@@ -50,7 +50,7 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo -e "${BOLD}${RED}"
     echo "╔══════════════════════════════════════════════╗"
-    echo "║         ANetBBS — UNINSTALL                 ║"
+    echo "║         ANetBBS — UNINSTALL                  ║"
     echo "╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
 
@@ -187,7 +187,7 @@ echo "║             ██╔══██║██║╚██╗██║█�
 echo "║             ██║  ██║██║ ╚████║███████╗   ██║                 ║"
 echo "║             ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝                 ║"
 echo "║                                                              ║"
-echo "║              ANetBBS — Installation Wizard                  ║"
+echo "║              ANetBBS — Installation Wizard                   ║"
 echo "║                                                              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
