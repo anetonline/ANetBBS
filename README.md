@@ -19,7 +19,7 @@ the tires (web admin runs on `http://localhost:5000`).
 
 ```
 tar xzf ANetBBS-v1.0a2.4.tar.gz
-cd ANetBBS-v1.0a2.19
+cd ANetBBS-v1.0a2.24
 sudo bash install.sh
 ```
 
