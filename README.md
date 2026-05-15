@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: alpha 2** (`v1.0a2.12`, May 2026)
+**Status: alpha 2** (`v1.0a2.24`, May 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,7 +18,7 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0a2.4.tar.gz
+tar xzf ANetBBS-v1.0a2.24.tar.gz
 cd ANetBBS-v1.0a2.24
 sudo bash install.sh
 ```
