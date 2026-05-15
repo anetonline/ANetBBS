@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Import Nodelist - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-upload"></i> Import Nodelist</h1>
+    <p>Upload a FidoNet nodelist file (e.g. <code>NODELIST.001</code>).</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label class="form-label">Nodelist File</label>
+                <input type="file" name="nodelist_file" class="form-control" required
+                       accept=".txt,.001,.002,.003,.004,.005,.006,.007">
+                <div class="form-text">
+                    Standard text-format nodelist file (FTS-5000). Imports replace the
+                    previous nodelist for the same domain.
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Domain</label>
+                <input type="text" name="domain" class="form-control" value="fidonet"
+                       pattern="[a-z0-9_-]+"
+                       title="Lowercase letters, digits, underscore, hyphen">
+                <div class="form-text">
+                    Network identifier (e.g. <code>fidonet</code>, <code>fsxnet</code>,
+                    <code>retronet</code>). Determines which entries the search shows.
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-upload"></i> Import
+            </button>
+            <a href="{{ url_for('nodelist.browse') }}" class="btn btn-link">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

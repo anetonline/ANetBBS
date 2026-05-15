@@ -1,0 +1,118 @@
+###################################################
+# Simple File Listing Example using Mystic Python #
+###################################################
+
+# List files in the user's current file base
+
+from mystic_bbs	import *
+
+# filelist flags
+
+file_offline = int("01")
+file_invalid = int("02")
+file_deleted = int("04")
+file_failed  = int("08")
+file_free    = int("10")
+file_hatched = int("20")
+
+# Load the current user and then load their current file base
+# but fail if they have not selected a file base
+
+user  = getuser(0)
+fbase = getfbaseid(user["fbase"])
+
+if fbase is None:
+	writeln ("|CRYou have not selected a file base yet!|CR|CR|PA")
+	quit()
+
+# Open the file list then check to make sure its open before reading
+# data from it
+
+flist = fl_open(fbase["filename"]);
+
+if flist is None:
+	writeln("Cannot open file listing. Press a key|PN")
+	quit()
+
+done = False
+
+# Seek to the first file in the list and loop while a file is found calling
+# next after each file so the next one will be loaded.  Seek should always be
+# called before cycling through the list
+
+fl_seek(flist, 0, True)
+
+while fl_found(flist) and not done and not shutdown():
+
+	# Load the file information into a dictionary and then get the file
+	# description
+	
+	fileinfo = fl_getfile(flist)
+	filedesc = fl_getdesc(flist)
+
+	# Show the file
+
+	writeln("|CL|14File #" + str(fileinfo["number"]) + " of " + str(fileinfo["total"]))
+	writeln("")
+	writeln("|09File: |11" + fileinfo["filename"])
+	writeln("|09Date: " + datestr(dated2u(fileinfo["date"]), "NNN DD YYYY HH:II:SS"))
+	writeln("Size: " + str(fileinfo["size"]))
+	writeln("DLs : " + str(fileinfo["dls"]))
+	writeln("ULer: " + fileinfo["ulname"])
+
+	flags = ""
+	
+	if fileinfo["flags"] & file_offline:
+		flags = flags + "OFFLINE "
+		
+	if fileinfo["flags"] & file_invalid:
+		flags = flags + "INVALID "
+		
+	if fileinfo["flags"] & file_deleted:
+		flags = flags + "DELETED "
+		
+	if fileinfo["flags"] & file_failed:
+		flags = flags + "FAILED "
+		
+	if fileinfo["flags"] & file_free:
+		flags = flags + "FREE "
+		
+	if fileinfo["flags"] & file_hatched:
+		flags = flags + "HATCHED "
+		
+	if flags == "":
+		flags = "NONE"
+	
+	writeln("Flag: |13" + flags)
+	writeln("")
+	writeln("|14Description (" + str(fileinfo["lines"]) + " lines):")
+	writeln("|03")
+	
+	# only print up to the first 10 lines so we can fit it on the screen
+	
+	for line in range(min(fileinfo["lines"], 10)):
+		writeln(filedesc[line])
+		
+	writeln("")
+	write("|16|09File List: (|11A|09)gain, (|11P|09)revious, (|11ENTER|09) Next, (|11Q|09) to Quit: |14")
+	
+	ch = onekey(chr(13) + 'APQ', True);
+
+	if ch == 'A':
+		# do nothing here so it redisplays the same file
+		pass
+
+	elif ch == 'P':
+		fl_prev(flist)
+
+	elif ch == 'Q':
+		done = True
+		break	
+	else:
+		fl_next(flist);	
+
+# Close the file list and report that we're done
+
+fl_close(flist)
+
+writeln("|CR|12Program complete: Press a key|PN");

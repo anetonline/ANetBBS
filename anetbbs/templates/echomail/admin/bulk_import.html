@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Bulk Import Areas — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-upload"></i> Bulk Import Echo Areas</h1>
+</div>
+
+<a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary btn-sm mb-3">
+    <i class="bi bi-arrow-left"></i> Back to Areas
+</a>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-list-ul"></i> Import from Echolist or Backbone File</div>
+    <div class="card-body">
+        <p style="font-size:0.9rem; color:#00cc00;">
+            One area per line. Both forms are accepted:
+        </p>
+        <pre style="background:#001100; border:1px solid #006600; padding:0.5rem; font-size:0.8rem; color:#0c0;">FIDO_GENERAL    General Discussion
+TQW_BBSGEN      - General BBS Chat        (FidoNet backbone style)</pre>
+        <p style="font-size:0.85rem; color:#888;">
+            Lines starting with <code>;</code> or <code>#</code> are skipped.
+            Leading <code>-</code> on the description is stripped automatically,
+            so <code>tqwnet.na</code>, <code>BACKBONE.NA</code> and
+            <code>FILEBONE.NA</code>-style files import cleanly.
+        </p>
+        <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {{ form.hidden_tag() }}
+
+            <div class="mb-3">
+                {{ form.network_id.label(class="form-label") }}
+                {{ form.network_id(class="form-control") }}
+                {% for e in form.network_id.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="mb-3">
+                {{ form.backbone_file.label(class="form-label") }}
+                {{ form.backbone_file(class="form-control") }}
+                {% for e in form.backbone_file.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="mb-3">
+                {{ form.echolist.label(class="form-label") }}
+                {{ form.echolist(class="form-control", rows=18,
+                                 style="font-family:'Courier New',monospace; font-size:0.85rem;",
+                                 placeholder="TQW_ADS         - BBS Adverts\nTQW_BBSGEN      - General BBS Chat\nTQW_GEN         - General Chat") }}
+                {% for e in form.echolist.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="form-check mb-3">
+                {{ form.is_subscribed(class="form-check-input") }}
+                {{ form.is_subscribed.label(class="form-check-label small") }}
+            </div>
+
+            <div class="d-flex justify-content-between">
+                <a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

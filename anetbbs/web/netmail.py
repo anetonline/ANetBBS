@@ -1,0 +1,329 @@
+# anetbbs/web/netmail.py
+"""
+FidoNet netmail blueprint — user-facing inbox/sent/compose/read/reply.
+
+Netmail (point-to-point FTN mail) is separate from echomail (broadcast areas)
+and from PMs (local-only direct messages between users on this BBS).
+
+Routes:
+    /netmail/                           inbox (received netmail)
+    /netmail/sent                       sent items
+    /netmail/<id>                       read a message
+    /netmail/compose                    new message
+    /netmail/<id>/reply                 reply to an existing message
+    /netmail/<id>/delete                soft-delete (per-side)
+"""
+import datetime
+from flask import (Blueprint, render_template, request, redirect, url_for,
+                   flash, abort)
+from flask_login import login_required, current_user
+
+from ..models import (db, NetmailMessage, EchomailNetwork, UserAka)
+from ..echomail.kludges import make_msgid
+from ..echomail.routing import (parse_address, find_network_for_address,
+                                find_aka_for_network)
+
+
+netmail_bp = Blueprint('netmail', __name__, url_prefix='/netmail')
+
+
+def _user_addresses(user):
+    """All FTN addresses associated with this user — used to filter inbox/sent.
+
+    Returns a list of strings. The user's AKAs are primary; the username also
+    matches if the netmail was addressed by name rather than by address."""
+    addrs = [a.address for a in (UserAka.query
+                                  .filter_by(user_id=user.id).all())]
+    # Also include any network's our_address — a sysop might receive netmail
+    # via the BBS's primary FTN address even if they have no personal AKAs.
+    for net in EchomailNetwork.query.filter_by(is_active=True).all():
+        if net.our_address and net.our_address not in addrs:
+            addrs.append(net.our_address)
+    return addrs
+
+
+@netmail_bp.route('/')
+@login_required
+def inbox():
+    """Show netmail addressed to this user (by name or any of their AKAs).
+
+    We match on either:
+      - to_user_id == current_user.id  (an internal pointer set when the
+        netmail came in to a known local user), or
+      - to_name matches the username (case-insensitive — common for
+        first-time arrivals before we link them to an account)
+    """
+    addrs = _user_addresses(current_user)
+    q = NetmailMessage.query.filter(
+        NetmailMessage.direction == 'inbound',
+        NetmailMessage.deleted_by_recipient.is_(False),
+    )
+    name_clauses = [
+        NetmailMessage.to_user_id == current_user.id,
+        NetmailMessage.to_name.ilike(current_user.username),
+    ]
+    if current_user.display_name:
+        name_clauses.append(NetmailMessage.to_name.ilike(current_user.display_name))
+    if addrs:
+        name_clauses.append(NetmailMessage.to_address.in_(addrs))
+    q = q.filter(db.or_(*name_clauses))
+    msgs = q.order_by(NetmailMessage.created_at.desc()).limit(200).all()
+    return render_template('netmail/list.html',
+                           messages=msgs, folder='inbox')
+
+
+@netmail_bp.route('/drafts')
+@login_required
+def drafts():
+    addrs = _user_addresses(current_user)
+    q = NetmailMessage.query.filter(
+        NetmailMessage.direction == 'outbound',
+        NetmailMessage.status == 'draft',
+        NetmailMessage.deleted_by_sender.is_(False),
+    )
+    name_clauses = [NetmailMessage.from_user_id == current_user.id]
+    if addrs:
+        name_clauses.append(NetmailMessage.from_address.in_(addrs))
+    q = q.filter(db.or_(*name_clauses))
+    msgs = q.order_by(NetmailMessage.created_at.desc()).all()
+    return render_template('netmail/list.html', messages=msgs, folder='drafts')
+
+
+@netmail_bp.route('/sent')
+@login_required
+def sent():
+    addrs = _user_addresses(current_user)
+    q = NetmailMessage.query.filter(
+        NetmailMessage.direction == 'outbound',
+        NetmailMessage.deleted_by_sender.is_(False),
+    )
+    name_clauses = [
+        NetmailMessage.from_user_id == current_user.id,
+        NetmailMessage.from_name.ilike(current_user.username),
+    ]
+    if addrs:
+        name_clauses.append(NetmailMessage.from_address.in_(addrs))
+    q = q.filter(db.or_(*name_clauses))
+    msgs = q.order_by(NetmailMessage.created_at.desc()).limit(200).all()
+    return render_template('netmail/list.html',
+                           messages=msgs, folder='sent')
+
+
+@netmail_bp.route('/<int:msg_id>')
+@login_required
+def read(msg_id):
+    m = NetmailMessage.query.get_or_404(msg_id)
+    # Authorize: this user must be the sender or recipient.
+    if not _user_owns(m):
+        abort(403)
+    if m.direction == 'inbound' and m.read_at is None:
+        m.read_at = datetime.datetime.utcnow()
+        m.status = 'read'
+        db.session.commit()
+    return render_template('netmail/read.html', m=m)
+
+
+@netmail_bp.route('/compose', methods=['GET', 'POST'])
+@netmail_bp.route('/<int:reply_to>/reply', methods=['GET', 'POST'])
+@login_required
+def compose(reply_to=None):
+    parent = NetmailMessage.query.get(reply_to) if reply_to else None
+    if parent and not _user_owns(parent):
+        abort(403)
+
+    networks = EchomailNetwork.query.filter_by(is_active=True).all()
+    user_akas = UserAka.query.filter_by(user_id=current_user.id).all()
+
+    if request.method == 'POST':
+        to_address = (request.form.get('to_address') or '').strip()
+        to_name = (request.form.get('to_name') or '').strip()
+        subject = (request.form.get('subject') or '').strip()
+        body = request.form.get('body') or ''
+        from_aka = (request.form.get('from_aka') or '').strip()
+        is_crash = bool(request.form.get('is_crash'))
+        is_private = bool(request.form.get('is_private'))
+        save_as_draft = bool(request.form.get('save_draft'))
+
+        if not parse_address(to_address):
+            flash(f'Invalid FTN address: {to_address!r}', 'danger')
+            return render_template('netmail/compose.html',
+                                   networks=networks, user_akas=user_akas,
+                                   parent=parent,
+                                   form=request.form)
+        if not to_name:
+            flash('Recipient name is required.', 'danger')
+            return render_template('netmail/compose.html',
+                                   networks=networks, user_akas=user_akas,
+                                   parent=parent,
+                                   form=request.form)
+
+        # Pick the network that matches the destination zone
+        network = find_network_for_address(to_address)
+        if network is None:
+            flash(f'No active FTN network covers zone of {to_address}.', 'danger')
+            return render_template('netmail/compose.html',
+                                   networks=networks, user_akas=user_akas,
+                                   parent=parent,
+                                   form=request.form)
+
+        # Pick the FROM address: explicit AKA, network-matched AKA, or
+        # network's `our_address`.
+        if from_aka:
+            from_address = from_aka
+        else:
+            aka = find_aka_for_network(current_user, network)
+            from_address = aka.address if aka else network.our_address
+
+        # Append the user's tagline + FTN trailer to the body. Tagline appears
+        # as the line right above the tear "---" so downstream readers see it
+        # in canonical FTN format.
+        if current_user.tagline:
+            body = body.rstrip() + '\n\n... ' + current_user.tagline + '\n'
+
+        # Generate kludges
+        from_name = (current_user.display_name or current_user.username)
+        msgid_value = make_msgid(from_address)
+        # Kludge formats:
+        # - MSGID/CHRS/PID/TZUTC/REPLYADDR/REPLYTO: colon form is the
+        #   canonical FTS spec and accepted everywhere.
+        # - INTL/FMPT/TOPT: SPACE form (no colon) per FTS-4001 / FSC-4009.
+        #   Mystic AreaFix matches strictly per spec; the colon form makes
+        #   the point address invisible to the bot, so the per-point
+        #   AreaFix password lookup fails. binkterm-php's reference
+        #   (BinkdProcessor.php:1965) is the canonical no-colon form.
+        kludges = [f'MSGID: {msgid_value}']
+        non_ascii = any(ord(c) > 127 for c in body)
+        chrs = 'UTF-8 4' if non_ascii else 'CP437 2'
+        kludges.append(f'CHRS: {chrs}')
+        kludges.append('PID: anetbbs/0.1')
+        try:
+            local_offset = datetime.datetime.now().astimezone().strftime('%z')
+            if not local_offset:
+                local_offset = '+0000'
+        except Exception:
+            local_offset = '+0000'
+        kludges.append(f'TZUTC: {local_offset}')
+        # INTL — required for inter-zone netmail (FTS-4001)
+        from_p = parse_address(from_address)
+        to_p = parse_address(to_address)
+        if from_p and to_p and from_p[0] != to_p[0]:
+            kludges.append(
+                f'INTL {to_p[0]}:{to_p[1]}/{to_p[2]} {from_p[0]}:{from_p[1]}/{from_p[2]}')
+        # FMPT/TOPT — point routing (FSC-4009 — space form, no colon)
+        if from_p and from_p[3]:
+            kludges.append(f'FMPT {from_p[3]}')
+        if to_p and to_p[3]:
+            kludges.append(f'TOPT {to_p[3]}')
+        # REPLYADDR / REPLYTO — explicit reply-to (FSC-0035).
+        kludges.append(f'REPLYADDR: {from_address}')
+        kludges.append(f'REPLYTO: {from_address} {from_name}')
+        # REPLY — if this is a reply with a parent that has a MSGID
+        reply_msgid = ''
+        if parent:
+            from ..echomail.kludges import kludges_from_json, find_kludge
+            parent_kludges = kludges_from_json(parent.kludges)
+            reply_msgid = find_kludge(parent_kludges, 'MSGID')
+            if reply_msgid:
+                kludges.append(f'REPLY: {reply_msgid}')
+
+        m = NetmailMessage(
+            network_id=network.id,
+            from_user_id=current_user.id,
+            from_address=from_address,
+            to_address=to_address,
+            from_name=from_name,
+            to_name=to_name,
+            subject=subject,
+            body=body,
+            kludges=__import__('json').dumps(kludges),
+            msgid=msgid_value,
+            reply_msgid=reply_msgid,
+            chrs=chrs,
+            is_private=is_private,
+            is_crash=is_crash,
+            is_local=True,
+            direction='outbound',
+            status='draft' if save_as_draft else 'queued',
+        )
+        db.session.add(m)
+        db.session.commit()
+        if save_as_draft:
+            flash('Saved as draft.', 'info')
+            return redirect(url_for('netmail.drafts'))
+        flash('Netmail queued for next outbound poll.', 'success')
+        return redirect(url_for('netmail.read', msg_id=m.id))
+
+    # GET — render form. Sources of pre-fill, in priority order:
+    #   1. ?draft_id=N  — load a saved draft for further editing
+    #   2. parent (reply) — quoted body + Re: subject
+    #   3. ?to_address / ?to_name querystring (compose-from-contact links)
+    initial = {}
+    draft_id = request.args.get('draft_id', type=int)
+    draft = None
+    if draft_id:
+        draft = NetmailMessage.query.get(draft_id)
+        if draft and (draft.from_user_id != current_user.id
+                      or draft.status != 'draft'):
+            draft = None
+    if draft:
+        initial = {
+            'to_address': draft.to_address or '',
+            'to_name': draft.to_name or '',
+            'subject': draft.subject or '',
+            'body': draft.body or '',
+            'is_crash': draft.is_crash,
+            'is_private': draft.is_private,
+        }
+    elif parent:
+        initial = {
+            'to_address': parent.from_address,
+            'to_name': parent.from_name,
+            'subject': parent.subject if (parent.subject or '').lower().startswith('re:')
+                       else f'Re: {parent.subject}',
+            'body': '\n'.join('> ' + l for l in (parent.body or '').splitlines())
+                    + '\n\n',
+        }
+    else:
+        initial = {
+            'to_address': request.args.get('to_address', ''),
+            'to_name': request.args.get('to_name', ''),
+            'subject': request.args.get('subject', ''),
+        }
+    return render_template('netmail/compose.html',
+                           networks=networks, user_akas=user_akas,
+                           parent=parent, form=initial)
+
+
+@netmail_bp.route('/<int:msg_id>/delete', methods=['POST'])
+@login_required
+def delete(msg_id):
+    m = NetmailMessage.query.get_or_404(msg_id)
+    if not _user_owns(m):
+        abort(403)
+    if m.direction == 'inbound':
+        m.deleted_by_recipient = True
+    else:
+        m.deleted_by_sender = True
+    db.session.commit()
+    flash('Message deleted from your view.', 'success')
+    return redirect(url_for('netmail.inbox' if m.direction == 'inbound'
+                            else 'netmail.sent'))
+
+
+def _user_owns(m):
+    """Authorization helper — is `m` visible to the current user?
+
+    Either they're the linked sender/recipient (DB-side foreign key), or the
+    name field matches their username, or the address matches one of their
+    AKAs / a network's our_address."""
+    if m.from_user_id == current_user.id or m.to_user_id == current_user.id:
+        return True
+    addrs = set(_user_addresses(current_user))
+    if m.to_address in addrs or m.from_address in addrs:
+        return True
+    uname = (current_user.username or '').lower()
+    if (m.to_name or '').lower() == uname:
+        return True
+    if (m.from_name or '').lower() == uname:
+        return True
+    return False

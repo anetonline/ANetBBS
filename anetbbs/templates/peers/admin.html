@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}BBS Directory Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-gear-fill"></i> BBS Directory (Admin)</h1>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add BBS</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-3">
+                <label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Hostname</label>
+                <input type="text" name="hostname" class="form-control" required
+                       placeholder="bbs.example.com">
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">Port</label>
+                <input type="number" name="finger_port" class="form-control" value="79">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">FTN (optional)</label>
+                <input type="text" name="ftn_address" class="form-control"
+                       placeholder="1:234/5">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Description</label>
+                <input type="text" name="description" class="form-control">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-primary w-100">Add</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="mb-2">
+    <form method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="refresh">
+        <button class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-clockwise"></i> Refresh All
+        </button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if peers %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Active</th><th>Name</th><th>Hostname</th><th>FTN</th>
+                <th>Online</th><th>Last Polled</th><th>Error</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for p in peers %}
+                <tr {% if not p.is_active %}class="text-muted"{% endif %}>
+                    <td>
+                        {% if p.is_active %}<span class="badge bg-success">on</span>
+                        {% else %}<span class="badge bg-secondary">off</span>{% endif %}
+                    </td>
+                    <td>{{ p.name }}</td>
+                    <td><code>{{ p.hostname }}:{{ p.finger_port }}</code></td>
+                    <td>{% if p.ftn_address %}<code>{{ p.ftn_address }}</code>{% endif %}</td>
+                    <td>{{ p.online_count or 0 }}</td>
+                    <td>
+                        {% if p.last_polled_at %}
+                            <small>{{ p.last_polled_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td><small class="text-danger">{{ (p.last_error or '')[:60] }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="peer_id" value="{{ p.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if p.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="peer_id" value="{{ p.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Delete {{ p.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No peers registered. Add some above.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

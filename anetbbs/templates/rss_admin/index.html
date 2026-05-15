@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}RSS Feeds — Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-rss-fill"></i> RSS Feeds — Admin</h1>
+    <p>Manage the list of RSS / Atom feeds available to BBS users.</p>
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <a href="{{ url_for('rss_admin.add') }}" class="btn btn-primary">
+        <i class="bi bi-plus"></i> Add Feed
+    </a>
+    <a href="{{ url_for('rss.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Reader View
+    </a>
+</div>
+
+{% if feeds %}
+<table class="table table-sm table-hover">
+    <thead>
+        <tr>
+            <th>Sort</th>
+            <th>Name</th>
+            <th>URL</th>
+            <th>Items</th>
+            <th>Last fetched</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for feed in feeds %}
+        <tr>
+            <td>{{ feed.sort_order }}</td>
+            <td>
+                <strong>{{ feed.name }}</strong>
+                {% if feed.description %}
+                <br><small class="text-muted">{{ feed.description }}</small>
+                {% endif %}
+            </td>
+            <td><small><code>{{ feed.url }}</code></small></td>
+            <td>{{ counts[feed.id] }}</td>
+            <td>
+                {% if feed.last_fetched_at %}
+                <small>{{ feed.last_fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+                {% else %}
+                <small class="text-muted">never</small>
+                {% endif %}
+            </td>
+            <td>
+                {% if not feed.is_active %}
+                <span class="badge bg-secondary">disabled</span>
+                {% elif feed.last_error %}
+                <span class="badge bg-danger" title="{{ feed.last_error }}">error</span>
+                {% else %}
+                <span class="badge bg-success">ok</span>
+                {% endif %}
+            </td>
+            <td class="text-end">
+                <form method="post" action="{{ url_for('rss_admin.refresh', feed_id=feed.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-secondary" title="Fetch now">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </form>
+                <a href="{{ url_for('rss_admin.edit', feed_id=feed.id) }}" class="btn btn-sm btn-secondary">
+                    <i class="bi bi-pencil"></i>
+                </a>
+                <form method="post" action="{{ url_for('rss_admin.delete', feed_id=feed.id) }}" class="d-inline"
+                      onsubmit="return confirm('Delete feed {{ feed.name }} and all its items?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No RSS feeds yet. Click <strong>Add Feed</strong> to add one.
+</div>
+{% endif %}
+{% endblock %}

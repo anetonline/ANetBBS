@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}MRC ↔ IRC Bridges{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-arrow-left-right"></i> MRC ↔ IRC Bridges</h1>
+    <p>Bidirectional message relays between an MRC room and an IRC channel.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> New Bridge</div>
+    <div class="card-body">
+        <form method="post" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-4"><label class="form-label">Bridge Name</label>
+                <input type="text" name="name" class="form-control" required></div>
+            <div class="col-md-4"><label class="form-label">MRC Room</label>
+                <input type="text" name="mrc_room" class="form-control" required
+                       placeholder="lobby"></div>
+            <div class="col-md-4"><label class="form-label">MRC Handle</label>
+                <input type="text" name="mrc_handle" class="form-control"
+                       value="ircbridge"></div>
+            <div class="col-md-12"><label class="form-label">MRC WebSocket URL</label>
+                <input type="text" name="mrc_ws_url" class="form-control"
+                       value="ws://127.0.0.1:8080/ws"
+                       placeholder="ws://localhost:8080/ws"></div>
+            <div class="col-md-5"><label class="form-label">IRC Server</label>
+                <input type="text" name="irc_server" class="form-control" required
+                       placeholder="irc.libera.chat"></div>
+            <div class="col-md-2"><label class="form-label">Port</label>
+                <input type="number" name="irc_port" class="form-control" value="6667"></div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="form-check">
+                    <input type="checkbox" name="irc_use_ssl" class="form-check-input" id="cb_ssl">
+                    <label for="cb_ssl" class="form-check-label">SSL</label>
+                </div>
+            </div>
+            <div class="col-md-3"><label class="form-label">IRC Nick</label>
+                <input type="text" name="irc_nick" class="form-control" value="ANETBridge"></div>
+            <div class="col-md-4"><label class="form-label">IRC Channel</label>
+                <input type="text" name="irc_channel" class="form-control" required
+                       placeholder="#mychannel"></div>
+            <div class="col-md-2"><label class="form-label">Channel Key</label>
+                <input type="text" name="irc_channel_key" class="form-control"></div>
+            <div class="col-md-3"><label class="form-label">SASL User</label>
+                <input type="text" name="sasl_user" class="form-control" autocomplete="off"></div>
+            <div class="col-md-3"><label class="form-label">SASL Pass</label>
+                <input type="password" name="sasl_pass" class="form-control" autocomplete="new-password"></div>
+            <div class="col-md-3 d-flex align-items-end">
+                <div class="form-check">
+                    <input type="checkbox" name="is_active" class="form-check-input" id="cb_active">
+                    <label for="cb_active" class="form-check-label">Active (run on next start)</label>
+                </div>
+            </div>
+            <div class="col-md-12">
+                <button class="btn btn-primary"><i class="bi bi-plus"></i> Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if bridges %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Name</th><th>MRC Room</th><th>IRC Channel</th>
+                <th>Server</th><th>State</th><th>Last Started</th><th>Last Error</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for b in bridges %}
+                <tr {% if not b.is_active %}class="text-muted"{% endif %}>
+                    <td><strong>{{ b.name }}</strong>
+                        <div class="small text-muted">id={{ b.id }}</div></td>
+                    <td><code>{{ b.mrc_room }}</code> as {{ b.mrc_handle }}</td>
+                    <td><code>{{ b.irc_channel }}</code> as {{ b.irc_nick }}</td>
+                    <td><code>{{ b.irc_server }}:{{ b.irc_port }}</code>{% if b.irc_use_ssl %} (SSL){% endif %}</td>
+                    <td>
+                        {% if b.is_active %}<span class="badge bg-success">active</span>
+                        {% else %}<span class="badge bg-secondary">paused</span>{% endif %}
+                    </td>
+                    <td><small>{{ b.last_started_at.strftime('%Y-%m-%d %H:%M') if b.last_started_at else '—' }}</small></td>
+                    <td><small class="text-danger">{{ (b.last_error or '')[:80] }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="bridge_id" value="{{ b.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if b.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="bridge_id" value="{{ b.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Delete bridge {{ b.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No bridges yet — add one above.</div>
+    {% endif %}
+    </div>
+</div>
+
+<div class="alert alert-info mt-3 small">
+    <strong>To run a bridge:</strong> each active bridge needs its own process.
+    For testing: <code>python -m anetbbs.features.mrc_irc_bridge --bridge-id N</code>.
+    For production: copy <code>deploy/anetbbs-mrc-irc-bridge@.service</code>
+    to <code>/etc/systemd/system/</code> and enable per-id with
+    <code>systemctl enable --now anetbbs-mrc-irc-bridge@1</code>.
+</div>
+{% endblock %}

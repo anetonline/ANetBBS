@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}RSS River{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-water"></i> RSS River — All Feeds</h1>
+    <p>Newest items across every active feed.</p>
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <a href="{{ url_for('rss.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Feeds
+    </a>
+    <form method="post" action="{{ url_for('rss.mark_all_read') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-secondary">
+            <i class="bi bi-check2-all"></i> Mark all read
+        </button>
+    </form>
+</div>
+
+{% if pagination.items %}
+<div class="list-group">
+    {% for item in pagination.items %}
+    <a href="{{ url_for('rss.view_item', item_id=item.id) }}"
+       class="list-group-item list-group-item-action {% if item.id not in read_ids %}fw-bold{% endif %}">
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="me-3">
+                {% if item.id not in read_ids %}<span class="badge bg-primary me-1">NEW</span>{% endif %}
+                <span class="badge bg-secondary me-1">{{ item.feed.name }}</span>
+                {{ item.title or '(no title)' }}
+            </div>
+            <small class="text-muted text-nowrap">
+                {% if item.published_at %}{{ item.published_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+            </small>
+        </div>
+        {% if item.summary %}
+        <p class="mb-0 mt-1 small text-muted" style="font-weight: normal;">
+            {{ item.summary[:200] }}{% if item.summary|length > 200 %}…{% endif %}
+        </p>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        {% if pagination.has_prev %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('rss.river', page=pagination.prev_num) }}">«</a></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</span></li>
+        {% if pagination.has_next %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('rss.river', page=pagination.next_num) }}">»</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No items yet across any feed.
+</div>
+{% endif %}
+{% endblock %}

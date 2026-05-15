@@ -1,0 +1,144 @@
+<style>
+#trivia-game { max-width: 650px; margin: 0 auto; }
+.trivia-option {
+    display: block; width: 100%; text-align: left; margin: 8px 0;
+    background: #000; border: 1px solid #00ff00; color: #00ff00;
+    font-family: 'Courier New', monospace; padding: 10px 14px; cursor: pointer;
+    border-radius: 3px; font-size: 1rem;
+}
+.trivia-option:hover:not(:disabled) { background: #003300; }
+.trivia-option.correct { background: #003300; border-color: #00ff00; color: #00ff00; }
+.trivia-option.wrong   { background: #330000; border-color: #ff4444; color: #ff4444; }
+.trivia-option:disabled { cursor: default; }
+#trivia-feedback { min-height: 2rem; font-size: 1.1rem; font-weight: bold; }
+#progress-bar { background: #003300; height: 8px; border-radius:4px; margin-bottom:10px; }
+#progress-fill { background: #00ff00; height: 100%; border-radius:4px; transition: width .4s; }
+</style>
+
+<div id="trivia-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-question-circle"></i> TRIVIA CHALLENGE</h4>
+    <div class="d-flex justify-content-between mb-1">
+        <span id="q-counter" style="color:#007700;"></span>
+        <span id="t-score" style="color:#00ff00;font-weight:bold;"></span>
+    </div>
+    <div id="progress-bar"><div id="progress-fill" style="width:0%"></div></div>
+    <div id="trivia-question" style="font-size:1.2rem; margin: 12px 0; min-height:3rem;"></div>
+    <div id="trivia-options"></div>
+    <div id="trivia-feedback" class="mt-3"></div>
+    <button id="trivia-next" class="btn btn-primary mt-3" style="display:none;">Next Question →</button>
+    <div id="trivia-end" style="display:none; text-align:center; font-size:1.3rem;"></div>
+</div>
+
+<script>
+(function() {
+    var QUESTIONS = [
+        {q:'What does BBS stand for?',a:1,o:['Basic Broadband System','Bulletin Board System','Binary Base Server','Broadcast Band Service']},
+        {q:'Which programming language is known as the "language of the web"?',a:2,o:['Python','C++','JavaScript','Ruby']},
+        {q:'What year was the first BBS created?',a:0,o:['1978','1985','1972','1990']},
+        {q:'Which key combination typically invokes a CTRL-C interrupt?',a:2,o:['ALT+F4','CTRL+Z','CTRL+C','CTRL+X']},
+        {q:'What does ASCII stand for?',a:0,o:['American Standard Code for Information Interchange','Advanced System Code Integration Interface','Automated Signal Coding and Information Index','Applied Standard Character Information Interface']},
+        {q:'What is the default port for HTTP?',a:1,o:['443','80','21','25']},
+        {q:'Which protocol is used for email sending?',a:3,o:['FTP','HTTP','IMAP','SMTP']},
+        {q:'What is 2^10?',a:2,o:['512','256','1024','2048']},
+        {q:'In ANSI art, what escape code starts a colour sequence?',a:0,o:['ESC[','\\n','\\t','ALT+X']},
+        {q:'What does PTY stand for in Linux?',a:1,o:['Physical Terminal Yellow','Pseudo-Terminal','Protocol Type Y','Pipe Terminal']},
+        {q:'What does SQL stand for?',a:2,o:['Simple Query Logic','Structured Question Language','Structured Query Language','System Query Layer']},
+        {q:'Which filesystem is default on most Linux systems?',a:0,o:['ext4','NTFS','FAT32','HFS+']},
+        {q:'What year was Python first released?',a:3,o:['2001','1999','1992','1991']},
+        {q:'How many bits in a byte?',a:1,o:['4','8','16','32']},
+        {q:'What does URL stand for?',a:2,o:['Universal Relay Link','Unique Resource Listing','Uniform Resource Locator','United Resource Link']},
+    ];
+
+    var questions, idx, score, answered;
+
+    function shuffle(arr) {
+        var a = arr.slice();
+        for (var i=a.length-1;i>0;i--) { var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; }
+        return a;
+    }
+
+    function startGame() {
+        questions = shuffle(QUESTIONS).slice(0, 10);
+        idx = 0; score = 0; answered = false;
+        document.getElementById('trivia-end').style.display = 'none';
+        showQuestion();
+    }
+
+    function showQuestion() {
+        answered = false;
+        document.getElementById('trivia-next').style.display = 'none';
+        document.getElementById('trivia-feedback').textContent = '';
+        var q = questions[idx];
+        document.getElementById('q-counter').textContent = 'Q ' + (idx+1) + ' / ' + questions.length;
+        document.getElementById('t-score').textContent = 'Score: ' + score;
+        document.getElementById('progress-fill').style.width = ((idx/questions.length)*100)+'%';
+        document.getElementById('trivia-question').textContent = q.q;
+        var opts = document.getElementById('trivia-options');
+        opts.innerHTML = '';
+        q.o.forEach(function(opt, i) {
+            var btn = document.createElement('button');
+            btn.className = 'trivia-option';
+            btn.textContent = String.fromCharCode(65+i) + '. ' + opt;
+            btn.onclick = function() { answer(i, q.a); };
+            opts.appendChild(btn);
+        });
+    }
+
+    function answer(chosen, correct) {
+        if (answered) return;
+        answered = true;
+        var btns = document.querySelectorAll('.trivia-option');
+        btns.forEach(function(b,i) {
+            b.disabled = true;
+            if (i === correct) b.classList.add('correct');
+            if (i === chosen && chosen !== correct) b.classList.add('wrong');
+        });
+        var fb = document.getElementById('trivia-feedback');
+        if (chosen === correct) {
+            score += 10;
+            fb.textContent = '✓ Correct!';
+            fb.style.color = '#00ff00';
+        } else {
+            fb.textContent = '✗ Wrong! Correct: ' + questions[idx].o[correct];
+            fb.style.color = '#ff4444';
+        }
+        document.getElementById('t-score').textContent = 'Score: ' + score;
+        document.getElementById('trivia-next').style.display = '';
+    }
+
+    document.getElementById('trivia-next').addEventListener('click', function() {
+        idx++;
+        if (idx < questions.length) {
+            showQuestion();
+        } else {
+            endGame();
+        }
+    });
+
+    function endGame() {
+        document.getElementById('progress-fill').style.width = '100%';
+        document.getElementById('trivia-question').textContent = '';
+        document.getElementById('trivia-options').innerHTML = '';
+        document.getElementById('trivia-feedback').textContent = '';
+        document.getElementById('trivia-next').style.display = 'none';
+        var pct = Math.round(score / (questions.length*10) * 100);
+        var grade = pct >= 90 ? 'GENIUS!' : pct >= 70 ? 'Great!' : pct >= 50 ? 'Not bad.' : 'Keep studying!';
+        var end = document.getElementById('trivia-end');
+        end.innerHTML = '<p style="color:#00ff00;">Final Score: <strong>' + score + ' / ' + (questions.length*10) + '</strong></p>' +
+            '<p>' + grade + '</p>' +
+            '<button id="trivia-restart" class="btn btn-primary">Play Again</button>';
+        end.style.display = 'block';
+        submitScore(score);
+        document.getElementById('trivia-restart').addEventListener('click', startGame);
+    }
+
+    function submitScore(s) {
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({score:s})
+        }).catch(function(){});
+    }
+
+    startGame();
+})();
+</script>

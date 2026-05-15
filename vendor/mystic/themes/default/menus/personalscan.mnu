@@ -1,0 +1,79 @@
+New scan all personal msgs
+
+
+00030000000000000000
+
+
+|CR|14New Menu Header|CR
+|CR|09Selection|03: |11
+
+0
+0
+
+
+
+Perform personal new message scan
+Remove /LIST if you want it to show the message bases
+instead of actual messages (on the MQ command below)
+FIRSTCMD
+
+10000000000000000000
+0
+0
+0
+
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+7
+GT
+
+|CR|12Scanning for new personal messages...|CR|CR
+0
+
+
+MQ
+
+/YOU /NOREAD /NOFOOT /LIST
+0
+
+
+-R
+
+0
+0
+
+
+GT
+!OY
+|15There are no new messages.|CR|CR|PA
+0
+
+
+-Y
+OY
+|CR|12You have |15|&3 |12new personal message(s): Read now? |11
+0
+
+
+MN
+OK
+/P /G /NOREAD
+0
+
+
+GO
+
+message
+0
+
+

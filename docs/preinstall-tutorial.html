@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ANetBBS — Pre-Install Tutorial</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+         margin: 0; background:#0e0e15; color:#cdd6f4; }
+  .deck { max-width: 900px; margin: 0 auto; padding: 1rem; }
+  .slide { background:#1e1e2e; border:1px solid #45475a;
+           border-radius:8px; padding: 2rem 1.5rem; margin-bottom: 1.5rem;
+           min-height: 50vh; }
+  .slide h1, .slide h2 { color: #89b4fa; margin-top: 0; }
+  .slide pre { background:#000; color:#a6e3a1; padding:1rem;
+               border-radius:6px; overflow:auto; }
+  .slide code { background:#11111b; padding:.1rem .35rem;
+                border-radius:3px; color:#fab387; }
+  .step { display:inline-block; padding:.2rem .8rem;
+          background:#89b4fa; color:#1e1e2e; border-radius:1rem;
+          font-size:.8rem; font-weight:600; margin-bottom:.5rem; }
+  .nav { position:fixed; bottom: 1rem; right: 1rem;
+         background: #313244; padding: .8rem 1rem; border-radius:8px; }
+  .nav a { color:#fff; text-decoration:none; padding:.3rem .6rem; }
+  ul { line-height: 1.8; }
+  hr { border-color:#45475a; }
+  .pill { background:#fab387; color:#1e1e2e; padding:.1rem .5rem;
+          border-radius:1rem; font-size:.8rem; font-weight:600; }
+</style>
+</head>
+<body>
+<div class="deck">
+
+<header style="text-align:center; padding: 2rem 0;">
+    <h1 style="color:#89b4fa; margin:0;">ANetBBS</h1>
+    <p style="color:#a6adc8;">A 5-minute pre-install walkthrough for new sysops</p>
+</header>
+
+<!-- Slide 1: What is it? -->
+<section class="slide">
+    <span class="step">1 / 10</span>
+    <h2>What is ANetBBS?</h2>
+    <p>A modern bulletin-board system that talks both new and old:</p>
+    <ul>
+        <li><strong>Web</strong> — Flask + WebSockets, mobile-friendly, themed</li>
+        <li><strong>Telnet / SSH / rlogin</strong> — for the classic experience</li>
+        <li><strong>FidoNet echomail</strong> — BinkP + QWK over real networks</li>
+        <li><strong>Door games</strong> — DOS, Synchronet JS, Mystic Pascal Script,
+            generic <code>exec</code> for anything else</li>
+        <li><strong>Multinode chat, IRC bridge, MRC bridge</strong></li>
+        <li><strong>Personal web pages</strong> per user</li>
+    </ul>
+    <p>One SQLite DB. One config file. Five systemd services. Done.</p>
+</section>
+
+<!-- Slide 2: System requirements -->
+<section class="slide">
+    <span class="step">2 / 10</span>
+    <h2>What you need before installing</h2>
+    <ul>
+        <li><strong>Linux server</strong> (Ubuntu 22.04+ or Debian 12+ recommended)</li>
+        <li><strong>Python 3.10+</strong></li>
+        <li><strong>~500 MB</strong> of disk for the app + venv</li>
+        <li><strong>Open ports</strong> for the protocols you want exposed:
+            <ul>
+                <li>5000 (web — usually proxied behind nginx on 80/443)</li>
+                <li>2233 (telnet)</li>
+                <li>2234 (SSH)</li>
+                <li>513 (rlogin — optional)</li>
+            </ul>
+        </li>
+        <li><strong>A domain</strong> (optional, makes share links nicer)</li>
+        <li><strong>An evening</strong> (you'll be done in under an hour)</li>
+    </ul>
+</section>
+
+<!-- Slide 3: Decisions to make -->
+<section class="slide">
+    <span class="step">3 / 10</span>
+    <h2>Decisions to make ahead of time</h2>
+    <p>The install wizard will ask you. Have answers ready:</p>
+    <ul>
+        <li>What's your <strong>BBS name</strong>?</li>
+        <li>What's your <strong>sysop handle</strong>?</li>
+        <li>What's your <strong>domain</strong> (or leave blank for IP)?</li>
+        <li>Which protocols (telnet/SSH/rlogin) do you want enabled?</li>
+        <li>How many <strong>concurrent terminal nodes</strong> (1–100)?</li>
+        <li>Do you want <strong>FidoNet echomail</strong>?</li>
+        <li>What <strong>admin password</strong> will you use?
+            (Make it good — &gt;12 random chars.)</li>
+    </ul>
+</section>
+
+<!-- Slide 4: First install -->
+<section class="slide">
+    <span class="step">4 / 10</span>
+    <h2>First install — three commands</h2>
+    <pre>tar xzf anetbbs-rebuilt-vNNN.tar.gz
+cd anetbbs-rebuilt
+sudo python3 -m anetbbs.installer.wizard</pre>
+    <p>The wizard handles:</p>
+    <ul>
+        <li>Generating a strong <code>SECRET_KEY</code></li>
+        <li>Writing <code>.env</code> with your settings</li>
+        <li>Creating <code>data/</code>, <code>logs/</code>, etc.</li>
+        <li>Building the Python venv and installing deps</li>
+        <li>Initializing the SQLite database</li>
+        <li>Creating + saving your sysop account</li>
+        <li>Installing systemd unit files (auto-starts on reboot)</li>
+    </ul>
+    <p>When it finishes:</p>
+    <pre>sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-ssh</pre>
+    <p>Visit <code>http://your_host:5000/</code>.</p>
+</section>
+
+<!-- Slide 5: nginx -->
+<section class="slide">
+    <span class="step">5 / 10</span>
+    <h2>nginx + HTTPS (recommended)</h2>
+    <p>Don't expose Flask directly. Put nginx in front:</p>
+    <pre>sudo cp deploy/anetbbs-nginx.conf.template \
+        /etc/nginx/sites-available/anetbbs.conf
+sudo nano /etc/nginx/sites-available/anetbbs.conf
+# Edit "server_name" to your real domain
+sudo ln -s /etc/nginx/sites-available/anetbbs.conf \
+           /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d bbs.example.com</pre>
+    <p>The template handles:</p>
+    <ul>
+        <li>HTTPS via Let's Encrypt</li>
+        <li>WebSocket upgrade for SocketIO + MRC bridge</li>
+        <li><code>auth_request</code> gating MRC behind login</li>
+    </ul>
+</section>
+
+<!-- Slide 6: First login + checklist -->
+<section class="slide">
+    <span class="step">6 / 10</span>
+    <h2>First login → launch checklist</h2>
+    <p>Log in with your sysop account, then visit
+       <code>/admin/checklist</code>.</p>
+    <p>Green check = done, red X = needs your attention. You'll typically need:</p>
+    <ul>
+        <li>BBS name customized (you did this in the wizard)</li>
+        <li>SECRET_KEY production-ready (wizard generated one)</li>
+        <li>Default theme picked (Admin → Themes)</li>
+        <li>At least one custom board (Admin → Boards → Add)</li>
+        <li>At least one bulletin (Admin → Bulletins → Add)</li>
+        <li>MOTD pool populated (Admin → MOTD)</li>
+        <li>At least one file area (Admin → File Areas → Add)</li>
+    </ul>
+    <p>Each item links straight to where you fix it.</p>
+</section>
+
+<!-- Slide 7: ANSI screens + menus -->
+<section class="slide">
+    <span class="step">7 / 10</span>
+    <h2>The fun part — make it yours</h2>
+    <ul>
+        <li><strong>Welcome / goodbye / newuser ANSI</strong> — paste your
+            ANSI art at <code>/admin/bbs-menus/screens</code>. Telnet
+            visitors see your art before login.</li>
+        <li><strong>Customize the main menu</strong> — every hotkey is
+            data-driven. Add an item, give it any shell command via the
+            <code>exec</code> action_type.</li>
+        <li><strong>One-click sub-menus</strong> — wizard at the bottom
+            of any menu's edit page.</li>
+        <li><strong>Add doors</strong> — Admin → Door Games. Native, DOS,
+            Synchronet JS, Mystic Pascal Script all supported.</li>
+    </ul>
+</section>
+
+<!-- Slide 8: Spam control -->
+<section class="slide">
+    <span class="step">8 / 10</span>
+    <h2>Spam control</h2>
+    <p>Five layers, all toggleable:</p>
+    <ul>
+        <li><strong>Bot gate</strong> — telnet visitors press ESC or *
+            twice. Filters scanners. <span class="pill">always on</span></li>
+        <li><strong>NUV</strong> — set <code>NUV_ENABLED=true</code>. New
+            users wait for sysop approval.</li>
+        <li><strong>IP bans</strong> — Admin → IP Bans. CIDR + TTL.</li>
+        <li><strong>Word filter</strong> — Admin → Word Filter. Applied
+            to shouts, posts, PMs.</li>
+        <li><strong>File queue</strong> — set
+            <code>FILE_MOD_QUEUE_ENABLED=true</code>. Sysop approves
+            uploads.</li>
+    </ul>
+</section>
+
+<!-- Slide 9: Daily ops -->
+<section class="slide">
+    <span class="step">9 / 10</span>
+    <h2>Day-to-day operations</h2>
+    <p>The Sysop Control Panel (<code>/admin/control</code>) is your
+       cockpit:</p>
+    <ul>
+        <li>Service status badges + Start / Stop / Restart buttons</li>
+        <li><strong>NodeSpy</strong> — see every terminal user's current
+            page + last action + idle time. Click for last-screen snapshot.</li>
+        <li>Live who's-online (web + terminal) refreshing every 5s</li>
+        <li>One-click journal viewer per service</li>
+    </ul>
+    <p>Install the supplied sudoers rule so service control works
+       without password prompts:</p>
+    <pre>sudo cp deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
+</section>
+
+<!-- Slide 10: Upgrades -->
+<section class="slide">
+    <span class="step">10 / 10</span>
+    <h2>Upgrades are one command</h2>
+    <pre>sudo anetbbs-upgrade /tmp/anetbbs-rebuilt-vNNN.tar.gz</pre>
+    <p>The wizard:</p>
+    <ul>
+        <li>Snapshots <code>data/</code>, <code>.env</code>,
+            <code>logs/</code> to a timestamped backup</li>
+        <li>Stops services</li>
+        <li>Rsync's the new code (preserves your data + config)</li>
+        <li><code>pip install -e</code> picks up new modules</li>
+        <li>Runs the schema migrator</li>
+        <li>Restarts services</li>
+        <li>Probes <code>/healthz</code> — auto-rolls-back if it fails</li>
+    </ul>
+    <p style="margin-top:2rem;"><strong>That's it. Welcome aboard, sysop.</strong></p>
+    <p style="color:#a6adc8;">Once installed, every detail is in
+       <code>/docs/</code> on your BBS.</p>
+</section>
+
+<footer style="text-align:center; color:#7f849c; padding: 2rem 0;">
+    Pre-install tutorial · ANetBBS · Run on any machine before
+    touching your server.
+</footer>
+
+</div>
+</body>
+</html>

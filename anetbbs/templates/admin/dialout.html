@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Dial-Out Directory{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-telephone-outbound"></i> Dial-Out Directory</h1>
+    <p>BBSes that show up in the user's "Dial Out" menu (telnet/SSH/rlogin out).</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add Destination</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-3"><label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" required></div>
+            <div class="col-md-3"><label class="form-label">Hostname</label>
+                <input type="text" name="hostname" class="form-control" required></div>
+            <div class="col-md-1"><label class="form-label">Port</label>
+                <input type="number" name="port" class="form-control" value="23"></div>
+            <div class="col-md-2"><label class="form-label">Protocol</label>
+                <select name="protocol" class="form-select">
+                    <option value="telnet">telnet</option>
+                    <option value="ssh">ssh</option>
+                    <option value="rlogin">rlogin</option>
+                </select></div>
+            <div class="col-md-1"><label class="form-label">Sort</label>
+                <input type="number" name="sort_order" class="form-control" value="100"></div>
+            <div class="col-md-1 d-flex align-items-end">
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="is_active" id="cb_a" checked><label class="form-check-label" for="cb_a">on</label></div>
+            </div>
+            <div class="col-md-1"><button class="btn btn-primary w-100">Add</button></div>
+            <div class="col-md-12"><label class="form-label">Description (optional)</label>
+                <input type="text" name="description" class="form-control"></div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>On</th><th>Sort</th><th>Name</th><th>Host</th>
+                <th>Proto</th><th>Description</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr {% if not r.is_active %}class="text-muted"{% endif %}>
+                    <td>{% if r.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                    <td>{{ r.sort_order }}</td>
+                    <td><strong>{{ r.name }}</strong></td>
+                    <td><code>{{ r.hostname }}:{{ r.port }}</code></td>
+                    <td>{{ r.protocol }}</td>
+                    <td><small class="text-muted">{{ r.description or '' }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="dest_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if r.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="dest_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Delete {{ r.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No destinations yet — defaults will be shown to users.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,288 @@
+
+ABOUT DOS DOORS AND WINDOWS BBS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This guide provides an example of how to perform an installation of a DOS door
+game with Mystic BBS for Windows.
+
+At the time of this writing only 32-bit Windows can run DOS software.  However,
+recently there has been a hacked version of Microsoft's Virtual DOS Machine
+based on some leaked source code.  This is designed to work in 64-bit Windows
+but its compatibility, and speed may be questionable.  Its also a legal grey
+area since it is not officially released by Microsoft.
+
+This tutorial will assume that you are using Windows 32-bit.  If you wish to
+use 64-bit there is the NTVDM that you can try at your own risk along with
+the 64-bit version of NetFossil.  You can find more information here but please
+use this at your own risk:
+
+http://www.columbia.edu/~em36/ntvdmx64.html
+
+DOS doors traditionally used what is called a "FOSSIL driver" in order to
+interact with a serial modem.  When running software over a modern BBS, a
+piece of software is used to trap those old DOS FOSSIL calls and redirect them
+to the BBS user.
+
+There are two ways to do this using Windows 32-bit and only one way to do it
+when trying to use the 64-bit hacked NTVDM.  For most purposes the recommended
+way to run DOS doors in Windows 32-bit is to use the DOSXTRN method.  But for
+64-bit platforms and as an alternative in Windows 32-bit, NetFossil can be used.
+
+
+CHOOSING A DRIVER FOR DOS I/O REDIRECTION
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using Windows 32-bit the easiest thing to do is to use the DOSXTRN method
+to execute doors.  As long as SBBSEXEC.DLL and DOSXTRN.EXE are in the root
+Mystic BBS directory, then you can execute DOS doors in the exact same way that
+you would using DOS and Mystic will handle everything else behind the scenes.
+
+Another benefit of using the DOSXTRN method is that it works over all types of
+connections to the BBS without any sort of tunneling.  It is the fastest and
+easiest way to get things running.
+
+These files are not distributed with Mystic BBS but for testing purposes at the
+moment you can find them at:
+
+http://www.mysticbbs.com/downloads/prealpha/dx.rar
+
+NOTE: If for some reason you are getting a message that Mystic cannot load the
+DLL file, you can also try moving the .DLL file into your C:\Windows\System32
+directory.
+
+The second method to using doors in Windows 32-bit that also can work with the
+64-bit version of Windows using the hacked 64-bit NTVDM mentioned above is to
+use the Freeware NetFossil software located at:
+
+http://pcmicro.com/netfoss/download.html
+
+NetFossil is slightly more difficult to set up as you have to set it up based
+on its own documentation and then when executing the door, NetFossil is
+executed instead and then NetFossil in turn executes your door.
+
+The pro of this is that it works in 64-bit Windows but the con is that it will
+only work over Telnet and RLOGIN connections (not SSH).
+
+This turtorial will show an example of setting up LORD using both of the
+methods discussed.
+
+
+DIRECTORY STRUCTRURE FOR THIS EXAMPLE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In this example, we have Mystic BBS installed to C:\MYSTIC and the doors
+will be installed in a subdirectory C:\MYSTIC\DOORS, so that all doors
+and related files are all tucked away neatly in their own subdirectory.
+
+We will install NetFossil in C:\MYSTIC\NETFOSS for the NetFossil example
+
+
+DRIVER INSTALLATION (IF USING DOSXTRN)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Copy SBBSEXEC.DLL and DOSXTRN.EXE into your root Mystic directory (C:\MYSTIC)
+
+
+DRIVER INSTALLATION - NETFOSSIL (IF USING NETFOSSIL METHOD)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you are using the DOSXTRN method then you can skip this section
+
+Note that NetFossil may have had many updates since this tutorial has been
+created so its possible that some command line options will have changed.  You
+may need to reference the documentation of NetFossil on how to set it up.
+
+First lets set up NETFOSS.  This is a relatively quick and painless setup and
+it only has to be done one time ever.  Once this is done, we can run all doors
+without having to change anything.
+
+1.  First extract the contents of NETF116.ZIP into its own directory.  In our
+    tutorial we are using C:\MYSTIC\NETFOSS
+
+2.  Move NETFOSS.DLL from your C:\MYSTIC\NETFOSS directory to your
+    C:\windows\system32 directory.  This is VERY important!
+
+    *IF YOU HEAR A BEEP WHEN YOU TEST YOUR DOOR LATER OR YOU GET A "Can't find
+    netfoss.dll" message when you run the door, its because this step was not
+    done correctly!  You may even need to restart your Windows machine
+    depending on the Windows version.
+
+3.  Open NF.BAT.  We need to change a few things here because it has some
+    directories inside that we need to change.  Rather than typing line by line
+    instructions lets just do this:  Basically we need to make NF.BAT look like
+    this:
+
+       @echo off
+       c:\mystic\netfoss\netfoss.com %1
+       if errorlevel 1 goto end
+       c:\mystic\netfoss\netcom.exe %1 %2 %3 %4 %5 %6 %7 %8 %9
+       c:\mystic\netfoss\netfoss.com /u  
+       :end
+
+    In other words, we are adding in the %1 as instructed in the documentation
+    and we are changing the paths to reflect where we really have NETFOSS
+    installed which is c:\mystic\netfoss (not c:\netfoss).  DO NOT OMIT THIS
+    STEP!
+
+4.  Once that is saved you are done.  You'll never have to touch NetFoss again
+    for any other doors, and it can be left alone to do what it does!
+
+
+
+SOFTWARE INSTALLATION - LORD
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Lets install the DOS door Legend of the Red Dragon.  We start this by unzipping
+LORD407.ZIP into its own directory.  The 4.07 version comes annoyingly "double
+zipped" meaning inside of LORD407.ZIP there is another LORD.ZIP.
+
+Unzip the contents of LORD.ZIP into the C:\MYSTIC\DOORS\LORD directory
+
+Now the setup of every door is going to be completely different, because it is
+dependant on the door itself.  LORD could be considered one of the "difficult"
+doors to setup.  Lets look at the steps to setup LORD as shown from the INSTALL
+text file that comes with the door:
+
+1. Edit C:\MYSTIC\DOORS\LORD\START.BAT and notice at the top it says this:
+  
+      REM cd \LORD
+      REM ^ Set this to your LORD path
+
+   Now change those REM lines so they look like this:
+
+      cd c:\mystic\doors\lord
+
+   It should look something like this at the top of the file:
+
+      cd c:\mystic\doors\lord
+      @echo off
+      <a bunch of other crap here>
+
+   Save the file and exit out of your text editor
+
+2. Run LORDCFG.  Now it says we need to setup each node that we want to use.
+   In our case we have a 3 node BBS setup using Mystic, so we'll setup 3 nodes
+
+      A.  Press (A) to "Create a new LORD.DAT file with defaults"
+      B.  Under "Main" select "Configured Nodes"
+      C.  Answer yes to the "Node 1 doesn't exist" question to config node 1
+
+   Now there are many settings here such as things like BBS Name.  These things
+   should be self-explained so lets only focus on what is required to get this
+   thing setup:
+
+      A.  Set "(3) BBS Software" to DOORSYS.  This is telling LORD that our BBS
+          will create a DOOR.SYS file containing information about the user.
+ 
+      B.  Set "(4) Path to dropfile" to "C:\MYSTIC\TEMP1".
+
+          Mystic creates door drop files in a temporary directory used by each
+          node for example C:\MYSTIC\TEMP1 would be node 1. C:\MYSTIC\TEMP2
+          would contain the door drop files for node 2, and so on.
+
+          Since we are currently configuring LORD node 1, we want to tell it
+          where to find the DOOR.SYS for node 1 which is C:\MYSTIC\TEMP1.
+
+      C.  Set "(5) Fossil / Internal" to Fossil.  This is telling the door to
+          use an old DOS "fossil" driver for I/O which is exactly what NetFoss
+          is used for!  THIS IS VERY IMPORTANT!
+
+   Thats it.  But since we have 3 nodes, we need to do this same thing for all
+   three nodes.  Here's how:
+
+      A.  Press ] to "Go forward a node"
+      B.  When asked to "Create node 2 data" say Yes.
+
+   LORD will copy over the settings you've already created for node 1, so there
+   is really only one thing that needs to change.  You guessed it (I hope) its
+   the "Path to the drop file":
+
+      C.  Set "(4) Path to the dropfile" to "C:\MYSTIC\TEMP2".  Remember we
+          said Mystic creates the DOOR.SYS file for each node in its temp 
+          directory, and since we are configuring Node 2 in LORD we must tell
+          it what that directory is: C:\MYSTIC\TEMP2
+
+   Now repeat the same steps above to create the configuration for Node 3 and
+   exit out of LORDCFG.  We are done configuring LORD for all 3 nodes.
+
+
+
+CREATING A MENU COMMAND IN MYSTIC TO EXECUTE LORD
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+  
+Now we put it all together by creating a menu command in Mystic!  The first
+thing to do is load into Mystic's configuration and open the Menu Editor, then
+select whatever menu it is that you want to add the option to run the door.
+
+To do this: run mystic -cfg from the commandline in C:\MYSTIC to start the
+configuration.
+
+Once inside the menu editor, select the menu you want to add the option to and
+press / to bring up the list of commands.  Select I to insert a new command
+whereever you want it.  Then press ENTER on the new command to edit it:
+
+   A.  Set the display text to whatever you want.  Lets use (L) LORD and we'll
+       make the L key what executes the door.
+
+   B.  Set "Hot key" to L
+
+   C.  Now press TAB to switch to menu commands.  This changes the editor mode
+       to allow you to configure what Mystic actually does when this letter is
+       pressed.
+
+   D.  By default Mystic creates a "Goto new menu -> main" command so just
+       press enter on that.
+
+   E.  Press ENTER on Command and Mystic will bring up a list of menu command
+       options.  You can just start typing "external" and Mystic will
+       automatically figure out what you want.
+
+       If you are using the DOSXTRN method then you will select "DX" menu
+       command.
+
+       If you are using the NetFossil method then you would select the "DD"
+       menu command.
+
+   F.  The data field commands the command line that Mystic will execute when
+       the menu option is selected by the user.  This command will be different
+       depending on which method you are choosing to use to execute the door.
+
+       If you are using the DOSXTRN method (DX) then you would enter the same
+       command line that you would use if you were setting up the same door in
+       DOS:
+ 
+         c:\mystic\doors\lord\start.bat %N
+
+       If you are using the NetFossil method (DD) then you need to execute
+       NetFossil and tell it the command line for LORD:
+
+         c:\mystic\netfoss\nf.bat /N%N /H%H c:\mystic\doors\lord\start.bat %N
+
+       Now lets discuss what this means.  %H passes the telnet socket handle
+       which is a requirement by NetFoss, and %N translates to the node number
+       which is required to pass to both NETFOSS and LORD's "start.bat".
+
+       All doors when using NetFossil in the future will be configured in the
+       following format:
+ 
+          c:\mystic\netfoss\nf.bat /N%N /H%H <DOOR COMMAND LINE>
+
+       After you have this working, to create a new door configuration you can
+       simply copy and paste the LORD menu command, then change the hot key,
+       description and the <DOOR COMMAND LINE> for whatever the door is your
+       are configuring.  It takes literally only seconds to add a new door!
+
+   G.  Now that you've set the DATA field to run the correct command line you
+       can exit out and save the menu.
+
+
+CONCLUSION, TESTING AND TROUBLESHOOTING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Now keep in mind you only ever have to configure NetFoss once and then you it
+never has to be done again.  And also keep in mind that LORD is one of the
+more annoying doors to configure (in my opinion) because you have to create a
+configuration for each node you have.  Most doors will not require those steps
+
+Remember to configure all of your doors to use a FOSSIL if they have the option
+to use serial or fossil.

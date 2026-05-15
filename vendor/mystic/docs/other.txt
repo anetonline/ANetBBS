@@ -1,0 +1,10 @@
+USEFUL UNIX NOTES AND COMMANDS:
+
+Search for location and filename of a library:
+ldconfig -p | grep libhunspell
+
+Create a symbolic file link:
+ln -sf /usr/lib/i386-linux-gnu/libhunspell-1.3.so.0 /usr/lib/libhunspell.so
+
+Search for MIS process running:
+ps -A | grep -w mis

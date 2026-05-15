@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Time Budgets{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-clock"></i> Time Budgets</h1>
+    <p class="small text-muted">
+        Per-user time limits for the telnet/SSH/rlogin BBS. Per-session
+        limit ends a single session at the cap; daily limit is total across
+        all sessions; bank minutes accumulate unused per-day time. Sysops
+        are exempt regardless of value.
+    </p>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-2">
+        <div class="col-md-3">
+            <label class="form-label small mb-0">User ID</label>
+            <input type="number" name="user_id" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">Per-session limit (min)</label>
+            <input type="number" name="time_limit_min" class="form-control" value="0">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">Daily limit (min)</label>
+            <input type="number" name="daily_limit_min" class="form-control" value="0">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-0">Bank (min)</label>
+            <input type="number" name="bank_minutes" class="form-control" value="0">
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button class="btn btn-primary w-100"><i class="bi bi-save"></i></button>
+        </div>
+    </div>
+    <div class="form-text small">0 = no limit. Bank carries unused daily minutes forward.</div>
+</form>
+
+<table class="table table-sm">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>User</th>
+            <th>Per-session (min)</th>
+            <th>Daily (min)</th>
+            <th>Bank (min)</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for user, budget in rows %}
+    <tr>
+        <td>{{ user.id }}</td>
+        <td>{{ user.username }}</td>
+        <td>{{ budget.time_limit_min if budget else 0 }}</td>
+        <td>{{ budget.daily_limit_min if budget else 0 }}</td>
+        <td>{{ budget.bank_minutes if budget else 0 }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="text-muted">No users.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

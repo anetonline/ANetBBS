@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}New Event{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-calendar-plus"></i> New Event</h1>
+</div>
+
+<form method="post" class="card p-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label">Title</label>
+        <input type="text" name="title" class="form-control" required>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Starts</label>
+            <input type="datetime-local" name="starts_at" class="form-control" required>
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Ends (optional)</label>
+            <input type="datetime-local" name="ends_at" class="form-control">
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Location (optional)</label>
+        <input type="text" name="location" class="form-control" placeholder="e.g. #lobby on IRC, or Discord voice">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Description (optional)</label>
+        <textarea name="description" class="form-control" rows="4"></textarea>
+    </div>
+    <div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Create</button>
+        <a href="{{ url_for('calendar.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

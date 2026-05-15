@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Inbox - {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-inbox"></i> Inbox</h1>
+</div>
+<div class="d-flex justify-content-between mb-3">
+    <div>
+        <a href="{{ url_for('pm.sent') }}" class="btn btn-primary"><i class="bi bi-send"></i> Sent</a>
+    </div>
+    <a href="{{ url_for('pm.compose') }}" class="btn btn-primary"><i class="bi bi-pencil"></i> Compose</a>
+</div>
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table mb-0">
+            <thead><tr><th></th><th>From</th><th>Subject</th><th>Date</th><th>Actions</th></tr></thead>
+            <tbody>
+                {% for msg in messages %}
+                <tr {% if not msg.read_at %}style="font-weight:bold;"{% endif %}>
+                    <td>{% if not msg.read_at %}<i class="bi bi-circle-fill text-primary" style="font-size:0.5rem;"></i>{% endif %}</td>
+                    <td>{{ msg.sender.username }}</td>
+                    <td><a href="{{ url_for('pm.read', message_id=msg.id) }}">{{ msg.subject }}</a></td>
+                    <td>{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        <form method="post" action="{{ url_for('pm.delete', message_id=msg.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">No messages in inbox.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

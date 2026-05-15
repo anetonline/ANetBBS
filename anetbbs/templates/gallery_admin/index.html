@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Galleries — Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-images"></i> Gallery Admin</h1>
+    <p>Manage image gallery collections.</p>
+</div>
+
+<div class="d-flex justify-content-between mb-3">
+    <a href="{{ url_for('gallery.index') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> View Galleries
+    </a>
+    <a href="{{ url_for('gallery_admin.add') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Add Gallery
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Label</th><th>Slug</th><th>Path</th>
+                    <th>Images</th><th>Status</th><th>Order</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in galleries %}
+                <tr>
+                    <td><strong>{{ g.label }}</strong>
+                        {% if g.description %}<br><span class="text-muted small">{{ g.description }}</span>{% endif %}
+                    </td>
+                    <td><code>{{ g.slug }}</code></td>
+                    <td style="font-size:.85rem;font-family:monospace;">
+                        {{ g.path }}
+                        {% if not g.exists %}<br><span style="color:#ff6600">⚠ Directory missing</span>{% endif %}
+                    </td>
+                    <td>{{ g.count }}</td>
+                    <td>
+                        {% if g.is_active %}<span style="color:#00ff00">✓ Active</span>
+                        {% else %}<span style="color:#888">— Disabled</span>{% endif %}
+                    </td>
+                    <td>{{ g.sort_order }}</td>
+                    <td>
+                        <a href="{{ url_for('gallery_admin.files', slug=g.slug) }}" class="btn btn-primary btn-sm" title="Manage Files">
+                            <i class="bi bi-folder2-open"></i>
+                        </a>
+                        <a href="{{ url_for('gallery_admin.edit', slug=g.slug) }}" class="btn btn-primary btn-sm" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="post" action="{{ url_for('gallery_admin.delete', slug=g.slug) }}" class="d-inline"
+                              onsubmit="return confirm('Remove gallery \'{{ g.label }}\' from the listing? Files on disk will be left untouched.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm" style="background:#000;border:1px solid #ff0000;color:#ff0000" title="Remove">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center p-4">No galleries configured.
+                    <a href="{{ url_for('gallery_admin.add') }}">Add the first one.</a>
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,131 @@
+<style>
+#typing-game { max-width: 700px; margin: 0 auto; text-align: center; }
+#typing-text {
+    font-size: 1.2rem; line-height: 2; background: #000; border: 1px solid #007700;
+    padding: 16px; text-align: left; margin: 12px 0; letter-spacing: .05rem;
+    min-height: 80px;
+}
+.char-pending { color: #007700; }
+.char-correct { color: #00ff00; }
+.char-wrong   { color: #ff4444; background: #330000; }
+.char-current { border-bottom: 2px solid #00ff00; animation: blink .7s step-end infinite; }
+@keyframes blink { 50% { border-color: transparent; } }
+#typing-input {
+    position: absolute; opacity: 0; width: 1px; height: 1px;
+}
+#typing-stats { display: flex; justify-content: space-around; font-size: 1.1rem; margin: 10px 0; }
+.stat-box { text-align: center; }
+.stat-val { font-size: 1.8rem; font-weight: bold; color: #00ff00; }
+.stat-lbl { color: #007700; font-size: .8rem; }
+#typing-msg { font-size: 1.2rem; font-weight: bold; min-height: 2rem; }
+</style>
+
+<div id="typing-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-keyboard"></i> TYPING SPEED TEST</h4>
+    <p style="color:#007700;">Type the text below as fast and accurately as possible!</p>
+
+    <div id="typing-stats">
+        <div class="stat-box"><div class="stat-val" id="wpm-val">0</div><div class="stat-lbl">WPM</div></div>
+        <div class="stat-box"><div class="stat-val" id="acc-val">100</div><div class="stat-lbl">% Accuracy</div></div>
+        <div class="stat-box"><div class="stat-val" id="time-val">60</div><div class="stat-lbl">Seconds</div></div>
+    </div>
+
+    <div id="typing-text" tabindex="0" onclick="document.getElementById('typing-input').focus();"></div>
+    <input id="typing-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div id="typing-msg"></div>
+    <button id="typing-new" class="btn btn-primary mt-3">
+        <i class="bi bi-arrow-clockwise"></i> New Test
+    </button>
+</div>
+
+<script>
+(function() {
+    var TEXTS = [
+        'The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!',
+        'In the world of BBS computing, sysops maintained bulletin board systems that allowed users to dial in with modems and share files, messages, and play door games.',
+        'A pseudo-terminal or PTY is a pair of virtual character devices that provide a bidirectional communication channel used by terminal emulators.',
+        'The green glow of the phosphor monitor illuminated the darkened room as the modem chirped and connected to the distant bulletin board system.',
+        'JavaScript is a high-level, often just-in-time compiled language that conforms to the ECMAScript standard. It has dynamic typing and prototype-based object orientation.',
+    ];
+
+    var text, pos, errors, total, startTime, timer, running = false;
+
+    function startGame() {
+        clearInterval(timer);
+        text = TEXTS[Math.floor(Math.random()*TEXTS.length)];
+        pos = 0; errors = 0; total = 0; startTime = null; running = false;
+        document.getElementById('wpm-val').textContent = '0';
+        document.getElementById('acc-val').textContent = '100';
+        document.getElementById('time-val').textContent = '60';
+        document.getElementById('typing-msg').textContent = '';
+        renderText();
+        document.getElementById('typing-input').value = '';
+        document.getElementById('typing-input').focus();
+    }
+
+    function renderText() {
+        var html = '';
+        for (var i=0;i<text.length;i++) {
+            var ch = text[i] === ' ' ? '&nbsp;' : text[i];
+            if (i < pos) {
+                html += '<span class="char-correct">' + ch + '</span>';
+            } else if (i === pos) {
+                html += '<span class="char-current char-pending">' + ch + '</span>';
+            } else {
+                html += '<span class="char-pending">' + ch + '</span>';
+            }
+        }
+        document.getElementById('typing-text').innerHTML = html;
+    }
+
+    document.getElementById('typing-input').addEventListener('input', function(e) {
+        if (!running && pos === 0) {
+            running = true;
+            startTime = Date.now();
+            var timeLeft = 60;
+            timer = setInterval(function() {
+                timeLeft--;
+                document.getElementById('time-val').textContent = timeLeft;
+                var elapsed = (Date.now()-startTime)/1000/60;
+                var wpm = elapsed > 0 ? Math.round((pos/5)/elapsed) : 0;
+                document.getElementById('wpm-val').textContent = wpm;
+                if (timeLeft <= 0) endGame();
+            }, 1000);
+        }
+        var typed = this.value;
+        if (!typed.length || !running) return;
+        var ch = typed[typed.length-1];
+        total++;
+        if (pos < text.length) {
+            if (ch === text[pos]) {
+                pos++;
+            } else {
+                errors++;
+            }
+        }
+        this.value = '';
+        var acc = total > 0 ? Math.round(((total-errors)/total)*100) : 100;
+        document.getElementById('acc-val').textContent = acc;
+        renderText();
+        if (pos >= text.length) endGame();
+    });
+
+    function endGame() {
+        clearInterval(timer);
+        running = false;
+        var elapsed = (Date.now()-startTime)/1000/60 || 0.001;
+        var wpm = Math.round((pos/5)/elapsed);
+        var acc = total > 0 ? Math.round(((total-errors)/total)*100) : 100;
+        document.getElementById('typing-msg').textContent = '✓ WPM: ' + wpm + ' | Accuracy: ' + acc + '%';
+        document.getElementById('typing-msg').style.color = '#00ff00';
+        var score = wpm * (acc / 100);
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({score: Math.round(score), details:{wpm:wpm, accuracy:acc}})
+        }).catch(function(){});
+    }
+
+    document.getElementById('typing-new').addEventListener('click', startGame);
+    startGame();
+})();
+</script>

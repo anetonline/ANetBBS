@@ -1,0 +1,151 @@
+<style>
+#ttt-game { max-width: 400px; margin: 0 auto; text-align: center; }
+.ttt-cell {
+    width: 100px; height: 100px; background: #000; border: 2px solid #00ff00;
+    font-size: 3rem; font-weight: bold; cursor: pointer; color: #00ff00;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s;
+}
+.ttt-cell:hover:not(.taken) { background: #001100; }
+.ttt-cell.taken { cursor: default; }
+.ttt-cell.x-cell { color: #00ff00; }
+.ttt-cell.o-cell { color: #ff6600; }
+.ttt-win { background: #003300 !important; }
+#ttt-board { display: grid; grid-template-columns: repeat(3,100px); gap: 4px; margin: 16px auto; width: max-content; }
+#ttt-status { font-size: 1.2rem; min-height: 2rem; font-weight: bold; }
+</style>
+
+<div id="ttt-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-grid-3x3"></i> TIC TAC TOE</h4>
+    <p style="color:#007700;">You are <strong style="color:#00ff00;">X</strong>. Computer is <strong style="color:#ff6600;">O</strong>.</p>
+    <div id="ttt-score" style="color:#007700; margin-bottom:8px;">
+        You: <span id="you-wins">0</span> | Computer: <span id="cpu-wins">0</span> | Draws: <span id="draws">0</span>
+    </div>
+    <div id="ttt-board"></div>
+    <div id="ttt-status"></div>
+    <button id="ttt-new" class="btn btn-primary mt-3">
+        <i class="bi bi-arrow-clockwise"></i> New Game
+    </button>
+</div>
+
+<script>
+(function() {
+    var board, playerTurn, gameOver, youWins=0, cpuWins=0, drawCount=0;
+
+    var WIN_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+    function startGame() {
+        board = Array(9).fill(null);
+        playerTurn = true;
+        gameOver = false;
+        document.getElementById('ttt-status').textContent = 'Your turn!';
+        document.getElementById('ttt-status').style.color = '#00ff00';
+        renderBoard();
+    }
+
+    function renderBoard() {
+        var container = document.getElementById('ttt-board');
+        container.innerHTML = '';
+        board.forEach(function(cell, i) {
+            var el = document.createElement('div');
+            el.className = 'ttt-cell' + (cell ? ' taken' : '') + (cell === 'X' ? ' x-cell' : cell === 'O' ? ' o-cell' : '');
+            el.textContent = cell || '';
+            if (!cell && !gameOver) el.addEventListener('click', function(){ playerMove(i); });
+            container.appendChild(el);
+        });
+    }
+
+    function playerMove(i) {
+        if (!playerTurn || gameOver || board[i]) return;
+        board[i] = 'X';
+        renderBoard();
+        var result = checkWin();
+        if (!result) {
+            playerTurn = false;
+            document.getElementById('ttt-status').textContent = 'Computer thinking…';
+            setTimeout(cpuMove, 400);
+        }
+    }
+
+    function cpuMove() {
+        var best = minimax(board, 'O', 0).idx;
+        board[best] = 'O';
+        renderBoard();
+        checkWin();
+        playerTurn = true;
+    }
+
+    function minimax(b, player, depth) {
+        var win = checkBoard(b);
+        if (win === 'X') return {score: -10 + depth};
+        if (win === 'O') return {score: 10 - depth};
+        var empty = b.map(function(v,i){return v===null?i:-1;}).filter(function(i){return i>=0;});
+        if (!empty.length) return {score: 0};
+        var moves = empty.map(function(i) {
+            b[i] = player;
+            var r = minimax(b, player==='O'?'X':'O', depth+1);
+            b[i] = null;
+            return {idx:i, score:r.score};
+        });
+        moves.sort(function(a,b){ return player==='O' ? b.score-a.score : a.score-b.score; });
+        return moves[0];
+    }
+
+    function checkBoard(b) {
+        for (var i=0;i<WIN_LINES.length;i++) {
+            var l=WIN_LINES[i];
+            if (b[l[0]] && b[l[0]]===b[l[1]] && b[l[0]]===b[l[2]]) return b[l[0]];
+        }
+        return null;
+    }
+
+    function checkWin() {
+        var winner = checkBoard(board);
+        if (winner) {
+            gameOver = true;
+            if (winner === 'X') {
+                youWins++;
+                document.getElementById('ttt-status').textContent = '🎉 You win!';
+                document.getElementById('ttt-status').style.color = '#00ff00';
+                document.getElementById('you-wins').textContent = youWins;
+                submitScore(10);
+            } else {
+                cpuWins++;
+                document.getElementById('ttt-status').textContent = '💀 Computer wins!';
+                document.getElementById('ttt-status').style.color = '#ff4444';
+                document.getElementById('cpu-wins').textContent = cpuWins;
+            }
+            highlightWin();
+            return true;
+        }
+        if (!board.some(function(c){return c===null;})) {
+            gameOver = true;
+            drawCount++;
+            document.getElementById('ttt-status').textContent = '🤝 Draw!';
+            document.getElementById('ttt-status').style.color = '#ffff00';
+            document.getElementById('draws').textContent = drawCount;
+            return true;
+        }
+        return false;
+    }
+
+    function highlightWin() {
+        WIN_LINES.forEach(function(l) {
+            if (board[l[0]] && board[l[0]]===board[l[1]] && board[l[0]]===board[l[2]]) {
+                var cells = document.querySelectorAll('.ttt-cell');
+                l.forEach(function(i){ cells[i].classList.add('ttt-win'); });
+            }
+        });
+    }
+
+    function submitScore(s) {
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({score:s})
+        }).catch(function(){});
+    }
+
+    document.getElementById('ttt-new').addEventListener('click', startGame);
+    startGame();
+})();
+</script>

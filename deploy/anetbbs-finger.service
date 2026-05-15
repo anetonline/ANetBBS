@@ -1,0 +1,20 @@
+[Unit]
+Description=ANetBBS Finger Service (RFC 1288)
+After=network.target
+
+[Service]
+Type=simple
+User=stingray
+Group=stingray
+WorkingDirectory=/home/stingray/anetbbs
+EnvironmentFile=/home/stingray/anetbbs/.env
+# Listening on TCP 79 requires CAP_NET_BIND_SERVICE; granted via the
+# systemd capability below so we don't need to run as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ExecStart=/home/stingray/anetbbs/venv/bin/python -m anetbbs.core.finger_server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

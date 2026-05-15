@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{% if area %}Edit Area{% else %}Add Area{% endif %} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-square-text"></i> {% if area %}Edit Area: {{ area.name }}{% else %}Add Echo Area{% endif %}</h1>
+</div>
+
+<a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary btn-sm mb-3">
+    <i class="bi bi-arrow-left"></i> Back to Areas
+</a>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-gear"></i> Area Configuration</div>
+    <div class="card-body">
+        <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {{ form.hidden_tag() }}
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    {{ form.network_id.label(class="form-label") }}
+                    {{ form.network_id(class="form-control") }}
+                    {% for e in form.network_id.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-md-4">
+                    {{ form.tag.label(class="form-label") }}
+                    {{ form.tag(class="form-control", placeholder="FIDO_GENERAL") }}
+                    {% for e in form.tag.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-md-4">
+                    {{ form.order.label(class="form-label") }}
+                    {{ form.order(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.name.label(class="form-label") }}
+                {{ form.name(class="form-control", placeholder="General Discussion") }}
+                {% for e in form.name.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="mb-3">
+                {{ form.description.label(class="form-label") }}
+                {{ form.description(class="form-control", rows=2) }}
+            </div>
+
+            <div class="d-flex gap-4 mb-3">
+                <div class="form-check">
+                    {{ form.is_active(class="form-check-input") }}
+                    <label class="form-check-label" for="is_active" style="color:#00ff00;">Active</label>
+                </div>
+                <div class="form-check">
+                    {{ form.is_subscribed(class="form-check-input") }}
+                    <label class="form-check-label" for="is_subscribed" style="color:#00ff00;">Subscribed</label>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between">
+                <a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

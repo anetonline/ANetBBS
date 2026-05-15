@@ -1,0 +1,477 @@
+# anetbbs/echomail/poller.py
+"""
+Background polling scheduler for echomail networks.
+
+Runs poll jobs on configured intervals for each active network.
+Updates EchomailPollLog records with results.
+Thread-safe — uses Flask app context for all DB operations.
+"""
+import logging
+import threading
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+_poller_thread = None
+_stop_event = threading.Event()
+
+
+class _NetmailAdapter:
+    """Adapt a NetmailMessage row to the attribute set the FTS-0001 packet
+    builder (anetbbs.echomail.binkp._build_ftn_packet) expects to see on
+    an EchomailMessage. Netmail differs from echomail in three ways:
+      - no AREA: line (handled by area=None)
+      - no SEEN-BY/PATH (also signaled by area=None)
+      - the destination header points at a single node, so we expose
+        from_address/to_address for the builder to write @INTL when the
+        zones differ.
+    Field name shims: NetmailMessage uses msgid/reply_msgid; the builder
+    expects msg_id/reply_id.
+    """
+    __slots__ = ('_nm', 'area', 'body', 'from_name', 'to_name', 'subject',
+                 'tear_line', 'origin_line', 'kludges', 'seenby', 'path',
+                 'chrs', 'msg_id', 'reply_id', 'from_address', 'to_address',
+                 'direction')
+
+    def __init__(self, nm):
+        self._nm = nm
+        self.area = None                       # netmail: no area
+        self.body = nm.body or ''
+        self.from_name = nm.from_name
+        self.to_name = nm.to_name
+        self.subject = nm.subject or ''
+        self.tear_line = None                  # build_message will default
+        self.origin_line = None
+        self.kludges = nm.kludges
+        self.seenby = None
+        self.path = None
+        self.chrs = nm.chrs or 'CP437 2'
+        self.msg_id = nm.msgid
+        self.reply_id = nm.reply_msgid
+        self.from_address = nm.from_address or ''
+        self.to_address = nm.to_address or ''
+        self.direction = 'netmail'             # signals private to packet builder
+
+    def __setattr__(self, key, value):
+        super().__setattr__(key, value)
+        # Auto-generated msgid in the builder should propagate back to the row
+        if key == 'msg_id' and getattr(self, '_nm', None) is not None:
+            self._nm.msgid = value
+
+
+def start_poller(app):
+    """
+    Start the background poller thread.
+    Should be called once after the Flask app is fully initialized.
+    """
+    global _poller_thread, _stop_event
+
+    if not app.config.get('ECHOMAIL_POLL_ENABLED', True):
+        logger.info("Echomail poller disabled by configuration")
+        return
+
+    if _poller_thread and _poller_thread.is_alive():
+        logger.warning("Echomail poller already running")
+        return
+
+    _stop_event.clear()
+    _poller_thread = threading.Thread(
+        target=_poller_loop,
+        args=(app,),
+        daemon=True,
+        name='echomail-poller'
+    )
+    _poller_thread.start()
+    logger.info("Echomail poller thread started")
+
+
+def stop_poller():
+    """Signal the poller thread to stop."""
+    global _stop_event
+    _stop_event.set()
+
+
+def poll_network_now(app, network_id: int):
+    """
+    Trigger an immediate poll for a specific network.
+    Runs synchronously in the calling thread (use from a background thread or
+    in a request context where latency is acceptable).
+    """
+    with app.app_context():
+        from ..models import EchomailNetwork
+        network = EchomailNetwork.query.get(network_id)
+        if network:
+            _do_poll(app, network)
+
+
+def poll_all_now(app):
+    """Trigger an immediate poll for all active networks."""
+    with app.app_context():
+        from ..models import EchomailNetwork
+        networks = EchomailNetwork.query.filter_by(is_active=True).all()
+        for network in networks:
+            try:
+                _do_poll(app, network)
+            except Exception as exc:
+                logger.error("Poller: error polling %s: %s", network.name, exc)
+
+
+# ---------------------------------------------------------------------------
+# Internal
+# ---------------------------------------------------------------------------
+
+def _poller_loop(app):
+    """Main loop — checks every 60 seconds whether any network needs polling."""
+    logger.info("Echomail poller loop started")
+    while not _stop_event.wait(timeout=60):
+        try:
+            with app.app_context():
+                from ..models import EchomailNetwork
+                networks = EchomailNetwork.query.filter_by(is_active=True).all()
+                now = datetime.utcnow()
+                for network in networks:
+                    if _is_poll_due(network, now):
+                        try:
+                            _do_poll(app, network)
+                        except Exception as exc:
+                            logger.error("Poller: error polling %s: %s", network.name, exc)
+        except Exception as exc:
+            logger.error("Poller loop error: %s", exc)
+
+    logger.info("Echomail poller loop stopped")
+
+
+_MIN_POLL_INTERVAL_MIN = 5  # floor — protect remote hubs from sub-5min polling
+
+
+def _is_poll_due(network, now: datetime) -> bool:
+    """Return True if the network is due for a poll."""
+    if not network.last_poll_at:
+        return True
+    minutes = max(network.poll_interval_minutes or 60, _MIN_POLL_INTERVAL_MIN)
+    return now >= network.last_poll_at + timedelta(minutes=minutes)
+
+
+def _do_poll(app, network):
+    """
+    Perform a poll for *network*.  Creates a PollLog entry, runs the
+    appropriate client, and imports inbound messages.
+    """
+    from ..models import db, EchomailMessage, EchomailPollLog
+
+    log = EchomailPollLog(
+        network_id=network.id,
+        poll_type='both',
+        started_at=datetime.utcnow(),
+        status='error',
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    try:
+        from ..models import NetmailMessage
+
+        # Gather queued outbound messages.
+        # - EchomailMessage covers public echomail (direction='outbound') and
+        #   private QWK netmail (direction='netmail') — used by both BinkP
+        #   echomail packs and QWK REP packets.
+        # - NetmailMessage is the FidoNet netmail inbox/sent table — applies
+        #   to BinkP networks only. Wrapped in _NetmailAdapter so the FTS-0001
+        #   packet builder can iterate over a uniform list.
+        outbound_echo = EchomailMessage.query.filter(
+            EchomailMessage.network_id == network.id,
+            EchomailMessage.direction.in_(('outbound', 'netmail')),
+            EchomailMessage.sent_at.is_(None),
+        ).all()
+
+        outbound_nm = []
+        if network.network_type == 'binkp':
+            outbound_nm = NetmailMessage.query.filter(
+                NetmailMessage.network_id == network.id,
+                NetmailMessage.direction == 'outbound',
+                NetmailMessage.status == 'queued',
+            ).all()
+
+        outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
+
+        result = _run_client(network, outbound, app)
+
+        # Import inbound messages. _import_message returns 1=imported,
+        # 0=duplicate, -1=dropped (loop/unknown-area/unsubscribed).
+        imported = 0
+        duplicates = 0
+        dropped = 0
+        for msg_data in result.get('received', []):
+            rc = _import_message(network, msg_data)
+            if rc > 0:
+                imported += 1
+            elif rc == 0:
+                duplicates += 1
+            else:
+                dropped += 1
+
+        log.status = 'success'
+        log.messages_sent = result.get('sent', 0)
+        log.messages_received = imported
+        if duplicates or dropped:
+            err_bits = []
+            if duplicates:
+                err_bits.append(f'{duplicates} duplicate')
+            if dropped:
+                err_bits.append(f'{dropped} dropped (loop/unknown/unsub)')
+            log.error_message = ', '.join(err_bits)
+
+        # Stamp outbound messages as sent
+        now = datetime.utcnow()
+        for msg in outbound_echo:
+            msg.sent_at = now
+        for nm in outbound_nm:
+            nm.sent_at = now
+            nm.status = 'sent'
+            nm.is_sent = True
+
+        network.last_poll_at = datetime.utcnow()
+        db.session.commit()
+        logger.info("Poller: %s — sent=%d received=%d",
+                    network.name, log.messages_sent, log.messages_received)
+
+    except Exception as exc:
+        log.status = 'error'
+        log.error_message = str(exc)
+        db.session.commit()
+        logger.error("Poller: poll failed for %s: %s", network.name, exc)
+        raise
+    finally:
+        log.completed_at = datetime.utcnow()
+        db.session.commit()
+
+
+def _run_client(network, outbound_messages, app):
+    """Instantiate and run the appropriate protocol client."""
+    if network.network_type == 'binkp':
+        from .binkp import BinkPClient
+        from ..models import db, HatchQueue
+        client = BinkPClient(
+            host=network.binkp_host or '',
+            port=network.binkp_port or 24554,
+            our_address=network.our_address or '1:1/1',
+            hub_address=network.hub_address or '1:1/0',
+            password=network.binkp_password or '',
+            use_tls=bool(getattr(network, 'binkp_tls', False)),
+            domain=(network.name or '').strip().lower() or None,
+        )
+        data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+        # Pick up any pending hatch-out files for this peer (the network's
+        # hub_address is the destination we're polling). Older subscriptions
+        # may target the hub directly; newer ones may target other downstream
+        # peers we route through this hub. We send everything bound for the
+        # hub address on this connection.
+        hatch_items = (HatchQueue.query
+                       .filter(HatchQueue.peer_address == (network.hub_address or ''),
+                               HatchQueue.status == 'pending')
+                       .order_by(HatchQueue.queued_at)
+                       .all())
+        out = client.poll(outbound_messages=outbound_messages,
+                          data_dir=data_dir,
+                          hatch_items=hatch_items)
+        # Mark shipped items as sent.
+        for hid in out.get('hatched_ids', []):
+            row = HatchQueue.query.get(hid)
+            if row is not None:
+                row.status = 'sent'
+                row.sent_at = datetime.utcnow()
+        if out.get('hatched_ids'):
+            db.session.commit()
+        return out
+
+    elif network.network_type == 'qwk':
+        from .qwk import QWKClient
+        client = QWKClient(
+            host=network.qwk_host or '',
+            port=network.qwk_port or 80,
+            username=network.qwk_username or '',
+            password=network.qwk_password or '',
+            packet_id=network.qwk_packet_id or 'ANET',
+            download_url=getattr(network, 'qwk_download_url', '') or '',
+            upload_url=getattr(network, 'qwk_upload_url', '') or '',
+            hub_id=getattr(network, 'qwk_hub_id', '') or '',
+        )
+        data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+        return client.poll(outbound_messages=outbound_messages, data_dir=data_dir)
+
+    else:
+        raise ValueError(f"Unknown network type: {network.network_type}")
+
+
+def _import_message(network, msg_data: dict) -> int:
+    """
+    Import a single parsed message dict into the database.
+    Returns 1 if imported, 0 if duplicate, -1 if dropped (loop / unsubscribed).
+    """
+    from ..models import db, EchoArea, EchomailMessage, BadAreaLog
+    import json as _json
+
+    area_tag = msg_data.get('area_tag')
+
+    # ----------------- Netmail (no AREA: kludge) -----------------
+    if not area_tag:
+        return _import_netmail(network, msg_data)
+
+    # ----------------- Echomail -----------------
+    # PATH dupe detection: if our address is already in PATH, this is a loop.
+    our_short = ''
+    if network.our_address:
+        try:
+            our_short = '/'.join(network.our_address.split(':', 1)[1].split('.')[0:1])
+            # our_short is now like "218/700" (net/node)
+        except Exception:
+            our_short = ''
+    if our_short:
+        for entry in (msg_data.get('path') or []):
+            if our_short in entry.split():
+                logger.info("Echomail loop: dropping msg with our addr %s in PATH",
+                            our_short)
+                return -1
+
+    # Find the echo area. Behavior differs by network type:
+    # - QWK: hub publishes its conference list in CONTROL.DAT, so it's safe
+    #        to auto-create areas the parser already validated against it.
+    # - BinkP/FTN: tags are arbitrary, so unknown ones go to BadAreaLog
+    #        for sysop review (SBBSecho's BadAreaFile semantics).
+    area = EchoArea.query.filter_by(network_id=network.id, tag=area_tag).first()
+    if not area:
+        if network.network_type == 'qwk':
+            area = EchoArea(
+                network_id=network.id,
+                tag=area_tag,
+                name=msg_data.get('area_name') or area_tag,
+                is_subscribed=True,
+                is_active=True,
+            )
+            db.session.add(area)
+            db.session.flush()
+        else:
+            try:
+                existing_bad = BadAreaLog.query.filter_by(
+                    network_id=network.id, tag=area_tag).first()
+                if existing_bad:
+                    existing_bad.count = (existing_bad.count or 0) + 1
+                    existing_bad.last_seen_at = datetime.utcnow()
+                else:
+                    db.session.add(BadAreaLog(
+                        network_id=network.id, tag=area_tag,
+                        sample_from=msg_data.get('from_name', '')[:100],
+                        sample_subject=msg_data.get('subject', '')[:200],
+                        count=1,
+                        first_seen_at=datetime.utcnow(),
+                        last_seen_at=datetime.utcnow(),
+                    ))
+            except Exception as exc:
+                logger.debug("BadAreaLog write failed (table may be absent): %s", exc)
+            logger.info("Echomail: dropping msg for unknown area %s on %s",
+                        area_tag, network.name)
+            return -1
+
+    if not area.is_subscribed or not area.is_active:
+        logger.debug("Echomail: skipping msg for unsubscribed area %s", area_tag)
+        return -1
+
+    # Deduplicate by msg_id if present
+    msg_id = msg_data.get('msg_id')
+    if msg_id:
+        existing = EchomailMessage.query.filter_by(msg_id=msg_id, area_id=area.id).first()
+        if existing:
+            return 0
+
+    msg = EchomailMessage(
+        area_id=area.id,
+        network_id=network.id,
+        msg_id=msg_id,
+        reply_id=msg_data.get('reply_id'),
+        from_name=msg_data.get('from_name', ''),
+        from_address=msg_data.get('from_address', ''),
+        to_name=msg_data.get('to_name', 'All'),
+        to_address=msg_data.get('to_address', ''),
+        subject=msg_data.get('subject', '(no subject)'),
+        body=msg_data.get('body', ''),
+        tear_line=msg_data.get('tear_line'),
+        origin_line=msg_data.get('origin_line'),
+        chrs=msg_data.get('chrs') or 'CP437 2',
+        kludges=_json.dumps(msg_data.get('kludges') or []),
+        seenby=_json.dumps(msg_data.get('seenby') or []),
+        path=_json.dumps(msg_data.get('path') or []),
+        direction='inbound',
+    )
+    db.session.add(msg)
+
+    # Update area stats
+    area.total_messages = (area.total_messages or 0) + 1
+    area.last_message_at = datetime.utcnow()
+
+    return 1
+
+
+def _import_netmail(network, msg_data: dict) -> int:
+    """Import an inbound netmail message and link it to a local user
+    when the recipient name or to_address matches one of their AKAs.
+    Falls back to the configured DefaultRecipient if no match.
+    """
+    from ..models import db, NetmailMessage, User, UserAka
+    import json as _json
+
+    msg_id = msg_data.get('msg_id') or ''
+    if msg_id:
+        existing = NetmailMessage.query.filter_by(msg_id=msg_id).first()
+        if existing:
+            return 0
+
+    to_name = (msg_data.get('to_name') or '').strip()
+    to_address = (msg_data.get('to_address') or '').strip()
+
+    # Match a local user by name or by AKA address.
+    to_user = None
+    if to_address:
+        aka = UserAka.query.filter_by(address=to_address).first()
+        if aka:
+            to_user = User.query.get(aka.user_id)
+    if to_user is None and to_name:
+        to_user = (User.query
+                   .filter(db.func.lower(User.username) == to_name.lower())
+                   .first())
+        if to_user is None:
+            to_user = (User.query
+                       .filter(db.func.lower(User.display_name) == to_name.lower())
+                       .first())
+
+    # DefaultRecipient fallback (from network config or app config)
+    if to_user is None:
+        default_name = (getattr(network, 'default_recipient', '') or '').strip()
+        if default_name:
+            to_user = (User.query
+                       .filter(db.func.lower(User.username) == default_name.lower())
+                       .first())
+
+    # NetmailMessage has no tear_line / origin_line columns (those are
+    # echomail-specific — see EchomailMessage). For netmail, the tear and
+    # origin lines stay in the body verbatim. Use only the model's actual
+    # column set to avoid `'X' is an invalid keyword argument` failures.
+    nm = NetmailMessage(
+        network_id=network.id,
+        msgid=msg_id or None,
+        reply_msgid=msg_data.get('reply_id') or None,
+        from_name=msg_data.get('from_name', ''),
+        from_address=msg_data.get('from_address', ''),
+        to_name=to_name,
+        to_address=to_address,
+        to_user_id=to_user.id if to_user else None,
+        subject=msg_data.get('subject', '(no subject)'),
+        body=msg_data.get('body', ''),
+        chrs=msg_data.get('chrs') or 'CP437 2',
+        kludges=_json.dumps(msg_data.get('kludges') or []),
+        direction='inbound',
+        status='received',
+        created_at=datetime.utcnow(),
+        received_at=datetime.utcnow(),
+    )
+    db.session.add(nm)
+    return 1

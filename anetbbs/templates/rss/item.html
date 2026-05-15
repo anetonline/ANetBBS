@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title or 'RSS item' }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-rss"></i> {{ item.title or '(no title)' }}</h1>
+    <p class="small text-muted mb-1">
+        from <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}">{{ item.feed.name }}</a>
+        {% if item.author %}· by {{ item.author }}{% endif %}
+        {% if item.published_at %}· {{ item.published_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+    </p>
+    {% if item.link %}
+    <p class="mb-0">
+        <a href="{{ item.link }}" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right"></i> Read original on {{ item.feed.name }}
+        </a>
+    </p>
+    {% endif %}
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to {{ item.feed.name }}
+    </a>
+    <a href="{{ url_for('rss.river') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-water"></i> River
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if item.content_html %}
+            {{ item.content_html|safe }}
+        {% elif item.summary %}
+            {{ item.summary|safe }}
+        {% else %}
+            <em>No content — open the original link to read on the source site.</em>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

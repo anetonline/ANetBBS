@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}File Queue — Sysop{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-shield-check"></i> File Moderation Queue</h1>
+</div>
+
+<div class="mb-3">
+    {% for s in ['pending','approved','rejected'] %}
+        <a href="?status={{ s }}"
+           class="btn btn-sm {% if status == s %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            {{ s|capitalize }} ({{ counts[s] }})
+        </a>
+    {% endfor %}
+</div>
+
+{% if entries %}
+<div class="table-responsive">
+<table class="table table-sm">
+    <thead>
+    <tr>
+        <th>When</th>
+        <th>User</th>
+        <th>Area</th>
+        <th>Filename</th>
+        <th>Size</th>
+        <th>Description</th>
+        <th>Actions</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+    <tr>
+        <td><small>{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+        <td>{{ e.user.username if e.user else '?' }}</td>
+        <td><code>{{ e.file_area.tag if e.file_area else '?' }}</code></td>
+        <td><strong>{{ e.filename }}</strong></td>
+        <td><small>{{ '%0.1f' | format((e.size_bytes or 0) / 1024.0) }} KB</small></td>
+        <td><small>{{ (e.description or '')[:80] }}</small></td>
+        <td class="text-nowrap">
+            {% if e.status == 'pending' %}
+            <form method="post" action="{{ url_for('file_queue.approve', entry_id=e.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-success" title="Publish to area">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+            </form>
+            <form method="post" action="{{ url_for('file_queue.reject', entry_id=e.id) }}" class="d-inline"
+                  onsubmit="this.elements.reason.value = prompt('Reason (optional):') || '';">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="reason">
+                <button class="btn btn-sm btn-warning" title="Reject and delete">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </form>
+            {% else %}
+            <span class="badge bg-secondary">{{ e.status }}</span>
+            {% if e.reviewed_by %}<small class="text-muted">by {{ e.reviewed_by.username }}</small>{% endif %}
+            {% endif %}
+            <form method="post" action="{{ url_for('file_queue.delete', entry_id=e.id) }}" class="d-inline"
+                  onsubmit="return confirm('Permanently delete this queue entry?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger" title="Remove from queue">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </form>
+        </td>
+    </tr>
+    {% if e.rejection_reason %}
+    <tr><td></td><td colspan="6"><small class="text-muted">Rejected: {{ e.rejection_reason }}</small></td></tr>
+    {% endif %}
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="card"><div class="card-body text-muted">No {{ status }} entries.</div></div>
+{% endif %}
+
+<div class="mt-3 small text-muted">
+    To enable the queue, set <code>FILE_MOD_QUEUE_ENABLED=true</code> in your <code>.env</code>.
+    When enabled, regular-user uploads land here for sysop approval before publishing.
+</div>
+{% endblock %}

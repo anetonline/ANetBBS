@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Forbidden — {{ config.BBS_NAME or 'ANetBBS' }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-lock"></i> 403 — Forbidden</h1>
+</div>
+
+<div class="card p-3">
+    <p>You don't have access to that page.</p>
+    <p class="small text-muted">
+        If you think this is wrong, log in as a user with the right
+        permissions, or ask the sysop.
+    </p>
+    <p>
+        <a href="{{ url_for('main.index') }}" class="btn btn-primary">
+            <i class="bi bi-house"></i> Home
+        </a>
+        {% if not current_user.is_authenticated %}
+        <a href="{{ url_for('auth.login') }}" class="btn btn-secondary">
+            <i class="bi bi-box-arrow-in-right"></i> Log in
+        </a>
+        {% endif %}
+    </p>
+</div>
+{% endblock %}

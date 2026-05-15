@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-speedometer2"></i> Admin Dashboard</h1>
+</div>
+
+<!-- Stats Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-people fs-2"></i>
+                <h3>{{ stats.total_users }}</h3>
+                <small>Total Users</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-person-check fs-2"></i>
+                <h3>{{ stats.active_users }}</h3>
+                <small>Active (30d)</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-circle-fill text-success fs-2"></i>
+                <h3>{{ stats.online_users }}</h3>
+                <small>Online Now</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-chat-left-text fs-2"></i>
+                <h3>{{ stats.total_posts }}</h3>
+                <small>Total Posts</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-collection fs-2"></i>
+                <h3>{{ stats.total_boards }}</h3>
+                <small>Boards</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 col-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-megaphone fs-2"></i>
+                <h3>{{ stats.total_messages }}</h3>
+                <small>Bulletins</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 24-hour activity row -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3 col-6">
+        <a href="{{ url_for('admin.users') }}" class="text-decoration-none">
+            <div class="card text-center" style="border-left:3px solid var(--theme-accent);">
+                <div class="card-body">
+                    <i class="bi bi-person-plus fs-2"></i>
+                    <h3>{{ stats.new_users_24h }}</h3>
+                    <small>New users (24h)</small>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="{{ url_for('boards.list_boards') }}" class="text-decoration-none">
+            <div class="card text-center" style="border-left:3px solid var(--theme-accent);">
+                <div class="card-body">
+                    <i class="bi bi-chat-dots fs-2"></i>
+                    <h3>{{ stats.new_posts_24h }}</h3>
+                    <small>New posts (24h)</small>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="{{ url_for('file_queue.index') }}" class="text-decoration-none">
+            <div class="card text-center" style="border-left:3px solid {% if stats.pending_files %}var(--theme-accent){% else %}var(--theme-border){% endif %};">
+                <div class="card-body">
+                    <i class="bi bi-shield-check fs-2"></i>
+                    <h3>{{ stats.pending_files }}</h3>
+                    <small>Pending file uploads</small>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <div class="card">
+            <div class="card-header py-2"><small><i class="bi bi-clock-history"></i> Recent callers</small></div>
+            <ul class="list-group list-group-flush small">
+                {% for c in recent_callers %}
+                <li class="list-group-item py-1">
+                    {{ c.username if c.username else '?' }}
+                    <small class="text-muted">{{ c.started_at.strftime('%m-%d %H:%M') }}</small>
+                </li>
+                {% else %}
+                <li class="list-group-item py-1 text-muted">No callers logged.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <!-- Quick Actions -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-lightning"></i> Quick Actions</div>
+            <div class="card-body d-grid gap-2">
+                <a href="{{ url_for('admin.add_user') }}" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add User</a>
+                <a href="{{ url_for('admin.add_board') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Board</a>
+                <a href="{{ url_for('admin.add_bulletin') }}" class="btn btn-primary"><i class="bi bi-megaphone"></i> Add Bulletin</a>
+                <a href="{{ url_for('admin.settings') }}" class="btn btn-primary"><i class="bi bi-gear"></i> System Settings</a>
+                <a href="{{ url_for('menu_admin.list_menus') }}" class="btn btn-primary"><i class="bi bi-list-nested"></i> BBS Menus</a>
+                <a href="{{ url_for('games_admin.dashboard') }}" class="btn btn-primary"><i class="bi bi-controller"></i> Door Games</a>
+                <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-primary"><i class="bi bi-envelope-arrow-up"></i> Echomail Networks</a>
+                <a href="{{ url_for('admin.themes') }}" class="btn btn-primary"><i class="bi bi-palette"></i> Themes</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Info -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-info-circle"></i> System Info</div>
+            <div class="card-body">
+                <p><strong>Python:</strong> {{ system_info.python_version }}</p>
+                <p><strong>Flask:</strong> {{ system_info.flask_version }}</p>
+                <p><strong>Database:</strong> {{ system_info.db_type }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Online Users -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-circle-fill text-success"></i> Online Users ({{ stats.online_users }})</div>
+            <div class="card-body">
+                {% if online_sessions %}
+                    {% for session in online_sessions %}
+                        <span class="badge" style="background-color:#003300;border:1px solid #00ff00;color:#00ff00;">
+                            <i class="bi bi-circle-fill text-success"></i> {{ session.user.username }}
+                        </span>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted">No users online</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- Recent Registrations -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-person-plus"></i> Recent Registrations</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Username</th><th>Email</th><th>Joined</th></tr></thead>
+                    <tbody>
+                        {% for user in recent_users %}
+                        <tr>
+                            <td><a href="{{ url_for('admin.edit_user', user_id=user.id) }}">{{ user.username }}</a>
+                                {% if user.is_admin %}<span class="badge bg-warning text-dark">Admin</span>{% endif %}
+                            </td>
+                            <td>{{ user.email }}</td>
+                            <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Logins -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-box-arrow-in-right"></i> Recent Logins</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Username</th><th>Last Login</th><th>Count</th></tr></thead>
+                    <tbody>
+                        {% for user in recent_logins %}
+                        <tr>
+                            <td><a href="{{ url_for('admin.edit_user', user_id=user.id) }}">{{ user.username }}</a></td>
+                            <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login }}</td>
+                            <td>{{ user.login_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,5 @@
+import mystic_bbs as bbs
+import sqlite3
+
+bbs.writeln("Hello from Python 3")
+bbs.writeln("|PA")

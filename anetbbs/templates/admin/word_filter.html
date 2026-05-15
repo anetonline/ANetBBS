@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Word Filter{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-filter-circle"></i> Word Filter</h1>
+    <p>Replace matched words/phrases in shouts and posts. Case-insensitive.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Pattern (literal word/phrase)</label>
+                <input type="text" name="pattern" class="form-control" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Replacement</label>
+                <input type="text" name="replacement" class="form-control" value="****">
+            </div>
+            <div class="col-md-3"><button class="btn btn-primary w-100">Add Filter</button></div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm mb-0">
+            <thead><tr><th>On</th><th>Pattern</th><th>Replacement</th><th></th></tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr {% if not r.is_active %}class="text-muted"{% endif %}>
+                    <td>{% if r.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                    <td><code>{{ r.pattern }}</code></td>
+                    <td>{{ r.replacement }}</td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="w_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if r.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="w_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No filters yet.</div>{% endif %}
+    </div>
+</div>
+{% endblock %}

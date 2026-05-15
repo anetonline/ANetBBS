@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Tour — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-compass"></i> Welcome Tour</h1>
+    <p class="lead">A 60-second guide to {{ config.BBS_NAME }}.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>1. Boards</strong> &mdash; threaded discussions</div>
+    <div class="card-body">
+        Read and post in topic-grouped boards. Replies thread under their
+        parent so it's easy to follow conversations. Use <code>@username</code>
+        to ping someone &mdash; they get an in-app notification.
+        <div class="mt-2">
+            <a href="{{ url_for('boards.list_boards') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-card-list"></i> Browse boards
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>2. Files</strong> &mdash; uploads and file echoes</div>
+    <div class="card-body">
+        File areas hold downloadable software, ANSI art, magazines, etc.
+        Some areas accept uploads (sysop may queue them for approval first).
+        Generate <em>shareable links</em> for friends without accounts.
+        <div class="mt-2">
+            <a href="{{ url_for('file_areas.index') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-folder2-open"></i> File areas
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>3. Chat</strong> &mdash; MRC, IRC, real-time</div>
+    <div class="card-body">
+        Connect to the global MRC network (BBS-to-BBS), join IRC channels
+        directly from your browser, or use the local shoutbox.
+        <div class="mt-2">
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('mrc.index') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-broadcast"></i> MRC
+            </a>
+            <a href="{{ url_for('irc.index') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-chat-square"></i> IRC
+            </a>
+            {% endif %}
+            <a href="{{ url_for('shoutbox.index') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-megaphone"></i> Shoutbox
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>4. Door games</strong> &mdash; like the old days</div>
+    <div class="card-body">
+        Tradewars, LORD, Usurper-style games &mdash; play in your browser via
+        the web terminal. Some are built-in JS, others run as real DOS doors.
+        <div class="mt-2">
+            <a href="{{ url_for('games.lobby') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-controller"></i> Game center
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>5. Profile</strong> &mdash; make yourself at home</div>
+    <div class="card-body">
+        Pick a theme, upload an avatar, write a tagline, set your AKAs.
+        You can also publish a Gemini capsule that shows up at
+        <code>/gemini/{username}</code>.
+        <div class="mt-2">
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('profile.edit') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-person-gear"></i> Edit profile
+            </a>
+            <a href="{{ url_for('gemini.edit') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-stars"></i> Gemini capsule
+            </a>
+            {% else %}
+            <a href="{{ url_for('auth.register') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-person-plus"></i> Sign up
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>6. Old-school access</strong></div>
+    <div class="card-body">
+        Prefer a real terminal? Telnet, SSH, and rlogin are all available.
+        See the <a href="{{ url_for('main.about') }}">About</a> page for
+        ports, or talk to the sysop.
+    </div>
+</div>
+
+<p class="mt-3">Welcome aboard.</p>
+{% endblock %}

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Search Results - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-search"></i> Search</h1>
+</div>
+
+<form method="get" class="mb-4" autocomplete="off">
+    <div class="input-group mb-2 position-relative">
+        <input type="text" name="q" id="searchInput" value="{{ q }}" class="form-control" placeholder="Search posts, users, boards...">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> Search</button>
+        <div id="searchSuggest" class="list-group position-absolute w-100"
+             style="top:100%;left:0;z-index:1000;display:none;"></div>
+    </div>
+    <div class="row g-2">
+        <div class="col-md-3">
+            <label class="form-label small mb-0">From</label>
+            <input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">To</label>
+            <input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">Board</label>
+            <select name="board" class="form-select form-select-sm">
+                <option value="">— Any —</option>
+                {% for b in boards %}
+                <option value="{{ b.id }}" {% if board_filter == b.id|string %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">By user</label>
+            <input type="text" name="user" value="{{ user_filter }}" class="form-control form-control-sm" placeholder="username">
+        </div>
+    </div>
+</form>
+
+{% if q %}
+<h5>Results for: "{{ q }}"</h5>
+
+<!-- Posts -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-chat-left-text"></i> Posts ({{ results.posts | length }})</div>
+    <div class="card-body p-0">
+        {% if results.posts %}
+        <div class="list-group list-group-flush">
+            {% for post in results.posts %}
+            <a href="{{ url_for('boards.view_post', post_id=post.id) }}"
+               class="list-group-item list-group-item-action"
+               style="background-color:var(--theme-card-bg);border-color:var(--theme-primary);color:var(--theme-primary);">
+                <div class="d-flex justify-content-between">
+                    <strong>{{ post.subject }}</strong>
+                    <small>{{ post.created_at.strftime('%Y-%m-%d') }}</small>
+                </div>
+                <small>by {{ post.author.username }} in {{ post.board.name }}</small>
+                <p class="mb-0 small">{{ post.content[:150] }}{% if post.content|length > 150 %}...{% endif %}</p>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="p-3">No posts found.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Users -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-people"></i> Users ({{ results.users | length }})</div>
+    <div class="card-body">
+        {% if results.users %}
+        <div class="d-flex flex-wrap gap-2">
+            {% for user in results.users %}
+            <a href="{{ url_for('profile.view_user', username=user.username) }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-person"></i> {{ user.username }}
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No users found.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Boards -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-collection"></i> Boards ({{ results.boards | length }})</div>
+    <div class="card-body">
+        {% if results.boards %}
+        <div class="list-group">
+            {% for board in results.boards %}
+            <a href="{{ url_for('boards.view_board', board_id=board.id) }}"
+               class="list-group-item list-group-item-action"
+               style="background-color:var(--theme-card-bg);border-color:var(--theme-primary);color:var(--theme-primary);">
+                <strong>{{ board.name }}</strong>
+                <p class="mb-0 small">{{ board.description }}</p>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No boards found.</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if results.echomail %}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-envelope-paper"></i> Echomail ({{ results.echomail | length }})</div>
+    <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+            {% for em in results.echomail %}
+            <a href="{{ url_for('echomail.read', area_id=em.area_id, message_id=em.id) }}" class="list-group-item list-group-item-action">
+                <strong>{{ em.subject or '(no subject)' }}</strong>
+                <small class="text-muted ms-2">by {{ em.from_name }}, {{ em.created_at.strftime('%Y-%m-%d') }}</small>
+                <p class="mb-0 small">{{ (em.body or '')[:200] }}{% if (em.body or '')|length > 200 %}...{% endif %}</p>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if results.shouts %}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-megaphone"></i> Shouts ({{ results.shouts | length }})</div>
+    <div class="card-body p-0">
+        <ul class="list-group list-group-flush">
+            {% for s in results.shouts %}
+            <li class="list-group-item">
+                <strong>{{ s.user.username if s.user else '?' }}</strong>: {{ s.text }}
+                <small class="text-muted ms-2">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+
+{% if not q %}
+<div id="recentSearches" class="card" style="display:none;">
+    <div class="card-header"><i class="bi bi-clock-history"></i> Recent searches</div>
+    <ul class="list-group list-group-flush" id="recentSearchesList"></ul>
+</div>
+{% endif %}
+
+<script>
+(function() {
+    const inp = document.getElementById('searchInput');
+    const sug = document.getElementById('searchSuggest');
+    if (!inp || !sug) return;
+    let t = null, lastQ = '';
+    inp.addEventListener('input', () => {
+        const q = inp.value.trim();
+        if (q.length < 2) { sug.style.display = 'none'; return; }
+        if (q === lastQ) return;
+        lastQ = q;
+        clearTimeout(t);
+        t = setTimeout(async () => {
+            try {
+                const r = await fetch('/search/suggest?q=' + encodeURIComponent(q));
+                const data = await r.json();
+                sug.innerHTML = '';
+                if (!data.length) { sug.style.display = 'none'; return; }
+                data.forEach(item => {
+                    const a = document.createElement('a');
+                    a.className = 'list-group-item list-group-item-action';
+                    a.href = item.url;
+                    a.innerHTML = '<small class="text-muted">' + item.kind + '</small> ' + item.label;
+                    sug.appendChild(a);
+                });
+                sug.style.display = 'block';
+            } catch (e) {}
+        }, 200);
+    });
+    inp.addEventListener('blur', () => setTimeout(() => sug.style.display = 'none', 200));
+
+    // Persist + show recent searches.
+    const RKEY = 'anet:recentSearches';
+    function pushRecent(q) {
+        if (!q) return;
+        try {
+            const list = JSON.parse(localStorage.getItem(RKEY) || '[]');
+            const filtered = [q].concat(list.filter(x => x !== q)).slice(0, 5);
+            localStorage.setItem(RKEY, JSON.stringify(filtered));
+        } catch (e) {}
+    }
+    inp.form.addEventListener('submit', () => pushRecent(inp.value.trim()));
+    const box = document.getElementById('recentSearches');
+    const list = document.getElementById('recentSearchesList');
+    if (box && list) {
+        try {
+            const arr = JSON.parse(localStorage.getItem(RKEY) || '[]');
+            if (arr.length) {
+                box.style.display = '';
+                arr.forEach(q => {
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item';
+                    li.innerHTML = '<a href="?q=' + encodeURIComponent(q) + '">' + q + '</a>';
+                    list.appendChild(li);
+                });
+            }
+        } catch (e) {}
+    }
+})();
+</script>
+{% endblock %}

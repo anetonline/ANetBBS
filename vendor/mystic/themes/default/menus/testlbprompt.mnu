@@ -1,0 +1,188 @@
+Test of LightBar/Prompt menu
+
+
+03000000000000000000
+6
+
+
+|CR|09Prompt Menu|03: |11
+
+0
+0
+
+
+
+
+
+
+FIRSTCMD
+
+10000000000000000000
+0
+0
+0
+1
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+GT
+
+|CR|12Use arrow keys or type hotkeys to see prompt menu in action!|CR
+0
+
+
+|09(|10?|09) |03Help
+|03Show a list of commands for this menu
+|14|17 ? |15Help |16
+?
+
+10000000000000000000
+0
+1
+0
+2
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+-G
+
+2
+0
+
+
+|09(|10D|09) |03Display Text
+|03Displays a line of text for the heck of it
+|14|17 D|15isplay Text |16
+D
+
+10000000000000000000
+0
+1
+0
+3
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+GT
+
+|CR|12This is a test!|CR
+0
+
+
+|09(|10USER|09) |03User List
+|03List or search users on this system
+|14|17 USER|15 List |16
+USER
+
+10000000000000000000
+0
+1
+0
+4
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+GU
+
+
+0
+
+
+|09(|10WHO|09) |03Who's Online
+|03Show all users logging into the BBS system
+|14|17 WHO|15s Online |16
+WHO
+
+10000000000000000000
+0
+1
+0
+5
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+NW
+
+
+0
+
+
+|09(|10Q|09) |03Quit to Demo Menu
+|03Select this to quit to demo menu
+|14|17 Q|15uit to Demo |16
+Q
+
+10000000000000000000
+0
+1
+0
+6
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+GO
+
+demos
+0
+
+

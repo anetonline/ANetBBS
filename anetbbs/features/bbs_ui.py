@@ -1,0 +1,1565 @@
+"""
+Telnet/SSH/rlogin BBS UI menus that read from the SAME tables the web uses.
+
+Currently provides view-mode for:
+  - Online users (web + telnet/SSH/rlogin combined, via UserSession)
+  - Message boards (browse boards → list threads → read thread)
+  - Bulletins (read pinned/announcement messages)
+  - Private messages (inbox + sent)
+  - Echomail areas (browse areas → list messages → read)
+  - File library (list files)
+  - User profile (view own info)
+
+All operations push a transient Flask app context so they can use the
+SQLAlchemy-mapped models without needing to be inside a Flask request.
+"""
+import os
+import logging
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+
+def _app():
+    """Make a transient Flask app + db context. Call inside `with`."""
+    from flask import Flask
+    from anetbbs.config import get_config
+    from anetbbs.models import db
+    app = Flask(__name__)
+    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+    db.init_app(app)
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Top-level BBS menu
+# ---------------------------------------------------------------------------
+
+class BBSMenuUI:
+    """Reusable menu helpers attached to a BBSSession."""
+
+    def __init__(self, session):
+        self.session = session
+
+    async def show_main(self):
+        """Top-level 'Main BBS' menu — wired into BBSSession.show_main_menu()."""
+        while True:
+            menu = (
+                "\r\n"
+                "╔══════════════════════════════════════════╗\r\n"
+                "║              Main BBS Menu               ║\r\n"
+                "╠══════════════════════════════════════════╣\r\n"
+                "║  M. Message Boards                       ║\r\n"
+                "║  B. Bulletins                            ║\r\n"
+                "║  P. Private Messages                     ║\r\n"
+                "║  E. Echomail                             ║\r\n"
+                "║  F. File Library                         ║\r\n"
+                "║  R. RSS News Reader                      ║\r\n"
+                "║  U. Who's Online                         ║\r\n"
+                "║  Y. Your Profile                         ║\r\n"
+                "║  Q. Return                               ║\r\n"
+                "╚══════════════════════════════════════════╝\r\n"
+                "\r\n"
+                "Choice: "
+            )
+            choice = (await self.session.read_line(menu) or '').strip().upper()
+            if choice == 'Q':
+                return
+            elif choice == 'M':
+                await self.list_boards()
+            elif choice == 'B':
+                await self.list_bulletins()
+            elif choice == 'P':
+                await self.list_pm_inbox()
+            elif choice == 'E':
+                await self.list_echo_areas()
+            elif choice == 'F':
+                await self.list_files()
+            elif choice == 'R':
+                await self.show_rss()
+            elif choice == 'U':
+                await self.show_online()
+            elif choice == 'Y':
+                await self.show_profile()
+
+    # ------------------------------------------------------------------
+    # Online users
+    # ------------------------------------------------------------------
+
+    async def show_online(self):
+        from anetbbs.models import UserSession, User
+        with _app().app_context():
+            five_min_ago = datetime.utcnow() - timedelta(minutes=5)
+            sessions = (UserSession.query
+                        .filter(UserSession.last_seen >= five_min_ago)
+                        .order_by(UserSession.last_seen.desc())
+                        .all())
+            rows = []
+            for s in sessions:
+                u = User.query.get(s.user_id)
+                if not u:
+                    continue
+                # page field is "[telnet] chat" or "/boards/" etc — encodes protocol
+                page = (s.page or '').strip()
+                if page.startswith('['):
+                    proto, _, where = page.partition(']')
+                    proto = proto.lstrip('[')
+                    where = (where or '').strip() or '-'
+                else:
+                    proto = 'web'
+                    where = page or '-'
+                rows.append((u.username, proto, where, s.last_seen))
+
+        from .ansi_ui import banner, footer, FG, RESET, BOLD
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner("Who's Online"))
+        if not rows:
+            await self.session.write(
+                f"  {FG['gry']}(no one is online right now){RESET}\r\n")
+        else:
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'User':<16} {'Proto':<8} "
+                f"{'Where':<22} {'Last seen':<12}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
+            for u, proto, where, ts in rows:
+                tstr = ts.strftime('%H:%M:%S') if ts else '?'
+                proto_color = (FG['grn'] if proto == 'telnet'
+                               else FG['mag'] if proto == 'ssh'
+                               else FG['yel'] if proto == 'web'
+                               else FG['cyan'])
+                await self.session.write(
+                    f"  {FG['wht']}{u[:16]:<16}{RESET} "
+                    f"{proto_color}{proto[:8]:<8}{RESET} "
+                    f"{FG['dim']}{where[:22]:<22}{RESET} "
+                    f"{FG['cyan']}{tstr:<12}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.read_line(
+            f"{FG['cyan']}Press Enter to continue...{RESET}")
+
+    # ------------------------------------------------------------------
+    # Message boards
+    # ------------------------------------------------------------------
+
+    async def list_boards(self):
+        from anetbbs.models import Board
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        with _app().app_context():
+            boards = Board.query.filter_by(is_active=True).order_by(Board.order, Board.name).all()
+            board_list = [(b.id, b.name, b.description or '', b.posts.count()) for b in boards]
+
+        if not board_list:
+            await self.session.write("\r\nNo boards configured yet.\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        while True:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Message Boards'))
+            for i, (_, name, desc, count) in enumerate(board_list, 1):
+                await self.session.write(
+                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET} "
+                    f"{FG['grn']}{name:<28}{RESET} "
+                    f"{FG['cyan']}({count:4d} threads){RESET}\r\n")
+                if desc:
+                    await self.session.write(
+                        f"      {FG['dim']}{desc[:62]}{RESET}\r\n")
+            await self.session.write(
+                f"\r\n  {FG['yel']}{BOLD}Q{RESET}{FG['gry']}.{RESET} "
+                f"{FG['red']}Return{RESET}\r\n")
+            await self.session.write(footer() + '\r\n')
+            choice = (await self.session.read_line(
+                _prompt('Pick board (number / Q): ')) or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(board_list):
+                    await self.list_threads(board_list[idx][0], board_list[idx][1])
+            except ValueError:
+                pass
+
+    async def list_threads(self, board_id, board_name):
+        from anetbbs.models import Post, User
+        with _app().app_context():
+            threads = (Post.query
+                       .filter_by(board_id=board_id, parent_id=None)
+                       .order_by(Post.created_at.desc())
+                       .limit(50).all())
+            t_list = []
+            for t in threads:
+                author = User.query.get(t.author_id)
+                t_list.append((t.id, t.subject, author.username if author else '?',
+                               t.created_at, t.replies.count()))
+
+        if not t_list:
+            await self.session.write(f"\r\n{board_name}: no threads yet.\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        while True:
+            await self.session.write(f"\r\n=== {board_name} (latest 50 threads) ===\r\n\r\n")
+            for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
+                ts = when.strftime('%m-%d %H:%M') if when else '?'
+                line = f"  {i:2d}. [{n_replies:2d}] {subj[:35]:<35} by {who[:12]:<12} {ts}"
+                await self.session.write(line + "\r\n")
+            choice = (await self.session.read_line("\r\nPick thread (number) or Q: ") or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(t_list):
+                    await self.read_thread(t_list[idx][0])
+            except ValueError:
+                pass
+
+    async def read_thread(self, post_id):
+        from anetbbs.models import Post, User
+        with _app().app_context():
+            root = Post.query.get(post_id)
+            if not root:
+                return
+            posts = [root] + list(root.replies.order_by(Post.created_at).all())
+            rendered = []
+            for p in posts:
+                author = User.query.get(p.author_id)
+                rendered.append({
+                    'subject': p.subject,
+                    'author': author.username if author else '?',
+                    'when': p.created_at,
+                    'content': p.content,
+                })
+
+        await self.session.write("\r\n" + "═" * 64 + "\r\n")
+        for i, p in enumerate(rendered):
+            ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
+            tag = '[OP]' if i == 0 else f'[Reply {i}]'
+            await self.session.write(f"\r\n{tag} {p['subject']}\r\n")
+            await self.session.write(f"From: {p['author']}    Date: {ts}\r\n")
+            await self.session.write("─" * 64 + "\r\n")
+            for line in (p['content'] or '').splitlines():
+                await self.session.write(line[:78] + "\r\n")
+            await self.session.write("\r\n")
+        await self.session.read_line("Press Enter...")
+
+    # ------------------------------------------------------------------
+    # Bulletins
+    # ------------------------------------------------------------------
+
+    async def list_bulletins(self):
+        from anetbbs.models import Message as Bulletin
+        from anetbbs.models import User
+        with _app().app_context():
+            now = datetime.utcnow()
+            bulletins = (Bulletin.query
+                         .filter((Bulletin.expires_at == None) | (Bulletin.expires_at > now))
+                         .order_by(Bulletin.is_pinned.desc(), Bulletin.created_at.desc())
+                         .limit(20).all())
+            b_list = []
+            for b in bulletins:
+                author = User.query.get(b.author_id)
+                b_list.append((b.id, b.title, author.username if author else '?',
+                               b.created_at, b.is_pinned, b.content))
+
+        if not b_list:
+            await self.session.write("\r\nNo bulletins.\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        while True:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Bulletins'))
+            for i, (_, title, who, when, pinned, _) in enumerate(b_list, 1):
+                ts = when.strftime('%m-%d') if when else '?'
+                pin = (FG['yel'] + '*' + RESET) if pinned else ' '
+                await self.session.write(
+                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET}{pin} "
+                    f"{FG['wht']}{title[:40]:<40}{RESET} "
+                    f"{FG['gry']}by{RESET} {FG['grn']}{who[:12]:<12}{RESET} "
+                    f"{FG['cyan']}{ts}{RESET}\r\n")
+            await self.session.write('\r\n' + footer() + '\r\n')
+            choice = (await self.session.read_line(
+                _prompt('Pick bulletin (number / Q): ')) or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(b_list):
+                    _, title, who, when, _, content = b_list[idx]
+                    ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                    await self._page_text(content or '',
+                                          title=title,
+                                          subtitle=f'by {who} — {ts}')
+            except ValueError:
+                pass
+
+    async def _page_text(self, body, title='', subtitle='', page_size=22):
+        """Page through `body` one screenful at a time with a [MORE] prompt.
+
+        Honors raw ANSI escape codes (so an ANSI bulletin renders) but
+        breaks on every 22 visible-text lines so users can read at their
+        own pace. After the last page, waits for a single keypress.
+        """
+        CYAN = '\x1b[96m'; YEL = '\x1b[93m'; WHT = '\x1b[97m'
+        DIM = '\x1b[37m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'
+
+        # Header
+        await self.session.write(
+            f'\r\n{BOLD}{CYAN}╔{"═" * 76}╗{RESET}\r\n')
+        if title:
+            await self.session.write(
+                f'{BOLD}{CYAN}║ {WHT}{title[:74]:<74} {CYAN}║{RESET}\r\n')
+        if subtitle:
+            await self.session.write(
+                f'{BOLD}{CYAN}║ {DIM}{subtitle[:74]:<74} {CYAN}║{RESET}\r\n')
+        await self.session.write(
+            f'{BOLD}{CYAN}╚{"═" * 76}╝{RESET}\r\n')
+
+        lines = (body or '').splitlines() or ['(empty)']
+        total = len(lines)
+        page = 0
+        while page * page_size < total:
+            chunk = lines[page * page_size:(page + 1) * page_size]
+            for line in chunk:
+                # Don't truncate ANSI-escaped lines — visible width <= 80 isn't
+                # easy to compute. Truncating bare text at 78 keeps the layout
+                # tidy on standard terminals.
+                if '\x1b' in line:
+                    await self.session.write(line + '\r\n')
+                else:
+                    await self.session.write(line[:78] + '\r\n')
+            page += 1
+            if page * page_size >= total:
+                # End of bulletin
+                await self.session.read_line(
+                    f'{YEL}--- end ---{RESET}  Press Enter to continue: ')
+                return
+            # Show pager prompt
+            shown = min(page * page_size, total)
+            prompt = (f'{YEL}--MORE--{RESET}  '
+                      f'({shown}/{total} lines)  '
+                      f'{DIM}[Enter]=more  [Q]=quit:{RESET} ')
+            ans = (await self.session.read_line(prompt) or '').strip().upper()
+            if ans == 'Q':
+                return
+
+    # ------------------------------------------------------------------
+    # Private messages
+    # ------------------------------------------------------------------
+
+    async def list_pm_inbox(self):
+        from anetbbs.models import db, PrivateMessage, User
+        my_id = self.session.user['id']
+
+        with _app().app_context():
+            inbox = (PrivateMessage.query
+                     .filter_by(recipient_id=my_id, is_deleted_recipient=False)
+                     .order_by(PrivateMessage.created_at.desc())
+                     .limit(50).all())
+            i_list = []
+            for m in inbox:
+                sender = User.query.get(m.sender_id)
+                i_list.append((m.id, m.subject, sender.username if sender else '?',
+                               m.created_at, m.read_at is not None, m.body))
+
+        if not i_list:
+            from .ansi_ui import banner, FG, RESET
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('PM Inbox'))
+            await self.session.write(
+                f"  {FG['gry']}Your inbox is empty.{RESET}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        while True:
+            from .ansi_ui import banner as _bnr
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(_bnr('PM Inbox'))
+            for i, (_, subj, who, when, was_read, _) in enumerate(i_list, 1):
+                ts = when.strftime('%m-%d %H:%M') if when else '?'
+                mark = ' ' if was_read else '*'
+                await self.session.write(f"  {i:2d}.{mark} {subj[:38]:<38} from {who[:12]:<12} {ts}\r\n")
+            choice = (await self.session.read_line("\r\nPick message (number) or Q: ") or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(i_list):
+                    pm_id, subj, who, when, _, body = i_list[idx]
+                    ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                    await self.session.write("\r\n" + "═" * 64 + "\r\n")
+                    await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
+                    await self.session.write("─" * 64 + "\r\n")
+                    for line in (body or '').splitlines():
+                        await self.session.write(line[:78] + "\r\n")
+                    # Mark as read
+                    with _app().app_context():
+                        pm = PrivateMessage.query.get(pm_id)
+                        if pm and pm.read_at is None:
+                            pm.read_at = datetime.utcnow()
+                            db.session.commit()
+                    await self.session.read_line("\r\nPress Enter...")
+            except ValueError:
+                pass
+
+    # ------------------------------------------------------------------
+    # Inter-BBS Instant Messages (RFC 1312 / MSP)
+    # ------------------------------------------------------------------
+
+    async def list_imsg_inbox(self):
+        """Read / reply / delete InterBBS instant messages from the terminal."""
+        from anetbbs.models import db, InstantMessage
+        from anetbbs.msp.client import send_msp
+        from anetbbs.msp.protocol import MSP_DEFAULT_PORT
+        my_id = self.session.user['id']
+
+        with _app().app_context():
+            ims = (InstantMessage.query
+                   .filter_by(recipient_id=my_id)
+                   .order_by(InstantMessage.received_at.desc())
+                   .limit(50).all())
+            rows = [(m.id, m.sender_label or '?', m.sender_host or '?',
+                     m.received_at, m.is_read, m.body or '') for m in ims]
+
+        if not rows:
+            from .ansi_ui import banner as _bnr, FG as _F, RESET as _R
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(_bnr('Inter-BBS Instant Messages'))
+            await self.session.write(
+                f"  {_F['gry']}No InterBBS instant messages.{_R}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        while True:
+            from .ansi_ui import banner as _bnr2
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(_bnr2('Inter-BBS Instant Messages'))
+            for i, (_, who, host, when, was_read, body) in enumerate(rows, 1):
+                ts = when.strftime('%m-%d %H:%M') if when else '?'
+                mark = ' ' if was_read else '*'
+                preview = body.replace('\r', ' ').replace('\n', ' ')[:30]
+                await self.session.write(
+                    f"  {i:2d}.{mark} {who[:18]:<18} {ts}  {preview}\r\n")
+            choice = (await self.session.read_line(
+                "\r\nPick # to read, R# to reply, D# to delete, Q to quit: ")
+                      or '').strip().upper()
+            if not choice or choice == 'Q':
+                return
+            cmd, num = ('R', choice[1:]) if choice.startswith('R') else \
+                       ('D', choice[1:]) if choice.startswith('D') else \
+                       ('V', choice)
+            try:
+                idx = int(num) - 1
+                if not (0 <= idx < len(rows)):
+                    continue
+            except ValueError:
+                continue
+            mid, who, host, when, _, body = rows[idx]
+
+            if cmd == 'V':
+                await self.session.write("\r\n" + "═" * 64 + "\r\n")
+                ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                await self.session.write(f"  From: {who}\r\n  Host: {host}\r\n  Date: {ts}\r\n")
+                await self.session.write("─" * 64 + "\r\n")
+                for line in body.splitlines():
+                    await self.session.write(line[:78] + "\r\n")
+                with _app().app_context():
+                    im = InstantMessage.query.get(mid)
+                    if im and not im.is_read:
+                        im.is_read = True
+                        db.session.commit()
+                await self.session.read_line("\r\nPress Enter...")
+
+            elif cmd == 'D':
+                with _app().app_context():
+                    im = InstantMessage.query.get(mid)
+                    if im:
+                        db.session.delete(im)
+                        db.session.commit()
+                rows.pop(idx)
+                await self.session.write("\r\nDeleted.\r\n")
+                if not rows:
+                    return
+
+            elif cmd == 'R':
+                # Reply: who is "user@bbsname" or just "user"; strip any @ part.
+                target_user = who.split('@', 1)[0]
+                target_host = host
+                await self.session.write(
+                    f"\r\nReply to {target_user}@{target_host}\r\n"
+                    "Type your message (single line, blank to abort):\r\n")
+                msg = (await self.session.read_line("> ") or '').strip()
+                if not msg:
+                    continue
+                me = self.session.user
+                bbs_name = _app().config.get('BBS_NAME', '')
+                ok = send_msp(
+                    host=target_host,
+                    port=MSP_DEFAULT_PORT,
+                    recipient=target_user,
+                    message=msg,
+                    sender=me.get('username', 'sysop'),
+                    sender_real_name=me.get('display_name') or me.get('username', ''),
+                    sender_system=bbs_name,
+                )
+                await self.session.write(
+                    "\r\nSent.\r\n" if ok else "\r\nDelivery failed.\r\n")
+
+    async def send_imsg(self):
+        """Compose a fresh InterBBS IM from the terminal."""
+        from anetbbs.msp.client import send_msp
+        from anetbbs.msp.protocol import MSP_DEFAULT_PORT
+        from .ansi_ui import banner, FG, RESET
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Send Inter-BBS Instant Message'))
+        dest = (await self.session.read_line(
+            f"  {FG['cyan']}Destination (user@host):{RESET} ") or '').strip()
+        if '@' not in dest:
+            await self.session.write(
+                f"\r\n{FG['red']}Need user@host format.{RESET}\r\n")
+            return
+        target_user, target_host = dest.rsplit('@', 1)
+        msg = (await self.session.read_line(
+            f"  {FG['cyan']}Message:{RESET} ") or '').strip()
+        if not msg:
+            return
+        me = self.session.user
+        bbs_name = _app().config.get('BBS_NAME', '')
+        ok = send_msp(
+            host=target_host,
+            port=MSP_DEFAULT_PORT,
+            recipient=target_user,
+            message=msg,
+            sender=me.get('username', 'sysop'),
+            sender_real_name=me.get('display_name') or me.get('username', ''),
+            sender_system=bbs_name,
+        )
+        await self.session.write(
+            f"\r\n{'Delivered' if ok else 'Delivery failed'}.\r\n")
+        await self.session.read_line("\r\nPress Enter...")
+
+    # ------------------------------------------------------------------
+    # Echomail areas
+    # ------------------------------------------------------------------
+
+    async def list_echo_areas(self):
+        from anetbbs.models import EchoArea, EchomailNetwork, EchomailMessage
+        with _app().app_context():
+            areas = (EchoArea.query
+                     .join(EchomailNetwork)
+                     .order_by(EchomailNetwork.name, EchoArea.name)
+                     .all())
+            a_list = [(a.id, a.tag, a.name, a.network.name,
+                       EchomailMessage.query.filter_by(area_id=a.id).count()) for a in areas]
+
+        if not a_list:
+            await self.session.write("\r\nNo echomail areas configured.\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        # Page so the area list doesn't scroll past on a 24-row terminal —
+        # mirrors the paging used by compose_echomail (C).
+        PAGE = 18
+        while True:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Echomail Areas'))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Tag':<18} "
+                f"{'Name':<25} {'Net':<10} {'Msgs':>6}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
+            for i, (_, tag, name, net, n) in enumerate(a_list, 1):
+                await self.session.write(
+                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
+                    f"{FG['grn']}{tag[:18]:<18}{RESET} "
+                    f"{FG['wht']}{name[:25]:<25}{RESET} "
+                    f"{FG['mag']}{net[:10]:<10}{RESET} "
+                    f"{FG['cyan']}{n:6d}{RESET}\r\n")
+                if i % PAGE == 0 and i < len(a_list):
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}-- more (Enter, "
+                        f"Q=stop listing) --{RESET}") or '').strip().upper()
+                    if ans == 'Q':
+                        # User saw what they wanted — skip the rest of
+                        # the listing and go straight to the picker.
+                        await self.session.write('\r\n')
+                        break
+            await self.session.write('\r\n' + footer() + '\r\n')
+            choice = (await self.session.read_line(
+                _prompt('Pick area (number / Q): ')) or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(a_list):
+                    await self.read_echo_area(a_list[idx][0], a_list[idx][1])
+            except ValueError:
+                pass
+
+    async def read_echo_area(self, area_id, tag):
+        from anetbbs.models import EchomailMessage
+        with _app().app_context():
+            msgs = (EchomailMessage.query
+                    .filter_by(area_id=area_id)
+                    .order_by(EchomailMessage.created_at.desc())
+                    .limit(30).all())
+            m_list = [(m.id, m.subject, m.from_name, m.to_name,
+                       m.created_at, m.body) for m in msgs]
+
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+
+        if not m_list:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(tag))
+            await self.session.write(
+                f"  {FG['gry']}(no messages in this area yet){RESET}\r\n")
+            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.read_line(
+                f"{FG['cyan']}Press Enter...{RESET}")
+            return
+
+        LIST_PAGE = 18    # rows before --more-- on the index
+        BODY_PAGE = 18    # rows before --more-- inside a message body
+        while True:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(f'{tag} — latest 30'))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Subject':<38} "
+                f"{'From':<12} {'Date':<6}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
+            for i, (_, subj, who, _, when, _) in enumerate(m_list, 1):
+                ts = when.strftime('%m-%d') if when else '?'
+                await self.session.write(
+                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
+                    f"{FG['wht']}{(subj or '(no subject)')[:38]:<38}{RESET} "
+                    f"{FG['grn']}{(who or '?')[:12]:<12}{RESET} "
+                    f"{FG['cyan']}{ts:<6}{RESET}\r\n")
+                if i % LIST_PAGE == 0 and i < len(m_list):
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}-- more (Enter, "
+                        f"Q=stop listing) --{RESET}") or '').strip().upper()
+                    if ans == 'Q':
+                        await self.session.write('\r\n')
+                        break
+            await self.session.write('\r\n' + footer() + '\r\n')
+            choice = (await self.session.read_line(
+                _prompt('Pick message (number / Q): ')) or '').strip()
+            if choice.upper() == 'Q' or not choice:
+                return
+            try:
+                idx = int(choice) - 1
+            except ValueError:
+                continue
+            if not (0 <= idx < len(m_list)):
+                continue
+            _, subj, frm, to, when, body = m_list[idx]
+            ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(subj or '(no subject)'))
+            await self.session.write(
+                f"  {FG['cyan']}From:{RESET} {FG['wht']}{frm}{RESET}\r\n"
+                f"  {FG['cyan']}To:  {RESET} {FG['wht']}{to}{RESET}\r\n"
+                f"  {FG['cyan']}Date:{RESET} {FG['wht']}{ts}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
+            lines = (body or '').splitlines() or ['(empty body)']
+            quit_body = False
+            for n, ln in enumerate(lines, 1):
+                # Echomail bodies often contain CP437 (line drawing,
+                # block chars, embedded ANSI escapes) stored as
+                # latin-1 mojibake — each original byte 0xNN became
+                # codepoint U+00NN. encode('latin-1') round-trips
+                # those bytes so a CP437 terminal renders them right.
+                # Falls back to cp437 encoding (with replacement) if
+                # the line has genuine unicode above 0xFF.
+                # Skip the extra FG wrapper so the message's own
+                # ANSI colors come through unmolested.
+                try:
+                    raw = ln.encode('latin-1')
+                except UnicodeEncodeError:
+                    raw = ln.encode('cp437', errors='replace')
+                self.session.writer.write(b'  ' + raw + b'\r\n')
+                await self.session.writer.drain()
+                if n % BODY_PAGE == 0 and n < len(lines):
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}-- more (Enter, "
+                        f"Q=back to list) --{RESET}") or '').strip().upper()
+                    if ans == 'Q':
+                        quit_body = True
+                        break
+            await self.session.write('\r\n' + footer() + '\r\n')
+            if not quit_body:
+                await self.session.read_line(
+                    f"{FG['cyan']}Press Enter to return to list...{RESET}")
+
+    # ------------------------------------------------------------------
+    # File library (list-only for now)
+    # ------------------------------------------------------------------
+
+    async def list_files(self):
+        from anetbbs.models import FileUpload, User
+        with _app().app_context():
+            files = (FileUpload.query
+                     .order_by(FileUpload.uploaded_at.desc() if hasattr(FileUpload, 'uploaded_at')
+                               else FileUpload.id.desc())
+                     .limit(50).all())
+            f_list = []
+            for f in files:
+                u = User.query.get(getattr(f, 'user_id', None) or getattr(f, 'uploader_id', None) or 0)
+                f_list.append((
+                    getattr(f, 'filename', None) or getattr(f, 'original_filename', '?'),
+                    getattr(f, 'size', None) or getattr(f, 'file_size', 0),
+                    u.username if u else '?',
+                    getattr(f, 'description', '') or '',
+                ))
+
+        if not f_list:
+            await self.session.write("\r\nNo files in the library yet.\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        await self.session.write("\r\n=== File Library (latest 50) ===\r\n\r\n")
+        for i, (name, size, who, desc) in enumerate(f_list, 1):
+            sz = f"{size:>9,}" if isinstance(size, int) else f"{str(size):>9}"
+            await self.session.write(f"  {i:2d}. {name[:30]:<30} {sz}  by {who[:12]:<12}\r\n")
+            if desc:
+                await self.session.write(f"      {desc[:60]}\r\n")
+        await self.session.write("\r\n(Downloads via web at /files/ — telnet download next iteration.)\r\n")
+        await self.session.read_line("\r\nPress Enter...")
+
+    # ------------------------------------------------------------------
+    # User profile
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # RSS News Reader
+    # ------------------------------------------------------------------
+
+    async def show_rss(self):
+        """Browse RSS feeds + items the sysop has subscribed."""
+        from anetbbs.models import RssFeed, RssItem, RssReadStatus
+        from .ansi_ui import banner, footer, FG, RESET
+
+        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
+              else getattr(self.session.user, 'id', None)
+
+        while True:
+            with _app().app_context():
+                feeds = (RssFeed.query.filter_by(is_active=True)
+                         .order_by(RssFeed.sort_order, RssFeed.name).all())
+                # Snapshot the data we need so the rest of the loop can
+                # touch session.write/read_line without a stale session.
+                feed_rows = []
+                for f in feeds:
+                    total = RssItem.query.filter_by(feed_id=f.id).count()
+                    if uid:
+                        read = (RssReadStatus.query
+                                .join(RssItem,
+                                      RssReadStatus.item_id == RssItem.id)
+                                .filter(RssItem.feed_id == f.id,
+                                        RssReadStatus.user_id == uid).count())
+                    else:
+                        read = 0
+                    feed_rows.append((f.id, f.name, total, total - read))
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('RSS News Reader'))
+            if not feed_rows:
+                await self.session.write(
+                    f"  {FG['gry']}No RSS feeds configured. Ask the sysop "
+                    f"to add some at /admin/rss/.{RESET}\r\n")
+                await self.session.write('\r\n' + footer() + '\r\n')
+                await self.session.read_line("Press Enter... ")
+                return
+            await self.session.write(
+                f"  {FG['cyan']}#  Feed                                 "
+                f"Items  Unread{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
+            for i, (_, name, total, unread) in enumerate(feed_rows, 1):
+                unread_marker = (f"{FG['yel']}{unread:>4}{RESET}"
+                                  if unread else f"{FG['gry']}{'-':>4}{RESET}")
+                await self.session.write(
+                    f"  {FG['grn']}{i:<3}{RESET}{name[:35]:<37} "
+                    f"{total:>5}  {unread_marker}\r\n")
+            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write(
+                f"  {FG['cyan']}A{RESET}=All Feeds (river)   "
+                f"{FG['cyan']}#{RESET}=View feed   "
+                f"{FG['cyan']}Q{RESET}=Back\r\n")
+            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
+            if choice == 'Q' or choice == '':
+                return
+            if choice == 'A':
+                await self._rss_river()
+                continue
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(feed_rows):
+                    await self._rss_feed_items(feed_rows[idx][0],
+                                                feed_rows[idx][1])
+            except ValueError:
+                pass
+
+    async def _rss_feed_items(self, feed_id, feed_name):
+        """List items in one feed, paginated."""
+        from anetbbs.models import RssItem, RssReadStatus
+        from .ansi_ui import banner, footer, FG, RESET
+
+        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
+              else getattr(self.session.user, 'id', None)
+        page = 0
+        per_page = 15
+
+        while True:
+            with _app().app_context():
+                q = (RssItem.query.filter_by(feed_id=feed_id)
+                     .order_by(RssItem.published_at.desc().nullslast()))
+                total_count = q.count()
+                items = q.offset(page * per_page).limit(per_page).all()
+                rows = []
+                read_ids = set()
+                if uid and items:
+                    item_ids = [i.id for i in items]
+                    read_ids = set(
+                        r[0] for r in RssReadStatus.query
+                        .with_entities(RssReadStatus.item_id)
+                        .filter(RssReadStatus.user_id == uid,
+                                RssReadStatus.item_id.in_(item_ids)).all())
+                for i in items:
+                    rows.append((i.id, i.title or '(no title)',
+                                  i.published_at, i.id in read_ids))
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(f'{feed_name}'))
+            if not rows:
+                await self.session.write(
+                    f"  {FG['gry']}No items yet. The poller fetches every "
+                    f"30 minutes; if this is fresh, give it a moment.{RESET}\r\n")
+                await self.session.write('\r\n' + footer() + '\r\n')
+                await self.session.read_line("Press Enter... ")
+                return
+            await self.session.write(
+                f"  {FG['cyan']}#   Date    Title{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 70}{RESET}\r\n")
+            for i, (_, title, ts, was_read) in enumerate(rows, 1):
+                ts_str = ts.strftime('%m-%d') if ts else '  ?  '
+                title_color = FG['gry'] if was_read else FG['wht']
+                marker = ' ' if was_read else '*'
+                await self.session.write(
+                    f"  {FG['grn']}{i:<3}{RESET}{marker}{ts_str}  "
+                    f"{title_color}{title[:60]:<60}{RESET}\r\n")
+            total_pages = (total_count + per_page - 1) // per_page
+            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write(
+                f"  Page {page + 1}/{total_pages or 1}   "
+                f"{FG['cyan']}#{RESET}=read item   "
+                f"{FG['cyan']}N{RESET}=next page   "
+                f"{FG['cyan']}P{RESET}=prev   "
+                f"{FG['cyan']}Q{RESET}=back\r\n")
+            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
+            if choice == 'Q' or choice == '':
+                return
+            if choice == 'N':
+                if (page + 1) * per_page < total_count:
+                    page += 1
+                continue
+            if choice == 'P':
+                if page > 0:
+                    page -= 1
+                continue
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(rows):
+                    await self._rss_view_item(rows[idx][0])
+            except ValueError:
+                pass
+
+    async def _rss_view_item(self, item_id):
+        """Display a single RSS item full-screen and mark as read."""
+        from anetbbs.models import db, RssItem, RssReadStatus
+        from .ansi_ui import banner, footer, FG, RESET
+
+        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
+              else getattr(self.session.user, 'id', None)
+
+        with _app().app_context():
+            item = RssItem.query.get(item_id)
+            if not item:
+                return
+            title = item.title or '(no title)'
+            link = item.link or ''
+            author = item.author or ''
+            published = item.published_at.strftime('%Y-%m-%d %H:%M UTC') \
+                        if item.published_at else 'unknown'
+            summary = item.summary or '(no summary)'
+            feed_name = item.feed.name
+            # Mark as read
+            if uid and not RssReadStatus.query.filter_by(
+                    user_id=uid, item_id=item.id).first():
+                try:
+                    db.session.add(RssReadStatus(user_id=uid, item_id=item.id))
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner(feed_name[:40]))
+        await self.session.write(
+            f"  {FG['cyan']}{title[:74]}{RESET}\r\n"
+            f"  {FG['gry']}{'─' * 74}{RESET}\r\n"
+            f"  {FG['gry']}Date:{RESET} {published}\r\n")
+        if author:
+            await self.session.write(
+                f"  {FG['gry']}Author:{RESET} {author}\r\n")
+        if link:
+            await self.session.write(
+                f"  {FG['gry']}Link:{RESET} {link[:70]}\r\n")
+        await self.session.write(f"  {FG['gry']}{'─' * 74}{RESET}\r\n\r\n")
+        # Word-wrap the summary to ~76 cols for readability on 80-col
+        # terminals.
+        for line in self._wrap_text(summary, 76):
+            await self.session.write('  ' + line + '\r\n')
+        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.read_line('\r\nPress Enter to return... ')
+
+    @staticmethod
+    def _wrap_text(text, width):
+        """Simple word-wrap. Preserves paragraph breaks."""
+        out = []
+        for para in text.split('\n'):
+            if not para.strip():
+                out.append('')
+                continue
+            words = para.split()
+            line = ''
+            for w in words:
+                if line and len(line) + 1 + len(w) > width:
+                    out.append(line)
+                    line = w
+                else:
+                    line = (line + ' ' + w) if line else w
+            if line:
+                out.append(line)
+        return out
+
+    async def _rss_river(self):
+        """Combined river of newest items from all feeds, paginated."""
+        from anetbbs.models import RssItem, RssFeed, RssReadStatus
+        from .ansi_ui import banner, footer, FG, RESET
+
+        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
+              else getattr(self.session.user, 'id', None)
+        page = 0
+        per_page = 15
+
+        while True:
+            with _app().app_context():
+                q = (RssItem.query.join(RssFeed)
+                     .filter(RssFeed.is_active.is_(True))
+                     .order_by(RssItem.published_at.desc().nullslast()))
+                total_count = q.count()
+                items = q.offset(page * per_page).limit(per_page).all()
+                rows = []
+                read_ids = set()
+                if uid and items:
+                    item_ids = [i.id for i in items]
+                    read_ids = set(
+                        r[0] for r in RssReadStatus.query
+                        .with_entities(RssReadStatus.item_id)
+                        .filter(RssReadStatus.user_id == uid,
+                                RssReadStatus.item_id.in_(item_ids)).all())
+                for i in items:
+                    rows.append((i.id, i.title or '(no title)',
+                                  i.feed.name, i.published_at,
+                                  i.id in read_ids))
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('RSS — All Feeds'))
+            if not rows:
+                await self.session.write(
+                    f"  {FG['gry']}No items across any feed yet.{RESET}\r\n")
+                await self.session.write('\r\n' + footer() + '\r\n')
+                await self.session.read_line("Press Enter... ")
+                return
+            await self.session.write(
+                f"  {FG['cyan']}#   Date   Feed             Title{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+            for i, (_, title, feed_name, ts, was_read) in enumerate(rows, 1):
+                ts_str = ts.strftime('%m-%d') if ts else '  ?  '
+                title_color = FG['gry'] if was_read else FG['wht']
+                marker = ' ' if was_read else '*'
+                await self.session.write(
+                    f"  {FG['grn']}{i:<3}{RESET}{marker}{ts_str}  "
+                    f"{FG['cyan']}{feed_name[:14]:<16}{RESET}"
+                    f"{title_color}{title[:42]:<42}{RESET}\r\n")
+            total_pages = (total_count + per_page - 1) // per_page
+            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write(
+                f"  Page {page + 1}/{total_pages or 1}   "
+                f"{FG['cyan']}#{RESET}=read   {FG['cyan']}N{RESET}=next   "
+                f"{FG['cyan']}P{RESET}=prev   {FG['cyan']}Q{RESET}=back\r\n")
+            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
+            if choice == 'Q' or choice == '':
+                return
+            if choice == 'N':
+                if (page + 1) * per_page < total_count:
+                    page += 1
+                continue
+            if choice == 'P':
+                if page > 0:
+                    page -= 1
+                continue
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(rows):
+                    await self._rss_view_item(rows[idx][0])
+            except ValueError:
+                pass
+
+    async def show_profile(self):
+        from anetbbs.models import User
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            if not u:
+                await self.session.write("\r\nProfile not found.\r\n")
+                await self.session.read_line("\r\nPress Enter...")
+                return
+
+        from .ansi_ui import banner, footer, FG, RESET
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Your Profile'))
+        for label, value in [
+            ('Username', u.username),
+            ('Display name', u.display_name or '-'),
+            ('Email', u.email or '-'),
+            ('Joined', u.created_at.strftime('%Y-%m-%d') if u.created_at else '?'),
+            ('Last login', u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'never'),
+            ('Login count', str(u.login_count or 0)),
+            ('Admin', 'yes' if u.is_admin else 'no'),
+            ('Location', u.location or '-'),
+            ('Bio', (u.bio or '-')[:60]),
+        ]:
+            await self.session.write(
+                f"  {FG['cyan']}{label:<14}{RESET} "
+                f"{FG['gry']}:{RESET} "
+                f"{FG['grn']}{value}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write(
+            f"{FG['dim']}Profile editing via web at /profile/edit — "
+            f"telnet edit next iteration.{RESET}\r\n")
+        await self.session.read_line(
+            f"\r\n{FG['cyan']}Press Enter...{RESET}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Compose / Post / Reply / Edit
+# ---------------------------------------------------------------------------
+
+class _ComposeMixin:
+    """Shared helpers for multi-line input (subject + body) used by post/PM/echomail compose."""
+
+    async def _read_body(self, prompt='Enter message. End with a single "." on its own line, or /A to abort:'):
+        """Read a multi-line body. Lines starting with '/' are commands:
+              /S   save and return text
+              /A   abort and return None
+              .    (line of just a dot) save and return text
+        Returns the text on save, None on abort.
+        """
+        await self.session.write("\r\n" + prompt + "\r\n")
+        lines = []
+        while True:
+            line = await self.session.read_line('')
+            if line is None:
+                return None
+            stripped = line.strip()
+            if stripped in ('.',) or stripped.upper() == '/S':
+                return '\n'.join(lines)
+            if stripped.upper() == '/A':
+                return None
+            lines.append(line)
+
+
+# Re-open BBSMenuUI to append more methods; Python lets us assign new methods
+# to the class. (Or we could subclass; this is shorter.)
+
+async def _post_compose(self, board_id, board_name, parent_id=None):
+    from anetbbs.models import db, Post
+    if parent_id:
+        await self.session.write(f"\r\n=== Reply to thread in {board_name} ===\r\n")
+    else:
+        await self.session.write(f"\r\n=== New thread in {board_name} ===\r\n")
+    subject = (await self.session.read_line("Subject: ") or '').strip()
+    if not subject:
+        await self.session.write("Cancelled (empty subject).\r\n")
+        return
+    body = await _ComposeMixin._read_body(self)
+    if body is None:
+        await self.session.write("Aborted.\r\n")
+        return
+    with _app().app_context():
+        p = Post(board_id=board_id, author_id=self.session.user['id'],
+                 parent_id=parent_id, subject=subject[:200], content=body)
+        db.session.add(p)
+        db.session.commit()
+    await self.session.write(f"\r\nPosted (id={p.id}).\r\n")
+    await self.session.read_line("\r\nPress Enter...")
+BBSMenuUI._post_compose = _post_compose
+
+
+async def _send_pm(self):
+    from anetbbs.models import db, User, PrivateMessage
+    from .ansi_ui import banner, FG, RESET
+    await self.session.write('\x1b[2J\x1b[H')
+    await self.session.write(banner('Send Private Message'))
+    to_username = (await self.session.read_line(
+        f"  {FG['cyan']}To (username):{RESET} ") or '').strip()
+    if not to_username:
+        return
+    with _app().app_context():
+        recipient = User.query.filter_by(username=to_username).first()
+        if not recipient:
+            await self.session.write(f"\r\nNo such user '{to_username}'.\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+        recipient_id = recipient.id
+    subject = (await self.session.read_line("Subject: ") or '').strip()
+    if not subject:
+        return
+    body = await _ComposeMixin._read_body(self)
+    if body is None:
+        await self.session.write("Aborted.\r\n")
+        return
+    with _app().app_context():
+        pm = PrivateMessage(sender_id=self.session.user['id'], recipient_id=recipient_id,
+                            subject=subject[:200], body=body)
+        db.session.add(pm)
+        db.session.commit()
+    await self.session.write(f"\r\nSent to {to_username}.\r\n")
+    await self.session.read_line("Press Enter...")
+BBSMenuUI.send_pm = _send_pm
+
+
+async def _compose_echomail(self):
+    from anetbbs.models import db, EchoArea, EchomailMessage, EchomailNetwork
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    with _app().app_context():
+        areas = EchoArea.query.join(EchomailNetwork).order_by(EchomailNetwork.name, EchoArea.name).all()
+        a_list = [(a.id, a.tag, a.name, a.network.name, a.network.our_address or '1:1/1') for a in areas]
+    if not a_list:
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Compose Echomail'))
+        await self.session.write(
+            f"  {FG['gry']}(no echomail areas configured){RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.read_line(
+            f"{FG['cyan']}Press Enter...{RESET}")
+        return
+    await self.session.write('\x1b[2J\x1b[H')
+    await self.session.write(banner('Compose Echomail'))
+    # Page through long area lists so the user can see them all on a 24-row term.
+    PAGE = 18
+    for i, (_, tag, name, net, _) in enumerate(a_list, 1):
+        await self.session.write(
+            f"  {FG['yel']}{BOLD}{i:3d}{RESET}{FG['gry']}.{RESET} "
+            f"{FG['grn']}{tag[:18]:<18}{RESET} "
+            f"{FG['wht']}{name[:25]:<25}{RESET} "
+            f"{FG['mag']}({net}){RESET}\r\n")
+        if i % PAGE == 0 and i < len(a_list):
+            ans = (await self.session.read_line(
+                f"  {FG['cyan']}-- more (Enter, "
+                f"Q=stop listing) --{RESET}") or '').strip().upper()
+            if ans == 'Q':
+                await self.session.write('\r\n')
+                break
+    await self.session.write('\r\n' + footer() + '\r\n')
+    pick = (await self.session.read_line(
+        _prompt('Pick area (number / Q): ')) or '').strip()
+    if pick.upper() == 'Q':
+        return
+    try:
+        idx = int(pick) - 1
+        area = a_list[idx]
+    except (ValueError, IndexError):
+        return
+    to_name = (await self.session.read_line(
+        f"  {FG['cyan']}To (name, e.g. 'All'):{RESET} ") or 'All').strip()
+    subject = (await self.session.read_line(
+        f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+    if not subject:
+        return
+    body = await _ComposeMixin._read_body(self)
+    if body is None:
+        return
+    username = self.session.user['username']
+    with _app().app_context():
+        em = EchomailMessage(
+            area_id=area[0],
+            network_id=EchomailNetwork.query.filter_by(name=area[3]).first().id,
+            from_name=username[:100],
+            from_address=area[4],
+            to_name=to_name[:100],
+            subject=subject[:200],
+            body=body,
+            direction='outbound',
+        )
+        db.session.add(em)
+        db.session.commit()
+    await self.session.write(
+        f"\r\n  {FG['grn']}{BOLD}✓ Queued for next BinkP poll.{RESET}"
+        f"  {FG['gry']}(msg id={em.id}){RESET}\r\n")
+    await self.session.read_line(
+        f"\r\n{FG['cyan']}Press Enter...{RESET}")
+BBSMenuUI.compose_echomail = _compose_echomail
+
+
+async def _edit_profile(self):
+    from anetbbs.models import db, User
+    fields = [
+        ('display_name', 'Display name', 100),
+        ('email', 'Email', 120),
+        ('location', 'Location', 100),
+        ('website', 'Website', 255),
+        ('bio', 'Bio (one line)', 500),
+        ('signature', 'Signature (one line)', 500),
+    ]
+    with _app().app_context():
+        u = User.query.get(self.session.user['id'])
+        if not u:
+            return
+        await self.session.write("\r\n=== Edit Profile (blank = keep) ===\r\n\r\n")
+        for attr, label, maxlen in fields:
+            current = getattr(u, attr, '') or ''
+            new = await self.session.read_line(f"{label} [{current[:30]}]: ")
+            if new and new.strip():
+                setattr(u, attr, new.strip()[:maxlen])
+        db.session.commit()
+    await self.session.write("\r\nProfile saved.\r\n")
+    await self.session.read_line("Press Enter...")
+BBSMenuUI.edit_profile = _edit_profile
+
+
+async def _change_password(self):
+    from anetbbs.models import db, User
+    from werkzeug.security import check_password_hash, generate_password_hash
+    cur = await self.session.read_line("\r\nCurrent password: ")
+    new1 = await self.session.read_line("New password: ")
+    new2 = await self.session.read_line("Confirm new: ")
+    if not new1 or new1 != new2:
+        await self.session.write("\r\nPasswords don't match (or empty). Cancelled.\r\n")
+        await self.session.read_line("Press Enter...")
+        return
+    with _app().app_context():
+        u = User.query.get(self.session.user['id'])
+        if not u or not check_password_hash(u.password_hash, cur or ''):
+            await self.session.write("\r\nCurrent password incorrect.\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+        u.password_hash = generate_password_hash(new1)
+        db.session.commit()
+    await self.session.write("\r\nPassword changed.\r\n")
+    await self.session.read_line("Press Enter...")
+BBSMenuUI.change_password = _change_password
+
+
+# Override list_threads to add 'N' for new thread + 'R' from inside read_thread
+async def _list_threads_v2(self, board_id, board_name):
+    from anetbbs.models import Post, User
+    while True:
+        with _app().app_context():
+            threads = (Post.query
+                       .filter_by(board_id=board_id, parent_id=None)
+                       .order_by(Post.created_at.desc())
+                       .limit(50).all())
+            t_list = []
+            for t in threads:
+                author = User.query.get(t.author_id)
+                t_list.append((t.id, t.subject, author.username if author else '?',
+                               t.created_at, t.replies.count()))
+
+        await self.session.write(f"\r\n=== {board_name} (latest 50) ===\r\n\r\n")
+        if not t_list:
+            await self.session.write("  (no threads yet)\r\n")
+        for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
+            ts = when.strftime('%m-%d %H:%M') if when else '?'
+            line = f"  {i:2d}. [{n_replies:2d}] {subj[:35]:<35} by {who[:12]:<12} {ts}"
+            await self.session.write(line + "\r\n")
+        choice = (await self.session.read_line("\r\nNumber to read, N=new thread, Q=back: ") or '').strip()
+        u = choice.upper()
+        if u == 'Q' or not choice:
+            return
+        if u == 'N':
+            await self._post_compose(board_id, board_name)
+            continue
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(t_list):
+                await self.read_thread_v2(t_list[idx][0], board_id, board_name)
+        except ValueError:
+            pass
+BBSMenuUI.list_threads = _list_threads_v2
+
+
+async def _read_thread_v2(self, post_id, board_id, board_name):
+    from anetbbs.models import Post, User
+    with _app().app_context():
+        root = Post.query.get(post_id)
+        if not root:
+            return
+        posts = [root] + list(root.replies.order_by(Post.created_at).all())
+        rendered = []
+        for p in posts:
+            author = User.query.get(p.author_id)
+            rendered.append({
+                'subject': p.subject, 'author': author.username if author else '?',
+                'when': p.created_at, 'content': p.content,
+            })
+    await self.session.write("\r\n" + "═" * 64 + "\r\n")
+    for i, p in enumerate(rendered):
+        ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
+        tag = '[OP]' if i == 0 else f'[Reply {i}]'
+        await self.session.write(f"\r\n{tag} {p['subject']}\r\n")
+        await self.session.write(f"From: {p['author']}    Date: {ts}\r\n")
+        await self.session.write("─" * 64 + "\r\n")
+        for line in (p['content'] or '').splitlines():
+            await self.session.write(line[:78] + "\r\n")
+    choice = (await self.session.read_line("\r\nR=reply, Enter=back: ") or '').strip().upper()
+    if choice == 'R':
+        await self._post_compose(board_id, board_name, parent_id=post_id)
+BBSMenuUI.read_thread_v2 = _read_thread_v2
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Sysop tools (admin users only)
+# ---------------------------------------------------------------------------
+
+async def _sysop_menu(self):
+    """Top-level sysop menu — only shown to is_admin users."""
+    if not self.session.user.get('is_admin'):
+        await self.session.write("\r\nSysop access required.\r\n")
+        await self.session.read_line("Press Enter...")
+        return
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    while True:
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Sysop Tools'))
+        for hk, lbl in (('U', 'Manage users'),
+                        ('B', 'Manage boards'),
+                        ('S', 'Server status'),
+                        ('Q', 'Return')):
+            await self.session.write(
+                f"  {FG['yel']}{BOLD}[{hk}]{RESET} "
+                f"{FG['grn']}{lbl}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        choice = await self.session.read_key(_prompt('Choice: '))
+        choice = (choice or '').upper()
+        if choice == 'Q' or not choice:
+            return
+        elif choice == 'U':
+            await self.sysop_users()
+        elif choice == 'B':
+            await self.sysop_boards()
+        elif choice == 'S':
+            await self.sysop_status()
+BBSMenuUI.sysop_menu = _sysop_menu
+
+
+async def _sysop_users(self):
+    from anetbbs.models import User
+    while True:
+        with _app().app_context():
+            users = User.query.order_by(User.id).all()
+            u_list = [(u.id, u.username, u.email or '-', u.is_active, u.is_admin,
+                       u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never',
+                       u.login_count or 0) for u in users]
+        await self.session.write("\r\n=== Users ===\r\n\r\n")
+        await self.session.write(f"  {'ID':<4}{'Username':<18}{'Active':<8}{'Admin':<8}{'Last login':<14}Logins\r\n")
+        for uid, name, _, active, admin, lastl, n in u_list:
+            await self.session.write(f"  {uid:<4}{name[:18]:<18}{'yes' if active else 'no':<8}"
+                                     f"{'yes' if admin else 'no':<8}{lastl:<14}{n}\r\n")
+        choice = (await self.session.read_line("\r\nUser ID to edit (or Q): ") or '').strip()
+        if choice.upper() == 'Q' or not choice:
+            return
+        try:
+            uid = int(choice)
+        except ValueError:
+            continue
+        await self._sysop_edit_user(uid)
+BBSMenuUI.sysop_users = _sysop_users
+
+
+async def _sysop_edit_user(self, uid):
+    from anetbbs.models import db, User
+    from werkzeug.security import generate_password_hash
+    with _app().app_context():
+        u = User.query.get(uid)
+        if not u:
+            await self.session.write("\r\nNo such user.\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+        info = (u.username, u.email, u.is_active, u.is_admin)
+    while True:
+        await self.session.write(f"\r\nEditing #{uid} {info[0]} ({info[1]}) "
+                                 f"active={info[2]} admin={info[3]}\r\n"
+                                 "  T. Toggle active\r\n"
+                                 "  A. Toggle admin\r\n"
+                                 "  P. Reset password\r\n"
+                                 "  D. Delete user (PERMANENT)\r\n"
+                                 "  Q. Back\r\n")
+        choice = (await self.session.read_line("Choice: ") or '').strip().upper()
+        if choice == 'Q' or not choice:
+            return
+        with _app().app_context():
+            u = User.query.get(uid)
+            if not u:
+                return
+            if choice == 'T':
+                u.is_active = not u.is_active
+                info = (u.username, u.email, u.is_active, u.is_admin)
+            elif choice == 'A':
+                u.is_admin = not u.is_admin
+                info = (u.username, u.email, u.is_active, u.is_admin)
+            elif choice == 'P':
+                new = await self.session.read_line("New password: ")
+                if new:
+                    u.password_hash = generate_password_hash(new)
+                    await self.session.write("Password updated.\r\n")
+            elif choice == 'D':
+                confirm = await self.session.read_line("Type DELETE to confirm: ")
+                if confirm == 'DELETE':
+                    db.session.delete(u)
+                    db.session.commit()
+                    await self.session.write("Deleted.\r\n")
+                    await self.session.read_line("Press Enter...")
+                    return
+            db.session.commit()
+BBSMenuUI._sysop_edit_user = _sysop_edit_user
+
+
+async def _sysop_boards(self):
+    from anetbbs.models import db, Board
+    while True:
+        with _app().app_context():
+            boards = Board.query.order_by(Board.order, Board.name).all()
+            b_list = [(b.id, b.name, b.description or '', b.is_active, b.posts.count()) for b in boards]
+        await self.session.write("\r\n=== Boards ===\r\n\r\n")
+        for bid, name, desc, active, count in b_list:
+            mark = ' ' if active else 'X'
+            await self.session.write(f"  [{mark}] {bid:<3} {name:<25} ({count:4d} threads)\r\n")
+            if desc:
+                await self.session.write(f"          {desc[:60]}\r\n")
+        await self.session.write("\r\n  N. New board\r\n  Q. Back\r\n  Or board ID to edit\r\n")
+        choice = (await self.session.read_line("Choice: ") or '').strip()
+        u = choice.upper()
+        if u == 'Q' or not choice:
+            return
+        if u == 'N':
+            name = (await self.session.read_line("Board name: ") or '').strip()
+            if not name:
+                continue
+            desc = (await self.session.read_line("Description: ") or '').strip()
+            with _app().app_context():
+                db.session.add(Board(name=name[:100], description=desc, is_active=True))
+                db.session.commit()
+            continue
+        try:
+            bid = int(choice)
+        except ValueError:
+            continue
+        with _app().app_context():
+            b = Board.query.get(bid)
+            if not b:
+                continue
+            await self.session.write("\r\nT=toggle active, R=rename, X=delete (with confirm), Q=back\r\n")
+            sub = (await self.session.read_line("Choice: ") or '').strip().upper()
+            if sub == 'T':
+                b.is_active = not b.is_active
+            elif sub == 'R':
+                new = (await self.session.read_line("New name: ") or '').strip()
+                if new:
+                    b.name = new[:100]
+            elif sub == 'X':
+                confirm = await self.session.read_line("Type DELETE to confirm: ")
+                if confirm == 'DELETE':
+                    db.session.delete(b)
+            db.session.commit()
+BBSMenuUI.sysop_boards = _sysop_boards
+
+
+async def _sysop_status(self):
+    """Quick server-status snapshot for sysops (counts + recent activity)."""
+    from anetbbs.models import (User, UserSession, Post, Message as Bulletin,
+                                PrivateMessage, EchomailMessage)
+    with _app().app_context():
+        five = datetime.utcnow() - timedelta(minutes=5)
+        stats = {
+            'users': User.query.count(),
+            'active30d': User.query.filter(User.last_login >= datetime.utcnow() - timedelta(days=30)).count(),
+            'online': UserSession.query.filter(UserSession.last_seen >= five).count(),
+            'posts': Post.query.count(),
+            'pms': PrivateMessage.query.count(),
+            'bulletins': Bulletin.query.count(),
+            'echo_in': EchomailMessage.query.filter_by(direction='inbound').count(),
+            'echo_out_q': EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count(),
+            'echo_out_sent': EchomailMessage.query.filter(EchomailMessage.sent_at != None).count(),
+        }
+    await self.session.write("\r\n=== Server Status ===\r\n\r\n")
+    for k, v in stats.items():
+        await self.session.write(f"  {k:<14} {v}\r\n")
+    await self.session.read_line("\r\nPress Enter...")
+BBSMenuUI.sysop_status = _sysop_status
+
+
+# ---------------------------------------------------------------------------
+# Re-wire the main BBS menu to add Send PM, Compose Echomail, Edit profile,
+# Change password, and Sysop menu (admin-gated).
+# ---------------------------------------------------------------------------
+
+async def _show_main_v2(self):
+    while True:
+        is_sysop = self.session.user.get('is_admin')
+        sysop_line = "║  S. Sysop tools                          ║\r\n" if is_sysop else ""
+        menu = (
+            "\r\n"
+            "╔══════════════════════════════════════════╗\r\n"
+            "║              Main BBS Menu               ║\r\n"
+            "╠══════════════════════════════════════════╣\r\n"
+            "║  M. Message Boards                       ║\r\n"
+            "║  N. New PM (send to user)                ║\r\n"
+            "║  P. PM Inbox                             ║\r\n"
+            "║  B. Bulletins                            ║\r\n"
+            "║  E. Echomail (read)                      ║\r\n"
+            "║  C. Compose Echomail                     ║\r\n"
+            "║  F. File Library                         ║\r\n"
+            "║  U. Who's Online                         ║\r\n"
+            "║  Y. Your Profile                         ║\r\n"
+            "║  X. Edit Profile                         ║\r\n"
+            "║  W. Change Password                      ║\r\n"
+            f"{sysop_line}"
+            "║  Q. Return                               ║\r\n"
+            "╚══════════════════════════════════════════╝\r\n"
+            "\r\n"
+            "Choice: "
+        )
+        choice = (await self.session.read_line(menu) or '').strip().upper()
+        if choice == 'Q':
+            return
+        elif choice == 'M':
+            await self.list_boards()
+        elif choice == 'B':
+            await self.list_bulletins()
+        elif choice == 'P':
+            await self.list_pm_inbox()
+        elif choice == 'N':
+            await self.send_pm()
+        elif choice == 'E':
+            await self.list_echo_areas()
+        elif choice == 'C':
+            await self.compose_echomail()
+        elif choice == 'F':
+            await self.list_files()
+        elif choice == 'U':
+            await self.show_online()
+        elif choice == 'Y':
+            await self.show_profile()
+        elif choice == 'X':
+            await self.edit_profile()
+        elif choice == 'W':
+            await self.change_password()
+        elif choice == 'S' and is_sysop:
+            await self.sysop_menu()
+BBSMenuUI.show_main = _show_main_v2

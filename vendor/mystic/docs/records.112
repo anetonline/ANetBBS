@@ -1,0 +1,1118 @@
+// =========================================================================
+// Mystic BBS Software                Copyright (C) 1997-2022 By James Coyle
+// =========================================================================
+// File    | RECORDS.PAS
+// Desc    | This file holds the data file records for all data files used
+//           within Mystic BBS software.  Mystic BBS is compiled with the
+//           latest version of Free Pascal for all platforms.
+// =========================================================================
+
+{$PACKRECORDS 1}
+
+Const
+  mysSoftwareID    = 'Mystic BBS';
+  mysCopyYear      = '1997-2022';
+  mysVersion       = '1.12 A48';
+  mysDataChanged   = '1.12 A47';
+  mysServerStatVer = 0;
+
+  {$IFDEF 32BIT}
+    OSBIT = '/32';
+  {$ENDIF}
+
+  {$IFDEF 64BIT}
+    OSBIT = '/64';
+  {$ENDIF}
+
+  {$IFDEF WINDOWS}
+    PathChar = '\';
+    LineTerm = #13#10;
+    OSType   = 0;
+    OSID     = 'Windows';
+  {$ENDIF}
+
+  {$IFDEF LINUX}
+    PathChar = '/';
+    LineTerm = #10;
+    OSType   = 1;
+    {$IFDEF CPUARM}
+      OSID  = 'Raspberry Pi';
+    {$ELSE}
+      OSID = 'Linux';
+    {$ENDIF}
+  {$ENDIF}
+
+  {$IFDEF DARWIN}
+    PathChar = '/';
+    LineTerm = #10;
+    OSID     = 'macOS';
+    OSType   = 2;
+  {$ENDIF}
+
+  // OSTYPE 3 = RESERVED FOR "ALL" OS TYPES IN CONFIGURATION
+
+  {$IFDEF OS2}
+    PathChar = '\';
+    LineTerm = #13#10;
+    OSID     = 'OS2';
+    OSType   = 4;
+  {$ENDIF}
+
+  mysCopyNotice  = 'Copyright (C) ' + mysCopyYear + ' By James Coyle';
+  mysOriginLine  = '--- ' + mysSoftwareID + ' v' + mysVersion + ' ' + {$I %DATE%} + ' (' + OSID + OSBIT + ')';
+  mysOriginNNTP  = '--- ' + mysSoftwareID + '/NNTP v' + mysVersion + ' ' + {$I %DATE%} + ' (' + OSID + OSBIT + ')';
+  mysOriginQWK   = '--- ' + mysSoftwareID + '/QWK v' + mysVersion + ' ' + {$I %DATE%} + ' (' + OSID + OSBIT + ')';
+  mysOriginQGate = '--- ' + mysSoftwareID + '/QWK Gate v' + mysVersion + ' ' + {$I %DATE%} + ' (' + OSID + OSBIT + ')';
+
+  mysMaxThemeText    = 554;
+  mysTemplatePrompts = 30;
+  mysMaxScreenInfo   = 10;
+  mysMaxAcsSize      = 30;                                      // Max ACS string size
+  mysMaxPathSize     = 80;
+  mysMaxMsgLines     = 1000;                                    // Max message base lines
+  mysMaxInputHistory = 5;                                       // Input history stack size
+  mysMaxFileDescLen  = 50;                                      // file description length per line
+  mysMaxBatchQueue   = 50;                                      // max files per queue
+  mysMaxVoteQuestion = 20;                                      // Max number of voting questions
+  mysMaxMenuNameLen  = 20;                                      // menu name size
+  mysMaxMenuItems    = 99;                                      // Maximum menu items per menu
+  mysMaxMenuCmds     = 25;                                      // Max menu commands per item
+  mysMaxMenuInput    = 12;
+  mysMaxMenuStack    = 8;
+  mysMaxTwitFilter   = 50;
+  mysMaxCallInfo     = 99;
+  mysMaxNetAddress   = 50;
+  mysPassLen         = 25;
+  mysMaxFileNameLen  = 70;
+  mysDateFormat      = 'DD NNN YYYY';
+
+  fn_SemFileEchoOut = 'echomail.out';
+  fn_SemFileEchoIn  = 'echomail.in';
+  fn_SemFileNews    = 'newsmail.out';
+  fn_SemFileNet     = 'netmail.out';
+  fn_SemFileQwk     = 'qwkmail.out';
+  fn_SemFileBone    = 'filebone.out';
+  fn_tplMsgEdit     = 'msg_editor';
+  fn_tplTextEdit    = 'ansitext';
+
+Type
+  SmallWord = System.Word;
+  Integer   = SmallInt;
+  Word      = SmallWord;
+
+  RecMessageText = Array[1..mysMaxMsgLines] of String[132];
+  RecFileText    = Array[1..100] of String[200];
+  AccessFlagType = Set of 1..26;
+
+  RecLogRoller = Record
+    Level    : Byte;                   // 1=Normal, 2=Verbose, 3=DEBUG
+    RollType : Byte;                   // 0=None, 1=File Size, 2=Day
+    Files    : Word;                   // # Files to keep
+    Size     : Cardinal;               // File size to trigger roll (KB)
+    Cached   : Boolean;                // Cached log writing?
+    DateFmt  : String[25];             //
+  End;
+
+  RecEchoMailAddr = Record
+    Zone,
+    Net,
+    Node,
+    Point : Word;
+  End;
+
+  RecEchoMailExport = LongInt;
+
+  RecEchoMailGroup = Record
+    UID  : SmallInt;
+    Desc : String[25];
+  End;
+
+Const                                            // Echomail Node Flags
+  emUplink = $01;
+
+Type
+  RecEchoMailNode = Record
+    Index       : LongInt;
+    Description : String[35];
+    Active      : Boolean;
+    Address     : RecEchoMailAddr;
+    Domain      : String[8];
+    ArcType     : String[4];
+    MailType    : Byte;                               // 0=BINKP,1=FTP,2=Dir
+    BinkHost    : String[60];
+    FtpPassive  : Boolean;
+    ProtType    : Byte;
+    BinkTimeout : Word;
+    BinkBlock   : Word;
+    BinkMD5     : Byte;
+    FtpOutHost  : String[60];
+    UNUSED      : Word;
+    FtpOutLogin : String[20];
+    FtpOutPass  : String[20];
+    FtpInDir    : String[60];
+    FtpOutDir   : String[60];
+    MaxPKTSize  : Word;
+    LastRecv    : LongInt;   // Unix date stamp
+    LastSent    : LongInt;   // Unix date stamp
+    LastReset   : LongInt;
+    InFiles     : Cardinal;
+    InSize      : Cardinal;
+    OutFiles    : Cardinal;
+    OutSize     : Cardinal;
+    BinkPass    : String[20];
+    RouteInfo   : String[128];
+    AreaFixPass : String[20];
+    DirInDir    : String[60];
+    DirOutDir   : String[60];
+    LPKTDay     : Byte;
+    LPKTPtr     : Byte;
+    BinkHideAKA : Boolean;
+    MaxARCSize  : Word;
+    PKTPass     : String[8];
+    UseFileBox  : Byte;               //0=No, 1=Hold, 2=Any
+    OutFileBox  : String[60];
+    TICPass     : String[20];
+    SecLevel    : Byte;
+    BinkIPType  : Byte;              //0=IPV4 1=IPV6
+    Groups      : Array[1..15] of Word;
+    AFlags      : AccessFlagType;
+    SysopName   : String[30];
+    UseSSL      : Byte;              //0=No, 1=Direct SSL, 2=StartTLS, 3=StarTLS/Forced
+    CryptKey    : String[20];
+    FileBoxHold : LongInt;
+    CrashErrors : Word;
+    Flags       : Byte;
+    BinkPEscape : Byte;
+    BinkULLimit : Cardinal;
+    BinkDLLimit : Cardinal;
+    Res         : Array[1..17] of Byte;
+  End;
+
+  RecQwkNetwork = Record
+    Index       : LongInt;
+    Description : String[30];
+    MemberType  : Byte;                                    // 0=HUB, 1=Node
+    PacketID    : String[20];
+    UseQWKE     : Boolean;
+    UsePassive  : Boolean;
+    HostName    : String[60];
+    Login       : String[20];
+    Password    : String[20];
+    ArcType     : String[4];
+    Active      : Boolean;
+    Res         : Array[1..74] of Byte;
+  End;
+
+  RecSauceInfo = Record          // Used internally by Mystic
+    Title     : String[35];
+    Author    : String[20];
+    Group     : String[20];
+    FontName  : String[22];
+    FileType  : Byte;
+    DataType  : Byte;
+    ColorMode : Byte;       // 0 = Unknown, 1 = Blink, 2 = iCE
+    Columns   : Word;
+    Lines     : Word;
+  End;
+
+  RecUserOptionalField = Record
+    Ask    : Boolean;
+    Desc   : String[12];
+    iType  : Byte;
+    iField : Byte;
+    iMax   : Byte;
+  End;
+
+  RecConfig = Record                                            // MYSTIC.DAT
+ // INTERNALS
+    DataChanged     : String[8];                                // Version of last data change
+    SystemCalls     : LongInt;                                  // system caller number
+    RESERVED        : LongInt;                                  // permanent user # position
+ // SYSTEM PATHS
+    SystemPath      : String[mysMaxPathSize];                   // Root mystic path
+    DataPath        : String[mysMaxPathSize];
+    LogsPath        : String[mysMaxPathSize];
+    MsgsPath        : String[mysMaxPathSize];
+    // Do not change anything before this
+    ThemePath       : String[mysMaxPathSize];
+    Python2Lib      : String[mysMaxPathSize];
+    Python3Lib      : String[mysMaxPathSize];
+    SemaPath        : String[mysMaxPathSize];
+    InboundPath     : String[mysMaxPathSize];
+    UnsecurePath    : String[mysMaxPathSize];
+    OutboundPath    : String[mysMaxPathSize];
+    AttachPath      : String[mysMaxPathSize];
+ // GENERAL SETTINGS
+    BBSName         : String[30];
+    BBSLocation     : String[30];
+    SysopName       : String[30];
+    SysopPW         : String[25];
+    SystemPW        : String[25];
+    FeedbackTo      : String[30];
+    Inactivity      : Word;                                     // Inactivity seconds (0=disabled)
+    DefStartMenu    : String[20];                               // Default start menu
+    DefThemeFile    : String[20];
+    DefTermMode     : Byte;                                     // 0=ask 1=detect 2=detect/ask 3=ansi 4=ascii
+    DefScreenSize   : Byte;
+    DefScreenCols   : Byte;
+    ChatStart       : Byte;                                     // Chat hour start
+    ChatEnd         : Byte;                                     // Chat hour end
+    ChatFeedback    : Boolean;                                  // E-mail sysop if page isn't answered
+    ChatLogging     : Boolean;                                  // Record SysOp chat to CHAT.LOG?
+    AcsSysop        : String[mysMaxAcsSize];
+    LocalCodePage   : Byte;
+    CfgTheme        : Byte;
+    QwkNetMenu      : String[20];
+ // LOGIN/MATRIX
+    LoginTime       : Byte;
+    LoginAttempts   : Byte;
+    PWAttempts      : Byte;
+    PWChange        : Word;
+    PWInquiry       : Boolean;
+    UseMatrix       : Boolean;
+    MatrixMenu      : String[20];
+    MatrixPW        : String[25];
+    MatrixAcs       : String[mysMaxAcsSize];
+    AcsInvisLogin   : String[mysMaxAcsSize];
+    AcsSeeInvis     : String[mysMaxAcsSize];
+    AcsMultiLogin   : String[mysMaxAcsSize];
+    ThemeOnStart    : Boolean;
+    MatrixLogin     : Boolean;
+    StartCodePage   : Byte;
+    AutoWhiteIP     : Byte;                      // 0=Per User, 1=All
+ // CONSOLE SETTINGS
+    SysopMacro      : Array[1..8] of String[60];                // Sysop Macros f1-f8
+    UseStatusBar    : Boolean;
+    StatusColor1    : Byte;
+    StatusColor2    : Byte;
+    StatusColor3    : Byte;
+ // NEW USER SETTINGS 1
+    AllowNewUsers   : Boolean;
+    NewUserSec      : SmallInt;
+    NewUserPW       : String[25];
+    NewUserEMail    : Boolean;
+    StartMGroup     : Word;
+    StartFGroup     : Word;
+    UseUSAPhone     : Boolean;
+    UserNameFormat  : Byte;                                     // 0=typed 1=upper 2=lower 3=proper
+    DefMsgPointers  : Byte;                                     // 0=First message, 1=EOM, 2=Last X, 3=Days Ago
+    DefPointerData  : Word;                                     // Last messages or days ago
+ // NEW USER SETTINGS 2
+    UserDateType    : Byte;                                     // 1=MM/DD/YY 2=DD/MM/YY 3=YY/DD/MM 4=Ask
+    UserEditorType  : Byte;                                     // 0=Line 1=Full 2=Ask
+    UserHotKeys     : Byte;                                     // 0=no 1=yes 2=ask
+    UserFullChat    : Byte;                                     // 0=no 1=yes 2=ask
+    UserFileList    : Byte;                                     // 0=Normal 1=Lightbar 2=Ask
+    UserReadType    : Byte;                                     // 0=normal 1=ansi 2=ask
+    UserMailIndex   : Byte;                                     // 0=normal 1=ansi 2=ask
+    UserReadIndex   : Byte;                                     // 0=normal 1=ansi 2=ask
+    UserQuoteWin    : Byte;                                     // 0=line 1=window 2=ask
+    UserProtocol    : Byte;                                     // 0=no 1=yes 2=ask
+    AskTheme        : Boolean;
+    AskRealName     : Boolean;
+    AskAlias        : Boolean;
+    AskStreet       : Boolean;
+    AskCityState    : Boolean;
+    AskZipCode      : Boolean;
+    AskHomePhone    : Boolean;
+    AskDataPhone    : Boolean;
+    AskBirthdate    : Boolean;
+    AskGender       : Boolean;
+    AskEmail        : Boolean;
+    AskUserNote     : Boolean;
+    AskScreenSize   : Boolean;
+    AskScreenCols   : Boolean;
+    AskCodePage     : Byte;
+    UserTagLines    : Byte;                                     // 0=on 1=off 2=global 3=personal
+ // NEW USER OPTIONAL
+    OptionalField   : Array[1..10] of RecUserOptionalField;
+ // MESSAGE BASE SETTINGS
+    MCompress       : Boolean;
+    MColumns        : Byte;
+    MShowHeader     : Boolean;                                  // re-show msg header after pause
+    MShowBases      : Boolean;
+    MaxAutoSig      : Byte;
+    Origin          : String[50];                               // Default origin line
+    NetCrash        : Boolean;
+    NetHold         : Boolean;
+    NetKillSent     : Boolean;
+    NetDirect       : Boolean;
+    ColorQuote      : Byte;
+    ColorText       : Byte;
+    ColorTear       : Byte;
+    ColorOrigin     : Byte;
+    ColorKludge     : Byte;
+    AcsExtReply     : String[mysMaxAcsSize];
+    AcsFileAttach   : String[mysMaxAcsSize];
+    AcsNodeLookup   : String[mysMaxAcsSize];
+    AcsMsgUpload    : String[mysMaxAcsSize];
+    ForceNodeList   : Boolean;
+    AddANSITag      : Byte;                      // 0=No, 1=Yes, 2=Networked
+    AddREPrefix     : Boolean;
+    CreateSemaphore : Byte;                      // 0 = on logoff, 1 = on post
+    AskMsgPost      : Byte;                      // 0=Yes, 1=No
+ // ECHOMAIL NETWORKS
+    NetAddress      : Array[1..mysMaxNetAddress] of RecEchoMailAddr;          // echomail addresses
+    NetPrimary      : Array[1..mysMaxNetAddress] of Boolean;
+    NetDomain       : Array[1..mysMaxNetAddress] of String[8];                // echomail domains (5D)
+    NetDesc         : Array[1..mysMaxNetAddress] of String[25];               // echomail network description
+ // LOGGING OPTIONS
+    LogMIS          : RecLogRoller;
+    LogNode         : RecLogRoller;
+    LogPOLL         : RecLogRoller;
+    LogQWK          : RecLogRoller;
+ // OFFLINE MAIL
+    QwkMaxBase      : Word;
+    QwkMaxPacket    : Word;
+    QwkArchive      : String[4];
+    QwkBBSID        : String[8];
+    QwkWelcome      : String[mysMaxPathSize];
+    QwkNews         : String[mysMaxPathSize];
+    QwkGoodbye      : String[mysMaxPathSize];
+    QwkPath         : String[mysMaxPathSize];
+    QwkRepPath      : String[mysMaxPathSize];
+ // FILE BASE SETTINGS
+    FCompress       : Boolean;
+    FColumns        : Byte;
+    FShowHeader     : Boolean;
+    FShowBases      : Boolean;
+    FDupeScan       : Byte;                                     // 0=no 1=yes 2=global
+    UploadBase      : Word;                                     // Default upload file base
+    ImportDIZ       : Boolean;
+    FreeUL          : LongInt;
+    FreeCDROM       : LongInt;
+    MaxFileDesc     : Byte;
+    MaxDescCols     : Byte;
+    FCommentLen     : Byte;
+    FProtocol       : Char;
+    TestUploads     : Boolean;
+    TestPassLevel   : Byte;
+    TestCmdLine     : String[mysMaxPathSize];
+    AcsValidate     : String[mysMaxAcsSize];
+    AcsSeeUnvalid   : String[mysMaxAcsSize];
+    AcsDLUnvalid    : String[mysMaxAcsSize];
+    AcsSeeFailed    : String[mysMaxAcsSize];
+    AcsDLFailed     : String[mysMaxAcsSize];
+    AcsSeeOffline   : String[mysMaxAcsSize];
+    DownloadFTP     : Boolean;
+    DownloadWEB     : Boolean;
+ // INTERNET SERVER SETTINGS
+    INetDomain      : String[60];
+    INetTNHidden    : Boolean;
+    INetMaxNodes    : Byte;
+    INetMaxPoll     : Byte;
+    SMTPEnabled     : Boolean;
+    SMTPSSL         : Byte;
+    SMTPHost        : String[60];
+    SMTPLogin       : String[60];
+    SMTPPass        : String[128];
+    SMTPAuth        : Byte;
+    SMTPIPType      : Byte;
+    SMTPPWReset     : Boolean;
+ // PASSWORD POLICY
+    PassMinLen      : Byte;
+    PassMinCap      : Byte;
+    PassMinNum      : Byte;
+    PassMinSym      : Byte;
+    PassStorage     : Byte;
+    PassIterations  : LongInt;
+ // UNSORTED/OTHER
+    NoTimePerDay    : Boolean;
+    INetMaxPollUL   : LongInt;
+    INetMaxPollDL   : LongInt;
+    UNUSED          : Array[1..2427] of Char;
+  End;
+
+Const                                            // User Flags
+  UserLockedOut  = $00000001;
+  UserNoRatio    = $00000002;
+  UserDeleted    = $00000004;
+  UserNoKill     = $00000008;
+  UserNoLastCall = $00000010;
+  UserNoPWChange = $00000020;
+  UserNoHistory  = $00000040;
+  UserNoTimeout  = $00000080;
+  UserQWKNetwork = $00000100;
+//  UserNoDelete   = $00000200;
+  UserForcePW    = $00000400;
+  UserWhiteIP    = $00000800;
+  UserInvisible  = $00001000;
+
+Type
+  UserPasswordRecord = Array[1..101] of Byte;
+
+  RecUser = Record                                         // USERS.DAT
+    PermIdx      : LongInt;                                // permanent user number
+    Flags        : LongInt;                                // User Flags bitmap
+    Password     : UserPasswordRecord;                     // Password
+    Handle       : String[30];                             // Handle
+    RealName     : String[30];                             // Real Name
+    Address      : String[30];                             // Address
+    City         : String[25];                             // City
+    ZipCode      : String[9];                              // Zipcode
+    HomePhone    : String[15];                             // Home Phone
+    DataPhone    : String[15];                             // Data phone
+    Birthday     : LongInt;                                // JULIAN date
+    Gender       : Char;                                   // M/F/U
+    Email        : String[60];
+    OptionData   : Array[1..10] of String[60];
+    UserInfo     : String[30];
+    Theme        : String[20];
+    AF1          : AccessFlagType;
+    AF2          : AccessFlagType;
+    Security     : SmallInt;
+    Expires      : LongInt;                                // Julian date
+    ExpiresTo    : Byte;                                   // Expire to security level
+    LastPWChange : LongInt;                                // Julian date
+    StartMenu    : String[20];
+    Archive      : String[4];
+    QwkFiles     : Boolean;
+    DateType     : Byte;
+    TagLineMode  : Byte;                                   // 0=Ask,1=Off,2=AutoGlobal,3=AutoPersonal
+    TagLineState : Byte;                                   // 0=Global, 1=Personal
+    PeerIP       : String[45];
+    PeerHost     : String[80];
+    PeerCountry  : String[60];                             // Country
+    FirstOn      : LongInt;                                // Date/Time of First Call Unix
+    LastOn       : LongInt;                                // Date/Time of Last Call Unix
+    Calls        : LongInt;                                // Number of calls to BBS
+    CallsToday   : SmallWord;                              // Number of calls today
+    DLs          : SmallWord;                              // # of downloads
+    DLsToday     : SmallWord;                              // # of downloads today
+    DLk          : LongInt;                                // # of downloads in K
+    DLkToday     : LongInt;                                // # of downloaded K today
+    ULs          : LongInt;                                // total number of uploads
+    ULk          : LongInt;                                // total number of uploaded K
+    Posts        : LongInt;                                // total number of msg posts
+    Emails       : LongInt;                                // total number of sent email
+    TimeLeft     : SmallInt;                               // time left online for today
+    TimeBank     : SmallInt;                               // number of mins in timebank
+    LastFBase    : Word;                                   // Last file base
+    LastMBase    : Word;                                   // Last message base
+    LastMGroup   : Word;                                   // Last group accessed
+    LastFGroup   : Word;                                   // Last file group accessed
+    Vote         : Array[1..99] of Byte;                   // Voting booth data
+    EditType     : Byte;                                   // 0 = Line, 1 = Full, 2 = Ask
+    FileList     : Byte;                                   // 0 = Normal, 1 = Lightbar
+    SigUse       : Boolean;                                // Use auto-signature?
+    SigOffset    : LongInt;                                // offset to sig in AUTOSIG.DAT
+    SigLength    : Byte;                                   // number of lines in sig
+    HotKeys      : Boolean;                                // does user have hotkeys on?
+    MReadType    : Byte;                                   // 0 = line 1 = full 2 = ask
+    UseLBIndex   : Boolean;                                // use lightbar index?
+    UseLBQuote   : Boolean;                                // use lightbar quote mode
+    UseLBMIdx    : Boolean;                                // use lightbar index in email?
+    UseFullChat  : Boolean;                                // use full screen teleconference
+    Protocol     : Char;
+    QwkExtended  : Boolean;
+    QwkNetwork   : LongInt;
+    EmailValDate : LongInt;                                // Unix date?
+    Reserved1    : String[15];
+    DoorsOpened  : LongInt;
+    Reserved     : Array[1..104] of Byte;
+  End;
+
+Const
+  EventPrefix = $00000001;
+
+Type
+  RecEvent = Record                        // EVENT.DAT
+    UID        : LongInt;                  // Unique record ID
+    Active     : Boolean;                  // Active or not
+    OSID       : Byte;                     // TBD
+    Name       : String[40];               // Description of event
+    ExecType   : Byte;                     // 0=BBS, 1=Semaphore, 2=Shell, 3=Interval, 4=Hourly
+    ExecTime   : SmallInt;                 // Minute in day to execute
+    ExecDays   : Array[0..6] of Boolean;   // Execution days (0=Sun, 6=Sat)
+    Shell      : String[160];              // Command line
+    SemaFile   : String[160];              // Semaphone "ACS"
+    SemaKill   : String[160];              // List of semaphores to delete
+    Warning    : Byte;                     // Minutes of user warning for BBS event
+    LastExec   : LongInt;                  // Unix date/time stamp of last execute
+    LastResult : Word;                     // Result code of last execution
+    RunPointer : LongInt;                  // Used internally by event system
+    RunStatus  : Byte;                     // Used internally by event system
+    Flags      : LongInt;
+    Res        : Array[1..84] of Byte;
+  End;
+
+(* SECURITY.DAT in the data directory holds 255 records, one for each *)
+(* possible security level. *)
+
+  RecSecurity = Record                   { SECURITY.DAT                     }
+    Desc       : String[30];             { Description of security level    }
+    Time       : Word;                   { Time online (mins) per day       }
+    MaxCalls   : Word;                   { Max calls per day                }
+    MaxDLs     : Word;                   { Max downloads per day            }
+    MaxDLk     : Word;                   { Max download kilobytes per day   }
+    MaxTB      : Word;                   { Max mins allowed in time bank    }
+    DLRatio    : Byte;                   { Download ratio (# of DLs per UL) }
+    DLKRatio   : SmallInt;               { DL K ratio (# of DLed K per UL K }
+    AF1        : AccessFlagType;         { Access flags for this level A-Z  }
+    AF2        : AccessFlagType;         { Access flags #2 for this level   }
+    Hard       : Boolean;                { Do a hard AF upgrade?            }
+    StartMenu  : String[20];             { Start Menu for this level        }
+    PCRatio    : SmallInt;               { Post / Call ratio per 100 calls  }
+    Expires    : Word;
+    ExpiresTo  : Word;
+    Posts      : Word;
+    PostsTo    : Word;
+    Download   : Word;
+    DownloadTo : Word;
+    Upload     : Word;
+    UploadTo   : Word;
+    Calls      : Word;
+    CallsTo    : Word;
+    Reserved   : Array[1..64] of Byte;
+  End;
+
+  RecArchive = Record                      { ARCHIVE.DAT }
+    OSType : Byte;
+    Active : Boolean;
+    Desc   : String[30];
+    Ext    : String[4];
+    Pack   : String[80];
+    Unpack : String[80];
+    View   : String[80];
+  End;
+
+  RecMessageScan = Record    // *.SCN for message bases
+    UserID  : LongInt;       // User UID
+    NewScan : Byte;          // 0=Off  1=On  2=Forced
+    QwkScan : Byte;
+  End;
+
+Const
+  MBRealNames   = $00000001;   // 1
+//  MBKillKludge  = $00000002; // 2
+  MBAutosigs    = $00000004;   // 3
+  MBNoAttach    = $00000008;   // 4
+  MBPrivate     = $00000010;   // 5
+  MBPrivReply   = $00000020;   // 6
+  MBAllowANSI   = $00000040;   // 7
+  MBAnonymous   = $00000080;   // 8
+
+Type
+  RecMessageBase = Record                                  // MBASES.DAT
+    Index     : Word;
+    Name      : String[60];
+    QWKName   : String[13];                                // ancient standard.. qwk base name
+    NewsName  : String[60];                                // newsgroup name spaces are replaced with .
+    FileName  : String[40];
+    Path      : String[mysMaxPathSize];
+    NetType   : Byte;                                           // 0=Local 1=Echo 2=News 3=Net
+    ReadType  : Byte;                                           // 0=User 1=Normal 2=FS
+    ListType  : Byte;                                           // 0=User 1=Normal 2=FS
+    ListACS   : String[mysMaxAcsSize];
+    ReadACS   : String[mysMaxAcsSize];
+    PostACS   : String[mysMaxAcsSize];
+    SysopACS  : String[mysMaxAcsSize];
+    ListEACS  : String[mysMaxAcsSize];
+    PostEACS  : String[mysMaxAcsSize];
+    ColQuote  : Byte;
+    ColText   : Byte;
+    ColTear   : Byte;
+    ColOrigin : Byte;
+    ColKludge : Byte;
+    NetAddr   : Byte;                                           // Net AKA to use for this base
+    Origin    : String[50];                                     // Net origin line for this base
+    DefNScan  : Byte;                                           // 0 = off, 1 = on, 2 = forced
+    DefQScan  : Byte;                                           // 0 = off, 1 = on, 2 = forced
+    MaxMsgs   : LongInt;                                        // max messages allowed (used for squish)
+    MaxAge    : Word;                                           // max days to keep msg (used for squish)
+    Header    : String[20];                                     // standard reader msgheader
+    RTemplate : String[20];                                     // fullscreen reader template
+    LTemplate : String[20];                                     // lightbar list template
+    Flags     : LongInt;                                        // MB flag bits see above
+    Created   : LongInt;
+    EchoTag   : String[40];                                     // EchoMail Tag
+    QwkNetID  : LongInt;
+    QwkConfID : Word;
+    Res       : Array[1..136] of Byte;                          // RESERVED
+  End;
+
+  RecFileScan = Record      // *.SCN for file bases
+    UserID  : LongInt;
+    NewScan : Byte;
+    LastNew : Cardinal;
+  End;
+
+Const
+  FBShowUpload = $00000001;
+  FBSlowMedia  = $00000002;
+  FBFreeFiles  = $00000004;
+  FBEchoHub    = $00000008;
+  FBAnonFTP    = $00000010;
+
+Type
+  RecFileBase = Record
+    Index      : Word;
+    Name       : String[60];
+    FtpName    : String[60];
+    FileName   : String[40];
+    DispFile   : String[20];
+    Template   : String[20];
+    ListACS    : String[30];
+    FtpACS     : String[30];
+    DLACS      : String[30];
+    ULACS      : String[30];
+    HatchACS   : String[30];
+    SysOpACS   : String[30];
+    PassEACS   : String[30];
+    Path       : String[mysMaxPathSize];
+    DefScan    : Byte;
+    Flags      : LongInt;
+    Created    : LongInt;
+    NetAddr    : Byte;
+    EchoTag    : String[40];
+    ListEACS   : String[30];
+    Res        : Array[1..53] of Byte;
+  End;
+
+// File base directory data is stored as:
+//    <FBaseRec.FileName>.DIR (RecFileList)
+//    <FBaseRec.FileName>.DES (Raw binary data)
+//    <FBaseRec.FileName>.DFX (RecFileIndex)
+//    <FBaseRec.FileName>.SCN (FScanRec)
+//    <FBaseRec.FileName>.LNK (Links to EchoMail Nodes for exporting)
+//
+// File descriptions are stored in .DES where RecFileList.pointer points
+// to where the file's description begins.  RecFileList.Lines contains the
+// number of lines in the file description.  Each line is stored as a Pascal
+// style string where the first byte is the length of the string followed
+// by text at the length given by the first byte.
+
+Const
+  FDirOffline = $01;
+  FDirUnvalid = $02;
+  FDirDeleted = $04;
+  FDirFailed  = $08;
+  FDirFree    = $10;
+  FDirHatched = $20;
+
+Type
+  RecFileIndex = Record  // .DFX
+    CRC : UInt64;
+  End;
+
+  RecFileList = Record   // .DIR
+    FileName  : String[70];
+    Size      : Cardinal;
+    DateTime  : LongInt;
+    Uploader  : String[30];
+    Flags     : Byte;
+    Downloads : LongInt;
+    Rating    : Byte;
+    DescPtr   : Cardinal;
+    DescLines : Byte;
+  End;
+
+Const
+  gfHidden = $00000001;
+
+Type
+  RecGroup = Record
+    UniqueID  : LongInt;
+    Name      : String[80];
+    ShortName : String[40];
+    InfoFile  : String[40];
+    ACS       : String[mysMaxACSSize];
+    Flags     : LongInt;
+    Reserved  : Array[1..4] of Byte;
+  End;
+
+  PtrMenuCmd = ^RecMenuCmd;
+  RecMenuCmd = Packed Record
+    MenuCmd : String[2];
+    Access  : String[mysMaxAcsSize];
+    Data    : String[200];
+    JumpID  : Byte;
+  End;
+
+  PtrMenuItem = ^RecMenuItem;
+  RecMenuItem = Packed Record
+    UniqueID   : Integer;
+    Text       : String[160];
+    TextLo     : String[160];
+    TextHi     : String[160];
+    HotKey     : String[mysMaxMenuInput];
+    Access     : String[mysMaxAcsSize];
+    ShowType   : Byte;
+    ReDraw     : Byte;
+    JumpUp     : Byte;
+    JumpDown   : Byte;
+    JumpLeft   : Byte;
+    JumpRight  : Byte;
+    JumpEscape : Byte;
+    JumpTab    : Byte;
+    JumpPgUp   : Byte;
+    JumpPgDn   : Byte;
+    JumpHome   : Byte;
+    JumpEnd    : Byte;
+    CmdData    : Array[1..mysMaxMenuCmds] of PtrMenuCmd;
+    Commands   : Byte;
+    X          : Byte;
+    Y          : Byte;
+    Timer      : Word;
+    TimerType  : Byte;
+    TimerShow  : Boolean;
+  End;
+
+  RecMenuMarquee = Record
+    Active : Boolean;
+    X      : Word;
+    Y      : Word;
+    Field  : Word;
+    Text   : Array[1..255] of Record
+               C : Char;
+               A : Byte;
+             End;
+    Offset : Word;
+    Len    : Word;
+    Tick   : Int64;
+    Speed  : Word;
+    Mode   : Byte;
+  End;
+
+  RecMenuInfo = Packed Record
+    Description : String[30];
+    Access      : String[mysMaxAcsSize];
+    DispFile    : String[20];
+    Fallback    : String[20];
+    NodeStatus  : String[40];
+    Header      : String[160];
+    Footer      : String[160];
+    Marquee     : AnsiString;
+    DoneX       : Byte;
+    DoneY       : Byte;
+    MenuType    : Byte;  // Menu: 0=std, 1=lb, 2=grid, 3=lbprompt
+    InputType   : Byte;  // Hotkeys: 0=user, 1=no, 2=yes
+    CharType    : Byte;
+    DispCols    : Byte;
+    Global      : Boolean;
+    IdxCounter  : LongInt;
+    LIndent80   : Byte;
+    RIndent80   : Byte;
+    LIndent132  : Byte;
+    RIndent132  : Byte;
+    LIndent160  : Byte;
+    RIndent160  : Byte;
+    RTOnActive  : Boolean;
+  End;
+
+  RecPercent = Record
+    BarLength : Byte;
+    LoChar    : Char;
+    LoAttr    : Byte;
+    HiChar    : Char;
+    HiAttr    : Byte;
+    Format    : Byte;
+    StartY    : Byte;
+    Active    : Boolean;
+    StartX    : Byte;
+    LastPos   : Byte;
+    Reserved  : Array[1..3] of Byte;
+  End;
+
+Type
+  RecPromptData   = Array[0..mysMaxThemeText] of AnsiString;
+  RecPromptSource = Array[0..mysMaxThemeText] of Byte;
+
+  RecThemeBox = Record
+    Frame      : Byte;
+    Style      : Byte;
+    Attr       : Byte;
+    Attr2      : Byte;
+    Attr3      : Byte;
+    Attr4      : Byte;
+    Shadow     : Boolean;
+    ShadowAttr : Byte;
+    HeadAttr   : Byte;
+    HeadType   : Byte;
+    OKAttr     : Byte;
+    TextAttr   : Byte;
+    LBLo       : Byte;
+    LBLoK      : Byte;
+    LBHi       : Byte;
+    LBHiK      : Byte;
+  End;
+
+  PtrTheme = ^RecTheme;
+  RecTheme = Record
+    Order         : Word;
+    ACS           : String[mysMaxACSSize];
+    Flags         : LongInt;
+    FileName      : String[20];
+    PInherit      : String[20];
+    TInherit      : String[20];
+    MInherit      : String[20];
+    SInherit      : String[20];
+    Author        : String[30];
+    Group         : String[30];
+    Contact       : String[60];
+    Desc          : String[40];
+    ColorMode     : Byte;
+    FontMode      : Byte;
+    PFallback     : Boolean;
+    TFallback     : Boolean;
+    MFallback     : Boolean;
+    SFallback     : Boolean;
+    ASCII         : Boolean;
+    ANSI          : Boolean;
+    BarYN         : Boolean;
+    TextPath      : String[mysMaxPathSize];
+    MenuPath      : String[mysMaxPathSize];
+    ScriptPath    : String[mysMaxPathSize];
+    TemplatePath  : String[mysMaxPathSize];
+    LineChat1     : Byte;
+    LineChat2     : Byte;
+    UserInputFmt  : Byte;
+    FieldColor1   : Byte;
+    FieldColor2   : Byte;
+    FieldChar     : Char;
+    EchoChar      : Char;
+    UseLRChars    : Boolean;
+    InRChar       : Char;
+    InRAttr       : Byte;
+    InLChar       : Char;
+    InLAttr       : Byte;
+    TagChar       : Char;
+    FileDescHi    : Byte;
+    FileDescLo    : Byte;
+    NewMsgChar    : Char;
+    NewVoteChar   : Char;
+    VotingBar     : RecPercent;
+    FileBar       : RecPercent;
+    MsgBar        : RecPercent;
+    Colors        : Array[0..9] of Byte;
+    Box1          : RecThemeBox;
+    Box2          : RecThemeBox;
+    Box3          : RecThemeBox;
+    Box4          : RecThemeBox;
+  End;
+
+  BBSListRec = Record
+    cType     : Byte;
+    Phone     : String[15];
+    Telnet    : String[40];
+    BBSName   : String[30];
+    Location  : String[25];
+    SysopName : String[30];
+    BaudRate  : String[6];
+    Software  : String[10];
+    Deleted   : Boolean;
+    AddedBy   : String[30];
+    Verified  : LongInt;
+    Res       : Array[1..6] of Byte;
+  End;
+
+(* ONELINERS.DAT found in the data directory.  This file contains all the
+   one-liner data.  It can be any number of records in size. *)
+
+  OneLineRec = Record
+    Text : String[79];
+    From : String[30];
+  End;
+
+(* Each record of VOTES.DAT is one question.  Mystic only allows for up *)
+(* to 20 questions. *)
+
+  VoteRec = Record                      { VOTES.DAT in DATA directory      }
+    Votes    : SmallInt;                { Total votes for this question    }
+    AnsNum   : Byte;                    { Total # of Answers               }
+    User     : String[30];              { User name who added question     }
+    ACS      : String[20];              { ACS to see this question         }
+    AddACS   : String[20];              { ACS to add an answer             }
+    ForceACS : String[20];              { ACS to force voting of question  }
+    Question : String[79];              { Question text                    }
+    Answer   : Array[1..15] of Record   { Array[1..15] of Answer data      }
+                Text  : String[40];     { Answer text                      }
+                Votes : SmallInt;       { Votes for this answer            }
+              End;
+  End;
+
+(* CHATx.DAT is created upon startup, where X is the node number being    *)
+(* loaded.  These files are used to store all the user information for a  *)
+(* node.                                                                  *)
+
+// need to have terminal emulation and remove baud rate
+// add IP/host?  change booleans to bitmap? user perm index
+
+  ChatRec = Record                     { CHATx.DAT }
+    Active     : Boolean;               { Is there a user on this node?   }
+    Name       : String[30];            { User's name on this node        }
+    Action     : String[40];            { User's action on this node      }
+    Location   : String[30];            { User's City/State on this node  }
+    Gender     : Char;                  { User's gender                   }
+    Age        : Byte;                  { User's age                      }
+    Baud       : String[6];             { User's baud rate                }
+    Invisible  : Boolean;               { Is node invisible?              }
+    Available  : Boolean;               { Is node available?              }
+    InChat     : Boolean;               { Is user in multi-node chat?     }
+    Room       : Byte;                  { Chat room                       }
+    Paged      : Boolean;
+    ServerType : Byte;
+    ServerSlot : Integer;
+    ClientSlot : Integer;
+    Updated    : LongInt;
+    ProcessID  : LongInt;
+  End;
+
+(* Chat room record - partially used by the multi node chat functions *)
+
+  RoomRec = Record
+    Name     : String[40];             { Channel Name }
+    Reserved : Array[1..128] of Byte;  { RESERVED }
+    // moderator ACS
+    // change topic ACS
+    // join ACS
+    // topic
+  End;
+
+// CALLERS.DAT holds information on the last callers to the BBS up to 99
+// records.
+
+Type
+  RecLastOn = Record                                            // CALLERS.DAT
+    DateTime   : LongInt;
+    NewUser    : Boolean;
+    PeerIP     : String[15];
+    PeerHost   : String[50];
+    Node       : Byte;
+    CallNum    : LongInt;
+    Handle     : String[30];
+    City       : String[25];
+    Address    : String[30];
+    Gender     : Char;
+    EmailAddr  : String[35];
+    UserInfo   : String[30];
+    OptionData : Array[1..10] of String[60];
+    Source     : Byte;
+    UserCalls  : Cardinal;
+    UserIndex  : LongInt;
+    SecondsOn  : LongInt;
+    UserDLs    : Word;
+    UserULs    : Word;
+    UserDLK    : LongInt;
+    UserULK    : LongInt;
+    UserPosts  : Word;
+    UserEmail  : Word;
+    UserDoors  : Word;
+    UserAF1    : AccessFlagType; // 4 bytes
+    UserAF2    : AccessFlagType;
+    Reserved   : Array[1..14] of Byte;
+  End;
+
+  RecHistory = Record
+    Date       : LongInt;
+    Emails     : Word;
+    Posts      : Word;
+    Downloads  : Word;
+    Uploads    : Word;
+    DownloadKB : LongInt;
+    UploadKB   : LongInt;
+    Calls      : LongInt;
+    NewUsers   : Word;
+    Telnet     : Word;
+    FTP        : Word;
+    POP3       : Word;
+    SMTP       : Word;
+    NNTP       : Word;
+    HTTP       : Word;
+    Hourly     : Array[0..23] of Byte;
+    Reserved   : Array[1..2] of Byte;
+  End;
+
+  RecProtocol = Record
+    OSType  : Byte;
+    Active  : Boolean;
+    Batch   : Boolean;
+    Key     : Char;
+    Desc    : String[40];
+    SendCmd : String[60];
+    RecvCmd : String[60];
+  End;
+
+  NodeMsgRec = Record
+    FromNode : Byte;
+    FromWho  : String[30];
+    ToWho    : String[30];
+    Message  : String[250];
+    MsgType  : Byte;
+    { 1  = Chat Pub and broadcast }
+    { 2  = System message }
+    { 3  = User message }
+    { 4  = Chat Private }
+    { 5  = chat status note }
+    { 6  = chat action }
+    { 7  = chat topic update }
+    { 8  = user 2 user page }
+    { 9  = user 2 user forced }
+    { 10 = chat accepted }
+    { 11 = start pipe session }
+    { 12 = end pipe session }
+    { 13 = terminate node }
+    Room     : Byte;  { Chat room number. 0 = chat broadcast }
+  End;
+
+  ServerInfoRecord = Record
+    Active         : Boolean;
+    IPV4Adapter    : String[19];
+    IPV6Adapter    : String[39];
+    AdapterType    : Byte;                       // 0 IPV4, 1 IPV6, 2 BOTH
+    ServerType     : LongInt;
+    ProtID         : String[8];
+    Port           : Word;
+    MaxAllowed     : Word;
+    MaxIPs         : Byte;
+    BanIP          : Byte;
+    BanSecs        : Word;
+    TimeOut        : Word;
+    CountryBlock   : Boolean;
+    SendBlocked    : Boolean;
+    // BINKP
+    BINKP_MD5      : Boolean;
+    BINKP_Unsecure : Boolean;
+    BINKP_ReName   : Byte;
+    // FTP
+    FTPDataStart   : Word;
+    FTPShowQWK     : Byte;
+    FTPAnonymous   : Boolean;
+    FTPPassive     : Byte;                       // 0=Yes, 1=No, 2=Forced
+    // POP3
+    POP3DelRETR    : Boolean;
+    // HTTP
+    WebRoot        : String[mysMaxPathSize];
+    //UNSORTED
+    UNUSED1        : Byte;
+    SSLPort        : Word;
+    AutoWhiteList  : Byte;
+    POP3ForceSSL   : Boolean;
+    BINKP_Escape   : Byte;
+    BINKP_StartTLS : Byte;                       // 0=No, 1=Yes, 2=Forced
+    DownloadLimit  : LongInt;
+    UploadLimit    : LongInt;
+    FTPTestUpload  : Boolean;
+    FTPTestPass    : Byte;
+    FTPTestCmdLine : String[80];
+    Reserved       : Array[1..109] of Byte;
+  End;
+
+Const
+  afAnnounced = $00000001;
+
+Type
+  AnnounceRecord = Record                        // ANNOUNCE.DIR & DES
+    Flags     : LongInt;
+    DateTime  : LongInt;
+    EchoTag   : String[40];
+    FileName  : String[70];
+    FileSize  : Int64;
+    DescPtr   : LongInt;
+  End;
+
+  MailQueueRecord = Record
+    Attempts : Word;
+    Date     : Cardinal;
+    Expires  : Cardinal;
+  End;

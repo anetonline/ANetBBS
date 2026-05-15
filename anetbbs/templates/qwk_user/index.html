@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}QWK Offline Reader{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-mailbox"></i> QWK Offline Reader</h1>
+    <p class="small text-muted">
+        Grab your unread echomail as a .QWK packet, read it offline in
+        your favorite QWK reader (MultiMail, BlueWave, OLX...), then
+        upload your replies as a .REP packet.
+    </p>
+</div>
+
+<div class="row g-3">
+<div class="col-md-6">
+    <div class="card h-100">
+        <div class="card-header"><i class="bi bi-cloud-download"></i> Download .QWK</div>
+        <div class="card-body">
+            <p>Builds a packet of every echomail message in your subscribed
+               areas you haven't read yet.</p>
+            <a href="{{ url_for('qwk_user.download') }}" class="btn btn-primary">
+                <i class="bi bi-download"></i> Download
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="col-md-6">
+    <div class="card h-100">
+        <div class="card-header"><i class="bi bi-cloud-upload"></i> Upload .REP</div>
+        <div class="card-body">
+            <form method="post" action="{{ url_for('qwk_user.upload') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="file" name="rep" accept=".rep,.zip" class="form-control mb-2" required>
+                <button class="btn btn-primary"><i class="bi bi-upload"></i> Upload replies</button>
+            </form>
+        </div>
+    </div>
+</div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-info-circle"></i> How to use a QWK reader</div>
+    <div class="card-body">
+        <ol class="small">
+            <li>Click <strong>Download</strong> above to grab the latest packet.</li>
+            <li>Open the .QWK file in MultiMail, BlueWave, OLX, etc.</li>
+            <li>Read messages, hit reply, write your response.</li>
+            <li>Save the resulting .REP file.</li>
+            <li>Upload it here. Replies are filed as outbound echomail and
+                propagated to the network on the next poll.</li>
+        </ol>
+    </div>
+</div>
+{% endblock %}

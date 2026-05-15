@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Theme Preview - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-palette"></i> Available Themes</h1>
+</div>
+
+<p>Click on a theme preview to select it. <a href="{{ url_for('profile.edit') }}">Go to profile edit</a> to save your choice.</p>
+
+<div class="row g-3">
+    {% for theme in themes %}
+    {% set vars = theme.css_variables | from_json %}
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body p-0">
+                <!-- Theme Preview -->
+                <div style="background-color:{{ vars.get('--theme-bg', '#1a1a1a') }};border:2px solid {{ vars.get('--theme-primary', '#00ff00') }};padding:15px;font-family:monospace;border-radius:4px;">
+                    <div style="background-color:{{ vars.get('--theme-bg-dark', '#000') }};border-bottom:1px solid {{ vars.get('--theme-primary', '#00ff00') }};padding:5px;margin:-15px -15px 10px -15px;color:{{ vars.get('--theme-primary', '#00ff00') }};font-weight:bold;">
+                        <i class="bi bi-terminal"></i> ANetBBS
+                    </div>
+                    <p style="color:{{ vars.get('--theme-primary', '#00ff00') }};">{{ theme.display_name }}</p>
+                    <p style="color:{{ vars.get('--theme-primary', '#00ff00') }};font-size:0.8rem;">{{ theme.description }}</p>
+                    <div style="background-color:{{ vars.get('--theme-input-bg', '#000') }};border:1px solid {{ vars.get('--theme-primary', '#00ff00') }};padding:5px;color:{{ vars.get('--theme-primary', '#00ff00') }};font-size:0.8rem;">
+                        Sample text input
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <strong>{{ theme.display_name }}</strong>
+                {% if current_user.is_authenticated and current_user.theme_id == theme.id %}
+                <span class="badge bg-success">Current</span>
+                {% endif %}
+                {% if theme.is_default %}
+                <span class="badge bg-warning text-dark">Default</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ m.subject or 'Netmail' }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-paper-fill"></i> {{ m.subject or '(no subject)' }}</h1>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="bi bi-info-circle"></i> Headers
+        <span class="float-end">
+            {% if m.is_crash %}<span class="badge bg-warning text-dark">CRASH</span>{% endif %}
+            {% if m.is_private %}<span class="badge bg-info text-dark">PVT</span>{% endif %}
+            <span class="badge bg-secondary">{{ m.status }}</span>
+        </span>
+    </div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-2">From</dt>
+            <dd class="col-sm-10">{{ m.from_name }} &lt;<code>{{ m.from_address }}</code>&gt;</dd>
+            <dt class="col-sm-2">To</dt>
+            <dd class="col-sm-10">{{ m.to_name }} &lt;<code>{{ m.to_address }}</code>&gt;</dd>
+            <dt class="col-sm-2">Subject</dt>
+            <dd class="col-sm-10">{{ m.subject or '(no subject)' }}</dd>
+            <dt class="col-sm-2">Date</dt>
+            <dd class="col-sm-10">{{ m.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+            {% if m.msgid %}
+            <dt class="col-sm-2">MSGID</dt>
+            <dd class="col-sm-10"><code>{{ m.msgid }}</code></dd>
+            {% endif %}
+            {% if m.reply_msgid %}
+            <dt class="col-sm-2">REPLY</dt>
+            <dd class="col-sm-10"><code>{{ m.reply_msgid }}</code></dd>
+            {% endif %}
+            <dt class="col-sm-2">CHRS</dt>
+            <dd class="col-sm-10">{{ m.chrs }}</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header py-1">
+        <button type="button" id="toggleMd" class="btn btn-link btn-sm p-0">
+            <i class="bi bi-markdown"></i> Toggle Markdown view
+        </button>
+    </div>
+    <div class="card-body">
+        <pre id="bodyPlain" class="ansi-body" style="white-space:pre-wrap;font-family:monospace;margin:0;">{{ m.body | msgbody(m.chrs if m.chrs is defined else '') }}</pre>
+        <div id="bodyMd" style="display:none;">{{ m.body | markdown }}</div>
+    </div>
+</div>
+<script>
+(function() {
+    const btn = document.getElementById('toggleMd');
+    const plain = document.getElementById('bodyPlain');
+    const md = document.getElementById('bodyMd');
+    if (!btn || !plain || !md) return;
+    btn.addEventListener('click', () => {
+        const showMd = plain.style.display !== 'none';
+        plain.style.display = showMd ? 'none' : '';
+        md.style.display = showMd ? '' : 'none';
+    });
+})();
+</script>
+
+{% if m.kludges %}
+<div class="card mb-3">
+    <div class="card-header">
+        <a class="text-decoration-none" data-bs-toggle="collapse" href="#kludgesPanel">
+            <i class="bi bi-code-slash"></i> Kludges (click to expand)
+        </a>
+    </div>
+    <div id="kludgesPanel" class="collapse">
+        <div class="card-body p-2">
+            <pre class="mb-0" style="font-size:11px;">{{ m.kludges }}</pre>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-3">
+    <a href="{{ url_for('netmail.compose', reply_to=m.id) }}" class="btn btn-primary">
+        <i class="bi bi-reply"></i> Reply
+    </a>
+    <button type="button" class="btn btn-outline-info copy-permalink-btn"
+            data-kind="netmail" data-id="{{ m.id }}" title="Copy permalink">
+        <i class="bi bi-link-45deg"></i> Copy Link
+    </button>
+    <form method="post" action="{{ url_for('saved.add') }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="kind" value="netmail">
+        <input type="hidden" name="target_id" value="{{ m.id }}">
+        <button class="btn btn-outline-warning" title="Bookmark this message">
+            <i class="bi bi-bookmark-star"></i> Save
+        </button>
+    </form>
+    <form method="post" action="{{ url_for('netmail.delete', msg_id=m.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger" onclick="return confirm('Delete this message from your view?')">
+            <i class="bi bi-trash"></i> Delete
+        </button>
+    </form>
+    <a href="{{ url_for('netmail.inbox' if m.direction == 'inbound' else 'netmail.sent') }}" class="btn btn-link">← Back</a>
+</div>
+{% endblock %}

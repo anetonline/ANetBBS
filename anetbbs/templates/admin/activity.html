@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Activity Log - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-clock-history"></i> User Activity Log</h1>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-4">
+        <label class="form-label">Activity Type</label>
+        <select name="type" class="form-select">
+            <option value="">— all —</option>
+            {% for t in distinct_types %}
+                <option value="{{ t }}" {% if t == current_type %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">User ID</label>
+        <input type="text" name="user" value="{{ current_user_filter }}" class="form-control">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">IP Address</label>
+        <input type="text" name="ip" value="{{ current_ip }}" class="form-control">
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-primary w-100">Filter</button>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm table-striped mb-0">
+            <thead><tr>
+                <th>When</th><th>User</th><th>Type</th><th>Service</th>
+                <th>IP</th><th>Details</th>
+            </tr></thead>
+            <tbody>
+            {% for a in pagination.items %}
+                <tr>
+                    <td><code>{{ a.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td>
+                        {% if a.user %}
+                            <a href="{{ url_for('admin.edit_user', user_id=a.user.id) }}">{{ a.user.username }}</a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ a.activity_type }}</span></td>
+                    <td>{{ a.service or '—' }}</td>
+                    <td><code>{{ a.ip_address or '—' }}</code></td>
+                    <td>{{ a.details or '' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="text-muted text-center p-3">No matching activity.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination">
+        {% if pagination.has_prev %}
+            <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&type={{ current_type }}&user={{ current_user_filter }}&ip={{ current_ip }}">Prev</a></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</span></li>
+        {% if pagination.has_next %}
+            <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&type={{ current_type }}&user={{ current_user_filter }}&ip={{ current_ip }}">Next</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

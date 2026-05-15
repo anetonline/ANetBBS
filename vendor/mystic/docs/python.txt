@@ -1,0 +1,220 @@
+
+MYSTIC PYTHON DOCUMENTATION
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+  ABOUT PYTHON AND MYSTIC
+  ~~~~~~~~~~~~~~~~~~~~~~~
+
+  Mystic BBS has an embedded Python engine for both BBS modifications and
+  games, as well as completely scriptable servers.
+
+  For BBS related modifications, Python can be executed by a menu command or
+  through an MCI display code.  This means that any prompt or command on a
+  menu can be replaced with a custom Python script developed by you.
+
+  In the case of the servers, Mystic takes care of all of the difficult stuff,
+  managing the connections, IP blocking and blacklisting, server threading and
+  messages, logging, etc.  Mystic simply allows you to create Python extension
+  that handles only the client's interaction with the server.
+
+
+
+  REQUIREMENTS
+  ~~~~~~~~~~~~
+
+  The requirements are as simple as having Python 2.7 installed on your
+  operating system.  Mystic will automatically detect if Python is installed
+  upon startup, and dynamically embed the language into itself.  This means
+  that Python is COMPLETELY OPTIONAL and its not a dependancy required to use
+  Mystic BBS.  If it exists, great!  Mystic will allow you to use it!
+
+  In Windows python27.dll can be copied into the Mystic directory or you can
+  include it into the operating system library path.  The Python installation
+  may already do this for you.
+
+  In Linux, Mystic looks for libpython2.7.so.1.0
+
+  In OSX, Mystic looks for libpython2.7.dylib
+
+  MAKE SURE YOU ARE USING THE CORRECT VERSION FOR YOUR PROCESSOR.  IF YOU ARE
+  USING 32-BIT MYSTIC YOU MUST BE USING THE 32-BIT PYTHON!  IF YOU ARE USING
+  THE 64-BIT MYSTIC THEN YOU NEED THE 64-BIT PYTHON
+
+
+
+  WHY PYTHON 2.7 WHEN THERE IS A 3.X
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The answer to this question is not simple, as there are a lot of reasons why
+  2.X was selected over 3.X.  This does not mean that 3.X will not be
+  supported in the future, but it likely wouldn't be until 2.X has become very
+  matured in Mystic.  Anyway, reasons:
+
+    1. Better package support for 2.X
+    2. String handling is more in line with how Mystic works.
+    3. Has had many years of heavy use and proven stability.
+    4. The syntax and API is not likely to change and break Mystic
+    5. It is still the default Python version of Ubuntu 14.04 LTS
+    6. It is still the default Python version of OSX El Capitan
+    7. More programming resources (tutorials, websites, etc) for 2.X
+
+
+
+  PROBLEMS WHEN ATTEMPTING TO EXECUTE A PYTHON SCRIPT
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+  If you get a "Import error: no module named site" when you DO try to
+  execute a Python script, its because you have Python on your system but
+  it is not completely installed.  You'll need to set your environment
+  variables.  For example if you have Python installed in C:\Python27:
+
+     SET PYTHONHOME=C:\PYTHON27
+     SET PYTHONPATH=C:\PYTHON27\LIB
+     SET PATH=%PYTHONHOME%;%PATH%
+
+  FROM PYTHON DOCS:
+
+  These environment variables influence Python’s behavior, they are processed
+  before the command-line switches other than -E. It is customary that
+  command-line switches override environmental variables where there is a
+  conflict.
+
+     PYTHONHOME
+
+     Change the location of the standard Python libraries. By default, the
+     libraries are searched in prefix/lib/pythonversion and
+     exec_prefix/lib/pythonversion, where prefix and exec_prefix are
+     installation-dependent directories, both defaulting to /usr/local.
+
+     When PYTHONHOME is set to a single directory, its value replaces both
+     prefix and exec_prefix. To specify different values for these, set
+     PYTHONHOME to prefix:exec_prefix.
+
+     PYTHONPATH
+
+     Augment the default search path for module files. The format is the same
+     as the shell’s PATH: one or more directory pathnames separated by
+     os.pathsep (e.g. colons on Unix or semicolons on Windows). Non-existent
+     directories are silently ignored.
+
+     In addition to normal directories, individual PYTHONPATH entries may
+     refer to zipfiles containing pure Python modules (in either source or
+     compiled form). Extension modules cannot be imported from zipfiles.
+
+     The default search path is installation dependent, but generally begins
+     with prefix/lib/pythonversion (see PYTHONHOME above). It is always
+     appended to PYTHONPATH.
+
+     An additional directory will be inserted in the search path in front of
+     PYTHONPATH as described above under Interface options. The search path
+     can be manipulated from within a Python program as the variable sys.path
+
+
+
+  CREATING A PYTHON MODULE FOR MYSTIC
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  For BBS modules, you first must import the BBS module:
+
+    import mystic_bbs as bbs
+
+  This will give you all of the BBS related functions addressable with a bbs.
+  prefix.
+
+  Note that in any loops you have in your BBS, you must trap the "shutdown"
+  boolean so that if it is true, your script will exit when Mystic requests
+  a shutdown.
+
+  MYSTIC PYTHON INTEGRATED BBS FUNCTIONS
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  (THIS IS A WORK IN PROGRESS... PLANNING STAGES.  IF THERE IS SOMETHING YOU
+   WANT PLEASE ASK)
+
+IMPLEMENTED BBS-SPECIFIC FUNCTIONS:
+
+  write
+  writeln
+  menucmd
+  getkey
+  shutdown
+  getstr
+  getuser
+  onekey
+  keypressed
+  param_str
+  param_count
+
+PLANNED:
+
+  Of course you get all of the Python stuff plus these functions:
+
+	RETURNS		FUNCTION NAME	PARAMETERS
+  
+  INPUT/OUTPUT:
+
+	(none)		clear		(none)
+	(none)		cleareol	(none)
+	(char, bool)	getkey		(none)
+	(string)	getstr		(<mode>byte, <fieldsize>byte, <maxsize>byte, <default>string)
+	(bool)		getyn		(<text>string, <default>bool)
+	(none)		gotoxy		(<x>byte, <y>byte)
+	(bool)		keypressed	(<waitTime>?)  or separate waitKey function with MS timer?
+	(char)		moreprompt	(none)
+	(none)		movex		(<x>byte)
+	(none)		movey		(<x>byte)
+	(char)		onekey		(<keys>string, <echo>bool)
+	(char,integer)	onekeyrange	(<keys>string, <min>integer, <max>integer
+	(none)		out		(string)
+	(none)		outln		(string)
+	(none)		pause		(none)
+	(none)		pipe		(string)
+	(none)		pipeln		(string)
+	(none)		purgeinput	(none)
+	(bool)		showfile	(<file>string, <baudrate>integer, <pause>bool)
+	(none)		stuffkey	(<keys>string)
+	(byte)		textattr	(none)
+	(byte)		wherex		(none)
+	(byte)		wherey		(none)
+	(none)		write		(string)
+	(none)		writeln		(string)
+	(none)		writexy		(<x>byte, <y>byte, <attr>byte, text<string>)
+	(none)		writexypipe	(<x>byte, <y>byte, <attr>byte, <pad>byte, text<string>
+
+  STRING FUNCTIONS:
+
+	(byte)		mcilen		(string)
+	(string)	mci2str		(string)
+
+  MISCELLANOUS / UNSORTED:
+
+	(bool)		access		(<acs>string)
+	(none)		appendtext	(<filename>string, <text>string)
+	(byte)		getcodepage	(none)
+	(byte)		getgraphics	(none)
+	(bool)		ignoregroups	(<optional on or off>bool)  * IF this can be done they do same for codepage, textattr,graphics etc
+	(string)	getprompt	(<promptnumber>integer)
+	(none)		hangup		(none)
+	(none)		log		(<level>byte, <category>char, <text>string)
+	(none)		menucmd		(<cmd>string, <data>string)
+	(byte)		node		(none)
+	(none)		setprompt	(<promptnumber>integer, <text>string)
+	(bool)		shutdown	(none)
+	(none)		upgradeuser	(<level>byte)
+	
+    
+
+key missing things TODO:
+
+	need to pass paramenters to the program somehow
+	need formatDate and various conversion functions
+ 	thisuser, user, msg areas, msg headers, msg text, file areas, file list
+	ansi buffer,
+	msg editor, ansi editor, text editor
+	box, listbox, screen save/restore, extended input
+	getattr putattr
+	getmailstats
+	getmsgbasestats
+	helper string functions from MPL?

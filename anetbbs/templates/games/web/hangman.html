@@ -1,0 +1,143 @@
+<style>
+#hangman-game { max-width: 700px; margin: 0 auto; text-align: center; }
+.word-display { font-size: 2rem; letter-spacing: .5rem; margin: 20px 0; color: #00ff00; }
+.wrong-letters { color: #ff4444; font-size: 1.2rem; min-height: 2rem; }
+#hangman-svg { margin: 20px auto; }
+.hangman-msg { font-size: 1.4rem; font-weight: bold; min-height: 2rem; }
+.keyboard { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 16px; }
+.key-btn {
+    width: 36px; height: 36px; background: #000; border: 1px solid #00ff00;
+    color: #00ff00; font-family: 'Courier New', monospace; font-size: .9rem;
+    cursor: pointer; border-radius: 3px;
+}
+.key-btn:hover:not(:disabled) { background: #003300; }
+.key-btn:disabled { opacity: .3; cursor: default; }
+</style>
+
+<div id="hangman-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-alphabet"></i> HANGMAN</h4>
+    <p style="color:#007700;">Guess the word before the man is hanged!</p>
+    <div id="hangman-category" style="color:#007700; font-size:.85rem; margin-bottom:4px;"></div>
+
+    <svg id="hangman-svg" width="200" height="220" viewBox="0 0 200 220">
+        <!-- Gallows -->
+        <line x1="20" y1="210" x2="180" y2="210" stroke="#00ff00" stroke-width="3"/>
+        <line x1="60" y1="210" x2="60" y2="10" stroke="#00ff00" stroke-width="3"/>
+        <line x1="60" y1="10" x2="130" y2="10" stroke="#00ff00" stroke-width="3"/>
+        <line x1="130" y1="10" x2="130" y2="35" stroke="#00ff00" stroke-width="3"/>
+        <!-- Body parts (hidden initially) -->
+        <circle id="hm-head" cx="130" cy="50" r="16" stroke="#00ff00" stroke-width="2" fill="none" style="display:none"/>
+        <line id="hm-body" x1="130" y1="66" x2="130" y2="130" stroke="#00ff00" stroke-width="2" style="display:none"/>
+        <line id="hm-larm" x1="130" y1="80" x2="100" y2="110" stroke="#00ff00" stroke-width="2" style="display:none"/>
+        <line id="hm-rarm" x1="130" y1="80" x2="160" y2="110" stroke="#00ff00" stroke-width="2" style="display:none"/>
+        <line id="hm-lleg" x1="130" y1="130" x2="100" y2="170" stroke="#00ff00" stroke-width="2" style="display:none"/>
+        <line id="hm-rleg" x1="130" y1="130" x2="160" y2="170" stroke="#00ff00" stroke-width="2" style="display:none"/>
+    </svg>
+
+    <div class="word-display" id="word-display"></div>
+    <div class="wrong-letters" id="wrong-letters"></div>
+    <div class="hangman-msg" id="hangman-msg"></div>
+    <div class="keyboard" id="keyboard"></div>
+    <button id="hm-new-game" class="btn btn-primary mt-3" style="display:none;">
+        <i class="bi bi-arrow-clockwise"></i> New Game
+    </button>
+</div>
+
+<script>
+(function() {
+    var WORDS = [
+        {w:'COMPUTER',c:'Technology'},{w:'KEYBOARD',c:'Technology'},{w:'TERMINAL',c:'Technology'},
+        {w:'PYTHON',c:'Programming'},{w:'JAVASCRIPT',c:'Programming'},{w:'FUNCTION',c:'Programming'},
+        {w:'DUNGEON',c:'Fantasy'},{w:'DRAGON',c:'Fantasy'},{w:'WIZARD',c:'Fantasy'},
+        {w:'GALAXY',c:'Space'},{w:'ROCKET',c:'Space'},{w:'ASTEROID',c:'Space'},
+        {w:'BULLETIN',c:'BBS'},{w:'SYSOP',c:'BBS'},{w:'MODEM',c:'BBS'},
+    ];
+
+    var bodyParts = ['hm-head','hm-body','hm-larm','hm-rarm','hm-lleg','hm-rleg'];
+    var word, guessed, wrong, gameOver;
+
+    function startGame() {
+        var entry = WORDS[Math.floor(Math.random()*WORDS.length)];
+        word = entry.w;
+        guessed = new Set();
+        wrong = [];
+        gameOver = false;
+
+        document.getElementById('hangman-category').textContent = 'Category: ' + entry.c;
+        document.getElementById('hangman-msg').textContent = '';
+        document.getElementById('hm-new-game').style.display = 'none';
+        bodyParts.forEach(function(id){ document.getElementById(id).style.display='none'; });
+        buildKeyboard();
+        render();
+    }
+
+    function buildKeyboard() {
+        var kb = document.getElementById('keyboard');
+        kb.innerHTML = '';
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(function(ch) {
+            var btn = document.createElement('button');
+            btn.className = 'key-btn';
+            btn.textContent = ch;
+            btn.onclick = function() { guess(ch); };
+            btn.id = 'key-' + ch;
+            kb.appendChild(btn);
+        });
+    }
+
+    function guess(ch) {
+        if (gameOver || guessed.has(ch)) return;
+        guessed.add(ch);
+        document.getElementById('key-' + ch).disabled = true;
+        if (word.indexOf(ch) < 0) {
+            wrong.push(ch);
+            document.getElementById(bodyParts[wrong.length-1]).style.display = '';
+        }
+        render();
+        checkEnd();
+    }
+
+    function render() {
+        var display = word.split('').map(function(c){ return guessed.has(c) ? c : '_'; });
+        document.getElementById('word-display').textContent = display.join(' ');
+        document.getElementById('wrong-letters').textContent =
+            wrong.length ? 'Wrong: ' + wrong.join(', ') : '';
+    }
+
+    function checkEnd() {
+        var won = word.split('').every(function(c){ return guessed.has(c); });
+        if (won) {
+            document.getElementById('hangman-msg').textContent = '🎉 YOU WIN!';
+            document.getElementById('hangman-msg').style.color = '#00ff00';
+            endGame(word.length * 10 - wrong.length * 2);
+        } else if (wrong.length >= 6) {
+            document.getElementById('hangman-msg').textContent = '💀 GAME OVER — Word was: ' + word;
+            document.getElementById('hangman-msg').style.color = '#ff4444';
+            document.getElementById('word-display').textContent = word.split('').join(' ');
+            endGame(0);
+        }
+    }
+
+    function endGame(score) {
+        gameOver = true;
+        document.getElementById('hm-new-game').style.display = '';
+        document.querySelectorAll('.key-btn').forEach(function(b){ b.disabled=true; });
+        if (score > 0) submitScore(score);
+    }
+
+    function submitScore(score) {
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken': getCsrf()},
+            body: JSON.stringify({score: score})
+        }).catch(function(){});
+    }
+
+    function getCsrf() {
+        var m = document.cookie.match(/csrf_token=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    document.getElementById('hm-new-game').addEventListener('click', startGame);
+    startGame();
+})();
+</script>

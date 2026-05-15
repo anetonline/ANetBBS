@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Game Admin — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h2><i class="bi bi-controller"></i> GAME CENTER ADMIN</h2>
+</div>
+
+<!-- Stats Row -->
+<div class="row mb-4 g-3">
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2rem;"><i class="bi bi-collection-play"></i></div>
+            <div style="font-size:1.5rem;">{{ total_games }}</div>
+            <div class="small">Total Games</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2rem;"><i class="bi bi-activity"></i></div>
+            <div style="font-size:1.5rem;">{{ active_sessions }}</div>
+            <div class="small">Active Sessions</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2rem;"><i class="bi bi-play-circle"></i></div>
+            <div style="font-size:1.5rem;">{{ total_plays }}</div>
+            <div class="small">Total Plays</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2rem;"><i class="bi bi-star"></i></div>
+            <div style="font-size:1.5rem;">{{ top_games | length }}</div>
+            <div class="small">Active Games</div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Links -->
+<div class="mb-4 d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('games_admin.list_games') }}" class="btn btn-primary">
+        <i class="bi bi-list"></i> Manage Games
+    </a>
+    <a href="{{ url_for('games_admin.add_game') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Add Game
+    </a>
+    <a href="{{ url_for('games_admin.sessions') }}" class="btn btn-primary">
+        <i class="bi bi-people"></i> Active Sessions
+    </a>
+    <a href="{{ url_for('games_admin.config') }}" class="btn btn-primary">
+        <i class="bi bi-gear"></i> System Config
+    </a>
+</div>
+
+<!-- Top Games -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-bar-chart"></i> Top Games by Plays</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Game</th><th>Type</th><th>Plays</th></tr></thead>
+                    <tbody>
+                    {% for game in top_games %}
+                    <tr>
+                        <td>{{ game.name }}</td>
+                        <td><small>{{ game.game_type }}</small></td>
+                        <td>{{ game.play_count or 0 }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-clock-history"></i> Recent Sessions</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>User</th><th>Game</th><th>Status</th></tr></thead>
+                    <tbody>
+                    {% for s in recent_sessions %}
+                    <tr>
+                        <td>{{ s.user.username }}</td>
+                        <td>{{ s.game.name }}</td>
+                        <td>
+                            <span class="badge" style="background:{% if s.status == 'active' %}#003300{% else %}#1a1a1a{% endif %};color:#00ff00;">
+                                {{ s.status }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

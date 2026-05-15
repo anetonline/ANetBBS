@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}History — {{ page.title }}{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-clock-history"></i> History — <a href="{{ url_for('wiki.view', slug=page.slug) }}">{{ page.title }}</a></h1>
+    <p class="text-muted">{{ revs|length }} revision{{ '' if revs|length == 1 else 's' }}</p>
+</div>
+
+<form id="diffForm" method="get" action="" onsubmit="return doDiff(event)">
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-arrow-left-right"></i>
+            Pick two revisions and click Compare to see the diff.
+            <button class="btn btn-sm btn-primary ms-3"><i class="bi bi-arrow-left-right"></i> Compare selected</button>
+        </div>
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th style="width:40px">A</th>
+                    <th style="width:40px">B</th>
+                    <th>Rev</th>
+                    <th>When</th>
+                    <th>Who</th>
+                    <th>Edit summary</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in revs %}
+                <tr>
+                    <td><input type="radio" name="a" value="{{ r.rev_num }}"
+                               {% if loop.index == 2 %}checked{% endif %}></td>
+                    <td><input type="radio" name="b" value="{{ r.rev_num }}"
+                               {% if loop.index == 1 %}checked{% endif %}></td>
+                    <td><a href="{{ url_for('wiki.view_revision', slug=page.slug, rev_num=r.rev_num) }}">r{{ r.rev_num }}</a></td>
+                    <td><small>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                    <td>
+                        {% if r.author %}<a href="{{ url_for('profile.view_user', username=r.author.username) }}">{{ r.author.username }}</a>
+                        {% else %}<small class="text-muted">{{ r.author_ip or 'anon' }}</small>{% endif %}
+                    </td>
+                    <td><small>{{ r.edit_summary or '' }}</small></td>
+                    <td>
+                    {% if current_user.is_authenticated and not loop.first %}
+                    <form method="post" action="{{ url_for('wiki.revert', slug=page.slug, rev_num=r.rev_num) }}" class="d-inline"
+                          onsubmit="return confirm('Revert to revision r{{ r.rev_num }}? A new revision will be written with this content.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-warning" title="Revert to this revision">
+                            <i class="bi bi-arrow-counterclockwise"></i>
+                        </button>
+                    </form>
+                    {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</form>
+
+<script>
+function doDiff(e) {
+    e.preventDefault();
+    const a = document.querySelector('input[name="a"]:checked');
+    const b = document.querySelector('input[name="b"]:checked');
+    if (!a || !b) { alert('Pick A and B.'); return false; }
+    if (a.value === b.value) { alert('Pick two different revisions.'); return false; }
+    location.href = '{{ url_for("wiki.view", slug=page.slug) }}/diff/' + a.value + '/' + b.value;
+    return false;
+}
+</script>
+{% endblock %}

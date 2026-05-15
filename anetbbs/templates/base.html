@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ config.BBS_NAME }}{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <style>
+        :root {
+            --bbs-primary: #0d6efd;
+            --bbs-dark: #212529;
+            --bbs-light: #f8f9fa;
+            /* New theme system: separate body text from accent so themes
+               can be high-contrast without being eye-strain bright. */
+            --theme-bg: #1e1e2e;
+            --theme-bg-dark: #11111b;
+            --theme-primary: #89b4fa;
+            --theme-primary-dark: #74a4ea;
+            --theme-text: #cdd6f4;
+            --theme-text-muted: #a6adc8;
+            --theme-card-bg: #252537;
+            --theme-input-bg: #181825;
+            --theme-input-focus: #1e1e2e;
+            --theme-border: #45475a;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: var(--theme-bg);
+            color: var(--theme-text);
+            line-height: 1.5;
+        }
+
+        .navbar {
+            background-color: var(--theme-bg-dark) !important;
+            border-bottom: 2px solid var(--theme-primary);
+        }
+
+        .navbar-brand, .nav-link {
+            color: var(--theme-primary) !important;
+            font-weight: 600;
+        }
+
+        .navbar-brand:hover, .nav-link:hover {
+            color: var(--theme-primary-dark) !important;
+        }
+
+        .container {
+            background-color: var(--theme-bg);
+            border: 1px solid var(--theme-border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            color: var(--theme-text);
+        }
+
+        .card {
+            background-color: var(--theme-card-bg);
+            border: 1px solid var(--theme-border);
+            color: var(--theme-text);
+            border-radius: 6px;
+        }
+
+        .card-header {
+            background-color: var(--theme-bg-dark);
+            border-bottom: 1px solid var(--theme-border);
+            font-weight: 600;
+            color: var(--theme-primary);
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--theme-primary);
+        }
+
+        .text-muted, small.text-muted {
+            color: var(--theme-text-muted) !important;
+        }
+
+        .btn-primary {
+            background-color: var(--theme-primary);
+            border-color: var(--theme-primary);
+            color: var(--theme-bg-dark);
+            font-weight: 500;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--theme-primary-dark);
+            border-color: var(--theme-primary-dark);
+            color: var(--theme-bg-dark);
+        }
+
+        .btn-outline-secondary {
+            color: var(--theme-text);
+            border-color: var(--theme-border);
+        }
+        .btn-outline-secondary:hover {
+            background-color: var(--theme-border);
+            color: var(--theme-text);
+        }
+
+        table { color: var(--theme-text); }
+        th { color: var(--theme-primary); }
+        .table > :not(caption) > * > * {
+            background-color: var(--theme-card-bg);
+            border-bottom-color: var(--theme-border);
+            color: var(--theme-text);
+        }
+        
+        .alert {
+            border: 1px solid;
+            font-weight: bold;
+        }
+        
+        .alert-success {
+            background-color: #003300;
+            color: #00ff00;
+            border-color: #00ff00;
+        }
+        
+        .alert-danger {
+            background-color: #330000;
+            color: #ff0000;
+            border-color: #ff0000;
+        }
+        
+        .alert-info {
+            background-color: #003333;
+            color: #00ffff;
+            border-color: #00ffff;
+        }
+        
+        .alert-warning {
+            background-color: #333300;
+            color: #ffff00;
+            border-color: #ffff00;
+        }
+
+        /* Bootstrap's default list-group-item is white-on-light, which
+           clashes with the dark theme everywhere it's used (RSS feed
+           rows, leaderboard, stats, docs, profile, oneliners, the
+           @mention popup, etc). Re-skin to match cards. */
+        .list-group { background-color: transparent; border-radius: 6px; overflow: hidden; }
+        .list-group-item {
+            background-color: var(--theme-card-bg);
+            border-color: var(--theme-border);
+            color: var(--theme-text);
+        }
+        .list-group-item-action:hover,
+        .list-group-item-action:focus {
+            background-color: var(--theme-bg-light, #1a1a2e);
+            color: var(--theme-text);
+        }
+        .list-group-item.active,
+        .list-group-item-action.active {
+            background-color: var(--theme-primary);
+            border-color: var(--theme-primary);
+            color: var(--theme-bg-dark);
+        }
+        /* Inside a list-group-item, the muted summary text needs
+           enough contrast against the dark card. */
+        .list-group-item .text-muted,
+        .list-group-item small.text-muted {
+            color: var(--theme-text-muted, #9ca3af) !important;
+        }
+
+        /* Bootstrap's .table-warning / -info / -danger / -success row
+           tints default to light pastel backgrounds on light text —
+           used e.g. on the Instant-Messages inbox to highlight unread
+           rows. Re-skin them to the same dark palette as .alert-* so
+           they read against the dark theme. */
+        .table > :not(caption) > * > *.table-warning,
+        .table > :not(caption) > tr.table-warning > *,
+        tr.table-warning > * {
+            background-color: #332b00 !important;
+            color: #ffe066 !important;
+        }
+        .table > :not(caption) > * > *.table-info,
+        .table > :not(caption) > tr.table-info > *,
+        tr.table-info > * {
+            background-color: #002b33 !important;
+            color: #66e0ff !important;
+        }
+        .table > :not(caption) > * > *.table-success,
+        .table > :not(caption) > tr.table-success > *,
+        tr.table-success > * {
+            background-color: #003319 !important;
+            color: #66ff99 !important;
+        }
+        .table > :not(caption) > * > *.table-danger,
+        .table > :not(caption) > tr.table-danger > *,
+        tr.table-danger > * {
+            background-color: #330000 !important;
+            color: #ff6666 !important;
+        }
+        .table > :not(caption) > * > *.table-active,
+        tr.table-active > * {
+            background-color: var(--theme-bg-light, #1a1a2e) !important;
+            color: var(--theme-text) !important;
+        }
+
+        .form-control, .form-select {
+            background-color: var(--theme-input-bg);
+            border: 1px solid var(--theme-border);
+            color: var(--theme-text);
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--theme-input-focus);
+            border-color: var(--theme-primary);
+            color: var(--theme-text);
+            box-shadow: 0 0 0 0.2rem rgba(137, 180, 250, 0.2);
+        }
+
+        .form-control::placeholder { color: var(--theme-text-muted); opacity: 0.7; }
+
+        .form-label {
+            color: var(--theme-text);
+            font-weight: 500;
+        }
+
+        a {
+            color: var(--theme-primary);
+            text-decoration: none;
+        }
+        
+        a:hover {
+            color: var(--theme-primary-dark);
+            text-decoration: underline;
+        }
+        
+        .table {
+            color: var(--theme-primary);
+        }
+        
+        .table-striped > tbody > tr:nth-of-type(odd) > * {
+            background-color: #0a0a0a;
+        }
+        
+        .bbs-header {
+            text-align: center;
+            padding: 20px;
+            border-bottom: 2px solid var(--theme-primary);
+            margin-bottom: 20px;
+        }
+        
+        .bbs-header h1 {
+            font-size: 2.5rem;
+            color: var(--theme-primary);
+            text-shadow: 0 0 10px var(--theme-primary);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            border-top: 2px solid var(--theme-primary);
+            margin-top: 40px;
+            color: var(--theme-primary);
+        }
+        /* ---- Mobile responsive tweaks (phone widths) ---- */
+        @media (max-width: 768px) {
+            .bbs-header h1 { font-size: 1.4rem; }
+            .navbar-brand { font-size: 1rem; }
+            /* Tables — let them scroll horizontally rather than wrap. */
+            .table-responsive-mobile { overflow-x: auto; }
+            table.table { font-size: 0.85rem; }
+            /* Stack action bars in card headers */
+            .card-header .float-end { float: none !important; display: block; margin-top: 4px; }
+            /* Toasts stay readable on narrow screens */
+            #bcastContainer { width: 100%; padding: 8px !important; }
+            #bcastContainer .toast { width: 100%; max-width: 100%; }
+            /* Footer doesn't crowd the bottom */
+            .footer { padding: 8px 4px; font-size: 0.75rem; }
+            /* Make form input rows wrap properly */
+            .row.g-2 > [class*="col-"] { margin-bottom: 4px; }
+        }
+        /* ANSI/CP437 message body — preserves whitespace and uses a font with
+           good box-drawing/CP437 coverage. Inline color spans come from the
+           msgbody filter. */
+        .ansi-body {
+            font-family: 'IBM VGA', 'Cascadia Code', 'Consolas',
+                         'Lucida Console', 'Courier New', monospace;
+            line-height: 1.2;
+            white-space: pre-wrap;
+        }
+        .ansi-body span { white-space: pre-wrap; }
+        /* Voting */
+        .vote-widget { display: inline-flex; align-items: center; gap: 2px; }
+        .vote-widget .vote-btn {
+            background: transparent;
+            border: 1px solid var(--theme-border, #444);
+            color: var(--theme-primary, #ccc);
+            padding: 2px 8px;
+        }
+        .vote-widget .vote-btn:hover:not(:disabled) {
+            background: var(--theme-bg-light, #222);
+        }
+        .vote-widget .vote-up.active {
+            color: #4caf50; border-color: #4caf50;
+        }
+        .vote-widget .vote-down.active {
+            color: #e53935; border-color: #e53935;
+        }
+        .vote-widget .vote-score {
+            font-weight: bold; min-width: 1.5em; text-align: center;
+        }
+    </style>
+
+    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active %}
+    <style id="user-theme">
+    :root {
+      {% for key, value in (current_user.theme.css_variables | from_json).items() %}
+      {{ key }}: {{ value }};
+      {% endfor %}
+    }
+    </style>
+    {% endif %}
+
+    {% block extra_css %}{% endblock %}
+
+    {# CSRF token for fetch()-based POSTs (vote API, future AJAX endpoints) #}
+    {% if csrf_token is defined %}
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    {% endif %}
+
+    <!-- Optional: highlight.js for fenced code blocks in markdown view. -->
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('main.index') }}">
+                <i class="bi bi-terminal"></i> {{ config.BBS_NAME }}
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <!-- Home -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.index') }}">
+                            <i class="bi bi-house"></i> Home
+                        </a>
+                    </li>
+
+                    <!-- Messaging dropdown — Boards / PMs / Netmail / Contacts -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-envelope"></i> Messaging
+                        </a>
+                        <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            <li><a class="dropdown-item" href="{{ url_for('boards.list_boards') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-left-text"></i> Local Boards</a></li>
+                            {% if current_user.is_authenticated %}
+                            <li><a class="dropdown-item" href="{{ url_for('echomail.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast-pin"></i> Echomail (FidoNet/QWK)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('pm.inbox') }}" style="color:var(--theme-primary);">
+                                <i class="bi bi-envelope-fill"></i> Private Messages
+                                {% set unread = current_user.received_messages | selectattr('read_at', 'none') | selectattr('is_deleted_recipient', 'equalto', False) | list | length %}
+                                {% if unread > 0 %} <span class="badge bg-danger">{{ unread }}</span>{% endif %}
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('netmail.inbox') }}" style="color:var(--theme-primary);"><i class="bi bi-envelope-paper"></i> Netmail (FidoNet)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('imsg.inbox') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-dots-fill"></i> Inter-BBS IM (MSP)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('qwk_user.index') }}" style="color:var(--theme-primary);"><i class="bi bi-mailbox"></i> QWK Offline Reader</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('telegram.index') }}" style="color:var(--theme-primary);"><i class="bi bi-lightning-charge"></i> Telegrams</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('contacts.index') }}" style="color:var(--theme-primary);"><i class="bi bi-person-rolodex"></i> Address Book</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+
+                    {% if current_user.is_authenticated %}
+                    <!-- Chat dropdown — MRC / IRC -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-broadcast"></i> Chat
+                        </a>
+                        <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            <li><a class="dropdown-item" href="{{ url_for('mrc.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast"></i> MRC Chat</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('irc.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast-pin"></i> IRC</a></li>
+                        </ul>
+                    </li>
+
+                    <!-- Games -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('games.lobby') }}">
+                            <i class="bi bi-controller"></i> Games
+                        </a>
+                    </li>
+                    {% endif %}
+
+                    <!-- Files dropdown -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-folder"></i> Files
+                        </a>
+                        <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            <li><a class="dropdown-item" href="{{ url_for('files.list_files') }}" style="color:var(--theme-primary);"><i class="bi bi-folder"></i> File Gallery</a></li>
+                            {% if current_user.is_authenticated %}
+                            <li><a class="dropdown-item" href="{{ url_for('file_areas.index') }}" style="color:var(--theme-primary);"><i class="bi bi-folder2-open"></i> File Areas</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('file_areas.my_shares') }}" style="color:var(--theme-primary);"><i class="bi bi-share"></i> My File Shares</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+
+                    <!-- Tools dropdown — Polls / Nodelist / About -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-tools"></i> Tools
+                        </a>
+                        <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            {% if current_user.is_authenticated %}
+                            <li><a class="dropdown-item" href="{{ url_for('web_terminal.index') }}" style="color:var(--theme-primary);"><i class="bi bi-terminal-fill"></i> Web Terminal</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('who.index') }}" style="color:var(--theme-primary);"><i class="bi bi-people"></i> Who's Online</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('bulletins.index') }}" style="color:var(--theme-primary);"><i class="bi bi-newspaper"></i> Bulletins</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('site_pages.view', slug='history') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> BBS History</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('gemini.index') }}" style="color:var(--theme-primary);"><i class="bi bi-stars"></i> Gemini Capsules</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('personal_pages.my_pages') }}" style="color:var(--theme-primary);"><i class="bi bi-globe2"></i> My Web Pages</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('calendar.index') }}" style="color:var(--theme-primary);"><i class="bi bi-calendar3"></i> Calendar</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('groups.index') }}" style="color:var(--theme-primary);"><i class="bi bi-people-fill"></i> Groups</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('leaderboard.index') }}" style="color:var(--theme-primary);"><i class="bi bi-trophy-fill"></i> Leaderboard</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('finger.index') }}" style="color:var(--theme-primary);"><i class="bi bi-search"></i> Finger</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('peers.index') }}" style="color:var(--theme-primary);"><i class="bi bi-globe2"></i> BBS Directory</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('shoutbox.index') }}" style="color:var(--theme-primary);"><i class="bi bi-megaphone"></i> Shoutbox</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('gallery.index') }}" style="color:var(--theme-primary);"><i class="bi bi-images"></i> Image Galleries</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('rss.index') }}" style="color:var(--theme-primary);"><i class="bi bi-rss-fill"></i> RSS Reader</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('polls.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bar-chart"></i> Polls</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('saved.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bookmark-star"></i> Saved Messages</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            {% endif %}
+                            <li><a class="dropdown-item" href="{{ url_for('nodelist.browse') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Nodelist</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('stats.index') }}" style="color:var(--theme-primary);"><i class="bi bi-graph-up"></i> Statistics</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tour') }}" style="color:var(--theme-primary);"><i class="bi bi-compass"></i> Tour</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('docs.index') }}" style="color:var(--theme-primary);"><i class="bi bi-book"></i> Documentation</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('wiki.index') }}" style="color:var(--theme-primary);"><i class="bi bi-journal-text"></i> Wiki</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.about') }}" style="color:var(--theme-primary);"><i class="bi bi-info-circle"></i> About</a></li>
+                        </ul>
+                    </li>
+
+                    {% if current_user.is_authenticated and current_user.is_admin %}
+                    <!-- Admin dropdown -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-shield-lock"></i> Admin
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Overview</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.dashboard') }}" style="color:var(--theme-primary);">Dashboard</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.setup_wizard') }}" style="color:var(--theme-primary);">🪄 Setup Wizard</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.motd_admin') }}" style="color:var(--theme-primary);">MOTD Pool</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.caller_log') }}" style="color:var(--theme-primary);">Caller Log</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.broadcast') }}" style="color:var(--theme-primary);">📢 Broadcast</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.caller_log') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> Caller Log</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.ip_bans') }}" style="color:var(--theme-primary);"><i class="bi bi-ban"></i> IP Bans</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.checklist') }}" style="color:var(--theme-primary);"><i class="bi bi-check2-square"></i> Launch Checklist</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tutorial') }}" style="color:var(--theme-primary);"><i class="bi bi-mortarboard"></i> Sysop Tutorial</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('control.index') }}" style="color:var(--theme-primary);"><i class="bi bi-sliders"></i> Control Panel</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('control.index') }}#nodespy" style="color:var(--theme-primary);"><i class="bi bi-binoculars"></i> NodeSpy (kick users)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.newuser_questions') }}" style="color:var(--theme-primary);"><i class="bi bi-question-circle"></i> New User Questions</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.pending_users') }}" style="color:var(--theme-primary);"><i class="bi bi-person-check"></i> Pending Users (NUV)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.newsletter') }}" style="color:var(--theme-primary);"><i class="bi bi-newspaper"></i> Newsletter</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.inactive_users') }}" style="color:var(--theme-primary);"><i class="bi bi-person-dash"></i> Inactive Users</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.time_budgets') }}" style="color:var(--theme-primary);"><i class="bi bi-clock"></i> Time Budgets</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.connection_test') }}" style="color:var(--theme-primary);">🔌 Connection Test</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.console') }}" style="color:var(--theme-primary);">⌨️ Sysop Console</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.virus_scan_admin') }}" style="color:var(--theme-primary);">🦠 Bulk Virus Scan</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.word_filter') }}" style="color:var(--theme-primary);">🔠 Word Filter</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('file_queue.index') }}" style="color:var(--theme-primary);"><i class="bi bi-shield-check"></i> File Queue</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.webhooks_admin') }}" style="color:var(--theme-primary);">🔗 Webhooks</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.pages') }}" style="color:var(--theme-primary);">🔔 Sysop Pages</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.activity') }}" style="color:var(--theme-primary);">Activity Log</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.registration_attempts') }}" style="color:var(--theme-primary);">Registration Attempts</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Users &amp; Content</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.users') }}" style="color:var(--theme-primary);">Users</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.boards') }}" style="color:var(--theme-primary);">Boards</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.bulletins') }}" style="color:var(--theme-primary);">Bulletins</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.themes') }}" style="color:var(--theme-primary);">Themes</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.theme_builder') }}" style="color:var(--theme-primary);">🎨 Theme Builder</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.db_backup') }}" style="color:var(--theme-primary);">💾 DB Backup</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Subsystems</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('games_admin.dashboard') }}" style="color:var(--theme-primary);">Door Games</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('gallery_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-images"></i> Galleries</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('rss_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-rss-fill"></i> RSS Feeds</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('echomail_admin.dashboard') }}" style="color:var(--theme-primary);">Echomail</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.default_echos') }}" style="color:var(--theme-primary);">Default Echo Subs</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.registry_index') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Federation Registry</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.file_echo_subs') }}" style="color:var(--theme-primary);">File-Echo Subs</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.mrc_irc_bridges') }}" style="color:var(--theme-primary);">MRC ↔ IRC Bridges</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.dialout_admin') }}" style="color:var(--theme-primary);">Dial-Out Directory</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.file_areas_admin') }}" style="color:var(--theme-primary);">File Areas</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.tic_log') }}" style="color:var(--theme-primary);">TIC Log</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.chat_bans') }}" style="color:var(--theme-primary);">Chat Bans</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('menu_admin.list_menus') }}" style="color:var(--theme-primary);">BBS Menus</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.index') }}" style="color:var(--theme-primary);">🎨 ANSI Editor</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.settings') }}" style="color:var(--theme-primary);">Settings</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <span class="nav-link"><i class="bi bi-circle-fill text-success" style="font-size:0.5rem;"></i> {{ online_count }} online</span>
+                    </li>
+                    {% if current_user.is_authenticated %}
+                        <!-- Quick PM badge — surfaces unread count -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('pm.inbox') }}" title="Private Messages">
+                                <i class="bi bi-envelope"></i>
+                                {% set unread2 = current_user.received_messages | selectattr('read_at', 'none') | selectattr('is_deleted_recipient', 'equalto', False) | list | length %}
+                                {% if unread2 > 0 %}<span class="badge bg-danger">{{ unread2 }}</span>{% endif %}
+                            </a>
+                        </li>
+                        <!-- Inter-BBS Instant Messages (RFC 1312 / MSP) -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('imsg.inbox') }}" title="Inter-BBS Instant Messages">
+                                <i class="bi bi-chat-dots"></i>
+                                {% set im_unread = (current_user.instant_messages | selectattr('is_read', 'equalto', False) | list | length) if current_user.instant_messages else 0 %}
+                                {% if im_unread > 0 %}<span class="badge bg-info">{{ im_unread }}</span>{% endif %}
+                            </a>
+                        </li>
+                        <!-- Notification bell — @mentions, sysop replies, etc. -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('notifications.index') }}" title="Notifications">
+                                <i class="bi bi-bell"></i>
+                                {% set notif_unread = (current_user.notifications | selectattr('is_read', 'equalto', False) | list | length) if current_user.notifications else 0 %}
+                                {% if notif_unread > 0 %}<span class="badge bg-warning text-dark">{{ notif_unread }}</span>{% endif %}
+                            </a>
+                        </li>
+                        <!-- Account dropdown — Profile / AKAs / Themes / Logout -->
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="bi bi-person-circle"></i> {{ current_user.username }}
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                                <li><a class="dropdown-item" href="{{ url_for('profile.index') }}" style="color:var(--theme-primary);"><i class="bi bi-person"></i> View Profile</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('profile.edit') }}" style="color:var(--theme-primary);"><i class="bi bi-pencil"></i> Edit Profile</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('profile.akas') }}" style="color:var(--theme-primary);"><i class="bi bi-mailbox"></i> FTN AKAs</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('profile.themes') }}" style="color:var(--theme-primary);"><i class="bi bi-palette"></i> Themes</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('profile.change_password') }}" style="color:var(--theme-primary);"><i class="bi bi-key"></i> Change Password</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('blocks.index') }}" style="color:var(--theme-primary);"><i class="bi bi-slash-circle"></i> Block List</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('notifications.settings') }}" style="color:var(--theme-primary);"><i class="bi bi-bell"></i> Notification Settings</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('profile.export_data') }}" style="color:var(--theme-primary);"><i class="bi bi-cloud-download"></i> Export My Data</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}" style="color:var(--theme-primary);"><i class="bi bi-box-arrow-right"></i> Logout</a></li>
+                            </ul>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.login') }}">
+                                <i class="bi bi-box-arrow-in-right"></i> Login
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.register') }}">
+                                <i class="bi bi-person-plus"></i> Register
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Secondary search bar — pulled out of the main navbar so the nav links
+         keep their full width when many sections are present. -->
+    <div class="bg-dark border-bottom" style="border-color:var(--theme-primary)!important;">
+        <div class="container py-1">
+            <form class="d-flex" method="get" action="{{ url_for('main.search') }}">
+                <input class="form-control form-control-sm me-2" type="search" name="q"
+                       placeholder="Search posts, users, files…" aria-label="Search">
+                <button class="btn btn-primary btn-sm" type="submit">
+                    <i class="bi bi-search"></i> Search
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Flash Messages -->
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        {% if qotd %}
+            <p style="font-style:italic;opacity:0.8;margin-bottom:0.25rem;">☆ {{ qotd }}</p>
+        {% endif %}
+        <p>&copy; {{ config.BBS_NAME }} | Powered by ANetBBS</p>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Site-wide sysop-broadcast listener. Pops a Bootstrap toast on
+         any incoming /sysop_broadcast event so all logged-in browser
+         tabs see the message in real time. -->
+    {% if current_user.is_authenticated %}
+    <div id="bcastContainer" class="position-fixed top-0 end-0 p-3" style="z-index:10000;"></div>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+    (function() {
+        try {
+            const sock = io('/', {transports: ['websocket', 'polling']});
+            sock.on('sysop_broadcast', d => {
+                const c = document.getElementById('bcastContainer');
+                if (!c) return;
+                const t = document.createElement('div');
+                t.className = 'toast show align-items-center text-bg-warning border-0 mb-2';
+                t.innerHTML = `<div class="d-flex">
+                    <div class="toast-body">
+                        <strong>📢 ${d.sender}:</strong> ${d.text}
+                    </div>
+                    <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+                c.appendChild(t);
+                setTimeout(() => t.remove(), 30000);
+            });
+            {% if current_user.is_admin %}
+            // Sysop-only: real-time toast when a telnet/SSH/rlogin user pages.
+            sock.on('sysop_page', d => {
+                const c = document.getElementById('bcastContainer');
+                if (!c) return;
+                const t = document.createElement('div');
+                t.className = 'toast show align-items-center text-bg-danger border-0 mb-2';
+                t.innerHTML = `<div class="d-flex">
+                    <div class="toast-body">
+                        <strong>🔔 Page from user #${d.user_id}</strong>
+                        <small class="d-block">via ${d.service}</small>
+                        <div class="mt-1">${d.message.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</div>
+                        <a href="/admin/pages" class="text-white text-decoration-underline small">View all pages</a>
+                    </div>
+                    <button type="button" class="btn-close me-2 m-auto btn-close-white" data-bs-dismiss="toast"></button>
+                </div>`;
+                c.appendChild(t);
+                // Persist longer than broadcasts since it's an interruption.
+                setTimeout(() => t.remove(), 120000);
+            });
+            {% endif %}
+        } catch (e) { console.warn('sysop broadcast socket failed:', e); }
+    })();
+    </script>
+    {% endif %}
+
+    <!-- Site-wide: handle .copy-permalink-btn clicks. Buttons need
+         data-kind and data-id attributes; we mint a slug via JSON API
+         then copy the resolved short URL to clipboard. -->
+    <script>
+    document.addEventListener('click', async function(e) {
+        const btn = e.target.closest('.copy-permalink-btn');
+        if (!btn) return;
+        e.preventDefault();
+        const kind = btn.dataset.kind;
+        const id = btn.dataset.id;
+        if (!kind || !id) return;
+        try {
+            const r = await fetch(`/m/get/${kind}/${id}`, {credentials: 'same-origin'});
+            const data = await r.json();
+            if (data && data.url) {
+                await navigator.clipboard.writeText(data.url);
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                setTimeout(() => { btn.innerHTML = orig; }, 2000);
+            }
+        } catch (err) {
+            console.error('Copy permalink failed', err);
+        }
+    });
+    </script>
+
+    {% block extra_js %}{% endblock %}
+
+    {# --- Vote button click handler (delegated, works for all .vote-widget) --- #}
+    <script>
+    (function() {
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const csrf = csrfMeta ? csrfMeta.getAttribute('content') : '';
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.vote-btn');
+            if (!btn) return;
+            if (btn.disabled) return;
+            const widget = btn.closest('.vote-widget');
+            if (!widget) return;
+            e.preventDefault();
+            const msgType = widget.dataset.msgType;
+            const msgId = parseInt(widget.dataset.msgId, 10);
+            const value = parseInt(btn.dataset.value, 10);
+            fetch('/api/vote', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrf,
+                },
+                body: JSON.stringify({type: msgType, id: msgId, value: value}),
+            })
+            .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+            .then(data => {
+                widget.querySelector('.vote-up-count').textContent = data.up;
+                widget.querySelector('.vote-down-count').textContent = data.down;
+                widget.querySelector('.vote-score').textContent = data.score;
+                const up = widget.querySelector('.vote-up');
+                const down = widget.querySelector('.vote-down');
+                up.classList.toggle('active', data.my_vote > 0);
+                down.classList.toggle('active', data.my_vote < 0);
+                up.querySelector('i').className = 'bi bi-hand-thumbs-up'
+                    + (data.my_vote > 0 ? '-fill' : '');
+                down.querySelector('i').className = 'bi bi-hand-thumbs-down'
+                    + (data.my_vote < 0 ? '-fill' : '');
+            })
+            .catch(err => console.error('vote failed:', err));
+        });
+    })();
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('pre code').forEach(b => {
+            try { hljs.highlightElement(b); } catch (e) {}
+        });
+    });
+    </script>
+
+    {% if current_user.is_authenticated %}
+    <!-- @mention autocomplete on all textareas -->
+    <div id="mentionPopup" class="list-group position-absolute"
+         style="display:none;z-index:1100;max-width:240px;font-size:0.9rem;"></div>
+    <script>
+    (function() {
+        const popup = document.getElementById('mentionPopup');
+        let activeTa = null, triggerStart = -1, items = [], hi = 0;
+        async function fetchSuggestions(prefix) {
+            try {
+                const r = await fetch('/users/suggest?q=' + encodeURIComponent(prefix));
+                return await r.json();
+            } catch (e) { return []; }
+        }
+        function place(ta) {
+            const r = ta.getBoundingClientRect();
+            popup.style.top = (window.scrollY + r.bottom) + 'px';
+            popup.style.left = (window.scrollX + r.left) + 'px';
+        }
+        function render() {
+            popup.innerHTML = '';
+            items.forEach((it, i) => {
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'list-group-item list-group-item-action ' +
+                              (i === hi ? 'active' : '');
+                a.textContent = '@' + it.username;
+                a.addEventListener('mousedown', (ev) => {
+                    ev.preventDefault();
+                    insert(it.username);
+                });
+                popup.appendChild(a);
+            });
+            popup.style.display = items.length ? 'block' : 'none';
+        }
+        function insert(username) {
+            if (!activeTa || triggerStart < 0) return;
+            const v = activeTa.value;
+            const before = v.slice(0, triggerStart);
+            const after = v.slice(activeTa.selectionStart);
+            const insertion = '@' + username + ' ';
+            activeTa.value = before + insertion + after;
+            const newPos = (before + insertion).length;
+            activeTa.selectionStart = activeTa.selectionEnd = newPos;
+            popup.style.display = 'none';
+            items = []; triggerStart = -1;
+            activeTa.focus();
+        }
+        async function maybeShow(ta) {
+            const pos = ta.selectionStart;
+            const v = ta.value.slice(0, pos);
+            const m = v.match(/(^|\s)@([A-Za-z0-9_.-]{1,20})$/);
+            if (!m) { popup.style.display = 'none'; items = []; return; }
+            triggerStart = pos - m[2].length - 1;
+            activeTa = ta;
+            const data = await fetchSuggestions(m[2]);
+            items = data; hi = 0;
+            place(ta); render();
+        }
+        document.addEventListener('input', (e) => {
+            if (e.target && e.target.tagName === 'TEXTAREA') maybeShow(e.target);
+        });
+        document.addEventListener('keydown', (e) => {
+            if (popup.style.display !== 'block' || !items.length) return;
+            if (e.key === 'ArrowDown') { hi = (hi + 1) % items.length; render(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { hi = (hi - 1 + items.length) % items.length; render(); e.preventDefault(); }
+            else if (e.key === 'Enter' || e.key === 'Tab') {
+                insert(items[hi].username); e.preventDefault();
+            } else if (e.key === 'Escape') {
+                popup.style.display = 'none'; items = [];
+            }
+        });
+        document.addEventListener('click', (e) => {
+            if (!popup.contains(e.target)) popup.style.display = 'none';
+        });
+    })();
+    </script>
+    {% endif %}
+</body>
+</html>

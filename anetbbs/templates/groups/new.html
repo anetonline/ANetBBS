@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}New Group{% endblock %}
+{% block content %}
+<div class="bbs-header"><h1><i class="bi bi-people-fill"></i> Create Group</h1></div>
+
+<form method="post" class="card p-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label">Group name</label>
+        <input type="text" name="name" class="form-control" required maxlength="80">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Tag (1-8 chars, shown next to your name)</label>
+        <input type="text" name="tag" class="form-control" maxlength="8" placeholder="ART, TW2K">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-control" rows="4"></textarea>
+    </div>
+    <div class="form-check mb-3">
+        <input type="checkbox" name="is_open" id="is_open" class="form-check-input" value="1">
+        <label class="form-check-label" for="is_open">Open membership (anyone can join)</label>
+    </div>
+    <div>
+        <button class="btn btn-primary"><i class="bi bi-check"></i> Create</button>
+        <a href="{{ url_for('groups.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

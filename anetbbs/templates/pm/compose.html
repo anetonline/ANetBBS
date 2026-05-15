@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Compose Message - {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pencil"></i> Compose Message</h1>
+</div>
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">New Message</div>
+            <div class="card-body">
+                <form method="post" data-draft-key="pm-compose">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.recipient.label(class="form-label") }}
+                        {{ form.recipient(class="form-control") }}
+                        {% for e in form.recipient.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.subject.label(class="form-label") }}
+                        {{ form.subject(class="form-control") }}
+                        {% for e in form.subject.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.content.label(class="form-label") }}
+                        {{ form.content(class="form-control", rows="10") }}
+                        {% for e in form.content.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <small id="draftStatus" class="text-muted me-auto"></small>
+                        {{ form.submit(class="btn btn-primary") }}
+                        <a href="{{ url_for('pm.inbox') }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+<script>
+(function() {
+    const form = document.querySelector('form[data-draft-key]');
+    if (!form) return;
+    const key = 'draft:' + form.dataset.draftKey;
+    const status = document.getElementById('draftStatus');
+    const fields = form.querySelectorAll('input[type=text], textarea');
+    function load() {
+        try {
+            const raw = localStorage.getItem(key); if (!raw) return;
+            const data = JSON.parse(raw);
+            fields.forEach(f => { if (f.name && data[f.name] && !f.value) f.value = data[f.name]; });
+            if (status) status.textContent = 'Draft restored';
+        } catch (e) {}
+    }
+    function save() {
+        try {
+            const out = {};
+            fields.forEach(f => { if (f.name) out[f.name] = f.value; });
+            localStorage.setItem(key, JSON.stringify(out));
+            if (status) status.textContent = 'Draft saved ' + new Date().toLocaleTimeString();
+        } catch (e) {}
+    }
+    load();
+    let t = null;
+    fields.forEach(f => f.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 800); }));
+    form.addEventListener('submit', () => { try { localStorage.removeItem(key); } catch (e) {} });
+})();
+</script>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

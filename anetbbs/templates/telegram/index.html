@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Telegrams - {{ folder|capitalize }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-lightning-charge-fill"></i> Telegrams
+        <small class="text-muted">{{ folder|capitalize }}</small></h1>
+    <p>One-line attention messages between BBSes (FidoNet crashmail).</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('telegram.index') }}"
+       class="btn btn-sm {% if folder == 'inbox' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        <i class="bi bi-inbox"></i> Inbox
+    </a>
+    <a href="{{ url_for('telegram.sent') }}"
+       class="btn btn-sm {% if folder == 'sent' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        <i class="bi bi-send"></i> Sent
+    </a>
+    <a href="{{ url_for('telegram.send') }}" class="btn btn-sm btn-success">
+        <i class="bi bi-lightning"></i> Send Telegram
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if messages %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>{% if folder == 'inbox' %}From{% else %}To{% endif %}</th>
+                <th>Address</th><th>Message</th><th>Date</th>
+            </tr></thead>
+            <tbody>
+            {% for m in messages %}
+                <tr>
+                    <td>{% if folder == 'inbox' %}{{ m.from_name }}{% else %}{{ m.to_name }}{% endif %}</td>
+                    <td><code>{% if folder == 'inbox' %}{{ m.from_address }}{% else %}{{ m.to_address }}{% endif %}</code></td>
+                    <td>
+                        {{ m.body[:120] }}{% if m.body|length > 120 %}…{% endif %}
+                        {% if m.is_crash %}<span class="badge bg-warning text-dark">CRASH</span>{% endif %}
+                    </td>
+                    <td><small>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No telegrams in {{ folder }}.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

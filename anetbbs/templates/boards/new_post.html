@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}New Post - {{ board.name }} - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-plus-circle"></i> New Post in {{ board.name }}
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('boards.new_post', board_id=board.id) }}" data-draft-key="post-board-{{ board.id }}">
+            {{ form.hidden_tag() }}
+            
+            <div class="mb-3">
+                {{ form.subject.label(class="form-label") }}
+                {{ form.subject(class="form-control" + (" is-invalid" if form.subject.errors else "")) }}
+                {% if form.subject.errors %}
+                    <div class="invalid-feedback">
+                        {% for error in form.subject.errors %}{{ error }}{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            
+            <div class="mb-3">
+                {{ form.content.label(class="form-label") }}
+                {{ form.content(class="form-control", rows=10) }}
+                {% if form.content.errors %}
+                    <div class="invalid-feedback d-block">
+                        {% for error in form.content.errors %}{{ error }}{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            
+            <div class="d-grid gap-2 d-md-flex justify-content-md-end align-items-center">
+                <small id="draftStatus" class="text-muted me-auto"></small>
+                <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="btn btn-secondary">Cancel</a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+(function() {
+    const form = document.querySelector('form[data-draft-key]');
+    if (!form) return;
+    const key = 'draft:' + form.dataset.draftKey;
+    const status = document.getElementById('draftStatus');
+    const fields = form.querySelectorAll('input[type=text], textarea, input[name=subject]');
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            fields.forEach(f => {
+                if (f.name && data[f.name] && !f.value) f.value = data[f.name];
+            });
+            if (status) status.textContent = 'Draft restored';
+        } catch (e) {}
+    }
+    function save() {
+        try {
+            const out = {};
+            fields.forEach(f => { if (f.name) out[f.name] = f.value; });
+            localStorage.setItem(key, JSON.stringify(out));
+            if (status) status.textContent = 'Draft saved ' + new Date().toLocaleTimeString();
+        } catch (e) {}
+    }
+    function clear() {
+        try { localStorage.removeItem(key); } catch (e) {}
+    }
+
+    load();
+    let timer = null;
+    fields.forEach(f => f.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(save, 800);
+    }));
+    form.addEventListener('submit', clear);
+})();
+</script>
+{% endblock %}

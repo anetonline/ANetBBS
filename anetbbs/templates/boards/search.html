@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Search Boards — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-3">
+    <h2><i class="bi bi-search"></i> Search Boards</h2>
+    <form method="get" class="mb-3">
+        <div class="input-group" style="max-width:560px;">
+            <input type="text" name="q" value="{{ q }}"
+                   class="form-control" autofocus
+                   placeholder="Search post subjects and bodies…">
+            <button class="btn btn-primary">Search</button>
+        </div>
+        <div class="form-text">Minimum 2 characters. Up to 100 results.</div>
+    </form>
+
+    {% if q and not results %}
+    <div class="alert alert-info">No matches for <code>{{ q }}</code>.</div>
+    {% endif %}
+
+    {% if results %}
+    <p class="text-muted small">{{ results|length }} match(es) for <code>{{ q }}</code>:</p>
+    <ul class="list-group">
+        {% for post, board in results %}
+        <li class="list-group-item">
+            <a href="{{ url_for('boards.view_post', post_id=post.id) }}">
+                <strong>{{ post.subject }}</strong>
+            </a>
+            <span class="text-muted small ms-2">
+                in {{ board.name }} •
+                by {{ post.author.username if post.author else '?' }} •
+                {{ post.created_at.strftime('%Y-%m-%d') }}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endblock %}

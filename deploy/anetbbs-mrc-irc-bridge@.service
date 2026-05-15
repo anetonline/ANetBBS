@@ -1,0 +1,16 @@
+[Unit]
+Description=ANetBBS MRC ↔ IRC Bridge (id=%i)
+After=network.target anetbbs.service anetbbs-mrc-bridge.service
+
+[Service]
+Type=simple
+User=stingray
+Group=stingray
+WorkingDirectory=/home/stingray/anetbbs
+EnvironmentFile=/home/stingray/anetbbs/.env
+ExecStart=/home/stingray/anetbbs/venv/bin/python -m anetbbs.features.mrc_irc_bridge --bridge-id %i
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

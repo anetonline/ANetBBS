@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Message Boards - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap">
+    <h1 class="mb-0"><i class="bi bi-chat-left-text"></i> Message Boards</h1>
+    <form method="get" action="{{ url_for('boards.search_posts') }}" class="d-flex">
+        <input type="text" name="q" class="form-control form-control-sm me-2"
+               placeholder="Search posts…" style="min-width:220px;">
+        <button class="btn btn-outline-primary btn-sm">Search</button>
+    </form>
+</div>
+
+{% if boards %}
+    {% for cat, blist in grouped %}
+    <div class="card mb-3">
+        <div class="card-header">
+            <i class="bi bi-collection"></i> {{ cat }}
+            <span class="badge bg-secondary ms-1">{{ blist | length }}</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th>Board</th>
+                        <th>Description</th>
+                        <th class="text-center">Topics</th>
+                        <th class="text-center">Replies</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for board in blist %}
+                    <tr>
+                        <td>
+                            <a href="{{ url_for('boards.view_board', board_id=board.id) }}"><strong>{{ board.name }}</strong></a>
+                            {% if current_user.is_authenticated and board_stats[board.id].unread %}
+                                <span class="badge bg-warning ms-2">{{ board_stats[board.id].unread }} new</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ board.description }}</td>
+                        <td class="text-center">{{ board_stats[board.id].post_count }}</td>
+                        <td class="text-center">{{ board_stats[board.id].reply_count }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <p>No boards available.</p>
+{% endif %}
+{% endblock %}

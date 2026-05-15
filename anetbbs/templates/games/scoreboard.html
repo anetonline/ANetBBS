@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Game Scoreboard{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-trophy-fill"></i> Game Scoreboard</h1>
+    <p>Top scores across all games.</p>
+</div>
+
+{% if by_game %}
+{% for g, rows in by_game.items() %}
+<div class="card mb-3">
+    <div class="card-header"><strong>{{ g.name }}</strong>
+        <small class="text-muted ms-2">{{ g.category }}</small></div>
+    <div class="card-body p-0">
+        <ol class="list-group list-group-numbered list-group-flush">
+            {% for r in rows %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <span>{{ r.username }}</span>
+                    <span><strong>{{ r.score }}</strong>
+                        <small class="text-muted ms-2">{{ r.when.strftime('%Y-%m-%d') }}</small></span>
+                </li>
+            {% endfor %}
+        </ol>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+    <div class="alert alert-info">No scores recorded yet.</div>
+{% endif %}
+{% endblock %}

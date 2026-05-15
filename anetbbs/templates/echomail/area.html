@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ echo_area.name }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.unread-row { font-weight: bold; }
+.msg-subject a { color: #00ff00; }
+.pagination .page-link { background-color: #000; border-color: #00ff00; color: #00ff00; }
+.pagination .page-link:hover { background-color: #00ff00; color: #000; }
+.pagination .active .page-link { background-color: #003300; border-color: #00ff00; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-square-text"></i> {{ echo_area.name }}</h1>
+    <p><code>{{ echo_area.tag }}</code> — {{ echo_area.network.name }}</p>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="{{ url_for('echomail.index') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> All Areas
+    </a>
+    <div>
+        <a href="{{ url_for('echomail.next_unread', area_id=echo_area.id) }}" class="btn btn-success btn-sm">
+            <i class="bi bi-skip-forward"></i> Next Unread
+        </a>
+        <form method="post" action="{{ url_for('echomail.mark_all_read', area_id=echo_area.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i class="bi bi-check2-all"></i> Mark All Read
+            </button>
+        </form>
+        <a href="{{ url_for('echomail.compose', area_id=echo_area.id) }}" class="btn btn-primary btn-sm ms-1">
+            <i class="bi bi-pencil-square"></i> Compose
+        </a>
+    </div>
+</div>
+
+{% if messages %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-list-ul"></i> Messages
+        <small class="ms-2" style="color:#00cc00;">{{ echo_area.total_messages or 0 }} total</small>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Subject</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for msg in messages %}
+                <tr class="{{ 'unread-row' if msg.id not in read_ids else '' }}">
+                    <td style="width:20px;">
+                        {% if msg.id not in read_ids %}
+                        <span style="color:#00ff00;">●</span>
+                        {% else %}
+                        <span style="color:#003300;">○</span>
+                        {% endif %}
+                    </td>
+                    <td class="msg-subject">
+                        <a href="{{ url_for('echomail.read', area_id=echo_area.id, message_id=msg.id) }}">
+                            {{ msg.subject or '(no subject)' }}
+                        </a>
+                    </td>
+                    <td>{{ msg.from_name or '' }}</td>
+                    <td>{{ msg.to_name or 'All' }}</td>
+                    <td style="font-size:0.85rem; white-space:nowrap;">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        {% if pagination.has_prev %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('echomail.area', area_id=echo_area.id, page=pagination.prev_num) }}">‹ Prev</a></li>
+        {% endif %}
+        {% for p in pagination.iter_pages() %}
+            {% if p %}
+            <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                <a class="page-link" href="{{ url_for('echomail.area', area_id=echo_area.id, page=p) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+        {% if pagination.has_next %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('echomail.area', area_id=echo_area.id, page=pagination.next_num) }}">Next ›</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center" style="padding:40px;">
+        <i class="bi bi-inbox" style="font-size:3rem;"></i>
+        <p class="mt-3">No messages in this area yet.</p>
+        <a href="{{ url_for('echomail.compose', area_id=echo_area.id) }}" class="btn btn-primary">
+            <i class="bi bi-pencil-square"></i> Be the first to post
+        </a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Address Book{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-person-rolodex"></i> Address Book</h1>
+    <p>Saved FTN and email contacts. Used for netmail recipient lookup.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-person-plus"></i> Add Contact</div>
+    <div class="card-body">
+        <form method="post" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-4">
+                <label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">FTN Address</label>
+                <input type="text" name="ftn_address" class="form-control"
+                       placeholder="1:234/5"
+                       pattern="^\d+:\d+/\d+(\.\d+)?$">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Email (optional)</label>
+                <input type="email" name="email" class="form-control">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary w-100">Add</button>
+            </div>
+            <div class="col-md-9">
+                <label class="form-label">Notes</label>
+                <input type="text" name="notes" class="form-control" maxlength="500">
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <div class="form-check">
+                    <input id="cb_crash" type="checkbox" name="crashmail_default" class="form-check-input">
+                    <label class="form-check-label" for="cb_crash">Always crash</label>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if entries %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th></th><th>Name</th><th>FTN</th><th>Email</th><th>Notes</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for e in entries %}
+                <tr>
+                    <td>
+                        <form method="post" action="{{ url_for('contacts.toggle_favorite', entry_id=e.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-link p-0">
+                                {% if e.favorite %}<i class="bi bi-star-fill text-warning"></i>{% else %}<i class="bi bi-star"></i>{% endif %}
+                            </button>
+                        </form>
+                    </td>
+                    <td>{{ e.name }}</td>
+                    <td>
+                        {% if e.ftn_address %}
+                            <a href="{{ url_for('netmail.compose') }}?to_address={{ e.ftn_address|urlencode }}&to_name={{ e.name|urlencode }}">
+                                <code>{{ e.ftn_address }}</code>
+                            </a>
+                            {% if e.crashmail_default %}<span class="badge bg-warning text-dark">CRASH</span>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td>{{ e.email or '' }}</td>
+                    <td><small class="text-muted">{{ e.notes or '' }}</small></td>
+                    <td>
+                        <form method="post" action="{{ url_for('contacts.delete', entry_id=e.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Delete {{ e.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No contacts yet — add one above.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

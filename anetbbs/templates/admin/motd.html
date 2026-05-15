@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}MOTD Pool{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-quote"></i> Message of the Day Pool</h1>
+    <p>Each login picks one MOTD at random (weighted). Active rows only.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-9">
+                <label class="form-label">MOTD text</label>
+                <input type="text" name="text" class="form-control" required maxlength="280">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Weight</label>
+                <input type="number" name="weight" class="form-control" value="1" min="1">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-primary w-100">Add</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if motds %}
+        <table class="table table-sm mb-0">
+            <thead><tr><th>On</th><th>Wt</th><th>Text</th><th>Added</th><th></th></tr></thead>
+            <tbody>
+            {% for m in motds %}
+                <tr {% if not m.is_active %}class="text-muted"{% endif %}>
+                    <td>{% if m.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                    <td>{{ m.weight }}</td>
+                    <td>{{ m.text }}</td>
+                    <td><small>{{ m.created_at.strftime('%Y-%m-%d') }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="motd_id" value="{{ m.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if m.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="motd_id" value="{{ m.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No MOTDs yet — add one above.</div>{% endif %}
+    </div>
+</div>
+{% endblock %}

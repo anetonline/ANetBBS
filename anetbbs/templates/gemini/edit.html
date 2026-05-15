@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Edit My Capsule{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pencil-square"></i> Edit My Gemini Capsule</h1>
+    <p>Gemtext is line-oriented: <code># Heading</code>, <code>## Sub</code>,
+       <code>* List item</code>, <code>=&gt; URL Description</code>,
+       <code>&gt; Quote</code>, <code>```</code> for preformatted blocks.</p>
+</div>
+<form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">Title</label>
+            <input type="text" name="title" class="form-control"
+                   value="{{ capsule.title or '' }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Gemtext</label>
+            <textarea name="content" rows="20" class="form-control"
+                      style="font-family:monospace;">{{ capsule.content or '' }}</textarea>
+        </div>
+        <div class="form-check mb-3">
+            <input id="cb_pub" type="checkbox" name="is_published"
+                   class="form-check-input"
+                   {% if capsule.is_published %}checked{% endif %}>
+            <label for="cb_pub" class="form-check-label">
+                Publish (anyone can view at /gemini/{{ current_user.username }})
+            </label>
+        </div>
+        <button class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        {% if capsule.is_published %}
+        <a href="{{ url_for('gemini.view', username=current_user.username) }}"
+           class="btn btn-outline-secondary">View</a>
+        {% endif %}
+    </div>
+</form>
+{% endblock %}

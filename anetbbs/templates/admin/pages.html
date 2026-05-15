@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Sysop Pages{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-bell-fill"></i> Sysop Pages</h1>
+    <p>Users requesting your attention from telnet/SSH/rlogin sessions.</p>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>When</th><th>User</th><th>Service</th><th>Message</th>
+                <th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for p in rows %}
+                <tr {% if not p.answered %}class="table-warning"{% endif %}>
+                    <td><code>{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td>
+                        {% if p.user %}
+                            <a href="{{ url_for('admin.edit_user', user_id=p.user.id) }}">
+                                {{ p.user.username }}
+                            </a>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ p.service or '?' }}</span></td>
+                    <td>{{ p.message }}</td>
+                    <td>
+                        {% if p.answered %}
+                            <span class="badge bg-success">answered</span>
+                            {% if p.answered_at %}
+                                <small class="text-muted">{{ p.answered_at.strftime('%H:%M') }}</small>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge bg-warning text-dark">pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not p.answered %}
+                        <form method="post" action="{{ url_for('admin.reply_page', page_id=p.id) }}" class="d-flex gap-1">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="text" name="reply" class="form-control form-control-sm"
+                                   placeholder="Quick reply..." style="min-width:180px;">
+                            <button class="btn btn-sm btn-primary">Reply</button>
+                        </form>
+                        <form method="post" action="{{ url_for('admin.answer_page', page_id=p.id) }}" class="mt-1">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-link p-0">mark answered</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="text-muted text-center p-3">No sysop pages yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

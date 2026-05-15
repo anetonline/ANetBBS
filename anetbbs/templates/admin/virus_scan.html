@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Bulk Virus Scan{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-virus"></i> Bulk Virus Scan</h1>
+    <p>Scan every file in every FileArea with ClamAV. Infections are
+       quarantined (renamed with .infected suffix).</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <p class="text-muted small">
+            Requires the <code>clamscan</code> binary in PATH (or set
+            <code>CLAMSCAN_PATH</code> in .env). Scan can take several minutes
+            on large libraries — be patient. Page will refresh when done.
+        </p>
+        <button class="btn btn-warning"
+                onclick="this.disabled=true; this.innerHTML='Scanning…'; this.form.submit();">
+            <i class="bi bi-shield-check"></i> Scan All File Areas
+        </button>
+    </div>
+</form>
+
+{% if results is not none %}
+<div class="card">
+    <div class="card-header">Scan Results — {{ results|length }} file(s) scanned</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Area</th><th>File</th><th>Status</th><th>Signature / Message</th>
+            </tr></thead>
+            <tbody>
+            {% for r in results %}
+                <tr {% if r.infected %}class="table-danger"{% endif %}>
+                    <td><code>{{ r.area }}</code></td>
+                    <td>{{ r.file }}</td>
+                    <td>
+                        {% if r.infected %}
+                            <span class="badge bg-danger">INFECTED</span>
+                        {% else %}
+                            <span class="badge bg-success">clean</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.sig %}<strong>{{ r.sig }}</strong>{% endif %}
+                        <small class="text-muted ms-2">{{ r.msg }}</small>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="4" class="text-muted text-center p-3">
+                    No files found in any active file area.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Import .ans{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-upload"></i> Import .ans File</h1>
+    <p>Upload an existing ANSI art file (CP437/latin-1 encoded). Color codes,
+       cursor positioning, and clear-screen are honored — anything more exotic
+       gets stripped silently.</p>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <label class="form-label">.ans file</label>
+                <input type="file" name="ans_file" class="form-control" required
+                       accept=".ans,.txt,.asc">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Width (default 80)</label>
+                <input type="number" name="width" class="form-control" value="80" min="20" max="132">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Height (default 25)</label>
+                <input type="number" name="height" class="form-control" value="25" min="5" max="50">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Name (optional)</label>
+            <input type="text" name="name" class="form-control" placeholder="(filename used if blank)">
+        </div>
+        <button class="btn btn-primary"><i class="bi bi-upload"></i> Import &amp; Edit</button>
+        <a href="{{ url_for('ansi_editor.index') }}" class="btn btn-link">Cancel</a>
+    </div>
+</form>
+{% endblock %}

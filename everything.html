@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>EVERYTHING</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<h1 id="everything-anetbbs-does">Everything ANetBBS Does</h1>
+<p>A complete inventory of what ships in <strong>ANetBBS
+v1.0b.2</strong> (alpha 2). Auto-derived from the blueprint registry,
+service units, and game/door catalogs. Nothing here is roadmap or vapor
+— every item below is present in the v1.0b.2 tarball.</p>
+<p><strong>By the numbers</strong></p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td>Web blueprints</td>
+<td>51</td>
+</tr>
+<tr class="even">
+<td>Public + admin web routes</td>
+<td>~320</td>
+</tr>
+<tr class="odd">
+<td>Front-end protocols</td>
+<td>8 (web, telnet, SSH, rlogin, finger, MSP, SYSTAT, BinkP)</td>
+</tr>
+<tr class="even">
+<td>Door-game types supported</td>
+<td>7 (DOS, native, Synchronet <code>.js</code>, Mystic Pascal
+<code>.mps</code>/<code>.mpx</code>, Mystic Python <code>.py</code>,
+rlogin out-dial, built-in web)</td>
+</tr>
+<tr class="odd">
+<td>Pre-installed door games</td>
+<td>3 (LORD, BotWars, ANetSIMS)</td>
+</tr>
+<tr class="even">
+<td>Built-in web games</td>
+<td>10</td>
+</tr>
+<tr class="odd">
+<td>Pre-loaded FidoNet packs</td>
+<td>3 (fsxnet, spooknet, tqwinfo)</td>
+</tr>
+<tr class="even">
+<td>Echomail networks supported</td>
+<td>4+ wire formats (FTN binkp, DOVE-Net QWK, TIC file echoes,
+AreaFix/FileFix)</td>
+</tr>
+<tr class="odd">
+<td>Real-time chat systems</td>
+<td>4 (MRC, IRC, multinode terminal, web shoutbox)</td>
+</tr>
+<tr class="even">
+<td>Outbound notifiers</td>
+<td>3 (email newsletter, Discord webhooks, Telegram bot)</td>
+</tr>
+<tr class="odd">
+<td>Built-in themes</td>
+<td>7 (plus custom theme builder)</td>
+</tr>
+<tr class="even">
+<td>Sysop admin endpoints</td>
+<td>60+</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="front-ends-8-protocols-one-user-database">Front-ends — 8
+protocols, one user database</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Protocol</th>
+<th>Port</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Web</strong></td>
+<td>5000 (or 80/443 behind nginx)</td>
+<td>Flask + SocketIO, gunicorn/eventlet, xterm.js terminal</td>
+</tr>
+<tr class="even">
+<td><strong>Telnet</strong></td>
+<td>2233</td>
+<td>asyncio, optional STARTTLS</td>
+</tr>
+<tr class="odd">
+<td><strong>SSH</strong></td>
+<td>2234</td>
+<td>asyncssh, password + pubkey auth</td>
+</tr>
+<tr class="even">
+<td><strong>rlogin</strong></td>
+<td>513</td>
+<td>classic Unix rlogin; both inbound (callers) and outbound (door
+rlogin to remote BBS game servers)</td>
+</tr>
+<tr class="odd">
+<td><strong>Finger</strong></td>
+<td>79</td>
+<td>RFC 1288, per-user <code>.plan</code> profile</td>
+</tr>
+<tr class="even">
+<td><strong>MSP — Inter-BBS Instant Messaging</strong></td>
+<td>TCP 18</td>
+<td>RFC 1312 wire format; talks to Synchronet IMSG</td>
+</tr>
+<tr class="odd">
+<td><strong>SYSTAT — who’s-online query</strong></td>
+<td>UDP 11</td>
+<td>RFC 866; queryable by peer BBSes</td>
+</tr>
+<tr class="even">
+<td><strong>BinkP — FidoNet inbound</strong></td>
+<td>TCP 24554</td>
+<td>FTS-1027</td>
+</tr>
+</tbody>
+</table>
+<p>All front-ends share <strong>one</strong> SQLite user database and
+one <code>UserSession</code> presence table — “who’s online” sees
+everyone regardless of how they connected.</p>
+<hr />
+<h2 id="messaging">Messaging</h2>
+<h3 id="local">Local</h3>
+<ul>
+<li>Local message boards with categories, threading, sticky/lock,
+quote-reply, ANSI banners</li>
+<li>Full-text search across boards</li>
+<li>Post voting (up/down)</li>
+<li>Per-board moderators with edit/delete/lock</li>
+<li>Per-user last-read tracking</li>
+<li>Drafts</li>
+<li>Soft-delete with restore</li>
+<li>Sysop word filter</li>
+<li>File attachments on posts</li>
+<li>Anonymous post option per board</li>
+</ul>
+<h3 id="private">Private</h3>
+<ul>
+<li>User-to-user private messages</li>
+<li>Inbox / Sent / Drafts folders</li>
+<li>Reply / Reply-all / Forward</li>
+<li>Mass-PM (sysop)</li>
+<li>Block list per user</li>
+<li>“You have new” banner at login</li>
+</ul>
+<h3 id="fidonet">FidoNet</h3>
+<ul>
+<li><strong>netmail</strong> (binkp) with full kludge support (MSGID,
+REPLY, INTL, CHRS, FMPT/TOPT, PID, TZUTC)</li>
+<li><strong>echomail</strong> bidirectional with AreaFix robot
+(<code>+TAG</code> / <code>-TAG</code> / <code>%RESCAN</code> /
+<code>%LIST</code> / <code>%QUERY</code>)</li>
+<li>Per-user FidoNet AKA registry</li>
+<li>Bad-area sysop review queue</li>
+<li>AreaFix password per network</li>
+<li>FTS-0001 wire format with bare-CR line terminators
+(spec-correct)</li>
+<li>Synchronet-compatible AreaFix subject-line password</li>
+<li>Inbound ZIP-bundle extraction (FTS-5003 Mystic-style)</li>
+</ul>
+<h3 id="dove-net-qwk">DOVE-Net QWK</h3>
+<ul>
+<li>Outbound REP packet upload</li>
+<li>Inbound QWK fetch + import</li>
+<li>CONTROL.DAT-driven area auto-create</li>
+<li>Conf# mapping, manual quick-add by conf number</li>
+<li>Idle-hub detection (“550 No QWK packet” = silent, not error)</li>
+</ul>
+<h3 id="tic-file-echoes">TIC (file echoes)</h3>
+<ul>
+<li>Ingest hatched files from FTN peers</li>
+<li>Hatch outbound to downstream subscribers</li>
+<li>Per-area FileFix subscribe/unsubscribe with
+<code>+TAG</code>/<code>-TAG</code></li>
+<li>Bulk subscribe-to-all per network</li>
+<li>TIC manifest validation, hash check</li>
+</ul>
+<h3 id="inter-bbs-im">Inter-BBS IM</h3>
+<ul>
+<li>MSP-2 (RFC 1312) wire-format compliant</li>
+<li>Receives IMs from Synchronet <code>sbbsimsg</code></li>
+<li>Sends outbound IM to peer BBSes</li>
+<li>Per-user routing (<code>StingRay@bbs.a-net.fyi</code>)</li>
+<li>Auto-mirrors Synchronet <code>sbbsimsg.lst</code> directory
+daily</li>
+</ul>
+<hr />
+<h2 id="real-time-chat">Real-time chat</h2>
+<h3 id="mrc-modern-relay-chat">MRC (Modern Relay Chat)</h3>
+<ul>
+<li>Single bridge connection to <code>mrc.bottomlessabyss.net</code>
+shared across all users</li>
+<li>Multi-network — connect to multiple MRC servers concurrently
+(configurable)</li>
+<li><strong>Web client</strong> at <code>/mrc/</code> — channel sidebar,
+user list, scrolling chat</li>
+<li><strong>Terminal client</strong> — stationary status bar at row 1,
+scrolling chat, pinned input</li>
+<li>Tab-completion on usernames seen in chat</li>
+<li>Slash-commands: <code>/identify</code> <code>/msg</code>
+<code>/me</code> <code>/join</code> <code>/list</code> <code>/who</code>
+<code>/chatters</code> <code>/motd</code> <code>/banners</code>
+<code>/topic</code> <code>/lastseen</code> <code>/afk</code>
+<code>/back</code> <code>/status</code> <code>/roomconfig</code>
+<code>/termsize</code> <code>/trust</code> <code>/broadcast</code>
+<code>/raw</code> <code>/ctcp</code></li>
+<li>Capabilities: MCI, MSGEXT, CTCP</li>
+<li>Per-user identify with passwords</li>
+<li>User profiles + arrival/departure events</li>
+<li>Web users + terminal users share rooms and identity</li>
+</ul>
+<h3 id="irc">IRC</h3>
+<ul>
+<li>Web IRC client at <code>/irc/</code> (xterm.js)</li>
+<li>MRC↔︎IRC bridge — sysop can mirror MRC channels to IRC, both
+ways</li>
+<li>Per-bridge config at <code>/admin/mrc-irc-bridges/</code></li>
+</ul>
+<h3 id="multinode-terminal-chat">Multinode terminal chat</h3>
+<ul>
+<li>Between currently-connected terminal/SSH sessions</li>
+<li>Page-to-chat invite</li>
+<li><code>/who</code> listing</li>
+</ul>
+<h3 id="shoutbox">Shoutbox</h3>
+<ul>
+<li>Inline web shoutbox on the front page</li>
+<li>Rate-limited</li>
+<li>Sysop moderate</li>
+</ul>
+<hr />
+<h2 id="files">Files</h2>
+<h3 id="file-areas">File areas</h3>
+<ul>
+<li>FidoNet-style file areas with per-area upload permission
+(<code>users</code> / <code>sysop</code> / <code>none</code>)</li>
+<li>Optional area password</li>
+<li>Sysop moderation queue (uploads quarantined until approved)</li>
+<li>Per-user upload/download ratios (Synchronet/Mystic style;
+sysop-configurable)</li>
+<li>Per-user shareable expiring links (with hours-valid + max-downloads
+cap)</li>
+<li>Per-file <code>[Re-scan descriptions]</code> sysop button</li>
+<li>Live directory scan — newly hatched/dropped files appear without
+DB-row management</li>
+</ul>
+<h3 id="file-gallery-web">File gallery (web)</h3>
+<ul>
+<li>Per-user uploads at <code>/files/</code></li>
+<li>Auto-extract description from <code>FILE_ID.DIZ</code> /
+<code>README.*</code> / <code>DESCRIPT.ION</code> inside the archive
+(zip, tar.gz/bz2/xz, 7z, rar, lha/lzh)</li>
+<li>CP437 → UTF-8 transcoding of DIZ files</li>
+<li>Optional ClamAV virus scan on upload</li>
+<li>Image-file thumbnail generation (cached PNG)</li>
+<li>Per-area browse + download</li>
+<li>File size caps (configurable)</li>
+</ul>
+<h3 id="fidonet-tic">FidoNet TIC</h3>
+<ul>
+<li>Auto-file inbound TICs into their declared area</li>
+<li>Outbound hatching with TIC manifest generation</li>
+<li>Multi-network: per-network file area + file-echo lists</li>
+</ul>
+<h3 id="image-galleries">Image galleries</h3>
+<ul>
+<li>Web gallery at <code>/gallery/</code> — paginated thumbnail grid,
+full-screen modal viewer, lazy-loaded</li>
+<li>Admin at <code>/admin/galleries/</code> — add/remove/edit
+collections, drag-and-drop multi-file upload</li>
+<li>JSON config (<code>gallery-config.json</code>) preserved across
+<code>update.sh</code> runs</li>
+<li>Terminal viewer <code>anet-gallery.sh</code> using chafa (universal)
+or img2sixel (sixel-capable terminals)</li>
+</ul>
+<hr />
+<h2 id="door-games">Door games</h2>
+<h3 id="door-types-supported">Door types supported</h3>
+<ol type="1">
+<li><strong>DOS doors</strong> via DOSBox-staging with TCP/serial
+nullmodem bridge</li>
+<li><strong>Native Linux doors</strong> (any executable)</li>
+<li><strong>Synchronet <code>.js</code> doors</strong> — real
+<code>jsexec</code> if installed, otherwise a built-in Node.js compat
+shim</li>
+<li><strong>Mystic Pascal <code>.mps</code>/<code>.mpx</code>
+doors</strong> — auto-compiles <code>.mps</code> → <code>.mpx</code> via
+bundled <code>mplc</code></li>
+<li><strong>Mystic Python <code>.py</code> doors</strong> via a fake
+<code>mystic_bbs</code> module</li>
+<li><strong>rlogin out-dial</strong> — connect outbound to remote BBS
+game servers (Synchronet xtrn, DoorParty, A-Net Online)</li>
+<li><strong>Built-in web games</strong> — Flask-routed mini-games</li>
+</ol>
+<h3 id="pre-installed-doors-in-vendorgames">Pre-installed doors (in
+<code>vendor/games/</code>)</h3>
+<ul>
+<li><strong>LORD</strong> — Legend of the Red Dragon (Synchronet JS
+port, plays end-to-end out of the box)</li>
+<li><strong>BotWars</strong> — multiplayer robot combat</li>
+<li><strong>ANetSIMS</strong> — life-sim by Apam (A-Net Sixel TV
+included)</li>
+</ul>
+<h3 id="bundled-mystic-runtime">Bundled Mystic runtime</h3>
+<ul>
+<li>Full Mystic BBS 1.12 A48 (mystic + mplc + mide + mis + mutil
+binaries)</li>
+<li>4.9 MB, no separate download required</li>
+</ul>
+<h3 id="drop-files-supported">Drop files supported</h3>
+<ul>
+<li>DOOR.SYS</li>
+<li>DORINFO1.DEF</li>
+<li>DOOR32.SYS</li>
+</ul>
+<h3 id="per-node-node-manager">Per-node node manager</h3>
+<ul>
+<li>Auto-allocates from <code>GAMES_MAX_NODES</code> pool</li>
+<li>Per-game <code>max_nodes</code> cap</li>
+<li>Per-node scratch dirs at
+<code>&lt;install&gt;/data/temp/nodeN/</code></li>
+<li>Release on session end</li>
+<li>Drop-file regeneration per call</li>
+</ul>
+<h3 id="token-substitution-in-door-config">Token substitution in door
+config</h3>
+<ul>
+<li>Synchronet <code>%CODE%</code> and Mystic <code>%c</code> codes
+interpreted in <code>executable_path</code>,
+<code>working_directory</code>, <code>command_line_args</code>,
+<code>drop_file_path</code></li>
+<li>Supported: <code>%f</code> (drop-file path), <code>%P</code>
+(per-node dir), <code>%U</code>/<code>%u</code> (username),
+<code>%n</code>/<code>%N</code> (node), <code>%m</code>/<code>%M</code>
+(minutes left), and ~25 more</li>
+</ul>
+<h3 id="synchronet-js-compat-shim">Synchronet JS compat shim</h3>
+<ul>
+<li>~270 functions/objects covering File / console / bbs / system / user
+/ load / require / dd_lightbar_menu / mouse_getkey</li>
+<li>Pure Node — runs stock SBBS doors that don’t need a full Synchronet
+install</li>
+</ul>
+<h3 id="door-io-safety">Door I/O safety</h3>
+<ul>
+<li>Ctrl+]q user-abort</li>
+<li>60-second idle-timeout watchdog (configurable via
+<code>DOOR_IDLE_TIMEOUT</code>)</li>
+<li>Bridge-close detection</li>
+<li>waitpid watcher</li>
+<li>Force-kill of stuck process groups</li>
+<li>Stuck doors always return user to BBS within the timeout</li>
+<li>Per-door working-dir preservation (NODE*.DAT etc. never
+auto-cleaned)</li>
+</ul>
+<h3 id="built-in-web-games-10">Built-in web games (10)</h3>
+<ul>
+<li><strong>Hangman</strong> (puzzle)</li>
+<li><strong>Trivia Challenge</strong> (puzzle)</li>
+<li><strong>Number Guesser</strong> (puzzle)</li>
+<li><strong>Snake</strong> (action)</li>
+<li><strong>Tic Tac Toe</strong> (strategy)</li>
+<li><strong>Memory Match</strong> (puzzle)</li>
+<li><strong>Typing Speed Test</strong> (other)</li>
+<li><strong>Minesweeper</strong> (puzzle)</li>
+<li><strong>2048</strong> (puzzle)</li>
+<li><strong>Text Adventure</strong> (RPG)</li>
+</ul>
+<h3 id="web-door-terminal">Web door terminal</h3>
+<ul>
+<li>Pinned to 80×25 with real CGA 16-color palette</li>
+<li>No auto-fit-to-viewport — <code>gotoxy</code> lands where doors
+expect</li>
+<li>Pre-join output buffer so doors that draw their welcome screen
+before the first keystroke (ANetSIMS, A-Net Sixel TV) render
+immediately</li>
+<li>Sixel + iTerm2 image addon for graphical doors</li>
+<li>Per-session keep-alive</li>
+</ul>
+<hr />
+<h2 id="wiki">Wiki</h2>
+<ul>
+<li>Collaborative wiki at <code>/wiki/</code></li>
+<li>Markdown with <code>[[wiki-links]]</code></li>
+<li>Full revision history with diff and revert</li>
+<li>Full-text search across pages</li>
+<li>Wanted-pages and orphan-pages reports</li>
+<li>41 seeded pages cover the whole BBS</li>
+<li>Per-page edit history with author / timestamp</li>
+<li>Page protection (sysop-only edit) optional</li>
+</ul>
+<hr />
+<h2 id="rss-atom-reader">RSS / Atom reader</h2>
+<ul>
+<li>Web reader at <code>/rss/</code> — feed list with unread counts,
+combined river view, paginated per-feed item lists, full-content article
+view</li>
+<li>Per-user mark-as-read tracking</li>
+<li>Terminal reader (<code>R</code> from main BBS menu) — same browse
+model, word-wrapped to 78 cols, unread <code>*</code> markers</li>
+<li>Admin at <code>/admin/rss/</code> — add/edit/delete feeds,
+force-refresh, per-feed status, last error</li>
+<li>Background poller — every active feed every 30 min (configurable via
+<code>RSS_POLL_INTERVAL</code>)</li>
+<li>Dedupes by GUID</li>
+<li>X-News feed seeded by default</li>
+<li>Outbound RSS feeds for local boards, bulletins, oneliners</li>
+</ul>
+<hr />
+<h2 id="community-social">Community / social</h2>
+<ul>
+<li><strong>Personal web pages</strong> —
+<code>/_pages/&lt;user&gt;</code> static HTML per user</li>
+<li><strong>Site pages</strong> — sysop-edited static pages at
+<code>/page/&lt;slug&gt;</code></li>
+<li><strong>Gemini Capsules</strong> — list local users’
+<code>gemini://</code> pages</li>
+<li><strong>User profiles</strong> with bio, avatar, location,
+<code>.plan</code></li>
+<li><strong>Calendar</strong> — per-user events, BBS-wide schedule</li>
+<li><strong>Groups</strong> — user-formed sub-communities</li>
+<li><strong>Polls</strong> — sysop and user polls, embedded in
+pages</li>
+<li><strong>Saved messages</strong> — bookmark / unread later</li>
+<li><strong>Oneliners</strong> wall</li>
+<li><strong><code>/finger/&lt;user&gt;</code></strong> web profiles</li>
+<li><strong>Contacts / Buddies</strong> — friend list with
+arrival/departure notifications</li>
+<li><strong>Blocks</strong> — per-user mute list</li>
+<li><strong>Notifications</strong> center with toast popups + bell
+badge</li>
+<li><strong>Leaderboard</strong> — ranked by points / posts / files /
+games activity</li>
+<li><strong>Permalinks</strong> — short <code>/m/&lt;id&gt;</code> for
+sharing posts off-BBS</li>
+<li><strong>Bulletins</strong> — sysop announcements with pinned +
+expiring</li>
+<li><strong>BBS History</strong> — site-page wiki of the BBS’s lore</li>
+</ul>
+<hr />
+<h2 id="outbound-notifications">Outbound notifications</h2>
+<ul>
+<li><strong>Email newsletter</strong> to active users</li>
+<li><strong>Discord webhooks</strong> for events (new post, new caller,
+etc.)</li>
+<li><strong>Telegram bot</strong> notifier</li>
+<li><strong>MSP outbound IM</strong> to peer BBSes</li>
+<li><strong>FidoNet netmail</strong> outbound</li>
+<li><strong>MRC</strong> outbound to bridge</li>
+</ul>
+<hr />
+<h2 id="sysop-tools">Sysop tools</h2>
+<h3 id="admin-dashboard">Admin dashboard</h3>
+<ul>
+<li>At-a-glance counts (users, posts, files, recent activity)</li>
+<li>Recent activity log</li>
+<li>Alerts (failed services, stuck doors, sysop pages, file queue,
+registration attempts)</li>
+</ul>
+<h3 id="setup">Setup</h3>
+<ul>
+<li>First-time <strong>setup wizard</strong> (interactive)</li>
+<li><strong>Setup checklist</strong> / <strong>Launch checklist</strong>
+with progress tracking</li>
+</ul>
+<h3 id="users">Users</h3>
+<ul>
+<li><strong>Users CRUD</strong> — add / edit / delete / bulk import /
+lock / toggle-ban</li>
+<li><strong>Pending users</strong> approval queue</li>
+<li><strong>Inactive users</strong> prune</li>
+<li><strong>New-user questions</strong> custom signup questionnaire</li>
+<li><strong>Registration attempts</strong> log</li>
+<li><strong>Time budgets</strong> — per-user daily/weekly time caps</li>
+<li><strong>User notes</strong> (sysop-only)</li>
+<li><strong>Manage user</strong> dialog (sessions, posts, files
+at-a-glance)</li>
+</ul>
+<h3 id="content">Content</h3>
+<ul>
+<li><strong>Boards</strong> CRUD + reorder</li>
+<li><strong>Per-board moderators</strong></li>
+<li><strong>Bulletins</strong> CRUD + pin/unpin + expiry</li>
+<li><strong>MOTD pool</strong> with rotation</li>
+<li><strong>Word filter</strong></li>
+<li><strong>Site pages</strong> editor</li>
+<li><strong>Menu admin</strong> — every BBS terminal menu is data-driven
+and editable</li>
+<li><strong>Themes</strong> CRUD + theme builder</li>
+<li><strong>Default echo subs</strong> template for new networks</li>
+<li><strong>ANSI editor</strong> for banners / welcome / goodbye
+screens</li>
+</ul>
+<h3 id="networks">Networks</h3>
+<ul>
+<li><strong>Echomail dashboard</strong> — poll logs, AreaFix log,
+bad-areas review</li>
+<li><strong>Per-network manage</strong> — binkp, AreaFix password,
+polling interval</li>
+<li><strong>File-echo subs</strong></li>
+<li><strong>Default echo subs</strong></li>
+<li><strong>TIC log</strong> + per-TIC detail</li>
+<li><strong>Subscribe / unsubscribe to all</strong> per network</li>
+<li><strong>Connection test</strong> to peers (binkp handshake)</li>
+<li><strong>Dialout</strong> (modem dial)</li>
+<li><strong>MRC↔︎IRC bridge</strong> admin</li>
+</ul>
+<h3 id="files-1">Files</h3>
+<ul>
+<li><strong>File areas admin</strong></li>
+<li><strong>Bulk import</strong> (FILEBONE / BACKBONE format)</li>
+<li><strong>File queue</strong> (moderation review)</li>
+<li><strong>Virus scan</strong> admin</li>
+</ul>
+<h3 id="games">Games</h3>
+<ul>
+<li><strong>Door Games admin</strong> — add / edit / sort / disable</li>
+<li><strong>Per-game max-nodes</strong> + drop-file type + door
+type</li>
+</ul>
+<h3 id="communication">Communication</h3>
+<ul>
+<li><strong>Broadcast</strong> to logged-in users</li>
+<li><strong>Newsletter</strong> email blast to active users</li>
+<li><strong>Sysop pages</strong> alert with answer/reply flow</li>
+<li><strong>Chat bans</strong> for MRC/shoutbox</li>
+<li><strong>Webhooks</strong> outbound notifications config</li>
+</ul>
+<h3 id="operations">Operations</h3>
+<ul>
+<li><strong>NodeSpy</strong> — see what every active terminal user is
+doing in real time</li>
+<li><strong>NodeSpy kick</strong> — disconnect stuck terminal sessions
+cross-process</li>
+<li><strong>Caller log</strong> — detailed connection records</li>
+<li><strong>Activity log</strong></li>
+<li><strong>Journal viewer</strong> — system journal (systemd) inside
+the web UI</li>
+<li><strong>Control panel</strong> — stop/start/restart any service from
+the web</li>
+<li><strong>Sysop console</strong> — terminal-style admin shell</li>
+<li><strong>DB backup</strong></li>
+<li><strong>IP bans</strong> (CIDR support)</li>
+</ul>
+<h3 id="galleries">Galleries</h3>
+<ul>
+<li><strong>Galleries</strong> CRUD</li>
+<li><strong>Per-gallery file management</strong> (drag-and-drop upload,
+delete, reorder)</li>
+</ul>
+<hr />
+<h2 id="front-end-ux-details">Front-end UX details</h2>
+<ul>
+<li>Single-key hotkey menus (no Enter required) on terminal</li>
+<li>Synchronet <code>@CODE@</code> and Mystic <code>|XX</code> display
+codes in welcome / goodbye / menu ANSI screens</li>
+<li>Notification banner at login
+(<code>*** You have new: 3 PMs, 1 InterBBS IM</code>)</li>
+<li>7 built-in themes — light, dark, amber, green, blue, retro,
+hacker</li>
+<li>Custom theme builder</li>
+<li>Per-user theme picker</li>
+<li>Mobile-friendly responsive web layout</li>
+<li>CP437/ANSI rendering across all message lists, viewers, sysop
+tools</li>
+<li>Image rendering in terminal (sixel + iTerm2 protocols)</li>
+<li>ANSI art preservation in echomail bodies (CP437 passthrough)</li>
+<li>80×25 default terminal sizing with sysop-overridable per-user
+<code>/termsize</code></li>
+</ul>
+<hr />
+<h2 id="pre-bundled-data">Pre-bundled data</h2>
+<ul>
+<li><strong>fsxnet.zip</strong> — fsxNet nodelist + areas info</li>
+<li><strong>spooknet.zip</strong> — SpookNet config</li>
+<li><strong>tqwinfo.zip</strong> — TQWnet info pack</li>
+<li><strong>41 wiki pages</strong> seeded</li>
+<li><strong>X-News RSS feed</strong> subscribed by default</li>
+<li><strong>Default themes</strong> (7 pre-built)</li>
+<li><strong>Default menus</strong> for terminal interface</li>
+</ul>
+<hr />
+<h2 id="deployment-operations">Deployment / operations</h2>
+<ul>
+<li><strong><code>install.sh</code></strong> — single-shot wizard
+installs the full stack in ~10 minutes:
+<ul>
+<li>Detects OS (Linux Mint / Ubuntu / Debian / Fedora / Arch /
+OpenSUSE)</li>
+<li>Installs system packages (python, nginx, certbot, nodejs,
+dosbox-staging, clamav, lhasa, unrar)</li>
+<li>Optional Mystic BBS runtime (bundled, no download)</li>
+<li>Creates service user, venv, secrets, SSH host key, sysop admin
+account</li>
+<li>Generates systemd units for every enabled service</li>
+<li>Configures UFW firewall rules</li>
+<li>Configures nginx reverse proxy with HTTP-only or HTTPS template</li>
+<li>Runs certbot for Let’s Encrypt SSL (with pre-flight port-forwarding
+check)</li>
+<li>Production vs Test mode switch (test mode skips nginx/SSL for
+behind-NAT setups)</li>
+</ul></li>
+<li><strong><code>update.sh</code></strong> — safe upgrade preserving
+<code>.env</code>, <code>data/</code>, <code>doors/</code>, MRC config,
+gallery config, MRC bridge state</li>
+<li><strong><code>install.sh --uninstall</code></strong> — clean
+removal</li>
+<li><strong>systemd units</strong> for every service with proper
+<code>CAP_NET_BIND_SERVICE</code> for privileged ports</li>
+<li><strong>UFW rules</strong> auto-added per enabled service</li>
+<li><strong><code>.env</code></strong> generation with secure
+SECRET_KEY</li>
+<li><strong>Logs</strong> at <code>/&lt;install&gt;/logs/</code> plus
+systemd journal integration</li>
+<li><strong>DB migrations</strong> via alembic on every start</li>
+</ul>
+<hr />
+<h2 id="code-coverage">Code coverage</h2>
+<ul>
+<li>51 web blueprints</li>
+<li>~320 HTTP routes</li>
+<li>189 templates</li>
+<li>Door I/O: DOS / Linux / Synchronet JS / Mystic Pascal / Mystic
+Python / rlogin / built-in web</li>
+<li>5 background pollers (echomail, RSS, MRC keepalive, IRC keepalive,
+sysop-page timeout)</li>
+<li>One SQLite database, one user identity, one session table across all
+front-ends</li>
+</ul>
+<hr />
+<p><em>For installation see <a
+href="README.md"><code>README.md</code></a>. For per-feature deep dives
+see <a href="docs/"><code>docs/</code></a>. For what’s-new vs prior
+alphas see <a href="RELEASE.md"><code>RELEASE.md</code></a>.</em></p>
+</body>
+</html>

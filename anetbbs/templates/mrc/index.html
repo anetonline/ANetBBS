@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MRC Chat - {{ config.BBS_NAME }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #0f0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: #003300;
+            padding: 10px 20px;
+            border-bottom: 2px solid #0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+        }
+        
+        .header .back-link {
+            color: #0ff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .header .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .status {
+            padding: 5px 20px;
+            background: #001100;
+            border-bottom: 1px solid #0f0;
+            font-size: 12px;
+        }
+        
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #0f0;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background: #000;
+        }
+        
+        .message {
+            margin-bottom: 5px;
+            line-height: 1.4;
+        }
+        
+        .message.system {
+            color: #ff0;
+        }
+        
+        .message.error {
+            color: #f00;
+        }
+        
+        .message.info {
+            color: #0ff;
+        }
+        
+        .message-user {
+            color: #0ff;
+            font-weight: bold;
+        }
+        
+        .message-site {
+            color: #888;
+            font-size: 11px;
+        }
+        
+        .input-area {
+            border-top: 1px solid #0f0;
+            padding: 10px;
+            background: #001100;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 8px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #0ff;
+        }
+        
+        button {
+            background: #003300;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #005500;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .join-panel {
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .join-panel input {
+            margin: 10px 0;
+            width: 300px;
+            max-width: 90%;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: #001100;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        
+        .sidebar h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #0ff;
+        }
+        
+        .sidebar-item {
+            padding: 5px;
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                max-height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>╔═══ MRC Chat ═══╗</h1>
+        <a href="{{ url_for('main.index') }}" class="back-link">« Back to BBS</a>
+    </div>
+    
+    <div class="status" id="status">
+        Status: <span id="status-text">Connecting...</span>
+    </div>
+    
+    <div class="main-container">
+        <div class="chat-area">
+            <div class="messages" id="messages"></div>
+            
+            <div class="input-area">
+                <div id="join-panel" class="join-panel">
+                    <h2>Join MRC Chat</h2>
+                    <div>
+                        <input type="text" id="handle-input" placeholder="Your handle" value="{{ suggested_handle }}" />
+                    </div>
+                    <div>
+                        <input type="text" id="room-input" placeholder="Room (default: Lobby)" value="Lobby" />
+                    </div>
+                    <div>
+                        <button id="join-btn">Join Chat</button>
+                    </div>
+                </div>
+                
+                <div id="chat-panel" style="display: none;">
+                    <div class="input-group">
+                        <input type="text" id="message-input" placeholder="Type a message or /command..." />
+                        <button id="send-btn">Send</button>
+                        <button id="leave-btn">Leave</button>
+                    </div>
+                    <div style="font-size:11px;color:#555;padding:4px 0 0 0;">
+                        Tip: use /help, /chatters, /identify &lt;pass&gt;, /register &lt;pass&gt; [email]
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <h3>Information</h3>
+            <div class="sidebar-item">Room: <span id="current-room">-</span></div>
+            <div class="sidebar-item">Handle: <span id="current-handle">-</span></div>
+            <div class="sidebar-item">Server: <span id="server-info">-</span></div>
+            <div class="sidebar-item">User: {{ current_user.username }}</div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='mrc/client.js') }}"></script>
+    <script>
+        // WebSocket URL from Flask config
+        const WS_URL = "{{ bridge_ws_url }}";
+        const SUGGESTED_HANDLE = "{{ suggested_handle }}";
+        
+        let client = null;
+        const messagesDiv = document.getElementById('messages');
+        const statusText = document.getElementById('status-text');
+        const joinPanel = document.getElementById('join-panel');
+        const chatPanel = document.getElementById('chat-panel');
+        const handleInput = document.getElementById('handle-input');
+        const roomInput = document.getElementById('room-input');
+        const messageInput = document.getElementById('message-input');
+        const joinBtn = document.getElementById('join-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const leaveBtn = document.getElementById('leave-btn');
+        
+        function addMessage(text, className = '') {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + className;
+            msgDiv.textContent = text;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function updateStatus(text, color = '#0f0') {
+            statusText.textContent = text;
+            statusText.style.color = color;
+        }
+        
+        function handleIncomingMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    addMessage(`✓ ${data.message}`, 'system');
+                    updateStatus('Connected', '#0f0');
+                    document.getElementById('server-info').textContent = data.server || 'MRC';
+                    break;
+                
+                case 'joined':
+                    addMessage(`✓ ${data.message}`, 'system');
+                    updateStatus(`In ${data.room} as ${data.handle}`, '#0f0');
+                    document.getElementById('current-room').textContent = data.room;
+                    document.getElementById('current-handle').textContent = data.handle;
+                    joinPanel.style.display = 'none';
+                    chatPanel.style.display = 'block';
+                    messageInput.focus();
+                    break;
+                
+                case 'handle_changed':
+                    addMessage(`! ${data.message}`, 'info');
+                    document.getElementById('current-handle').textContent = data.new_handle;
+                    break;
+                
+                case 'mrc_message':
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = 'message';
+                    
+                    const userSpan = document.createElement('span');
+                    userSpan.className = 'message-user';
+                    userSpan.textContent = data.from_user;
+                    
+                    const siteSpan = document.createElement('span');
+                    siteSpan.className = 'message-site';
+                    siteSpan.textContent = `@${data.from_site}`;
+                    
+                    msgDiv.appendChild(userSpan);
+                    msgDiv.appendChild(document.createTextNode(' '));
+                    msgDiv.appendChild(siteSpan);
+                    msgDiv.appendChild(document.createTextNode(': '));
+                    msgDiv.appendChild(document.createTextNode(data.message));
+                    
+                    messagesDiv.appendChild(msgDiv);
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                    break;
+                
+                case 'left':
+                    addMessage(`✓ ${data.message}`, 'system');
+                    updateStatus('Connected (not in room)', '#ff0');
+                    document.getElementById('current-room').textContent = '-';
+                    document.getElementById('current-handle').textContent = '-';
+                    joinPanel.style.display = 'block';
+                    chatPanel.style.display = 'none';
+                    break;
+                
+                case 'error':
+                    addMessage(`✗ Error: ${data.message}`, 'error');
+                    break;
+                
+                case 'disconnected':
+                    updateStatus('Disconnected', '#f00');
+                    addMessage('✗ Disconnected from server', 'error');
+                    joinPanel.style.display = 'block';
+                    chatPanel.style.display = 'none';
+                    break;
+            }
+        }
+        
+        async function init() {
+            try {
+                client = new MRCClient(WS_URL);
+                client.addMessageHandler(handleIncomingMessage);
+                await client.connect();
+            } catch (error) {
+                updateStatus('Connection failed', '#f00');
+                addMessage(`✗ Failed to connect: ${error.message}`, 'error');
+            }
+        }
+        
+        joinBtn.addEventListener('click', () => {
+            const handle = handleInput.value.trim();
+            const room = roomInput.value.trim() || 'Lobby';
+            
+            if (!handle) {
+                addMessage('✗ Please enter a handle', 'error');
+                return;
+            }
+            
+            client.joinRoom(handle, room);
+        });
+        
+        sendBtn.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            if (message.startsWith('/')) {
+                // Slash command: strip the leading '/', uppercase the command word,
+                // keep any arguments as-is.
+                const rest = message.slice(1);
+                const spaceIdx = rest.indexOf(' ');
+                const cmd = spaceIdx === -1
+                    ? rest.toUpperCase()
+                    : rest.slice(0, spaceIdx).toUpperCase() + rest.slice(spaceIdx);
+                client.sendServerCommand(cmd);
+            } else {
+                client.sendMessage(message);
+            }
+            
+            messageInput.value = '';
+        });
+        
+        leaveBtn.addEventListener('click', () => {
+            client.leaveRoom();
+        });
+        
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendBtn.click();
+            }
+        });
+        
+        handleInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                joinBtn.click();
+            }
+        });
+        
+        // Initialize on page load
+        window.addEventListener('load', init);
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (client) {
+                client.disconnect();
+            }
+        });
+    </script>
+</body>
+</html>

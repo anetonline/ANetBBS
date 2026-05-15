@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Smart Upload{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-cloud-arrow-up"></i> Smart Upload</h1>
+    <p>Upload a file. We auto-detect the target file area from the filename
+       (e.g. <code>FILES.GAMES_lord.zip</code> or <code>foo[FILES.UTILS].zip</code>),
+       or pick one manually.</p>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">File</label>
+            <input type="file" name="file" class="form-control" required>
+            <div class="form-text">Tip: prefix with <code>AREATAG_</code> or
+                include <code>[AREATAG]</code> for auto-detection.</div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Force area (optional)</label>
+            <select name="area_id" class="form-select">
+                <option value="">— auto-detect from filename —</option>
+                {% for a in areas %}
+                    <option value="{{ a.id }}">{{ a.tag }} — {{ a.name or '' }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn btn-primary"><i class="bi bi-upload"></i> Upload</button>
+        <a href="{{ url_for('file_areas.index') }}" class="btn btn-link">Cancel</a>
+    </div>
+</form>
+{% endblock %}

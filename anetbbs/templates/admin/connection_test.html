@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Connection Test{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-broadcast"></i> Connection Test</h1>
+    <p>Probe a remote BBS for telnet/SSH/finger/IRC/web availability.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Host</label>
+                <input type="text" name="host" class="form-control" value="{{ host }}" required>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Ports (optional override, e.g. <code>Telnet:2233,IRC:6667</code>)</label>
+                <input type="text" name="ports" class="form-control" placeholder="(blank = standard probes)">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100">Test</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if results %}
+<div class="card">
+    <div class="card-header">Results for <code>{{ host }}</code></div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Service</th><th>Port</th><th>Status</th><th>Latency</th><th>Banner / Note</th>
+            </tr></thead>
+            <tbody>
+            {% for r in results %}
+                <tr>
+                    <td><strong>{{ r.label }}</strong></td>
+                    <td><code>{{ r.port }}</code></td>
+                    <td>
+                        {% if r.ok %}
+                            <span class="badge bg-success">open</span>
+                        {% else %}
+                            <span class="badge bg-danger">closed</span>
+                        {% endif %}
+                    </td>
+                    <td>{% if r.ms is not none %}<small>{{ r.ms }}ms</small>{% endif %}</td>
+                    <td><small class="text-muted">{{ r.note }}</small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

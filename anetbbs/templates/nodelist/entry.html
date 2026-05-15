@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}{{ entry.address }} - Nodelist{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pin-map-fill"></i> {{ entry.system_name or entry.address }}</h1>
+    <p><code>{{ entry.address }}</code> — {{ entry.location }}</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-info-circle"></i> System Info</div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Address</dt>
+            <dd class="col-sm-9"><code>{{ entry.address }}</code></dd>
+            <dt class="col-sm-3">System</dt>
+            <dd class="col-sm-9">{{ entry.system_name or '—' }}</dd>
+            <dt class="col-sm-3">Sysop</dt>
+            <dd class="col-sm-9">{{ entry.sysop_name or '—' }}</dd>
+            <dt class="col-sm-3">Location</dt>
+            <dd class="col-sm-9">{{ entry.location or '—' }}</dd>
+            <dt class="col-sm-3">Phone</dt>
+            <dd class="col-sm-9"><code>{{ entry.phone or '—' }}</code></dd>
+            <dt class="col-sm-3">Baud</dt>
+            <dd class="col-sm-9">{{ entry.baud_rate or '—' }}</dd>
+            <dt class="col-sm-3">Type</dt>
+            <dd class="col-sm-9">
+                {% if entry.keyword_type %}
+                    <span class="badge bg-secondary">{{ entry.keyword_type }}</span>
+                {% else %}
+                    Plain Node
+                {% endif %}
+            </dd>
+        </dl>
+    </div>
+</div>
+
+{% if flags %}
+<div class="card">
+    <div class="card-header"><i class="bi bi-flag"></i> Flags</div>
+    <div class="card-body">
+        <div class="row">
+            {% for k, v in flags.items() %}
+            <div class="col-md-4 mb-1">
+                <span class="badge bg-info text-dark">{{ k }}{% if v is not sameas true %}: {{ v }}{% endif %}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-3 d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('nodelist.browse') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Browse
+    </a>
+    {# Send-netmail-to-sysop. Pre-fills the To Address + To Name via the
+       existing /netmail/compose querystring contract. The compose route
+       auto-picks the FROM AKA that matches entry.zone, so the sysop's
+       new node address (e.g. 1337:3/231 for TQWnet entries) is selected
+       automatically. Falls back to "Sysop" if the nodelist row has no
+       sysop name (rare but happens on placeholder Down entries). #}
+    <a href="{{ url_for('netmail.compose',
+                        to_address=entry.address,
+                        to_name=entry.sysop_name or 'Sysop',
+                        subject='') }}"
+       class="btn btn-primary btn-sm">
+        <i class="bi bi-envelope"></i> Send Netmail to Sysop
+    </a>
+</div>
+{% endblock %}

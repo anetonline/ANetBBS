@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}Create{% else %}Edit{% endif %} {{ title }} — Wiki{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1>
+        <i class="bi bi-{% if is_new %}plus-square{% else %}pencil-square{% endif %}"></i>
+        {% if is_new %}Create new page{% else %}Edit page{% endif %}
+        <small class="text-muted">/wiki/{{ slug }}</small>
+    </h1>
+</div>
+
+<form method="post" action="{{ url_for('wiki.edit', slug=slug) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+        <label class="form-label">Title</label>
+        <input type="text" name="title" class="form-control" required
+               value="{{ title }}" autofocus>
+    </div>
+
+    <ul class="nav nav-tabs" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#editTab" type="button">
+                <i class="bi bi-pencil"></i> Source
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#previewTab" type="button"
+                    onclick="loadPreview()">
+                <i class="bi bi-eye"></i> Preview
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#cheatTab" type="button">
+                <i class="bi bi-question-circle"></i> Cheatsheet
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content border border-top-0 p-3 mb-3" style="background:var(--theme-card-bg);">
+        <div class="tab-pane fade show active" id="editTab">
+            <textarea name="body" id="bodyArea" class="wiki-edit-textarea" required>{{ body }}</textarea>
+        </div>
+        <div class="tab-pane fade" id="previewTab">
+            <div id="previewBody" class="wiki-body">
+                <p class="text-muted">Click the Preview tab to render.</p>
+            </div>
+        </div>
+        <div class="tab-pane fade wiki-cheatsheet" id="cheatTab">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Markdown</h5>
+                    <table class="table table-sm">
+                        <tr><th><code># Heading 1</code></th><td>Top-level heading</td></tr>
+                        <tr><th><code>## Heading 2</code></th><td>Subheading</td></tr>
+                        <tr><th><code>**bold**</code></th><td><strong>bold</strong></td></tr>
+                        <tr><th><code>*italic*</code></th><td><em>italic</em></td></tr>
+                        <tr><th><code>`code`</code></th><td><code>code</code></td></tr>
+                        <tr><th><code>- item</code></th><td>Bulleted list</td></tr>
+                        <tr><th><code>1. item</code></th><td>Numbered list</td></tr>
+                        <tr><th><code>&gt; quote</code></th><td>Blockquote</td></tr>
+                        <tr><th><code>[text](url)</code></th><td>External link</td></tr>
+                        <tr><th><code>![alt](url)</code></th><td>Image</td></tr>
+                        <tr><th><code>---</code></th><td>Horizontal rule</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h5>Wiki links</h5>
+                    <table class="table table-sm">
+                        <tr><th><code>[[Getting Started]]</code></th>
+                            <td>→ <a href="{{ url_for('wiki.view', slug='getting-started') }}">Getting Started</a></td></tr>
+                        <tr><th><code>[[home|click here]]</code></th>
+                            <td>Pipe lets you change the link text</td></tr>
+                        <tr><th><code>[[Sysop Guide#Doors]]</code></th>
+                            <td>Anchor jumps inside the target page</td></tr>
+                    </table>
+                    <h5>Code blocks</h5>
+                    <pre>```python
+def hello():
+    print("hi")
+```</pre>
+                    <p>Use <code>```</code> on its own line to start
+                       and end a fenced code block. Add a language
+                       name for syntax-coloured highlighting.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Edit summary <small class="text-muted">(optional, shown in history)</small></label>
+        <input type="text" name="edit_summary" class="form-control"
+               placeholder="e.g. Fixed typo, added installation steps…"
+               maxlength="300">
+    </div>
+
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary"><i class="bi bi-check2"></i> Save</button>
+        <a href="{{ url_for('wiki.view', slug=slug) }}" class="btn btn-outline-secondary">Cancel</a>
+        {% if not is_new %}
+            <a href="{{ url_for('wiki.history', slug=slug) }}" class="btn btn-outline-secondary ms-auto">
+               <i class="bi bi-clock-history"></i> History</a>
+        {% endif %}
+    </div>
+</form>
+
+<script>
+async function loadPreview() {
+    const body = document.getElementById('bodyArea').value;
+    const fd = new FormData();
+    fd.append('body', body);
+    fd.append('csrf_token', '{{ csrf_token() }}');
+    try {
+        const r = await fetch('{{ url_for("wiki.preview", slug=slug) }}',
+                              {method: 'POST', body: fd});
+        const j = await r.json();
+        document.getElementById('previewBody').innerHTML = j.html
+            || '<p class="text-muted">(empty)</p>';
+    } catch (e) {
+        document.getElementById('previewBody').innerHTML =
+            '<p class="text-danger">Preview failed: ' + e + '</p>';
+    }
+}
+</script>
+{% endblock %}

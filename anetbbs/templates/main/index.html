@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}Home - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-terminal-fill"></i> {{ config.BBS_NAME }}</h1>
+    <p>{{ config.BBS_DESCRIPTION }}</p>
+</div>
+
+{% if qotd %}
+<div class="card mb-3" style="border-left:3px solid var(--theme-accent);">
+    <div class="card-body py-2">
+        <small class="text-muted me-2"><i class="bi bi-quote"></i> MOTD:</small>
+        <em>{{ qotd }}</em>
+    </div>
+</div>
+{% endif %}
+
+{% if active_poll %}
+<div class="card mb-3" style="border-left:3px solid var(--theme-primary);">
+    <div class="card-header py-2">
+        <i class="bi bi-bar-chart"></i> Active Poll
+    </div>
+    <div class="card-body py-2">
+        <strong>{{ active_poll.question }}</strong>
+        <a href="{{ url_for('polls.view_poll', poll_id=active_poll.id) }}" class="btn btn-sm btn-primary float-end">
+            Vote &rarr;
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-md-8">
+        <!-- Recent Posts -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="bi bi-chat-left-text"></i> Recent Posts
+            </div>
+            <div class="card-body">
+                {% if recent_posts %}
+                    <div class="list-group">
+                        {% for post in recent_posts %}
+                            <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ post.subject }}</h6>
+                                    <small>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                                </div>
+                                <p class="mb-1">{{ post.content[:100] }}{% if post.content|length > 100 %}...{% endif %}</p>
+                                <small>by {{ post.author.username }} in {{ post.board.name }}</small>
+                            </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p>No posts yet. Be the first to post!</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Message Boards -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list"></i> Message Boards
+            </div>
+            <div class="card-body">
+                {% if boards %}
+                    <div class="list-group">
+                        {% for board in boards %}
+                            <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ board.name }}</h6>
+                                </div>
+                                <p class="mb-1">{{ board.description }}</p>
+                            </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p>No boards available.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <!-- Bulletins -->
+        {% if bulletins %}
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-megaphone"></i> Bulletins
+                </div>
+                <div class="card-body">
+                    {% for bulletin in bulletins %}
+                        <div class="mb-3">
+                            <h6>{{ bulletin.title }}</h6>
+                            <p class="small">{{ bulletin.content }}</p>
+                            <small class="text-muted">Posted {{ bulletin.created_at.strftime('%Y-%m-%d') }}</small>
+                        </div>
+                        {% if not loop.last %}<hr style="border-color: #00ff00;">{% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- Statistics -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="bi bi-graph-up"></i> Statistics
+            </div>
+            <div class="card-body">
+                <p><strong>Boards:</strong> {{ stats.total_boards }}</p>
+                <p><strong>Posts:</strong> {{ stats.total_posts }}</p>
+                <p><strong>Active Users:</strong> {{ stats.total_users }}</p>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-link-45deg"></i> Quick Links
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><a href="{{ url_for('boards.list_boards') }}"><i class="bi bi-arrow-right"></i> Browse Boards</a></li>
+                    <li><a href="{{ url_for('files.list_files') }}"><i class="bi bi-arrow-right"></i> File Gallery</a></li>
+                    {% if current_user.is_authenticated %}
+                        <li><a href="{{ url_for('mrc.index') }}"><i class="bi bi-arrow-right"></i> MRC Chat</a></li>
+                        <li><a href="{{ url_for('irc.index') }}"><i class="bi bi-arrow-right"></i> IRC</a></li>
+                        <li><a href="{{ url_for('profile.index') }}"><i class="bi bi-arrow-right"></i> My Profile</a></li>
+                        <li><a href="{{ url_for('pm.inbox') }}"><i class="bi bi-arrow-right"></i> Messages</a></li>
+                    {% else %}
+                        <li><a href="{{ url_for('auth.register') }}"><i class="bi bi-arrow-right"></i> Register</a></li>
+                        <li><a href="{{ url_for('auth.login') }}"><i class="bi bi-arrow-right"></i> Login</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+
+        <!-- Online Users -->
+        {% if online_users %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-people"></i> Who's Online ({{ online_users | length }})
+                <a href="{{ url_for('who.index') if current_user.is_authenticated else '#' }}"
+                   class="float-end small">all</a>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0">
+                    {% for user in online_users %}
+                    <li><i class="bi bi-circle-fill text-success" style="font-size:0.5rem;"></i>
+                        <a href="{{ url_for('profile.view_user', username=user.username) }}">{{ user.username }}</a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if todays_birthdays %}
+        <div class="card mt-3 border-warning">
+            <div class="card-header">🎂 Birthdays Today</div>
+            <div class="card-body">
+                {% for u in todays_birthdays %}
+                    <div><strong>{{ u.username }}</strong>
+                        — wish them a happy one!</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if active_broadcasts %}
+        <div class="card mt-3 border-warning">
+            <div class="card-header"><i class="bi bi-megaphone-fill text-warning"></i> Sysop Broadcasts</div>
+            <div class="card-body">
+                {% for b in active_broadcasts %}
+                <div class="mb-2"><strong>{{ b.sender.username if b.sender else 'sysop' }}:</strong>
+                    {{ b.text }}
+                    <div class="text-muted small">{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if today_stats %}
+        <div class="card mt-3">
+            <div class="card-header"><i class="bi bi-bar-chart"></i> Last 24 hours</div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0 small">
+                    <li>📝 {{ today_stats.posts }} board posts</li>
+                    <li>📨 {{ today_stats.echomail }} echomail</li>
+                    <li>📣 {{ today_stats.shouts }} shouts</li>
+                    <li>👋 {{ today_stats.new_users }} new users</li>
+                    {% if file_area_count %}<li>📂 {{ file_area_count }} file areas</li>{% endif %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if recent_shouts and current_user.is_authenticated %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-megaphone"></i> Latest Shouts
+                <a href="{{ url_for('shoutbox.index') }}" class="float-end small">all</a>
+            </div>
+            <div class="card-body">
+                {% for s in recent_shouts %}
+                <div class="mb-1 small">
+                    <strong>{{ s.user.username }}</strong>: {{ s.text }}
+                    <div class="text-muted" style="font-size:0.75rem;">{{ s.created_at.strftime('%H:%M') }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if latest_echomail and current_user.is_authenticated %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-envelope-paper"></i> Latest Echomail
+                <a href="{{ url_for('echomail.index') }}" class="float-end small">all</a>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0 small">
+                    {% for em in latest_echomail %}
+                    <li class="mb-1">
+                        <a href="{{ url_for('echomail.read', area_id=em.area_id, message_id=em.id) }}">
+                            {{ em.subject[:48] if em.subject else '(no subject)' }}
+                        </a>
+                        <div class="text-muted" style="font-size:0.75rem;">
+                            {{ em.from_name }} — {{ em.created_at.strftime('%m/%d %H:%M') }}
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

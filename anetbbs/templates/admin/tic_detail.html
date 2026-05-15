@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}TIC #{{ tic.id }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-file-earmark-text"></i> TIC #{{ tic.id }}</h1>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Status</dt>
+            <dd class="col-sm-9">{{ tic.status }}</dd>
+            <dt class="col-sm-3">Area</dt>
+            <dd class="col-sm-9"><code>{{ tic.area_tag or '?' }}</code></dd>
+            <dt class="col-sm-3">File</dt>
+            <dd class="col-sm-9">{{ tic.filename or '?' }}</dd>
+            <dt class="col-sm-3">Size</dt>
+            <dd class="col-sm-9">{{ tic.size_bytes or 0 }} bytes</dd>
+            <dt class="col-sm-3">CRC32</dt>
+            <dd class="col-sm-9"><code>{{ tic.crc32 or '?' }}</code></dd>
+            <dt class="col-sm-3">From</dt>
+            <dd class="col-sm-9"><code>{{ tic.from_address or '?' }}</code></dd>
+            <dt class="col-sm-3">Origin</dt>
+            <dd class="col-sm-9"><code>{{ tic.origin or '?' }}</code></dd>
+            <dt class="col-sm-3">Stored at</dt>
+            <dd class="col-sm-9"><code>{{ tic.stored_path or '(not filed)' }}</code></dd>
+            <dt class="col-sm-3">Received</dt>
+            <dd class="col-sm-9">{{ tic.received_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+            {% if tic.processed_at %}
+            <dt class="col-sm-3">Processed</dt>
+            <dd class="col-sm-9">{{ tic.processed_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+</div>
+
+{% if tic.description %}
+<div class="card mb-3">
+    <div class="card-header">Description</div>
+    <div class="card-body"><pre>{{ tic.description }}</pre></div>
+</div>
+{% endif %}
+
+{% if tic.error_message %}
+<div class="card mb-3 border-danger">
+    <div class="card-header text-danger">Error</div>
+    <div class="card-body"><pre class="text-danger">{{ tic.error_message }}</pre></div>
+</div>
+{% endif %}
+
+{% if path %}
+<div class="card mb-3">
+    <div class="card-header">PATH</div>
+    <div class="card-body p-2"><pre style="font-size:0.85rem;margin:0;">{% for p in path %}{{ p }}
+{% endfor %}</pre></div>
+</div>
+{% endif %}
+
+{% if seenby %}
+<div class="card mb-3">
+    <div class="card-header">SEEN-BY</div>
+    <div class="card-body p-2"><pre style="font-size:0.85rem;margin:0;">{% for s in seenby %}{{ s }}
+{% endfor %}</pre></div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header"><a class="text-decoration-none" data-bs-toggle="collapse" href="#raw">Raw TIC <small>(click to expand)</small></a></div>
+    <div id="raw" class="collapse">
+        <div class="card-body p-2"><pre class="mb-0" style="font-size:11px;">{{ tic.raw_content or '' }}</pre></div>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('admin.tic_log') }}" class="btn btn-link">← TIC log</a>
+</div>
+{% endblock %}

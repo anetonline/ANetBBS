@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Nodelist Browser - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-diagram-3-fill"></i> Nodelist Browser</h1>
+    <p>Search the FidoNet network directory.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-7">
+                <label class="form-label">Search</label>
+                <input type="text" name="q" value="{{ q }}" class="form-control"
+                       placeholder="Sysop name, system name, location, or address (e.g. 1:234/5)">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Domain</label>
+                <select name="domain" class="form-select">
+                    <option value="">— all —</option>
+                    {% for nl in nodelists %}
+                        <option value="{{ nl.domain }}"
+                                {% if domain == nl.domain %}selected{% endif %}>
+                            {{ nl.domain }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100"><i class="bi bi-search"></i> Search</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if nodelists %}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-database"></i> Imported Nodelists</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Domain</th><th>Filename</th><th>Day</th><th>Released</th>
+                <th>Entries</th><th>Imported</th>
+            </tr></thead>
+            <tbody>
+            {% for nl in nodelists %}
+                <tr>
+                    <td><strong>{{ nl.domain }}</strong></td>
+                    <td>{{ nl.filename }}</td>
+                    <td>{{ nl.day_of_year }}</td>
+                    <td>{{ nl.release_date }}</td>
+                    <td>{{ nl.entry_count }}</td>
+                    <td>{{ nl.imported_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-warning">
+    No nodelists imported yet.
+    {% if current_user.is_admin %}
+        <a href="{{ url_for('nodelist.admin_upload') }}">Upload one</a>.
+    {% else %}
+        Ask the sysop to import a nodelist.
+    {% endif %}
+</div>
+{% endif %}
+
+{% if q %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-list-check"></i> Search Results
+        ({{ entries|length }} match{{ '' if entries|length == 1 else 'es' }})
+    </div>
+    <div class="card-body p-0">
+        {% if entries %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Address</th><th>System</th><th>Sysop</th>
+                <th>Location</th><th>Type</th>
+            </tr></thead>
+            <tbody>
+            {% for e in entries %}
+                <tr>
+                    <td><code>
+                        <a href="{{ url_for('nodelist.view_entry', entry_id=e.id) }}">
+                            {{ e.address }}
+                        </a>
+                    </code></td>
+                    <td>{{ e.system_name }}</td>
+                    <td>{{ e.sysop_name }}</td>
+                    <td>{{ e.location }}</td>
+                    <td>{% if e.keyword_type %}<span class="badge bg-secondary">{{ e.keyword_type }}</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="p-3">No matches.</div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_admin %}
+<div class="mt-3 d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('nodelist.admin_upload') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-upload"></i> Import / Replace Nodelist
+    </a>
+    <a href="{{ url_for('nodelist.admin_bulk_import') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-cloud-arrow-down"></i> Bulk Import from Directory
+    </a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Compose Netmail — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-4" style="max-width: 800px;">
+    <h2><i class="bi bi-envelope-fill"></i> Compose QWK Netmail</h2>
+    <p class="text-muted">
+        Send a private 1-on-1 message to a user on another BBS via DOVE-Net or
+        another QWK network. The message will be queued and delivered on the
+        next poll. The recipient's BBS routes it to them by name.
+    </p>
+
+    <form method="post" novalidate>
+        {{ form.hidden_tag() }}
+
+        <div class="mb-3">
+            {{ form.network_id.label(class="form-label") }}
+            {{ form.network_id(class="form-select") }}
+        </div>
+
+        <div class="mb-3">
+            {{ form.to_name.label(class="form-label") }}
+            {{ form.to_name(class="form-control",
+                placeholder="e.g. Rob Swindell, SYSOP, or a user handle") }}
+            <div class="form-text">
+                The name as it appears on the recipient's BBS.
+            </div>
+        </div>
+
+        <div class="mb-3">
+            {{ form.to_address.label(class="form-label") }}
+            {{ form.to_address(class="form-control",
+                placeholder="e.g. 1:103/705 (only needed if name is ambiguous)") }}
+        </div>
+
+        <div class="mb-3">
+            {{ form.subject.label(class="form-label") }}
+            {{ form.subject(class="form-control") }}
+        </div>
+
+        <div class="mb-3">
+            {{ form.body.label(class="form-label") }}
+            {{ form.body(class="form-control", rows=15,
+                style="font-family:monospace;") }}
+        </div>
+
+        <button type="submit" class="btn btn-success">
+            <i class="bi bi-send"></i> {{ form.submit.label.text }}
+        </button>
+        <a href="{{ url_for('echomail.index') }}" class="btn btn-secondary">
+            Cancel
+        </a>
+    </form>
+</div>
+{% endblock %}

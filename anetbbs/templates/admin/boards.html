@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Board Management - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-collection"></i> Board Management</h1>
+</div>
+
+<div class="text-end mb-3">
+    <a href="{{ url_for('admin.add_board') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Board</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Posts</th>
+                    <th>Active</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for board in boards %}
+                <tr>
+                    <td>{{ board.order }}</td>
+                    <td>{{ board.name }}</td>
+                    <td>{{ board.description or '' }}</td>
+                    <td>{{ board_stats.get(board.id, 0) }}</td>
+                    <td>
+                        {% if board.is_active %}
+                            <i class="bi bi-check-circle text-success"></i>
+                        {% else %}
+                            <i class="bi bi-x-circle text-danger"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="{{ url_for('admin.move_board', board_id=board.id, direction='up') }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-up"></i></button>
+                        </form>
+                        <form method="post" action="{{ url_for('admin.move_board', board_id=board.id, direction='down') }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-down"></i></button>
+                        </form>
+                        <a href="{{ url_for('admin.edit_board', board_id=board.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{{ url_for('admin.board_moderators', board_id=board.id) }}" class="btn btn-sm btn-secondary" title="Moderators"><i class="bi bi-person-badge"></i></a>
+                        <a href="{{ url_for('admin.delete_board', board_id=board.id) }}" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

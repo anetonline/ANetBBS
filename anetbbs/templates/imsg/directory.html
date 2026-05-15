@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}BBS Directory — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-globe2"></i> Inter-BBS Directory</h2>
+            <p class="text-muted mb-0">
+                BBSes from the <code>sbbsimsg.lst</code> registry that participate
+                in inter-BBS instant messaging. Click <em>Who's online</em> to
+                query a remote system live, then <em>Send IM</em> to send a message.
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('imsg.inbox') }}" class="btn btn-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Inbox
+            </a>
+            {% if current_user.is_admin %}
+            <form method="post" action="{{ url_for('imsg.directory_refresh') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-primary btn-sm">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh from Vertrauen
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <form method="get" class="mb-3">
+        <div class="input-group input-group-sm" style="max-width:480px;">
+            <input type="text" name="q" value="{{ q }}"
+                   class="form-control" placeholder="Filter by hostname or BBS name…">
+            <button class="btn btn-outline-primary">Filter</button>
+        </div>
+    </form>
+
+    {% if not rows %}
+        <div class="alert alert-warning">
+            Directory is empty. Click <strong>Refresh from Vertrauen</strong>
+            to pull <code>ftp://vert.synchro.net/sbbsimsg.lst</code>.
+        </div>
+    {% else %}
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Hostname</th>
+                    <th>Software</th>
+                    <th>Sysop / Location</th>
+                    <th>Last Seen</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td><strong>{{ r.name }}</strong></td>
+                    <td>
+                        <code>{{ r.hostname }}</code>
+                        {% if r.ip_address %}<br><small class="text-muted">{{ r.ip_address }}</small>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.source == 'anetbbs' %}
+                            <span class="badge bg-primary">ANetBBS</span>
+                        {% elif r.source == 'sbbsimsg' %}
+                            <span class="badge bg-secondary">Synchronet</span>
+                        {% else %}
+                            <span class="badge bg-dark">{{ r.software or 'unknown' }}</span>
+                        {% endif %}
+                        {% if r.software_version %}<br><small>{{ r.software_version }}</small>{% endif %}
+                    </td>
+                    <td>
+                        {{ r.sysop or '—' }}
+                        {% if r.location %}<br><small class="text-muted">{{ r.location }}</small>{% endif %}
+                    </td>
+                    <td><small>{{ r.last_seen_at.strftime('%Y-%m-%d') if r.last_seen_at else '' }}</small></td>
+                    <td class="text-end">
+                        <a href="{{ url_for('imsg.directory_who', entry_id=r.id) }}"
+                           class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-people"></i> Who's online
+                        </a>
+                        <a href="{{ url_for('imsg.send', host=r.hostname) }}"
+                           class="btn btn-success btn-sm">
+                            <i class="bi bi-send"></i> Send IM
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+{% endblock %}

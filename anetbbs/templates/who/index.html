@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Who's Online{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-people-fill"></i> Who's Online</h1>
+    <p>{{ total }} logged-in user{% if total != 1 %}s{% endif %} across all protocols.</p>
+</div>
+
+{% if counts %}
+<div class="mb-3">
+    {% for proto, n in counts.items() %}
+        <span class="badge bg-secondary me-1">{{ proto }}: {{ n }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>User</th><th>Protocol</th><th>Where</th>
+                {% if current_user.is_authenticated and current_user.is_admin %}<th>IP</th>{% endif %}
+                <th>Last Seen</th>
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('profile.view_user', username=r.user.username) }}">
+                            <strong>{{ r.user.username }}</strong>
+                        </a>
+                        {% if r.user.is_admin %}<span class="badge bg-warning text-dark">sysop</span>{% endif %}
+                    </td>
+                    <td><span class="badge bg-info text-dark">{{ r.protocol }}</span></td>
+                    <td><small class="text-muted">
+                        {% if current_user.is_authenticated and current_user.is_admin %}
+                            {{ r.where or '—' }}
+                        {% else %}
+                            {{ r.where_label }}
+                        {% endif %}
+                    </small></td>
+                    {% if current_user.is_authenticated and current_user.is_admin %}
+                    <td><code class="small">{{ r.ip }}</code></td>
+                    {% endif %}
+                    <td><small>{{ r.last_seen.strftime('%H:%M:%S') }}</small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No one is online right now.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

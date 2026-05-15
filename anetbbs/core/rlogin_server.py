@@ -1,0 +1,124 @@
+# core/rlogin_server.py
+"""
+RFC 1282 rlogin server for ANetBBS.
+
+rlogin is inherently insecure (no encryption). This server is disabled by
+default (RLOGIN_ENABLED=false). Enable only on trusted networks.
+
+Protocol summary (RFC 1282):
+  1. Client connects and sends a NUL-terminated string: "<client-user>\0<server-user>\0<terminal/speed>\0"
+  2. Server acknowledges with a single NUL byte.
+  3. Normal bidirectional data flow follows.
+"""
+import asyncio
+import logging
+
+from .session import BBSSession
+
+logger = logging.getLogger(__name__)
+
+# Warning printed to stderr at startup when rlogin is enabled
+_RLOGIN_WARNING = (
+    'WARNING: rlogin server is enabled. '
+    'rlogin provides NO encryption and is inherently insecure. '
+    'Only enable on trusted, firewalled networks.'
+)
+
+
+class RloginServer:
+    """Asyncio-based rlogin BBS server."""
+
+    def __init__(self, config):
+        self.config = config
+        self.server = None
+        self._shutdown_event = asyncio.Event()
+        self.active_connections = set()
+
+    async def handle_connection(self, reader, writer):
+        addr = writer.get_extra_info('peername')
+        logger.info('rlogin connection from %s', addr)
+        self.active_connections.add(writer)
+
+        try:
+            # rlogin handshake: read until three NUL-terminated strings
+            header = await _read_rlogin_header(reader)
+            logger.debug('rlogin header from %s: %s', addr, header)
+
+            # Send the acknowledgement NUL byte
+            writer.write(b'\x00')
+            await writer.drain()
+
+            # The handshake's server_user is who the client wants to log in as.
+            # Pass it as prefill so the BBS session can skip the username prompt.
+            session = BBSSession(reader, writer, self.config,
+                                 prefill_username=header.get('server_user'))
+            await session.start()
+        except asyncio.IncompleteReadError:
+            logger.debug('rlogin connection from %s closed during handshake', addr)
+        except Exception as exc:
+            logger.error('rlogin session error from %s: %s', addr, exc)
+        finally:
+            if not writer.is_closing():
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            self.active_connections.discard(writer)
+            logger.info('rlogin connection closed for %s', addr)
+
+    async def start(self):
+        """Start the rlogin server and wait until shutdown."""
+        import sys
+        print(_RLOGIN_WARNING, file=sys.stderr, flush=True)
+        logger.warning(_RLOGIN_WARNING)
+
+        self.server = await asyncio.start_server(
+            self.handle_connection,
+            self.config.get('rlogin', {}).get('host', '0.0.0.0'),
+            self.config.get('rlogin', {}).get('port', 513),
+        )
+        addr = self.server.sockets[0].getsockname()
+        logger.info('rlogin server started on %s', addr)
+
+        async with self.server:
+            await self._shutdown_event.wait()
+
+    def stop(self):
+        if not self._shutdown_event.is_set():
+            self._shutdown_event.set()
+            if self.server:
+                self.server.close()
+
+
+async def _read_rlogin_header(reader):
+    """
+    Read the rlogin client header.
+
+    Returns a dict with keys: client_user, server_user, terminal_speed.
+    """
+    # The very first byte from the client must be NUL (RFC 1282 §3)
+    first = await reader.readexactly(1)
+    if first != b'\x00':
+        raise ValueError(f'Expected NUL, got {first!r}')
+
+    raw = b''
+    while True:
+        chunk = await reader.read(256)
+        if not chunk:
+            raise asyncio.IncompleteReadError(raw, None)
+        raw += chunk
+        # We need three NUL-terminated strings
+        parts = raw.split(b'\x00')
+        if len(parts) >= 4:
+            break
+
+    client_user = parts[0].decode('ascii', errors='replace')
+    server_user = parts[1].decode('ascii', errors='replace')
+    terminal_speed = parts[2].decode('ascii', errors='replace')
+
+    return {
+        'client_user': client_user,
+        'server_user': server_user,
+        'terminal_speed': terminal_speed,
+    }

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Documentation — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-book"></i> Documentation</h1>
+    <p class="lead">Everything you need to run, use, and extend your ANetBBS.</p>
+</div>
+
+{% if not docs %}
+<div class="alert alert-warning">No documentation files found in <code>docs/</code>.</div>
+{% else %}
+<div class="row g-3">
+    <div class="col-lg-9">
+        {% for cat in categories %}
+        <div class="card mb-3">
+            <div class="card-header d-flex align-items-center">
+                <i class="bi {{ cat.icon }} me-2"></i>
+                <strong>{{ cat.name }}</strong>
+                <span class="badge bg-secondary ms-auto">{{ cat.docs|length }}</span>
+            </div>
+            <ul class="list-group list-group-flush">
+            {% for d in cat.docs %}
+                <li class="list-group-item d-flex align-items-center">
+                    <a href="{{ url_for('docs.view', slug=d.slug) }}"
+                       class="text-decoration-none flex-grow-1">
+                        {{ d.title }}
+                    </a>
+                    <code class="small text-muted ms-2">{{ d.slug }}</code>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="col-lg-3">
+        <div class="card mb-3 sticky-top" style="top: 1rem;">
+            <div class="card-header"><i class="bi bi-mortarboard"></i> First time here?</div>
+            <div class="card-body">
+                <p class="small">If you just installed your BBS, take the
+                   guided slideshow tour for new sysops.</p>
+                <a href="{{ url_for('main.tutorial') }}" class="btn btn-primary w-100 mb-2">
+                    <i class="bi bi-play-circle"></i> Start tutorial
+                </a>
+                <a href="{{ url_for('main.tour') }}" class="btn btn-outline-primary w-100">
+                    <i class="bi bi-compass"></i> User tour
+                </a>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="bi bi-info-circle"></i> Quick links</div>
+            <ul class="list-group list-group-flush small">
+                <li class="list-group-item"><a href="{{ url_for('wiki.index') }}">Wiki</a></li>
+                <li class="list-group-item"><a href="{{ url_for('stats.index') }}">Statistics</a></li>
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <li class="list-group-item"><a href="{{ url_for('admin.checklist') }}">Sysop launch checklist</a></li>
+                <li class="list-group-item"><a href="{{ url_for('control.index') }}">Sysop control panel</a></li>
+                {% endif %}
+                <li class="list-group-item"><a href="{{ url_for('main.healthz') }}">Health check JSON</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

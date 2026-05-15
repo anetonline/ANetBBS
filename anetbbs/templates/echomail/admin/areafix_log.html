@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}AreaFix Log — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-journal-text"></i> AreaFix Log</h2>
+            <p class="text-muted mb-0">
+                Audit trail of AreaFix subscription/unsubscription requests
+                — both inbound (other nodes asking us to add areas) and
+                outbound (us asking a hub to add areas).
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Echomail Dashboard
+            </a>
+        </div>
+    </div>
+
+    <form method="get" class="mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label form-label-sm">Filter by network:</label>
+                <select name="network_id" class="form-select form-select-sm">
+                    <option value="">All networks</option>
+                    {% for n in all_networks %}
+                    <option value="{{ n.id }}"
+                            {% if network_filter == n.id %}selected{% endif %}>
+                        {{ n.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary btn-sm">Filter</button>
+            </div>
+        </div>
+    </form>
+
+    {% if not rows %}
+        <div class="alert alert-info">
+            No AreaFix activity yet. Use the
+            <a href="{{ url_for('echomail_admin.areas') }}">Send AreaFix Request</a>
+            panel on the Areas page to trigger one.
+        </div>
+    {% else %}
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Network</th>
+                    <th>From</th>
+                    <th>Type</th>
+                    <th>Tags</th>
+                    <th>Result</th>
+                    <th>Response</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '' }}</td>
+                    <td>{{ networks[row.network_id].name if row.network_id in networks else '?' }}</td>
+                    <td><code>{{ row.from_address or '' }}</code></td>
+                    <td><span class="badge bg-secondary">{{ row.request_type }}</span></td>
+                    <td><small><code>{{ row.area_tags or '' }}</code></small></td>
+                    <td>
+                        {% if row.success %}
+                            <span class="badge bg-success">OK</span>
+                        {% else %}
+                            <span class="badge bg-danger">FAIL</span>
+                        {% endif %}
+                    </td>
+                    <td><pre style="margin:0; font-size:0.75rem; max-width:480px; white-space:pre-wrap;">{{ (row.response or '')[:300] }}</pre></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if pagination and pagination.pages > 1 %}
+        <nav>
+            <ul class="pagination pagination-sm">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link"
+                       href="?page={{ pagination.prev_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}">Prev</a>
+                </li>
+                {% endif %}
+                <li class="page-item active">
+                    <span class="page-link">
+                        Page {{ pagination.page }} of {{ pagination.pages }}
+                    </span>
+                </li>
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link"
+                       href="?page={{ pagination.next_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}">Next</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Send IM — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-4" style="max-width:720px;">
+    <h2><i class="bi bi-send"></i> Send Inter-BBS Instant Message</h2>
+    <p class="text-muted">
+        Real-time delivery to a user on another BBS over MSP (TCP port 18).
+        The remote BBS must be running Synchronet (sbbsimsg) or another
+        compatible MSP server. There is no acknowledgement — "delivered"
+        means the bytes hit the wire and the remote did not reject.
+    </p>
+
+    <form method="post">
+        {{ form.hidden_tag() }}
+
+        <div class="mb-3">
+            {{ form.recipient.label(class="form-label") }}
+            {{ form.recipient(class="form-control",
+                placeholder="stingray@a-net-online.lol") }}
+            <div class="form-text">
+                Tip: you can paste <code>user@host</code> here and leave
+                the Host field blank — we'll split it for you.
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-9">
+                {{ form.host.label(class="form-label") }}
+                {{ form.host(class="form-control",
+                    placeholder="bbs.example.com (only if not in Recipient)") }}
+            </div>
+            <div class="col-md-3">
+                {{ form.port.label(class="form-label") }}
+                {{ form.port(class="form-control") }}
+            </div>
+        </div>
+
+        <div class="mb-3">
+            {{ form.message.label(class="form-label") }}
+            {{ form.message(class="form-control", rows=8,
+                style="font-family:monospace;") }}
+            <div class="form-text">8 KB max per RFC 1312.</div>
+        </div>
+
+        <button class="btn btn-success">
+            <i class="bi bi-send"></i> Send
+        </button>
+        <a href="{{ url_for('imsg.inbox') }}" class="btn btn-secondary">
+            Cancel
+        </a>
+    </form>
+</div>
+{% endblock %}

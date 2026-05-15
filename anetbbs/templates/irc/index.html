@@ -1,0 +1,524 @@
+{% extends "base.html" %}
+
+{% block title %}IRC Chat - {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.irc-shell { display:grid; grid-template-columns:180px 1fr 160px; grid-template-rows:auto 1fr auto; height:75vh; gap:0; border:1px solid var(--theme-primary); }
+@media (max-width:900px) {
+    /* Phone layout: hide users panel, channels become a horizontal scroller. */
+    .irc-shell { grid-template-columns:120px 1fr; height:80vh; }
+    .irc-users { display:none; }
+    .irc-input { grid-column:2/3; }
+    .irc-channels { font-size:0.8rem; }
+    .irc-config { gap:4px; }
+    .irc-config input { width:auto !important; min-width:80px; }
+}
+.irc-config { grid-column:1/-1; padding:8px; background:var(--theme-bg-dark); display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+.irc-config input, .irc-config select, .irc-config button { font-size:0.85rem; }
+.irc-channels { background:var(--theme-bg-dark); border-right:1px solid var(--theme-primary); overflow-y:auto; padding:4px; }
+.irc-channels .channel-item { padding:4px 8px; cursor:pointer; border-radius:4px; }
+.irc-channels .channel-item.active { background:var(--theme-primary); color:#000; }
+.irc-channels .channel-item:hover { background:#333; }
+.irc-log { background:#000; color:#0f0; font-family:monospace; font-size:0.85rem; overflow-y:auto; padding:6px; white-space:pre-wrap; }
+.irc-log .line { padding:1px 0; }
+.irc-log .system { color:#aaa; }
+.irc-log .error { color:#f33; }
+.irc-log .self { color:#0ff; }
+.irc-log .from { font-weight:bold; }
+.irc-log .ts { color:#666; font-size:0.75rem; }
+.irc-log .joinpart { color:#888; font-style:italic; }
+.irc-log .action { color:#ff6; font-style:italic; }
+.irc-log .highlight { background:#ff0; color:#000; padding:1px 2px; border-radius:2px; }
+.irc-log .mention { border-left:3px solid #ff0; padding-left:4px; }
+.irc-users { background:var(--theme-bg-dark); border-left:1px solid var(--theme-primary); overflow-y:auto; padding:4px; font-family:monospace; font-size:0.8rem; }
+.irc-users .user-item { padding:1px 4px; cursor:pointer; border-radius:3px; }
+.irc-users .user-item:hover { background:#333; }
+.irc-users .op { color:#0f0; }
+.irc-users .voice { color:#0ff; }
+.irc-users .header { color:#aaa; font-weight:bold; padding:4px; border-bottom:1px solid #333; margin-bottom:4px; }
+.irc-input { grid-column:2/3; padding:6px; background:var(--theme-bg-dark); border-top:1px solid var(--theme-primary); display:flex; gap:6px; }
+.irc-input input { flex:1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-broadcast-pin"></i> IRC Chat</h1>
+    <p>Connect to any IRC network from your browser.</p>
+</div>
+
+<div class="irc-shell">
+    <div class="irc-config">
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Server</label>
+            <input id="cfg_server" type="text" class="form-control form-control-sm"
+                   value="{{ saved.server if saved else 'irc.libera.chat' }}" style="width:160px;">
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Port</label>
+            <input id="cfg_port" type="number" class="form-control form-control-sm"
+                   value="{{ saved.port if saved else 6667 }}" style="width:80px;">
+        </div>
+        <div class="form-check mb-1">
+            <input id="cfg_ssl" class="form-check-input" type="checkbox"
+                   {% if saved and saved.use_ssl %}checked{% endif %}>
+            <label class="form-check-label" for="cfg_ssl" style="font-size:0.85rem;">SSL</label>
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Nick</label>
+            <input id="cfg_nick" type="text" class="form-control form-control-sm"
+                   value="{{ saved.nick if saved else default_nick }}" style="width:120px;">
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Auto-join channels (comma)</label>
+            <input id="cfg_channels" type="text" class="form-control form-control-sm"
+                   value="{{ saved.channels if saved else '' }}"
+                   placeholder="#hangout,#bbs" style="width:220px;">
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">SASL Account</label>
+            <input id="cfg_sasl_user" type="text" class="form-control form-control-sm"
+                   placeholder="(optional)" style="width:120px;" autocomplete="off">
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">SASL Password</label>
+            <input id="cfg_sasl_pass" type="password" class="form-control form-control-sm"
+                   placeholder="" style="width:120px;" autocomplete="new-password">
+        </div>
+        <button id="btn_connect" class="btn btn-success btn-sm">
+            <i class="bi bi-plug"></i> Connect
+        </button>
+        <button id="btn_disconnect" class="btn btn-danger btn-sm" disabled>
+            <i class="bi bi-x-circle"></i> Disconnect
+        </button>
+        <button id="btn_save" class="btn btn-outline-secondary btn-sm" title="Save these settings">
+            <i class="bi bi-bookmark"></i>
+        </button>
+    </div>
+
+    <div class="irc-channels" id="channels">
+        <div class="channel-item active" data-channel="(server)">(server)</div>
+    </div>
+
+    <div class="irc-log" id="log">
+        <div class="line system">[Click <b>Connect</b> to begin.]</div>
+    </div>
+
+    <div class="irc-users" id="users">
+        <div class="header" id="usersHeader">Users</div>
+        <div id="usersList"></div>
+    </div>
+
+    <div class="irc-input">
+        <span id="current_channel" class="text-muted" style="white-space:nowrap;">(server)</span>
+        <input id="input_line" class="form-control form-control-sm" type="text"
+               placeholder="Type a message or /command (e.g. /join #channel)…" disabled>
+        <button id="btn_send" class="btn btn-primary btn-sm" disabled>
+            <i class="bi bi-send"></i>
+        </button>
+    </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function() {
+    const socket = io('/irc', {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        // Bumped from 10 → 50 with longer backoff so brief gunicorn worker
+        // recycles or upstream IRC server hiccups don't end the session.
+        reconnectionAttempts: 50,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 30000,
+        randomizationFactor: 0.5,
+        timeout: 30000,
+    });
+
+    const log = document.getElementById('log');
+    const input = document.getElementById('input_line');
+    const btnSend = document.getElementById('btn_send');
+    const btnConnect = document.getElementById('btn_connect');
+    const btnDisconnect = document.getElementById('btn_disconnect');
+    const btnSave = document.getElementById('btn_save');
+    const channelsBox = document.getElementById('channels');
+    const currentChannelLabel = document.getElementById('current_channel');
+
+    let currentChannel = '(server)';
+    let myNick = '{{ default_nick }}';
+    const channelLines = { '(server)': [] };
+    const channelNames = { };   // channel -> Set of nicks for tab-complete
+    const channelModes = { };   // channel -> { nick -> '@'/'+'/'' } for sidebar
+    let notifyEnabled = false;
+    if ('Notification' in window && Notification.permission === 'granted') {
+        notifyEnabled = true;
+    }
+
+    function maybeNotify(channel, from, text) {
+        // Suppress notifications for messages I sent myself.
+        if (from === myNick) return;
+        if (channel === currentChannel && document.hasFocus()) return;
+        if (!notifyEnabled) return;
+        try {
+            new Notification(`${channel} — ${from}`, {
+                body: text.slice(0, 200),
+                tag: 'irc-' + channel,
+                silent: false,
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    function isMention(text) {
+        if (!myNick) return false;
+        const re = new RegExp('(^|[^a-zA-Z0-9_])' +
+            myNick.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+            '($|[^a-zA-Z0-9_])', 'i');
+        return re.test(text || '');
+    }
+
+    function refreshUsersPanel() {
+        const header = document.getElementById('usersHeader');
+        const list = document.getElementById('usersList');
+        if (!header || !list) return;
+        const set = channelNames[currentChannel];
+        if (!set || !currentChannel.startsWith('#')) {
+            header.textContent = 'Users';
+            list.innerHTML = '<div class="text-muted small">— pick a channel —</div>';
+            return;
+        }
+        const modes = channelModes[currentChannel] || {};
+        // Sort: ops first, then voiced, then plain — alphabetical within group.
+        const arr = [...set].sort((a, b) => {
+            const am = modes[a] || ''; const bm = modes[b] || '';
+            const rank = m => m === '@' ? 0 : m === '+' ? 1 : 2;
+            const r = rank(am) - rank(bm);
+            if (r) return r;
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
+        header.textContent = `Users in ${currentChannel} (${arr.length})`;
+        list.innerHTML = arr.map(n => {
+            const m = modes[n] || '';
+            const cls = m === '@' ? 'op' : m === '+' ? 'voice' : '';
+            return `<div class="user-item ${cls}">${m}${escapeHtml(n)}</div>`;
+        }).join('');
+    }
+
+    function addLine(channel, html, cls) {
+        const ts = new Date().toLocaleTimeString().slice(0, 8);
+        const line = `<div class="line ${cls || ''}"><span class="ts">${ts}</span> ${html}</div>`;
+        if (!channelLines[channel]) channelLines[channel] = [];
+        channelLines[channel].push(line);
+        // Cap each channel's history at 1000 lines.
+        if (channelLines[channel].length > 1000) channelLines[channel].shift();
+        if (channel === currentChannel) {
+            log.insertAdjacentHTML('beforeend', line);
+            log.scrollTop = log.scrollHeight;
+        }
+    }
+
+    function ensureChannel(channel) {
+        if (!channel || channelLines[channel]) return;
+        channelLines[channel] = [];
+        const div = document.createElement('div');
+        div.className = 'channel-item';
+        div.textContent = channel;
+        div.dataset.channel = channel;
+        div.addEventListener('click', () => switchChannel(channel));
+        channelsBox.appendChild(div);
+    }
+
+    function switchChannel(channel) {
+        currentChannel = channel;
+        currentChannelLabel.textContent = channel;
+        log.innerHTML = (channelLines[channel] || []).join('');
+        log.scrollTop = log.scrollHeight;
+        document.querySelectorAll('.channel-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.channel === channel);
+        });
+        refreshUsersPanel();
+    }
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // --- Socket events ---
+    socket.on('connect', () => addLine('(server)', '[socketio connected]', 'system'));
+    socket.on('disconnect', reason => {
+        addLine('(server)', '[socketio disconnected: ' + reason + ']', 'error');
+        input.disabled = true; btnSend.disabled = true;
+        btnConnect.disabled = false; btnDisconnect.disabled = true;
+    });
+    socket.on('connect_error', err => {
+        addLine('(server)', '[socketio connect error: ' + (err.message || err) + ']', 'error');
+    });
+    socket.io.on('reconnect_attempt', n => {
+        addLine('(server)', `[reconnecting… attempt ${n}]`, 'system');
+    });
+    socket.io.on('reconnect', n => {
+        addLine('(server)', `[reconnected after ${n} attempts]`, 'system');
+    });
+    socket.io.on('reconnect_failed', () => {
+        addLine('(server)',
+            '[reconnect failed — auto-refreshing page in 30s…]', 'error');
+        // After 50 backoff'd attempts (~5+ minutes total) failed, the
+        // network is genuinely down or our worker is stuck. Auto-refresh
+        // so the user gets a fresh socketio handshake without manual
+        // intervention. Browser will replay any cached creds and we'll
+        // either succeed or land back here again.
+        setTimeout(() => location.reload(), 30000);
+    });
+
+    socket.on('irc_system', d => addLine('(server)', escapeHtml(d.text), 'system'));
+    socket.on('irc_error', d => addLine(currentChannel, '⚠ ' + escapeHtml(d.message), 'error'));
+    socket.on('irc_connected', d => {
+        addLine('(server)', `Connected to ${escapeHtml(d.server)}:${d.port} as ${escapeHtml(d.nick)}`, 'system');
+        myNick = d.nick;
+        input.disabled = false; btnSend.disabled = false;
+        btnConnect.disabled = true; btnDisconnect.disabled = false;
+        input.focus();
+        // First connect — ask once for desktop notification permission.
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission().then(p => {
+                notifyEnabled = (p === 'granted');
+                if (notifyEnabled) {
+                    addLine('(server)',
+                        '[notifications enabled — you will be alerted on mention]',
+                        'system');
+                }
+            });
+        }
+    });
+    socket.on('irc_nick', d => {
+        if (d.old === myNick) myNick = d.new;
+    });
+    socket.on('irc_disconnected', d => {
+        addLine('(server)', `Disconnected: ${escapeHtml(d.reason || '')}`, 'system');
+        input.disabled = true; btnSend.disabled = true;
+        btnConnect.disabled = false; btnDisconnect.disabled = true;
+    });
+
+    socket.on('irc_message', d => {
+        // d.html is already pre-rendered + safe (server-side mIRC->HTML)
+        ensureChannel(d.target);
+        const plain = d.plain || '';
+        const mentioned = !d.self && isMention(plain);
+        let cls = d.self ? 'self' : '';
+        if (mentioned) cls += ' mention';
+        addLine(d.target, `<span class="from">&lt;${escapeHtml(d.from)}&gt;</span> ${d.html || escapeHtml(plain)}`, cls);
+        if (mentioned) maybeNotify(d.target, d.from, plain);
+    });
+    socket.on('irc_action', d => {
+        ensureChannel(d.target);
+        addLine(d.target, `<span class="action">* ${escapeHtml(d.from)} ${d.text}</span>`, 'action');
+    });
+    socket.on('irc_notice', d => {
+        addLine(d.target || '(server)', `-${escapeHtml(d.from)}- ${d.html || ''}`, 'system');
+    });
+    socket.on('irc_join', d => {
+        ensureChannel(d.channel);
+        if (!channelNames[d.channel]) channelNames[d.channel] = new Set();
+        channelNames[d.channel].add(d.nick);
+        addLine(d.channel, `→ ${escapeHtml(d.nick)} joined ${escapeHtml(d.channel)}`, 'joinpart');
+        if (d.channel === currentChannel) refreshUsersPanel();
+    });
+    socket.on('irc_part', d => {
+        const r = d.reason ? ` (${escapeHtml(d.reason)})` : '';
+        if (channelNames[d.channel]) channelNames[d.channel].delete(d.nick);
+        if (channelModes[d.channel]) delete channelModes[d.channel][d.nick];
+        addLine(d.channel, `← ${escapeHtml(d.nick)} left ${escapeHtml(d.channel)}${r}`, 'joinpart');
+        if (d.channel === currentChannel) refreshUsersPanel();
+    });
+    socket.on('irc_kick', d => {
+        if (channelNames[d.channel]) channelNames[d.channel].delete(d.victim);
+        if (channelModes[d.channel]) delete channelModes[d.channel][d.victim];
+        addLine(d.channel, `‼ ${escapeHtml(d.kicker)} kicked ${escapeHtml(d.victim)}: ${escapeHtml(d.reason || '')}`, 'error');
+        if (d.channel === currentChannel) refreshUsersPanel();
+    });
+    socket.on('irc_mode', d => {
+        addLine(d.target.startsWith('#') ? d.target : '(server)',
+                `MODE ${escapeHtml(d.target)} ${escapeHtml(d.modes)} (by ${escapeHtml(d.by)})`, 'system');
+    });
+    socket.on('irc_topic', d => {
+        ensureChannel(d.channel);
+        const by = d.by ? ` (set by ${escapeHtml(d.by)})` : '';
+        addLine(d.channel, `Topic for ${escapeHtml(d.channel)}: ${escapeHtml(d.topic)}${by}`, 'system');
+    });
+    socket.on('irc_whois', d => {
+        addLine('(server)', `WHOIS ${escapeHtml(d.target)}: ${escapeHtml(d.text)}`, 'system');
+    });
+    // Channel list browser — accumulate /list rows and surface a clickable
+    // panel instead of dumping each line into the server log.
+    let listAccum = [];
+    let listTimer = null;
+    socket.on('irc_list', d => {
+        listAccum.push(d);
+        if (listTimer) clearTimeout(listTimer);
+        listTimer = setTimeout(renderListPanel, 250);
+    });
+    socket.on('irc_list_end', d => {
+        if (listTimer) { clearTimeout(listTimer); listTimer = null; }
+        renderListPanel();
+        listAccum = [];
+        addLine('(server)', `— end of /list (${arguments[0]?.count ?? ''}) —`, 'system');
+    });
+
+    function renderListPanel() {
+        if (!listAccum.length) return;
+        const sorted = [...listAccum].sort((a, b) =>
+            (parseInt(b.users) || 0) - (parseInt(a.users) || 0));
+        let html = '<div class="card mb-2"><div class="card-header py-1">' +
+                   `Channel list (${sorted.length}) — click to /join` +
+                   '</div><div class="card-body p-0" style="max-height:300px;overflow-y:auto;">' +
+                   '<table class="table table-sm table-hover mb-0">';
+        for (const r of sorted.slice(0, 200)) {
+            html += `<tr style="cursor:pointer;" data-join="${escapeHtml(r.channel)}">
+                <td><code>${escapeHtml(r.channel)}</code></td>
+                <td>${escapeHtml(r.users)}</td>
+                <td><small>${escapeHtml((r.topic || '').slice(0, 80))}</small></td>
+            </tr>`;
+        }
+        html += '</table></div></div>';
+        // Drop the panel into the (server) log and switch to it.
+        switchChannel('(server)');
+        log.insertAdjacentHTML('beforeend', html);
+        log.scrollTop = log.scrollHeight;
+        // Wire click-to-join.
+        log.querySelectorAll('tr[data-join]').forEach(row => {
+            row.addEventListener('click', () => {
+                socket.emit('irc_send', { line: '/join ' + row.dataset.join });
+            });
+        });
+    }
+    socket.on('irc_names', d => {
+        ensureChannel(d.channel);
+        // Track mode prefix and strip it for the names Set.
+        const modes = {};
+        const cleanNames = d.names.map(n => {
+            const m = n.match(/^([@+%&~]?)(.*)$/);
+            const prefix = m ? m[1] : '';
+            const nick = m ? m[2] : n;
+            if (prefix) modes[nick] = prefix;
+            return nick;
+        });
+        channelNames[d.channel] = new Set(cleanNames);
+        channelModes[d.channel] = modes;
+        addLine(d.channel, `Users in ${escapeHtml(d.channel)}: ${escapeHtml(d.names.join(', '))}`, 'system');
+        if (d.channel === currentChannel) refreshUsersPanel();
+    });
+    socket.on('irc_quit', d => {
+        // Quit removes nick from every channel
+        Object.values(channelNames).forEach(s => s.delete(d.nick));
+        Object.values(channelModes).forEach(m => delete m[d.nick]);
+        addLine('(server)', `← ${escapeHtml(d.nick)} quit (${escapeHtml(d.reason || '')})`, 'joinpart');
+        refreshUsersPanel();
+    });
+    socket.on('irc_nick', d => {
+        Object.values(channelNames).forEach(s => {
+            if (s.delete(d.old)) s.add(d.new);
+        });
+        Object.values(channelModes).forEach(m => {
+            if (m[d.old] !== undefined) { m[d.new] = m[d.old]; delete m[d.old]; }
+        });
+        addLine('(server)', `${escapeHtml(d.old)} is now ${escapeHtml(d.new)}`, 'system');
+        refreshUsersPanel();
+    });
+    socket.on('irc_raw', d => {
+        // Only unhandled commands land here now — much less chatty.
+        addLine('(server)', escapeHtml(d.line), 'system');
+    });
+
+    // --- UI handlers ---
+    btnConnect.addEventListener('click', () => {
+        const server = document.getElementById('cfg_server').value.trim();
+        const port = parseInt(document.getElementById('cfg_port').value, 10) || 6667;
+        const useSsl = document.getElementById('cfg_ssl').checked;
+        const nick = document.getElementById('cfg_nick').value.trim();
+        const channelsCfg = document.getElementById('cfg_channels').value.trim();
+        const autojoin = channelsCfg.split(',').map(s => s.trim()).filter(Boolean);
+        const saslUser = document.getElementById('cfg_sasl_user').value.trim();
+        const saslPass = document.getElementById('cfg_sasl_pass').value;
+        socket.emit('irc_connect', {
+            server, port, use_ssl: useSsl, nick, autojoin,
+            sasl_user: saslUser || null,
+            sasl_pass: saslPass || null,
+        });
+    });
+
+    btnDisconnect.addEventListener('click', () => {
+        socket.emit('irc_disconnect');
+    });
+
+    btnSave.addEventListener('click', async () => {
+        const fd = new FormData();
+        fd.append('server', document.getElementById('cfg_server').value);
+        fd.append('port', document.getElementById('cfg_port').value);
+        if (document.getElementById('cfg_ssl').checked) fd.append('use_ssl', '1');
+        fd.append('nick', document.getElementById('cfg_nick').value);
+        fd.append('channels', document.getElementById('cfg_channels').value);
+        const r = await fetch('{{ url_for("irc.save_settings") }}',
+            { method: 'POST', body: fd });
+        addLine('(server)',
+            r.ok ? '[Settings saved.]' : '[Save failed.]', 'system');
+    });
+
+    btnSend.addEventListener('click', sendInput);
+
+    // Tab-complete state — track partial nick + cycle index across consecutive
+    // Tab presses so "abc<TAB><TAB><TAB>" cycles through "abcde", "abcfg", etc.
+    let tabState = null;
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            tabState = null;
+            sendInput();
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const set = channelNames[currentChannel];
+            if (!set || set.size === 0) return;
+            const value = input.value;
+            const cursorAt = input.selectionStart;
+            // Find the partial word ending at the cursor (word = no whitespace).
+            let wordStart = cursorAt;
+            while (wordStart > 0 && !/\s/.test(value[wordStart - 1])) wordStart--;
+            const partial = value.slice(wordStart, cursorAt);
+
+            if (!tabState || tabState.partial !== partial || tabState.start !== wordStart) {
+                // New completion run — gather matches.
+                const lower = partial.toLowerCase();
+                const matches = [...set].filter(n => n.toLowerCase().startsWith(lower)).sort();
+                if (!matches.length) return;
+                tabState = { partial, start: wordStart, matches, idx: 0 };
+            } else {
+                tabState.idx = (tabState.idx + 1) % tabState.matches.length;
+            }
+            const completion = tabState.matches[tabState.idx];
+            const suffix = (tabState.start === 0) ? ': ' : ' ';
+            const newValue = value.slice(0, tabState.start) + completion + suffix + value.slice(cursorAt);
+            input.value = newValue;
+            const newCursor = tabState.start + completion.length + suffix.length;
+            input.setSelectionRange(newCursor, newCursor);
+        } else {
+            tabState = null;
+        }
+    });
+    function sendInput() {
+        const line = input.value;
+        if (!line.trim()) return;
+        if (line.startsWith('/')) {
+            socket.emit('irc_send', { line });
+        } else {
+            const target = currentChannel.startsWith('#') ? currentChannel : '';
+            socket.emit('irc_send', { line, target });
+        }
+        input.value = '';
+    }
+
+    // initial click on (server) entry
+    channelsBox.querySelector('.channel-item').addEventListener('click',
+        () => switchChannel('(server)'));
+})();
+</script>
+{% endblock %}

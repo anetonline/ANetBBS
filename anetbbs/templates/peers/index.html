@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}BBS Directory{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-globe2"></i> BBS Directory</h1>
+    <p>Known peer BBSes — click any to see who's currently online there.</p>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if peers %}
+        <table class="table table-hover mb-0">
+            <thead><tr>
+                <th>BBS</th><th>Host</th><th>FTN</th><th>Online</th><th>Updated</th>
+            </tr></thead>
+            <tbody>
+            {% for p in peers %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('peers.view', peer_id=p.id) }}">
+                            <strong>{{ p.name }}</strong>
+                        </a>
+                        {% if p.description %}
+                            <div class="text-muted small">{{ p.description }}</div>
+                        {% endif %}
+                    </td>
+                    <td><code>{{ p.hostname }}</code>{% if p.finger_port and p.finger_port != 79 %}:{{ p.finger_port }}{% endif %}</td>
+                    <td>{% if p.ftn_address %}<code>{{ p.ftn_address }}</code>{% endif %}</td>
+                    <td>
+                        {% if p.online_count %}
+                            <span class="badge bg-success">{{ p.online_count }}</span>
+                        {% elif p.last_error %}
+                            <span class="badge bg-danger" title="{{ p.last_error }}">err</span>
+                        {% else %}
+                            <span class="badge bg-secondary">0</span>
+                        {% endif %}
+                    </td>
+                    <td><small class="text-muted">
+                        {% if p.last_polled_at %}{{ p.last_polled_at.strftime('%H:%M:%S') }}{% else %}—{% endif %}
+                    </small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No peer BBSes registered yet.
+            {% if current_user.is_admin %}
+                <a href="{{ url_for('peers.admin') }}">Add some</a>.
+            {% else %}
+                Ask the sysop to register some.
+            {% endif %}
+        </div>
+    {% endif %}
+    </div>
+</div>
+
+{% if current_user.is_admin %}
+<div class="mt-3">
+    <a href="{{ url_for('peers.admin') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-gear"></i> Manage BBS Directory
+    </a>
+</div>
+{% endif %}
+{% endblock %}

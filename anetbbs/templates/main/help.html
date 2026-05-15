@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Help - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-question-circle"></i> Help &amp; Support
+    </div>
+    <div class="card-body">
+        <h4>Frequently Asked Questions</h4>
+        
+        <h5>How do I create a post?</h5>
+        <p>Navigate to the <a href="{{ url_for('boards.list_boards') }}">Boards</a> section, select a board, and click "New Post".</p>
+        
+        <h5>How do I reply to a post?</h5>
+        <p>Click on the post title to view it, then use the reply form at the bottom of the page.</p>
+        
+        <h5>How do I access the chat?</h5>
+        <p>Click on the <a href="{{ url_for('mrc.index') }}">MRC Chat</a> link in the navigation menu (or <a href="{{ url_for('irc.index') }}">IRC</a> for the inter-BBS IRC bridge). You must be logged in to use chat.</p>
+        
+        <h5>How do I edit my profile?</h5>
+        <p>Click on your username in the navigation bar, then click "Edit Profile".</p>
+        
+        <h5>Can I connect via telnet?</h5>
+        <p>Yes! Use any telnet client to connect to port {{ config.TELNET_PORT }}.</p>
+        
+        <h5>Need more help?</h5>
+        <p>Post in the Technical Support board or contact an administrator.</p>
+    </div>
+</div>
+{% endblock %}

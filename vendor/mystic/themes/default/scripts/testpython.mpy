@@ -1,0 +1,142 @@
+##############################################################
+## INITIALIZE BBS FUNCTIONS AND DEFINE ANY GLOBAL VARIABLES ##
+##############################################################
+
+from mystic_bbs import *
+
+KEY_UP       = chr(72)       # Some keyboard code defines returned by input functions
+KEY_DOWN     = chr(80)
+KEY_ESCAPE   = chr(27)
+KEY_ENTER    = chr(13)
+KEY_TAB      = chr(9)
+KEY_LEFT     = chr(75)
+KEY_RIGHT    = chr(77)
+
+user_deleted = int("00000004")  # user deleted flag from records.pas
+
+thisuser = getuser(0);    # read the currently logged in user into thisuser
+
+
+################################
+## CUSTOM FUNCTION: USER LIST ##
+################################
+
+def show_user_list():
+
+	writeln("|15|16|CL|17 Python Demonstration Program > User Listing|$X79 |16|CR")
+
+	count = 1
+	user  = getuser(count)
+	shown = 0
+
+	while not user is None:
+
+		if not user["flags"] & user_deleted:
+
+			writeln(user["handle"])
+			shown = shown + 1
+
+		count = count + 1
+		user  = getuser(count)	
+
+	write("|CR|14Listed |15" + str(shown) + " |14user(s)|CR|CR|PA")
+
+
+
+################################
+## CUSTOM FUNCTION: BOX DEMO  ##
+################################
+
+def do_box_demo():
+
+	box = box_options()
+
+	box["header"]  = " Demo Box "
+	box["restore"] = False
+
+	writeln(str(box["attr1"]) + "|PN")
+
+	#box_open  (box, 20, 3, 60, 9)
+	#box_close (box)
+
+
+#################################
+## CUSTOM FUNCTION: INPUT DEMO ##
+#################################
+
+def do_input_demo():
+
+	writeln("|15|16|CL|17 Python Demonstration Program > Input Demo|$X79 |16")
+
+	write('|CR|09Type a string: ');
+
+	input = getstr(11, 40, 120, "Default");
+
+	writeln("|CR|13Enter characters and press |05[|15ESCAPE|15|05] |13when done:|07|CR")
+
+	while not shutdown():
+
+		char, extended = getkey();
+
+		if extended:
+
+			if char == KEY_UP:
+				writeln("you pressed up arrow");
+			elif char == KEY_DOWN:
+				writeln("you pressed down arrow");
+			elif char == KEY_LEFT:
+				writeln("you pressed left arrow");
+			elif char == KEY_RIGHT:
+				writeln("you pressed right arrow");
+			else:
+				writeln("You pressed extended key #" + str(ord(char)))
+
+		else:
+			if char == KEY_ESCAPE:
+				writeln("you pressed ESCAPE");
+				break;
+			elif char == KEY_ENTER:
+				writeln("you pressed enter");
+			elif char == KEY_TAB:
+				writeln("you pressed tab");
+			else:
+				writeln("you pressed character " + char);
+
+
+################################
+## CUSTOM FUNCTION: MAIN MENU ##
+################################
+
+def show_main_menu():
+
+	while not shutdown():
+
+		writeln("|15|16|CL|17 Python Demonstration Program > Main Menu|$X79 |16")
+
+		writeln("|CR|15Hello, |14" + thisuser["handle"] + " #" + str(thisuser["id"]) + "|15!  Please select one of the following options:|CR")
+		writeln("  |09(|11I|09) Input Demo")
+		writeln("  |09(|11U|09) User List")
+		write  ("|CREnter option (|11Q|09/|11Quit|09): |11")
+
+		# get one character input using defined list of valid keys
+
+		char = onekey("IQU", True)
+
+		if char == "I":
+			do_input_demo()
+
+		if char == "Q":
+			break
+
+		if char ==  "U":
+			show_user_list()
+
+		
+
+###################################
+## PROGRAM EXECUTION BEGINS HERE ##
+###################################
+
+show_main_menu()
+
+writeln("|CR|14Demo complete! |PA");

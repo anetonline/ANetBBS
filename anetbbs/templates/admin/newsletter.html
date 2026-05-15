@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Sysop Newsletter{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-newspaper"></i> Sysop Newsletter</h1>
+    <p class="small text-muted">Compose a message that goes to every
+       verified active user as a PM.</p>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-2">
+        <label class="form-label">Subject</label>
+        <input name="subject" class="form-control" maxlength="200" required>
+    </div>
+    <div class="mb-2">
+        <label class="form-label">Body</label>
+        <textarea name="body" class="form-control" rows="12" required></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="return confirm('Send newsletter to all users?');">
+        <i class="bi bi-send"></i> Send to all users
+    </button>
+</form>
+
+<h5 class="mt-4">Sent newsletters</h5>
+{% if history %}
+<table class="table table-sm">
+    <thead><tr><th>When</th><th>Subject</th><th>Recipients</th><th>By</th></tr></thead>
+    <tbody>
+    {% for n in history %}
+    <tr>
+        <td><small>{{ n.sent_at.strftime('%Y-%m-%d %H:%M') if n.sent_at else 'draft' }}</small></td>
+        <td>{{ n.subject }}</td>
+        <td>{{ n.recipients_count }}</td>
+        <td><small>{{ n.sent_by.username if n.sent_by else '?' }}</small></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="text-muted">No newsletters sent yet.</p>
+{% endif %}
+{% endblock %}

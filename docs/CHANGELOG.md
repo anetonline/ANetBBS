@@ -1,0 +1,1484 @@
+# ANetBBS Changelog
+
+Versions are internal build numbers. Public releases are tagged
+separately. Current release: **`v1.0a2.19` — alpha 2** (internal v287.18,
+May 2026). Previous: `v1.0a` — alpha 1 (internal v196).
+
+## v287.18 — Dialout: telnet IAC + raw key reads (May 2026)
+
+First bug filed against the pre-alpha public release. The dialout
+feature (terminal → another BBS via outbound telnet) was broken in
+two visible ways:
+
+1. **No ANSI rendering on the remote** — we never negotiated the
+   telnet protocol, so the remote BBS asked our terminal "do you
+   support TTYPE / BINARY / NAWS?" and got no reply. It fell back
+   to dumb-terminal mode and stripped ANSI escapes from everything
+   it sent back.
+2. **Single keypresses didn't reach the remote** — `_proxy` read the
+   user's input via `session.read_line()`, which is line-buffered and
+   blocks until Enter. Hotkeys (ESC, `*`, menu shortcuts, bot-defense
+   challenges) never made it across until the user pressed Enter.
+
+Rewrote `_proxy` in `anetbbs/features/dialout.py` with:
+
+- **Minimal telnet IAC state machine** on the remote→user direction
+  that strips protocol bytes, handles DO/DONT/WILL/WONT, responds
+  to subnegotiation (TTYPE → "ANSI"), and announces our capabilities
+  up-front so the remote enters full-ANSI mode.
+- **Raw single-byte reads** via `session.read_raw(1)` on the user→
+  remote direction. Each keypress is shuttled immediately, IAC bytes
+  are doubled per RFC 854.
+- **Ctrl+] escape actually works now** — was a half-implemented dead
+  constant before. Ctrl+], Q to quit; any other key resumes.
+
+## v287.17 — Admin user delete cascade fix (May 2026)
+
+`Admin → Users → Delete` returned 500 Internal Server Error because
+`UserSession.user_id` is `NOT NULL` but the relationship had no cascade.
+SQLAlchemy tried `UPDATE user_sessions SET user_id=NULL` to detach the
+session before deleting the user, which the constraint rejected.
+
+Fixed by switching the backref to `db.backref('session', uselist=False,
+cascade='all, delete-orphan')` so the session row is deleted instead
+of unlinked. Bonus: corrects the relationship cardinality (UserSession
+is 1:1 with User via the `unique=True` user_id, so `uselist=False` is
+the right shape anyway).
+
+## v287.16 — SYSTAT now sees web users (May 2026)
+
+Peer BBSes querying `/imsg/directory/<host>/who` against ANetBBS hit
+SYSTAT (UDP/11), which historically read only the `NodeActivity` table
+— the multi-node terminal slot tracker. Any user signed in via the web
+front-end (the majority on ANetBBS) lived in `UserSession` and was
+invisible to SYSTAT. Result: "Who's online" pages on peer BBSes
+showed `No users currently active.` even when the BBS was busy.
+
+Fixed by unioning `NodeActivity` (terminal) + `UserSession` (web)
+inside `_build_response`. Dedupes on username so a user logged in via
+both transports counts once. Web sessions get synthetic slot names
+`web1`, `web2`, ... and their page paths are sanitized through the
+same `_friendly_where()` map as `/who/` so peer BBSes don't learn the
+exact URL each user is on.
+
+## v287.15 — anetbbs.lst → BbsDirectoryEntry pull (May 2026)
+
+Bridges the federation registry into the existing inter-BBS IM
+directory. Without this, peers registered against the hub appeared in
+`anetbbs.lst` but **not** in `/imsg/directory/`, because that view
+reads from `BbsDirectoryEntry` (historically populated only by
+Vertrauen's `sbbsimsg.lst` for Synchronet hosts).
+
+- New module `anetbbs/msp/anetbbs_directory.py` — pulls
+  `REGISTRY_URL/anetbbs.lst` daily, upserts each peer into
+  `BbsDirectoryEntry` with `source='anetbbs'`.
+- New columns on `bbs_directory`: `sysop`, `location`, `software`,
+  `software_version`, `msp_port`, `systat_port`, `source`. Synchronet
+  rows keep their `source='sbbsimsg'`; ANetBBS rows get `'anetbbs'`.
+  `_lightweight_migrate` adds the columns automatically.
+- Pruning: rows with `source='anetbbs'` that disappear from the
+  upstream list get deleted on the next refresh. Synchronet + manual
+  rows are left untouched (owned by other refresh paths).
+- `/imsg/directory/` template now shows **Software** and **Sysop /
+  Location** columns with a badge per BBS family (ANetBBS = blue,
+  Synchronet = grey).
+- Refresher runs in a daemon thread on every install with
+  `REGISTRY_URL` set (default `https://bbs.a-net.fyi`), independent of
+  the hub-mode flag.
+
+## v287.14 — Registry CSRF hotfix (May 2026)
+
+v287.13 shipped the registry API but the `POST /registry/api/v1/*`
+endpoints required a CSRF token — fine for browser forms, not for
+peer ANetBBS hosts calling the API. First attempt to register against
+the live hub returned `400 The CSRF token is missing.`. Fixed by
+exempting the entire registry blueprint from CSRF protection at
+register-time (`csrf.exempt(registry_bp)` in `web_app.create_app`).
+
+Admin-side routes at `/admin/registry/*` still require CSRF because
+they're part of the admin blueprint, which keeps its protection.
+
+## v287.13 — Federation registry, days 2-3 (May 2026)
+
+First two days of the v1.0a3 federation registry build. Adds the
+"central hub" half — the side that accepts registrations + emits
+`anetbbs.lst`. The peer-side client (auto-register + heartbeat + daily
+pull) lands in v287.14 tomorrow.
+
+**Day 2 — registry API:**
+- New `RegistryEntry` model (`registry_entries` table)
+- New `anetbbs/web/registry.py` blueprint:
+  - `POST /registry/api/v1/register` — peer announces, gets verify token
+  - `POST /registry/api/v1/heartbeat` — daily keep-alive + soft-metadata update
+  - `GET /registry/verify/<token>` — sysop confirms ownership via email link
+  - `GET /anetbbs.lst` + `GET /registry/api/v1/list` — JSON of listed peers
+- Rate limits: per-host (5s register / 10s heartbeat) + per-IP hourly caps
+- Hub-mode gate (`REGISTRY_MODE_ENABLED=true`) — endpoints 404 on non-hub installs
+
+**Day 3 — sysop admin UI + prober:**
+- `/admin/registry/` — full approval queue UI:
+  - Counts cards: pending verify / pending approval / listed / total
+  - Approve / reject / edit / delete per-entry
+  - Inline edit form for soft metadata (name, sysop, location, ports, notes)
+  - Approve button gated on `is_verified=True` (can't approve unverified
+    entries — prevents drive-by sysop approval of typo'd emails)
+  - Reject de-lists but keeps the row; delete is one-click-with-confirm
+- New `anetbbs/msp/probe.py` — periodic SYSTAT prober:
+  - Runs in a daemon thread inside the hub's web service
+  - Probes every approved+verified+active entry on
+    `REGISTRY_PROBE_INTERVAL_SEC` (default 1 hour)
+  - Drops `is_listed=False` after `REGISTRY_PROBE_FAILURE_THRESHOLD`
+    consecutive failures (default 3)
+  - Auto-re-lists if a previously-dropped entry starts probing OK again
+- Admin nav link added under Subsystems
+
+Two acceptance gates before an entry shows up on the public list:
+**email verification + sysop approval**. Designed to keep
+`anetbbs.lst` clean even if the hub is publicly exposed.
+
+## v287.12 — FTP user docs (May 2026)
+
+The FTP server shipped in v287.8 but the user docs hadn't caught up.
+Updated:
+
+- `docs/PORTS.md` — new rows for FTP control (21) + passive range
+  (40000-40050), updated privileged-ports section with the systemd
+  drop-in recipe for `CAP_NET_BIND_SERVICE`, added the iptables rule.
+- `docs/07-file-areas.md` — new **FTP access** section explaining the
+  three permission tiers (anonymous / authenticated / sysop) and how
+  uploads create `FileUpload` rows.
+- `docs/01-installing.md` — port list updated.
+- `docs/00-overview.md` — architecture diagram now shows FTP next to
+  telnet/SSH/rlogin inside `anetbbs.service`.
+- `README.md` — front-page protocol list mentions FTP + IFC.
+- `FEATURES.md` — protocol table row.
+
+## v287.11 — FTP settings in `/admin/settings` (May 2026)
+
+Added eight FTP rows to the sysop settings page so the config matches
+the other protocol settings (telnet / SSH / rlogin) rather than being
+.env-only:
+
+- `FTP_ENABLED`
+- `FTP_PORT`
+- `FTP_ANON_ENABLED`
+- `FTP_PASV_PORTS`
+- `FTP_TLS_CERTFILE`
+- `FTP_TLS_KEYFILE`
+- `FTP_ROOT_DIR`
+- `FTP_BANNER`
+
+All marked `requires_restart=True` (same as the other protocol toggles)
+because the FTP daemon binds its ports at startup.
+
+## v287.10 — FTP: hide server-side path in symlink listings (May 2026)
+
+`LIST` output was leaking the absolute server-side `storage_path` to
+every client (including anon) as the symlink target:
+
+```
+lrwxrwxrwx 1 anetbbs anetbbs 39 May 15 01:34 FILES.GAMES -> /home/stingray/anetbbs/data/files/games
+```
+
+That exposes internal directory structure and could help a remote
+attacker fingerprint the install. Fixed by overriding `lstat()` in
+`SymlinkAwareFS` to use `os.stat()` instead, so symlinks resolve
+through and look like regular directories to the FTP client:
+
+```
+drwxrwxr-x 2 anetbbs anetbbs 4096 May 15 01:34 FILES.GAMES
+```
+
+## v287.9 — FTP hotfix: don't break telnet/SSH login (May 2026)
+
+**v287.8 shipped FTP integration that broke telnet/SSH login** with
+`Session error: cannot notify on un-acquired lock`. Root cause:
+`anetbbs.main` was calling `anetbbs.web_app.create_app()` to obtain a
+Flask app for the FTP daemon thread — but that path registers all
+~50 blueprints AND starts the echomail / RSS / MSP / SYSTAT
+background pollers, each of which uses `threading` primitives. Turning
+the previously pure-asyncio terminal-server process into a mixed
+asyncio+threading process broke the `threading.Condition` semantics
+that the login flow's session lock relies on.
+
+Fixed by adding `anetbbs.ftp.server.build_minimal_app()` — a 5-line
+Flask app builder that initializes only `db.init_app(app)` and the
+config. Zero blueprints, zero pollers. `anetbbs.main` now uses this
+instead of `create_app()`, so the FTP thread has just enough to do
+`User.check_password` + `FileUpload` writes without dragging the
+full app surface into the process.
+
+Verified post-fix:
+- Minimal app: 0 blueprints registered, DB queries work.
+- SSH/telnet login no longer raises the lock error when FTP is enabled.
+- FTP server still serves anonymous + authenticated correctly.
+
+## v287.8 — FTP server (May 2026)
+
+**FTP front-end.** A new `anetbbs/ftp/` module serves the existing
+`FileArea` tree to the internet, completing the four-protocol set
+(web / telnet / SSH / rlogin / FTP). Earns you the FTN nodelist `IFC`
+flag (Internet File transfer Capability) once you advertise it.
+
+Architecture:
+
+- **pyftpdlib backend.** Mature, async-friendly. Drives the whole wire
+  protocol — we add the auth + filesystem + upload-tracking layers.
+- **Auth via existing `User.check_password`** — same bcrypt as web /
+  telnet / SSH. Anonymous login is enabled by default (`FTP_ANON_ENABLED=true`).
+- **Three-tier symlink trees** at `data/ftp_root/{anon,users,admin}/`,
+  rebuilt on every server start:
+  - `anon/` — public areas (`is_active AND NOT is_sysop_only`), read-only.
+  - `users/` — non-sysop-only areas, full r/w subject to per-area perms.
+  - `admin/` — every active area including sysop-only.
+  Each tree is just symlinks pointing at `FileArea.storage_path`. The
+  authorizer maps the right tree onto each session at login.
+- **`SymlinkAwareFS`** — pyftpdlib's default `AbstractedFS` uses
+  `os.path.realpath()` for path safety, which dereferences symlinks and
+  treats every CWD through one as "outside the user's home." We
+  override `realpath()` → `abspath()` and `validpath()` to compare
+  against abspath — preserves `..` traversal safety while letting our
+  deliberate symlink tree work.
+- **Upload tracking.** `on_file_received` hook creates a `FileUpload`
+  row keyed to the parent directory's `FileArea`, so files uploaded
+  via FTP show up in the web UI's file-area browser. Per-area
+  `upload_permission` enforced post-hoc: if the user lacks permission
+  the file is deleted and the violation logged.
+- **Optional FTPS** — set `FTP_TLS_CERTFILE` + `FTP_TLS_KEYFILE` (reuse
+  the same Let's Encrypt cert nginx uses) and connections can `AUTH TLS`
+  on the same port.
+- **Passive port range** configurable via `FTP_PASV_PORTS` (default
+  `40000-40050`). Open + forward those on the firewall.
+- **Process integration.** Runs in a daemon thread inside the existing
+  `anetbbs.service` — no new systemd unit. Driven by `FTP_ENABLED` in
+  the `.env` file. If pyftpdlib is missing, the server logs a warning
+  and skips startup instead of crashing the BBS.
+
+Verified end-to-end with curl:
+- Anonymous lists only public areas, can download.
+- Anonymous upload is denied at the auth layer (perm string is `elr`).
+- Authenticated user sees non-sysop-only areas; admin sees all.
+- Authenticated upload lands on disk **and** creates a `FileUpload` row.
+
+## v287.7 — Nodelist auto-import + send-netmail-to-sysop (May 2026)
+
+Two enhancements inspired by Craig Hendricks's (codefenix) **NetLister**
+door for Synchronet (https://conchaos.synchro.net):
+
+- **FileArea → Nodelist auto-import.** New `is_nodelist_source` +
+  `nodelist_domain` columns on `file_areas`. When the sysop flags an
+  area (e.g. `Z1DAILY` for FidoNet, `tqwinfo` for TQWnet) and sets a
+  domain, every inbound TIC for that area is unwrapped (ZIPs included
+  — TQWnet's `tqwnet.zNN` style works without naming the .zip
+  extension) and auto-imported into the `Nodelist` table. Tagged by
+  domain so `/nodelist/?domain=tqwnet` filters work. Verified
+  end-to-end against real-world archives — `tqwnet.z46` (145 entries),
+  `fsxnet.zip` (323), `Z1DAILY.ZIP` (1208).
+- **Send-Netmail-to-Sysop button** on `/nodelist/<id>`. One click jumps
+  to the existing netmail composer with `to_address` + `to_name`
+  pre-filled from the nodelist row. The compose route already auto-picks
+  the FROM AKA whose zone matches the destination, so clicking a TQWnet
+  entry composes from your `1337:3/231` AKA, a fsxnet entry from your
+  `21:1/100` AKA, etc.
+- **Bulk-import admin route** at `/nodelist/admin/bulk-import`. Scans a
+  configurable directory (default `data/nodelists`, override via
+  `NODELIST_SCAN_DIR`), lists every plausible nodelist file or ZIP,
+  and lets the sysop tick + tag → import in a single submit. Useful
+  for first-run when the sysop already has a stash of nodelist
+  archives on disk (e.g. from infopack downloads).
+- **`import_from_path()`** is the new public entry point in
+  `anetbbs/echomail/nodelist.py`. Accepts text files, archives, or
+  ZIPs with non-standard extensions (`.z46`, `.a07`, etc — detected by
+  magic bytes, not suffix). Picks the highest-priority nodelist member
+  from a ZIP using `_looks_like_nodelist()` heuristics.
+
+## v287.6 — /who/ privacy + inbound netmail status (May 2026)
+
+Two fixes surfaced while a sysop was watching their own /who/ page:
+
+- **`/who/` "Where" column sanitized for non-admins.** The column used
+  to leak the exact URL each user was viewing (e.g. `/echomail/53/25407`)
+  to every other logged-in user. Anyone could copy-paste the link and
+  follow someone around. Sysops still see raw paths; non-admins now see
+  a coarse area label ("Echomail", "Profile", "Boards", "MRC Chat", …).
+  The map is `_WEB_AREA_LABELS` in `anetbbs/web/who.py` — extend as new
+  blueprints land. Telnet/SSH/rlogin sessions are unaffected (their
+  `where` is already a friendly menu/game name, not a URL).
+- **Inbound netmail status was sometimes `draft`.** The listener path
+  (`binkp_server.py`) correctly set `status='received'` on incoming
+  netmail, but the **poller path** (`poller.py`, where we dial out to
+  pull mail) was creating `NetmailMessage` rows without setting status —
+  so they inherited the model's `draft` default (which is right for the
+  *compose* flow but wrong for inbound). AREAFIX responses received via
+  poll-out vanished from the sysop's inbox UI as a result. Fixed:
+  `poller.py:458` now sets `status='received'` + `received_at`. Existing
+  stuck rows can be backfilled with
+  `UPDATE netmail_messages SET status='received', received_at=created_at WHERE direction='inbound' AND status='draft';`
+
+## v287.5 — profile form nested-`<form>` fix, deploy-script path bomb (May 2026)
+
+Two more profile-edit bugs found while v287.4 was being deployed:
+
+- **Profile edits never submitted at all** — `templates/profile/edit.html`
+  had a nested `<form action="/profile/avatar/remove">` inside the main
+  profile form. HTML forbids nested forms; browsers auto-close the outer
+  form at the inner `<form>` tag, so the Privacy / Signature / Tagline /
+  Theme dropdown / **Update Profile** submit button ended up outside any
+  form. Clicking Update did literally nothing — no POST left the browser,
+  no field ever saved. Why nobody's `users.theme_id` was ever non-NULL.
+  Fixed by lifting the avatar-remove form out of the main form and
+  pointing the Remove Avatar button at it via the HTML5 `form=` attribute,
+  so the visual layout is unchanged but the markup is now valid.
+- **`anetbbs-deploy-latest.sh` step 4.5 path bomb** — the script was
+  copying `deploy/*.service` straight into `/etc/systemd/system`. The
+  source units ship `/opt/anetbbs` as the install path, but real installs
+  often live elsewhere (e.g. `/home/stingray/anetbbs`). After a deploy,
+  systemd would try to exec `/opt/anetbbs/venv/bin/gunicorn`, fail with
+  `status=203/EXEC`, and crash-loop the web service. Step 4.5 now rewrites
+  `/opt/anetbbs` → `$INSTALL` (the script's own install-path variable)
+  before installing the unit. Existing live boxes that already got
+  clobbered need a one-time `sudo sed -i 's|/opt/anetbbs|/home/stingray/anetbbs|g' /etc/systemd/system/anetbbs*.service && sudo systemctl daemon-reload`.
+
+## v287.4 — profile form + nginx upload limit (May 2026)
+
+Two reported bugs in one cut:
+
+- **Profile edits silently failed for anyone with a `.local` email.**
+  WTForms `Email()` delegates to `email-validator` 2.x, which rejects
+  RFC 6761 special-use TLDs (`.local`, `.test`, `.invalid`, `.example`).
+  The seeded admin user is `admin@anetbbs.local`, so every profile save
+  — including the theme dropdown — bounced off email validation before
+  reaching the DB. Theme picker looked broken, but the real problem
+  was upstream. Replaced `Email` with a permissive regex validator
+  (`anetbbs/web/validators.py:PermissiveEmail`) in `auth.py`,
+  `profile.py`, and `admin.py`. Any RFC-shaped address now passes,
+  including FidoNet-style aliases and internal-only TLDs.
+- **Avatar uploads under 2 MB returned 413 Request Entity Too Large.**
+  The bundled nginx template (`deploy/anetbbs-nginx.conf.template`)
+  inherited nginx's 1 MB default `client_max_body_size`. Added an
+  explicit `client_max_body_size 110m;` directive (covers the 100 MB
+  `UPLOAD_MAX_SIZE` plus headroom). On upgrade, regenerate the live
+  nginx config or add the directive by hand inside the `server {}`
+  block and `nginx -t && systemctl reload nginx`.
+
+## v1.0b.1 — branding consistency pass (May 2026)
+
+Tiny but everywhere: replaced `ANET BBS` / `Anet BBS` / `ANet BBS` /
+`anet bbs` / `ANET-BBS` → `ANetBBS` across **61 source files**.
+User-visible places include the "Powered by …" footer line, default
+BBS_NAME fallbacks, systat banner, copyright lines, log messages,
+admin tool descriptions, etc.
+
+Functional code unchanged. Just one consistent spelling.
+
+## v1.0b — alpha 2 (May 2026)
+
+Cut from internal build v287.1. Bundles every internal release from
+v197 through v287.1; the per-build notes below capture the granular
+changes. Headline additions:
+
+- **LORD** ships pre-installed and plays end-to-end under the Node +
+  Synchronet compat shim (v283.x–v287 added the deep API stubs the
+  game exercises).
+- **Wiki** at `/wiki/` with revision history, diff, search,
+  wanted/orphan reports, 41 seeded pages (v284).
+- **RSS reader** — web + terminal (v281).
+- **Web doors at 80×25** with the real CGA palette, plus pre-join
+  output buffering so welcome screens render immediately (v287, v287.1).
+- **NodeSpy kick** for stuck terminal sessions, cross-process via
+  DB-flag/poll (v283.x).
+- **Echomail terminal** reader properly paged with `[Q]=quit`,
+  CP437 body passthrough (v283.5–v283.7).
+
+## v287.1 — Web doors: buffer pre-join output (May 2026)
+
+Some doors (ANetSIMS, A-Net Sixel TV, anything that draws a welcome
+screen then waits for input *before* the user does anything) showed
+nothing in the web terminal until the user pressed Enter. The
+keystroke produced new output which then DID appear. Telnet / SSH /
+rlogin worked fine because they don't have this race.
+
+Root cause was a race in `web/games.py:handle_start_game`:
+
+1. `launch_door_game()` starts the PTY-reader thread *synchronously*.
+   Within milliseconds the reader calls `_emit_output(welcome_bytes)`.
+2. At that instant `sid_box[0]` is still `None` (set on the next
+   line), so `_emit_output` returned early — **bytes lost**.
+3. Even after `sid_box[0]` was set, the next emit went to
+   `room=str(session_id)` — but `join_room()` hadn't run yet, so the
+   client wasn't in the room. **Also dropped.**
+4. First user keystroke → door writes more output → by then
+   `join_room()` had run → bytes flow.
+
+Fix: `_emit_output` now appends to a pre-join buffer (under a lock,
+the reader is on its own thread) while a `_buffering` flag is true.
+After `launch_door_game` returns, `sid_box` is set, the room is
+joined, `game_started` is emitted, and `_flush_pre_join_buffer()`
+drains the buffer as one chunk and flips the flag — subsequent
+reads bypass the buffer and emit directly.
+
+## v287 — Web door terminal: pin to 80x25, real CGA palette (May 2026)
+
+After LORD saved/loaded cleanly in v286.10 there were two remaining
+visual issues:
+
+1. **ANSI art bled into menus.** Violet's portrait and her flirt
+   menu appeared overlapped. Cause: `play_terminal.html` started the
+   xterm at 80×24 but immediately ran `fitAddon.fit()` to fill the
+   viewport — typically 150+ columns. LORD's `gotoxy(50, 12)` then
+   landed at the wrong column and the menu overprinted the art.
+2. **Gray where colors should be.** xterm.js's default red/green/blue
+   are web-ish midtones, not the CGA primaries doors are written for.
+
+Fixes:
+
+- **Pin xterm.js to 80×25** in `play_terminal.html`. Removed the fit
+  addon and the window-resize handler. Wrapped the terminal in a
+  centered, shrink-to-fit container so it sits cleanly in any
+  browser width.
+- **Real CGA palette** — full 16 colors set on the xterm theme.
+  Matches what door authors saw on a PC (DOS bright red is
+  `#ff5555`, not whatever the browser thought).
+- **`screen_rows = 25`** in `synchronet_compat.py` (was 24).
+- **PTY initial winsize 80×25** in `door_runner.py`. Some kernels
+  default new ptys to (0, 0) — without an explicit `TIOCSWINSZ`
+  the door reads `console.screen_rows` as 0 and gotoxy breaks.
+- Font bumped to 16px Cascadia Mono / Consolas / Courier New for
+  a sharper CP437 render.
+
+## v286.10 — LORD: File.write at-cursor + exit-hook silence (May 2026)
+
+**Critical** — `File.prototype.write(str, len)` in the compat shim
+was `this._content += str` — *append to EOF, ignore position*.
+But `recordfile.js` calls `this.file.write(wr, len)` for every
+String / Date / Float field at a seeked record offset
+(`this.file.position = rec * RecordLength` then a chain of writes).
+Every string field on every record landed at the file's tail
+instead of its proper slot. That's why the player-list rankings
+showed character-name fragments mixed with timestamps, and
+nonsense XP values: not corrupt bytes, just bytes in the wrong
+columns.
+
+Fixed `write()` to honor `_pos` and *overwrite* at the cursor
+(padding with NULs if seeked past EOF), matching `writeBin/writeStr`.
+`writeln()` now goes through the same path.
+
+Also silenced the cosmetic `[BBS] exit hook failed: player is not
+defined` line that prints at every clean quit — LORD's
+`js.on_exit` cleanup references variables that are already out
+of scope by exit. The hook's purpose was already-redundant
+cleanup; swallow the error. Set `BBS_DEBUG_EXIT_HOOKS=1` if you
+ever want to see them.
+
+**Save data after this update:** old `player.bin` / `state.bin`
+files were written with the broken layout. They'll READ wrong
+in the new code (and may corrupt further on write). Recommended
+to delete and start fresh:
+```
+sudo -u stingray rm -f \
+  /home/stingray/anetbbs/anetbbs/games/sbbs_doors/lord/state.bin \
+  /home/stingray/anetbbs/anetbbs/games/sbbs_doors/lord/player.bin \
+  /home/stingray/anetbbs/anetbbs/games/sbbs_doors/lord/*.lock
+```
+
+## v286.9 — LORD: check_gameover null-deref guard (May 2026)
+
+Same pattern as v286.8's flirt-with-Violet patch:
+`check_gameover` runs at the top of every door entry. If
+`state.won_by >= 0` (someone "won"), it does
+`wb = player_get(state.won_by)` then immediately `wb.name`.
+When the referenced player record is gone, the door crashes
+with `Cannot read property 'name' of null` — and the next
+entry crashes again because the bad flag is still in state.
+
+Patched `lord.js` to null-check `wb`, reset `state.won_by = -1`,
+`put_state()`, and let the door continue. The game effectively
+re-opens for play instead of being stuck on a perpetual "game
+over" screen.
+
+## v286.8 — LORD: flirt-with-Violet null-deref guard (May 2026)
+
+In-game crash patch: `flirt_with_violet()` assumed
+`player_get(state.married_to_violet)` always returns a record,
+and dereferenced `op.name` directly. If `state.married_to_violet`
+points at a stale record (record deleted between marriage and
+the next flirt; or our fresh state file has a non-(-1) default),
+`player_get` returns null and the door bombs with
+`Cannot read property 'name' of null`.
+
+Patched `lord.js` to:
+- Check `op === null` after `player_get`
+- Reset `state.married_to_violet = -1` and `put_state()` (so the
+  flag stays cleared after the door exits)
+- Show a generic Grizelda-kisses-you-painfully line instead of
+  the personalised `you curse <name>` text
+
+This is an upstream LORD-JS bug we should ideally push back; for
+now the patch is marked `// ANetBBS patch:` in the source for
+easy review.
+
+## v286.7 — LORD: File.readBin / writeBin / Str + full mode parsing (May 2026)
+
+Next missing piece: `RecordFile.writeField` → `this.file.writeBin(val, N)`.
+Synchronet's File has typed-binary I/O (`readBin(N)` / `writeBin(value, N)`)
+for fixed-width LE unsigned integers, plus `readStr(N)` / `writeStr(s, N)`
+for fixed-width strings. recordfile.js (the library LORD uses to store
+the per-record game state in lord.dat etc.) wires every field through
+them.
+
+Added in this round:
+
+- `File.prototype.readBin(bytes)` — read N-byte LE unsigned int
+- `File.prototype.writeBin(value, bytes)` — write same, overwriting at pos
+- `File.prototype.readStr(n)` / `writeStr(str, n)` — fixed-width strings
+  with space-pad/truncate semantics
+
+Also overhauled `File.open(mode)` to honor the full fopen language:
+`'r'`, `'w'`, `'a'`, `'r+'`, `'w+'`, `'a+'` (with the `'b'` suffix
+ignored — same as glibc). Previously only the presence of `'w'` was
+detected, so opening `rb+` was silently treated as read-only and writes
+never flushed. Now tracks `_can_write` separately from the truncate /
+append flags, and `writeBin/writeStr/flush/close` all gate on that
+single signal.
+
+## v286.6 — LORD: File.lock / unlock / flush / truncate (May 2026)
+
+After `file_mutex`, LORD's next stop was `RecordFile.lock()` →
+`this.file.lock(rec*RecordLength, RecordLength)`. `recordfile.js`
+uses Synchronet's File range-locking on every record open/close.
+Single-node ANetBBS has no contention so:
+
+- `File.prototype.lock(start, length)` → returns `true` (always grant)
+- `File.prototype.unlock(start, length)` → returns `true`
+- `File.prototype.flush()` → persists in-memory `_content` to disk
+- `File.prototype.truncate(n)` → trims `_content` and the on-disk
+  file (LORD uses this for the "reset save" path)
+
+All added to `synchronet_compat.py` File prototype.
+
+## v286.5 — LORD: `file_mutex` stub (May 2026)
+
+After v286.4 cleared the RIP-probe stall, the next missing
+built-in tripped: `ReferenceError: file_mutex is not defined` at
+LORD's first `get_state()` call. Synchronet's `file_mutex` is an
+atomic single-writer lock primitive — creates a `.lock` file
+carrying an owner identity, returns false if a peer holds it.
+
+Single-node BBSes never contend, so a stub that always grants
+the lock (and writes `contents` if provided, since LORD uses
+the lock file as a write-once data drop for things like war
+reports, mail messages, and fairy logs) is enough.
+
+Stub added to `synchronet_compat.py`, exposed on globalThis.
+
+## v286.4 — LORD: skip the 10-second RIP probe (May 2026)
+
+The DOS LORD had a `/NORIP` command-line flag to disable the RIP
+terminal-detection probe. The JS port doesn't — it unconditionally
+sends `\x1b[!\x1b[6n` and blocks `read_str(10000, /RIPSCRIP/)` for
+up to ten seconds waiting for a RIPSCRIP response that no modern
+terminal (xterm.js, SyncTERM, NetRunner, mTelnet) sends. That's
+the 10+ second stall users felt before the welcome ANSI appeared.
+
+Patched `anetbbs/games/sbbs_doors/lord/lord.js` to comment out
+the probe + the if-block that loads RIP icons. `rip` stays `false`
+(its var default), the welcome screen and main menu render
+immediately. To re-enable: uncomment the block — it's marked with
+`// ANetBBS patch:` in the source.
+
+## v286.3 — LORD: input plumbing actually works now (May 2026)
+
+v286.2 cached `Queue("name")` so same-name calls returned the same
+instance — but missed the case where two scripts pass DIFFERENT
+suffixes:
+
+- `dorkit.js` → `new Queue("dorkit_input" + bbs.node_num)`
+  → `"dorkit_input1"`
+- `ansi_input.js` → `new Queue("dorkit_input" + (argv[0] ?? ''))`
+  → `"dorkit_input"` (argv is empty in our shim)
+
+Different names = different cache entries = still two queues =
+bytes still nowhere. Fixed in `sbbs_stubs/dorkit/sbbs_input.js` by
+explicitly re-pointing `ai.input_queue = dk.console.input_queue`
+after loading ansi_input.js, so processed keystrokes definitely
+land where dorkit polls.
+
+## v286.2 — LORD: input + draw-speed fix (May 2026)
+
+Two issues from a live launch of v286:
+
+1. **Input did nothing.** LORD's welcome screen drew but
+   keystrokes were eaten. Cause: Synchronet's `Queue("name")`
+   is a named IPC channel — two `new Queue("dorkit_input"+N)`
+   calls in different scripts (dorkit.js + ansi_input.js) bind
+   to the same wire. Our shim's Queue was a plain JS class, so
+   the two became *separate* objects. `ai.add(byte)` wrote
+   processed keystrokes into instance B; dorkit polled instance A.
+   Forever empty. Fixed by name-caching: same name returns the
+   same Queue instance.
+
+2. **Welcome screen drew slowly.** ~20 s on the live BBS. Cause:
+   `dk.console.print` writes to BOTH `local_io` and `remote_io`.
+   In sbbs mode local_io is unused — but our compat forces
+   `local_console.js` to load unconditionally (it's required at
+   the bottom of dorkit.js), leaving local_io defined. Every
+   print byte went through a 24×80 Screen grid with per-cell
+   `setCell` updates. Patched `sbbs_console.js` to
+   `delete dk.console.local_io` so writes go straight to
+   remote_io → stdout.
+
+Test instructions if you're scripting smoke tests against the
+shim: keep the test window >= 12 s for LORD's start path — it
+has a hard-coded 10 s RIP-probe timeout before the welcome
+display happens.
+
+## v286.1 — Games admin: silent-save fix (May 2026)
+
+Clicking Save on `/admin/games/<id>/edit` did nothing — appeared
+to be a no-op. Cause: the `drop_file_type` SelectField (and to a
+lesser extent `category`) rejected empty/NULL values via WTForms'
+default "must be in choices" validator. LORD's seeded row leaves
+`drop_file_type` NULL, so editing it would silently fail
+validation; the page re-rendered identically with no flash, no
+error display, no apparent action.
+
+Fixed in two places:
+
+- `web/games_admin.py:GameForm` — `drop_file_type` and `category`
+  now use `validate_choice=False`, accepting empty / NULL as
+  "no value".
+- `templates/games/admin/form.html` — added an `alert-danger`
+  block at the top of the form that lists every field error
+  when save fails. Future invisible-save bugs become visible
+  immediately.
+
+## v286 — LORD: now boots under Node compat shim (May 2026)
+
+Following v285 which bundled the LORD source and recommended real
+Synchronet `jsexec`, this release closes the remaining gaps so LORD
+actually renders under Node — no Synchronet install required. The
+welcome ANSI screen draws; the input loop reads keystrokes; play
+proceeds.
+
+**Compat-shim additions in `anetbbs/games/synchronet_compat.py`**
+
+- `server` and `client` global stubs — without those, dorkit's
+  `dk.system.mode` test fell through to undefined and no console
+  driver loaded, so LORD ran to completion with zero output. Now
+  dorkit picks `'sbbs'` mode and loads `sbbs_console.js`.
+- Beefed-up `bbs.*`: `logon_time`, `get_time_left()`, `online`,
+  `sys_status`, `start_time`. `system.*`: `node_dir`, `data_dir`,
+  `text_dir`, `ctrl_dir`, `exec_dir`, `mods_dir`, `qwk_id`,
+  `os_version`, `matchuser/matchuserdata/username` no-ops.
+- Beefed-up `user.*` (security.password, stats.bytes_uploaded/
+  downloaded, laston_date, expiration_date, alias, location, …).
+- `console.right/left/up/down(n)` aliases — sbbs_console.js calls
+  these names rather than `cursor_right` etc.
+- `console.ctrlkey_passthru` slot so doors can set the bitmask.
+- `load(true, "file.js", args)` background form returns a stub
+  Queue for the on-exit cleanup hook.
+- `File.readln()` returns `null` at EOF (not `''`) so LORD's
+  `build_txt_index` loop terminates instead of spinning.
+- `File.position` becomes a real getter/setter (used by
+  `build_txt_index` to record byte offsets).
+- `File.length` is now a property (not a method) — matches what
+  sauce_lib and others expect.
+- Load resolver prefers `<stubs_dir>/dorkit/<file>` over the flat
+  `<stubs_dir>/<file>` so the dorkit-internal Screen/Graphic with
+  the right prototype methods wins over older bare copies.
+
+**Node-side input plumbing** (`sbbs_stubs/dorkit/sbbs_input.js`)
+
+Replaced upstream's busy-loop background-thread with a callback
+that registers on `dk.console.input_queue_callback` and runs from
+dorkit's own waitkey() loop. Sets `stty min 0 time 1` once at load
+so each readSync returns within 100 ms — no per-iteration stty
+thrash, no busy-wait, the door is responsive.
+
+**Seed Game row flipped to active**
+
+`_create_default_data` inserts LORD with `is_active=True` now. The
+door appears in `/games/` ready to play on first start; sysops who
+prefer jsexec can install it later and the door_runner auto-prefers
+real Synchronet binaries when found.
+
+**Honest caveats**
+
+- The compat shim handles LORD specifically. Other Synchronet doors
+  vary; this is the foundation, not a guarantee everything works.
+- The Node `Queue` is a single-process in-memory FIFO; doors that
+  rely on inter-process communication via named queues will need
+  more work.
+- File operations stay in latin-1 binary mode for CP437 fidelity;
+  pure-text doors that expect UTF-8 might surprise.
+
+## v285 — LORD: Synchronet JS port pre-installed (May 2026)
+
+Bundles Synchronet's JavaScript port of *Legend of the Red Dragon*
+inside the BBS, plus the upstream `dorkit/` helper library it needs.
+
+**What ships**
+
+- `anetbbs/games/sbbs_doors/lord/` — full upstream `xtrn/lord/`
+  tree from `github.com/SynchronetBBS/sbbs` (lord.js, lordsrv.js,
+  recorddefs.js, IGM subdirs, ANSI art, name lists; 16 MB total).
+- `anetbbs/games/sbbs_stubs/dorkit/` — the upstream `xtrn/dorkit/`
+  console drivers (screen.js, local_console.js, ansi_console.js,
+  ansi_input.js, attribute.js, graphic.js, …) so LORD's
+  `require("screen.js")` chain resolves.
+- `dorkit.js` + `recordfile.js` synced to current upstream.
+
+**Compat-shim improvements**
+
+The `synchronet_compat.py` shim grew the bits LORD (and any other
+real Synchronet door) reaches for:
+
+- `Queue` class — Synchronet's inter-script FIFO; backed by stdin
+  reads when the queue name starts with `dorkit_input`.
+- `strftime(fmt, unix_seconds)` — C-style with the common
+  conversion specifiers (`%H %M %S %Y %m %d %a %A %b %B …`).
+- `js.load_path_list`, `js.on_exit(code)`, `js.exec()`, `js.gc()`,
+  `js.global`, `js.auto_terminate`, `js.terminate_signaled`.
+- `require()` now accepts the scope-prefix form
+  (`require(scope, "cnflib.js", "CNF")`) used by LORD.
+- `load()` consults `js.load_path_list` first, then the new
+  conventional `<exec_dir>/{dorkit,load}/` fallbacks.
+- `Queue` exposed on `globalThis` via the existing global-registry
+  sweep so `vm.runInThisContext`'d sub-files see it.
+- `sbbs_stubs/cnflib.js`: SpiderMonkey `for each (var p in struct)`
+  → standard `Object.keys(struct).forEach(...)` so V8 parses it.
+
+**Pre-seeded Game row**
+
+`_create_default_data` inserts a "Legend of the Red Dragon" game
+(`game_type='door_synchronet'`) pointing at the bundled LORD. Sysop
+must flip `is_active=true` once Synchronet's `jsexec` runtime is on
+the host — see the updated [[LORD Setup]] wiki page for the three
+ways to get jsexec (apt, build-from-source, or point `SBBS_JSEXEC`
+env at an existing install).
+
+**Why jsexec instead of Node**
+
+The compat shim gets simpler doors running under Node, but LORD's
+dorkit library binds its console driver to a full Synchronet
+`bbs/server/client/user/console` global quintet and depends on the
+forked input-thread model. Emulating that on top of Node's
+single-threaded loop is a much deeper rewrite. Real `jsexec` is a
+small standalone binary that gives upstream behaviour for free.
+
+## v284 — Wiki (May 2026)
+
+A full community wiki at `/wiki/` — collaborative documentation
+with revisions, diff, search, and markdown + `[[wiki-links]]`.
+
+**Models**
+
+- `WikiPage` — slug-keyed page with current body, title, summary,
+  view count, lock flag, soft-delete flag, created/updated audit.
+- `WikiRevision` — every edit gets one. Stores the full body
+  (no compression — sqlite is fine at this scale), edit summary,
+  author user-id, author IP, rev-num monotonic per page.
+- Auto-sweep adds both tables on next `anetbbs-web` start.
+
+**Renderer** (`anetbbs/wiki/render.py`)
+
+- Python-markdown with `fenced_code`, `tables`, `nl2br`,
+  `attr_list`, `toc`, `sane_lists`.
+- `[[Page Title]]` → `/wiki/page-title`. Missing pages render as
+  red dashed-underline links so editors notice.
+- `[[slug|display text]]` and `[[Page#anchor]]` both supported.
+- Wiki-link preprocessing skips fenced code blocks and inline
+  `\`code\`` spans so example tokens don't become real links.
+- Output sanitized by bleach with a whitelist that keeps headings,
+  tables, code, images, our wiki-link CSS classes, and heading
+  anchor IDs.
+
+**Slug helpers** (`anetbbs/wiki/slug.py`)
+
+- NFKD-fold + lowercase + dash-collapse.
+- "Café — édition" → `cafe-edition`.
+- "BinkP & QWK" → `binkp-and-qwk`.
+
+**Routes** (`anetbbs/web/wiki.py`)
+
+| URL | What |
+|-----|------|
+| `/wiki/` | Home page render + recent edits sidebar |
+| `/wiki/<slug>` | View a page (red-link template if missing) |
+| `/wiki/<slug>/edit` | Edit form with live preview |
+| `/wiki/<slug>/preview` | JS-called preview endpoint |
+| `/wiki/<slug>/history` | Revision list w/ compare picker |
+| `/wiki/<slug>/rev/<n>` | View a specific old revision |
+| `/wiki/<slug>/diff/<a>/<b>` | Unified diff between revisions |
+| `/wiki/<slug>/revert/<n>` | Roll back to revision N |
+| `/wiki/<slug>/lock` (admin) | Toggle edit lock |
+| `/wiki/<slug>/delete` (admin) | Soft-delete |
+| `/wiki/<slug>/restore` (admin) | Undo soft-delete |
+| `/wiki/<slug>/rename` (admin) | Change slug |
+| `/wiki/new` | Create-new flow with suggested slug |
+| `/wiki/all` | Alphabetical index |
+| `/wiki/recent` | Every edit, newest first |
+| `/wiki/search?q=…` | Full-text across title + body |
+| `/wiki/wanted` | Pages linked-to but not created |
+| `/wiki/orphans` | Pages no other page links to |
+
+**Templates** — 13 Jinja templates extending `base.html`, all
+dark-theme-aware. Wiki-specific CSS (red links for missing pages,
+diff colourization) lives inline in `wiki/_layout.html`.
+
+**Auth**
+
+- Anyone (incl. logged-out) can read.
+- Logged-in users can edit and create.
+- Locked pages: only admins can edit.
+- Lock, delete, restore, rename: admin-only.
+
+**Seed content** — 41 pages covering: connecting via web /
+telnet / SSH / rlogin / gemini / finger; reading and posting in
+boards, echomail, netmail, PMs, instant messages, RSS, files;
+playing doors (web, rlogin, DOS); sysop guide; door setup; BinkP
+setup; LORD-specific recipe; DosBridge architecture; the codepage
+story; NodeSpy; backup; full architecture overview; QWK; TIC
+processor; IRC and MRC bridges; web terminal; and a glossary of
+BBS jargon. 41 revisions in history on day one — each seed entry
+gets an r1.
+
+**Nav**
+
+- `/wiki/` link added to the Help dropdown next to Documentation.
+
+**Note on seeded pages** — they're a starting point, not the final
+word. Anyone with an account can improve them, and the wanted
+pages report at `/wiki/wanted` shows the queue of pages that
+existing pages already link to.
+
+## v283.7 — Echomail: CP437 body passthrough + Q-skip (May 2026)
+
+Two issues from the Echomail reader:
+
+**CP437 / ANSI bodies were mangled.** Echomail bodies received via
+BinkP from FidoNet/Synchronet networks contain CP437 line-drawing,
+block characters, and embedded ANSI color escapes — stored as
+latin-1 mojibake (each original byte 0xNN → codepoint U+00NN).
+The reader was passing them through `session.write()` which
+re-encodes everything to CP437, scrambling the bytes. Body lines
+now go straight to the writer via `line.encode('latin-1')`, so
+the original bytes reach the user's CP437 terminal unchanged.
+Falls back to `cp437` encoding with replacement if the line has
+genuine unicode codepoints above 0xFF.
+
+**Q-skip on `-- more --` prompts.** Walking past 100 areas to
+find #22 was painful. Every paging prompt in the echomail flow
+(area list under E, message index after picking an area, message
+body, area list under C compose) now reads:
+`-- more (Enter, Q=stop listing) --`. Pressing Q at any of them
+breaks out of the loop and goes straight to the picker (or back
+to the message index, for body view). Mirrors the bulletin
+reader's existing `[Q]=quit` behavior.
+
+## v283.6 — Echomail message reader: color + paging (May 2026)
+
+After picking an area under Echomail (E), the resulting message
+list and message body were plain monochrome and dumped without
+paging. Now matches the rest of the terminal UI:
+
+- Banner + footer wrap on both list and body screens
+- Colored columns on the message index (yellow #, white subject,
+  green from, cyan date)
+- `-- more (Enter) --` paging every 18 lines on both the index
+  and the message body, so long posts don't scroll past on a
+  24-row terminal
+- Same paging treatment in Compose Echomail (C) for the area-empty
+  screen, prompts, and the queued-for-BinkP confirmation
+
+## v283.5 — Echomail (E) area list paging (May 2026)
+
+The terminal main menu's Echomail (E) area listing scrolled past on
+24-row terminals — `compose_echomail` (C) already paged every 18
+lines with `-- more (Enter) --`, but `list_echo_areas` dumped
+everything at once. Now uses the same paging.
+
+## v283.4 — Dark-theme: list-group + table row tints (May 2026)
+
+Bootstrap's default `.list-group-item` and `.table-warning/-info/...`
+row tints render light-on-light, which clashes with the dark theme.
+The most visible offenders were:
+
+- The RSS Reader feed list and River feed (white cards, hard to read).
+- The Inter-BBS Instant Messages inbox unread-row highlight (cream
+  yellow on white).
+- @mention autocomplete popup, leaderboards, stats, profile,
+  oneliners, calendar, docs nav — all used `.list-group-item`.
+
+`base.html` now overrides these classes to use the same dark palette
+as the `.card` and `.alert-*` styles. No template changes needed —
+all consumers benefit automatically.
+
+## v283.3 — NodeSpy kick audit-log fix (May 2026)
+
+The kick endpoint in v283.2 raised
+`TypeError: 'action' is an invalid keyword argument for UserActivity`
+on every kick attempt — the audit-log column is `activity_type`, not
+`action`. (The legacy v283 code had the same bug but never ran far
+enough to trip it.) Now uses the correct field and also records
+`ip_address` and `service='web'`.
+
+## v283.2 — NodeSpy kick: cross-process fix (May 2026)
+
+The kick button in v283 / v283.1 *appeared* to work but didn't actually
+disconnect anyone. Root cause: `anetbbs-web` (gunicorn) and
+`anetbbs-telnet` are separate systemd services with separate Python
+processes. The kick endpoint flipped a flag in the web process's
+in-memory `_NODES` dict, but the active terminal session lived in the
+telnet process — different memory, no effect.
+
+Now the kick crosses the process boundary via the database:
+
+- `NodeActivity` gains two columns: `kick_requested` (bool) and
+  `kick_reason` (string). Auto-sweep adds them on next gunicorn start.
+- `/admin/control/nodespy/<slot>/kick` simply updates those columns
+  and commits.
+- A new `_kick_watchdog` task in `BBSSession` polls its own
+  `NodeActivity` row every 5 seconds. When `kick_requested` is set, it
+  writes the goodbye banner, closes the writer, and the session
+  unwinds via the normal teardown path.
+- The watchdog is cancelled on session close, before
+  `_close_node_activity` deletes the row.
+
+Worst-case latency: ~5 seconds between kick click and disconnect.
+Stuck/idle users are unaffected (the watchdog runs on its own timer,
+not on user input).
+
+## v283 — NodeSpy kick (May 2026)
+
+Sysop can now disconnect a stuck or misbehaving terminal user
+straight from the NodeSpy panel:
+
+- **Kick button** in the per-row NodeSpy table (red door-arrow icon)
+- **Kick form** in the per-node detail page with an optional reason
+  text field
+- New endpoint: `POST /admin/control/nodespy/<slot>/kick` (CSRF-
+  protected, admin-only)
+- New function: `multinode.kick_node(slot, reason)` — pushes a 'kick'
+  payload to the session's chat queue, writes a goodbye line to the
+  user's terminal, then closes the underlying transport. The session's
+  reader EOFs and the session cleans up naturally.
+- `NodeEntry` gained a `session` reference (passed by `acquire_slot`
+  in `core/session.py`) so the kick handler has a handle to close.
+- Audit log entry in `user_activity` for every kick (action=`kick_node`,
+  details = "slot N (username): reason"). So sysop kicks are
+  traceable.
+
+Different from a ban — this just drops the current connection. The
+user can reconnect immediately. To prevent reconnect, sysop must
+also add an IP ban under `/admin/ip-bans/`.
+
+## v282 — consolidation cut (May 2026)
+
+Clean release after the v280-v281.3 hotfix series. No new behavior
+beyond what the v281.3 patches already shipped — this is purely
+a docs + memory + audit-pass roll-up so the next deploy carries
+matching docs alongside the running code.
+
+- Docs updated: CHANGELOG, FEATURES, 14-door-games (door_rlogin
+  worked example, dosemu removal note), 16-rss-reader.
+- Memory entries updated: project_status reflects current cursor
+  + RSS + door_rlogin work; rlogin handshake quirk recorded at
+  project_rlogin_format.md; LORD setup guidance at
+  project_lord_setup.md; door-files-hands-off feedback at
+  feedback_door_files.md.
+- Final audit: 50 blueprints, 319 routes, 189 templates parse,
+  zero broken `url_for()` references, app boots clean. Pyflakes
+  has no undefined-name / redefinition warnings — only intentional
+  drains and load-bearing imports remain.
+
+## v1.0a — RSS reader (May 2026, internal v281)
+
+Built-in RSS / Atom feed reader for both web and terminal. Sysop
+manages feeds at /admin/rss/. Background poller refreshes every
+30 minutes (configurable via `RSS_POLL_INTERVAL` env var). X-News
+seeded by default so a fresh install has at least one feed populated.
+
+**New tables** (auto-created by the lightweight migration sweep):
+- `rss_feeds` — sysop-configured feeds
+- `rss_items` — articles (deduped per-feed by GUID)
+- `rss_read_status` — per-user read markers
+
+**New blueprints:** `rss` at `/rss/`, `rss_admin` at `/admin/rss/`.
+
+**New file:** `anetbbs/rss/poller.py` — background daemon thread.
+
+**New dependency:** `feedparser>=6.0` (handles RSS 2.0 / Atom / RSS 1.0).
+
+**Web UI:** Tools → RSS Reader. Feed list with unread badges, "all
+feeds" river view, paginated per-feed item lists, single-item full
+content view, mark-as-read tracking per user.
+
+**Terminal UI:** Main BBS Menu → R. Feed picker, river, paginated
+item lists, single-item viewer with word-wrapped body. Same mark-read
+state shared with the web UI.
+
+**Pre-seeded feed:** `https://x-bit.org/rss/rss.xml` (X-News).
+
+**v281.1** — fixed Jinja name collision. Renamed template var from
+`unread` to `feed_unread` because base.html does `{% set unread = ... %}`
+for the PM badge counter, which shadowed our context variable inside
+child templates and turned the dict into an int.
+
+**v281.2** — added RSS to the data-driven menu engine. v281 only
+added it to the hardcoded `BBSMenuUI.show_main()` fallback; the
+running terminal sessions use the `BbsMenu` table-driven menu, which
+needed a new `rss` action_type registration + a `R` hotkey entry in
+`DEFAULT_MENUS` (auto-backfilled to existing installs by
+`seed_default_menus`).
+
+**v281.3** — typo: `FG['ylw']` → `FG['yel']`. Crashed `show_rss()`
+on first launch.
+
+See [`docs/16-rss-reader.md`](16-rss-reader.md) for full feature docs.
+
+## v1.0a — A-Net Game Server / rlogin doors (May 2026, internal v280)
+
+New game type: **A-Net Game Server (rlogin)**. Lets BBS users
+transparently rlogin into a remote Synchronet door game server
+(or DoorParty, or any other rlogin-accepting BBS host). The user
+sees one continuous session — no second login prompt.
+
+**Architecture:**
+
+- New `anetbbs/games/rlogin_bridge.py` with `RloginConnection` —
+  same write/stop/bind_emit shape as `DosBridge` so it slots into
+  the existing DoorSession machinery (send_input, terminate_session,
+  cleanup all work without changes).
+- New `launch_rlogin_session()` in `door_runner.py` for the web flow.
+- New `play_rlogin_telnet()` in `door_runner.py` for the terminal
+  flow. Both use the same `RloginConnection`.
+- Game type `door_rlogin` selectable in `/admin/games/` with its own
+  helper section in the form (server host:port + user template +
+  password + optional terminal hint for direct-to-door launches).
+
+**Wire format:** Synchronet's BBS-mode rlogin server uses INVERTED
+field order vs RFC 1282 — the password goes in the client-user-name
+slot (1st field) and the BBS username in the server-user-name slot
+(2nd). Verified against game.a-net-online.lol on 2026-05-09. Memory
+note saved at `memory/project_rlogin_format.md`.
+
+**dosemu removed.** The half-finished `door_dosemu` game type was
+yanked from the dropdown — drive-letter detection was wrong and the
+admin form fields were missing. `_build_dosemu_command` stays in the
+source tree as dead code in case someone wants to validate it
+properly later.
+
+**v280.1–v280.4 — admin form polish + rename:** dropdown renamed
+"Synchronet xtrn / DoorParty" → "A-Net Game Server (rlogin)". Added
+a dedicated form section so the executable_path / command_line_args
+fields are visible when door_rlogin is selected (same fix pattern as
+the gallery_admin disappearing-fields bug). Updated helper text with
+working examples for game.a-net-online.lol direct-to-door
+(`xtrn=LORD408`, `xtrn=ASSASSIN`, etc.).
+
+## v1.0a — door I/O safety + auto-recovery (May 2026, internal v279.1–v279.9)
+
+A series of hotfixes after v279 wired up the DosBridge — fixing
+real-world door issues that surfaced during testing.
+
+- **v279.1:** `_build_dos_command` now accepts `token_ctx=None` for
+  validation-only callers (the terminal launcher previewed the
+  command before allocating a bridge port; without this it crashed
+  with "unexpected keyword argument").
+- **v279.2:** DOOR.SYS / DORINFO / DOOR32.SYS now identify as `COM1:`
+  + 38400 baud + comm type 1 (FOSSIL) instead of `COM0:` + 0 + comm
+  type 2. Most classic doors (LORD especially) interpret COM0/0 as
+  "local console — bypass FOSSIL, write to BIOS only", which dropped
+  all output before it could reach the bridge.
+- **v279.3:** bridge diagnostic logging — first 5 chunks logged
+  verbatim, "0 bytes after 10s" warning if door isn't writing to
+  FOSSIL, total chunk/byte count on close.
+- **v279.4:** terminal `door_dos` now uses the unified launch path
+  (`launch_door_game` via `play_door_game_telnet`). The legacy
+  `play_dos_game_telnet` had its own DOSBox-launching code that
+  predated the bridge wiring and never got updated; terminal users
+  were getting silent hangs.
+- **v279.5:** waitpid watcher thread. xvfb-run can leave Xvfb running
+  past the door exit (Xvfb inherits the PTY slave_fd, keeping
+  master_fd from EOFing), which means our PTY watcher never wakes
+  to fire cleanup. The new watcher does `os.waitpid(pid, 0)` and
+  triggers `_cleanup_session` when the door subprocess actually
+  exits — independent of PTY EOF.
+- **v279.6:** bridge close → cleanup signal. When DOSBox closes its
+  end of the TCP nullmodem (which it does on exit), the bridge fires
+  a new `on_close` callback that runs `_cleanup_session` immediately.
+  Faster than waitpid for the common case.
+- **v279.7:** real Ctrl+]q abort. The launch banner has been telling
+  users "press Ctrl+] then q to abort" since forever, but the input
+  pump just forwarded those bytes to the door. Now the pump
+  actually watches for the sequence and triggers cleanup.
+- **v279.8:** idle-timeout watchdog (default 300s). If zero bytes
+  flow in either direction for the timeout, the bridge force-closes
+  and triggers cleanup. Catches stuck-door cases (LORD's exit-loop,
+  infinite "press any key" prompts on hidden screens).
+- **v279.9:** idle timeout reduced to 60s default + made configurable
+  via `DOOR_IDLE_TIMEOUT`. Also force-kills the door process group
+  via SIGTERM (then SIGKILL 2s later) when timeout fires, instead of
+  just trusting `_cleanup_session` to do it.
+
+End result: stuck DOS doors always return to the BBS within 60
+seconds, the BBS user's session never permanently hangs, orphan
+DOSBox processes get reaped.
+
+## v1.0a — DOS door bridge wired up (May 2026, internal v279)
+
+**v279 — actual DOS door I/O.** The previous DOSBox configs wrote
+`serial1=stdio`, which DOSBox-staging 0.80+ silently downgraded to
+`dummy` — meaning DOS door output and keystrokes never reached BBS
+users. The whole DOS door path was end-to-end broken on modern DOSBox.
+
+This release wires `dos_bridge.py` (which has been complete-but-unused
+in the tree for a while) into the launch flow:
+
+- DosBridge picks a free TCP port (5000–5100) and listens.
+- DOSBox config is `serial1=nullmodem server:127.0.0.1 port:NNNN
+  transparent:1`. DOSBox dials in at boot.
+- New `DosBridge.bind_emit(emit_fn)` reads bytes off the TCP socket and
+  forwards them to the BBS user's terminal via `socketio_emit_fn`.
+- New `DosBridge.write(data)` accepts BBS-side keystrokes and pushes
+  them onto the TCP socket so DOSBox's COM1 receives them.
+- `DoorSession.write()` routes through the bridge when present, so the
+  rest of the BBS doesn't have to care which transport is in use.
+- `DoorSession.close()` also stops the bridge so the listener doesn't
+  leak.
+- The PTY remains open on door_dos sessions but only as a process-exit
+  watcher; door I/O no longer flows through it.
+- DOSBox config also stripped invalid `output=null` and `autolock`
+  options that staging 0.82.x rejects.
+
+End result: vanilla DOSBox 0.74-3, DOSBox-staging 0.82.x, and DOSBox-X
+all work for `door_dos` games via TCP nullmodem. No special build
+required.
+
+## v1.0a — door-runtime polish (May 2026, internal v277–v278)
+
+Hot-fixes plus the dosemu2 path, deployed on top of the v276 audit pass.
+
+**v278:**
+- New `door_dosemu` game type — uses dosemu2 (`-dumb` stdio) instead of
+  DOSBox. Better latency, no FOSSIL gymnastics over TCP nullmodem,
+  apt-packaged via dosemu2 PPA on Ubuntu / native on Debian. Mounts
+  game dir + per-node temp dir + bundled FOSSIL driver dir, autoexec
+  loads `BNU.COM` on COM1 for parity with the DOSBox path so the same
+  LORDCFG / TWCFG settings work either way.
+- Snap-confine detector in `_build_dos_command`: when `dosbox` /
+  `dosbox-staging` resolves to a `/snap/` path, we reject it up front
+  with a clear "remove snap, install apt or AppImage instead" message.
+  Avoids the cryptic `cap_dac_override not found` error on first
+  launch from systemd.
+
+**v277:**
+- DOSBox per-node mount: the per-node temp dir is now mounted as drive
+  E: in addition to the game dir on C:. Sysops set LORDCFG's "Path to
+  dropfile" to `E:\` and multi-node LORD / TradeWars / TQW just works
+  without overwriting each other's drop files.
+- `docs/14-door-games.md` and `docs/15-synchronet-compat.md` published.
+
+## v1.0a — pre-release polish (May 2026, internal v195–v276)
+
+Final shake-out before tagging the alpha.
+
+**New: Image galleries**
+- `/gallery/` — paginated thumbnail grid + full-screen modal viewer.
+  Browser-native, lazy-loaded.
+- `/admin/galleries/` — full CRUD on collections (label/slug/path/sort/
+  active) plus per-gallery file management (drag-drop multi-upload,
+  click-to-delete, pagination).
+- Storage: `gallery-config.json` at install root, auto-seeded on first
+  run from any DSR `gifs` / `swim` directories that exist. Excluded
+  from deploy so sysop edits survive `rsync --delete`.
+- Standalone terminal viewer: `/home/<user>/anet-gallery.sh` (chafa /
+  img2sixel) — kept outside the install dir so deploys don't remove it.
+- Galleries link lives under **Tools** in the top nav (kept off the
+  primary bar to avoid wrapping on smaller widths).
+- New doc: [`13-image-galleries.md`](13-image-galleries.md).
+
+**Removed: DSR (Digital Showroom)**
+- The Synchronet sixel image-viewer door is no longer wired into the
+  games menu. The `convert → .sixel` pipeline returned rc=0 with no
+  output file when the door was launched from a gunicorn-spawned PTY
+  child (worked manually but not under the web service); root cause
+  not identified after extensive investigation. The web `/gallery/` +
+  terminal `anet-gallery.sh` cover the same use-case at higher quality.
+- DSR files remain on disk under `doors/sbbs/dsr/` so a future
+  reinstatement is possible without re-extracting from the .zip.
+
+**Codebase audit**
+- Real bug found and fixed: `current_app` referenced in `web/admin.py`
+  but missing from the flask import line (would have NameError'd at the
+  affected admin routes).
+- Real bug found and fixed: missing `requests` from `setup.py`
+  install_requires — `webhooks.py` imports it unconditionally so a fresh
+  `pip install -e .` would crash on first webhook dispatch.
+- Real bug found and fixed: missing `admin/time_budgets.html` template
+  — `/admin/time-budgets` would 500 on GET. Template added matching the
+  rest of the admin UI.
+- Real bug found and fixed: 4 broken `url_for()` references that would
+  raise `BuildError` at render time (`echomail.view_message`,
+  `boards.view_thread`, `pm.read_message`, `echomail.list_messages` —
+  endpoints renamed in earlier work but the saved-messages and
+  permalinks blueprints still pointed at the old names).
+- Real bug found and fixed: 3 duplicate method definitions in
+  `core/session.py` (`write` / `read_line` / `clear_screen`) — Python
+  silently kept only the later definitions, the first ones were dead
+  code. Removed.
+- Real bug found and fixed: 3 stray `f''`-prefixed strings without
+  placeholders in `web/echomail_admin.py` and `web/irc_web.py`.
+- Real bug found and fixed: `update.sh` rsync was missing `--exclude`
+  for `/doors/` and `/gallery-config.json` — closes the same hole that
+  caused the v195 deploy incident.
+- Duplicate `import json` in `echomail/tic.py` removed.
+- Duplicate `from typing import Dict` in `core/session.py` consolidated.
+- Explicit `__all__` added to `anetbbs/core/__init__.py` (silences
+  pyflakes false-positive on re-exports).
+- Orphan templates removed: `admin/callers.html` (replaced by
+  `admin/caller_log.html`), `chat/index.html` (legacy local-chat,
+  replaced by MRC).
+- ~80 unused imports trimmed across the package — pyflakes warning
+  count down from ~110 to 22, with the remaining warnings all
+  intentional (load-bearing `SessionProtocol` re-export, protocol-level
+  drain variables, dead `global` declarations).
+- All 180 Jinja templates parse cleanly.
+- All 308 `url_for()` references resolve to a registered endpoint.
+- 79/81 SQLAlchemy models are queried in code; the two stragglers
+  (`ChatMessage`, `MenuTranslation`) are leftover scaffold tables that
+  stay in the schema for now to avoid alpha migration churn.
+- Zero outstanding `TODO`/`FIXME`/`XXX`/`HACK` markers in our code
+  (matches in vendored Synchronet `.js` stubs are upstream's).
+- New top-level [`FEATURES.md`](../FEATURES.md) — single-page inventory
+  of every user-visible feature for the alpha.
+- `docs/00-overview.md` updated with the gallery feature.
+- `docs/PORTS.md` + `deploy/README.md` now document the Finger
+  service (port 79).
+
+**Error pages + nav coverage**
+- New branded `404.html` / `403.html` / `500.html` templates wired up
+  via `errorhandler()` (previous behaviour fell through to Flask's
+  default monochrome error pages).
+- Sysop nav: added `Time Budgets` link to the Admin → Users dropdown
+  (the `/admin/time-budgets` page was registered but unreachable from
+  the UI — only the URL bar got you there).
+
+**Config completeness**
+- `.env.example` expanded with previously-undocumented but code-used
+  settings: `SYSOP_NAME`, `BBS_DOMAIN`, `BBS_PUBLIC_HOST`, `BBS_EMAIL`,
+  `BBS_LOCATION`, `BBS_NODES`, `IDLE_TIMEOUT_SECONDS`,
+  `FINGER_LISTEN_HOST/PORT`, `BINKP_LISTEN_HOST/PORT`,
+  `BINKP_OUR_ADDRESS`, `BINKP_SYSTEM_NAME`, `CLAMSCAN_PATH`,
+  `IRC_LOG_CHANNELS`, `NUV_ENABLED`, `RATIO_MIN`.
+
+**Door-game runtime parity with Synchronet / Mystic**
+
+A real BBS gives each active node its own scratch directory and
+substitutes shortcodes (Synchronet `%f`, Mystic `%P` etc.) in door
+command lines. Both were missing; both shipped this session.
+
+- New `anetbbs/games/node_paths.py` — per-node temp dirs at
+  `<install>/data/temp/nodeN/` (1..`BBS_NODES`), auto-created on app
+  boot. Owns the substitution table.
+- Synchronet `%`-token vocabulary supported in `Game.executable_path`,
+  `Game.working_directory`, `Game.command_line_args`, and
+  `Game.drop_file_path`: `%a`, `%c`, `%d`, `%e`, `%f`, `%g`, `%h`,
+  `%i`, `%j`, `%k`, `%l`, `%m`, `%n`, `%o`, `%p`, `%r`, `%s`, `%t`,
+  `%u`, `%w`, `%y`, `%z`, `%!`, `%%`.
+- Mystic `%`-token vocabulary supported in the same fields:
+  `%P` (per-node temp dir w/ trailing `/`), `%N`, `%M`, `%U`, `%T`,
+  `%H`, `%R`, `%E`, `%S`, `%L`. So `%Pdoor32.sys` correctly resolves
+  to e.g. `/data/temp/node3/door32.sys`.
+- `Game.drop_file_path` is now %-token expanded (was only `{node}`).
+- New doc: [`docs/14-door-games.md`](14-door-games.md) — full token
+  table, LORD walk-through, and the rest of the door-config story.
+- New doc: [`docs/15-synchronet-compat.md`](15-synchronet-compat.md) —
+  xtrn coverage survey, what stock Synchronet doors are likely to work
+  through our Node shim vs. need a real `jsexec`.
+
+**Mystic .mps auto-compile**
+- New `_ensure_mps_compiled()` in `door_runner.py` — if `mplc` is on
+  the host, automatically compile `.mps` source → `.mpx` bytecode
+  before launch (only if source is newer than bytecode). Falls back to
+  an existing `.mpx` next to the source if `mplc` isn't installed.
+- New `MYSTIC_MPLC_PATH` env var for explicit override.
+
+**Installer modes (test vs production)**
+- `install.sh` now starts with an "Install mode" prompt:
+  - **production** = real BBS facing the public internet — wants
+    nginx, SSL, a domain pointed at the box, privileged-port services
+    (Finger/MSP/SYSTAT) reachable from peers.
+  - **test** = local-only / behind NAT / no static IP / just trying it
+    out — auto-skips nginx, certbot, Finger/MSP/SYSTAT/BinkP. Gunicorn
+    binds 0.0.0.0:5000 directly. Sysop can flip individual flags later
+    without re-installing.
+- New optional install step: download Mystic Linux freeware tarball,
+  extract `mystic` + `mplc` to `/opt/mystic/`, symlink into
+  `/usr/local/bin/`, write `MYSTIC_MPLC_PATH` to `.env`. Soft-fails
+  if the download URL is unreachable (no network, mysticbbs.com down).
+- `anetbbs-finger.service` unit now installed by `install.sh` when
+  `ENABLE_FINGER=y` (was never deployed by the installer despite the
+  unit file existing in `deploy/`).
+- Test-mode summary message at end of install spells out exactly what
+  was skipped and how to re-enable later.
+
+**Deploy / ops**
+- `update.sh` and the documented rsync recipe explicitly
+  `--exclude=doors --exclude=gallery-config.json --exclude=data/` to
+  prevent the v195-era incident where a `--delete` deploy wiped the
+  doors tree (DSR, BotWars, RDQ3, the 6500-GIF library) from a
+  production install.
+
+**Misc**
+- `permission denied` regressions on the MRC bridge fixed by ensuring
+  service unit `User=stingray` matches actual file ownership on the
+  reference deployment (was getting accidentally chown'd to anetbbs).
+
+## v1.0a — alpha refresh (May 2026, internal v194)
+
+Subsequent rolling internal builds (v165-v194) refine the alpha. Public
+tarball at `ANetBBS-v1.0a.tar.gz` always tracks the latest internal cut.
+
+**Highlights since the v164 alpha:**
+
+- **MSP / Inter-BBS IM correctness** — the previous wire format was a
+  homegrown 5-field variant that Synchronet rejected silently and we
+  mis-parsed in the inbound direction. v168 ships a real RFC 1312 MSP-2
+  encoder/decoder (7 fields with a leading 'B'/'A' type byte), strips
+  `@host` from inbound recipients, optionally answers acked-mode requests.
+- **Synchronet `@CODE@` substitution** in our Synchronet stub layer's
+  `printfile` — `@BBS@`, `@USER@`, `@SYSOP@`, `@TIME@`, `@DATE@`,
+  `@SECURITY@`, `@CALLS@`, `@NODE@`, etc. resolve from the BBS_*
+  environment variables that `door_runner.py` exports.
+- **Display-code preprocessor** for ANSI screens and BbsMenu screens —
+  Synchronet @-codes (`@USER@`, `@BBS@`, `@TIME@`, ...) and Mystic
+  named codes (`|UN`, `|BN`, `|DT`, ...). Color-pipe codes like `|07`
+  remain handled by the existing `_pipe_to_ansi`.
+- **QWK polling improvements** — Synchronet's `550 No QWK packet
+  created (no new messages)` is now treated as benign instead of a
+  fatal poll error (was generating thousands of false ERROR lines per
+  day). Poll interval clamped to ≥5 minutes to prevent a misconfigured
+  DB from hammering remote hubs.
+- **Web-stack hardening** — `KillMode=mixed` + `RestartSec=10` on the
+  gunicorn unit so eventlet workers don't leak past the master and
+  cause EADDRINUSE crash loops; `_create_default_data` `os` shadowing
+  bug fixed; `body` keyword for `PrivateMessage` (was `content`);
+  `/help` endpoint repaired.
+- **Permissions** — install.sh asserts ssh_host_key + sbbs_stubs/
+  + doors/ permissions on every run (not only at first generation),
+  with sbbs_stubs source files now shipped world-readable so future
+  rsync deploys don't reset BotWars/RDQ3 to broken.
+- **Terminal MRC client** — extensive UX work:
+    - anetmrc-style stationary status bar at the top (room, topic,
+      mention badge, server latency)
+    - DECSTBM scroll region for chat below it
+    - HH:MM timestamp prefix on every chat line, ANSI-aware word-wrap
+      with continuation indent
+    - Tab-complete usernames (active list seeded from chat events,
+      `/who`, `/chatters`)
+    - New slash commands: `/afk [msg]`, `/back`, `/status`,
+      `/roomconfig`, `/termsize`, `/whoon` alias of `/who`
+    - `/info <id>` now passes the BBS index to the server
+    - `/scroll` removed (terminal-native scrollback works fine)
+    - Removed the doubling-on-wrap bug (input is slide-windowed; chat
+      uses ANSI-aware word wrap instead of native terminal wrap)
+- **Terminal BBS UI** — single-key hotkeys (no Enter required), screen
+  clear before each menu, Q logoff confirms with Y/N, banner+colored
+  rendering on Boards / Echomail / Bulletins / Who's Online / Sysop
+  Tools / Profile / PM compose / IM compose / inboxes, paged area
+  picker for compose-echomail, terminal IM reader (`[I]` and `[J]`).
+- **Web nav reorg** — Inter-BBS IM badge in the top bar (next to PM
+  envelope and notification bell), Web Terminal moved from Chat
+  dropdown to top of Tools dropdown.
+- **Privacy** — IP column on `/who` now hidden from non-admins.
+- **CP437 mojibake recovery** for ANSI screens stored as Latin-1 in
+  the DB (encode→bytes→write-as-CP437 path so SyncTERM and modern
+  terminals both render correctly).
+- **Dialout default directory** trimmed to a single seed entry
+  (sysop adds the rest via `/admin/dialout`).
+- **Door runner** — door cleanup callback now runs inside a captured
+  Flask app context (was leaking "Working outside of application
+  context" errors when sessions ended).
+- **Web service unit** — config templated for `/opt/anetbbs/`; the
+  `install.sh` rewrite handles `INSTALL_DIR` substitution properly.
+
+## v1.0a — first alpha (May 2026)
+
+Bundles all internal versions through v164.
+
+**Major features:**
+- Web BBS (Flask + SocketIO) + telnet + SSH + rlogin front-ends
+- FidoNet binkp echomail + netmail with full kludge support (MSGID, REPLY,
+  INTL, FMPT/TOPT, CHRS, PID, TZUTC), CRAM-MD5 BinkP auth, optional TLS
+- DOVE-Net QWK echomail with REP packet outbound, CONTROL.DAT-driven
+  area auto-create, 1-on-1 QWK netmail compose
+- Inter-BBS Instant Messaging via MSP (RFC 1312) on TCP/18 + SYSTAT/
+  ActiveUser on UDP/11, with the Synchronet `sbbsimsg.lst` directory
+  mirrored daily and a built-in BBS picker UI
+- **Terminal MRC chat** (telnet/SSH/rlogin) — talks to the same local
+  websocket bridge that web users hit, so terminal and browser users
+  share the same hub identity and chat rooms. Full command set
+  (`/identify /msg /me /join /list /who /motd /banners /topic /scroll
+  /mentions /trust /broadcast …`); ←/→ arrow keys cycle outgoing text
+  color; `/identify` mid-line password masking; @mention highlighting
+  with bell; outgoing 140-char cap with auto-split on word boundaries;
+  ROOMTOPIC banner + topic snippet baked into the prompt
+- Local boards with voting, search, sticky/lock, threading, ANSI banners,
+  per-board moderators
+- File bases with TIC ingest, outbound TIC hatching, `FILE_ID.DIZ`
+  auto-extract, per-area upload permissions
+- Doors: DOSBox (auto-detect staging/x/vanilla), Mystic .mps and .mpy,
+  Synchronet .js (real jsexec when available, Node.js shim fallback),
+  native binaries — all with DOOR.SYS / DOOR32.SYS / DORINFO drop files
+- Private messages, FTN netmail, CP437 + ANSI rendering everywhere
+- AreaFix in/out with per-network admin queue, BadArea sysop-review queue
+- Admin: rate limits on login/MSP/votes, random initial admin password
+  written to `data/admin_password.txt`, SECRET_KEY guard refusing dev
+  default in production, open-redirect-hardened login
+
+## Internal version history (build numbers)
+
+| ver  | summary |
+| ---- | ------- |
+| v164 | MRC: ROOMTOPIC captured + shown in prompt + topic banner; mention bell + brighter highlight; `/scroll` empty-state; `/mentions` to clear counter |
+| v163 | MRC terminal: dropped DECSTBM scroll regions (unreliable on BBS terminals); switched to inline-redraw model |
+| v162 | MRC terminal: truncate-to-width on emit, dropped SAVE/RESTORE_CURSOR |
+| v161 | Taglines append on echomail + QWK netmail (was netmail-only) |
+| v160 | MRC terminal: separator/input row collision fix; ←/→ arrow-key color cycling |
+| v159 | MRC terminal: split-screen UI, 140-char outgoing cap, scrollback, mention highlighting, full command roster |
+| v158 | MRC terminal: trigger-space stays visible on /identify; broader server-noise suppression (BANNER, TYPING, CAPABILITIES, NEWROOM) |
+| v157 | MRC terminal: inline /identify password masking; USERLIST: protocol-leak suppression |
+| v156 | MRC terminal: `/join` uses NEWROOM (was resetting trust state via re-handshake) |
+| v155 | MRC terminal: dropped MRC submenu — choice 3 takes you straight in; masked-input tip |
+| v154 | MRC terminal: IDENTIFY/REGISTER/UPDATE corrected to top-level verbs (not TRUST subcommands) |
+| v153 | MRC terminal: full slash-command set (motd/banners/topic/roompass/lastseen/last/etc.); cleaner event renderer |
+| v152 | Restored SessionProtocol import (telnet/SSH service crash fix) |
+| v151 | Terminal MRC client (talks to local websocket bridge — terminal+web users share rooms) |
+| v150 | Hands-off installer: CAP_NET_BIND_SERVICE in systemd unit; optional-deps prompts (DOSBox/ClamAV/lhasa); MRC bridge gated; UFW prompt |
+| v149 | Cleanup: stale tarballs, __pycache__, egg-info, dead imports; file-delete bug (uploader_id vs user_id) |
+| v148 | Upgrade-wizard fix: auto-heals SECRET_KEY in .env; ANETBBS_SCHEMA_MIGRATE_ONLY bypass for migration subprocess |
+| v147 | SECRET_KEY guard relaxed for migration mode (incomplete; superseded by v148) |
+| v146 | Security pass: random admin pw, SECRET_KEY guard, decorator fix, open-redirect, rate limits |
+| v145 | TZUTC netmail kludge + board search route |
+| v144 | File-area scoping on uploads + `upload_permission` enforcement |
+| v143 | Synchronet doors prefer real jsexec; SBBSEXEC/SBBSCTRL/SBBSDATA/SBBSNODE env in fork |
+| v142 | MSP send form accepts `user@host` paste; wire-tested to a-net-online.lol |
+| v141 | SYSTAT/ActiveUser UDP service + sbbsimsg.lst directory + BBS browser UI |
+| v140 | MSP / RFC 1312 Inter-BBS Instant Messaging — server, client, inbox, send form |
+| v139 | FidoNet netmail compose actually sends (was dead-letter); FTS-0001 12-byte routing header fixed; @INTL/@FMPT/@TOPT |
+| v138 | Up/down voting on board posts, echomail, PMs |
+| v137 | File upload: bug fixes + `FILE_ID.DIZ` / README auto-extract; ALLOWED_EXTENSIONS broadened |
+| v136 | AreaFix log viewer |
+| v135 | QWK auto-create areas from CONTROL.DAT; poll-log no-longer-shows-negative-counts fix |
+| v134 | AreaFix-on-subscribe; QWK quick-add UI |
+| v133 | Auto-sweep schema migration; BadAreaLog viewer |
+| v132 | SBBSecho parity: CRAM-MD5 BinkP, soft-CR strip, UTF-8 detect, PATH dupe, BadAreaLog model |
+| v131 | CP437/ANSI rendering filter + image-link helper for boards |
+| v130 | CP437/ANSI Jinja filter; QWK netmail (private 1-on-1) compose + inbox + REP-with-status='*' |
+| v129 | QWK parser fix — num_chunks is ASCII not binary (caused garbage areas + crammed bodies) |
+| v128 | Echomail nav link, misc UI |
+| ...  | (earlier history archived) |
+
+The full per-version diff lives in git.

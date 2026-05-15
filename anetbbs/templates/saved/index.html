@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Saved Messages{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-bookmark-star-fill"></i> Saved Messages</h1>
+    <p>Messages you've bookmarked from echomail, netmail, boards, and PMs.</p>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if items %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Kind</th><th>Subject</th><th>From</th><th>Saved</th>
+                <th>Notes</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for it in items %}
+                <tr>
+                    <td><span class="badge bg-secondary">{{ it.kind_label }}</span></td>
+                    <td>
+                        {% if it.exists %}
+                            <a href="{{ it.link }}">{{ it.subject }}</a>
+                        {% else %}
+                            <span class="text-muted">{{ it.subject }} (deleted)</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ it.sender }}</td>
+                    <td>{{ it.row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td><small class="text-muted">{{ it.row.notes or '' }}</small></td>
+                    <td>
+                        <form method="post" action="{{ url_for('saved.delete', saved_id=it.row.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">remove</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">Nothing saved yet — bookmark a message to see it here.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

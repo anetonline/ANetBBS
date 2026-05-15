@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}One-Liners{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-quote"></i> One-Liners &amp; Last Callers</h1>
+</div>
+
+<div class="row">
+<div class="col-md-8">
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-megaphone"></i> One-Liners</div>
+        {% if current_user.is_authenticated %}
+        <div class="card-body">
+            <form method="post" action="{{ url_for('oneliners.post') }}" class="d-flex gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="text" maxlength="120" required class="form-control" placeholder="Leave a one-liner (120 chars max)">
+                <button class="btn btn-primary"><i class="bi bi-send"></i></button>
+            </form>
+        </div>
+        {% endif %}
+        <ul class="list-group list-group-flush">
+        {% for r in rows %}
+            <li class="list-group-item d-flex justify-content-between">
+                <span>
+                    <strong>{{ r.user.username if r.user else '?' }}</strong>:
+                    {{ r.text }}
+                </span>
+                <small class="text-muted">{{ r.created_at.strftime('%m-%d %H:%M') }}</small>
+            </li>
+        {% else %}
+            <li class="list-group-item text-muted">No one-liners yet.</li>
+        {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<div class="col-md-4">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-clock-history"></i> Last 10 Callers</div>
+        <ul class="list-group list-group-flush small">
+        {% for c in last_callers %}
+            <li class="list-group-item">
+                <strong>{{ c.username or '?' }}</strong>
+                <span class="badge bg-secondary ms-1">{{ c.service or '?' }}</span>
+                <small class="text-muted ms-2">{{ c.started_at.strftime('%m-%d %H:%M') }}</small>
+            </li>
+        {% else %}
+            <li class="list-group-item text-muted">No callers logged.</li>
+        {% endfor %}
+        </ul>
+    </div>
+</div>
+</div>
+{% endblock %}

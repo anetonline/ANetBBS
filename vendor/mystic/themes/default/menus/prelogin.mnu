@@ -1,0 +1,73 @@
+Default Login sequence menu
+s10
+
+00031000000000000000
+1
+
+Menu Header
+Command: 
+
+0
+0
+
+
+
+Can replace MC (check email) with a personalscan-like menu
+if you want a global new personal message scan instead of
+just e-mail
+FIRSTCMD
+
+10000000000000000000
+0
+0
+0
+1
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+6
+NS
+!OI
+0;|&1 has logged into node |&2.
+0
+
+
+GN
+
+
+0
+
+
+GX
+
+bulletin bulletin bullet check
+0
+
+
+MC
+
+
+0
+
+
+MF
+
+/scan
+0
+
+
+GO
+
+main
+0
+
+

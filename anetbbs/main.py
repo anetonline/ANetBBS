@@ -1,0 +1,264 @@
+# anetbbs/main.py
+"""Telnet/SSH/rlogin entry point for ANetBBS.
+
+Console script: `anetbbs` -> anetbbs.main:main
+"""
+import asyncio
+import logging
+import signal
+import sys
+import os
+from anetbbs.core.session import BBSSession
+from anetbbs.core.service_locator import ServiceLocator
+from anetbbs.features.chat import ChatManager
+from anetbbs.config import get_config
+
+# Set up logging once
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bbs.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+class BBSServer:
+    def __init__(self, config=None):
+        self.config = config or {
+            'server': {'host': '0.0.0.0', 'port': 2233}
+        }
+        self.server = None
+        self.running = True
+        self.active_connections = set()
+        self._shutdown_event = asyncio.Event()
+
+    async def handle_connection(self, reader, writer):
+        addr = writer.get_extra_info('peername')
+        logger.info(f'New connection from {addr}')
+
+        self.active_connections.add(writer)
+
+        session = BBSSession(reader, writer, self.config)
+        chat_manager = ChatManager(session)
+        ServiceLocator.register('chat_manager', chat_manager)
+
+        try:
+            await session.start()
+        except Exception as e:
+            logger.error(f"Unhandled exception in client_connected_cb\n{writer.transport}")
+            logger.exception(e)
+        finally:
+            if not writer.is_closing():
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception as e:
+                    logger.error(f"Error closing connection for {addr}: {e}")
+
+            self.active_connections.discard(writer)
+            ServiceLocator.clear()
+            logger.info(f'Connection closed for {addr}')
+
+    async def close_all_connections(self):
+        if self.active_connections:
+            logger.info(f"Closing {len(self.active_connections)} active connections...")
+            close_tasks = []
+            for writer in self.active_connections:
+                if not writer.is_closing():
+                    writer.close()
+                    close_tasks.append(writer.wait_closed())
+            if close_tasks:
+                await asyncio.gather(*close_tasks, return_exceptions=True)
+            self.active_connections.clear()
+
+    def stop(self):
+        if not self._shutdown_event.is_set():
+            logger.info("Shutting down server...")
+            self._shutdown_event.set()
+            self.running = False
+            if self.server:
+                self.server.close()
+
+    async def shutdown(self):
+        self.stop()
+        await self.close_all_connections()
+        if self.server:
+            await self.server.wait_closed()
+        logger.info("Server shutdown complete")
+
+    async def start(self):
+        try:
+            self.server = await asyncio.start_server(
+                self.handle_connection,
+                self.config['server']['host'],
+                self.config['server']['port']
+            )
+
+            addr = self.server.sockets[0].getsockname()
+            logger.info(f'BBS server started on {addr}')
+
+            async with self.server:
+                await self._shutdown_event.wait()
+
+        except Exception as e:
+            logger.error(f"Server error: {e}")
+        finally:
+            await self.shutdown()
+
+
+def main():
+    """Main entry point — starts telnet, SSH, and optionally rlogin servers."""
+    env = os.environ.get('FLASK_ENV', 'development')
+    config_class = get_config(env)
+
+    telnet_enabled = config_class.TELNET_ENABLED
+    ssh_enabled = config_class.SSH_ENABLED
+    rlogin_enabled = config_class.RLOGIN_ENABLED
+    ftp_enabled = getattr(config_class, 'FTP_ENABLED', False)
+    mail_enabled = getattr(config_class, 'MAIL_ENABLED', False)
+
+    if not telnet_enabled and not ssh_enabled and not rlogin_enabled \
+            and not ftp_enabled and not mail_enabled:
+        logger.info("All BBS servers are disabled. Use 'anetbbs-web' to run the web interface.")
+        return
+
+    # LMTP receiver runs in its own daemon thread. Same pattern as FTP:
+    # build a MINIMAL Flask app (no blueprints, no pollers) so we don't
+    # contaminate the asyncio loop with threading-based subsystems.
+    if mail_enabled:
+        try:
+            import threading
+            from anetbbs.mail.lmtp_server import run as _lmtp_run, build_minimal_app as _mail_app
+            mail_app = _mail_app()
+            mail_thread = threading.Thread(
+                target=_lmtp_run, args=(mail_app,),
+                name='mail-lmtp', daemon=True)
+            mail_thread.start()
+            logger.info("Starting ANetBBS Mail LMTP listener on unix:%s",
+                        config_class.MAIL_LMTP_SOCKET)
+        except ImportError as exc:
+            logger.warning("aiosmtpd not installed — Mail LMTP disabled. "
+                           "Install: pip install aiosmtpd>=1.4.0 (%s)", exc)
+        except Exception:
+            logger.exception("Failed to start Mail LMTP listener")
+
+    # FTP server runs in a daemon thread alongside the asyncio servers.
+    # pyftpdlib has its own selectors-based loop and doesn't natively mix
+    # with asyncio; a thread is the cleanest integration. CRITICAL: we
+    # build a MINIMAL Flask app here (just SQLAlchemy bound to the same
+    # DB), NOT the full web_app.create_app() — that one registers 50
+    # blueprints and starts the echomail/RSS pollers, all of which use
+    # threading primitives. Pulling them in turns this pure-asyncio
+    # process into a mixed-concurrency mess and the telnet/SSH login
+    # flow's threading.Condition breaks with "cannot notify on
+    # un-acquired lock".
+    if ftp_enabled:
+        try:
+            import threading
+            from anetbbs.ftp.server import run as _ftp_run, build_minimal_app
+            flask_app = build_minimal_app()
+            ftp_thread = threading.Thread(
+                target=_ftp_run, args=(flask_app,),
+                name='ftp-server', daemon=True)
+            ftp_thread.start()
+            logger.info("Starting ANetBBS FTP Server on %s:%d",
+                        config_class.FTP_HOST, config_class.FTP_PORT)
+        except ImportError as exc:
+            logger.warning("pyftpdlib not installed — FTP server disabled. "
+                           "Install with: pip install pyftpdlib>=2.0.0 (%s)", exc)
+        except Exception:
+            logger.exception("Failed to start FTP server")
+
+    bbs_config = {
+        'server': {
+            'host': config_class.TELNET_HOST,
+            'port': config_class.TELNET_PORT,
+        }
+    }
+    rlogin_cfg = {
+        'rlogin': {
+            'host': config_class.RLOGIN_HOST,
+            'port': config_class.RLOGIN_PORT,
+        }
+    }
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    servers_to_stop = []
+
+    def signal_handler(sig, frame):
+        logger.info("Received shutdown signal")
+        if not loop.is_closed():
+            for s in servers_to_stop:
+                loop.call_soon_threadsafe(s.stop)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    async def run_all():
+        tasks = []
+
+        if telnet_enabled:
+            telnet_server = BBSServer(bbs_config)
+            servers_to_stop.append(telnet_server)
+            logger.info("Starting ANetBBS Telnet Server on %s:%d",
+                        config_class.TELNET_HOST, config_class.TELNET_PORT)
+            tasks.append(asyncio.ensure_future(telnet_server.start()))
+
+        if ssh_enabled:
+            try:
+                from anetbbs.core.ssh_server import start_ssh_server
+                logger.info("Starting ANetBBS SSH Server on %s:%d",
+                            config_class.SSH_HOST, config_class.SSH_PORT)
+                ssh_srv = await start_ssh_server(
+                    config_class.SSH_HOST,
+                    config_class.SSH_PORT,
+                    config_class.SSH_HOST_KEY_FILE,
+                    bbs_config,
+                )
+                async def _ssh_keepalive():
+                    async with ssh_srv:
+                        await asyncio.get_event_loop().create_future()
+                tasks.append(asyncio.ensure_future(_ssh_keepalive()))
+            except ImportError:
+                logger.warning("asyncssh not installed — SSH server disabled. "
+                               "Install with: pip install asyncssh>=2.14.0")
+            except Exception as exc:
+                logger.error("Failed to start SSH server: %s", exc)
+
+        if rlogin_enabled:
+            from anetbbs.core.rlogin_server import RloginServer
+            rlogin_cfg_merged = {**bbs_config, **rlogin_cfg}
+            rlogin_server = RloginServer(rlogin_cfg_merged)
+            servers_to_stop.append(rlogin_server)
+            logger.info("Starting ANetBBS rlogin Server on %s:%d",
+                        config_class.RLOGIN_HOST, config_class.RLOGIN_PORT)
+            tasks.append(asyncio.ensure_future(rlogin_server.start()))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        loop.run_until_complete(run_all())
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+    finally:
+        try:
+            tasks = asyncio.all_tasks(loop)
+            for task in tasks:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        logger.info("Server shutdown complete")
+
+
+if __name__ == '__main__':
+    main()

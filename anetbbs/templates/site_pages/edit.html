@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Edit: {{ page.title }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pencil"></i> Edit {{ page.title }}</h1>
+    <p class="text-muted small">Slug: <code>{{ page.slug }}</code> — Markdown supported.</p>
+</div>
+
+<form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label">Title</label>
+        <input type="text" name="title" class="form-control" value="{{ page.title }}" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Content (Markdown)</label>
+        <textarea name="content_md" rows="20" class="form-control" style="font-family:monospace;">{{ page.content_md }}</textarea>
+    </div>
+    <button class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+    <a href="{{ url_for('site_pages.view', slug=page.slug) }}" class="btn btn-link">Cancel</a>
+</form>
+{% endblock %}

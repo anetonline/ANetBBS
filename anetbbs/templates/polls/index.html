@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Polls{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-bar-chart"></i> Polls</h1>
+    <p>Vote in active polls or create your own.</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('polls.new_poll') }}" class="btn btn-primary">
+        <i class="bi bi-plus-square"></i> New Poll
+    </a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-circle-fill text-success"></i> Active</div>
+    <div class="card-body p-0">
+    {% if active %}
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Question</th><th>By</th><th>Votes</th><th>Created</th></tr></thead>
+            <tbody>
+            {% for p in active %}
+                <tr>
+                    <td><a href="{{ url_for('polls.view_poll', poll_id=p.id) }}">{{ p.question }}</a></td>
+                    <td>{{ p.creator.username }}</td>
+                    <td>{{ p.options.count() }} options</td>
+                    <td>{{ p.created_at.strftime('%Y-%m-%d') }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No active polls.</div>{% endif %}
+    </div>
+</div>
+
+{% if closed %}
+<div class="card">
+    <div class="card-header"><i class="bi bi-circle text-muted"></i> Recently Closed</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Question</th><th>By</th><th>Closed</th></tr></thead>
+            <tbody>
+            {% for p in closed %}
+                <tr>
+                    <td><a href="{{ url_for('polls.view_poll', poll_id=p.id) }}">{{ p.question }}</a></td>
+                    <td>{{ p.creator.username }}</td>
+                    <td>{{ p.closes_at.strftime('%Y-%m-%d') if p.closes_at else '—' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

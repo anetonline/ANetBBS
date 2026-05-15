@@ -1,0 +1,2292 @@
+# anetbbs/models.py
+"""
+Database models for ANetBBS
+Supports both SQLite (development) and PostgreSQL (production)
+"""
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
+
+db = SQLAlchemy()
+
+
+class Theme(db.Model):
+    """User interface theme model"""
+    __tablename__ = 'themes'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    display_name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    css_variables = db.Column(db.Text, nullable=False)
+    is_default = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class User(UserMixin, db.Model):
+    """User model for authentication and profiles"""
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_login = db.Column(db.DateTime)
+    login_count = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    is_admin = db.Column(db.Boolean, default=False)
+    display_name = db.Column(db.String(100))
+    bio = db.Column(db.Text)
+    location = db.Column(db.String(100))
+    website = db.Column(db.String(255))
+    avatar_url = db.Column(db.String(500))
+    avatar_upload = db.Column(db.String(255))
+    signature = db.Column(db.Text)
+    tagline = db.Column(db.String(160))           # message footer rotator
+    date_of_birth = db.Column(db.Date)
+    show_email = db.Column(db.Boolean, default=False)
+    theme_id = db.Column(db.Integer, db.ForeignKey('themes.id'), nullable=True)
+    # JSON-encoded {kind: bool} map. Missing key = default-on.
+    notify_prefs = db.Column(db.Text)
+    # Mystic/Synchronet-style numeric access level (0-255). admin gets 100+.
+    # Lets sysop create tiers: e.g. 10=newuser, 20=verified, 50=power, 100=sysop.
+    access_level = db.Column(db.Integer, default=10, index=True)
+    # ANSI codepage preference: 'cp437' (DOS classic) or 'utf8'.
+    codepage = db.Column(db.String(8), default='cp437')
+    # Preferred language code (ISO-639-1) for menu translations: en/es/fr/...
+    language = db.Column(db.String(8), default='en')
+    # New User Verification — sysop approves before user can log in
+    # (only enforced when NUV_ENABLED config flag is set).
+    is_verified = db.Column(db.Boolean, default=True, index=True)
+    # Internet email — when enabled (sysop-approved per the
+    # MAIL_ALLOCATION=sysop policy), inbound mail addressed to
+    # `<email_local_part>@<MAIL_DOMAIN>` lands in this user's mail
+    # inbox via the LMTP listener. `email_local_part` defaults to a
+    # lowercased + slugified username if blank.
+    email_enabled = db.Column(db.Boolean, default=False, index=True)
+    email_local_part = db.Column(db.String(64), index=True)
+
+    # Relationships
+    posts = db.relationship('Post', backref='author', lazy='dynamic', cascade='all, delete-orphan')
+    messages = db.relationship('Message', backref='author', lazy='dynamic', cascade='all, delete-orphan')
+    theme = db.relationship('Theme', backref='theme_users', lazy=True, foreign_keys=[theme_id])
+    
+    def set_password(self, password):
+        """Hash and set user password"""
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        """Verify user password"""
+        return check_password_hash(self.password_hash, password)
+    
+    def update_login(self):
+        """Update login timestamp and count.
+        Null-safe — if login_count is NULL (legacy rows), treats it as 0."""
+        self.last_login = datetime.utcnow()
+        self.login_count = (self.login_count or 0) + 1
+        db.session.commit()
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+
+class Board(db.Model):
+    """Message board/forum model"""
+    __tablename__ = 'boards'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    order = db.Column(db.Integer, default=0)
+    # Optional ANSI banner rendered at top of the board's index page.
+    # Stored as the rendered escape-coded string (same format as ansi_text
+    # on AnsiArt). Sysop can paste output of `Download .ans`.
+    ansi_banner = db.Column(db.Text)
+    # Sub-conference / category — group related boards. e.g. "General",
+    # "Tech", "FidoNet". Boards in the same category are listed together.
+    category = db.Column(db.String(80), default='', index=True)
+
+    # Relationships
+    posts = db.relationship('Post', backref='board', lazy='dynamic', cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<Board {self.name}>'
+
+
+class Post(db.Model):
+    """Message board post/thread model"""
+    __tablename__ = 'posts'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    board_id = db.Column(db.Integer, db.ForeignKey('boards.id'), nullable=False, index=True)
+    author_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('posts.id'), index=True)
+    
+    subject = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_pinned = db.Column(db.Boolean, default=False, index=True)
+    is_locked = db.Column(db.Boolean, default=False)
+
+    # Relationships
+    replies = db.relationship('Post', backref=db.backref('parent', remote_side=[id]),
+                            lazy='dynamic', cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<Post {self.subject}>'
+
+
+class Message(db.Model):
+    """Bulletin/announcement model"""
+    __tablename__ = 'messages'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    author_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    expires_at = db.Column(db.DateTime)
+    is_pinned = db.Column(db.Boolean, default=False)
+    
+    def __repr__(self):
+        return f'<Message {self.title}>'
+
+
+class ChatMessage(db.Model):
+    """Chat message history model"""
+    __tablename__ = 'chat_messages'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    username = db.Column(db.String(80), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Relationship
+    user = db.relationship('User', backref='chat_messages', lazy=True)
+    
+    def __repr__(self):
+        return f'<ChatMessage from {self.username}>'
+
+
+class Game(db.Model):
+    """Game model for the Game Center"""
+    __tablename__ = 'games'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    slug = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.Text)
+    category = db.Column(db.String(50), default='other')
+
+    # Game type determines how it's launched
+    # Types: 'door_dos', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web'
+    game_type = db.Column(db.String(20), nullable=False)
+
+    # Door game settings
+    executable_path = db.Column(db.String(500))
+    working_directory = db.Column(db.String(500))
+    command_line_args = db.Column(db.String(500))
+    drop_file_type = db.Column(db.String(20))
+    drop_file_path = db.Column(db.String(500))
+    use_dosbox = db.Column(db.Boolean, default=False)
+
+    # Mystic BBS Python game settings
+    mystic_script_path = db.Column(db.String(500))
+
+    # Synchronet JS game settings
+    synchronet_script_path = db.Column(db.String(500))
+    synchronet_exec_dir = db.Column(db.String(500))
+
+    # Web game settings
+    web_game_module = db.Column(db.String(100))
+    web_game_url = db.Column(db.String(500))
+
+    # General settings
+    max_nodes = db.Column(db.Integer, default=1)
+    is_active = db.Column(db.Boolean, default=True)
+    is_multiplayer = db.Column(db.Boolean, default=False)
+    play_count = db.Column(db.Integer, default=0)
+    icon = db.Column(db.String(50))
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    sessions = db.relationship('GameSession', backref='game', lazy='dynamic')
+    scores = db.relationship('GameScore', backref='game', lazy='dynamic')
+
+    def __repr__(self):
+        return f'<Game {self.name}>'
+
+
+class GameSession(db.Model):
+    """Active game session tracking"""
+    __tablename__ = 'game_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('games.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    node_number = db.Column(db.Integer, nullable=False)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    ended_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='active')  # active, completed, crashed, timeout
+    pid = db.Column(db.Integer)
+
+    user = db.relationship('User', backref='game_sessions')
+
+    def __repr__(self):
+        return f'<GameSession {self.id} game={self.game_id} user={self.user_id}>'
+
+
+class GameScore(db.Model):
+    """Game high score / leaderboard entry"""
+    __tablename__ = 'game_scores'
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('games.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    score = db.Column(db.Integer, default=0)
+    details = db.Column(db.Text)  # JSON with extra score data
+    achieved_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='game_scores')
+
+    def __repr__(self):
+        return f'<GameScore {self.score} game={self.game_id} user={self.user_id}>'
+
+
+class UserSession(db.Model):
+    """Active user session tracking for online presence"""
+    __tablename__ = 'user_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    ip_address = db.Column(db.String(45))
+    user_agent = db.Column(db.String(255))
+    page = db.Column(db.String(255))
+
+    # Cascade-delete the session row when the user is deleted. Without
+    # this, SQLAlchemy defaults to "set FK to NULL" on user delete —
+    # but user_id is NOT NULL, so the parent delete blows up with
+    # `IntegrityError: NOT NULL constraint failed: user_sessions.user_id`.
+    user = db.relationship(
+        'User',
+        backref=db.backref('session', uselist=False,
+                           cascade='all, delete-orphan'),
+        lazy=True)
+
+    def __repr__(self):
+        return f'<UserSession user_id={self.user_id}>'
+
+
+class PrivateMessage(db.Model):
+    """Private message between users"""
+    __tablename__ = 'private_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    recipient_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    read_at = db.Column(db.DateTime)
+    is_deleted_sender = db.Column(db.Boolean, default=False)
+    is_deleted_recipient = db.Column(db.Boolean, default=False)
+
+    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
+    recipient = db.relationship('User', foreign_keys=[recipient_id], backref='received_messages')
+
+    def __repr__(self):
+        return f'<PrivateMessage {self.subject}>'
+
+
+class FileUpload(db.Model):
+    """User file upload record"""
+    __tablename__ = 'file_uploads'
+
+    id = db.Column(db.Integer, primary_key=True)
+    uploader_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    mime_type = db.Column(db.String(100))
+    description = db.Column(db.Text)
+    download_count = db.Column(db.Integer, default=0)
+    is_public = db.Column(db.Boolean, default=True)
+    # Optional file area scoping — null means a generic top-level upload.
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    uploader = db.relationship('User', backref='uploads', lazy=True)
+    file_area = db.relationship('FileArea')
+
+    def __repr__(self):
+        return f'<FileUpload {self.filename}>'
+
+
+class EchomailNetwork(db.Model):
+    """FidoNet-style network configuration"""
+    __tablename__ = 'echomail_networks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    network_type = db.Column(db.String(10), nullable=False)  # 'binkp' or 'qwk'
+    description = db.Column(db.Text)
+
+    # BinkP settings
+    binkp_host = db.Column(db.String(255))
+    binkp_port = db.Column(db.Integer, default=24554)
+    binkp_password = db.Column(db.String(255))
+    # Optional separate AreaFix password — many hubs configure a distinct
+    # password for AreaFix requests vs the BinkP session secret. If blank,
+    # falls back to binkp_password for backward compatibility.
+    areafix_password = db.Column(db.String(255))
+    our_address = db.Column(db.String(50))  # FTN address like 1:234/567
+    hub_address = db.Column(db.String(50))
+
+    # QWK settings
+    qwk_host = db.Column(db.String(255))
+    qwk_port = db.Column(db.Integer)
+    qwk_username = db.Column(db.String(100))
+    qwk_password = db.Column(db.String(255))
+    qwk_packet_id = db.Column(db.String(8))
+    # The HUB's QWK system ID (e.g. "VERT" for DOVE-Net). qnet-ftp's
+    # convention: download <hub_id>.qwk, upload <packet_id>.rep.
+    qwk_hub_id = db.Column(db.String(16))
+    # Override the default URL path. Set this when the upstream uses a
+    # non-standard layout (e.g. Dove-Net's qnet.dl URL). If blank, the
+    # client falls back to {host}:{port}/qwk/{packet_id}.qwk.
+    qwk_download_url = db.Column(db.String(500))
+    qwk_upload_url = db.Column(db.String(500))
+
+    poll_interval_minutes = db.Column(db.Integer, default=60)
+    last_poll_at = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # SBBSecho parity:
+    # - default_recipient: where netmail addressed to an unknown name lands
+    # - cram_md5: prefer/require CRAM-MD5 BinkP auth (Synchronet default)
+    # - binkp_tls: implicit TLS for outbound BinkP
+    default_recipient = db.Column(db.String(100))
+    cram_md5 = db.Column(db.Boolean, default=True)
+    binkp_tls = db.Column(db.Boolean, default=False)
+
+    areas = db.relationship('EchoArea', backref='network', lazy='dynamic', cascade='all, delete-orphan')
+    poll_logs = db.relationship('EchomailPollLog', backref='network', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<EchomailNetwork {self.name}>'
+
+
+class EchoArea(db.Model):
+    """Echomail message area/conference"""
+    __tablename__ = 'echo_areas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'), nullable=False, index=True)
+    tag = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    is_subscribed = db.Column(db.Boolean, default=True)
+    is_sysop_only = db.Column(db.Boolean, default=False, index=True)
+    order = db.Column(db.Integer, default=0)
+    total_messages = db.Column(db.Integer, default=0)
+    last_message_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    messages = db.relationship('EchomailMessage', backref='area', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<EchoArea {self.tag}>'
+
+
+class EchomailMessage(db.Model):
+    """Individual echomail message"""
+    __tablename__ = 'echomail_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'), nullable=False, index=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'), nullable=False, index=True)
+    msg_id = db.Column(db.String(100), index=True)
+    reply_id = db.Column(db.String(100))
+    from_name = db.Column(db.String(100), nullable=False)
+    from_address = db.Column(db.String(50))
+    to_name = db.Column(db.String(100), nullable=False)
+    to_address = db.Column(db.String(50))
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    tear_line = db.Column(db.String(200))
+    origin_line = db.Column(db.String(200))
+    # FTN kludges preserved verbatim — JSON-encoded array of "@KLUDGE val" lines.
+    # Without this we'd lose MSGID/REPLY threading, CHRS encoding declaration,
+    # PATH/SEENBY routing info, and the message would not be reforwarded
+    # correctly to downstream peers.
+    kludges = db.Column(db.Text)
+    chrs = db.Column(db.String(40), default='CP437 2')   # CHRS kludge value
+    seenby = db.Column(db.Text)                           # SEEN-BY list (JSON)
+    path = db.Column(db.Text)                             # PATH list (JSON)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow)
+    direction = db.Column(db.String(10), default='inbound')  # 'inbound' or 'outbound'
+    # For outbound messages: timestamp of successful send to the network.
+    # NULL means "queued, not yet sent". Inbound messages leave this NULL.
+    sent_at = db.Column(db.DateTime, index=True)
+
+    def __repr__(self):
+        return f'<EchomailMessage {self.subject}>'
+
+
+class EchomailReadStatus(db.Model):
+    """Per-user read tracking for echomail messages"""
+    __tablename__ = 'echomail_read_status'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('echomail_messages.id'), nullable=False, index=True)
+    read_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'message_id', name='uq_echomail_read'),)
+
+    def __repr__(self):
+        return f'<EchomailReadStatus user={self.user_id} msg={self.message_id}>'
+
+
+class EchomailPollLog(db.Model):
+    """Echomail polling history"""
+    __tablename__ = 'echomail_poll_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'), nullable=False, index=True)
+    poll_type = db.Column(db.String(10), default='both')  # 'send', 'receive', 'both'
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='running')  # 'success', 'error', 'partial', 'running'
+    messages_sent = db.Column(db.Integer, default=0)
+    messages_received = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text)
+
+    def __repr__(self):
+        return f'<EchomailPollLog network={self.network_id} status={self.status}>'
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: BBS menu system (data-driven menus for telnet/SSH/rlogin)
+# ---------------------------------------------------------------------------
+
+class BbsMenu(db.Model):
+    """A BBS menu shown on telnet/SSH/rlogin. Each menu has an `ansi_screen`
+    (raw ANSI art shown above the prompt), a `prompt`, and a list of MenuItems.
+    Use `name` as the unique key referenced from menu actions (e.g. action_args
+    for action_type='goto' should be the target menu's name)."""
+
+    __tablename__ = 'bbs_menus'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # 'main', 'sysop', 'games', etc
+    title = db.Column(db.String(100), nullable=False)              # Shown at top
+    ansi_screen = db.Column(db.Text)                               # Raw ANSI art (CP437)
+    prompt = db.Column(db.String(100), default='Choice: ')
+    is_default = db.Column(db.Boolean, default=False)              # Shown after login if true
+    min_access = db.Column(db.Integer, default=0)                  # 0=any, 100=admin
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    items = db.relationship('BbsMenuItem', backref='menu',
+                            order_by='BbsMenuItem.sort_order',
+                            lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<BbsMenu {self.name}>'
+
+
+class BbsMenuItem(db.Model):
+    """A single item on a BbsMenu. The user types `hotkey` to invoke `action_type`
+    with `action_args`. Action types:
+      - 'goto':       jump to another menu (action_args = menu name)
+      - 'door':       launch a door game (action_args = Game.id)
+      - 'boards':     enter message-boards UI
+      - 'pm':         enter PM inbox
+      - 'pm_send':    compose new PM
+      - 'bulletins':  read bulletins
+      - 'echo':       echomail areas
+      - 'echo_post':  compose echomail
+      - 'files':      file library
+      - 'who':        who's online
+      - 'profile':    view profile
+      - 'edit_prof':  edit profile
+      - 'passwd':     change password
+      - 'sysop':      sysop tools (admin only)
+      - 'chat':       chat menu
+      - 'logoff':     end the session
+    """
+
+    __tablename__ = 'bbs_menu_items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    menu_id = db.Column(db.Integer, db.ForeignKey('bbs_menus.id'), nullable=False, index=True)
+    hotkey = db.Column(db.String(4), nullable=False)              # 'M', '1', 'F2', etc
+    label = db.Column(db.String(80), nullable=False)              # 'Message Boards'
+    action_type = db.Column(db.String(20), nullable=False)
+    action_args = db.Column(db.String(255))                       # see action_type docstring
+    min_access = db.Column(db.Integer, default=0)                 # hide if user.access < this
+    sort_order = db.Column(db.Integer, default=0)
+    is_visible = db.Column(db.Boolean, default=True)
+
+    def __repr__(self):
+        return f'<BbsMenuItem menu={self.menu_id} {self.hotkey}={self.label!r}>'
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: FidoNet support — nodelist, netmail, AKAs, TIC, areafix
+# ---------------------------------------------------------------------------
+
+class Nodelist(db.Model):
+    """Imported nodelist metadata (one row per imported file).
+
+    A nodelist is the FidoNet network's address book — a flat-file directory
+    of every system on the network, regenerated weekly. We store metadata
+    about each imported file plus all entries (NodelistEntry rows below).
+    """
+    __tablename__ = 'nodelists'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(40), default='fidonet', index=True)  # network name
+    filename = db.Column(db.String(120))                              # NODELIST.001 etc
+    day_of_year = db.Column(db.Integer)
+    release_date = db.Column(db.Date)
+    crc_checksum = db.Column(db.String(16))
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow)
+    entry_count = db.Column(db.Integer, default=0)
+
+    entries = db.relationship('NodelistEntry', backref='nodelist',
+                              lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<Nodelist {self.domain} day={self.day_of_year}>'
+
+
+class NodelistEntry(db.Model):
+    """One row from a parsed nodelist file."""
+    __tablename__ = 'nodelist_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nodelist_id = db.Column(db.Integer, db.ForeignKey('nodelists.id'),
+                            nullable=False, index=True)
+    zone = db.Column(db.Integer, nullable=False, index=True)
+    net = db.Column(db.Integer, nullable=False, index=True)
+    node = db.Column(db.Integer, nullable=False, index=True)
+    point = db.Column(db.Integer, default=0)
+    keyword_type = db.Column(db.String(16))    # Zone/Net/Region/Hub/Pvt/Hold/Down/None
+    system_name = db.Column(db.String(120))
+    location = db.Column(db.String(120))
+    sysop_name = db.Column(db.String(120), index=True)
+    phone = db.Column(db.String(60))
+    baud_rate = db.Column(db.Integer)
+    flags = db.Column(db.Text)                 # JSON-encoded {flag: value|true}
+
+    @property
+    def address(self):
+        if self.point:
+            return f'{self.zone}:{self.net}/{self.node}.{self.point}'
+        return f'{self.zone}:{self.net}/{self.node}'
+
+    def __repr__(self):
+        return f'<NodelistEntry {self.address} {self.system_name!r}>'
+
+
+class UserAka(db.Model):
+    """Multiple FTN addresses (AKAs) the sysop can send mail FROM.
+
+    A sysop running multiple nodes (e.g. 1:234/5 in Fidonet AND 21:1/100 in
+    fsxnet) needs to pick which AKA to use when composing netmail. This table
+    tracks alternate addresses available to a user (only one can be primary)."""
+    __tablename__ = 'user_akas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    address = db.Column(db.String(60), nullable=False)   # 'zone:net/node[.point]'
+    domain = db.Column(db.String(40), default='fidonet')
+    is_primary = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('akas', lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<UserAka user={self.user_id} {self.address}>'
+
+
+class RegistryEntry(db.Model):
+    """A registered ANetBBS instance in the central federation registry.
+
+    The BBS designated as the registry hub (REGISTRY_MODE_ENABLED=true)
+    accepts `POST /registry/api/v1/register` from peer ANetBBS instances
+    and exposes the approved-list at `/anetbbs.lst`. Peers pull that list
+    daily into their local `BbsDirectoryEntry` table for browsing/IM.
+
+    Two acceptance gates before an entry appears in the public list:
+      1. Email verification — sysop clicks a token link sent to
+         `contact_email` (proves they own that mailbox).
+      2. Sysop approval — the hub's sysop manually approves the entry
+         via the admin UI (prevents drive-by spam even with email).
+    `is_listed` is the public flag — only entries where both gates are
+    true AND `is_active=true` show up in the JSON output.
+    """
+    __tablename__ = 'registry_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    host = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    msp_port = db.Column(db.Integer, default=18)
+    systat_port = db.Column(db.Integer, default=11)
+    # Friendly metadata shown to other BBS users browsing the directory.
+    name = db.Column(db.String(160), nullable=False)
+    sysop = db.Column(db.String(120))
+    location = db.Column(db.String(120))
+    software = db.Column(db.String(40), default='ANetBBS')
+    software_version = db.Column(db.String(40))
+    notes = db.Column(db.Text)
+    # Provenance + verification
+    contact_email = db.Column(db.String(255), nullable=False)
+    registration_token = db.Column(db.String(64), index=True)  # email-verify
+    is_verified = db.Column(db.Boolean, default=False, index=True)
+    is_approved = db.Column(db.Boolean, default=False, index=True)
+    is_listed = db.Column(db.Boolean, default=False, index=True)
+    is_active = db.Column(db.Boolean, default=True)
+    source_ip = db.Column(db.String(45))   # IP that POSTed /register
+    # Liveness tracking — the hub probes SYSTAT periodically and stale
+    # entries get dropped from the public list after N missed probes.
+    registered_at = db.Column(db.DateTime, default=datetime.utcnow,
+                              nullable=False)
+    last_heartbeat_at = db.Column(db.DateTime)
+    last_probe_at = db.Column(db.DateTime)
+    last_probe_ok = db.Column(db.Boolean, default=False)
+    consecutive_probe_failures = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f'<RegistryEntry {self.host}>'
+
+
+class InternetMail(db.Model):
+    """RFC 5322 email received via the LMTP listener (from the sysop's
+    local Postfix/Exim/OpenSMTPD instance) or sent via the BBS's web
+    composer (handed off to 127.0.0.1:25).
+
+    Inbox model: one row per delivered message. The `raw` column keeps
+    the full RFC 822 source so a future POP3/IMAP server can render
+    bit-for-bit what hit the wire — important for crypto signatures,
+    inline images, and quoted-printable bodies. The structured columns
+    are extracted at receive time so we can render quickly without
+    re-parsing on every page load.
+    """
+    __tablename__ = 'internet_mail'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    direction = db.Column(db.String(10), default='inbound', index=True)
+    # 'inbound' / 'outbound' / 'quarantine' (held — SPF soft-fail etc)
+    status = db.Column(db.String(20), default='received', index=True)
+    # inbound: received / read
+    # outbound: queued / sent / failed
+    # any: quarantine
+    from_addr = db.Column(db.String(255), index=True)
+    from_name = db.Column(db.String(255))
+    to_addr = db.Column(db.String(255), index=True)
+    to_name = db.Column(db.String(255))
+    cc = db.Column(db.Text)        # comma-joined; not the canonical addr list
+    subject = db.Column(db.String(998))   # RFC 5322 line limit
+    # Pre-extracted plain body for fast rendering. Multipart messages
+    # get their `text/plain` part here; HTML stays in `raw` for later.
+    body = db.Column(db.Text)
+    has_html = db.Column(db.Boolean, default=False)
+    has_attachments = db.Column(db.Boolean, default=False)
+    raw = db.Column(db.LargeBinary)        # full RFC 5322 source
+    raw_size = db.Column(db.Integer, default=0)
+    message_id = db.Column(db.String(255), index=True)
+    in_reply_to = db.Column(db.String(255), index=True)
+    refs = db.Column(db.Text)              # space-joined Message-IDs
+    # Anti-spam / provenance
+    spf_result = db.Column(db.String(20))  # pass / fail / softfail / neutral / none / temperror / permerror
+    dkim_result = db.Column(db.String(20))
+    received_via = db.Column(db.String(40), default='lmtp')
+    # lmtp / smtp / submission (future) / web
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           index=True, nullable=False)
+    read_at = db.Column(db.DateTime)
+    sent_at = db.Column(db.DateTime)        # outbound only
+
+    user = db.relationship('User',
+                           backref=db.backref('internet_mail', lazy='dynamic',
+                                              cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<InternetMail {self.id} {self.direction} {self.from_addr!r} -> {self.to_addr!r}>'
+
+
+class NetmailMessage(db.Model):
+    """Point-to-point FidoNet netmail (NOT an echo — addressed to one node).
+
+    Netmail is FTN's email: single recipient, with kludge lines (MSGID/REPLY/
+    INTL/CHARSET/PATH/FMPT/TOPT/...) preserved verbatim. We store kludges as
+    a JSON-encoded array so they round-trip correctly when forwarded.
+    """
+    __tablename__ = 'netmail_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'),
+                           index=True)
+    from_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+
+    from_address = db.Column(db.String(60), index=True)   # FTN addr of sender
+    to_address = db.Column(db.String(60), index=True)     # FTN addr of recipient
+    from_name = db.Column(db.String(120), nullable=False)
+    to_name = db.Column(db.String(120), nullable=False)
+    subject = db.Column(db.String(200), default='')
+    body = db.Column(db.Text, nullable=False)
+
+    # FTN kludges — JSON-encoded array of "@KLUDGE value" lines so we can
+    # round-trip them when forwarding. Examples: "MSGID 1:234/5 12abcd",
+    # "REPLY 1:234/5 11abcd", "INTL 2:5020/1042 1:234/5", "CHRS UTF-8 4".
+    kludges = db.Column(db.Text)
+    msgid = db.Column(db.String(200), index=True)        # parsed from MSGID kludge
+    reply_msgid = db.Column(db.String(200))              # parsed from REPLY kludge
+    chrs = db.Column(db.String(40), default='CP437 2')   # CHRS kludge
+
+    # FTN attribute flags (from the message header). True/False columns make
+    # SQL queries readable. See FTS-0001 §5.2 for canonical bitfield order.
+    is_private = db.Column(db.Boolean, default=False)
+    is_crash = db.Column(db.Boolean, default=False)      # crashmail (direct delivery)
+    is_recd = db.Column(db.Boolean, default=False)       # received by recipient
+    is_sent = db.Column(db.Boolean, default=False)
+    is_filereq = db.Column(db.Boolean, default=False)    # file request
+    is_killsent = db.Column(db.Boolean, default=False)   # kill/sent flag
+    is_local = db.Column(db.Boolean, default=False)      # locally generated
+    is_hold = db.Column(db.Boolean, default=False)
+    is_immediate = db.Column(db.Boolean, default=False)
+
+    # Lifecycle
+    direction = db.Column(db.String(10), default='outbound')   # 'inbound'/'outbound'
+    status = db.Column(db.String(20), default='draft')
+    # status values:
+    #   'draft' - user is composing; not queued
+    #   'queued' - ready to send on next poll
+    #   'sent' - successfully transmitted to uplink/peer
+    #   'received' - inbound, sitting in user's inbox
+    #   'read' - inbound, user has read it
+    #   'failed' - send error (see error_message)
+    error_message = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    sent_at = db.Column(db.DateTime, index=True)
+    received_at = db.Column(db.DateTime)
+    read_at = db.Column(db.DateTime)
+
+    # Soft-delete: independent for sender and recipient
+    deleted_by_sender = db.Column(db.Boolean, default=False)
+    deleted_by_recipient = db.Column(db.Boolean, default=False)
+
+    def __repr__(self):
+        return f'<NetmailMessage {self.from_address} -> {self.to_address} {self.subject!r}>'
+
+
+class TicFile(db.Model):
+    """Incoming TIC file — FidoNet file echo distribution.
+
+    A TIC file is a small text manifest sent through FTN file echos describing
+    a binary file (size, CRC, area, replaces, etc.). We parse received TICs,
+    fetch the referenced file from the inbound dir, and auto-file it into the
+    matching FileArea.
+    """
+    __tablename__ = 'tic_files'
+
+    id = db.Column(db.Integer, primary_key=True)
+    area_tag = db.Column(db.String(80), index=True)      # FILEAREA tag
+    filename = db.Column(db.String(120))                 # FILE
+    size_bytes = db.Column(db.BigInteger)                # SIZE
+    crc32 = db.Column(db.String(16))                     # CRC
+    description = db.Column(db.Text)                     # DESC + LDESC lines
+    origin = db.Column(db.String(60))                    # ORIGIN address
+    from_address = db.Column(db.String(60))              # FROM address
+    seenby = db.Column(db.Text)                          # SEENBY list (JSON)
+    path = db.Column(db.Text)                            # PATH list (JSON)
+    raw_content = db.Column(db.Text)                     # full TIC text
+
+    received_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    processed_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='pending')  # pending/filed/error/skipped
+    error_message = db.Column(db.Text)
+    file_upload_id = db.Column(db.Integer, db.ForeignKey('file_uploads.id'),
+                               index=True)              # filed-as
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             index=True)
+    stored_path = db.Column(db.String(500))             # absolute path of binary
+
+    def __repr__(self):
+        return f'<TicFile {self.area_tag}/{self.filename}>'
+
+
+class AreafixLog(db.Model):
+    """Log of areafix robot interactions — area subscription requests via netmail.
+
+    When a downstream node netmails our areafix bot with `+ECHO.AREA`, we
+    add it to their subscription list and reply with the action taken. This
+    table is the audit trail."""
+    __tablename__ = 'areafix_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'),
+                           index=True)
+    from_address = db.Column(db.String(60), index=True)
+    request_type = db.Column(db.String(20))          # subscribe/unsubscribe/list/help
+    area_tags = db.Column(db.Text)                   # comma-list of areas affected
+    response = db.Column(db.Text)                    # what we replied with
+    success = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<AreafixLog {self.from_address} {self.request_type}>'
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Sysop / security tools — audit log, rate limit, password reset
+# ---------------------------------------------------------------------------
+
+class PasswordResetToken(db.Model):
+    """Self-service password reset tokens. Single-use, time-limited."""
+    __tablename__ = 'password_reset_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    token = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    used_at = db.Column(db.DateTime)
+    requested_ip = db.Column(db.String(45))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('reset_tokens',
+                                                      lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    @property
+    def is_valid(self):
+        if self.used_at is not None:
+            return False
+        return datetime.utcnow() < self.expires_at
+
+    def __repr__(self):
+        return f'<PasswordResetToken user={self.user_id} valid={self.is_valid}>'
+
+
+class UserActivity(db.Model):
+    """Audit log of user actions — sysop-visible.
+
+    activity_type is a short slug. Common values:
+      login, logout, register, post, post_reply, msg_sent, msg_read,
+      file_upload, file_download, door_played, chat_msg, profile_edit,
+      password_changed, theme_changed
+    """
+    __tablename__ = 'user_activities'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=True, index=True)   # nullable for anon events
+    activity_type = db.Column(db.String(40), nullable=False, index=True)
+    details = db.Column(db.Text)                     # free-form context (URL, target id, etc)
+    ip_address = db.Column(db.String(45))
+    user_agent = db.Column(db.String(255))
+    service = db.Column(db.String(20))               # web/telnet/ssh/rlogin
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('activities',
+                                                      lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<UserActivity user={self.user_id} {self.activity_type}>'
+
+
+class RegistrationAttempt(db.Model):
+    """Tracks signup attempts by IP for rate-limiting purposes.
+
+    A new row is written for every POST to the registration page (success or
+    failure). The auth code uses a window query (last N minutes) to throttle
+    repeat attempts from the same IP."""
+    __tablename__ = 'registration_attempts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ip_address = db.Column(db.String(45), nullable=False, index=True)
+    username_attempted = db.Column(db.String(80))
+    success = db.Column(db.Boolean, default=False)
+    error_reason = db.Column(db.String(200))
+    user_agent = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    def __repr__(self):
+        return f'<RegistrationAttempt {self.ip_address} success={self.success}>'
+
+
+class IrcServerConfig(db.Model):
+    """Per-user saved IRC server preference (server, port, nick, channels)."""
+    __tablename__ = 'irc_server_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        unique=True, nullable=False, index=True)
+    server = db.Column(db.String(120), default='irc.libera.chat')
+    port = db.Column(db.Integer, default=6667)
+    use_ssl = db.Column(db.Boolean, default=False)
+    nick = db.Column(db.String(40))
+    channels = db.Column(db.Text)             # comma-separated list
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('irc_config',
+                                                      uselist=False,
+                                                      cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<IrcServerConfig user={self.user_id} {self.server}:{self.port}>'
+
+
+class AddressBookEntry(db.Model):
+    """Per-user contacts — FTN addresses + email + free-form notes."""
+    __tablename__ = 'address_book'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    ftn_address = db.Column(db.String(60))     # 'zone:net/node[.point]'
+    email = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+    favorite = db.Column(db.Boolean, default=False, index=True)
+    crashmail_default = db.Column(db.Boolean, default=False)
+    last_used_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('contacts',
+                                                      lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<AddressBookEntry {self.name} ({self.ftn_address or self.email})>'
+
+
+class Poll(db.Model):
+    """A sysop-or-user-created poll. Answers stored in PollOption."""
+    __tablename__ = 'polls'
+
+    id = db.Column(db.Integer, primary_key=True)
+    creator_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                           nullable=False, index=True)
+    question = db.Column(db.String(400), nullable=False)
+    description = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    closes_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    creator = db.relationship('User', backref='polls_created')
+    options = db.relationship('PollOption', backref='poll',
+                              lazy='dynamic',
+                              cascade='all, delete-orphan',
+                              order_by='PollOption.sort_order')
+
+    def __repr__(self):
+        return f'<Poll {self.id} {self.question[:30]!r}>'
+
+
+class PollOption(db.Model):
+    __tablename__ = 'poll_options'
+
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey('polls.id'),
+                        nullable=False, index=True)
+    text = db.Column(db.String(200), nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+
+    votes = db.relationship('PollVote', backref='option',
+                            lazy='dynamic',
+                            cascade='all, delete-orphan')
+
+    @property
+    def vote_count(self):
+        return self.votes.count()
+
+
+class PollVote(db.Model):
+    """One row per (user, poll) — uniqueness enforced to prevent duplicate votes."""
+    __tablename__ = 'poll_votes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey('polls.id'),
+                        nullable=False, index=True)
+    option_id = db.Column(db.Integer, db.ForeignKey('poll_options.id'),
+                          nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('poll_id', 'user_id',
+                                           name='uq_poll_vote_user'),)
+
+    user = db.relationship('User', backref='poll_votes')
+
+
+class ChatBan(db.Model):
+    """Bans on users in MRC chat rooms — global or per-room.
+
+    A NULL `room` value means a global ban (kicked from all rooms). expires_at
+    NULL means permanent. The MRC bridge consults this table on each message
+    and refuses traffic from banned users."""
+    __tablename__ = 'chat_bans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    room = db.Column(db.String(80), index=True)
+    reason = db.Column(db.Text)
+    issued_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    expires_at = db.Column(db.DateTime, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref='chat_bans')
+    issued_by = db.relationship('User', foreign_keys=[issued_by_id])
+
+    @property
+    def is_active(self):
+        if self.expires_at is None:
+            return True
+        return datetime.utcnow() < self.expires_at
+
+    def __repr__(self):
+        return f'<ChatBan user={self.user_id} room={self.room}>'
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: File areas (FidoNet file echos), shoutbox, saved messages, etc.
+# ---------------------------------------------------------------------------
+
+class FileArea(db.Model):
+    """A FidoNet file echo (or local file area).
+
+    File areas group hatched/uploaded files by topic — e.g. FILES.GAMES,
+    FILES.UTILS, MAGAZINES. The TIC processor looks up an area by `tag` and
+    files matching binaries here. Local-only areas have network_id NULL."""
+    __tablename__ = 'file_areas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'),
+                           index=True)
+    tag = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(120))
+    description = db.Column(db.Text)
+    storage_path = db.Column(db.String(500))      # absolute dir for binaries
+    is_active = db.Column(db.Boolean, default=True)
+    is_subscribed = db.Column(db.Boolean, default=True)   # receive from upstream
+    is_sysop_only = db.Column(db.Boolean, default=False)
+    upload_permission = db.Column(db.String(20), default='users')
+    # upload_permission values: 'users' / 'sysop' / 'none'
+    password = db.Column(db.String(80))           # optional area password
+    # When this file area is the network's nodelist distribution echo (e.g.
+    # Z1DAILY for FidoNet, tqwinfo for TQWnet), inbound TICs are unpacked
+    # and the nodelist text is auto-imported into the Nodelist table —
+    # tagged with `nodelist_domain` so `/nodelist/?domain=tqwnet` filters work.
+    is_nodelist_source = db.Column(db.Boolean, default=False)
+    nodelist_domain = db.Column(db.String(40))    # e.g. 'tqwnet', 'fidonet'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    network = db.relationship('EchomailNetwork',
+                              backref=db.backref('file_areas', lazy='dynamic',
+                                                 cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<FileArea {self.tag}>'
+
+
+class ShoutboxPost(db.Model):
+    """One-line shouts posted to the site-wide shoutbox visible on the home page."""
+    __tablename__ = 'shoutbox_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    text = db.Column(db.String(280), nullable=False)
+    is_hidden = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('shouts', lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<ShoutboxPost #{self.id} by {self.user_id}>'
+
+
+class SavedMessage(db.Model):
+    """User-saved bookmarks of messages (echomail / netmail / board posts).
+
+    `kind` discriminates which table the `target_id` references:
+        'echomail' -> EchomailMessage.id
+        'netmail'  -> NetmailMessage.id
+        'post'     -> Post.id (board)
+        'pm'       -> Message.id (private message)
+    """
+    __tablename__ = 'saved_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    kind = db.Column(db.String(16), nullable=False, index=True)
+    target_id = db.Column(db.Integer, nullable=False, index=True)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('saved_msgs', lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'kind', 'target_id',
+                            name='uq_saved_msg_user_kind_target'),
+    )
+
+    def __repr__(self):
+        return f'<SavedMessage user={self.user_id} {self.kind}#{self.target_id}>'
+
+
+class MessageSlug(db.Model):
+    """Short permalink slug for any kind of message — sharable URL.
+
+    Generates a short opaque token (6-8 chars, base62) on first request for
+    a message, stored here. Subsequent shares of the same message reuse the
+    token. URL: /m/<slug>"""
+    __tablename__ = 'message_slugs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(16), unique=True, nullable=False, index=True)
+    kind = db.Column(db.String(16), nullable=False)        # echomail/netmail/post/pm
+    target_id = db.Column(db.Integer, nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('kind', 'target_id',
+                                           name='uq_message_slug_target'),)
+
+    def __repr__(self):
+        return f'<MessageSlug {self.slug} -> {self.kind}#{self.target_id}>'
+
+
+class FileEchoSubscription(db.Model):
+    """Downstream peer subscriptions for FidoNet file echo distribution.
+
+    A row says: send all hatched files in `file_area_id` onward to FTN address
+    `peer_address`. Used by the TIC hatch-out queue to compute the SEEN-BY /
+    PATH lines and the recipients list when re-broadcasting an inbound TIC.
+    """
+    __tablename__ = 'file_echo_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             nullable=False, index=True)
+    peer_address = db.Column(db.String(60), nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    file_area = db.relationship('FileArea', backref=db.backref('subscriptions',
+                                                               lazy='dynamic',
+                                                               cascade='all, delete-orphan'))
+
+    __table_args__ = (db.UniqueConstraint('file_area_id', 'peer_address',
+                                           name='uq_file_echo_sub'),)
+
+
+class HatchQueue(db.Model):
+    """Outbound TIC + binary queued for delivery to a downstream peer.
+
+    The poller / binkp client picks `pending` rows for a peer, builds a TIC
+    file referencing the binary, sends both, and flips status to `sent`.
+    Failures bump retry_count; we cap at retry_max and mark `failed`."""
+    __tablename__ = 'hatch_queue'
+
+    id = db.Column(db.Integer, primary_key=True)
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             nullable=False, index=True)
+    peer_address = db.Column(db.String(60), nullable=False, index=True)
+    binary_path = db.Column(db.String(500), nullable=False)
+    filename = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text)
+    crc32 = db.Column(db.String(16))
+    size_bytes = db.Column(db.BigInteger)
+    seenby = db.Column(db.Text)              # JSON of inherited SEEN-BY entries
+    path = db.Column(db.Text)                # JSON of inherited PATH entries
+    status = db.Column(db.String(16), default='pending', index=True)
+    # status: pending / sent / failed
+    retry_count = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text)
+    queued_at = db.Column(db.DateTime, default=datetime.utcnow,
+                          nullable=False, index=True)
+    sent_at = db.Column(db.DateTime)
+
+    file_area = db.relationship('FileArea')
+
+    def __repr__(self):
+        return f'<HatchQueue {self.filename} -> {self.peer_address}>'
+
+
+class SysopBroadcast(db.Model):
+    """Sysop one-line announcements pushed to all online users in real time.
+
+    The web stores them so users joining later can still see recent
+    broadcasts; the telnet/SSH/rlogin sessions render them on their next
+    menu loop. Marking expires_at lets old broadcasts auto-hide."""
+    __tablename__ = 'sysop_broadcasts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                          nullable=False, index=True)
+    text = db.Column(db.Text, nullable=False)
+    expires_at = db.Column(db.DateTime, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    sender = db.relationship('User')
+
+    def __repr__(self):
+        return f'<SysopBroadcast #{self.id} by {self.sender_id}>'
+
+
+class SysopPage(db.Model):
+    """A user-initiated 'page sysop' — surfaces as a real-time toast on
+    sysop browser tabs and stays in this table for follow-up."""
+    __tablename__ = 'sysop_pages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    service = db.Column(db.String(20))           # web/telnet/ssh/rlogin
+    message = db.Column(db.Text)
+    answered = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+    answered_at = db.Column(db.DateTime)
+
+    user = db.relationship('User')
+
+    def __repr__(self):
+        return f'<SysopPage #{self.id} by {self.user_id} answered={self.answered}>'
+
+
+class SitePage(db.Model):
+    """Sysop-editable static-ish page content. Used for the BBS history page,
+    welcome screen, etc. Looked up by `slug`; content is Markdown."""
+    __tablename__ = 'site_pages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    content_md = db.Column(db.Text, default='')
+    updated_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    updated_by = db.relationship('User')
+
+    def __repr__(self):
+        return f'<SitePage {self.slug}>'
+
+
+class PeerBbs(db.Model):
+    """A known peer BBS we can finger / send telegrams to.
+
+    The cross-BBS presence aggregator queries each peer's finger service
+    periodically and caches who's online so users can see activity across
+    the BBS network — Synchronet-style "active sysops" feel."""
+    __tablename__ = 'peer_bbses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    hostname = db.Column(db.String(160), nullable=False, unique=True, index=True)
+    finger_port = db.Column(db.Integer, default=79)
+    ftn_address = db.Column(db.String(60))     # for telegram targeting
+    description = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    last_polled_at = db.Column(db.DateTime)
+    last_response = db.Column(db.Text)         # cached finger output
+    last_error = db.Column(db.Text)
+    online_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<PeerBbs {self.name} {self.hostname}>'
+
+
+class UserNote(db.Model):
+    """Private sysop note attached to a user account.
+
+    Visible only to admins via /admin/users/<id>/notes. Useful for tracking
+    moderation history, contact attempts, "this user is a regular Echomail
+    contributor", etc."""
+    __tablename__ = 'user_notes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    author_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                          nullable=False, index=True)
+    note = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref='notes_about')
+    author = db.relationship('User', foreign_keys=[author_id])
+
+    def __repr__(self):
+        return f'<UserNote about={self.user_id} by={self.author_id}>'
+
+
+class EchomailLastRead(db.Model):
+    """Per-(user, area) lastread pointer. Faster than scanning EchomailReadStatus.
+
+    Stores the highest message_id the user has seen in each area. Used by
+    the "next unread" jump to skip straight to where they left off."""
+    __tablename__ = 'echomail_lastread'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'),
+                        nullable=False, index=True)
+    last_message_id = db.Column(db.Integer)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'area_id',
+                                           name='uq_lastread_user_area'),)
+
+
+class CalendarEvent(db.Model):
+    """Sysop-managed calendar event. All times UTC."""
+    __tablename__ = 'calendar_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    starts_at = db.Column(db.DateTime, nullable=False, index=True)
+    ends_at = db.Column(db.DateTime)
+    location = db.Column(db.String(200))
+    is_published = db.Column(db.Boolean, default=True, index=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                              nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship('User')
+
+
+class FileQueueEntry(db.Model):
+    """Pending uploads awaiting sysop approval before going public."""
+    __tablename__ = 'file_queue'
+
+    id = db.Column(db.Integer, primary_key=True)
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    quarantine_path = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text)
+    size_bytes = db.Column(db.BigInteger)
+    status = db.Column(db.String(16), default='pending', index=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    reviewed_at = db.Column(db.DateTime)
+    rejection_reason = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    file_area = db.relationship('FileArea')
+    user = db.relationship('User', foreign_keys=[user_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_id])
+
+
+class GeminiCapsule(db.Model):
+    """Per-user Gemini (gemtext) capsule — small static page exposed at
+    /gemini/<username>. Sysop can also publish a site-wide capsule."""
+    __tablename__ = 'gemini_capsules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        unique=True, nullable=False, index=True)
+    title = db.Column(db.String(120))
+    content = db.Column(db.Text)             # raw gemtext
+    is_published = db.Column(db.Boolean, default=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('gemini_capsule',
+                                                      uselist=False,
+                                                      cascade='all, delete-orphan'))
+
+
+class WordFilter(db.Model):
+    """Naughty-word filter — replace matched terms with ****."""
+    __tablename__ = 'word_filters'
+
+    id = db.Column(db.Integer, primary_key=True)
+    pattern = db.Column(db.String(80), unique=True, nullable=False)
+    replacement = db.Column(db.String(80), default='****')
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Notification(db.Model):
+    """In-app notification for a user — @mentions, replies, sysop pings."""
+    __tablename__ = 'notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    kind = db.Column(db.String(32), nullable=False, index=True)
+    title = db.Column(db.String(200))
+    body = db.Column(db.Text)
+    target_url = db.Column(db.String(500))
+    is_read = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('notifications',
+                                                      lazy='dynamic'))
+
+
+class PostReaction(db.Model):
+    """User reaction to a board post — one row per (user, post, kind).
+
+    `kind` is a slug: 'like', 'heart', 'lol', 'wow', 'sad'."""
+    __tablename__ = 'post_reactions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('posts.id'),
+                        nullable=False, index=True)
+    kind = db.Column(db.String(20), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User')
+    post = db.relationship('Post', backref='reactions')
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'post_id', 'kind',
+                                           name='uq_post_reaction'),)
+
+
+class Webhook(db.Model):
+    """Outbound webhook — POST JSON to a URL when an event fires.
+
+    `event` is one of: shout, post, bulletin, login, achievement, broadcast,
+    sysop_page, echomail. `template` is an optional JSON body with
+    placeholders like {user}, {text}, {url}; blank uses default shape."""
+    __tablename__ = 'webhooks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    event = db.Column(db.String(40), nullable=False, index=True)
+    method = db.Column(db.String(10), default='POST')
+    template = db.Column(db.Text)
+    secret = db.Column(db.String(120))
+    is_active = db.Column(db.Boolean, default=True)
+    last_called_at = db.Column(db.DateTime)
+    last_status = db.Column(db.Integer)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Achievement(db.Model):
+    """A badge a user can earn. Defined here so sysop sees the catalog."""
+    __tablename__ = 'achievements'
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text)
+    icon = db.Column(db.String(40))     # bootstrap-icon class fragment
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class UserAchievement(db.Model):
+    """Award row — user X earned achievement Y at time Z."""
+    __tablename__ = 'user_achievements'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    achievement_id = db.Column(db.Integer, db.ForeignKey('achievements.id'),
+                               nullable=False, index=True)
+    earned_at = db.Column(db.DateTime, default=datetime.utcnow,
+                          nullable=False, index=True)
+
+    user = db.relationship('User', backref='achievements_earned')
+    achievement = db.relationship('Achievement')
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'achievement_id',
+                                           name='uq_user_achievement'),)
+
+
+class MotdEntry(db.Model):
+    """Random message-of-the-day pool. Login screens show one at random."""
+    __tablename__ = 'motd_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.Text, nullable=False)
+    weight = db.Column(db.Integer, default=1)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class CallerLog(db.Model):
+    """Per-login record — who connected, from where, on what protocol."""
+    __tablename__ = 'caller_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    username = db.Column(db.String(80))
+    service = db.Column(db.String(20))
+    ip_address = db.Column(db.String(45))
+    country = db.Column(db.String(60))
+    duration_seconds = db.Column(db.Integer)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+
+class DialoutDestination(db.Model):
+    """A registered remote BBS for the telnet/SSH dial-out menu.
+
+    Sysop maintains the list via /admin/dialout. Users see the directory
+    when picking 'Dial Out' from the BBS menu."""
+    __tablename__ = 'dialout_destinations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    hostname = db.Column(db.String(160), nullable=False)
+    port = db.Column(db.Integer, default=23)
+    protocol = db.Column(db.String(16), default='telnet')
+    description = db.Column(db.Text)
+    sort_order = db.Column(db.Integer, default=100)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class SharedFileLink(db.Model):
+    """Anonymous-access token for a file in a file area.
+
+    Used to share a download URL with someone who isn't a registered user
+    of this BBS. Token is opaque, optionally with an expiry and a
+    download-count limit. Audit log of accesses kept for the sysop."""
+    __tablename__ = 'shared_file_links'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(32), unique=True, nullable=False, index=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                              nullable=False, index=True)
+    file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
+                             nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    note = db.Column(db.String(200))
+    expires_at = db.Column(db.DateTime, index=True)
+    max_downloads = db.Column(db.Integer)               # null = unlimited
+    download_count = db.Column(db.Integer, default=0)
+    last_accessed_at = db.Column(db.DateTime)
+    last_accessed_ip = db.Column(db.String(45))
+    is_revoked = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    creator = db.relationship('User')
+    file_area = db.relationship('FileArea')
+
+    @property
+    def is_valid(self):
+        if self.is_revoked:
+            return False
+        if self.expires_at and self.expires_at <= datetime.utcnow():
+            return False
+        if self.max_downloads is not None and \
+                (self.download_count or 0) >= self.max_downloads:
+            return False
+        return True
+
+
+class MrcIrcBridge(db.Model):
+    """Bidirectional MRC ↔ IRC relay configuration.
+
+    A bridge connects an MRC room to an IRC server+channel; messages flow
+    both ways with sender-name prefixing so participants on each side can
+    tell who said what."""
+    __tablename__ = 'mrc_irc_bridges'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    mrc_room = db.Column(db.String(80), nullable=False)
+    mrc_handle = db.Column(db.String(40), default='ircbridge')
+    mrc_ws_url = db.Column(db.String(255))            # ws://host/ws
+    irc_server = db.Column(db.String(120), nullable=False)
+    irc_port = db.Column(db.Integer, default=6667)
+    irc_use_ssl = db.Column(db.Boolean, default=False)
+    irc_nick = db.Column(db.String(40), default='ANETBridge')
+    irc_channel = db.Column(db.String(80), nullable=False)
+    irc_channel_key = db.Column(db.String(80))
+    sasl_user = db.Column(db.String(80))
+    sasl_pass = db.Column(db.String(120))
+    is_active = db.Column(db.Boolean, default=False)
+    last_started_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<MrcIrcBridge {self.name}: {self.mrc_room} <-> {self.irc_channel}>'
+
+
+class AnsiArt(db.Model):
+    """Reusable ANSI art piece — created via the web editor.
+
+    Stored two ways:
+        grid_json    JSON-encoded {width, height, cells: [...]} for editor reload
+        ansi_text    pre-rendered escape-coded text for serving to telnet
+    """
+    __tablename__ = 'ansi_art'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    slug = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    description = db.Column(db.Text)
+    width = db.Column(db.Integer, default=80)
+    height = db.Column(db.Integer, default=25)
+    grid_json = db.Column(db.Text)
+    ansi_text = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    created_by = db.relationship('User')
+
+    def __repr__(self):
+        return f'<AnsiArt {self.slug}>'
+
+
+class IrcChannelLog(db.Model):
+    """Per-channel IRC log lines. Sysop opt-in via env var IRC_LOG_CHANNELS."""
+    __tablename__ = 'irc_channel_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    server = db.Column(db.String(120), index=True)
+    channel = db.Column(db.String(80), index=True)
+    nick = db.Column(db.String(40))
+    kind = db.Column(db.String(16))   # message, action, join, part, etc.
+    text = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+
+class UserBlock(db.Model):
+    """One user blocking another. Blocked target cannot send PMs to the
+    blocker; @mentions of the blocker by the target are suppressed; and
+    the UI can dim posts authored by blocked users."""
+    __tablename__ = 'user_blocks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                           nullable=False, index=True)
+    blocked_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                           nullable=False, index=True)
+    reason = db.Column(db.String(280))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    blocker = db.relationship('User', foreign_keys=[blocker_id],
+                              backref=db.backref('blocks_made', lazy='dynamic'))
+    blocked = db.relationship('User', foreign_keys=[blocked_id],
+                              backref=db.backref('blocked_by', lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('blocker_id', 'blocked_id',
+                                          name='uq_user_block'),)
+
+
+class BoardModerator(db.Model):
+    """Many-to-many: a user is a moderator of a board.
+
+    Moderators can delete posts/replies in their board (in addition to
+    sysops/admins). Sysop assigns moderators in /admin/boards/<id>/moderators."""
+    __tablename__ = 'board_moderators'
+
+    id = db.Column(db.Integer, primary_key=True)
+    board_id = db.Column(db.Integer, db.ForeignKey('boards.id'),
+                         nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    granted_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+
+    board = db.relationship('Board', backref=db.backref('moderators',
+                                                        lazy='dynamic',
+                                                        cascade='all, delete-orphan'))
+    user = db.relationship('User', backref=db.backref('moderating',
+                                                      lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('board_id', 'user_id',
+                                          name='uq_board_moderator'),)
+
+
+class UserGroup(db.Model):
+    """A user-formed group/clan: name, tag, leader, members.
+
+    Useful for door-game teams (e.g. tradewars factions) or BBS art crews.
+    The `tag` is shown next to usernames as a badge."""
+    __tablename__ = 'user_groups'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    tag = db.Column(db.String(8))                       # short prefix tag
+    description = db.Column(db.Text)
+    leader_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                          nullable=False, index=True)
+    is_open = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    leader = db.relationship('User', foreign_keys=[leader_id],
+                             backref='groups_led')
+
+
+class UserGroupMember(db.Model):
+    """Membership of a user in a group."""
+    __tablename__ = 'user_group_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('user_groups.id'),
+                         nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow,
+                          nullable=False)
+
+    group = db.relationship('UserGroup',
+                            backref=db.backref('members', lazy='dynamic',
+                                               cascade='all, delete-orphan'))
+    user = db.relationship('User', backref=db.backref('group_memberships',
+                                                      lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('group_id', 'user_id',
+                                          name='uq_group_member'),)
+
+
+class BoardSubscription(db.Model):
+    """User following a board — gets notifications for new top-level posts."""
+    __tablename__ = 'board_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    board_id = db.Column(db.Integer, db.ForeignKey('boards.id'),
+                         nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+
+    user = db.relationship('User', backref=db.backref('board_subs',
+                                                      lazy='dynamic'))
+    board = db.relationship('Board', backref=db.backref('subscribers',
+                                                        lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'board_id',
+                                          name='uq_board_subscription'),)
+
+
+class IpBan(db.Model):
+    """Sysop-banned IP / CIDR. Login + register routes refuse matching IPs."""
+    __tablename__ = 'ip_bans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cidr = db.Column(db.String(45), nullable=False, unique=True, index=True)
+    reason = db.Column(db.String(280))
+    banned_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                             index=True)
+    expires_at = db.Column(db.DateTime, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+
+    banned_by = db.relationship('User')
+
+
+class BoardLastRead(db.Model):
+    """Per-user last-visit timestamp per board, for unread counts."""
+    __tablename__ = 'board_last_read'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    board_id = db.Column(db.Integer, db.ForeignKey('boards.id'),
+                         nullable=False, index=True)
+    last_read_at = db.Column(db.DateTime, default=datetime.utcnow,
+                             nullable=False)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'board_id',
+                                          name='uq_board_last_read'),)
+
+
+class BbsAnsiScreen(db.Model):
+    """Named raw ANSI/CP437 screen the BBS displays at lifecycle points.
+
+    Built-in slots used by the session loop:
+      - 'welcome'  : pre-login banner shown to telnet visitors. SSH/rlogin
+                     auto-login users skip it (their client already gave
+                     credentials).
+      - 'goodbye'  : shown on logoff to every protocol.
+      - 'newuser'  : shown after registration, before first login.
+    The sysop can also create custom slots and reference them from menu
+    items (action_type='ansi', action_args=<slot name>).
+    """
+    __tablename__ = 'bbs_ansi_screens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slot = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(120))
+    body = db.Column(db.Text, nullable=False)         # Raw ANSI bytes (text)
+    pause_after = db.Column(db.Boolean, default=False)  # Wait for Enter
+    is_active = db.Column(db.Boolean, default=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+
+class UserTimeBudget(db.Model):
+    """Mystic-style time budget per user.
+
+    `time_limit_min` is the per-session ceiling (0 = unlimited).
+    `daily_limit_min` is the per-24h ceiling.
+    `bank_minutes` accumulates earned time the user can spend on doors etc.
+    Counter columns are reset on demand by the daily roll-over."""
+    __tablename__ = 'user_time_budgets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        unique=True, nullable=False, index=True)
+    time_limit_min = db.Column(db.Integer, default=60)         # per session
+    daily_limit_min = db.Column(db.Integer, default=240)       # per 24h
+    bank_minutes = db.Column(db.Integer, default=0)
+    used_today_min = db.Column(db.Integer, default=0)
+    last_reset_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('time_budget',
+                                                       uselist=False))
+
+
+class OneLiner(db.Model):
+    """Logoff one-liners — short messages users leave on the way out.
+    Like Mystic's 'one-liner' wall."""
+    __tablename__ = 'one_liners'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    text = db.Column(db.String(120), nullable=False)
+    is_hidden = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    user = db.relationship('User')
+
+
+class FileRatio(db.Model):
+    """Per-user upload/download bytes tracker (Synchronet/Mystic style)."""
+    __tablename__ = 'file_ratios'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        unique=True, nullable=False, index=True)
+    bytes_uploaded = db.Column(db.BigInteger, default=0)
+    bytes_downloaded = db.Column(db.BigInteger, default=0)
+    files_uploaded = db.Column(db.Integer, default=0)
+    files_downloaded = db.Column(db.Integer, default=0)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow,
+                             onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('file_ratio',
+                                                       uselist=False))
+
+
+class NewUserQuestion(db.Model):
+    """Sysop-defined question shown on registration. Answer stored
+    verbatim per user in NewUserAnswer."""
+    __tablename__ = 'newuser_questions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    prompt = db.Column(db.String(280), nullable=False)
+    is_required = db.Column(db.Boolean, default=False)
+    sort_order = db.Column(db.Integer, default=0, index=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+
+
+class NewUserAnswer(db.Model):
+    """A user's answer to a NewUserQuestion."""
+    __tablename__ = 'newuser_answers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    question_id = db.Column(db.Integer, db.ForeignKey('newuser_questions.id'),
+                            nullable=False, index=True)
+    answer = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User')
+    question = db.relationship('NewUserQuestion')
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'question_id',
+                                          name='uq_newuser_answer'),)
+
+
+class NodeActivity(db.Model):
+    """Terminal session live activity — heartbeat from each running
+    telnet/SSH/rlogin session so the web sysop can see what each user
+    is currently doing (NodeSpy-style)."""
+    __tablename__ = 'node_activity'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slot = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    username = db.Column(db.String(80), index=True)
+    protocol = db.Column(db.String(16))                # telnet/ssh/rlogin
+    peer = db.Column(db.String(80))
+    page = db.Column(db.String(80))                    # current menu/area
+    action = db.Column(db.String(120))                 # last action label
+    last_screen = db.Column(db.Text)                   # snapshot of last screen
+    started_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow,
+                          nullable=False, index=True)
+    # Sysop kick flag — set by /admin/control/nodespy/<slot>/kick.
+    # The terminal session's periodic checker polls this on its own
+    # asyncio loop and self-disconnects when set. Cross-process safe
+    # since the flag lives in SQLite (anetbbs-web sets, anetbbs-telnet
+    # reads).
+    kick_requested = db.Column(db.Boolean, default=False, nullable=False,
+                                index=True)
+    kick_reason = db.Column(db.String(200))
+
+    user = db.relationship('User')
+
+
+class MenuTranslation(db.Model):
+    """Multi-language menu string overrides.
+
+    Look up by (lang, key) — key is something like 'main.title' or
+    'item.boards.label'. Falls back to the source text if missing."""
+    __tablename__ = 'menu_translations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    lang = db.Column(db.String(8), nullable=False, index=True)
+    key = db.Column(db.String(200), nullable=False, index=True)
+    text = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('lang', 'key',
+                                          name='uq_menu_trans'),)
+
+
+class Newsletter(db.Model):
+    """Sysop newsletter — broadcast a multi-paragraph message to all users
+    via PM (and optionally email if SMTP is configured)."""
+    __tablename__ = 'newsletters'
+
+    id = db.Column(db.Integer, primary_key=True)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    sent_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                           nullable=False)
+    sent_at = db.Column(db.DateTime)                   # null = draft
+    recipients_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    sent_by = db.relationship('User')
+
+
+class BbsDirectoryEntry(db.Model):
+    """An entry in the inter-BBS directory.
+
+    Refreshed daily from two sources:
+      - `sbbsimsg.lst` from Vertrauen (Synchronet BBSes) — `source='sbbsimsg'`
+      - `anetbbs.lst` from the federation hub (ANetBBS BBSes) — `source='anetbbs'`
+    One row per known BBS that listens on UDP/SYSTAT + TCP/MSP. The
+    `software` column lets the /imsg/ directory page filter or badge
+    by BBS family."""
+    __tablename__ = 'bbs_directory'
+
+    id = db.Column(db.Integer, primary_key=True)
+    hostname = db.Column(db.String(160), unique=True, nullable=False, index=True)
+    ip_address = db.Column(db.String(45))
+    name = db.Column(db.String(160))
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow,
+                             index=True)
+    notes = db.Column(db.Text)
+    # Extended metadata (anetbbs.lst sources fill these; sbbsimsg rows
+    # leave them NULL).
+    sysop = db.Column(db.String(120))
+    location = db.Column(db.String(120))
+    software = db.Column(db.String(40))            # e.g. 'ANetBBS', 'Synchronet', 'Mystic'
+    software_version = db.Column(db.String(40))
+    msp_port = db.Column(db.Integer, default=18)
+    systat_port = db.Column(db.Integer, default=11)
+    source = db.Column(db.String(20), default='sbbsimsg', index=True)
+    # source: 'sbbsimsg' / 'anetbbs' / 'manual'
+
+
+class InstantMessage(db.Model):
+    """Inter-BBS instant message (RFC 1312 MSP / Synchronet IMSG).
+
+    A short, real-time message delivered from another BBS over MSP. We
+    store it so it's visible in the user's IM inbox even if they were
+    offline when it arrived. `origin` distinguishes how it got here in
+    case we add other transports later (e.g. an MRC IM bridge)."""
+    __tablename__ = 'instant_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    recipient_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                             nullable=False, index=True)
+    sender_label = db.Column(db.String(160))   # "user@bbsname" if known
+    sender_host = db.Column(db.String(120))    # peer IP / hostname
+    body = db.Column(db.Text, nullable=False)
+    received_at = db.Column(db.DateTime, default=datetime.utcnow,
+                            nullable=False, index=True)
+    is_read = db.Column(db.Boolean, default=False, index=True)
+    origin = db.Column(db.String(20), default='msp')
+
+    recipient = db.relationship('User', backref='instant_messages')
+
+
+class MessageVote(db.Model):
+    """Per-user up/down vote on any kind of message.
+
+    `message_type` selects the target table — one of 'post' (board posts),
+    'echomail' (echomail messages), 'netmail' (FTN netmail), 'pm' (private
+    messages). `value` is +1 (upvote) or -1 (downvote). The unique
+    constraint keeps each user to one vote per message; the route layer
+    handles toggling and switching."""
+    __tablename__ = 'message_votes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    message_type = db.Column(db.String(20), nullable=False, index=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    value = db.Column(db.Integer, nullable=False, default=1)  # +1 or -1
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'message_type', 'message_id',
+                             name='uq_message_vote_user'),
+        db.Index('ix_message_vote_target', 'message_type', 'message_id'),
+    )
+
+    user = db.relationship('User')
+
+
+class BadAreaLog(db.Model):
+    """Echomail tags received for areas we don't carry — sysop review queue.
+
+    Mirrors SBBSecho's BadAreaFile semantics. We don't auto-create areas on
+    inbound traffic; the sysop reviews this list and either subscribes or
+    ignores. A repeat-counter helps spot the noisy ones.
+    """
+    __tablename__ = 'bad_area_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    network_id = db.Column(db.Integer,
+                           db.ForeignKey('echomail_networks.id'),
+                           nullable=False, index=True)
+    tag = db.Column(db.String(100), nullable=False, index=True)
+    sample_from = db.Column(db.String(100))
+    sample_subject = db.Column(db.String(200))
+    count = db.Column(db.Integer, default=1)
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('network_id', 'tag', name='uq_bad_area_per_net'),
+    )
+
+    network = db.relationship('EchomailNetwork')
+
+    def __repr__(self):
+        return f'<BadAreaLog {self.network_id}:{self.tag} x{self.count}>'
+
+
+class RssFeed(db.Model):
+    """A subscribed RSS / Atom feed.
+
+    Sysops manage the list at /admin/rss/ ; the background poller fetches
+    each active feed periodically (default 30 min) and stores items in
+    RssItem. Per-user read state lives in RssReadStatus.
+    """
+    __tablename__ = 'rss_feeds'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    url = db.Column(db.String(500), nullable=False, unique=True)
+    site_url = db.Column(db.String(500))   # human-facing homepage of the feed
+    description = db.Column(db.String(500))
+    category = db.Column(db.String(60), default='general')
+    sort_order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    last_fetched_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    items = db.relationship('RssItem', backref='feed',
+                            cascade='all, delete-orphan',
+                            order_by='RssItem.published_at.desc()')
+
+    def __repr__(self):
+        return f'<RssFeed {self.name} @ {self.url}>'
+
+
+class RssItem(db.Model):
+    """A single article from an RSS feed."""
+    __tablename__ = 'rss_items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    feed_id = db.Column(db.Integer,
+                        db.ForeignKey('rss_feeds.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    guid = db.Column(db.String(500), nullable=False, index=True)
+    title = db.Column(db.String(500))
+    link = db.Column(db.String(1000))
+    author = db.Column(db.String(200))
+    summary = db.Column(db.Text)         # plain-text or limited-HTML summary
+    content_html = db.Column(db.Text)    # full HTML if available (atom:content)
+    published_at = db.Column(db.DateTime, index=True)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('feed_id', 'guid', name='uq_rss_item_per_feed'),
+    )
+
+    def __repr__(self):
+        return f'<RssItem {self.feed_id}:{self.title!r}>'
+
+
+class RssReadStatus(db.Model):
+    """Per-user read marker for an RssItem.
+
+    Presence of a row = user has read it. Absence = unread. We don't
+    bother with explicit 'unread' rows.
+    """
+    __tablename__ = 'rss_read_status'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    item_id = db.Column(db.Integer,
+                        db.ForeignKey('rss_items.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    read_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'item_id', name='uq_rss_read_per_user'),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wiki — collaborative documentation pages with revision history.
+# ---------------------------------------------------------------------------
+
+class WikiPage(db.Model):
+    """A single wiki page identified by a URL slug.
+
+    Pages are markdown with `[[Wiki Link]]` cross-references rendered to
+    `/wiki/<slug>` URLs. Edits write a new WikiRevision and bump the
+    page's body/title/updated_at to match the latest revision.
+    """
+    __tablename__ = 'wiki_pages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(160), nullable=False, unique=True, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False, default='')
+    summary = db.Column(db.String(300))     # last edit summary, displayed in lists
+    is_locked = db.Column(db.Boolean, default=False, nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    view_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+    created_by_id = db.Column(db.Integer,
+                              db.ForeignKey('users.id', ondelete='SET NULL'),
+                              nullable=True)
+    updated_by_id = db.Column(db.Integer,
+                              db.ForeignKey('users.id', ondelete='SET NULL'),
+                              nullable=True)
+
+    revisions = db.relationship(
+        'WikiRevision', backref='page', lazy='dynamic',
+        cascade='all, delete-orphan',
+        order_by='WikiRevision.rev_num.desc()')
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    updated_by = db.relationship('User', foreign_keys=[updated_by_id])
+
+    def __repr__(self):
+        return f'<WikiPage {self.slug!r}>'
+
+
+class WikiRevision(db.Model):
+    """An immutable historical version of a WikiPage.
+
+    Every edit writes one. rev_num is monotonic per-page (1, 2, 3, …)
+    so revisions sort cleanly without relying on timestamp tie-breaks.
+    """
+    __tablename__ = 'wiki_revisions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    page_id = db.Column(db.Integer,
+                        db.ForeignKey('wiki_pages.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    rev_num = db.Column(db.Integer, nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    edit_summary = db.Column(db.String(300))
+    author_id = db.Column(db.Integer,
+                          db.ForeignKey('users.id', ondelete='SET NULL'),
+                          nullable=True)
+    author_ip = db.Column(db.String(45))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    author = db.relationship('User')
+
+    __table_args__ = (
+        db.UniqueConstraint('page_id', 'rev_num', name='uq_wiki_rev_per_page'),
+    )
+
+    def __repr__(self):
+        return f'<WikiRevision page={self.page_id} rev={self.rev_num}>'

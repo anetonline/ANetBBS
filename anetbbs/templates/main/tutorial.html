@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}New Sysop Tutorial — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<style>
+  .slide { min-height: 60vh; padding: 2rem 1.5rem; }
+  .slide h2 { font-size: 1.8rem; margin-bottom: 1rem; }
+  .slide pre { background:#000; color:#0f0; padding:1rem; border-radius:6px;
+               max-height:18rem; overflow:auto; }
+  .slide ul { line-height: 1.8; }
+  .step-badge {
+      display:inline-block; padding:.2rem .6rem;
+      background: var(--theme-primary); color:#000;
+      border-radius:1rem; font-size:.8rem; margin-bottom:.5rem;
+  }
+</style>
+
+<div class="bbs-header">
+    <h1><i class="bi bi-mortarboard"></i> New Sysop Tutorial</h1>
+    <p class="lead">A 10-step walkthrough — use the arrows to navigate.</p>
+</div>
+
+<div id="sysopTutorial" class="carousel slide carousel-dark"
+     data-bs-interval="false" data-bs-keyboard="true">
+
+    <div class="carousel-indicators">
+        {% for i in range(11) %}
+        <button type="button" data-bs-target="#sysopTutorial"
+                data-bs-slide-to="{{ i }}"
+                {% if i == 0 %}class="active" aria-current="true"{% endif %}
+                aria-label="Slide {{ i + 1 }}"></button>
+        {% endfor %}
+    </div>
+
+    <div class="carousel-inner card" style="border:1px solid var(--theme-primary);">
+
+        <!-- Slide 1: Welcome -->
+        <div class="carousel-item active">
+            <div class="slide text-center">
+                <span class="step-badge">Step 0 / 10</span>
+                <h2><i class="bi bi-rocket-takeoff"></i> Welcome, sysop.</h2>
+                <p class="lead">This tour walks you through the
+                first ten things to do after installing ANetBBS.</p>
+                <p>Use ←/→ keys, swipe, or the arrows to navigate.
+                Skip to anything you've already done — order doesn't
+                matter much.</p>
+                <p class="text-muted small">Estimated time: ~5 minutes.</p>
+            </div>
+        </div>
+
+        <!-- Slide 2: Change admin password -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 1 / 10</span>
+                <h2><i class="bi bi-key"></i> Change the seeded admin password</h2>
+                <p>The first start auto-generates a random admin password
+                and writes it to <code>data/admin_password.txt</code>
+                (mode <code>0600</code>). The web log also banner-prints
+                it on first boot. <strong>Change it on first login.</strong></p>
+                <ul>
+                    <li>Login as <code>admin</code> with that password</li>
+                    <li>Top-right user menu → <strong>Change Password</strong></li>
+                    <li>Or sysop-side: <strong>Admin → Users → ✏️ Edit</strong></li>
+                </ul>
+                <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary">
+                    Change my password
+                </a>
+            </div>
+        </div>
+
+        <!-- Slide 3: Brand the BBS -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 2 / 10</span>
+                <h2><i class="bi bi-pencil-square"></i> Brand the BBS</h2>
+                <p>Edit <code>/home/stingray/anetbbs/.env</code>
+                and set:</p>
+                <pre>BBS_NAME=My Awesome BBS
+BBS_DESCRIPTION=Where the cool kids hang out
+SYSOP_NAME=Stingray
+BBS_DOMAIN=bbs.example.com
+BBS_NODES=8</pre>
+                <p>Or use <strong>Admin → Settings</strong> for the same fields
+                (auto-applied without restart for non-restart-required ones).</p>
+            </div>
+        </div>
+
+        <!-- Slide 4: Theme + welcome ANSI -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 3 / 10</span>
+                <h2><i class="bi bi-palette"></i> Pick a theme + draw a welcome banner</h2>
+                <ul>
+                    <li><strong>Profile → Themes</strong> — pick from 7 built-in
+                        themes (Modern Dark / Classic Green / Amber / Blue Ice /
+                        Matrix / Synthwave / Paper White)</li>
+                    <li><strong>Admin → Themes</strong> — sysop builds custom themes</li>
+                    <li><strong>Admin → BBS Menus → ANSI screens</strong> — paste
+                        a Pablo / Moebius .ans into the welcome / goodbye / newuser
+                        slots so terminal users see your art</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 5: Boards -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 4 / 10</span>
+                <h2><i class="bi bi-chat-left-text"></i> Customize message boards</h2>
+                <p>Default install seeds 4 boards. Make them yours:</p>
+                <ul>
+                    <li><strong>Admin → Boards → Add Board</strong></li>
+                    <li>Group with <strong>Category</strong> field
+                        ("General", "Tech", "FidoNet")</li>
+                    <li>Assign <strong>per-board moderators</strong> from the
+                        boards admin list (the badge icon)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 6: Menus -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 5 / 10</span>
+                <h2><i class="bi bi-list-nested"></i> Edit the BBS menu (telnet/SSH)</h2>
+                <p>Everything is data-driven and customizable:</p>
+                <ul>
+                    <li><strong>Admin → BBS Menus</strong></li>
+                    <li>Click the main menu, edit the items inline</li>
+                    <li>"Add a sub-menu (one click)" wizard makes nested menus easy</li>
+                    <li>Use action_type <code>exec</code> to run external programs
+                        (doors, weather, anything)</li>
+                    <li>Use action_type <code>ansi</code> to show an ANSI art
+                        screen on demand</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 7: Echomail -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 6 / 10</span>
+                <h2><i class="bi bi-envelope-arrow-up"></i> Plug into FidoNet (echomail)</h2>
+                <p>Want your BBS to share messages with the wider FidoNet?</p>
+                <ul>
+                    <li><strong>Admin → Echomail Networks</strong></li>
+                    <li>Add a network (BinkP for FidoNet-style, QWK for Dove-Net)</li>
+                    <li>Subscribe to areas you care about</li>
+                    <li>Set up your AKA addresses on Profile</li>
+                    <li>Per-user QWK download/upload at <code>/qwk/</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 8: Sysop control panel -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 7 / 10</span>
+                <h2><i class="bi bi-sliders"></i> Sysop control panel</h2>
+                <p><strong>Admin → Control Panel</strong> is your daily ops view:</p>
+                <ul>
+                    <li>Service status + Start / Stop / Restart buttons
+                        (web, telnet, SSH, rlogin, MRC bridge)</li>
+                    <li>NodeSpy — see what every terminal user is doing
+                        in real time, with screen snapshots</li>
+                    <li>Live who's-online list (web + terminal)</li>
+                    <li>One-click journal viewer for each service</li>
+                </ul>
+                <p>For service control to work, install
+                <code>deploy/sudoers.anetbbs</code>:</p>
+                <pre>sudo cp /home/stingray/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
+            </div>
+        </div>
+
+        <!-- Slide 9: Spam control -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 8 / 10</span>
+                <h2><i class="bi bi-shield-check"></i> Spam &amp; abuse control</h2>
+                <ul>
+                    <li><strong>NUV</strong> — set <code>NUV_ENABLED=true</code> so
+                        every new user needs your approval (Admin → Pending Users)</li>
+                    <li><strong>Bot gate</strong> — telnet visitors must press
+                        ESC or * twice to filter out port scanners (built-in)</li>
+                    <li><strong>IP bans</strong> — Admin → IP Bans, accepts CIDR
+                        and TTL</li>
+                    <li><strong>Word filter</strong> — Admin → Word Filter scrubs
+                        shouts, posts, PMs</li>
+                    <li><strong>File queue</strong> — set <code>FILE_MOD_QUEUE_ENABLED=true</code>
+                        to require sysop approval for uploads</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 10: Door games -->
+        <div class="carousel-item">
+            <div class="slide">
+                <span class="step-badge">Step 9 / 10</span>
+                <h2><i class="bi bi-controller"></i> Door games + external programs</h2>
+                <ul>
+                    <li><strong>Admin → Door Games</strong> — register existing
+                        DOS / Synchronet / Mystic / native doors</li>
+                    <li>Each terminal user gets a clean dropfile
+                        (door.sys / dorinfo1.def / door32.sys)</li>
+                    <li>Or: drop ANY shell command into a menu via
+                        the <code>exec</code> action_type</li>
+                    <li>Sample weather door already wired —
+                        <strong>Admin → BBS Menus → "Add sample items"</strong></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 11: Done -->
+        <div class="carousel-item">
+            <div class="slide text-center">
+                <span class="step-badge">Step 10 / 10</span>
+                <h2><i class="bi bi-flag-fill"></i> You're set</h2>
+                <p class="lead">That's the high-level tour. Everything else
+                is in the docs.</p>
+                <p>
+                    <a href="{{ url_for('docs.index') }}" class="btn btn-primary">
+                        <i class="bi bi-book"></i> Full documentation
+                    </a>
+                    <a href="{{ url_for('admin.checklist') }}" class="btn btn-secondary">
+                        <i class="bi bi-check2-square"></i> Launch checklist
+                    </a>
+                    <a href="{{ url_for('control.index') }}" class="btn btn-secondary">
+                        <i class="bi bi-sliders"></i> Control panel
+                    </a>
+                </p>
+                <p class="text-muted small mt-3">Every feature is on a single
+                hotkey, every menu is editable, every door is a JSON config.
+                It's your BBS — make it weird.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <button class="carousel-control-prev" type="button" data-bs-target="#sysopTutorial" data-bs-slide="prev">
+        <span class="carousel-control-prev-icon"></span><span class="visually-hidden">Previous</span>
+    </button>
+    <button class="carousel-control-next" type="button" data-bs-target="#sysopTutorial" data-bs-slide="next">
+        <span class="carousel-control-next-icon"></span><span class="visually-hidden">Next</span>
+    </button>
+</div>
+{% endblock %}

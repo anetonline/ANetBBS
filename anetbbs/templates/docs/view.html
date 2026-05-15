@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ slug | replace('-', ' ') | title }} — Docs{% endblock %}
+{% block content %}
+<div class="row">
+<div class="col-lg-3">
+    <div class="card sticky-top" style="top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto;">
+        <div class="card-header"><i class="bi bi-book"></i> Documentation</div>
+        {% for cat in categories %}
+        <div class="px-3 pt-3 pb-1 small text-uppercase text-muted">
+            <i class="bi {{ cat.icon }} me-1"></i> {{ cat.name }}
+        </div>
+        <ul class="list-group list-group-flush small">
+        {% for d in cat.docs %}
+            <li class="list-group-item py-1 {% if d.slug == slug %}active{% endif %}">
+                <a href="{{ url_for('docs.view', slug=d.slug) }}"
+                   class="{% if d.slug == slug %}text-white{% endif %}"
+                   style="text-decoration:none;">
+                    {{ d.title }}
+                </a>
+            </li>
+        {% endfor %}
+        </ul>
+        {% endfor %}
+        <div class="card-footer small">
+            <a href="{{ url_for('docs.index') }}">← Documentation index</a>
+        </div>
+    </div>
+</div>
+
+<div class="col-lg-9">
+    <article class="markdown-body">
+        {{ body | markdown }}
+    </article>
+</div>
+</div>
+{% endblock %}

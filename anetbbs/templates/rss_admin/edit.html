@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{% if feed %}Edit{% else %}Add{% endif %} RSS Feed{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-rss-fill"></i>
+        {% if feed %}Edit Feed: {{ feed.name }}{% else %}Add RSS Feed{% endif %}
+    </h1>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label">Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" required
+                   value="{{ feed.name if feed else '' }}"
+                   placeholder="X-News">
+            <small class="text-muted">Display name shown to users.</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Category</label>
+            <input type="text" name="category" class="form-control"
+                   value="{{ feed.category if feed else 'general' }}"
+                   placeholder="news / tech / scene / general">
+        </div>
+        <div class="col-12">
+            <label class="form-label">Feed URL <span class="text-danger">*</span></label>
+            <input type="url" name="url" class="form-control" required
+                   value="{{ feed.url if feed else '' }}"
+                   placeholder="https://x-bit.org/rss/rss.xml">
+            <small class="text-muted">RSS 2.0 / Atom / RSS 1.0 — feedparser handles all of them.</small>
+        </div>
+        <div class="col-12">
+            <label class="form-label">Site URL (optional)</label>
+            <input type="url" name="site_url" class="form-control"
+                   value="{{ feed.site_url if feed else '' }}"
+                   placeholder="https://x-bit.org">
+            <small class="text-muted">Human-facing homepage of the feed source.</small>
+        </div>
+        <div class="col-12">
+            <label class="form-label">Description (optional)</label>
+            <input type="text" name="description" class="form-control" maxlength="500"
+                   value="{{ feed.description if feed else '' }}"
+                   placeholder="One-line description of the feed">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Sort order</label>
+            <input type="number" name="sort_order" class="form-control"
+                   value="{{ feed.sort_order if feed else 10 }}">
+            <small class="text-muted">Lower = appears first.</small>
+        </div>
+        <div class="col-md-3 d-flex align-items-end pb-1">
+            <div class="form-check">
+                <input type="checkbox" id="is_active" name="is_active" class="form-check-input"
+                       {% if (feed and feed.is_active) or not feed %}checked{% endif %}>
+                <label for="is_active" class="form-check-label">Active</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save"></i> Save{% if not feed %} & Fetch{% endif %}
+        </button>
+        <a href="{{ url_for('rss_admin.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

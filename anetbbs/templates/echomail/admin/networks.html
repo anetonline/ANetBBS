@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Echomail Networks — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-diagram-3"></i> Echomail Networks</h1>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Dashboard
+    </a>
+    <a href="{{ url_for('echomail_admin.new_network') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Add Network
+    </a>
+</div>
+
+{% if networks %}
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th><th>Type</th><th>Host</th><th>Status</th>
+                    <th>Last Poll</th><th>Interval</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for net in networks %}
+                <tr>
+                    <td><strong>{{ net.name }}</strong></td>
+                    <td><span class="badge" style="background:#003300; color:#00ff00; border:1px solid #00ff00;">{{ net.network_type|upper }}</span></td>
+                    <td style="font-size:0.85rem;">
+                        {% if net.network_type == 'binkp' %}{{ net.binkp_host or '—' }}:{{ net.binkp_port or 24554 }}
+                        {% else %}{{ net.qwk_host or '—' }}:{{ net.qwk_port or 80 }}{% endif %}
+                    </td>
+                    <td>
+                        {% if net.is_active %}
+                        <span style="color:#00ff00;">● Active</span>
+                        {% else %}
+                        <span style="color:#ff6600;">● Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-size:0.85rem;">
+                        {{ net.last_poll_at.strftime('%Y-%m-%d %H:%M') if net.last_poll_at else 'Never' }}
+                    </td>
+                    <td>{{ net.poll_interval_minutes or 60 }}m</td>
+                    <td>
+                        <form method="post" action="{{ url_for('echomail_admin.test_connection', network_id=net.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary btn-sm" title="Test Connection">
+                                <i class="bi bi-plug"></i>
+                            </button>
+                        </form>
+                        <form method="post" action="{{ url_for('echomail_admin.poll_now', network_id=net.id) }}" class="d-inline ms-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary btn-sm" title="Poll Now">
+                                <i class="bi bi-arrow-repeat"></i>
+                            </button>
+                        </form>
+                        <a href="{{ url_for('echomail_admin.edit_network', network_id=net.id) }}" class="btn btn-primary btn-sm ms-1" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="post" action="{{ url_for('echomail_admin.delete_network', network_id=net.id) }}" class="d-inline ms-1"
+                              onsubmit="return confirm('Delete network {{ net.name }}? This will also delete all areas and messages!');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm" style="background:#000; border:1px solid #ff0000; color:#ff0000;" title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center p-4">
+        <i class="bi bi-diagram-3" style="font-size:3rem;"></i>
+        <p class="mt-3">No networks configured yet.</p>
+        <a href="{{ url_for('echomail_admin.new_network') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add First Network
+        </a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

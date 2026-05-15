@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Moderators — {{ board.name }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-person-badge"></i> Moderators — {{ board.name }}</h1>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="row g-2">
+        <div class="col-md-8">
+            <input type="text" name="username" class="form-control" placeholder="Username" required>
+        </div>
+        <div class="col-md-4">
+            <button class="btn btn-primary w-100"><i class="bi bi-plus"></i> Add Moderator</button>
+        </div>
+    </div>
+</form>
+
+{% if mods %}
+<table class="table table-sm">
+    <thead><tr><th>User</th><th>Since</th><th></th></tr></thead>
+    <tbody>
+    {% for m in mods %}
+    <tr>
+        <td><strong>{{ m.user.username if m.user else '?' }}</strong></td>
+        <td><small>{{ m.granted_at.strftime('%Y-%m-%d') }}</small></td>
+        <td>
+            <form method="post" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="mod_id" value="{{ m.id }}">
+                <button class="btn btn-sm btn-outline-danger">Revoke</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="text-muted">No moderators assigned (besides sysops).</p>
+{% endif %}
+
+<a href="{{ url_for('admin.boards') }}" class="btn btn-secondary">Back to boards</a>
+{% endblock %}

@@ -1,0 +1,261 @@
+# anetbbs/config.py
+"""
+Configuration management for ANetBBS
+Supports different environments (development, production)
+"""
+import os
+from pathlib import Path
+
+# Base directory
+BASE_DIR = Path(__file__).parent.parent
+
+
+class Config:
+    """Base configuration"""
+    
+    # Security
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    
+    # Database
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ECHO = False
+    
+    # Telnet Server
+    TELNET_ENABLED = os.environ.get('TELNET_ENABLED', 'true').lower() == 'true'
+    TELNET_HOST = os.environ.get('TELNET_HOST', '0.0.0.0')
+    TELNET_PORT = int(os.environ.get('TELNET_PORT', '2233'))
+
+    # SSH Server
+    SSH_ENABLED = os.environ.get('SSH_ENABLED', 'true').lower() == 'true'
+    SSH_HOST = os.environ.get('SSH_HOST', '0.0.0.0')
+    SSH_PORT = int(os.environ.get('SSH_PORT', '2234'))
+    SSH_HOST_KEY_FILE = os.environ.get('SSH_HOST_KEY_FILE', 'data/ssh_host_key')
+
+    # rlogin Server (inherently insecure — disabled by default)
+    RLOGIN_ENABLED = os.environ.get('RLOGIN_ENABLED', 'false').lower() == 'true'
+    RLOGIN_HOST = os.environ.get('RLOGIN_HOST', '0.0.0.0')
+    RLOGIN_PORT = int(os.environ.get('RLOGIN_PORT', '513'))
+
+    # FTP Server — serves the file areas. Anonymous access is read-only and
+    # limited to FileAreas with is_active=True AND is_sysop_only=False.
+    # Authenticated users can upload to areas whose upload_permission lets
+    # them. Per-area enforcement happens in the auth layer.
+    FTP_ENABLED = os.environ.get('FTP_ENABLED', 'false').lower() == 'true'
+    FTP_HOST = os.environ.get('FTP_HOST', '0.0.0.0')
+    FTP_PORT = int(os.environ.get('FTP_PORT', '21'))
+    FTP_ANON_ENABLED = os.environ.get('FTP_ANON_ENABLED', 'true').lower() == 'true'
+    # Optional TLS — reuses the same cert nginx is using. Set both paths to
+    # enable FTPS (AUTH TLS) on the same port. Without these, only plain
+    # FTP works.
+    FTP_TLS_CERTFILE = os.environ.get('FTP_TLS_CERTFILE', '')
+    FTP_TLS_KEYFILE = os.environ.get('FTP_TLS_KEYFILE', '')
+    # Passive mode port range — needs to be opened on the firewall and
+    # forwarded to this host if behind NAT. Tight default range keeps the
+    # exposed surface small.
+    FTP_PASV_PORTS = os.environ.get('FTP_PASV_PORTS', '40000-40050')
+    # Where to assemble the virtual FTP tree (symlinks to each FileArea's
+    # storage_path). Rebuilt on every server start.
+    FTP_ROOT_DIR = os.environ.get('FTP_ROOT_DIR', 'data/ftp_root')
+    # Banner shown on connect — replace at will.
+    FTP_BANNER = os.environ.get('FTP_BANNER', 'ANetBBS FTP — file areas')
+
+    # Internet email — ANetBBS doesn't ship an MTA. We ride on top of the
+    # sysop's existing Postfix (or Exim/OpenSMTPD) instance:
+    #   - Inbound: a postfix virtual-alias routes `*@MAIL_DOMAIN` to
+    #     `lmtp:unix:MAIL_LMTP_SOCKET`. ANetBBS reads from there.
+    #   - Outbound: ANetBBS submits to `MAIL_RELAY_HOST:MAIL_RELAY_PORT`
+    #     (default 127.0.0.1:25 — the local MTA). The MTA does MX
+    #     lookup, DKIM signing, retries, bounces, deliverability.
+    # See docs/19-email.md for the postfix recipe.
+    MAIL_ENABLED = os.environ.get('MAIL_ENABLED', 'false').lower() == 'true'
+    MAIL_DOMAIN = os.environ.get('MAIL_DOMAIN', '')
+    MAIL_LMTP_SOCKET = os.environ.get(
+        'MAIL_LMTP_SOCKET', '/run/anetbbs/lmtp.sock')
+    MAIL_RELAY_HOST = os.environ.get('MAIL_RELAY_HOST', '127.0.0.1')
+    MAIL_RELAY_PORT = int(os.environ.get('MAIL_RELAY_PORT', '25'))
+    # Maximum inbound message size — anything larger is rejected at
+    # `MAIL FROM` time with a 552 status. Default 25 MB matches Gmail.
+    MAIL_MAX_SIZE = int(os.environ.get('MAIL_MAX_SIZE', str(25 * 1024 * 1024)))
+    # 'sysop' / 'auto' / 'optin' — controls who gets an address.
+    # Day-1 ships with the sysop-approved default; the other modes
+    # are wired up in the admin UI in Day 4.
+    MAIL_ALLOCATION = os.environ.get('MAIL_ALLOCATION', 'sysop')
+
+    # ANetBBS federation registry —
+    #   REGISTRY_MODE_ENABLED: this BBS doubles as the central hub for
+    #     anetbbs.lst (the federation directory). Most installs leave it
+    #     false; one designated hub (bbs.a-net.fyi by default) runs it.
+    #   REGISTRY_URL: where peer ANetBBS instances POST their registration
+    #     + heartbeat, and pull the latest anetbbs.lst from. Points at
+    #     the hub above. New installs ship with the canonical URL so
+    #     they get a populated list out of the box.
+    #   REGISTRY_SELF_REGISTER: if true, this BBS auto-registers itself
+    #     against REGISTRY_URL on startup + heartbeats daily.
+    REGISTRY_MODE_ENABLED = os.environ.get(
+        'REGISTRY_MODE_ENABLED', 'false').lower() == 'true'
+    REGISTRY_URL = os.environ.get(
+        'REGISTRY_URL', 'https://bbs.a-net.fyi')
+    REGISTRY_SELF_REGISTER = os.environ.get(
+        'REGISTRY_SELF_REGISTER', 'false').lower() == 'true'
+    # How long an entry can go without a heartbeat before SYSTAT probes
+    # start counting against it. The probe thread itself runs every
+    # REGISTRY_PROBE_INTERVAL_SEC and drops `is_listed` to false after
+    # REGISTRY_PROBE_FAILURE_THRESHOLD consecutive failures.
+    REGISTRY_HEARTBEAT_STALE_HOURS = int(os.environ.get(
+        'REGISTRY_HEARTBEAT_STALE_HOURS', '48'))
+    REGISTRY_PROBE_INTERVAL_SEC = int(os.environ.get(
+        'REGISTRY_PROBE_INTERVAL_SEC', '3600'))
+    REGISTRY_PROBE_FAILURE_THRESHOLD = int(os.environ.get(
+        'REGISTRY_PROBE_FAILURE_THRESHOLD', '3'))
+    
+    # Web Server
+    WEB_HOST = os.environ.get('WEB_HOST', '0.0.0.0')
+    WEB_PORT = int(os.environ.get('WEB_PORT', '5000'))
+    
+    # Session
+    PERMANENT_SESSION_LIFETIME = 3600 * 24 * 7  # 7 days
+    SESSION_COOKIE_SECURE = False
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    
+    # Application
+    BBS_NAME = os.environ.get('BBS_NAME', 'ANetBBS')
+    BBS_DESCRIPTION = os.environ.get('BBS_DESCRIPTION', 'A Modern BBS System')
+    # Public hostname/domain shown on the About page connect commands.
+    # Defaults to whatever Host header the request carries.
+    BBS_DOMAIN = os.environ.get('BBS_DOMAIN', '')
+    # Personal web-pages toggle. When true, the app serves the contents
+    # of {DATA_DIR}/personal_pages/ at the BBS root URL — e.g. dropping
+    # a `photography/` folder makes it visible at /photography/ with
+    # auto-index.html resolution.
+    PERSONAL_PAGES_ENABLED = os.environ.get(
+        'PERSONAL_PAGES_ENABLED', 'false').lower() == 'true'
+    # New User Verification — when true, fresh registrations are marked
+    # is_verified=False and have to wait for sysop approval before they
+    # can log in. Like Mystic's NUV mode.
+    NUV_ENABLED = os.environ.get('NUV_ENABLED', 'false').lower() == 'true'
+    # Number of telnet/SSH/rlogin "nodes" (1-100). Each concurrent
+    # terminal session occupies one node. Used by the multinode chat,
+    # who's-online slot tracking, and admin capacity displays.
+    BBS_NODES = max(1, min(100, int(os.environ.get('BBS_NODES', '8'))))
+    # Idle disconnect for terminal menus (seconds). 0 = never idle out.
+    # IRC/MRC are web features and unaffected.
+    IDLE_TIMEOUT_SECONDS = int(os.environ.get('IDLE_TIMEOUT_SECONDS', '1800'))
+    
+    # Data directory
+    DATA_DIR = os.path.join(BASE_DIR, 'data')
+    
+    # Inter-BBS Instant Messaging (MSP / RFC 1312)
+    MSP_ENABLED = True
+    MSP_BIND_HOST = '0.0.0.0'
+    MSP_PORT = 18
+    # SYSTAT / ActiveUser UDP service (Synchronet IMSG companion)
+    SYSTAT_ENABLED = True
+    SYSTAT_BIND_HOST = '0.0.0.0'
+    SYSTAT_PORT = 11
+    # Inter-BBS directory (sbbsimsg.lst from Vertrauen)
+    SBBSIMSG_LIST_URL = 'ftp://vert.synchro.net/sbbsimsg.lst'
+    SBBSIMSG_AUTO_REFRESH = True
+    SBBSIMSG_REFRESH_SECONDS = 86400   # daily
+
+    # File uploads
+    UPLOAD_MAX_SIZE = 100 * 1024 * 1024  # 100MB
+    AVATAR_MAX_SIZE = 2 * 1024 * 1024  # 2MB
+    ALLOWED_EXTENSIONS = {
+        # Images / docs
+        'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'txt', 'md',
+        # Archives (BBS bread-and-butter)
+        'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz2', 'xz',
+        'lzh', 'lha', 'arj', 'arc', 'cab',
+        # Software / executables
+        'exe', 'com', 'bat', 'cmd',
+        # Source / data
+        'iso', 'img', 'nfo', 'diz', 'csv', 'json', 'xml', 'log',
+        # Audio / video
+        'mp3', 'wav', 'ogg', 'flac', 'mp4', 'avi', 'mkv', 'mov',
+        # Code
+        'py', 'js', 'html', 'css', 'c', 'h', 'cpp', 'hpp', 'java',
+    }
+    AVATAR_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
+    AVATARS_DIR = os.path.join(DATA_DIR, 'avatars')
+    
+    # Logging
+    LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+    LOG_FILE = os.path.join(BASE_DIR, 'bbs.log')
+    
+    # MRC Bridge Configuration
+    MRC_BRIDGE_HOST = os.environ.get('MRC_BRIDGE_HOST', 'localhost')
+    MRC_BRIDGE_PORT = int(os.environ.get('MRC_BRIDGE_PORT', '8080'))
+    MRC_BRIDGE_USE_SSL = os.environ.get('MRC_BRIDGE_USE_SSL', 'false').lower() == 'true'
+    MRC_BRIDGE_WS_PATH = os.environ.get('MRC_BRIDGE_WS_PATH', '/mrcws')
+
+    # Games Configuration
+    GAMES_ENABLED = os.environ.get('GAMES_ENABLED', 'true').lower() == 'true'
+    GAMES_DATA_DIR = os.path.join(DATA_DIR, 'games')
+    GAMES_MAX_NODES = int(os.environ.get('GAMES_MAX_NODES', '10'))
+    GAMES_SESSION_TIMEOUT = int(os.environ.get('GAMES_SESSION_TIMEOUT', '3600'))
+    DOSBOX_PATH = os.environ.get('DOSBOX_PATH', '/usr/bin/dosbox')
+    DOSEMU_PATH = os.environ.get('DOSEMU_PATH', '/usr/bin/dosemu')
+    NODEJS_PATH = os.environ.get('NODEJS_PATH', '/usr/bin/node')
+    MYSTIC_PYTHON_PATH = os.environ.get('MYSTIC_PYTHON_PATH', '')
+    MYSTIC_BBS_PATH = os.environ.get('MYSTIC_BBS_PATH', '/usr/local/bin/mystic')
+
+    # Echomail Configuration
+    ECHOMAIL_ENABLED = os.environ.get('ECHOMAIL_ENABLED', 'true').lower() == 'true'
+    ECHOMAIL_POLL_ENABLED = os.environ.get('ECHOMAIL_POLL_ENABLED', 'true').lower() == 'true'
+    ECHOMAIL_DATA_DIR = os.path.join(DATA_DIR, 'echomail')
+    ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS - A Modern BBS System')
+    ECHOMAIL_TEAR_LINE = os.environ.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS')
+
+
+class DevelopmentConfig(Config):
+    """Development configuration"""
+    DEBUG = True
+    TESTING = False
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+        f'sqlite:///{os.path.join(Config.DATA_DIR, "anetbbs_dev.db")}'
+    SQLALCHEMY_ECHO = False
+
+
+class ProductionConfig(Config):
+    """Production configuration"""
+    DEBUG = False
+    TESTING = False
+    SESSION_COOKIE_SECURE = True
+    
+    # Use PostgreSQL in production or fallback to SQLite
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+        f'sqlite:///{os.path.join(Config.DATA_DIR, "anetbbs.db")}'
+    
+    # SECRET_KEY validation happens at runtime, not import
+    #@property
+    #def SECRET_KEY(self):
+        #key = os.environ.get('SECRET_KEY')
+        #if not key:
+            #raise ValueError("SECRET_KEY environment variable must be set in production")
+        #return key
+
+
+class TestingConfig(Config):
+    """Testing configuration"""
+    DEBUG = True
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    WTF_CSRF_ENABLED = False
+
+
+# Configuration dictionary
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'testing': TestingConfig,
+    'default': DevelopmentConfig
+}
+
+
+def get_config(env=None):
+    """Get configuration for specified environment"""
+    if env is None:
+        env = os.environ.get('FLASK_ENV', 'development')
+    return config.get(env, config['default'])

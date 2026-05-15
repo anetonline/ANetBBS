@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Bulletin Management - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-megaphone"></i> Bulletin Management</h1>
+</div>
+
+<div class="text-end mb-3 d-flex gap-2 justify-content-end">
+    <form method="post" action="{{ url_for('admin.purge_expired_bulletins') }}"
+          onsubmit="return confirm('Permanently delete all expired bulletins?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger"><i class="bi bi-archive"></i> Purge Expired</button>
+    </form>
+    <a href="{{ url_for('admin.add_bulletin') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Bulletin</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Author</th>
+                    <th>Pinned</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for message in messages %}
+                <tr>
+                    <td>{{ message.title }}</td>
+                    <td>{{ message.author.username }}</td>
+                    <td>
+                        {% if message.is_pinned %}
+                            <i class="bi bi-pin-fill text-warning"></i>
+                        {% else %}
+                            <i class="bi bi-pin text-muted"></i>
+                        {% endif %}
+                    </td>
+                    <td>{{ message.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ message.expires_at.strftime('%Y-%m-%d') if message.expires_at else 'Never' }}</td>
+                    <td>
+                        <form method="post" action="{{ url_for('admin.toggle_pin', bulletin_id=message.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-primary" title="{{ 'Unpin' if message.is_pinned else 'Pin' }}">
+                                <i class="bi bi-pin{{ '-fill' if message.is_pinned else '' }}"></i>
+                            </button>
+                        </form>
+                        <a href="{{ url_for('admin.edit_bulletin', bulletin_id=message.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{{ url_for('admin.delete_bulletin', bulletin_id=message.id) }}" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

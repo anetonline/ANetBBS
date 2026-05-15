@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}System Settings - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-gear"></i> System Settings</h1>
+</div>
+
+<p class="text-muted">
+  Editable settings persist to <code>{{ config_info.ENV_FILE }}</code>. Changes
+  marked <span class="badge bg-warning text-dark">restart</span> require
+  <code>sudo systemctl restart anetbbs.service anetbbs-telnet anetbbs-ssh anetbbs-rlogin</code>
+  to take effect.
+</p>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-pencil"></i> Editable Settings</div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% for s in editable %}
+          <div class="mb-2">
+            <label class="form-label small mb-1">
+              {{ s.label }}
+              {% if s.requires_restart %}<span class="badge bg-warning text-dark ms-1">restart</span>{% endif %}
+            </label>
+            <input type="{{ s.kind }}" name="{{ s.key }}" class="form-control form-control-sm"
+                   value="{{ s.value }}" placeholder="(empty)">
+          </div>
+          {% endfor %}
+          <button type="submit" class="btn btn-primary mt-2">
+            <i class="bi bi-save"></i> Save Settings
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-info-circle"></i> Read-Only Configuration</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tbody>
+            {% for key, value in config_info.items() %}
+            <tr>
+              <th class="small">{{ key }}</th>
+              <td class="small">{{ value }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="bi bi-file-text"></i> Recent Log Entries (last 100)</div>
+      <div class="card-body p-0">
+        <pre style="background:var(--theme-bg-dark);color:var(--theme-primary);font-size:0.7rem;max-height:380px;overflow-y:auto;padding:10px;margin:0;">{% for line in log_lines %}{{ line | e }}{% endfor %}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

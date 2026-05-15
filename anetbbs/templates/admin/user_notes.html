@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Notes — {{ target.username }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-journal-text"></i> Sysop Notes — {{ target.username }}</h1>
+    <p>Private notes visible only to admins.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="card-body">
+        <label class="form-label">Add a note</label>
+        <textarea name="note" rows="3" class="form-control" required></textarea>
+        <button class="btn btn-primary mt-2"><i class="bi bi-plus"></i> Add</button>
+        <a href="{{ url_for('admin.edit_user', user_id=target.id) }}" class="btn btn-link">← Back to user</a>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if notes %}
+        {% for n in notes %}
+        <div class="border-bottom p-2">
+            <div class="d-flex justify-content-between">
+                <strong>{{ n.author.username if n.author else '?' }}</strong>
+                <small class="text-muted">{{ n.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+            </div>
+            <pre style="white-space:pre-wrap;font-family:inherit;margin:4px 0 0 0;">{{ n.note }}</pre>
+            <form method="post" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="note_id" value="{{ n.id }}">
+                <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+            </form>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="p-3 text-muted">No notes yet.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

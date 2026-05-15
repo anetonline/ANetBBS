@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Preview: {{ art.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.ansi-preview {
+    background: #000;
+    color: #ccc;
+    font-family: 'Courier New', 'DejaVu Sans Mono', monospace;
+    font-size: 14px;
+    line-height: 18px;
+    padding: 6px;
+    width: max-content;
+    overflow: auto;
+}
+.ansi-preview .row { display: flex; }
+.ansi-preview .cell { width: 10px; height: 18px; text-align: center;
+                      line-height: 18px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-eye-fill"></i> Preview: {{ art.name }}</h1>
+    <p>Approximate render of the saved ANSI bytes (mIRC palette).</p>
+</div>
+
+<div class="ansi-preview">
+{% set palette = ['#ffffff','#000000','#00007f','#009300',
+                  '#ff0000','#7f0000','#9c009c','#fc7f00',
+                  '#ffff00','#00fc00','#009393','#00ffff',
+                  '#0000fc','#ff00ff','#7f7f7f','#d2d2d2'] %}
+{% set bg_palette = palette[:8] %}
+{% for r in range(grid.height or art.height) %}
+<div class="row">
+{%- for c in range(grid.width or art.width) -%}
+{%- set idx = r * (grid.width or art.width) + c -%}
+{%- set cell = grid.cells[idx] if idx < (grid.cells|length) else None -%}
+<span class="cell" style="color:{{ palette[(cell.fg if cell else 7) | int] }};background:{{ bg_palette[(cell.bg if cell else 0) | int] }};">{{ (cell.c if cell else ' ') | escape }}</span>
+{%- endfor -%}
+</div>
+{% endfor %}
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('ansi_editor.edit', art_id=art.id) }}" class="btn btn-link">← Back to editor</a>
+    <a href="{{ url_for('ansi_editor.raw_ansi', art_id=art.id) }}" class="btn btn-outline-secondary btn-sm">Download .ans</a>
+</div>
+{% endblock %}

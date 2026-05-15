@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Groups — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-people-fill"></i> User Groups / Clans</h1>
+</div>
+
+{% if current_user.is_authenticated %}
+<div class="mb-3">
+    <a href="{{ url_for('groups.new') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Create Group</a>
+</div>
+{% endif %}
+
+{% if groups %}
+<div class="row g-3">
+{% for g in groups %}
+<div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+        <div class="card-header">
+            {% if g.tag %}<span class="badge bg-secondary">{{ g.tag }}</span>{% endif %}
+            <strong>{{ g.name }}</strong>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted">
+                Leader: {{ g.leader.username if g.leader else '?' }} ·
+                Members: {{ g.members.count() }} ·
+                {% if g.is_open %}Open{% else %}Invite-only{% endif %}
+            </p>
+            {% if g.description %}<p>{{ g.description[:140] }}{% if g.description|length > 140 %}...{% endif %}</p>{% endif %}
+            <a href="{{ url_for('groups.view', group_id=g.id) }}" class="btn btn-sm btn-primary">View</a>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No groups yet. {% if current_user.is_authenticated %}<a href="{{ url_for('groups.new') }}">Start one.</a>{% endif %}</p>
+{% endif %}
+{% endblock %}

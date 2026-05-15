@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Search — Wiki{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-search"></i> Search the wiki</h1>
+</div>
+
+<form method="get" action="{{ url_for('wiki.search') }}" class="mb-3">
+    <div class="input-group">
+        <input type="text" name="q" value="{{ q }}" class="form-control"
+               placeholder="Search titles, slugs, and body text…" autofocus>
+        <button class="btn btn-primary">Search</button>
+    </div>
+</form>
+
+{% if q %}
+    {% if results %}
+        <p class="text-muted">{{ results|length }} result{{ '' if results|length == 1 else 's' }} for <strong>{{ q }}</strong></p>
+        <ul class="list-group">
+        {% for p in results %}
+            <li class="list-group-item">
+                <a href="{{ url_for('wiki.view', slug=p.slug) }}"><strong>{{ p.title }}</strong></a>
+                <small class="text-muted">— {{ p.updated_at.strftime('%Y-%m-%d') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
+                {% if p.summary %}<br><small class="text-muted">{{ p.summary }}</small>{% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <div class="alert alert-info">
+            No matches for <strong>{{ q }}</strong>.
+            {% if current_user.is_authenticated %}
+            You can <a href="{{ url_for('wiki.new') }}">create a new page</a>.
+            {% endif %}
+        </div>
+    {% endif %}
+{% endif %}
+{% endblock %}

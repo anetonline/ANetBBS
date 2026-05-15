@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Notification Settings{% endblock %}
+{% block content %}
+<div class="bbs-header"><h1><i class="bi bi-bell"></i> Notification Settings</h1></div>
+
+<form method="post" class="card p-3" style="max-width:560px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% for kind, label in kinds %}
+    <div class="form-check mb-2">
+        <input type="checkbox" id="k_{{ kind }}" name="{{ kind }}" class="form-check-input"
+               {% if prefs.get(kind, True) %}checked{% endif %}>
+        <label class="form-check-label" for="k_{{ kind }}">{{ label }}</label>
+    </div>
+    {% endfor %}
+    <div class="mt-2">
+        <button class="btn btn-primary"><i class="bi bi-check"></i> Save</button>
+        <a href="{{ url_for('notifications.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+<p class="small text-muted mt-2">Newly created notifications honor these preferences. Existing notifications are not affected.</p>
+{% endblock %}

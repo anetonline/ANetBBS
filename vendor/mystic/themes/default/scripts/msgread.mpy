@@ -1,0 +1,114 @@
+#####################################################
+# Simple Message Reader Example using Mystic Python #
+#####################################################
+
+# Reads messages in the user's current message base
+# With a pause prompt and basic navigation
+
+from mystic_bbs import *
+
+# Load the current user and then load their current message base
+# but fail if they have not selected a message base
+
+user  = getuser(0)
+mbase = getmbaseid(user["mbase"])
+
+if mbase is None:
+	writeln ("|CRYou have not selected a message base yet!|CR|CR|PA")
+	quit()
+
+# Open the message base then check to make sure its open before reading
+# data from it
+
+msg = msg_open(mbase["path"] + mbase["filename"]);
+
+if msg is None:
+	quit()
+
+done = False
+
+# Seek to the first message in the base and loop while a message
+# is found, calling msg_next after each message so the next one
+# will be loaded.  Seek must be called first even if reading
+# from the first message.
+
+msg_seek(msg, 0)
+
+while msg_found(msg) and not done and not shutdown():
+
+	# Load the message header information into a dictionary
+	# and the message text into a list.  The message header
+	# must be loaded before the message text will be accessible
+
+	msghdr  = msg_gethdr(msg)
+	msgtext = msg_gettxt(msg)
+
+	# Show the message header, setting a line counter that can
+	# be used to pause the screen
+
+	writeln("|16|CL|15Msg#: " + str(msghdr["number"]) + " of " + str(msghdr["highmsg"]))
+	writeln("|14From: " + msghdr["from"]);
+	writeln("|13  To: " + msghdr["to"]);
+	writeln("|11Subj: " + msghdr["subj"]);
+	writeln("|09-------------------------------------------------------------------------------|07");
+
+	pausecount = 4
+
+	# loop through each line in the message (list) and pause when
+	# we get more than 23 lines
+
+	for line in msgtext:
+
+		# before printing a line check if we need to pause
+
+		if pausecount >= 23:
+			pausecount = 1
+
+			write("|14*PAUSE* Continue? (|15Y|14)es, (|15N|14)o, (|15Q|14)uit: |07")
+
+			ch = onekey(chr(13) + 'YNQ', False)
+
+			# after getting input, erase the pause prompt then process the input
+
+			backspace(wherex(), True)
+
+			if ch == 'Q':
+				done = True
+				break
+			elif ch == 'N':
+				break
+
+		# increase pause counter and send a line of message text
+		# unless it is a kludge line:
+
+		if (line == "") or (line != "" and line[0] != chr(1)):
+			pausecount += 1
+			writeln(line)
+		
+	# At end of message, so lets give a prompt if we didn't get a quit
+	# from the pause prompt:
+
+	if not done:
+		write("|CR|16|09MSG READER: (|11A|09)gain, (|11P|09)revious, (|11ENTER|09) Next, (|11Q|09) to Quit: ")
+
+		ch = onekey(chr(13) + 'APQ', True);
+
+		if ch == 'A':
+			# do nothing here so it redisplays the same msg
+			pass
+
+		elif ch == 'P':
+			if msghdr["number"] != 1:
+				msg_prev(msg)
+
+		elif ch == 'Q':
+			done = True
+			break	
+		else:
+			msg_next(msg);	
+
+# Close the message base and report that we're done
+
+msg_close(msg)
+
+writeln("|CR|12Program complete: Press a key|PN");

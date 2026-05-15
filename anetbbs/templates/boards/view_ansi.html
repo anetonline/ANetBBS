@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ post.subject }} (ANSI) — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-tv"></i> {{ post.subject }}</h1>
+    <small>by <a href="{{ url_for('profile.view_user', username=post.author.username) }}">{{ post.author.username }}</a>
+        on {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to text view
+    </a>
+</div>
+
+<pre style="background:#000;color:#aaa;padding:8px;border:1px solid #333;
+            font-family: 'Cascadia Mono','Consolas','Courier New',monospace;
+            font-size:14px; line-height:1.0; white-space:pre; overflow-x:auto;">{{ rendered | safe }}</pre>
+{% endblock %}

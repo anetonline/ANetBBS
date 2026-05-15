@@ -1,0 +1,428 @@
+
+ -------------------------------------------------------------------------
+ Mystic Display Codes                                          Section A.1
+ -------------------------------------------------------------------------
+
+
+                            [ Table of Contents ]
+
+                      Section   Description
+
+                          A.1   Using Mystic Display Codes
+                          A.2   BBS and User Information Codes
+                          A.3   Text Color MCI Codes
+                          A.4   Text Formatting Codes
+                          A.5   Screen/Cursor Related Codes
+                          A.6   Input Field Manipulation Codes
+                          A.7   Text Box Notification Codes
+                          A.8   Miscelleanous Uncategorized Codes
+                          A.9   Prompt Info Codes
+                          A.10  Screen Info Codes
+
+ -------------------------------------------------------------------------
+ A.1  USING Mystic DISPLAY CODES
+ -------------------------------------------------------------------------
+
+    Mystic Display Codes are found throughout the BBS in various prompts
+    and display files.  The purpose of these codes is to replace the code
+    with a corresponding value for that code.  For example, if you wanted
+    to display the user's name, there is a code which when parsed in a
+    prompt or file would be replaced with the current logged in user name.
+
+    The format for all codes consists of a starting pipe character (|)
+    followed by two characters which are used to represent what data
+    Mystic will replace the code with.  These codes are CASE SENSITIVE
+    although currently only uppercased letters are being used.
+
+    An example of an MCI code and how it would be processed by Mystic
+    would be:
+
+       Welcome the BBS, |UH.
+
+    In the above example, |UH is the MCI code for the user's handle.  If
+    the current user online had a account handle of "Joe User", then the
+    result of the above example after being processed by Mystic would
+    be:
+
+       Welcome to the BBS, Joe User.
+
+    Certain display codes require additional data to be provided after
+    the code.  These types of codes are used to do many different things
+    from text formatting, to changing input fields, to saving/restoring
+    the remote user's screen, all the way through to popping up windows
+    and performaning various other BBS functions.
+
+    Once again it is important to note that all display codes are CASE
+    SENSITIVE!
+
+    The following sections will cover all types of MCI codes used by
+    Mystic BBS.
+
+
+ -------------------------------------------------------------------------
+ A.2  BBS and User Information Codes
+ -------------------------------------------------------------------------
+* Updated from http://wiki.mysticbbs.com/doku.php?id=displaycodes
+
+    AG - User's age in years
+    AS - User's auto signature (On or Off)
+    AV - User's chat availability for user to user chat (Yes or No)
+    BD - User's baud rate (returns TELNET or LOCAL) (may be removed)
+    BI - User's birth date in their selected date format
+    BN - BBS name from System configuration
+    CM - User's full screen node chat setting (On or Off)
+    CS - User's total number of calls to the BBS
+    CT - User's total number of calls to the BBS today
+    DA - Current date in the user's selected date format
+    DK - User's total downloads in kilobytes
+    DL - User's total number of downloaded files
+    DT - User's total number of downloads today
+    FB - User's current file base name
+    FG - User's current file group name
+    FK - User's total uploads in kilobytes
+    FO - User's first call date in their selected date format
+    FS - User's file group (short name)
+    FT - Total number of files in current file base (dynamic)
+    FU - User's total number of files uploaded
+    HK - User's hotkey setting (On or Off)
+    IL - User's node status invisibility (On or Off)
+    KT - User's downloads in kilobytes today
+    LO - User's last call date in their selected date format
+    MB - User's current message base name
+    MD - Menu description of the current menu (from menu flags)
+    ME - User's total number of e-mails sent
+    MF - Shows number of draft messages saved for the current user
+    MG - User's current message group name
+    ML - User's lightbar message index setting (On or Off)
+    MN - Network address of current message base
+    MP - User's total number of message posts
+    MS - User's message group (short name)
+    MT - Total number of messages in current message base (dynamic)
+    MU - Total unread personal messages *
+    MW - Total personal messages *
+    ND - Current node number
+    NE - Minutes until next BBS-type event
+    OS - Operating system (Windows, Linux, Raspberry Pi, etc)
+    PC - User's current post to calls ratio
+    PW - Configured number of days before required password change
+    QA - User's selected archive format (QWK, etc)
+    QE - User's Generate QWKE setting (Yes or No)
+    QL - User's Include QWK file listing setting (Yes or No)
+    RD - User's download ratio for their current security level (files)
+    RK - User's download ratio for their current security level (kilobytes)
+    SB - User's max allowed minutes in time bank for current security level
+    SC - User's max calls per day allowed for current security level
+    SD - User's current security level description
+    SK - User's max allowed download kilobytes per day for current sec level
+    SL - User's current security level number
+    SN - Configured Sysop name
+    SP - Configured post call ratio for the current security level
+    ST - Configured allowed minutes per day for current security level
+    SX - User's max allowed downloaded files per day for current security level
+    TB - User's timebank minutes
+    TC - Total number of calls to the BBS system
+    TE - User's terminal emulation (Ansi or Ascii)
+    TI - Current time of day in 12 hour format
+    TL - User's time left in minutes
+    TO - User's time spent online this session (in minutes)
+    U# - User's number (aka permanent user index)
+    U1 - User's optional data answer for question #1
+    U2 - User's optional data answer for question #1
+    U3 - User's optional data answer for question #1
+    UA - User's address
+    UB - User's file listing type (Normal or Lightbar)
+    UC - User's city, state
+    UD - User's data phone number
+    UE - User's message editor type (Line, Full, or Ask)
+    UF - User's Date input format (MM/DD/YY, DD/MM/YY, YY/DD/MM)
+    UG - User's gender (Male or Female)
+    UH - User's handle (alias)
+    UI - User's User information field
+    UJ - User's message reader type (Normal or Lightbar)
+    UK - User's email address
+    UL - User's selected theme description
+    UM - User's lightbar message index setting (On of Off)
+    UN - User's real name
+    UO - User's country of origin (as detected by IP/Country blocking)
+    UP - User's Home phone number
+    UQ - User's full screen editor quote mode (Standard or Lightbar)
+    US - User's screen size lines (ie 25)
+    UX - User's computer/router/internet host name
+    UY - User's IP address
+    UZ - User's zip (postal) code
+    VR - Mystic BBS version number
+    XD - Days left before the user's account expires (or 0 if none)
+    XS - Security level in which the user's account will expire to
+
+
+ -------------------------------------------------------------------------
+ A.3  COLOR CHANGING CODES (PIPE COLOR CODES)
+ -------------------------------------------------------------------------
+
+   The typical pipe format of <pipe>## where ## is one of the following:
+
+   00 : Sets the current foreground to Black
+   01 : Sets the current foreground to Dark Blue
+   02 : Sets the current foreground to Dark Green
+   03 : Sets the current foreground to Dark Cyan
+   04 : Sets the current foreground to Dark Red
+   05 : Sets the current foreground to Dark Magenta
+   06 : Sets the current foreground to Brown
+   07 : Sets the current foreground to Grey
+   08 : Sets the current foreground to Dark Grey
+   09 : Sets the current foreground to Light Blue
+   10 : Sets the current foreground to Light Green
+   11 : Sets the current foreground to Light Cyan
+   12 : Sets the current foreground to Light Red
+   13 : Sets the current foreground to Light Magenta
+   14 : Sets the current foreground to Yellow
+   15 : Sets the current foreground to White
+
+   16 : Sets the current background to Black
+   17 : Sets the current background to Blue
+   18 : Sets the current background to Green
+   19 : Sets the current background to Cyan
+   20 : Sets the current background to Red
+   21 : Sets the current background to Magenta
+   22 : Sets the current background to Brown
+   23 : Sets the current background to Grey
+
+   Depending on the terminal the 24-31 codes can have different results.  Some
+   terminals will use iCE colors which are the non-blinking brighter
+   backgrounds.  Others may use blinking text instead.
+
+   TERMINALS THAT USE BRIGHT BACKGROUNDS (ICE COLORS):
+
+   24 : Sets the current background to Dark Grey
+   25 : Sets the current background to Light Blue
+   26 : Sets the current background to Light Green
+   27 : Sets the current background to Light Cyan
+   28 : Sets the current background to Light Red
+   29 : Sets the current background to Light Magenta
+   30 : Sets the current background to light Yellow
+   31 : Sets the current background to light White
+
+   TERMINALS THAT USE BLINKING:
+
+   24 : Sets the current background to black with blinking foreground
+   25 : Sets the current background to blue with blinking foreground
+   26 : Sets the current background to green with blinking foreground
+   27 : Sets the current background to cyan with blinking foreground
+   28 : Sets the current background to red with blinking foreground
+   29 : Sets the current background to magenta with blinking foreground
+   30 : Sets the current background to brown with blinking foreground
+   31 : Sets the current background to grey with blinking foreground
+
+   T1 : Sets current color to theme's color #1
+   T2 : Sets current color to theme's color #2
+   T3 : Sets current color to theme's color #3
+   T4 : Sets current color to theme's color #4
+   T5 : Sets current color to theme's color #5
+   T6 : Sets current color to theme's color #6
+   T7 : Sets current color to theme's color #7
+   T8 : Sets current color to theme's color #8
+   T9 : Sets current color to theme's color #9
+   T0 : Sets current color to theme's color #0
+
+
+ -------------------------------------------------------------------------
+ A.4  Text Formatting Codes
+ -------------------------------------------------------------------------
+
+   Text formatting codes are most often used within the prompts file to
+   create aligned lists of data, for things such as the user list or
+   who's online, etc.  These codes, like many other display codes, set up
+   the circumstances in which the display code after it are displayed
+
+   Note: ## should be replaced by the number noted in the description, and
+   must always be two characters.
+
+   $C##  - Centers the value of the next display code with a width of ##
+   $D##C - Duplicates character C ## times
+   $L##  - Left pad the next display code with spaces to ## characters
+   $R##  - Right pad the next display code with spaces to ## characters
+   $X##C - Duplicate character C until column ##
+
+   $c##C - Centers the value of the next display with a width of ## using
+           character C
+   $l##C - Left pad the next display code with character <C> to ## characters
+   $r##C - Right pad the next display code with character <C> to ## chars
+*  PD    - Pads with spaces the next MCI code value result
+
+   Examples (pay attention to the quotes):
+
+      |UN translates to........: "User Name"
+
+      |$R30|UN translates to...: "User Name                     "
+      |$C30|UN translates to...: "          User Name           "
+      |$L30|UN translates to...: "                     User Name"
+
+      |$D30- translates to.....: "------------------------------"
+      |$X30- translates to.....: "------------------------------"
+
+      |UN|$X30. translates to..: "User Name....................."
+
+      |$c30.|UN translates to...: ".........User Name..........."
+      |$r30.|UN translates to..: "User Name....................."
+      |$l30.|UN translates to..: ".....................User Name"
+
+*     |PD|UN translates to.....: " User Name "
+
+   The difference between $D and $X is that D duplicates a set number of
+   characters, while $X duplicates that character until a certain column
+   is reached.  If you use $X30- on column 10, it will create 20 characters
+   so it is dependant on the current location of the cursor.
+
+ -------------------------------------------------------------------------
+ A.5  Screen/Cursor Related Codes
+ -------------------------------------------------------------------------
+
+   Note: ## should be replaced by the number noted in the description, and
+   must always be two characters.  For example, to move to column 1 on the
+   current line you would send |[X01
+
+   [A## - Move the cursor up ## lines
+   [B## - Move the cursor down ## lines
+   [C## - Move the cursor forward (to the right) ## columns
+   [D## - Move the cursor backwards (to the left) ## columns
+   [K   - Clear from the current cursor position to the end of the line
+   [L   - Move cursor and erase data backwards from current column to column ##
+   [X## - Move cursor to X coordinate ##
+   [Y## - Move cursor to Y coordinate ##
+*  [0   - Hide cursor (if terminal supports it)
+*  [1   - Show cursor (if terminal supports it)
+   BS   - Sends 1 destructive backspace sequence (ASCII 8-32-8)
+   CL   - Clears the screen (ANSI 1,1 locate and [2J or ASCII 12)
+*  CN   - Turns iCE colors OFF (if terminal supports it)
+*  CY   - Turns iCE colors ON (if terminal supports it)
+   CR   - Send a carrage return and line feed (move to next line)
+   RA   - Restore the saved text attribute color
+   RS   - Restore the saved user's terminal screen
+   SA   - Save the current text attribute color
+   SS   - Save the entire user's terminal screen
+
+
+ -------------------------------------------------------------------------
+ A.6  Input Field Manipulation Codes
+ -------------------------------------------------------------------------
+
+   Input field codes effect the next input field of its type, and are
+   generally used in prompt strings that are send prior to asking the user
+   for input.
+
+   -N   - Forces the next Yes/No prompt to default to a No answer
+   -Y   - Forces the next Yes/No prompt to default to a Yes answer
+   IF   - Turns off the input field background color for the next input
+          prompt.
+*  IB   - Turns off input barrier for the next string input
+   IN## - Sets the scrolling input field size for the next input prompt to
+          ## characters.  If the maximum size of the input field is larger
+          than this, Mystic will scroll the text inside so that it can
+          accept more characters without taking up more than ## on screen.
+   IS## - Limits the actual maximum number of characters allow for an
+          input prompt to ## characters.
+
+
+ -------------------------------------------------------------------------
+ A.7  Text Box Notification Codes
+ -------------------------------------------------------------------------
+
+  Text Box codes are used to pop up a quick notification box, using the
+  configured box type of the current theme for visuals.
+
+  In addition to just displaying a box, Mystic is able to use its remote
+  screen imaging to save the space behind the box and restore it once the
+  box is closed, depending on the type of code used.  This prevents any
+  corruption of the users screen regardless of what they are doing when
+  they receive the notification.
+
+  User and BBS data MCI codes, along with pipe color codes can be used
+  within these boxes.
+
+     #B<header>#<notification>#
+
+       The #B code opens a notification box with a <header> and <notification>
+       string, following by an "OK" prompt for the user to press a key.  After
+       the user pressed a key, Mystic will automatically restore the user's
+       original screen content that was overwritten by the box.
+
+       Example:
+
+         |#BThis is a header#This is a test notification box!#
+
+
+     #I<header>#<notification>#
+
+       This box is similar to the #B notification, except that it does not
+       restore the user's screen content after displaying, and it does not
+       wait for the user to press a key.  One use for this might be during
+       a new message scan "Scanning" prompt, for example.
+
+         |#BNew Message Scan#Scanning: |&1...#
+
+
+ -------------------------------------------------------------------------
+ A.8  Miscellaneous Unsorted Codes
+ -------------------------------------------------------------------------
+
+*  AA   - Used in display files to enable aborting of the display file
+   AO   - Used in display files to disable aborting of the display file
+   BE   - Sends a ^G character to the terminal (beep code on some terms)
+   DE   - Delay for half a second
+   PA   - Send the pause prompt and wait for a key to be pressed
+   PB   - Purge the current input buffer
+   PI   - Display a pipe symbol (|)
+*  CH   - Prints out the character after (|CD| prints a pipe)
+   PN   - Wait for a key to be pressed without prompting
+   PO   - Used in display files to disable pausing for that display file
+   QO   - Replaced with a randomly generated Quote of the Day
+   RP## - Sets the internal screen pause line counter to ##
+   XX   - Returns no value
+
+
+   DF<file>| - Send display file <file> Example: |DFmyansi|
+
+   DI## - Sets the baud rate of the current display file, using the
+          following scale:
+
+            00 -    = No baud emulation
+            01 - 09 = 300 baud
+            10 - 19 = 1200 baud
+            20 - 29 = 2400 baud
+            30 - 39 = 4800 baud
+            40 - 49 = 9600 baud
+            50 - 59 = 19200 baud
+            60 - 69 = 28800 baud
+            70 - 79 = 38460 baud
+            80 - 89 = 57600 baud
+            90 - 99 = 115200 baud
+
+ -------------------------------------------------------------------------
+ A.9  Prompt Info Codes
+ -------------------------------------------------------------------------
+
+   Prompt Info codes are used within the prompts found in a theme's prompt
+   file.  The value of each prompt is dynamic, and changes depending on
+   each specific prompt.
+
+   The prompt editor and the prompt file itself will have comments which
+   show what each Prompt Info code's value means for that prompt.  For an
+   example, lets look at prompt #334:
+
+     334 Jump to which message? (1-|&2):
+
+   In this prompt, &1 is replaced by the current message number, and &2
+   is replaced by the total number of messages in the base.  These values
+   are noted in the comments for that particular prompt in both the editor
+   and the prompt file.
+
+   Prompt Info codes currently range from &0-&9, and from &A-&E
+
+ -------------------------------------------------------------------------
+ A.10  Screen Info Codes
+ -------------------------------------------------------------------------
+
+   Note: These codes are slowly being depreciated because they're annoying
+   to use.  The newer templates will have screen coordinates defined within
+   a .INI-like text file.
+

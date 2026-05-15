@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard{% endblock %}
+{% block content %}
+<div class="bbs-header"><h1><i class="bi bi-trophy-fill"></i> Leaderboard</h1></div>
+
+<div class="mb-3">
+    {% for p, label in [('week','This week'),('month','This month'),('all','All time')] %}
+        <a href="?period={{ p }}" class="btn btn-sm {% if period == p %}btn-primary{% else %}btn-outline-primary{% endif %}">{{ label }}</a>
+    {% endfor %}
+</div>
+
+<div class="row g-3">
+<div class="col-md-6">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-pencil"></i> Top Posters</div>
+        <ol class="list-group list-group-flush list-group-numbered">
+            {% for u, n in top_posters %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <a href="{{ url_for('profile.view_user', username=u) }}">{{ u }}</a>
+                    <span class="badge bg-primary">{{ n }}</span>
+                </li>
+            {% else %}
+                <li class="list-group-item text-muted">No posts in this window.</li>
+            {% endfor %}
+        </ol>
+    </div>
+</div>
+
+<div class="col-md-6">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-collection"></i> Most Active Boards</div>
+        <ol class="list-group list-group-flush list-group-numbered">
+            {% for name, bid, n in top_boards %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <a href="{{ url_for('boards.view_board', board_id=bid) }}">{{ name }}</a>
+                    <span class="badge bg-primary">{{ n }}</span>
+                </li>
+            {% else %}
+                <li class="list-group-item text-muted">No board activity.</li>
+            {% endfor %}
+        </ol>
+    </div>
+</div>
+
+<div class="col-md-6">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-megaphone"></i> Top Shouters</div>
+        <ol class="list-group list-group-flush list-group-numbered">
+            {% for u, n in top_shouters %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <a href="{{ url_for('profile.view_user', username=u) }}">{{ u }}</a>
+                    <span class="badge bg-primary">{{ n }}</span>
+                </li>
+            {% else %}
+                <li class="list-group-item text-muted">No shouts in this window.</li>
+            {% endfor %}
+        </ol>
+    </div>
+</div>
+
+<div class="col-md-6">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-emoji-smile"></i> Top Reactors</div>
+        <ol class="list-group list-group-flush list-group-numbered">
+            {% for u, n in top_reactors %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <a href="{{ url_for('profile.view_user', username=u) }}">{{ u }}</a>
+                    <span class="badge bg-primary">{{ n }}</span>
+                </li>
+            {% else %}
+                <li class="list-group-item text-muted">No reactions yet.</li>
+            {% endfor %}
+        </ol>
+    </div>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Chat Bans - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-slash-circle"></i> MRC Chat Bans</h1>
+    <p>Kick/ban users from chat rooms with optional expiry.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add Ban</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-3">
+                <label class="form-label">User</label>
+                <select name="user_id" class="form-select" required>
+                    {% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Room (blank = all rooms)</label>
+                <input type="text" name="room" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Hours (blank = permanent)</label>
+                <input type="number" name="duration_hours" class="form-control" min="1">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Reason</label>
+                <input type="text" name="reason" class="form-control">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-danger w-100">Ban</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Active &amp; Expired Bans</div>
+    <div class="card-body p-0">
+    {% if bans %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>User</th><th>Room</th><th>Reason</th><th>Expires</th>
+                <th>Issued by</th><th>When</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for b in bans %}
+                <tr {% if not b.is_active %}class="text-muted"{% endif %}>
+                    <td>{{ b.user.username if b.user else '?' }}</td>
+                    <td>{{ b.room or 'ALL' }}</td>
+                    <td>{{ b.reason or '' }}</td>
+                    <td>{{ b.expires_at.strftime('%Y-%m-%d %H:%M') if b.expires_at else 'never' }}</td>
+                    <td>{{ b.issued_by.username if b.issued_by else '' }}</td>
+                    <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="remove">
+                            <input type="hidden" name="ban_id" value="{{ b.id }}">
+                            <button class="btn btn-link btn-sm p-0">lift</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No chat bans.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}New page — Wiki{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-plus-square"></i> Create a new wiki page</h1>
+</div>
+
+<form method="post" action="{{ url_for('wiki.new') }}" class="card p-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label">Page title</label>
+        <input type="text" name="title" class="form-control" required
+               value="{{ title }}" autofocus
+               placeholder="e.g. BinkP setup, Door installation guide…"
+               oninput="suggestSlug(this.value)">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Slug
+            <small class="text-muted">URL-safe; auto-derived from title</small></label>
+        <div class="input-group">
+            <span class="input-group-text">/wiki/</span>
+            <input type="text" name="slug" id="slugField" class="form-control"
+                   value="{{ slug }}"
+                   placeholder="page-name-here"
+                   pattern="[a-z0-9\-]+">
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary"><i class="bi bi-pencil-square"></i> Continue to editor</button>
+        <a href="{{ url_for('wiki.index') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+function suggestSlug(title) {
+    const f = document.getElementById('slugField');
+    if (f.dataset.touched === '1') return;
+    const slug = (title || '').toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    f.value = slug;
+}
+document.getElementById('slugField').addEventListener('input', function() {
+    this.dataset.touched = '1';
+});
+</script>
+{% endblock %}

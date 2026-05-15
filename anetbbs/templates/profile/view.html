@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.display_name or user.username }}'s Profile - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Profile Sidebar -->
+    <div class="col-md-3">
+        <div class="card mb-3">
+            <div class="card-body text-center">
+                {% if avatar %}
+                    <img src="{{ avatar }}" alt="Avatar" class="rounded-circle mb-2" style="width:100px;height:100px;object-fit:cover;border:2px solid var(--theme-primary);">
+                {% else %}
+                    <i class="bi bi-person-circle" style="font-size:5rem;"></i>
+                {% endif %}
+                <h4>{{ user.display_name or user.username }}</h4>
+                {% if user.display_name %}
+                    <p class="small">@{{ user.username }}</p>
+                {% endif %}
+                {% if online %}
+                    <span><i class="bi bi-circle-fill text-success" style="font-size:0.6rem;"></i> Online</span>
+                {% else %}
+                    <span><i class="bi bi-circle" style="font-size:0.6rem;"></i> Offline</span>
+                {% endif %}
+                {% if user.is_admin %}
+                    <div><span class="badge bg-warning text-dark mt-1">Admin</span></div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
+            <div class="card-body">
+                {% if user.location %}
+                    <p><i class="bi bi-geo-alt"></i> {{ user.location }}</p>
+                {% endif %}
+                {% if user.website %}
+                    <p><i class="bi bi-link-45deg"></i> <a href="{{ user.website }}" target="_blank" rel="noopener noreferrer">{{ user.website }}</a></p>
+                {% endif %}
+                {% if user.show_email %}
+                    <p><i class="bi bi-envelope"></i> {{ user.email }}</p>
+                {% endif %}
+                <p><i class="bi bi-calendar"></i> Joined {{ user.created_at.strftime('%Y-%m-%d') }}</p>
+                {% if user.last_login %}
+                    <p><i class="bi bi-clock"></i> Last login {{ user.last_login.strftime('%Y-%m-%d') }}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-graph-up"></i> Stats</div>
+            <div class="card-body">
+                <p><strong>Posts:</strong> {{ stats.total_posts }}</p>
+                <p><strong>Replies:</strong> {{ stats.total_replies }}</p>
+                <p><strong>Member for:</strong> {{ stats.account_age }} days</p>
+            </div>
+        </div>
+
+        {% if current_user.is_authenticated and current_user.username == user.username %}
+        <div class="d-grid gap-2">
+            <a href="{{ url_for('profile.edit') }}" class="btn btn-primary"><i class="bi bi-pencil"></i> Edit Profile</a>
+            <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary"><i class="bi bi-key"></i> Change Password</a>
+        </div>
+        {% elif current_user.is_authenticated %}
+        <div class="d-grid">
+            <a href="{{ url_for('pm.compose', username=user.username) }}" class="btn btn-primary"><i class="bi bi-envelope"></i> Send Message</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Profile Content -->
+    <div class="col-md-9">
+        {% if user.bio %}
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-person"></i> About</div>
+            <div class="card-body">
+                <p>{{ user.bio }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if user.signature %}
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-pen"></i> Signature</div>
+            <div class="card-body">
+                <em>{{ user.signature }}</em>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if groups %}
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-people-fill"></i> Groups ({{ groups|length }})</div>
+            <div class="card-body">
+                {% for gm in groups %}
+                <a href="{{ url_for('groups.view', group_id=gm.group.id) }}" class="badge bg-secondary me-1 mb-1 text-decoration-none" style="font-size:0.9rem;">
+                    {% if gm.group.tag %}[{{ gm.group.tag }}] {% endif %}{{ gm.group.name }}
+                    {% if gm.is_leader %}<i class="bi bi-star-fill text-warning ms-1" title="Leader"></i>{% endif %}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if achievements %}
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-trophy"></i> Achievements ({{ achievements|length }})</div>
+            <div class="card-body">
+                <div class="row">
+                    {% for a in achievements %}
+                    <div class="col-md-6 mb-2">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-{{ a.icon }} text-warning me-2" style="font-size:1.5rem;"></i>
+                            <div>
+                                <strong>{{ a.name }}</strong>
+                                <div class="text-muted small">{{ a.description }}</div>
+                                <div class="text-muted" style="font-size:0.7rem;">earned {{ a.earned_at.strftime('%Y-%m-%d') }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-header"><i class="bi bi-chat-left-text"></i> Recent Posts</div>
+            <div class="card-body p-0">
+                {% if recent_posts %}
+                <div class="list-group list-group-flush">
+                    {% for post in recent_posts %}
+                    <a href="{{ url_for('boards.view_post', post_id=post.id) }}"
+                       class="list-group-item list-group-item-action"
+                       style="background-color:var(--theme-card-bg);border-color:var(--theme-primary);color:var(--theme-primary);">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ post.subject }}</strong>
+                            <small>{{ post.created_at.strftime('%Y-%m-%d') }}</small>
+                        </div>
+                        <small>in {{ post.board.name }}</small>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="p-3">No posts yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

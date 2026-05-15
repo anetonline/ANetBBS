@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ message.subject }} - {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-open"></i> Message</h1>
+</div>
+<div class="card mb-3">
+    <div class="card-header">
+        <strong>{{ message.subject }}</strong>
+    </div>
+    <div class="card-body">
+        <p><strong>From:</strong> <a href="{{ url_for('profile.view_user', username=message.sender.username) }}">{{ message.sender.username }}</a></p>
+        <p><strong>To:</strong> <a href="{{ url_for('profile.view_user', username=message.recipient.username) }}">{{ message.recipient.username }}</a></p>
+        <p><strong>Date:</strong> {{ message.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        <hr style="border-color: var(--theme-primary, #00ff00);">
+        <button type="button" id="toggleMd" class="btn btn-link btn-sm p-0 mb-2">
+            <i class="bi bi-markdown"></i> Toggle Markdown view
+        </button>
+        <div class="text-end mb-2">
+            {% set msg_type = 'pm' %}{% set msg_id = message.id %}
+            {% include '_vote_buttons.html' %}
+        </div>
+        <pre id="bodyPlain" class="ansi-body" style="white-space:pre-wrap;font-family:inherit;">{{ message.content | msgbody }}</pre>
+        <div id="bodyMd" style="display:none;">{{ message.content | markdown }}</div>
+        {% if message.sender and message.sender.signature %}
+        <div class="mt-3 pt-2 small text-muted" style="border-top:1px dashed var(--theme-border); white-space: pre-wrap;">
+            -- <br>{{ message.sender.signature }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+<script>
+(function() {
+    const btn = document.getElementById('toggleMd');
+    const plain = document.getElementById('bodyPlain');
+    const md = document.getElementById('bodyMd');
+    if (!btn || !plain || !md) return;
+    btn.addEventListener('click', () => {
+        const showMd = plain.style.display !== 'none';
+        plain.style.display = showMd ? 'none' : '';
+        md.style.display = showMd ? '' : 'none';
+    });
+})();
+</script>
+<div class="d-flex gap-2">
+    {% if message.recipient_id == current_user.id %}
+    <a href="{{ url_for('pm.compose', username=message.sender.username) }}" class="btn btn-primary"><i class="bi bi-reply"></i> Reply</a>
+    <a href="{{ url_for('pm.compose', username=message.sender.username, quote=message.id) }}" class="btn btn-outline-secondary"><i class="bi bi-quote"></i> Quote Reply</a>
+    <form method="post" action="{{ url_for('saved.add') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="kind" value="pm">
+        <input type="hidden" name="target_id" value="{{ message.id }}">
+        <button type="submit" class="btn btn-outline-warning"><i class="bi bi-bookmark-star"></i> Save</button>
+    </form>
+    <form method="post" action="{{ url_for('pm.delete', message_id=message.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Delete</button>
+    </form>
+    <a href="{{ url_for('pm.inbox') }}" class="btn btn-secondary">Back to Inbox</a>
+    {% else %}
+    <a href="{{ url_for('pm.sent') }}" class="btn btn-secondary">Back to Sent</a>
+    {% endif %}
+</div>
+
+{% if conversation and conversation | length > 1 %}
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-chat-text"></i> Conversation with {{ other.username if other else '?' }}
+        ({{ conversation | length }} messages)
+    </div>
+    <div class="card-body p-0">
+        <ul class="list-group list-group-flush">
+        {% for m in conversation %}
+            <li class="list-group-item {% if m.id == message.id %}bg-secondary bg-opacity-25{% endif %}">
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('pm.read', message_id=m.id) }}">
+                        <strong>{{ m.sender.username if m.sender else '?' }}</strong>:
+                        {{ m.subject or '(no subject)' }}
+                    </a>
+                    <small>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                </div>
+                <small class="text-muted">{{ (m.content or '')[:120] }}{% if (m.content or '')|length > 120 %}...{% endif %}</small>
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

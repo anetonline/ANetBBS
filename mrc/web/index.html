@@ -1,0 +1,2329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <title>MRC Chat - ANetBBS</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    
+    :root {
+      --bg:#000;
+      --fg:#0f0;
+      --fg-dim:#0a0;
+      --panel-bg:#001100;
+      --panel-bg2:#003300;
+      --border:#0f0;
+      --accent:#0ff;
+      --link-bg:#001100;
+      --link-bg-hover:#005500;
+      --btn-bg:#003300;
+      --btn-bg-hover:#005500;
+      --input-bg:#000;
+      --mention:#ffff55;
+      --action:#ff55ff;
+      --error:#f00;
+      --system:#ff0;
+      --dm:#55ffff;
+      --ui-font-size:14px;
+      --ui-line-height:1.4;
+      --crt-scanline-opacity:0.18;
+      --crt-vignette-opacity:0.22;
+      --crt-glow:0.35;
+      --vh: 1vh;
+    }
+    
+    body.theme-green {}
+    body.theme-amber {
+      --fg:#ffb000; --fg-dim:#cc8c00;
+      --panel-bg:#1a0f00; --panel-bg2:#332200;
+      --border:#ffb000; --accent:#55ffff;
+      --link-bg:#1a0f00; --link-bg-hover:#4a2f00;
+      --btn-bg:#332200; --btn-bg-hover:#4a2f00;
+    }
+    body.theme-cyan {
+      --fg:#55ffff; --fg-dim:#22bcbc;
+      --panel-bg:#001616; --panel-bg2:#003333;
+      --border:#55ffff; --accent:#ffff55;
+      --link-bg:#001616; --link-bg-hover:#005555;
+      --btn-bg:#003333; --btn-bg-hover:#005555;
+    }
+    body.theme-mono {
+      --fg:#e6e6e6; --fg-dim:#aaaaaa;
+      --panel-bg:#0e0e0e; --panel-bg2:#1b1b1b;
+      --border:#e6e6e6; --accent:#e6e6e6;
+      --link-bg:#0e0e0e; --link-bg-hover:#2a2a2a;
+      --btn-bg:#1b1b1b; --btn-bg-hover:#2a2a2a;
+      --mention:#ffffff; --action:#ffffff; --dm:#ffffff; --system:#ffffff;
+    }
+    body.theme-ibmblue {
+      --bg:#001b33; --fg:#7fd0ff; --fg-dim:#4aa6d6;
+      --panel-bg:#001326; --panel-bg2:#00284d;
+      --border:#7fd0ff; --accent:#ffff55;
+      --link-bg:#001326; --link-bg-hover:#003a70;
+      --btn-bg:#00284d; --btn-bg-hover:#003a70;
+    }
+    
+    html {
+      height: 100%;
+    }
+    
+    body {
+      font-family: 'Courier New', monospace;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      font-size: var(--ui-font-size);
+      line-height: var(--ui-line-height);
+      position: fixed;
+      width: 100%;
+      overflow: hidden;
+    }
+    
+    .header {
+      background: var(--panel-bg2);
+      padding: 10px 20px;
+      border-bottom: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+      z-index: 100;
+      flex-wrap: wrap;
+    }
+    
+    .header h1 { font-size: 24px; white-space: nowrap; }
+    .header a,
+    .header button {
+      color: var(--fg);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      font-size: 12px;
+      background: var(--link-bg);
+      cursor: pointer;
+    }
+    .header a:hover,
+    .header button:hover { background: var(--link-bg-hover); }
+    
+    #leave-btn-mobile {
+      display: none;
+    }
+    
+    .logo {
+      height: 90px;
+      width: auto;
+      display: block;
+    }
+
+    .status {
+      padding: 5px 20px;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    
+    .status-left { overflow: hidden; text-overflow: ellipsis; }
+    .status-right { display: flex; align-items: center; gap: 14px; overflow: hidden; min-width: 0; }
+    .topic-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 60vw; overflow: hidden; }
+    .topic-text { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 55vw; }
+    
+    .main-container { 
+      display: flex; 
+      flex: 1; 
+      overflow: hidden; 
+      position: relative;
+      min-height: 0;
+    }
+    
+    .chat-area { 
+      flex: 1; 
+      display: flex; 
+      flex-direction: column; 
+      border-right: 1px solid var(--border); 
+      min-height: 0;
+    }
+    
+    .messages { 
+      flex: 1; 
+      overflow-y: auto; 
+      padding: 10px; 
+      background: var(--bg); 
+      min-height: 0;
+    }
+    
+    .message { margin-bottom: 5px; white-space: pre-wrap; }
+    .message.system  { color: var(--system); }
+    .message.error   { color: var(--error); }
+    .message.info    { color: var(--accent); }
+    .message.notice  { color: var(--system); }
+    .message.dm      { color: var(--dm); }
+    .message.mention {
+      color: var(--mention);
+      text-shadow: 0 0 6px rgba(255,255,120,.35);
+      border-left: 2px solid var(--mention);
+      padding-left: 6px;
+    }
+    .message.action { color: var(--action); }
+    
+    .card {
+      display: inline-block;
+      padding: 0 4px;
+      margin: 0 1px;
+      background: #f8f8f8;
+      color: #111;
+      border: 1px solid #cfcfcf;
+      border-radius: 3px;
+      box-shadow: 0 1px 0 rgba(0,0,0,.35);
+      font-weight: bold;
+      line-height: 1.25;
+      vertical-align: baseline;
+      text-shadow: none;
+    }
+    .card.red   { color: #b00000; }
+    .card.black { color: #111; }
+    .card .suit { font-weight: normal; margin-right: 1px; }
+    
+    .input-area { 
+      border-top: 1px solid var(--border); 
+      padding: 10px; 
+      background: var(--panel-bg); 
+      flex-shrink: 0;
+      overflow: visible;
+    }
+    
+    .input-group { display: flex; gap: 10px; }
+    
+    input[type="text"] {
+      flex: 1;
+      background: var(--input-bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      padding: 8px;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    
+    input[type="text"]:focus { outline: none; border-color: var(--accent); }
+    
+    button {
+      background: var(--btn-bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    
+    button:hover { background: var(--btn-bg-hover); }
+    
+    .join-panel { padding: 20px; text-align: center; }
+    .join-panel input { margin: 10px 0; width: 300px; max-width: 90%; }
+    
+    .sidebar { 
+      width: 280px; 
+      background: var(--panel-bg); 
+      padding: 10px; 
+      overflow-y: auto; 
+      flex-shrink: 0;
+    }
+    
+    .sidebar h3 { font-size: 14px; margin: 10px 0; color: var(--accent); }
+    .sidebar-item { padding: 5px; margin: 2px 0; font-size: 12px; }
+    .userlist { border: 1px solid var(--border); background: var(--bg); padding: 6px; max-height: 260px; overflow: auto; font-size: 12px; }
+    .user { padding: 3px 4px; cursor: pointer; user-select: none; }
+    .user:hover    { background: var(--panel-bg2); }
+    .user.selected { background: var(--accent); color: #000; }
+    .help-hint { font-size: 11px; color: #555; padding: 4px 0 0 0; }
+    .panel { border: 1px solid var(--border); background: var(--bg); margin-top: 10px; font-size: 12px; }
+    .panel-header {
+      padding: 8px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-bg);
+      color: var(--accent);
+      font-weight: bold;
+    }
+    .panel-header:hover { background: var(--panel-bg2); }
+    .panel-body { padding: 8px; display: none; }
+    .panel.open .panel-body { display: block; }
+    .panel .chev { color: var(--fg); font-weight: normal; }
+    .panel label { display: block; margin: 6px 0 2px; color: var(--accent); }
+    .panel-row { display: flex; gap: 8px; align-items: center; }
+    .panel-row input[type="text"],
+    .panel-row select,
+    .panel-row input[type="range"],
+    .panel-row textarea {
+      flex: 1;
+      background: var(--input-bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      padding: 6px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    textarea { resize: vertical; min-height: 44px; }
+    input[type="range"] { padding: 0; border: 0; background: transparent; }
+    .panel-row button { padding: 6px 10px; font-size: 12px; }
+    .style-preview { margin-top: 6px; color: #aaa; }
+    .style-preview span { color: var(--accent); }
+    .toggle-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; color: var(--fg); }
+    .toggle-row input { transform: translateY(1px); }
+    .mentions-list { border: 1px solid var(--border); background: var(--bg); padding: 6px; max-height: 220px; overflow: auto; }
+    .mention-item {
+      padding: 6px;
+      border-bottom: 1px solid var(--panel-bg2);
+      cursor: pointer;
+      color: var(--mention);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .mention-item:hover { background: var(--panel-bg2); }
+    .mention-meta  { color: var(--accent); }
+    .mention-empty { color: #555; padding: 6px; }
+    .panel-header.attn { color: var(--mention); box-shadow: inset 0 0 0 1px rgba(255,255,120,.4); }
+    
+    body.crt-on .main-container::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,var(--crt-scanline-opacity)) 0px,
+        rgba(255,255,255,0.00) 1px,
+        rgba(0,0,0,0.00) 2px,
+        rgba(0,0,0,var(--crt-scanline-opacity)) 3px
+      );
+      mix-blend-mode: overlay;
+      opacity: 0.55;
+    }
+    body.crt-on .main-container::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center,
+        rgba(0,0,0,0) 0%,
+        rgba(0,0,0,var(--crt-vignette-opacity)) 70%,
+        rgba(0,0,0,calc(var(--crt-vignette-opacity) + 0.22)) 100%
+      );
+    }
+    body.crt-on { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(0,255,0,0.35); }
+    body.crt-on.theme-amber  { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(255,176,0,0.35); }
+    body.crt-on.theme-cyan   { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(85,255,255,0.35); }
+    body.crt-on.theme-ibmblue{ text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(127,208,255,0.35); }
+    body.crt-on.theme-mono   { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(230,230,230,0.25); }
+    
+    .c00{color:#000000;} .c01{color:#0000AA;} .c02{color:#00AA00;} .c03{color:#00AAAA;}
+    .c04{color:#AA0000;} .c05{color:#AA00AA;} .c06{color:#AA5500;} .c07{color:#AAAAAA;}
+    .c08{color:#555555;} .c09{color:#5555FF;} .c10{color:#55FF55;} .c11{color:#55FFFF;}
+    .c12{color:#FF5555;} .c13{color:#FF55FF;} .c14{color:#FFFF55;} .c15{color:#FFFFFF;}
+    
+    body.pipe-theme-theme .c07 { color: var(--fg-dim); }
+    body.pipe-theme-theme .c10 { color: var(--fg); }
+    body.pipe-theme-theme .c11 { color: var(--accent); }
+    body.pipe-theme-theme .c14 { color: var(--mention); }
+    body.pipe-theme-theme .c13 { color: var(--action); }
+    body.pipe-theme-theme .c12 { color: #ff6666; }
+    body.pipe-theme-theme .c15 { color: #ffffff; }
+
+    /* ================================================================
+       MOBILE RESPONSIVE STYLES (tablets and below)
+       ================================================================ */
+    @media (max-width: 1024px) {
+      .sidebar { width: 240px; }
+      .logo { height: 70px; }
+    }
+
+    @media (max-width: 768px) {
+      /* Stack layout vertically on mobile */
+      .main-container { 
+        flex-direction: column; 
+      }
+      
+      .sidebar { 
+        width: 100%; 
+        max-height: 30%; 
+        border-right: none;
+        border-top: 1px solid var(--border);
+        order: 2;
+      }
+      
+      .chat-area {
+        order: 1;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .header {
+        padding: 8px 12px;
+      }
+      
+      .header h1 { font-size: 16px; }
+      
+      .logo { height: 50px; }
+      
+      .status {
+        padding: 4px 12px;
+        font-size: 11px;
+        gap: 8px;
+      }
+      
+      .topic-wrap { max-width: 100%; }
+      .topic-text { max-width: calc(100vw - 140px); }
+      
+      .input-area {
+        padding: 8px;
+      }
+      
+      .input-group { 
+        gap: 6px;
+        flex-wrap: nowrap;
+      }
+      
+      /* Hide Leave button from input area on mobile */
+      #leave-btn {
+        display: none;
+      }
+      
+      /* Show Leave button in header on mobile */
+      #leave-btn-mobile {
+        display: inline-block;
+      }
+      
+      input[type="text"],
+      button {
+        font-size: 16px;
+        padding: 10px 8px;
+      }
+      
+      button { padding: 10px 12px; }
+      
+      .help-hint {
+        font-size: 10px;
+        display: none;
+      }
+      
+      .join-panel input { width: 100%; }
+      
+      /* Hide some sidebar content on mobile for space */
+      .sidebar-item { font-size: 11px; }
+      
+      .userlist { max-height: 150px; }
+      
+      .panel { margin-top: 6px; }
+      
+      .panel-header { padding: 6px; }
+      
+      .panel-body { padding: 6px; }
+      
+      .panel label { font-size: 11px; }
+      
+      .mentions-list { max-height: 150px; }
+      
+      /* Optimize for virtual keyboard */
+      input, textarea {
+        -webkit-appearance: none;
+        appearance: none;
+        border-radius: 0;
+      }
+    }
+
+    @media (max-width: 480px) {
+      body { font-size: 12px; }
+      
+      .header {
+        padding: 6px 8px;
+        flex-wrap: wrap;
+      }
+      
+      .header h1 { font-size: 14px; }
+      
+      .header a,
+      .header button { 
+        padding: 3px 6px;
+        font-size: 10px;
+      }
+      
+      .logo { height: 40px; }
+      
+      .logo-wrap { flex: 0 0 auto; }
+      
+      .status {
+        padding: 3px 8px;
+        font-size: 10px;
+        flex-wrap: wrap;
+      }
+      
+      .topic-wrap { 
+        max-width: 100%;
+        flex-basis: 100%;
+      }
+      
+      .topic-text { max-width: 100%; }
+      
+      .messages { padding: 6px; }
+      
+      .message { margin-bottom: 3px; }
+      
+      .input-area {
+        padding: 6px;
+      }
+      
+      .input-group { 
+        gap: 4px; 
+        flex-wrap: nowrap;
+      }
+      
+      input[type="text"] {
+        font-size: 16px;
+        flex-basis: 100%;
+        padding: 10px;
+      }
+      
+      .input-group button {
+        flex: 0 0 auto;
+        font-size: 12px;
+        padding: 8px 6px;
+      }
+      
+      .sidebar {
+        max-height: 25%;
+        padding: 6px;
+      }
+      
+      .sidebar h3 { 
+        font-size: 12px; 
+        margin: 6px 0;
+      }
+      
+      .userlist { 
+        max-height: 120px;
+        font-size: 11px;
+      }
+      
+      .panel { margin-top: 4px; font-size: 11px; }
+      .panel-header { padding: 4px; font-size: 11px; }
+      .panel-body { padding: 4px; }
+      .panel label { font-size: 10px; }
+      
+      .mentions-list { max-height: 120px; }
+    }
+  </style>
+</head>
+<body class="theme-green">
+<div class="header">
+  <div class="logo-wrap">
+    <img src="https://a-net.online/mrc.png" class="logo">
+  </div>
+  <a href="#" id="return-link">Return to BBS</a>
+  <button id="leave-btn-mobile" title="Leave the current room">Leave</button>
+</div>
+
+  <div class="status" id="status">
+    <div class="status-left">
+      Status: <span id="status-text">Connecting...</span>
+    </div>
+    <div class="status-right">
+      <div class="topic-wrap">
+        Topic: <span id="topic-text" class="topic-text">-</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="chat-area">
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <div id="join-panel" class="join-panel">
+          <h2>Join MRC Chat</h2>
+          <div><input type="text" id="handle-input" placeholder="Your handle" /></div>
+          <div><input type="text" id="room-input" placeholder="Room (default: Lobby)" value="Lobby" /></div>
+          <div>
+            <select id="server-select" style="margin:10px 0; width:300px; max-width:90%;">
+              <option value="primary">Bottomless Abyss (Primary)</option>
+              <option value="uk">UK ERB Fallback</option>
+              <option value="ca">CA ERB Fallback</option>
+            </select>
+          </div>
+          <div class="help-hint" id="server-select-hint" style="margin-top:-2px; margin-bottom:10px;">Choose which MRC network to connect to.</div>
+          <div><button id="join-btn">Join Chat</button></div>
+        </div>
+        <div id="chat-panel" style="display:none;">
+          <div class="input-group">
+            <input type="text" id="message-input"
+              placeholder="Type a message, /command, or !helper..."
+              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" 
+              inputmode="text" />
+            <button id="send-btn">Send</button>
+            <button id="leave-btn">Leave</button>
+          </div>
+          <div class="help-hint">
+            Tip: /help, /whoon, /chatters, /join &lt;room&gt;, /identify &lt;pass&gt;,
+            /register &lt;pass&gt; [email], /t user msg, /me action, /ctcp target command, and helpers like !list
+            <div style="margin-top:4px;">
+              Shortcuts: <code>Alt+H</code> history, <code>Alt+T</code> sticky DM toggle,
+              <code>Alt+M</code> macros, <code>↑/↓</code> cycle recent inputs
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <h3>Information</h3>
+      <div class="sidebar-item">Room: <span id="current-room">-</span></div>
+      <div class="sidebar-item">Handle: <span id="current-handle">-</span></div>
+      <div class="sidebar-item">Server: <span id="server-info">-</span></div>
+
+      <div class="panel" id="helpers-panel" style="display:none;">
+        <div class="panel-header" id="helpers-header">
+          <span>Helpers</span>
+          <span class="chev" id="helpers-chev">[+]</span>
+        </div>
+        <div class="panel-body" id="helpers-body">
+          <div class="panel-row">
+            <button id="btn-help">/help</button>
+            <button id="btn-list">!list</button>
+          </div>
+          <div class="panel-row" style="margin-top:6px;">
+            <button id="btn-whoon">/whoon</button>
+            <button id="btn-chatters">/chatters</button>
+          </div>
+          <div style="height:8px;"></div>
+          <label>Quick Join</label>
+          <div class="panel-row">
+            <input type="text" id="quick-join-room" placeholder="room name (e.g. ddial)" />
+            <button id="btn-quick-join">Join</button>
+          </div>
+          <div style="height:10px;"></div>
+          <label>Session History (Alt+H)</label>
+          <div class="mentions-list" id="history-list" style="max-height:160px;"></div>
+          <div class="panel-row" style="margin-top:8px;">
+            <button id="history-clear">Clear History</button>
+          </div>
+          <div style="height:10px;"></div>
+          <label>Sticky DM (Alt+T)</label>
+          <div class="panel-row">
+            <button id="sticky-toggle">Toggle</button>
+            <span id="sticky-status" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          </div>
+          <div style="height:10px;"></div>
+          <label>Macros (Alt+M)</label>
+          <div class="help-hint">Set up to 12 macros. Click to send. Use {room} and {handle} placeholders.</div>
+          <div id="macros-list"></div>
+          <div class="panel-row" style="margin-top:8px;">
+            <button id="macros-edit">Edit Macros</button>
+          </div>
+          <div id="macros-editor" style="display:none;margin-top:8px;">
+            <textarea id="macros-json" spellcheck="false" placeholder='Example:
+[
+  {"name":"BJ 50","text":"/t johnny5 play blackjack 50"},
+  {"name":"Hit","text":"/t johnny5 hit"},
+  {"name":"Stand","text":"/t johnny5 stand"}
+]'></textarea>
+            <div class="panel-row" style="margin-top:6px;">
+              <button id="macros-save">Save</button>
+              <button id="macros-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="style-panel" style="display:none;">
+        <div class="panel-header" id="style-header">
+          <span>Handle Style</span>
+          <span class="chev" id="style-chev">[+]</span>
+        </div>
+        <div class="panel-body" id="style-body">
+          <label>Theme</label>
+          <div class="panel-row">
+            <select id="theme-select">
+              <option value="theme-green">Classic Green</option>
+              <option value="theme-amber">Amber</option>
+              <option value="theme-cyan">Cyan</option>
+              <option value="theme-ibmblue">IBM Blue</option>
+              <option value="theme-mono">Mono</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="crt-toggle" />
+            <label for="crt-toggle" style="margin:0;">CRT effect (scanlines + glow)</label>
+          </div>
+          <label>Font size</label>
+          <div class="panel-row">
+            <input type="range" id="font-size-range" min="11" max="20" step="1" />
+            <span id="font-size-label" style="min-width:64px;text-align:right;"></span>
+          </div>
+          <label>Line spacing</label>
+          <div class="panel-row">
+            <input type="range" id="line-height-range" min="1.1" max="1.9" step="0.05" />
+            <span id="line-height-label" style="min-width:64px;text-align:right;"></span>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="pipe-theme-toggle" />
+            <label for="pipe-theme-toggle" style="margin:0;">Theme-colored pipe palette</label>
+          </div>
+          <div class="panel-row" style="margin-top:8px;">
+            <button id="ui-reset">Reset UI</button>
+          </div>
+          <hr style="border:0;border-top:1px solid var(--border);opacity:.35;margin:10px 0;">
+          <label>Prefix Color (00-15)</label>
+          <div class="panel-row"><select id="style-prefix-color"></select></div>
+          <label>Handle Color (00-15)</label>
+          <div class="panel-row"><select id="style-handle-color"></select></div>
+          <label>Suffix Color (00-15)</label>
+          <div class="panel-row"><select id="style-suffix-color"></select></div>
+          <label for="style-prefix">Prefix</label>
+          <div class="panel-row">
+            <input type="text" id="style-prefix" maxlength="16" placeholder="e.g. !" />
+          </div>
+          <label for="style-suffix">Suffix</label>
+          <div class="panel-row">
+            <input type="text" id="style-suffix" maxlength="16" placeholder="e.g. |12>" />
+          </div>
+          <label>Typing Color (local + optional outgoing)</label>
+          <div class="panel-row"><select id="style-typing-color"></select></div>
+          <div class="toggle-row">
+            <input type="checkbox" id="outgoing-color-toggle" />
+            <label for="outgoing-color-toggle" style="margin:0;">Colorize outgoing chat</label>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="mention-sound-toggle" />
+            <label for="mention-sound-toggle" style="margin:0;">Ding on mention/DM</label>
+          </div>
+          <div class="panel-row" style="margin-top:8px;">
+            <button id="style-apply">Apply</button>
+            <button id="style-test">Test (local)</button>
+            <button id="style-reset">Reset</button>
+          </div>
+          <div class="style-preview">Preview: <span id="style-preview">-</span></div>
+        </div>
+      </div>
+
+      <h3>Users</h3>
+      <div class="sidebar-item" style="padding:0;margin:0 0 6px 0;color:#555;">
+        Click a name to DM-sticky toggle (<code>/t user</code>). Click again to stop. Tab autocompletes.
+      </div>
+      <div class="userlist" id="userlist"></div>
+
+      <div class="panel" id="mentions-panel" style="display:none;">
+        <div class="panel-header" id="mentions-header">
+          <span>Mentions <span id="mentions-count" class="mention-meta"></span></span>
+          <span class="chev" id="mentions-chev">[+]</span>
+        </div>
+        <div class="panel-body" id="mentions-body">
+          <div class="panel-row" style="justify-content:space-between;">
+            <button id="mentions-clear">Clear</button>
+            <button id="mentions-test">Test ding</button>
+          </div>
+          <div style="height:8px;"></div>
+          <div class="mentions-list" id="mentions-list">
+            <div class="mention-empty">No mentions yet.</div>
+          </div>
+          <div class="help-hint" style="padding-top:8px;">
+            Mentions include <code>@you</code> and DMs. Click to jump to scrollback.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/mrcweb/static/client.js"></script>
+  <script>
+    // ========================================================================
+    // MOBILE VIEWPORT FIX: Set dynamic viewport height to avoid 100vh issues
+    // ========================================================================
+    function setActualVh() {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', vh + 'px');
+    }
+    setActualVh();
+    window.addEventListener('resize', setActualVh);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(setActualVh, 100);
+    });
+
+    // ========================================================================
+    // MOBILE: Scroll input into view when keyboard appears
+    // ========================================================================
+    function setupMobileInputHandling() {
+      const messageInput = document.getElementById('message-input');
+      if (!messageInput) return;
+
+      messageInput.addEventListener('focus', () => {
+        setTimeout(() => {
+          messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+      });
+
+      // Also handle viewport resize (keyboard appearing on Android)
+      window.addEventListener('resize', () => {
+        if (document.activeElement === messageInput) {
+          messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', setupMobileInputHandling);
+
+    // ========================================================================
+    // BACKGROUND/VISIBILITY: Keep WebSocket alive and reconnect on resume
+    // ========================================================================
+    function setupVisibilityHandling() {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          // App went to background
+          logger.info('App hidden - WebSocket will maintain connection');
+          // Don't disconnect, just let it stay connected via keepalive pings
+        } else {
+          // App came back to foreground
+          logger.info('App visible again - checking connection status');
+          if (client && !client.connected) {
+            logger.info('Reconnecting after visibility resume...');
+            client.connect().catch(e => {
+              logger.error('Reconnection failed: ' + e);
+            });
+          }
+        }
+      });
+
+      // Also handle page freeze/resume (on iOS especially)
+      window.addEventListener('beforeunload', () => {
+        logger.info('Page may be unloading, gracefully stopping');
+      });
+
+      window.addEventListener('pagehide', () => {
+        logger.info('Page hidden (may freeze)');
+      });
+
+      window.addEventListener('pageshow', () => {
+        logger.info('Page shown again - checking connection');
+        if (client && !client.connected) {
+          logger.info('Reconnecting after pageshow...');
+          client.connect().catch(e => {
+            logger.error('Reconnection failed: ' + e);
+          });
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', setupVisibilityHandling);
+
+    // ========================================================================
+    // LOGGING HELPER for debugging
+    // ========================================================================
+    const logger = {
+      info: (msg) => console.log('[MRC]', msg),
+      error: (msg) => console.error('[MRC-ERROR]', msg),
+      warn: (msg) => console.warn('[MRC-WARN]', msg)
+    };
+
+    // ========================================================================
+    // EXISTING CODE (from original index.html)
+    // ========================================================================
+    (function () {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      if (!window.MRC_SERVER_CHOICES) {
+        window.MRC_SERVER_CHOICES = [
+          { id: 'primary', label: 'Bottomless Abyss (Primary)', ws_path: '/mrcws' },
+          { id: 'uk',      label: 'UK ERB Fallback',            ws_path: '/mrcws-uk' },
+          { id: 'ca',      label: 'CA ERB Fallback',            ws_path: '/mrcws-ca' }
+        ];
+      }
+      if (!window.MRC_WS_URL) {
+        window.MRC_WS_URL = proto + '//' + location.host + '/mrcws';
+      }
+      if (!window.RETURN_TO_BBS_URL) window.RETURN_TO_BBS_URL = '';
+      if (window.SUPPRESS_UNKNOWN_COMMAND  === undefined) window.SUPPRESS_UNKNOWN_COMMAND  = true;
+      if (window.SUPPRESS_USERLIST_LINES   === undefined) window.SUPPRESS_USERLIST_LINES   = true;
+      if (window.SUPPRESS_ROOMTOPIC_LINES  === undefined) window.SUPPRESS_ROOMTOPIC_LINES  = true;
+    })();
+
+    const WS_PING_INTERVAL_MS = 25000;
+    let wsPingTimer = null;
+
+    const SERVER_PREF_KEY = 'mrc_server_choice_v1';
+
+    function getServerChoices() {
+      const arr = Array.isArray(window.MRC_SERVER_CHOICES) ? window.MRC_SERVER_CHOICES : [];
+      return arr.filter(x => x && x.id && x.label && x.ws_path);
+    }
+
+    function getSelectedServerId() {
+      try {
+        return localStorage.getItem(SERVER_PREF_KEY) || 'primary';
+      } catch (_) {
+        return 'primary';
+      }
+    }
+
+    function setSelectedServerId(id) {
+      try { localStorage.setItem(SERVER_PREF_KEY, id || 'primary'); } catch (_) {}
+    }
+
+    function getSelectedServerChoice() {
+      const choices = getServerChoices();
+      const selectedId = getSelectedServerId();
+      return choices.find(x => x.id === selectedId) || choices[0] || { id: 'primary', label: 'MRC', ws_path: '/mrcws' };
+    }
+
+    function buildWsUrlForChoice(choice) {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const path = (choice && choice.ws_path) ? String(choice.ws_path) : '/mrcws';
+      return proto + '//' + location.host + path;
+    }
+
+    function getSelectedWsUrl() {
+      return buildWsUrlForChoice(getSelectedServerChoice());
+    }
+
+    function populateServerSelect() {
+      if (!serverSelect) return;
+      const choices = getServerChoices();
+      const selectedId = getSelectedServerId();
+      serverSelect.innerHTML = '';
+      for (const choice of choices) {
+        const opt = document.createElement('option');
+        opt.value = choice.id;
+        opt.textContent = choice.label;
+        if (choice.id === selectedId) opt.selected = true;
+        serverSelect.appendChild(opt);
+      }
+      const active = getSelectedServerChoice();
+      if (serverSelectHint) {
+        serverSelectHint.textContent = 'Selected network: ' + (active.label || 'MRC');
+      }
+    }
+
+    function startWsKeepalive() {
+      stopWsKeepalive();
+      wsPingTimer = setInterval(() => {
+        try {
+          if (!client || !client.ws) return;
+          if (client.ws.readyState !== 1) return;
+          client.ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+        } catch (_) {}
+      }, WS_PING_INTERVAL_MS);
+    }
+
+    function stopWsKeepalive() {
+      if (wsPingTimer) clearInterval(wsPingTimer);
+      wsPingTimer = null;
+    }
+
+    let client       = null;
+    let currentHandle = '';
+    let currentRoom   = '';
+    let knownUsers    = [];
+
+    let stickyDmUser  = null;
+    let stickyDmNodes = new Map();
+
+    const sentHistory     = [];
+    const SENT_HISTORY_MAX = 20;
+    let sentHistoryIdx    = -1;
+    let sentHistoryDraft  = '';
+
+    const MACROS_KEY = 'mrc_macros_v1';
+    const MACROS_MAX = 12;
+    let macros = [];
+
+    // -----------------------------------------------------------------------
+    // Wire-limit overhead (received from server on 'joined' / 'style_updated')
+    // -----------------------------------------------------------------------
+    const MRC_MAX_LEN = 140;
+    let _handleOverheadChars = 0;
+    let _dmOverheadChars     = 0;
+
+    function _chatTypedLimit() { return Math.max(10, MRC_MAX_LEN - _handleOverheadChars); }
+    function _dmTypedLimit()   { return Math.max(10, MRC_MAX_LEN - _dmOverheadChars); }
+
+    // DOM refs
+    const messagesDiv      = document.getElementById('messages');
+    const statusText       = document.getElementById('status-text');
+    const topicText        = document.getElementById('topic-text');
+    const joinPanel        = document.getElementById('join-panel');
+    const chatPanel        = document.getElementById('chat-panel');
+    const handleInput      = document.getElementById('handle-input');
+    const roomInput        = document.getElementById('room-input');
+    const serverSelect     = document.getElementById('server-select');
+    const serverSelectHint = document.getElementById('server-select-hint');
+    const messageInput     = document.getElementById('message-input');
+    const joinBtn          = document.getElementById('join-btn');
+    const sendBtn          = document.getElementById('send-btn');
+    const leaveBtn         = document.getElementById('leave-btn');
+    const leaveBtnMobile   = document.getElementById('leave-btn-mobile');
+    const returnLink       = document.getElementById('return-link');
+    const userListDiv      = document.getElementById('userlist');
+    const helpersPanel     = document.getElementById('helpers-panel');
+    const helpersHeader    = document.getElementById('helpers-header');
+    const helpersChev      = document.getElementById('helpers-chev');
+    const btnHelp          = document.getElementById('btn-help');
+    const btnList          = document.getElementById('btn-list');
+    const btnWhoon         = document.getElementById('btn-whoon');
+    const btnChatters      = document.getElementById('btn-chatters');
+    const quickJoinRoom    = document.getElementById('quick-join-room');
+    const btnQuickJoin     = document.getElementById('btn-quick-join');
+    const historyList      = document.getElementById('history-list');
+    const historyClear     = document.getElementById('history-clear');
+    const stickyToggleBtn  = document.getElementById('sticky-toggle');
+    const stickyStatus     = document.getElementById('sticky-status');
+    const macrosList       = document.getElementById('macros-list');
+    const macrosEdit       = document.getElementById('macros-edit');
+    const macrosEditor     = document.getElementById('macros-editor');
+    const macrosJson       = document.getElementById('macros-json');
+    const macrosSave       = document.getElementById('macros-save');
+    const macrosCancel     = document.getElementById('macros-cancel');
+    const stylePanel       = document.getElementById('style-panel');
+    const styleHeader      = document.getElementById('style-header');
+    const styleChev        = document.getElementById('style-chev');
+    const themeSelect      = document.getElementById('theme-select');
+    const crtToggle        = document.getElementById('crt-toggle');
+    const pipeThemeToggle  = document.getElementById('pipe-theme-toggle');
+    const fontSizeRange    = document.getElementById('font-size-range');
+    const lineHeightRange  = document.getElementById('line-height-range');
+    const fontSizeLabel    = document.getElementById('font-size-label');
+    const lineHeightLabel  = document.getElementById('line-height-label');
+    const uiResetBtn       = document.getElementById('ui-reset');
+    const selPrefixColor   = document.getElementById('style-prefix-color');
+    const selHandleColor   = document.getElementById('style-handle-color');
+    const selSuffixColor   = document.getElementById('style-suffix-color');
+    const stylePrefix      = document.getElementById('style-prefix');
+    const styleSuffix      = document.getElementById('style-suffix');
+    const selTypingColor   = document.getElementById('style-typing-color');
+    const outgoingColorToggle = document.getElementById('outgoing-color-toggle');
+    const mentionSoundToggle  = document.getElementById('mention-sound-toggle');
+    const styleApply       = document.getElementById('style-apply');
+    const styleTest        = document.getElementById('style-test');
+    const styleReset       = document.getElementById('style-reset');
+    const stylePreview     = document.getElementById('style-preview');
+    const mentionsPanel    = document.getElementById('mentions-panel');
+    const mentionsHeader   = document.getElementById('mentions-header');
+    const mentionsChev     = document.getElementById('mentions-chev');
+    const mentionsCount    = document.getElementById('mentions-count');
+    const mentionsList     = document.getElementById('mentions-list');
+    const mentionsClear    = document.getElementById('mentions-clear');
+    const mentionsTest     = document.getElementById('mentions-test');
+
+    // -----------------------------------------------------------------------
+    // Utility
+    // -----------------------------------------------------------------------
+    function escapeHtml(s) {
+      return (s ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    function stripPipeCodes(s) { return (s || '').replace(/\|\d{2}/g, ''); }
+
+    // -----------------------------------------------------------------------
+    // Message-length helpers
+    // -----------------------------------------------------------------------
+    function _typedPortionForLimit(rawLine) {
+      const t = String(rawLine || '').trim();
+      if (!t) return { kind: 'none', text: '' };
+
+      if (t.startsWith('!')) return { kind: 'chat', text: t };
+
+      if (t.startsWith('/')) {
+        const raw   = t.slice(1).trim();
+        const parts = raw.split(/\s+/);
+        const verb  = (parts[0] || '').toUpperCase();
+        const rest  = raw.slice((parts[0] || '').length).trim();
+
+        if (verb === 'T' || verb === 'DM' || verb === 'MSG') {
+          if (!rest) return { kind: 'dm', text: '' };
+          const sp        = rest.split(/\s+/);
+          const toUserRaw = sp[0] || '';
+          const dmText    = rest.slice(toUserRaw.length).trim();
+          return { kind: 'dm', text: dmText };
+        }
+        if (verb === 'ME' || verb === 'ACTION') return { kind: 'action', text: rest };
+        return { kind: 'cmd', text: '' };
+      }
+
+      if (t.startsWith('* ')) return { kind: 'action', text: t.slice(2) };
+      return { kind: 'chat', text: t };
+    }
+
+    function _limitForLine(rawLine) {
+      const { kind } = _typedPortionForLimit(rawLine);
+      if (kind === 'chat') return _chatTypedLimit();
+      if (kind === 'dm')   return _dmTypedLimit();
+      return MRC_MAX_LEN;
+    }
+
+    function _isOverLimit(rawLine) {
+      const { kind, text } = _typedPortionForLimit(rawLine);
+      if (kind === 'cmd' || kind === 'none') return false;
+      return stripPipeCodes(text || '').length > _limitForLine(rawLine);
+    }
+
+    function tooLongError(limit) {
+      addMessage('✗ Message too long (max ' + (limit || MRC_MAX_LEN) + ' chars for this message type).', 'error');
+    }
+
+    function _trimVisibleToLimit(text, limit) {
+      const src = String(text || '');
+      let out = '', i = 0, visible = 0;
+      while (i < src.length) {
+        const ch = src[i];
+        if (ch === '|' && i + 2 < src.length) {
+          const a = src[i + 1], b = src[i + 2];
+          if (/\d/.test(a) && /\d/.test(b)) { out += src.slice(i, i + 3); i += 3; continue; }
+        }
+        if (visible >= limit) break;
+        out += ch; visible++; i++;
+      }
+      return out;
+    }
+
+    function enforceTypingLimitInInput() {
+      const v    = messageInput.value || '';
+      const info = _typedPortionForLimit(v);
+      if (!(info.kind === 'chat' || info.kind === 'dm' || info.kind === 'action')) return;
+
+      const limit = _limitForLine(v);
+      if (stripPipeCodes(info.text || '').length <= limit) return;
+
+      const trimmed = _trimVisibleToLimit(info.text || '', limit);
+      const t = String(v || '').trim();
+
+      if (t.startsWith('/')) {
+        const raw   = t.slice(1).trim();
+        const parts = raw.split(/\s+/);
+        const verb  = (parts[0] || '').toUpperCase();
+        const rest  = raw.slice((parts[0] || '').length).trim();
+        if (verb === 'ME' || verb === 'ACTION') {
+          messageInput.value = '/' + parts[0] + ' ' + trimmed; return;
+        }
+        if (verb === 'T' || verb === 'DM' || verb === 'MSG') {
+          const toUserRaw = rest.split(/\s+/)[0] || '';
+          messageInput.value = '/' + parts[0] + ' ' + toUserRaw + ' ' + trimmed; return;
+        }
+        return;
+      }
+      if (t.startsWith('* ')) { messageInput.value = '* ' + trimmed; return; }
+      messageInput.value = trimmed;
+    }
+
+    // -----------------------------------------------------------------------
+    // Display helpers
+    // -----------------------------------------------------------------------
+    function localTimeHHMM() {
+      const d = new Date();
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function smileysToEmoji(text) {
+      const s = String(text ?? '');
+      return s
+        .replaceAll(':-D', '😄').replaceAll(':D',  '😄')
+        .replaceAll(';-)', '😉').replaceAll(';)',  '😉')
+        .replaceAll(':-)', '🙂').replaceAll(':)',  '🙂')
+        .replaceAll(':-(', '🙁').replaceAll(':(',  '🙁')
+        .replaceAll(':-P', '😛').replaceAll(':P',  '😛').replaceAll(':p', '😛')
+        .replaceAll(':-O', '😮').replaceAll(':O',  '😮').replaceAll(':o', '😮');
+    }
+
+    function cp437DoorFixes(text) {
+      if (text === null || text === undefined) return '';
+      return String(text)
+        .replaceAll('\u0003', '♥')
+        .replaceAll('\u0004', '♦')
+        .replaceAll('\u0005', '♣')
+        .replaceAll('\u0006', '♠');
+    }
+
+    function cardsToHtml(html) {
+      return String(html || '').replace(/([♥♦♣♠])\s*(10|[2-9]|[JQKA])/g, (m, suit, rank) => {
+        const isRed = (suit === '♥' || suit === '♦');
+        return '<span class="' + (isRed ? 'card red' : 'card black') + '"><span class="suit">' + suit + '</span>' + rank + '</span>';
+      });
+    }
+
+    function renderPipeCodesToHtml(text) {
+      const fixed = cp437DoorFixes(text ?? '');
+      let s = escapeHtml(fixed).replace(/\r\n/g, '\n');
+      const re = /\|(\d{2})/g;
+      let out = '', lastIndex = 0, open = false, m;
+      while ((m = re.exec(s)) !== null) {
+        out += s.slice(lastIndex, m.index);
+        lastIndex = re.lastIndex;
+        if (open) out += '</span>';
+        open = true;
+        out += '<span class="c' + m[1] + '">';
+      }
+      out += s.slice(lastIndex);
+      if (open) out += '</span>';
+      out = smileysToEmoji(out);
+      out = cardsToHtml(out);
+      return out;
+    }
+
+    // -----------------------------------------------------------------------
+    // Message list
+    // -----------------------------------------------------------------------
+    const messageNodes = [];
+    const mentionItems = [];
+
+    function addMessage(text, className, usePipeRender = false) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'message' + (className ? ' ' + className : '');
+      if (usePipeRender) msgDiv.innerHTML = renderPipeCodesToHtml(text);
+      else               msgDiv.textContent = text;
+      msgDiv.dataset.msgIndex = String(messageNodes.length);
+      messagesDiv.appendChild(msgDiv);
+      messageNodes.push(msgDiv);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function updateStatus(text, color) {
+      statusText.textContent = text;
+      statusText.style.color = color || '';
+    }
+
+    function setTopic(topic) {
+      const t = (topic ?? '').trim();
+      topicText.textContent = t || '-';
+      topicText.title       = t || '';
+    }
+
+    // -----------------------------------------------------------------------
+    // Sticky DM
+    // -----------------------------------------------------------------------
+    function clearStickyDm() {
+      stickyDmUser = null;
+      for (const div of stickyDmNodes.values()) div.classList.remove('selected');
+      renderStickyStatus();
+    }
+
+    function renderStickyStatus() {
+      if (!stickyStatus) return;
+      stickyStatus.textContent = stickyDmUser ? ('ON → ' + stickyDmUser) : 'OFF';
+    }
+
+    // -----------------------------------------------------------------------
+    // User list
+    // -----------------------------------------------------------------------
+    function setUsers(users) {
+      const uniq = Array.from(new Set((users || []).filter(Boolean)));
+      uniq.sort((a, b) => a.localeCompare(b));
+      knownUsers = uniq;
+      userListDiv.innerHTML = '';
+      stickyDmNodes.clear();
+
+      for (const u of uniq) {
+        const div = document.createElement('div');
+        div.className = 'user';
+        div.textContent = u;
+        const key = u.toLowerCase();
+        stickyDmNodes.set(key, div);
+        if (stickyDmUser && stickyDmUser.toLowerCase() === key) div.classList.add('selected');
+        div.addEventListener('click', () => {
+          if (stickyDmUser && stickyDmUser.toLowerCase() === key) {
+            clearStickyDm();
+            addMessage('ℹ Sticky DM off', 'notice');
+            return;
+          }
+          clearStickyDm();
+          stickyDmUser = u;
+          div.classList.add('selected');
+          renderStickyStatus();
+          addMessage('ℹ Sticky DM → ' + u + ' (click again to stop)', 'notice');
+          messageInput.focus();
+        });
+        userListDiv.appendChild(div);
+      }
+
+      if (stickyDmUser && !uniq.some(x => x.toLowerCase() === stickyDmUser.toLowerCase()))
+        clearStickyDm();
+    }
+
+    function canonicalizeUser(u) {
+      const needle = (u || '').toLowerCase();
+      return knownUsers.find(x => x.toLowerCase() === needle) || u;
+    }
+
+    function tryParseUserListFromServerMessage(msg) {
+      const s = String(msg || '').trim();
+
+      const m = s.match(/^(?:SERVER:\s*)?(USERLIST|CHATTERS)\s*:\s*(.*)$/i);
+      if (!m) return false;
+
+      const raw = (m[2] || '').trim();
+      if (!raw) { setUsers([]); return true; }
+
+      const users = raw
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean)
+        .map(x => x.replace(/\|[0-9]{2}/g, '').trim());
+
+      setUsers(users);
+      return true;
+    }
+
+    function tryParseRoomTopicFromServerMessage(msg) {
+      const m = String(msg || '').trim().match(/(?:^|SERVER:\s*)ROOMTOPIC\s*:\s*([^:]+)\s*:\s*(.*)$/i);
+      if (!m) return false;
+      const room  = (m[1] || '').trim().toLowerCase();
+      const topic = (m[2] || '').trim();
+      if (!currentRoom || room === currentRoom) setTopic(topic);
+      return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // Message formatting
+    // -----------------------------------------------------------------------
+    function formatLine(data) {
+      const fromUser = data.from_user || '';
+      const msg      = data.message   || '';
+      let line;
+
+      if (fromUser.toUpperCase() === 'SERVER') {
+        if (window.SUPPRESS_UNKNOWN_COMMAND && msg.includes('Unknown command')) return null;
+        if (/^STATS\s*:/i.test(msg)) return null;
+        line = 'SERVER: ' + msg;
+      } else {
+        const trimmed = (msg || '').trim();
+        const parts   = trimmed.split(/\s+/);
+        const first   = parts[0] || '';
+        const looksStyled     = first.includes('^') || first.includes('<') || first.includes('>') || first.includes('|');
+        const differsFromUser = first && fromUser && first.toLowerCase() !== fromUser.toLowerCase();
+        line = (first && (looksStyled || differsFromUser)) ? trimmed : (fromUser + ': ' + msg);
+      }
+      return localTimeHHMM() + ' ' + line;
+    }
+
+    function isMention(line) {
+      if (!currentHandle) return false;
+      const clean = stripPipeCodes(line || '');
+      const h     = currentHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp('(^|[^A-Za-z0-9_])@?' + h + '([^A-Za-z0-9_]|$)', 'i').test(clean);
+    }
+
+    // -----------------------------------------------------------------------
+    // Audio
+    // -----------------------------------------------------------------------
+    let audioCtx = null, audioUnlocked = false;
+
+    function ensureAudioUnlocked() {
+      if (audioUnlocked) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+      audioUnlocked = true;
+    }
+
+    function playDing() {
+      if (!mentionSoundToggle.checked) return;
+      ensureAudioUnlocked();
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.0001;
+      o.connect(g); g.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      o.start(now); o.stop(now + 0.2);
+    }
+
+    function setupAudioUnlockOnce() {
+      const unlock = () => { ensureAudioUnlocked(); };
+      window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+      window.addEventListener('keydown',     unlock, { once: true, capture: true });
+      window.addEventListener('touchstart',  unlock, { once: true, capture: true });
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel toggle
+    // -----------------------------------------------------------------------
+    function togglePanel(panelEl, chevEl, open) {
+      const willOpen = (open !== undefined) ? open : !panelEl.classList.contains('open');
+      panelEl.classList.toggle('open', willOpen);
+      chevEl.textContent = willOpen ? '[-]' : '[+]';
+    }
+
+    // -----------------------------------------------------------------------
+    // Mentions
+    // -----------------------------------------------------------------------
+    function renderMentions() {
+      const count = mentionItems.length;
+      mentionsCount.textContent = count ? '(' + count + ')' : '';
+      mentionsHeader.classList.toggle('attn', count > 0);
+      if (!count) { mentionsList.innerHTML = '<div class="mention-empty">No mentions yet.</div>'; return; }
+      mentionsList.innerHTML = '';
+      for (const item of mentionItems.slice().reverse()) {
+        const div = document.createElement('div');
+        div.className = 'mention-item';
+        div.title     = item.preview;
+        div.innerHTML = '<span class="mention-meta">' + escapeHtml(item.from) + '</span> — ' + escapeHtml(item.preview);
+        div.addEventListener('click', () => {
+          const node = messageNodes[item.idx];
+          if (node) {
+            node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            node.classList.add('mention');
+            setTimeout(() => node.classList.remove('mention'), 1200);
+          }
+        });
+        mentionsList.appendChild(div);
+      }
+    }
+
+    function addMention(fromUser, line, msgIndex) {
+      mentionItems.push({
+        idx:     msgIndex,
+        from:    fromUser || 'someone',
+        preview: stripPipeCodes(line || '').trim().slice(0, 160),
+        ts:      Date.now()
+      });
+      mentionsPanel.style.display = 'block';
+      renderMentions();
+      if (!mentionsPanel.classList.contains('open')) togglePanel(mentionsPanel, mentionsChev, true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Sent history
+    // -----------------------------------------------------------------------
+    function _isSensitiveHistoryLine(v) {
+      const t = (v || '').trim().toLowerCase();
+      return t.startsWith('/identify ') || t.startsWith('/register ') ||
+             t.startsWith('/update ')   || t.startsWith('/roompass ');
+    }
+
+    function pushSentHistory(rawLine) {
+      const v = (rawLine || '').trim();
+      if (!v || _isSensitiveHistoryLine(v)) return;
+      if (sentHistory.length && sentHistory[sentHistory.length - 1] === v) return;
+      sentHistory.push(v);
+      while (sentHistory.length > SENT_HISTORY_MAX) sentHistory.shift();
+      sentHistoryIdx   = -1;
+      sentHistoryDraft = '';
+      renderHistoryList();
+    }
+
+    function renderHistoryList() {
+      if (!historyList) return;
+      if (!sentHistory.length) {
+        historyList.innerHTML = '<div class="mention-empty">No sent messages this session.</div>';
+        return;
+      }
+      historyList.innerHTML = '';
+      for (let i = sentHistory.length - 1; i >= 0; i--) {
+        const item = sentHistory[i];
+        const div  = document.createElement('div');
+        div.className   = 'mention-item';
+        div.style.color = 'var(--accent)';
+        div.textContent = item.length > 180 ? item.slice(0, 180) + '…' : item;
+        div.title       = item;
+        div.addEventListener('click', () => {
+          messageInput.value = item;
+          messageInput.focus();
+          enforceTypingLimitInInput();
+        });
+        historyList.appendChild(div);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Macros
+    // -----------------------------------------------------------------------
+    function loadMacros() {
+      try {
+        const raw = localStorage.getItem(MACROS_KEY);
+        if (!raw) { macros = []; return; }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) { macros = []; return; }
+        macros = parsed
+          .filter(x => x && typeof x === 'object')
+          .map(x => ({ name: String(x.name || '').slice(0, 40), text: String(x.text || '').slice(0, 500) }))
+          .filter(x => x.name && x.text)
+          .slice(0, MACROS_MAX);
+      } catch { macros = []; }
+    }
+
+    function saveMacros(newMacros) {
+      macros = (newMacros || []).slice(0, MACROS_MAX);
+      localStorage.setItem(MACROS_KEY, JSON.stringify(macros));
+      renderMacros();
+    }
+
+    function macroExpand(text) {
+      return String(text || '')
+        .replaceAll('{room}',   currentRoom   || '')
+        .replaceAll('{handle}', currentHandle || '');
+    }
+
+    function renderMacros() {
+      macrosList.innerHTML = '';
+      if (!macros.length) { macrosList.innerHTML = '<div class="help-hint">No macros set.</div>'; return; }
+      for (const m of macros) {
+        const row = document.createElement('div'); row.className = 'panel-row';
+        const b   = document.createElement('button');
+        b.textContent = m.name; b.title = m.text;
+        b.addEventListener('click', () => {
+          messageInput.value = macroExpand(m.text);
+          messageInput.focus();
+          enforceTypingLimitInInput();
+        });
+        row.appendChild(b);
+        macrosList.appendChild(row);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Input parsing
+    // -----------------------------------------------------------------------
+    function parseUserInput(line) {
+      const msg = (line || '').trim();
+      if (!msg) return { kind: 'chat', value: '' };
+      if (msg.startsWith('!')) return { kind: 'chat', value: msg };
+      if (msg.startsWith('/')) {
+        const raw   = msg.slice(1).trim();
+        const parts = raw.split(/\s+/);
+        const verb  = (parts[0] || '').toUpperCase();
+        const rest  = raw.slice((parts[0] || '').length).trim();
+        if ((verb === 'T' || verb === 'DM' || verb === 'MSG') && rest) {
+          const sp        = rest.split(/\s+/);
+          const toUserRaw = sp[0];
+          const toUser    = canonicalizeUser(toUserRaw);
+          const dmText    = rest.slice(toUserRaw.length).trim();
+          if (!dmText) return { kind: 'local_error', value: 'Usage: /t <user> <message>' };
+          return { kind: 'direct_message', to_user: toUser, message: dmText };
+        }
+        if ((verb === 'ME' || verb === 'ACTION') && rest) return { kind: 'action', value: rest };
+        return { kind: 'server_cmd', value: verb + (rest ? ' ' + rest : '') };
+      }
+      return { kind: 'chat', value: msg };
+    }
+
+    function maskSensitiveCommandForEcho(cmdValue) {
+      const t    = (cmdValue || '').trim();
+      const parts = t.split(/\s+/);
+      const verb  = (parts[0] || '').toUpperCase();
+      const rest  = t.slice((parts[0] || '').length).trim();
+      if (!rest) return '/' + t;
+      if (verb === 'IDENTIFY' || verb === 'REGISTER' || verb === 'UPDATE' || verb === 'ROOMPASS')
+        return '/' + verb + ' ' + '*'.repeat(rest.length);
+      return '/' + t;
+    }
+
+    // -----------------------------------------------------------------------
+    // Secure mode (password masking)
+    // -----------------------------------------------------------------------
+    let secureMode = null;
+
+    function _isSecureVerb(verb) {
+      const v = (verb || '').toUpperCase();
+      return v === 'IDENTIFY' || v === 'REGISTER' || v === 'UPDATE' || v === 'ROOMPASS';
+    }
+
+    function _secureVisibleValue(verb, realRest, separatorEntered) {
+      const rest = realRest || '';
+      const hasSep = !!separatorEntered || !!rest;
+      return '/' + verb.toUpperCase() + (hasSep ? ' ' : '') + '*'.repeat(rest.length);
+    }
+
+    function _maybeEnterSecureModeFromVisible() {
+      const raw = String(messageInput.value || '').replace(/\r?\n/g, '');
+      if (!raw.startsWith('/')) { secureMode = null; return; }
+      const withoutSlash = raw.slice(1);
+      const m = withoutSlash.match(/^(\w+)(.*)$/);
+      if (!m) { secureMode = null; return; }
+      const verb = (m[1] || '').toUpperCase();
+      if (!_isSecureVerb(verb)) { secureMode = null; return; }
+      const tail = m[2] || '';
+      const separatorEntered = /^\s/.test(tail);
+      const rest = separatorEntered ? tail.replace(/^\s+/, '') : '';
+      secureMode = { verb, realRest: rest, separatorEntered };
+      messageInput.value = _secureVisibleValue(verb, rest, separatorEntered);
+      const len = messageInput.value.length;
+      messageInput.setSelectionRange(len, len);
+    }
+
+    // -----------------------------------------------------------------------
+    // Outgoing colour wrap
+    // -----------------------------------------------------------------------
+    function wrapOutgoingChatText(text) {
+      if (!outgoingColorToggle.checked) return text;
+      const c = selTypingColor.value || '10';
+      return '|' + c + text + '|07';
+    }
+
+    // -----------------------------------------------------------------------
+    // Send
+    // -----------------------------------------------------------------------
+    function doSend() {
+      let rawLine = messageInput.value || '';
+      if (secureMode) rawLine = '/' + secureMode.verb + ((secureMode.separatorEntered || secureMode.realRest) ? ' ' : '') + (secureMode.realRest || '');
+
+      const parsed = parseUserInput(rawLine);
+      if (!parsed) return;
+
+      if (parsed.kind === 'local_error') {
+        addMessage('✗ ' + parsed.value, 'error');
+        secureMode = null;
+        return;
+      }
+
+      pushSentHistory(rawLine);
+
+      if (parsed.kind === 'direct_message') {
+        if (_isOverLimit('/t x ' + parsed.message)) { tooLongError(_dmTypedLimit()); secureMode = null; return; }
+        addMessage('(DM → ' + parsed.to_user + ') ' + parsed.message, 'dm', false);
+        client.sendDirectMessage(parsed.to_user, parsed.message);
+        messageInput.value = ''; secureMode = null; return;
+      }
+
+      if (parsed.kind === 'action') {
+        if (_isOverLimit('/me ' + parsed.value)) { tooLongError(MRC_MAX_LEN); secureMode = null; return; }
+        client.sendMessage('* ' + parsed.value);
+        messageInput.value = ''; secureMode = null; return;
+      }
+
+      if (parsed.kind === 'server_cmd') {
+        addMessage('> ' + maskSensitiveCommandForEcho(parsed.value), 'info');
+        client.sendServerCommand('/' + parsed.value);
+        messageInput.value = ''; secureMode = null; return;
+      }
+
+      if (parsed.kind === 'chat') {
+        if (!parsed.value) return;
+        if (stickyDmUser) {
+          if (_isOverLimit('/t x ' + parsed.value)) { tooLongError(_dmTypedLimit()); secureMode = null; return; }
+          addMessage('(DM → ' + stickyDmUser + ') ' + parsed.value, 'dm', false);
+          client.sendDirectMessage(stickyDmUser, parsed.value);
+          messageInput.value = ''; secureMode = null; return;
+        }
+        if (_isOverLimit(parsed.value)) { tooLongError(_chatTypedLimit()); secureMode = null; return; }
+        client.sendMessage(wrapOutgoingChatText(parsed.value));
+        messageInput.value = ''; secureMode = null;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Style / theme helpers
+    // -----------------------------------------------------------------------
+    function colorOptions(targetSelect) {
+      const labels = {
+        "00":"00 Black",    "01":"01 Blue",         "02":"02 Green",      "03":"03 Cyan",
+        "04":"04 Red",      "05":"05 Magenta",      "06":"06 Brown",      "07":"07 Gray",
+        "08":"08 Dark Gray","09":"09 Light Blue",   "10":"10 Light Green","11":"11 Light Cyan",
+        "12":"12 Light Red","13":"13 Light Magenta","14":"14 Yellow",     "15":"15 White"
+      };
+      targetSelect.innerHTML = '';
+      for (const k of Object.keys(labels)) {
+        const opt = document.createElement('option');
+        opt.value = k; opt.textContent = labels[k];
+        targetSelect.appendChild(opt);
+      }
+    }
+
+    function updateTypingColor() {
+      const c = selTypingColor.value || '10';
+      const cssMap = {
+        "00":"#000000","01":"#0000AA","02":"#00AA00","03":"#00AAAA",
+        "04":"#AA0000","05":"#AA00AA","06":"#AA5500","07":"#AAAAAA",
+        "08":"#555555","09":"#5555FF","10":"#55FF55","11":"#55FFFF",
+        "12":"#FF5555","13":"#FF55FF","14":"#FFFF55","15":"#FFFFFF"
+      };
+      messageInput.style.color      = cssMap[c] || '';
+      messageInput.style.caretColor = cssMap[c] || '';
+    }
+
+    function styledHandleString() {
+      const pc = selPrefixColor.value || '07';
+      const hc = selHandleColor.value || '07';
+      const sc = selSuffixColor.value || '07';
+      const p  = stylePrefix.value || '';
+      const s  = styleSuffix.value || '';
+      const h  = currentHandle || 'Handle';
+      return '|' + pc + p + '|' + hc + h + '|' + sc + s + '|07';
+    }
+
+    function updateStylePreview() {
+      stylePreview.innerHTML = renderPipeCodesToHtml(styledHandleString());
+      updateTypingColor();
+    }
+
+    function sendStyleUpdate() {
+      if (!client || !client.ws || client.ws.readyState !== 1) return;
+      client.ws.send(JSON.stringify({
+        type:         'set_style',
+        prefix:       stylePrefix.value,
+        suffix:       styleSuffix.value,
+        prefix_color: selPrefixColor.value,
+        handle_color: selHandleColor.value,
+        suffix_color: selSuffixColor.value,
+        typing_color: selTypingColor.value
+      }));
+    }
+
+    function addLocalStyleTestLine() {
+      addMessage(styledHandleString() + ' This is a local style test (not sent)', 'info', true);
+    }
+
+    function applyThemeClass(themeClass) {
+      document.body.classList.remove('theme-green','theme-amber','theme-cyan','theme-ibmblue','theme-mono');
+      document.body.classList.add(themeClass || 'theme-green');
+    }
+
+    function setUiFontSize(px) {
+      const v = Math.max(11, Math.min(20, Number(px) || 14));
+      document.documentElement.style.setProperty('--ui-font-size', v + 'px');
+      fontSizeRange.value     = String(v);
+      fontSizeLabel.textContent = v + 'px';
+    }
+
+    function setUiLineHeight(v) {
+      const x = Math.max(1.1, Math.min(1.9, Number(v) || 1.4));
+      document.documentElement.style.setProperty('--ui-line-height', String(x));
+      lineHeightRange.value      = String(x);
+      lineHeightLabel.textContent = x.toFixed(2);
+    }
+
+    function applyCrt(on)       { document.body.classList.toggle('crt-on',           !!on); }
+    function applyPipeTheme(on) { document.body.classList.toggle('pipe-theme-theme',  !!on); }
+
+    // -----------------------------------------------------------------------
+    // Preferences
+    // -----------------------------------------------------------------------
+    function loadPrefs() {
+      const ding = localStorage.getItem('mrc_mention_ding');
+      mentionSoundToggle.checked  = (ding === null) ? true : (ding === '1');
+      outgoingColorToggle.checked = localStorage.getItem('mrc_outgoing_colorize') === '1';
+
+      const theme = localStorage.getItem('mrc_theme') || 'theme-green';
+      themeSelect.value = theme;
+      applyThemeClass(theme);
+
+      const crt = localStorage.getItem('mrc_crt') === '1';
+      crtToggle.checked = crt; applyCrt(crt);
+
+      const pipeTheme = localStorage.getItem('mrc_pipe_theme') === '1';
+      pipeThemeToggle.checked = pipeTheme; applyPipeTheme(pipeTheme);
+
+      setUiFontSize(Number(localStorage.getItem('mrc_font_size_px')) || 14);
+      setUiLineHeight(Number(localStorage.getItem('mrc_line_height')) || 1.4);
+    }
+
+    function saveMentionPref()         { localStorage.setItem('mrc_mention_ding',      mentionSoundToggle.checked  ? '1' : '0'); }
+    function saveOutgoingColorizePref(){ localStorage.setItem('mrc_outgoing_colorize', outgoingColorToggle.checked ? '1' : '0'); }
+
+    function resetUiPrefs() {
+      ['mrc_theme','mrc_crt','mrc_pipe_theme','mrc_font_size_px','mrc_line_height']
+        .forEach(k => localStorage.removeItem(k));
+      loadPrefs();
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: toggle in-room UI panels
+    // -----------------------------------------------------------------------
+    function _setInRoomUi(inRoom) {
+      stylePanel.style.display    = inRoom ? 'block' : 'none';
+      mentionsPanel.style.display = inRoom ? 'block' : 'none';
+      helpersPanel.style.display  = inRoom ? 'block' : 'none';
+      joinPanel.style.display     = inRoom ? 'none'  : 'block';
+      chatPanel.style.display     = inRoom ? 'block' : 'none';
+      // Restore interactivity whenever we toggle UI state
+      chatPanel.style.opacity       = '';
+      chatPanel.style.pointerEvents = '';
+    }
+
+    // -----------------------------------------------------------------------
+    // Main WebSocket message handler
+    // -----------------------------------------------------------------------
+    function handleIncomingMessage(data) {
+      switch (data.type) {
+
+        case 'pong': break;
+
+        // ---- Reconnect lifecycle (events emitted by client.js) ----------
+        case 'reconnecting':
+          stopWsKeepalive();
+          updateStatus('Reconnecting… (attempt ' + data.attempt + ')', 'var(--error)');
+          addMessage('⚠ Connection lost — reconnecting in ' +
+            Math.round((data.delayMs || 0) / 1000) + 's (attempt ' + data.attempt + ')…', 'error');
+          chatPanel.style.opacity       = '0.5';
+          chatPanel.style.pointerEvents = 'none';
+          break;
+
+        case 'rejoining':
+          addMessage('↺ Reconnected — rejoining ' + data.room + ' as ' + data.handle + '…', 'system');
+          updateStatus('Rejoining ' + data.room + '…', '');
+          break;
+        // ---------------------------------------------------------------
+
+        case 'welcome':
+          addMessage('✓ ' + data.message, 'system');
+          updateStatus('Connected', '');
+          document.getElementById('server-info').textContent = (getSelectedServerChoice().label || data.server || 'MRC');
+          break;
+
+        case 'bridge_status':
+          if (data.status === 'upstream_connected')
+            addMessage('✓ MRC upstream connected', 'system');
+          if (data.status === 'upstream_disconnected')
+            addMessage('✗ MRC upstream disconnected (reconnecting…)', 'error');
+          break;
+
+        case 'room_changed': {
+          const r = (data.room || '').toLowerCase();
+          currentRoom = r;
+          document.getElementById('current-room').textContent = data.room || '-';
+          setTopic('-');
+          addMessage('ℹ Room changed to ' + data.room, 'notice');
+          break;
+        }
+
+        case 'joined': {
+          currentHandle = data.handle || '';
+          currentRoom   = (data.room  || '').toLowerCase();
+
+          _handleOverheadChars = (typeof data.handle_overhead === 'number') ? data.handle_overhead : 0;
+          _dmOverheadChars     = (typeof data.dm_overhead     === 'number') ? data.dm_overhead     : 0;
+
+          document.getElementById('current-room').textContent   = data.room;
+          document.getElementById('current-handle').textContent = data.handle;
+          addMessage('✓ ' + data.message, 'system');
+          updateStatus('Ready as ' + data.handle, '');
+
+          _setInRoomUi(true);
+
+          const st = data.style || {};
+          stylePrefix.value    = st.prefix       || '';
+          styleSuffix.value    = st.suffix       || '';
+          selPrefixColor.value = st.prefix_color || '07';
+          selHandleColor.value = st.handle_color || (st.color || '07');
+          selSuffixColor.value = st.suffix_color || '07';
+          selTypingColor.value = st.typing_color || '10';
+          updateStylePreview();
+
+          togglePanel(stylePanel,    styleChev,    false);
+          togglePanel(mentionsPanel, mentionsChev, false);
+          togglePanel(helpersPanel,  helpersChev,  false);
+          renderMentions();
+          renderHistoryList();
+          renderStickyStatus();
+          renderMacros();
+          messageInput.focus();
+
+          if (stylePrefix.value || styleSuffix.value ||
+              selPrefixColor.value !== '07' || selHandleColor.value !== '07' ||
+              selSuffixColor.value !== '07') {
+            setTimeout(() => { try { sendStyleUpdate(); } catch (_) {} }, 600);
+          }
+
+          setTimeout(startWsKeepalive, 250);
+          break;
+        }
+
+        case 'style_updated': {
+          const st2 = data.style || {};
+          stylePrefix.value    = st2.prefix       || '';
+          styleSuffix.value    = st2.suffix       || '';
+          selPrefixColor.value = st2.prefix_color || '07';
+          selHandleColor.value = st2.handle_color || (st2.color || '07');
+          selSuffixColor.value = st2.suffix_color || '07';
+          selTypingColor.value = st2.typing_color || '10';
+          _handleOverheadChars = (typeof data.handle_overhead === 'number') ? data.handle_overhead : _handleOverheadChars;
+          _dmOverheadChars     = (typeof data.dm_overhead     === 'number') ? data.dm_overhead     : _dmOverheadChars;
+          updateStylePreview();
+          addMessage('✓ ' + (data.message || 'Style updated'), 'system');
+          break;
+        }
+
+        case 'info':
+          addMessage('ℹ ' + (data.message || ''), 'notice');
+          break;
+
+        case 'mrc_message': {
+          const isServer = (data.from_user || '').toUpperCase() === 'SERVER';
+          if (isServer) {
+            const msg        = data.message || '';
+            const isUserlist = tryParseUserListFromServerMessage(msg);
+            const isTopic    = tryParseRoomTopicFromServerMessage(msg);
+            if (window.SUPPRESS_USERLIST_LINES  && isUserlist) break;
+            if (window.SUPPRESS_ROOMTOPIC_LINES && isTopic)    break;
+          }
+
+          const line = formatLine(data);
+          if (line) {
+            const fromLower  = (data.from_user || '').toLowerCase();
+            const meLower    = (currentHandle  || '').toLowerCase();
+            const isFromMe   = fromLower && meLower && fromLower === meLower;
+            const cleanLine  = stripPipeCodes(line);
+            const dmToMe     = cleanLine.includes('/DirectMsg');
+            const mentioned  = (!isServer && isMention(line)) || (!isServer && dmToMe);
+
+            const classes = [];
+            if (dmToMe)                 classes.push('dm');
+            if (mentioned && !isFromMe) classes.push('mention');
+
+            const isActionLine =
+              cleanLine.trim().startsWith('* ') ||
+              (line || '').trim().startsWith('|15*');
+            if (isActionLine) classes.push('action');
+
+            addMessage(line, classes.join(' '), true);
+
+            if (mentioned && !isFromMe) {
+              playDing();
+              addMention(data.from_user || '', dmToMe ? '[DM] ' + line : line, messageNodes.length - 1);
+            }
+          }
+          break;
+        }
+
+        case 'left':
+          stopWsKeepalive();
+          addMessage('✓ ' + (data.message || 'Left'), 'system');
+          updateStatus('Connected (not in room)', '');
+          currentHandle        = '';
+          currentRoom          = '';
+          _handleOverheadChars = 0;
+          _dmOverheadChars     = 0;
+          setTopic('-');
+          clearStickyDm();
+          setUsers([]);
+          _setInRoomUi(false);
+          break;
+
+        case 'error':
+          addMessage('✗ Error: ' + data.message, 'error');
+          break;
+
+        case 'disconnected':
+          if (!client || !client._shouldReconnect) {
+            stopWsKeepalive();
+            updateStatus('Disconnected', '');
+            addMessage('✗ Disconnected from server', 'error');
+            _handleOverheadChars = 0;
+            _dmOverheadChars     = 0;
+            clearStickyDm();
+            setUsers([]);
+            _setInRoomUi(false);
+          }
+          break;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Init
+    // -----------------------------------------------------------------------
+    async function init() {
+      try {
+        if (!window.MRCClient) throw new Error('MRCClient is not loaded (check script src path)');
+        populateServerSelect();
+        const choice = getSelectedServerChoice();
+        client = new window.MRCClient(getSelectedWsUrl());
+        client.addMessageHandler(handleIncomingMessage);
+        await client.connect();
+        document.getElementById('server-info').textContent = choice.label || 'MRC';
+        setTimeout(startWsKeepalive, 250);
+      } catch (e) {
+        stopWsKeepalive();
+        updateStatus('Connection failed', '');
+        addMessage('✗ Failed to connect: ' + (e.message || e), 'error');
+      }
+    }
+
+    async function reconnectToSelectedServer(showNotice = true) {
+      stopWsKeepalive();
+      if (client) {
+        try { client._shouldReconnect = false; } catch (_) {}
+        try { client.disconnect(); } catch (_) {}
+      }
+      const choice = getSelectedServerChoice();
+      client = new window.MRCClient(getSelectedWsUrl());
+      client.addMessageHandler(handleIncomingMessage);
+      if (showNotice) addMessage('ℹ Switching to ' + (choice.label || 'MRC') + '…', 'notice');
+      try {
+        await client.connect();
+        document.getElementById('server-info').textContent = choice.label || 'MRC';
+        setTimeout(startWsKeepalive, 250);
+      } catch (e) {
+        updateStatus('Connection failed', '');
+        addMessage('✗ Failed to connect: ' + (e.message || e), 'error');
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Event listeners — preferences
+    // -----------------------------------------------------------------------
+    loadPrefs();
+
+    themeSelect.addEventListener('change', () => {
+      localStorage.setItem('mrc_theme', themeSelect.value);
+      applyThemeClass(themeSelect.value);
+    });
+    crtToggle.addEventListener('change', () => {
+      localStorage.setItem('mrc_crt', crtToggle.checked ? '1' : '0');
+      applyCrt(crtToggle.checked);
+    });
+    pipeThemeToggle.addEventListener('change', () => {
+      localStorage.setItem('mrc_pipe_theme', pipeThemeToggle.checked ? '1' : '0');
+      applyPipeTheme(pipeThemeToggle.checked);
+    });
+    fontSizeRange.addEventListener('input', () => {
+      localStorage.setItem('mrc_font_size_px', String(fontSizeRange.value));
+      setUiFontSize(fontSizeRange.value);
+    });
+    lineHeightRange.addEventListener('input', () => {
+      localStorage.setItem('mrc_line_height', String(lineHeightRange.value));
+      setUiLineHeight(lineHeightRange.value);
+    });
+    uiResetBtn.addEventListener('click', resetUiPrefs);
+
+    if (serverSelect) {
+      serverSelect.addEventListener('change', async () => {
+        const nextId = serverSelect.value || 'primary';
+        if (currentHandle || currentRoom) {
+          addMessage('✗ Leave the current room before switching servers.', 'error');
+          populateServerSelect();
+          return;
+        }
+        setSelectedServerId(nextId);
+        populateServerSelect();
+        await reconnectToSelectedServer(true);
+      });
+    }
+
+    mentionSoundToggle.addEventListener('change',  saveMentionPref);
+    outgoingColorToggle.addEventListener('change', saveOutgoingColorizePref);
+    setupAudioUnlockOnce();
+
+    // -----------------------------------------------------------------------
+    // Event listeners — colour dropdowns + style panel
+    // -----------------------------------------------------------------------
+    colorOptions(selPrefixColor);
+    colorOptions(selHandleColor);
+    colorOptions(selSuffixColor);
+    colorOptions(selTypingColor);
+
+    styleHeader.addEventListener('click',    () => togglePanel(stylePanel,    styleChev));
+    mentionsHeader.addEventListener('click', () => togglePanel(mentionsPanel, mentionsChev));
+    helpersHeader.addEventListener('click',  () => togglePanel(helpersPanel,  helpersChev));
+
+    stylePrefix.addEventListener('input',     updateStylePreview);
+    styleSuffix.addEventListener('input',     updateStylePreview);
+    selPrefixColor.addEventListener('change', updateStylePreview);
+    selHandleColor.addEventListener('change', updateStylePreview);
+    selSuffixColor.addEventListener('change', updateStylePreview);
+    selTypingColor.addEventListener('change', updateStylePreview);
+
+    styleApply.addEventListener('click', () => sendStyleUpdate());
+    styleTest.addEventListener('click',  () => addLocalStyleTestLine());
+    styleReset.addEventListener('click', () => {
+      stylePrefix.value    = '';
+      styleSuffix.value    = '';
+      selPrefixColor.value = '07';
+      selHandleColor.value = '07';
+      selSuffixColor.value = '07';
+      selTypingColor.value = '10';
+      updateStylePreview();
+      sendStyleUpdate();
+    });
+
+    // -----------------------------------------------------------------------
+    // Event listeners — mentions
+    // -----------------------------------------------------------------------
+    mentionsClear.addEventListener('click', () => {
+      mentionItems.length = 0;
+      renderMentions();
+      for (const node of messageNodes) {
+        if (node && node.classList) node.classList.remove('mention');
+      }
+      mentionsHeader.classList.remove('attn');
+    });
+    mentionsTest.addEventListener('click', () => {
+      ensureAudioUnlocked();
+      const was = mentionSoundToggle.checked;
+      mentionSoundToggle.checked = true;
+      playDing();
+      mentionSoundToggle.checked = was;
+    });
+
+    // -----------------------------------------------------------------------
+    // Event listeners — helper buttons
+    // -----------------------------------------------------------------------
+    btnHelp.addEventListener('click',     () => client.sendServerCommand('/help'));
+    btnWhoon.addEventListener('click',    () => client.sendServerCommand('/whoon'));
+    btnChatters.addEventListener('click', () => client.sendServerCommand('/chatters'));
+    btnList.addEventListener('click',     () => client.sendMessage('!list'));
+
+    btnQuickJoin.addEventListener('click', () => {
+      const r = (quickJoinRoom.value || '').trim();
+      if (!r) return;
+      client.sendServerCommand('/join ' + r);
+      quickJoinRoom.value = '';
+      messageInput.focus();
+    });
+
+    historyClear.addEventListener('click', () => {
+      sentHistory.length = 0;
+      sentHistoryIdx     = -1;
+      sentHistoryDraft   = '';
+      renderHistoryList();
+      addMessage('ℹ Session history cleared', 'notice');
+    });
+
+    stickyToggleBtn.addEventListener('click', () => {
+      if (stickyDmUser) {
+        clearStickyDm();
+        addMessage('ℹ Sticky DM off', 'notice');
+      } else {
+        addMessage('ℹ Sticky DM is OFF. Click a user in the userlist to turn it on.', 'notice');
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Event listeners — macros
+    // -----------------------------------------------------------------------
+    loadMacros();
+    renderMacros();
+
+    macrosEdit.addEventListener('click', () => {
+      macrosEditor.style.display = (macrosEditor.style.display === 'none') ? 'block' : 'none';
+      if (macrosEditor.style.display === 'block')
+        macrosJson.value = JSON.stringify(macros, null, 2);
+    });
+    macrosCancel.addEventListener('click', () => { macrosEditor.style.display = 'none'; });
+    macrosSave.addEventListener('click', () => {
+      try {
+        const parsed = JSON.parse(macrosJson.value || '[]');
+        if (!Array.isArray(parsed)) throw new Error('Macros JSON must be an array.');
+        const cleaned = parsed
+          .filter(x => x && typeof x === 'object')
+          .map(x => ({ name: String(x.name || '').trim(), text: String(x.text || '').trim() }))
+          .filter(x => x.name && x.text)
+          .slice(0, MACROS_MAX);
+        saveMacros(cleaned);
+        macrosEditor.style.display = 'none';
+        addMessage('ℹ Macros saved', 'notice');
+      } catch (e) {
+        addMessage('✗ Macro save failed: ' + (e.message || e), 'error');
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Event listeners — join / send / leave
+    // -----------------------------------------------------------------------
+    joinBtn.addEventListener('click', () => {
+      const handle = handleInput.value.trim();
+      const room   = roomInput.value.trim() || 'Lobby';
+      if (!handle) return addMessage('✗ Please enter a handle', 'error');
+      client.joinRoom(handle, room);
+    });
+
+    sendBtn.addEventListener('click',  doSend);
+    
+    leaveBtn.addEventListener('click', () => {
+      try { client.leaveRoom(); } catch (_) {}
+      setTimeout(() => {
+        try { if (serverSelect) serverSelect.disabled = false; } catch (_) {}
+      }, 250);
+    });
+
+    leaveBtnMobile.addEventListener('click', () => {
+      try { client.leaveRoom(); } catch (_) {}
+      setTimeout(() => {
+        try { if (serverSelect) serverSelect.disabled = false; } catch (_) {}
+      }, 250);
+    });
+
+    // -----------------------------------------------------------------------
+    // Message input: live limit enforcement + secure-mode interception
+    // -----------------------------------------------------------------------
+    messageInput.addEventListener('input', () => {
+      if (!secureMode) _maybeEnterSecureModeFromVisible();
+      enforceTypingLimitInInput();
+    });
+
+    messageInput.addEventListener('beforeinput', (e) => {
+      if (!secureMode) return;
+      if (e.inputType === 'insertText' && typeof e.data === 'string') {
+        e.preventDefault();
+        if (!secureMode.separatorEntered && e.data === ' ') {
+          secureMode.separatorEntered = true;
+        } else {
+          if (!secureMode.separatorEntered) secureMode.separatorEntered = true;
+          secureMode.realRest = (secureMode.realRest || '') + e.data;
+        }
+        messageInput.value  = _secureVisibleValue(secureMode.verb, secureMode.realRest, secureMode.separatorEntered);
+        const len = messageInput.value.length;
+        messageInput.setSelectionRange(len, len);
+        enforceTypingLimitInInput();
+        return;
+      }
+      if (e.inputType === 'deleteContentBackward') {
+        e.preventDefault();
+        if (secureMode.realRest) {
+          secureMode.realRest = (secureMode.realRest || '').slice(0, -1);
+        } else if (secureMode.separatorEntered) {
+          secureMode.separatorEntered = false;
+        }
+        messageInput.value  = _secureVisibleValue(secureMode.verb, secureMode.realRest, secureMode.separatorEntered);
+        const len = messageInput.value.length;
+        messageInput.setSelectionRange(len, len);
+        enforceTypingLimitInInput();
+      }
+    });
+
+    // Arrow up/down history cycling
+    messageInput.addEventListener('keydown', (e) => {
+      if (secureMode) return;
+      if (e.key === 'ArrowUp') {
+        if (!sentHistory.length) return;
+        e.preventDefault();
+        if (sentHistoryIdx === -1) {
+          sentHistoryDraft = messageInput.value;
+          sentHistoryIdx   = sentHistory.length - 1;
+        } else {
+          sentHistoryIdx = Math.max(0, sentHistoryIdx - 1);
+        }
+        messageInput.value = sentHistory[sentHistoryIdx] || '';
+        const len = messageInput.value.length;
+        messageInput.setSelectionRange(len, len);
+        enforceTypingLimitInInput();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        if (sentHistoryIdx === -1) return;
+        e.preventDefault();
+        sentHistoryIdx++;
+        if (sentHistoryIdx >= sentHistory.length) {
+          sentHistoryIdx     = -1;
+          messageInput.value = sentHistoryDraft || '';
+        } else {
+          messageInput.value = sentHistory[sentHistoryIdx] || '';
+        }
+        const len = messageInput.value.length;
+        messageInput.setSelectionRange(len, len);
+        enforceTypingLimitInInput();
+      }
+    });
+
+    // Enter to send + Tab username autocomplete
+    let tabCycle = { key: '', idx: 0, items: [] };
+
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); return; }
+      if (secureMode) return;
+      if (e.key !== 'Tab') return;
+
+      const val    = messageInput.value;
+      const cursor = messageInput.selectionStart ?? val.length;
+      const left   = val.slice(0, cursor);
+
+      // "/t <user>" tab-complete
+      const dmMatch = left.match(/^\/t\s+([A-Za-z0-9_]*)$/i);
+      if (dmMatch) {
+        const prefix     = dmMatch[1] || '';
+        const candidates = knownUsers.filter(u => u.toLowerCase().startsWith(prefix.toLowerCase()));
+        e.preventDefault();
+        if (!candidates.length) return;
+        const cycleKey = 'dm:' + prefix.toLowerCase() + ':' + candidates.join(',');
+        if (tabCycle.key !== cycleKey) tabCycle = { key: cycleKey, idx: 0, items: candidates };
+        else tabCycle.idx = (tabCycle.idx + 1) % tabCycle.items.length;
+        const chosen    = tabCycle.items[tabCycle.idx];
+        const newPrefix = '/t ' + chosen + ' ';
+        messageInput.value = newPrefix + val.slice(cursor);
+        messageInput.setSelectionRange(newPrefix.length, newPrefix.length);
+        enforceTypingLimitInInput();
+        return;
+      }
+
+      // General token tab-complete
+      const m = left.match(/(^|[\s])([A-Za-z0-9_]+)$/);
+      if (!m) return;
+      const prefix     = m[2];
+      const candidates = knownUsers.filter(u => u.toLowerCase().startsWith(prefix.toLowerCase()));
+      if (!candidates.length) return;
+      e.preventDefault();
+      const cycleKey = 'tok:' + prefix.toLowerCase() + ':' + candidates.join(',');
+      if (tabCycle.key !== cycleKey) tabCycle = { key: cycleKey, idx: 0, items: candidates };
+      else tabCycle.idx = (tabCycle.idx + 1) % tabCycle.items.length;
+      const completed = tabCycle.items[tabCycle.idx];
+      const newLeft   = left.slice(0, left.length - prefix.length) + completed;
+      messageInput.value = newLeft + val.slice(cursor);
+      messageInput.setSelectionRange(newLeft.length, newLeft.length);
+      enforceTypingLimitInInput();
+    });
+
+    // -----------------------------------------------------------------------
+    // Alt+H / Alt+T / Alt+M shortcuts
+    // -----------------------------------------------------------------------
+    document.addEventListener('keydown', (e) => {
+      if (!e.altKey) return;
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        togglePanel(helpersPanel, helpersChev);
+      }
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        if (stickyDmUser) {
+          clearStickyDm();
+          addMessage('ℹ Sticky DM off', 'notice');
+        } else {
+          addMessage('ℹ Sticky DM is OFF. Click a user in the userlist to turn it on.', 'notice');
+        }
+      }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        togglePanel(helpersPanel, helpersChev, true);
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Return-to-BBS link
+    // -----------------------------------------------------------------------
+    returnLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      try { if (client) client.leaveRoom(); } catch (_) {}
+      setTimeout(() => {
+        const url = window.RETURN_TO_BBS_URL;
+        if (url && typeof url === 'string' && url.trim()) window.location.href = url;
+        else window.history.back();
+      }, 250);
+    });
+
+    // -----------------------------------------------------------------------
+    // Page lifecycle
+    // -----------------------------------------------------------------------
+    window.addEventListener('load', init);
+    window.addEventListener('beforeunload', () => {
+      stopWsKeepalive();
+      try { if (client) client.disconnect(); } catch (_) {}
+    });
+  </script>
+</body>
+</html>

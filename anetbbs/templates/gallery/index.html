@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Image Galleries — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-images"></i> Image Galleries</h1>
+    <p>Browse the BBS's photo and GIF collections.</p>
+</div>
+
+<div class="row g-3">
+    {% for g in galleries %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h3 class="card-title"><i class="bi bi-folder2-open"></i> {{ g.label }}</h3>
+                {% if g.exists %}
+                    <p class="text-muted">{{ g.count }} image{{ 's' if g.count != 1 else '' }}</p>
+                    <a href="{{ url_for('gallery.browse', slug=g.slug) }}"
+                       class="btn btn-primary btn-sm">
+                        <i class="bi bi-grid-3x3"></i> Open Gallery
+                    </a>
+                {% else %}
+                    <p class="text-muted"><em>Directory not found.</em></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

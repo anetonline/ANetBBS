@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Game Center — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-controller"></i> GAME CENTER</h1>
+    <p>Choose your game and prepare to play!</p>
+</div>
+
+<!-- Search + Filter -->
+<form method="get" class="mb-4 d-flex gap-2 flex-wrap">
+    <input type="text" name="q" class="form-control" style="max-width:300px;"
+           placeholder="Search games…" value="{{ search }}">
+    <select name="category" class="form-control" style="max-width:180px;">
+        <option value="">All Categories</option>
+        {% for cat in ['action','classic','other','puzzle','rpg','strategy'] %}
+        <option value="{{ cat }}" {% if category_filter == cat %}selected{% endif %}>
+            {{ cat | capitalize }}
+        </option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">
+        <i class="bi bi-search"></i> Filter
+    </button>
+    {% if category_filter or search %}
+    <a href="{{ url_for('games.lobby') }}" class="btn btn-outline-secondary" style="border-color:#00ff00;color:#00ff00;">
+        <i class="bi bi-x-circle"></i> Clear
+    </a>
+    {% endif %}
+</form>
+
+<div class="row">
+    <!-- Game Grid -->
+    <div class="col-md-9">
+        {% if categories %}
+            {% for cat, game_list in categories.items() %}
+            <h4 class="mt-3 mb-2" style="color:#00ff00;border-bottom:1px solid #00ff00;">
+                {{ cat | capitalize }}
+                <span class="badge" style="background:#003300;color:#00ff00;font-size:.7rem;">{{ game_list|length }}</span>
+            </h4>
+            <div class="row row-cols-1 row-cols-md-3 g-3 mb-4">
+                {% for game in game_list %}
+                <div class="col">
+                    <div class="card h-100" style="transition:border-color .2s;">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="bi {{ game.icon or 'bi-controller' }}"></i>
+                                {{ game.name }}
+                            </h5>
+                            <p class="card-text small" style="color:#00cc00;">{{ game.description or '' }}</p>
+                            <span class="badge mb-2"
+                                  style="background:#001a00;color:#00ff00;border:1px solid #00ff00;font-size:.7rem;">
+                                {% if game.game_type == 'builtin_web' %}Web Game
+                                {% elif game.game_type == 'door_dos' %}DOS Door
+                                {% elif game.game_type == 'door_native' %}Native Door
+                                {% elif game.game_type == 'door_mystic' %}Mystic Python
+                                {% elif game.game_type == 'door_synchronet' %}Synchronet JS
+                                {% else %}{{ game.game_type }}{% endif %}
+                            </span>
+                            <br>
+                            <small style="color:#007700;">
+                                <i class="bi bi-play-circle"></i> {{ game.play_count or 0 }} plays
+                            </small>
+                        </div>
+                        <div class="card-footer d-flex gap-2">
+                            <a href="{{ url_for('games.detail', slug=game.slug) }}"
+                               class="btn btn-primary btn-sm flex-grow-1">
+                                <i class="bi bi-info-circle"></i> Info
+                            </a>
+                            <a href="{{ url_for('games.play', slug=game.slug) }}"
+                               class="btn btn-sm flex-grow-1"
+                               style="background:#003300;border:1px solid #00ff00;color:#00ff00;">
+                                <i class="bi bi-play-fill"></i> Play
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                No games found{% if search %} matching "{{ search }}"{% endif %}{% if category_filter %} in category "{{ category_filter }}"{% endif %}.
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-people"></i> Now Playing</div>
+            <div class="card-body p-2">
+                {% if now_playing %}
+                    {% for s in now_playing %}
+                    <div class="mb-1 small">
+                        <i class="bi bi-person"></i> {{ s.user.username }}
+                        <span style="color:#007700;">→ {{ s.game.name }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="small mb-0" style="color:#007700;">No active sessions.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header"><i class="bi bi-trophy"></i> Leaderboards</div>
+            <div class="card-body p-2">
+                <a href="{{ url_for('games.scores') }}" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-list-ol"></i> View All Scores
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

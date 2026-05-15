@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Send Telegram{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-lightning-fill"></i> Send a Telegram</h1>
+    <p>One-line attention message — delivered crash + immediate.</p>
+</div>
+
+<form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2 mb-3">
+            <div class="col-md-5">
+                <label class="form-label">To Address (FTN)</label>
+                <input type="text" name="to_address" class="form-control" required
+                       value="{{ form.to_address or '' }}"
+                       pattern="^\d+:\d+/\d+(\.\d+)?$"
+                       placeholder="zone:net/node[.point]">
+                <div class="form-text">
+                    <a href="{{ url_for('nodelist.browse') }}" target="_blank">Find an address in the nodelist</a>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">To User</label>
+                <input type="text" name="to_name" class="form-control" required
+                       value="{{ form.to_name or '' }}">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Telegram (max 1000 chars)</label>
+            <textarea name="body" rows="4" maxlength="1000" required
+                      class="form-control" style="font-family:monospace;">{{ form.body or '' }}</textarea>
+        </div>
+        <button class="btn btn-warning"><i class="bi bi-lightning"></i> Send Telegram</button>
+        <a href="{{ url_for('telegram.index') }}" class="btn btn-link">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}ANSI Art Library{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-easel-fill"></i> ANSI Art Library</h1>
+    <p>Build CP437 ANSI screens for your BBS menus, welcome banners, and more.</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('ansi_editor.create') }}" class="btn btn-primary">
+        <i class="bi bi-plus-square"></i> New ANSI Art
+    </a>
+    <a href="{{ url_for('ansi_editor.import_ans') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-upload"></i> Import .ans
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if arts %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Name</th><th>Size</th><th>Updated</th><th>By</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for a in arts %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('ansi_editor.edit', art_id=a.id) }}">
+                            <strong>{{ a.name }}</strong>
+                        </a>
+                        <code class="text-muted ms-2 small">{{ a.slug }}</code>
+                    </td>
+                    <td>{{ a.width }}×{{ a.height }}</td>
+                    <td><small>{{ a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '—' }}</small></td>
+                    <td>{{ a.created_by.username if a.created_by else '?' }}</td>
+                    <td>
+                        <a href="{{ url_for('ansi_editor.edit', art_id=a.id) }}" class="btn btn-sm btn-outline-primary">edit</a>
+                        <a href="{{ url_for('ansi_editor.raw_ansi', art_id=a.id) }}" class="btn btn-sm btn-outline-secondary">.ans</a>
+                        <form method="post" action="{{ url_for('ansi_editor.delete', art_id=a.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-link text-danger p-0"
+                                    onclick="return confirm('Delete {{ a.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No art yet — click "New ANSI Art" to start.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

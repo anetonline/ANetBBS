@@ -1,0 +1,61 @@
+NOTE THIS FILE IS WORK IN PROGRESS FOR 1.12
+
+Text templates are used in various places within Mystic to define the output
+of certain generators, such as all files listings, new file arrival
+annoucements, and more.
+
+Each code translates to a specific value, so for the sake of this example lets
+say @CODE@ translates to "Hello" when it is encountered in a text template.
+
+In some cases, a simple translation will be sufficient, but often times
+additional formatting will be required in order to achieve the desired output.
+In order to provide formatting capabiltities, each code can have any number of
+functions applied to them by using the hypen - after the code name.
+
+For example:
+
+  @CODE@
+  @CODE-<function>@
+  @CODE-<function>-<function>@
+  @CODE-<function>-<function>-<function>@
+
+A code can have zero or any number of functions applied to it.  The following
+functions are available to use:
+
+Function       Descrption                                Example
+-------------- ----------------------------------------- ---------------------
+A<text>        Append <text> to end of value             @CODE-A World@
+C<char><len>   Center pads using <char> to <len> spaces  @CODE-C 20@
+D<char>        Duplicate <char> to the length of code    @CODE-D=@
+L<char><len>   Left pad using <char> to <len> spaces     @CODE-L 20@
+P<text>        Prepend <text> to beginning of value      @CODE-PHi! @
+R<char><len>   Right pad using <char> to <len> spaces    @CODE-R 20@
+S<orig>=<new>  Replace text <orig> with text <new>       @CODE-SHello=Goodbye@
+
+Not yet implemented, possible ideas:
+
+U              Convert to all upper case
+L              Convert to all lower case
+F<char><len>   Dupe <char>, (<len> - code length) times
+W<char<num>    Get word <num> using <char> as word delim
+
+Examples:
+
+@CODE@ was equal to a value of Hello, then:
+
+@CODE-A World@         = "Hello World"
+@CODE-SHello=Goodbye@  = "Goodbye"
+@CODE-R 30@            = "Hello                         "
+@CODE-R.30@            = "Hello........................."
+@CODE-A World-R.30@    = "Hello World..................."
+@CODE-D=@              = "====="  (dupe "=" to the length of the value of code)
+
+Draw a box that works regardless of length of @CODE@:
+
+.-@CODE-D-@-.
+| @CODE@ |
+`-@CODE-D-@-'
+
+.-------.
+| Hello |
+`-------'

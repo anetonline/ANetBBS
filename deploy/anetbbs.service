@@ -1,0 +1,24 @@
+[Unit]
+Description=ANetBBS terminal protocols (telnet / ssh / rlogin)
+After=network.target
+
+[Service]
+Type=simple
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+# Single process owns telnet, ssh, and rlogin. Which protocols
+# actually start is driven by TELNET_ENABLED / SSH_ENABLED /
+# RLOGIN_ENABLED in the .env file referenced above. This unit
+# intentionally has no Environment= overrides — Ubuntu systemd treats
+# EnvironmentFile as winning over Environment= (opposite of the
+# documented behavior), so the previous split-protocol units
+# (anetbbs-telnet.service + anetbbs-ssh.service) could not override
+# the .env values and ended up fighting each other for ports.
+ExecStart=/opt/anetbbs/venv/bin/anetbbs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

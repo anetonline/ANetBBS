@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Echo Areas — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-square-text"></i> Echo Areas</h1>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Dashboard
+    </a>
+    <div>
+        <a href="{{ url_for('echomail_admin.bad_areas') }}" class="btn btn-warning btn-sm me-2">
+            <i class="bi bi-exclamation-triangle"></i> Bad Areas
+        </a>
+        <a href="{{ url_for('echomail_admin.bulk_import') }}" class="btn btn-primary btn-sm me-2">
+            <i class="bi bi-upload"></i> Bulk Import
+        </a>
+        <a href="{{ url_for('echomail_admin.new_area') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add Area
+        </a>
+    </div>
+</div>
+
+{% set binkp_nets = [] %}
+{% set qwk_nets = [] %}
+{% for n in all_networks %}
+    {% if n.is_active and n.network_type == 'binkp' %}{% set _ = binkp_nets.append(n) %}{% endif %}
+    {% if n.is_active and n.network_type == 'qwk' %}{% set _ = qwk_nets.append(n) %}{% endif %}
+{% endfor %}
+
+{% if binkp_nets %}
+<details class="card mb-3" style="border-color:#006600;">
+    <summary class="card-header" style="background:#001100; cursor:pointer;">
+        <i class="bi bi-cloud-arrow-up"></i> Send AreaFix Request to a FidoNet Hub
+    </summary>
+    <div class="card-body">
+        <p class="text-muted small mb-2">
+            Subscribing locally only tells <em>us</em> to keep messages.
+            AreaFix tells the <em>hub</em> to actually send them. Tags
+            separated by spaces or commas.
+        </p>
+        {% for net in binkp_nets %}
+        <form method="post"
+              action="{{ url_for('echomail_admin.network_areafix', network_id=net.id) }}"
+              class="row g-2 mb-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-2"><strong>{{ net.name }}</strong>
+                <div class="text-muted" style="font-size:0.75rem;">{{ net.hub_address or '(no hub)' }}</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label form-label-sm small">Subscribe (+TAGS):</label>
+                <input type="text" name="plus_tags" class="form-control form-control-sm"
+                       placeholder="GENERAL ANSI.ARTWORK FTSC_PUBLIC">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label form-label-sm small">Unsubscribe (-TAGS):</label>
+                <input type="text" name="minus_tags" class="form-control form-control-sm"
+                       placeholder="OBSOLETE.ECHO">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-success btn-sm w-100">Send</button>
+            </div>
+        </form>
+        <details class="mb-2 ms-3">
+            <summary class="small text-muted" style="cursor:pointer;">
+                <i class="bi bi-pencil-square"></i>
+                Custom AreaFix command for {{ net.name }}
+                (advanced — type the netmail body verbatim)
+            </summary>
+            <form method="post"
+                  action="{{ url_for('echomail_admin.custom_areafix', network_id=net.id) }}"
+                  class="mt-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-2">
+                    <textarea name="body" rows="4" class="form-control form-control-sm"
+                              style="font-family:'Courier New',monospace; font-size:0.85rem;"
+                              placeholder="%RESCAN D=3650&#10;+TAGNAME&#10;-OBSOLETE.AREA&#10;%QUERY"></textarea>
+                    <div class="form-text small">
+                        One AreaFix directive per line.
+                        Subject auto-set to your AreaFix password.
+                        Examples: <code>%RESCAN D=3650</code> (full rescan, last 3650 days),
+                        <code>%RESCAN TAG R=500</code> (last 500 in one area),
+                        <code>%QUERY</code>, <code>%COMPRESS GZIP</code>.
+                    </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <select name="robot" class="form-select form-select-sm" style="max-width:150px;">
+                        <option value="AreaFix" selected>AreaFix</option>
+                        <option value="FileFix">FileFix</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-send"></i> Queue netmail
+                    </button>
+                </div>
+            </form>
+        </details>
+        <div class="d-flex gap-2 ms-1 mb-3 flex-wrap" style="margin-left:1rem;">
+            <form method="post"
+                  action="{{ url_for('echomail_admin.subscribe_all', network_id=net.id) }}"
+                  onsubmit="return confirm('Subscribe to ALL areas on {{ net.name }}? This marks every local EchoArea row as subscribed AND sends a +TAG AreaFix request for every known tag to {{ net.hub_address }}.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-success btn-sm" title="Subscribe locally + send +TAG AreaFix for every known tag">
+                    <i class="bi bi-bell"></i> Subscribe to ALL
+                </button>
+            </form>
+            <form method="post"
+                  action="{{ url_for('echomail_admin.rescan_all', network_id=net.id) }}"
+                  onsubmit="return confirm('%RESCAN every subscribed area on {{ net.name }}? Sends a single AreaFix netmail to {{ net.hub_address }} with %RESCAN for every currently-subscribed tag.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-warning btn-sm" title="%RESCAN every subscribed area">
+                    <i class="bi bi-arrow-clockwise"></i> Rescan ALL
+                </button>
+            </form>
+            <form method="post"
+                  action="{{ url_for('echomail_admin.unsubscribe_all', network_id=net.id) }}"
+                  onsubmit="return confirm('Unsubscribe from ALL areas on {{ net.name }}? This clears every local subscribed flag AND sends -TAG AreaFix for every known tag.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-outline-danger btn-sm" title="Unsubscribe locally + send -TAG AreaFix for every known tag">
+                    <i class="bi bi-bell-slash"></i> Unsubscribe from ALL
+                </button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
+{% if qwk_nets %}
+<details class="card mb-3" style="border-color:#006666;">
+    <summary class="card-header" style="background:#001818; cursor:pointer;">
+        <i class="bi bi-mailbox"></i> Quick-Add QWK Areas (by Conference Number)
+    </summary>
+    <div class="card-body">
+        <p class="text-muted small mb-2">
+            Pre-create areas for specific QWK conference numbers (e.g.
+            DOVE-Net's <code>2001=General, 2006=Programming</code>). The
+            tag is auto-formatted as <code>QWK_&lt;num&gt;</code>. Once
+            created, incoming messages with that conf# will land here.
+            Format: one entry per line — <code>NUM Name</code>.
+        </p>
+        {% for net in qwk_nets %}
+        <form method="post"
+              action="{{ url_for('echomail_admin.qwk_quick_add', network_id=net.id) }}"
+              class="mb-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-2 align-items-start">
+                <div class="col-md-2"><strong>{{ net.name }}</strong></div>
+                <div class="col-md-8">
+                    <textarea name="entries" class="form-control form-control-sm"
+                              rows="4"
+                              placeholder="2001 General&#10;2002 Advertisements&#10;2006 Programming&#10;2008 Sysops"></textarea>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-success btn-sm w-100">Add</button>
+                </div>
+            </div>
+        </form>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
+{% if areas %}
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Network</th><th>Tag</th><th>Name</th>
+                    <th>Messages</th><th>Last Activity</th>
+                    <th>Status</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for area in areas %}
+                <tr>
+                    <td style="font-size:0.85rem;">{{ area.network.name }}</td>
+                    <td><code style="color:#00cc00; font-size:0.8rem;">{{ area.tag }}</code></td>
+                    <td>{{ area.name }}</td>
+                    <td>{{ area.total_messages or 0 }}</td>
+                    <td style="font-size:0.85rem;">
+                        {{ area.last_message_at.strftime('%Y-%m-%d') if area.last_message_at else '—' }}
+                    </td>
+                    <td>
+                        {% if area.is_subscribed %}<span style="color:#00ff00;">✓ Subscribed</span>
+                        {% else %}<span style="color:#888;">— Unsubscribed</span>{% endif %}
+                    {% if not area.is_active %}<span style="color:#ff6600;" class="ms-1">Inactive</span>{% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="{{ url_for('echomail_admin.toggle_subscribe', area_id=area.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary btn-sm" title="{{ 'Unsubscribe' if area.is_subscribed else 'Subscribe' }}">
+                                <i class="bi bi-{{ 'bell-slash' if area.is_subscribed else 'bell' }}"></i>
+                            </button>
+                        </form>
+                        <a href="{{ url_for('echomail_admin.edit_area', area_id=area.id) }}" class="btn btn-primary btn-sm ms-1" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        {% if area.network and area.network.network_type == 'binkp' and area.is_subscribed %}
+                        <form method="post" action="{{ url_for('echomail_admin.rescan_area', area_id=area.id) }}" class="d-inline ms-1"
+                              onsubmit="return confirm('Queue an AreaFix %RESCAN {{ area.tag }} netmail to {{ area.network.hub_address }}? The hub will re-feed the area\'s backlog on the next poll.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-warning btn-sm" title="%RESCAN — pull the area's backlog from the hub">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                        <form method="post" action="{{ url_for('echomail_admin.delete_area', area_id=area.id) }}" class="d-inline ms-1"
+                              onsubmit="return confirm('Delete area {{ area.name }}? All messages will be lost!');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm" style="background:#000; border:1px solid #ff0000; color:#ff0000;" title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center p-4">
+        <i class="bi bi-chat-square-text" style="font-size:3rem;"></i>
+        <p class="mt-3">No echo areas configured yet.</p>
+        <a href="{{ url_for('echomail_admin.new_area') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add First Area
+        </a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

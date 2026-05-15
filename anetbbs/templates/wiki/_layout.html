@@ -1,0 +1,80 @@
+{# Common header / nav included by every wiki page. #}
+<style>
+  /* Wiki-specific styles. Extending base.html, so we inherit the dark
+     theme already — just add the bits the wiki needs that aren't
+     general-purpose. */
+  .wiki-toolbar { display:flex; gap:8px; align-items:center;
+                   flex-wrap:wrap; margin-bottom:18px; }
+  .wiki-toolbar .wiki-search { margin-left:auto; min-width:240px; }
+  .wiki-nav { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .wiki-nav a { padding:4px 10px; border:1px solid var(--theme-border);
+                 border-radius:4px; font-size:0.9rem; }
+  .wiki-nav a.current { background:var(--theme-primary);
+                         color:var(--theme-bg-dark); }
+  .wiki-body { line-height:1.55; max-width:920px; }
+  .wiki-body h1, .wiki-body h2, .wiki-body h3 {
+      border-bottom:1px solid var(--theme-border);
+      padding-bottom:0.3em; margin-top:1.4em; }
+  .wiki-body h1:first-child { margin-top:0; }
+  .wiki-body code { background:#1a1a2e; padding:1px 5px;
+                     border-radius:3px; font-size:0.92em; }
+  .wiki-body pre { background:#0a0a14; padding:10px;
+                    border:1px solid var(--theme-border);
+                    border-radius:4px; overflow:auto; }
+  .wiki-body pre code { background:transparent; padding:0; }
+  .wiki-body table { border-collapse:collapse; margin:0.6em 0; }
+  .wiki-body table th, .wiki-body table td {
+      border:1px solid var(--theme-border); padding:6px 10px; }
+  .wiki-body table th {
+      background:var(--theme-bg-dark);
+      color:var(--theme-primary); }
+  .wiki-body blockquote {
+      border-left:3px solid var(--theme-primary); padding:4px 14px;
+      margin:0.6em 0; color:var(--theme-text-muted); }
+  .wiki-link { color:var(--theme-primary); }
+  .wiki-link-missing { color:#ff7676; border-bottom:1px dashed #ff7676; }
+  .wiki-meta { font-size:0.85rem; color:var(--theme-text-muted);
+                margin-bottom:14px; }
+  .wiki-edit-textarea { width:100%; min-height:520px; font-family:
+        'Cascadia Mono','Consolas','Courier New',monospace; font-size:0.95rem;
+        background:#0a0a14; color:var(--theme-text);
+        border:1px solid var(--theme-border); padding:10px; }
+  .wiki-rev-row { display:flex; gap:10px; align-items:center;
+                   padding:6px 8px; border-bottom:1px solid var(--theme-border); }
+  .wiki-diff { font-family:'Cascadia Mono','Consolas','Courier New',monospace;
+                background:#0a0a14; padding:12px;
+                border:1px solid var(--theme-border); white-space:pre;
+                overflow:auto; font-size:0.9rem; line-height:1.4; }
+  .wiki-diff .add { color:#7fff7f; }
+  .wiki-diff .del { color:#ff7f7f; }
+  .wiki-diff .hdr { color:#7fbfff; }
+  .wiki-cheatsheet { font-size:0.85rem; }
+  .wiki-cheatsheet code { background:#1a1a2e; padding:1px 5px;
+                            border-radius:3px; }
+</style>
+
+<nav class="wiki-nav" aria-label="Wiki navigation">
+    <a href="{{ url_for('wiki.index') }}"
+       class="{% if request.endpoint == 'wiki.index' %}current{% endif %}">
+       <i class="bi bi-house"></i> Home</a>
+    <a href="{{ url_for('wiki.all_pages') }}"
+       class="{% if request.endpoint == 'wiki.all_pages' %}current{% endif %}">
+       <i class="bi bi-list-ul"></i> All pages</a>
+    <a href="{{ url_for('wiki.recent') }}"
+       class="{% if request.endpoint == 'wiki.recent' %}current{% endif %}">
+       <i class="bi bi-clock-history"></i> Recent changes</a>
+    <a href="{{ url_for('wiki.search') }}"
+       class="{% if request.endpoint == 'wiki.search' %}current{% endif %}">
+       <i class="bi bi-search"></i> Search</a>
+    <a href="{{ url_for('wiki.wanted') }}"
+       class="{% if request.endpoint == 'wiki.wanted' %}current{% endif %}">
+       <i class="bi bi-question-circle"></i> Wanted</a>
+    <a href="{{ url_for('wiki.orphans') }}"
+       class="{% if request.endpoint == 'wiki.orphans' %}current{% endif %}">
+       <i class="bi bi-snow"></i> Orphans</a>
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('wiki.new') }}"
+       class="{% if request.endpoint == 'wiki.new' %}current{% endif %}">
+       <i class="bi bi-plus-square"></i> New page</a>
+    {% endif %}
+</nav>

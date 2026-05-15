@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Setup Wizard{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-magic"></i> Setup Wizard</h1>
+    <p>One-stop checklist for new ANetBBS installs.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">Status checklist</div>
+    <div class="card-body">
+        <ul class="list-unstyled mb-0">
+            <li>{{ '✅' if progress.has_admin else '⬜' }} Sysop user exists</li>
+            <li>{{ '✅' if progress.has_motd else '⬜' }} MOTD pool populated</li>
+            <li>{{ '✅' if progress.has_network else '⬜' }} Echomail network configured (<a href="{{ url_for('echomail_admin.dashboard') }}">configure</a>)</li>
+            <li>{{ '✅' if progress.has_areas else '⬜' }} Echo areas subscribed (<a href="{{ url_for('admin.default_echos') }}">configure</a>)</li>
+            <li>{{ '✅' if progress.has_menus else '⬜' }} BBS menus seeded (auto on first deploy)</li>
+            <li>{{ '✅' if progress.has_dial else '⬜' }} Dial-out directory populated</li>
+        </ul>
+    </div>
+</div>
+
+<form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <h6>BBS Branding</h6>
+        <div class="row g-2 mb-3">
+            <div class="col-md-6"><label class="form-label">BBS Name</label>
+                <input type="text" name="bbs_name" class="form-control" value="{{ config.BBS_NAME or '' }}"></div>
+            <div class="col-md-6"><label class="form-label">Sysop Name</label>
+                <input type="text" name="sysop_name" class="form-control" value="{{ current_user.display_name or current_user.username }}"></div>
+        </div>
+
+        <h6>Seed some MOTDs (welcome messages shown at random)</h6>
+        <div class="mb-3">
+            <input type="text" name="motd" class="form-control mb-1" value="Welcome back to {{ config.BBS_NAME or 'the BBS' }}!">
+            <input type="text" name="motd" class="form-control mb-1" value="Did you know we have door games? Press G from the main menu.">
+            <input type="text" name="motd" class="form-control mb-1" value="Bulletins keep you up to date — check Tools → Bulletins.">
+            <input type="text" name="motd" class="form-control mb-1" value="Want to chat in real time? IRC and MRC are both available under Chat.">
+            <input type="text" name="motd" class="form-control mb-1" placeholder="(custom MOTD)">
+        </div>
+
+        <h6>Pre-load the dial-out directory</h6>
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="seed_dial" id="cb_dial" {% if not progress.has_dial %}checked{% endif %}>
+            <label for="cb_dial" class="form-check-label">
+                Seed default BBS list (A-Net, Particles!, Vert, etc.) — edit later in
+                <a href="{{ url_for('admin.dialout_admin') }}">Dial-Out Directory</a>
+            </label>
+        </div>
+
+        <h6>Seed sample ANSI art</h6>
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="seed_ansi" id="cb_ansi" checked>
+            <label for="cb_ansi" class="form-check-label">
+                Add sample art (welcome banner, login splash, divider, goodbye) to the
+                <a href="{{ url_for('ansi_editor.index') }}">ANSI editor library</a>
+            </label>
+        </div>
+
+        <button class="btn btn-primary"><i class="bi bi-check2-circle"></i> Apply</button>
+        <a href="{{ url_for('admin.dashboard') }}" class="btn btn-link">Back to dashboard</a>
+    </div>
+</form>
+{% endblock %}

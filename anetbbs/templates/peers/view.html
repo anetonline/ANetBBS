@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ peer.name }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-globe"></i> {{ peer.name }}</h1>
+    <p>
+        <code>{{ peer.hostname }}</code>{% if peer.finger_port and peer.finger_port != 79 %}:{{ peer.finger_port }}{% endif %}
+        {% if peer.ftn_address %} — <code>{{ peer.ftn_address }}</code>{% endif %}
+    </p>
+    {% if peer.description %}<p>{{ peer.description }}</p>{% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-header py-1">
+        <i class="bi bi-people"></i> Online users
+        <small class="text-muted ms-2">
+            (last polled {{ peer.last_polled_at.strftime('%Y-%m-%d %H:%M:%S UTC') if peer.last_polled_at else 'never' }})
+        </small>
+    </div>
+    <div class="card-body">
+        {% if peer.last_error %}
+            <div class="alert alert-warning mb-0">
+                <strong>Polling error:</strong> {{ peer.last_error }}
+            </div>
+        {% elif peer.last_response %}
+            <pre style="white-space:pre-wrap;font-family:monospace;margin:0;">{{ peer.last_response }}</pre>
+        {% else %}
+            <div class="text-muted">No data yet — the system will poll on the next request.</div>
+        {% endif %}
+    </div>
+</div>
+
+{% if peer.ftn_address %}
+<div class="mb-2">
+    <a href="{{ url_for('telegram.send') }}?to_address={{ peer.ftn_address|urlencode }}"
+       class="btn btn-warning btn-sm">
+        <i class="bi bi-lightning"></i> Send Telegram to {{ peer.name }}
+    </a>
+</div>
+{% endif %}
+<a href="{{ url_for('peers.index') }}" class="btn btn-link">← All BBSes</a>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}File Areas{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-folder2-open"></i> File Areas</h1>
+    <p>FidoNet file echos and local file libraries.</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('file_areas.smart_upload') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-cloud-arrow-up"></i> Smart Upload (auto-route by tag)
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Tag</th><th>Name</th><th>Files</th><th>Total Size</th>
+                <th>Description</th>
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td><code><a href="{{ url_for('file_areas.view_area', area_id=r.area.id) }}">{{ r.area.tag }}</a></code></td>
+                    <td>{{ r.area.name or '' }}</td>
+                    <td>{{ r.count }}</td>
+                    <td>{{ '%.1f'|format(r.total_size / 1024) }} KB</td>
+                    <td><small class="text-muted">{{ r.area.description or '' }}</small></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No file areas yet — they'll appear after the first inbound TIC arrives.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

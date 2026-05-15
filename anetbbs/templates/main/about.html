@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}About - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-info-circle"></i> About {{ config.BBS_NAME }}
+    </div>
+    <div class="card-body">
+        <h3>Welcome to {{ config.BBS_NAME }}</h3>
+        <p>{{ config.BBS_DESCRIPTION }}</p>
+        
+        <h4>Features</h4>
+        <h4>A-Net Online</h4>
+        <ul>
+            <li>Message Boards - Discussion forums for various topics</li>
+            <li>Real-time Chat - Connect with other users instantly</li>
+            <li>User Profiles - Customize your presence</li>
+            <li>Bulletins - Stay updated with announcements</li>
+            <li>Telnet Support - Classic BBS access (optional)</li>
+        </ul>
+        
+        <h4>Getting Started</h4>
+        <p>
+            To get started, <a href="{{ url_for('auth.register') }}">register an account</a> or 
+            <a href="{{ url_for('auth.login') }}">login</a> if you already have one.
+        </p>
+        
+        <h4>Old-School Terminal Access</h4>
+        <p>For the classic BBS experience, connect via any of these
+           protocols (whichever the sysop has enabled):</p>
+        {% set host = config.BBS_DOMAIN or request.host.split(':')[0] %}
+        <pre style="background-color: #0a0a0a; padding: 10px; border: 1px solid var(--theme-primary);">
+{% if config.TELNET_ENABLED %}Telnet:  {{ host }}  port {{ config.TELNET_PORT }}
+{% endif %}{% if config.SSH_ENABLED %}SSH:     {{ host }}  port {{ config.SSH_PORT }}
+{% endif %}{% if config.RLOGIN_ENABLED %}rlogin:  {{ host }}  port {{ config.RLOGIN_PORT }}
+{% endif %}</pre>
+        {% if not (config.TELNET_ENABLED or config.SSH_ENABLED or config.RLOGIN_ENABLED) %}
+        <p class="text-muted"><em>Terminal access is currently disabled — web only.</em></p>
+        {% endif %}
+
+        <p class="small text-muted mt-3">
+            Nodes: this BBS supports up to {{ config.BBS_NODES or 8 }} concurrent terminal connections.
+        </p>
+    </div>
+</div>
+{% endblock %}

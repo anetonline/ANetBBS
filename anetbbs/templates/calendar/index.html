@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-calendar3"></i> Calendar</h1>
+</div>
+
+{% if current_user.is_authenticated and current_user.is_admin %}
+<div class="mb-3">
+    <a href="{{ url_for('calendar.new_event') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Add Event</a>
+</div>
+{% endif %}
+
+<div class="card mb-3">
+    <div class="card-header">📅 Upcoming</div>
+    <div class="card-body p-0">
+    {% if upcoming %}
+        <ul class="list-group list-group-flush">
+        {% for e in upcoming %}
+            <li class="list-group-item">
+                <strong>{{ e.title }}</strong>
+                <span class="text-muted ms-2">{{ e.starts_at.strftime('%a %Y-%m-%d %H:%M UTC') }}</span>
+                {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
+                {% if e.description %}<div class="text-muted small">{{ e.description }}</div>{% endif %}
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <form method="post" action="{{ url_for('calendar.delete', event_id=e.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                </form>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}<div class="p-3 text-muted">No upcoming events.</div>{% endif %}
+    </div>
+</div>
+
+{% if past %}
+<div class="card">
+    <div class="card-header text-muted">Recent past events</div>
+    <div class="card-body p-0">
+        <ul class="list-group list-group-flush">
+        {% for e in past %}
+            <li class="list-group-item text-muted">
+                {{ e.title }} — {{ e.starts_at.strftime('%Y-%m-%d') }}
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

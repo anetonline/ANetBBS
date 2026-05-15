@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Caller Log{% endblock %}
+{% block content %}
+<div class="bbs-header"><h1><i class="bi bi-clock-history"></i> Caller Log</h1></div>
+
+<form method="get" class="card p-3 mb-3">
+    <div class="row g-2">
+        <div class="col-md-3">
+            <label class="form-label small mb-0">Username</label>
+            <input type="text" name="user" value="{{ user }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-0">IP</label>
+            <input type="text" name="ip" value="{{ ip }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-0">Service</label>
+            <select name="service" class="form-select form-select-sm">
+                <option value="">— Any —</option>
+                {% for s in ['web','telnet','ssh','rlogin'] %}
+                    <option value="{{ s }}" {% if service == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-0">From</label>
+            <input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-0">To</label>
+            <input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+        </div>
+    </div>
+    <div class="mt-2">
+        <button class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> Filter</button>
+        <a href="{{ url_for('admin.caller_log') }}" class="btn btn-secondary btn-sm">Reset</a>
+    </div>
+</form>
+
+<table class="table table-sm">
+    <thead><tr><th>When</th><th>User</th><th>Service</th><th>IP</th><th>Country</th><th>Duration</th></tr></thead>
+    <tbody>
+    {% for c in pagination.items %}
+    <tr>
+        <td><small>{{ c.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
+        <td><strong>{{ c.username or '?' }}</strong></td>
+        <td><span class="badge bg-secondary">{{ c.service or '?' }}</span></td>
+        <td><code>{{ c.ip_address or '' }}</code></td>
+        <td><small>{{ c.country or '' }}</small></td>
+        <td><small>{{ c.duration_seconds or 0 }}s</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No matches.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% if pagination.pages > 1 %}
+<nav>
+<ul class="pagination">
+    {% if pagination.has_prev %}
+    <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&user={{ user }}&ip={{ ip }}&service={{ service }}&date_from={{ date_from }}&date_to={{ date_to }}">Prev</a></li>
+    {% endif %}
+    <li class="page-item active"><span class="page-link">{{ pagination.page }} / {{ pagination.pages }}</span></li>
+    {% if pagination.has_next %}
+    <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&user={{ user }}&ip={{ ip }}&service={{ service }}&date_from={{ date_from }}&date_to={{ date_to }}">Next</a></li>
+    {% endif %}
+</ul>
+</nav>
+{% endif %}
+{% endblock %}

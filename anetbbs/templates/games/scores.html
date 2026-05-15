@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Leaderboards — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h2><i class="bi bi-trophy"></i> LEADERBOARDS</h2>
+</div>
+
+<!-- Filters -->
+<form method="get" class="mb-4 d-flex gap-2 flex-wrap">
+    <select name="game_id" class="form-control" style="max-width:220px;">
+        <option value="">All Games</option>
+        {% for g in all_games %}
+        <option value="{{ g.id }}" {% if game_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+    </select>
+    <select name="period" class="form-control" style="max-width:160px;">
+        <option value="all" {% if period == 'all' %}selected{% endif %}>All Time</option>
+        <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>This Month</option>
+    </select>
+    <button type="submit" class="btn btn-primary">
+        <i class="bi bi-funnel"></i> Filter
+    </button>
+</form>
+
+{% if top_scores %}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Player</th>
+            <th>Game</th>
+            <th>Score</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for score in top_scores %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ score.user.username }}</td>
+            <td>
+                <a href="{{ url_for('games.detail', slug=score.game.slug) }}">
+                    {{ score.game.name }}
+                </a>
+            </td>
+            <td>{{ score.score }}</td>
+            <td>{{ score.achieved_at.strftime('%Y-%m-%d') }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No scores recorded yet. Play some games!
+</div>
+{% endif %}
+{% endblock %}

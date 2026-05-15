@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}File-Echo Subscriptions{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-share"></i> File-Echo Subscriptions</h1>
+    <p>Downstream peers that receive each file area's hatched files.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add Subscription</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-5">
+                <label class="form-label">File Area</label>
+                <select name="file_area_id" class="form-select" required>
+                    {% for a in areas %}
+                        <option value="{{ a.id }}">{{ a.tag }} — {{ a.name or '' }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Peer FTN Address</label>
+                <input type="text" name="peer_address" class="form-control"
+                       placeholder="zone:net/node[.point]"
+                       pattern="^\d+:\d+/\d+(\.\d+)?$" required>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100">Subscribe</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if subs %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Area</th><th>Peer</th><th>Active</th><th>Created</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for s in subs %}
+                <tr {% if not s.is_active %}class="text-muted"{% endif %}>
+                    <td><code>{{ s.file_area.tag if s.file_area else '?' }}</code></td>
+                    <td><code>{{ s.peer_address }}</code></td>
+                    <td>
+                        {% if s.is_active %}
+                            <span class="badge bg-success">active</span>
+                        {% else %}
+                            <span class="badge bg-secondary">paused</span>
+                        {% endif %}
+                    </td>
+                    <td><small>{{ s.created_at.strftime('%Y-%m-%d') }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="sub_id" value="{{ s.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">
+                                {{ 'pause' if s.is_active else 'resume' }}
+                            </button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="sub_id" value="{{ s.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Remove subscription?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No subscriptions yet — add one above.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

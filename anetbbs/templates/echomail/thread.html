@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Thread: {{ seed.subject or '(no subject)' }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-square-text"></i> Thread</h1>
+    <p>
+        <code>{{ echo_area.tag }}</code> — {{ messages|length }} message{% if messages|length != 1 %}s{% endif %}
+    </p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('echomail.area', area_id=echo_area.id) }}" class="btn btn-link">← Back to {{ echo_area.tag }}</a>
+</div>
+
+{% for m in messages %}
+<div class="card mb-2" style="margin-left: {{ (m._depth or 0) * 24 }}px;">
+    <div class="card-header py-1 d-flex justify-content-between align-items-center" style="font-size:0.9rem;">
+        <span>
+            <strong>{{ m.from_name }}</strong> →
+            <span class="text-muted">{{ m.to_name or 'All' }}</span>
+            {% if m == seed %}<span class="badge bg-primary">selected</span>{% endif %}
+            {% if m.id == messages[0].id and m._depth == 0 %}<span class="badge bg-success">root</span>{% endif %}
+        </span>
+        <span class="text-muted small">{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+    </div>
+    <div class="card-body py-2">
+        <div class="mb-1">
+            <strong>{{ m.subject or '(no subject)' }}</strong>
+        </div>
+        <pre class="ansi-body" style="white-space:pre-wrap;font-family:monospace;font-size:0.85rem;margin:0;">{{ (m.body[:600] if m.body else '') | msgbody(m.chrs) }}{% if m.body and m.body|length > 600 %}...{% endif %}</pre>
+        <div class="mt-1">
+            <a href="{{ url_for('echomail.read', area_id=echo_area.id, message_id=m.id) }}" class="btn btn-sm btn-link p-0">Read full</a>
+            <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=m.id) }}" class="btn btn-sm btn-link p-0">Reply</a>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

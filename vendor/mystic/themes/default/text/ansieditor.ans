@@ -1,0 +1,20 @@
+[0m[1;1H
+
+
+
+[15C[1;30mษอออออออออออออออ[35;45m ANSI Editor Help [30;40mอออออออออออออออป
+[15Cบ                                                บ
+[15Cบ  [37mESCAPE   [0mSelect Attribute / Quick menu        [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mA   [0mSelect Attribute / Quick menu        [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mB   [0mBlock Operations                     [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mF   [0mJump to first column of line         [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mG   [0mJump to last column of line          [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mI   [0mInsert Tab (5 spaces)                [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mK   [0mCut the current line of text         [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mO   [0mOpen a new file for editing          [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mS   [0mSave the curent file to disk         [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mU   [0mUncut/paste the cut buffer           [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mV   [0mToggle Insert/Overwrite Mode         [1;30mบ
+[15Cบ  [37mCTRL[30m+[37mY   [0mDelete Line                          [1;30mบ
+[15Cบ                                                บ
+[15Cศอออออออออออออออออ[35;45m Press a key [30;40mออออออออออออออออออผ

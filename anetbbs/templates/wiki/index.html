@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Wiki — {{ config.BBS_NAME or 'ANetBBS' }}{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-book"></i> {{ config.BBS_NAME or 'ANetBBS' }} Wiki</h1>
+    <p class="text-muted">{{ total }} page{{ '' if total == 1 else 's' }} — collaborative documentation maintained by the community.</p>
+</div>
+
+<div class="row">
+    <div class="col-md-9">
+        {% if home and body_html %}
+            <div class="wiki-meta">
+                <i class="bi bi-clock"></i>
+                Last edited {{ home.updated_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                {% if home.updated_by %}
+                    by <a href="{{ url_for('profile.view_user', username=home.updated_by.username) }}">{{ home.updated_by.username }}</a>
+                {% endif %}
+                · <a href="{{ url_for('wiki.history', slug=home.slug) }}">history</a>
+                {% if current_user.is_authenticated %}
+                · <a href="{{ url_for('wiki.edit', slug=home.slug) }}">edit</a>
+                {% endif %}
+            </div>
+            <div class="wiki-body">{{ body_html }}</div>
+        {% else %}
+            <div class="alert alert-info">
+                <p><strong>The wiki is empty.</strong></p>
+                <p>The home page hasn't been written yet.
+                {% if current_user.is_authenticated %}
+                <a href="{{ url_for('wiki.edit', slug='home') }}" class="btn btn-sm btn-primary">Create the home page</a>
+                {% else %}
+                Log in to create it.
+                {% endif %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-clock-history"></i> Recent edits</div>
+            <ul class="list-group list-group-flush">
+                {% for p in recent %}
+                    <li class="list-group-item">
+                        <a href="{{ url_for('wiki.view', slug=p.slug) }}">{{ p.title }}</a>
+                        <br><small class="text-muted">{{ p.updated_at.strftime('%m-%d %H:%M') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-muted">No edits yet.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

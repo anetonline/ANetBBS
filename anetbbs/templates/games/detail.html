@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ game.name }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+    <a href="{{ url_for('games.lobby') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Game Center
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0">
+                    <i class="bi {{ game.icon or 'bi-controller' }}"></i> {{ game.name }}
+                </h3>
+            </div>
+            <div class="card-body">
+                <p>{{ game.description or 'No description available.' }}</p>
+                <dl class="row small">
+                    <dt class="col-sm-4">Category</dt>
+                    <dd class="col-sm-8">{{ game.category | capitalize }}</dd>
+                    <dt class="col-sm-4">Type</dt>
+                    <dd class="col-sm-8">
+                        {% if game.game_type == 'builtin_web' %}Built-in Web Game
+                        {% elif game.game_type == 'door_dos' %}Classic DOS Door
+                        {% elif game.game_type == 'door_native' %}Native Door
+                        {% elif game.game_type == 'door_mystic' %}Mystic BBS Python
+                        {% elif game.game_type == 'door_synchronet' %}Synchronet JS
+                        {% else %}{{ game.game_type }}{% endif %}
+                    </dd>
+                    <dt class="col-sm-4">Total Plays</dt>
+                    <dd class="col-sm-8">{{ game.play_count or 0 }}</dd>
+                    <dt class="col-sm-4">Active Now</dt>
+                    <dd class="col-sm-8">{{ active_sessions | length }}</dd>
+                </dl>
+                {% if current_user.is_authenticated %}
+                <a href="{{ url_for('games.play', slug=game.slug) }}"
+                   class="btn btn-primary mt-2">
+                    <i class="bi bi-play-fill"></i> Play Now
+                </a>
+                {% else %}
+                <a href="{{ url_for('auth.login') }}" class="btn btn-primary mt-2">
+                    <i class="bi bi-box-arrow-in-right"></i> Login to Play
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-trophy"></i> Top Scores</div>
+            <div class="card-body p-0">
+                {% if top_scores %}
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Player</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for score in top_scores %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ score.user.username }}</td>
+                            <td>{{ score.score }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="p-3 mb-0 small" style="color:#007700;">No scores yet. Be the first!</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

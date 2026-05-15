@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{{ poll.question }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-bar-chart-fill"></i> {{ poll.question }}</h1>
+    {% if poll.description %}<p>{{ poll.description }}</p>{% endif %}
+    <p class="text-muted small">
+        by {{ poll.creator.username }} on {{ poll.created_at.strftime('%Y-%m-%d') }}
+        {% if not poll.is_active %}<span class="badge bg-secondary">closed</span>{% endif %}
+    </p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+    {% if poll.is_active %}
+        <form method="post" action="{{ url_for('polls.vote', poll_id=poll.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% for opt in options %}
+                {% set pct = (opt.vote_count * 100 / total) | round(1) %}
+                <div class="mb-2">
+                    <label class="form-check">
+                        <input type="radio" name="option_id" value="{{ opt.id }}"
+                               class="form-check-input"
+                               {% if user_vote and user_vote.option_id == opt.id %}checked{% endif %}>
+                        <span class="form-check-label">{{ opt.text }}</span>
+                    </label>
+                    <div class="progress" style="height:8px;">
+                        <div class="progress-bar" style="width:{{ pct }}%;"></div>
+                    </div>
+                    <small class="text-muted">{{ opt.vote_count }} ({{ pct }}%)</small>
+                </div>
+            {% endfor %}
+            <button class="btn btn-primary mt-2">
+                <i class="bi bi-check2"></i> {% if user_vote %}Change Vote{% else %}Vote{% endif %}
+            </button>
+        </form>
+    {% else %}
+        {% for opt in options %}
+            {% set pct = (opt.vote_count * 100 / total) | round(1) %}
+            <div class="mb-2">
+                <strong>{{ opt.text }}</strong> — {{ opt.vote_count }} ({{ pct }}%)
+                <div class="progress" style="height:8px;">
+                    <div class="progress-bar" style="width:{{ pct }}%;"></div>
+                </div>
+            </div>
+        {% endfor %}
+    {% endif %}
+    </div>
+</div>
+
+<div>
+    <a href="{{ url_for('polls.index') }}" class="btn btn-link">← All polls</a>
+    {% if poll.is_active and (current_user.is_admin or poll.creator_id == current_user.id) %}
+        <form method="post" action="{{ url_for('polls.close', poll_id=poll.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-danger btn-sm" onclick="return confirm('Close this poll?')">
+                <i class="bi bi-x-circle"></i> Close Poll
+            </button>
+        </form>
+    {% endif %}
+</div>
+{% endblock %}

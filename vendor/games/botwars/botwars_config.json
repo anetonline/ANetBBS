@@ -1,0 +1,16 @@
+{
+  "game_name": "Bot Wars",
+  "version": "0.2.0",
+  "bank": {
+    "daily_fee": 20,
+    "raid_penalty_pct": 0.2
+  },
+  "guild": {
+    "default_upkeep": 500,
+    "raid_window_hours": 24
+  },
+  "boss": {
+    "base_level_offset": 40,
+    "phase_thresholds": [0.66, 0.35]
+  }
+}

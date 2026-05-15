@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ msg.subject }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.msg-body { background-color: #0a0a0a; border: 1px solid #00ff00; padding: 16px; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 0.9rem; line-height: 1.5; }
+.ansi-body { font-family: 'IBM VGA','Cascadia Code','Consolas','Lucida Console','Courier New',monospace; line-height: 1.2; color: #aaaaaa; }
+.ansi-body span { white-space: pre-wrap; }
+.msg-meta th { color: #00cc00; width: 100px; font-weight: bold; }
+.quoted-line { color: #009900; }
+.tear-origin { color: #007700; font-size: 0.8rem; margin-top: 8px; border-top: 1px dotted #007700; padding-top: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="{{ url_for('echomail.area', area_id=echo_area.id) }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> {{ echo_area.name }}
+    </a>
+    <div>
+        {% if prev_msg %}
+        <a href="{{ url_for('echomail.read', area_id=echo_area.id, message_id=prev_msg.id) }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-chevron-left"></i> Prev
+        </a>
+        {% endif %}
+        {% if next_msg %}
+        <a href="{{ url_for('echomail.read', area_id=echo_area.id, message_id=next_msg.id) }}" class="btn btn-primary btn-sm ms-1">
+            Next <i class="bi bi-chevron-right"></i>
+        </a>
+        {% endif %}
+        <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=msg.id) }}" class="btn btn-primary btn-sm ms-2">
+            <i class="bi bi-reply"></i> Reply
+        </a>
+        {% if msg.msg_id or msg.reply_id %}
+        <a href="{{ url_for('echomail.thread', area_id=echo_area.id, message_id=msg.id) }}" class="btn btn-outline-primary btn-sm ms-1">
+            <i class="bi bi-chat-square-text"></i> Thread
+        </a>
+        {% endif %}
+        <a href="{{ url_for('echomail.next_unread', area_id=echo_area.id) }}" class="btn btn-success btn-sm ms-1">
+            <i class="bi bi-skip-forward"></i> Next Unread
+        </a>
+        <form method="post" action="{{ url_for('saved.add') }}" class="d-inline ms-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="kind" value="echomail">
+            <input type="hidden" name="target_id" value="{{ msg.id }}">
+            <button class="btn btn-outline-warning btn-sm" title="Bookmark this message">
+                <i class="bi bi-bookmark-star"></i>
+            </button>
+        </form>
+        <button type="button" class="btn btn-outline-info btn-sm ms-1 copy-permalink-btn"
+                data-kind="echomail" data-id="{{ msg.id }}" title="Copy permalink">
+            <i class="bi bi-link-45deg"></i>
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-envelope-open"></i> {{ msg.subject or '(no subject)' }}
+    </div>
+    <div class="card-body">
+        <table class="table msg-meta mb-3" style="font-size:0.9rem;">
+            <tr><th>From:</th><td>{{ msg.from_name or '' }}{% if msg.from_address %} &lt;{{ msg.from_address }}&gt;{% endif %}</td></tr>
+            <tr><th>To:</th><td>{{ msg.to_name or 'All' }}{% if msg.to_address %} &lt;{{ msg.to_address }}&gt;{% endif %}</td></tr>
+            <tr><th>Date:</th><td>{{ msg.created_at.strftime('%a, %d %b %Y %H:%M UTC') }}</td></tr>
+            <tr><th>Area:</th><td><a href="{{ url_for('echomail.area', area_id=echo_area.id) }}">{{ echo_area.name }}</a> ({{ echo_area.tag }})</td></tr>
+            <tr><th>Network:</th><td>{{ echo_area.network.name }}</td></tr>
+        </table>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <button type="button" id="toggleMd" class="btn btn-link btn-sm p-0">
+                <i class="bi bi-markdown"></i> Toggle Markdown view
+            </button>
+            <span>
+                {% set msg_type = 'echomail' %}{% set msg_id = msg.id %}
+                {% include '_vote_buttons.html' %}
+            </span>
+        </div>
+        <div class="msg-body ansi-body" id="bodyPlain">{{ msg.body | msgbody(msg.chrs) }}{% if msg.tear_line or msg.origin_line %}
+<div class="tear-origin">
+{% if msg.tear_line %}{{ msg.tear_line | msgbody(msg.chrs) }}
+{% endif %}{% if msg.origin_line %}* Origin: {{ msg.origin_line | msgbody(msg.chrs) }}{% endif %}
+</div>
+{% endif %}</div>
+        <div id="bodyMd" class="msg-body" style="display:none;">{{ msg.body | markdown }}</div>
+        <script>
+        (function() {
+            const btn = document.getElementById('toggleMd');
+            const plain = document.getElementById('bodyPlain');
+            const md = document.getElementById('bodyMd');
+            if (!btn || !plain || !md) return;
+            btn.addEventListener('click', () => {
+                const showMd = plain.style.display !== 'none';
+                plain.style.display = showMd ? 'none' : '';
+                md.style.display = showMd ? '' : 'none';
+            });
+        })();
+        </script>
+    </div>
+    <div class="card-footer d-flex justify-content-between">
+        <span style="font-size:0.8rem; color:#00cc00;">
+            <i class="bi bi-arrow-{{ 'down' if msg.direction == 'inbound' else 'up' }}-circle"></i>
+            {{ msg.direction|capitalize }}
+            {% if msg.imported_at %} — received {{ msg.imported_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+        </span>
+        <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=msg.id) }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-reply"></i> Reply
+        </a>
+    </div>
+</div>
+{% endblock %}

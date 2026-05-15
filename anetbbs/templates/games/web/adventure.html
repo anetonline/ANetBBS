@@ -1,0 +1,238 @@
+<style>
+#adv-game { max-width: 700px; margin: 0 auto; }
+#adv-output {
+    background: #000; border: 1px solid #007700; padding: 12px; height: 400px;
+    overflow-y: auto; font-size: .95rem; line-height: 1.7;
+    font-family: 'Courier New', monospace; margin-bottom: 8px;
+}
+#adv-input-row { display: flex; gap: 8px; }
+#adv-input {
+    flex: 1; background: #000; border: 1px solid #00ff00; color: #00ff00;
+    font-family: 'Courier New', monospace; font-size: 1rem; padding: 6px 10px;
+}
+#adv-input:focus { outline: none; box-shadow: 0 0 4px rgba(0,255,0,.4); }
+.adv-system { color: #00ff00; }
+.adv-player { color: #ffcc00; }
+.adv-error   { color: #ff4444; }
+.adv-win     { color: #00ffff; font-weight: bold; }
+</style>
+
+<div id="adv-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-map"></i> TEXT ADVENTURE</h4>
+    <div id="adv-output"></div>
+    <div id="adv-input-row">
+        <input id="adv-input" placeholder="Enter command (e.g. go north, look, take key)…" autocomplete="off">
+        <button id="adv-submit" class="btn btn-primary">→ Enter</button>
+    </div>
+    <p style="color:#007700; font-size:.8rem; margin-top:6px;">
+        Commands: <code>look</code> • <code>go [direction]</code> • <code>take [item]</code> •
+        <code>drop [item]</code> • <code>inventory</code> • <code>use [item]</code> •
+        <code>examine [item]</code> • <code>help</code>
+    </p>
+</div>
+
+<script>
+(function() {
+    // ---------------------------------------------------------------
+    // World definition
+    // ---------------------------------------------------------------
+    var ROOMS = {
+        entrance: {
+            name: 'Dungeon Entrance',
+            desc: 'You stand at the entrance of a dark dungeon. A torch flickers on the wall. Passages lead north and east.',
+            exits: {north: 'corridor', east: 'guardroom'},
+            items: ['torch'],
+        },
+        corridor: {
+            name: 'Dark Corridor',
+            desc: 'A long, damp corridor stretches before you. Slime coats the walls. A door lies to the south. Stairs descend to the west.',
+            exits: {south: 'entrance', west: 'staircase'},
+            items: ['rusty_key'],
+        },
+        guardroom: {
+            name: 'Guard Room',
+            desc: 'An abandoned guard room. A table is overturned. There is a locked chest in the corner. The exit is to the west.',
+            exits: {west: 'entrance'},
+            items: ['chest'],
+            locks: {chest: 'iron_key'},
+        },
+        staircase: {
+            name: 'Spiral Staircase',
+            desc: 'A spiral staircase. It leads up to the east, and further down to the north.',
+            exits: {east: 'corridor', north: 'vault'},
+            items: [],
+        },
+        vault: {
+            name: 'The Vault',
+            desc: 'A massive stone vault. The walls are covered in gold engravings. A heavy door to the south is the only exit.',
+            exits: {south: 'staircase'},
+            items: ['iron_key', 'treasure'],
+            requires: {south: 'torch'},
+        },
+    };
+
+    var ITEMS = {
+        torch:     {name:'a torch',       desc:'A burning torch that lights your way.',     take:true},
+        rusty_key: {name:'a rusty key',   desc:'An old rusty key. It might open something.', take:true},
+        iron_key:  {name:'an iron key',   desc:'A sturdy iron key with ornate markings.',    take:true},
+        chest:     {name:'a locked chest',desc:'A heavy chest locked with an iron lock.',    take:false},
+        treasure:  {name:'the treasure',  desc:'A pile of golden coins and gems!',            take:true, win:true},
+    };
+
+    var state = { room: 'entrance', inventory: [], score: 0, moves: 0 };
+    var roomItems = {};
+    Object.keys(ROOMS).forEach(function(id){ roomItems[id] = ROOMS[id].items.slice(); });
+    var opened = {};
+
+    // ---------------------------------------------------------------
+    function print(text, cls) {
+        var out = document.getElementById('adv-output');
+        var div = document.createElement('div');
+        div.className = 'adv-' + (cls||'system');
+        div.innerHTML = text;
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight;
+    }
+
+    function doLook() {
+        var room = ROOMS[state.room];
+        print('<strong>' + room.name + '</strong>');
+        print(room.desc);
+        var items = roomItems[state.room];
+        if (items.length) {
+            print('You see: ' + items.map(function(i){ return ITEMS[i].name; }).join(', ') + '.');
+        }
+        var exits = Object.keys(room.exits);
+        print('Exits: ' + exits.join(', ') + '.');
+    }
+
+    function doGo(dir) {
+        var room = ROOMS[state.room];
+        if (!room.exits[dir]) { print('You cannot go that way.', 'error'); return; }
+        var req = room.requires && room.requires[dir];
+        if (req && state.inventory.indexOf(req) < 0) {
+            print('You need ' + ITEMS[req].name + ' to go that way.', 'error'); return;
+        }
+        state.room = room.exits[dir];
+        state.score += 5;
+        doLook();
+    }
+
+    function doTake(target) {
+        var items = roomItems[state.room];
+        var idx = findItem(target, items);
+        if (idx < 0) { print('There is no ' + target + ' here.', 'error'); return; }
+        var id = items[idx];
+        if (!ITEMS[id].take) { print('You cannot take that.', 'error'); return; }
+        items.splice(idx, 1);
+        state.inventory.push(id);
+        state.score += 10;
+        print('You pick up ' + ITEMS[id].name + '.');
+        if (ITEMS[id].win) {
+            print('★★★ YOU FOUND THE TREASURE! You win! ★★★', 'win');
+            submitScore(state.score + 100);
+        }
+    }
+
+    function doDrop(target) {
+        var idx = findItem(target, state.inventory);
+        if (idx < 0) { print("You don't have that.", 'error'); return; }
+        var id = state.inventory.splice(idx, 1)[0];
+        roomItems[state.room].push(id);
+        print('You drop ' + ITEMS[id].name + '.');
+    }
+
+    function doInventory() {
+        if (!state.inventory.length) { print('You are carrying nothing.'); return; }
+        print('You are carrying: ' + state.inventory.map(function(i){ return ITEMS[i].name; }).join(', ') + '.');
+    }
+
+    function doExamine(target) {
+        var id = findItem(target, state.inventory);
+        if (id >= 0) { print(ITEMS[state.inventory[id]].desc); return; }
+        var ri = findItem(target, roomItems[state.room]);
+        if (ri >= 0) { print(ITEMS[roomItems[state.room][ri]].desc); return; }
+        print('You see nothing special.', 'error');
+    }
+
+    function doUse(target) {
+        var idx = findItem(target, state.inventory);
+        if (idx < 0) { print("You don't have that.", 'error'); return; }
+        var id = state.inventory[idx];
+        var room = ROOMS[state.room];
+        var locks = room.locks || {};
+        var used = false;
+        Object.keys(locks).forEach(function(obj) {
+            if (locks[obj] === id && roomItems[state.room].indexOf(obj) >= 0) {
+                roomItems[state.room].splice(roomItems[state.room].indexOf(obj), 1);
+                state.inventory.splice(idx, 1);
+                roomItems[state.room].push('iron_key'); // reveal key inside chest
+                print('You use ' + ITEMS[id].name + ' to open the ' + obj + '!');
+                print('Inside you find an iron key.');
+                state.score += 20;
+                used = true;
+            }
+        });
+        if (!used) print('You use the ' + ITEMS[id].name + ' but nothing happens.');
+    }
+
+    function doHelp() {
+        print('Commands: look, go [n/s/e/w], take [item], drop [item], inventory (or i), examine [item], use [item].');
+    }
+
+    function findItem(target, list) {
+        target = target.toLowerCase();
+        for (var i=0;i<list.length;i++) {
+            if (ITEMS[list[i]] && ITEMS[list[i]].name.toLowerCase().indexOf(target) >= 0) return i;
+            if (list[i].toLowerCase().indexOf(target) >= 0) return i;
+        }
+        return -1;
+    }
+
+    function submitScore(s) {
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({score: s})
+        }).catch(function(){});
+    }
+
+    function handleCommand(raw) {
+        var cmd = raw.trim().toLowerCase();
+        if (!cmd) return;
+        print('&gt; ' + raw, 'player');
+        state.moves++;
+        var parts = cmd.split(/\s+/);
+        var verb = parts[0], rest = parts.slice(1).join(' ');
+        if (verb === 'look' || verb === 'l') { doLook(); }
+        else if (verb === 'go' || verb === 'north' || verb === 'south' || verb === 'east' || verb === 'west'
+                 || verb === 'n' || verb === 's' || verb === 'e' || verb === 'w' || verb === 'up' || verb === 'down') {
+            var dir = verb === 'go' ? rest : {n:'north',s:'south',e:'east',w:'west'}[verb] || verb;
+            doGo(dir);
+        }
+        else if (verb === 'take' || verb === 'get' || verb === 'pick') { doTake(rest); }
+        else if (verb === 'drop') { doDrop(rest); }
+        else if (verb === 'inventory' || verb === 'i') { doInventory(); }
+        else if (verb === 'examine' || verb === 'x' || verb === 'inspect') { doExamine(rest); }
+        else if (verb === 'use') { doUse(rest); }
+        else if (verb === 'help' || verb === '?') { doHelp(); }
+        else { print("I don't understand that command. Type 'help' for a list.", 'error'); }
+    }
+
+    document.getElementById('adv-submit').addEventListener('click', function() {
+        var inp = document.getElementById('adv-input');
+        handleCommand(inp.value);
+        inp.value = '';
+        inp.focus();
+    });
+    document.getElementById('adv-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { document.getElementById('adv-submit').click(); }
+    });
+
+    // Welcome
+    print('=== DUNGEON ADVENTURE ===');
+    print('Find the treasure hidden deep within the dungeon!');
+    print('');
+    doLook();
+    document.getElementById('adv-input').focus();
+})();
+</script>

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Setup Wizard — Error{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-exclamation-triangle"></i> Setup Wizard Error</h1>
+    <p>Something went wrong loading or processing the wizard.</p>
+</div>
+<div class="alert alert-danger"><strong>Error:</strong> {{ error }}</div>
+<div class="card">
+    <div class="card-header">Traceback (also in the server log)</div>
+    <div class="card-body p-2">
+        <pre style="background:#000;color:#0f0;padding:8px;font-size:0.8rem;margin:0;overflow:auto;max-height:60vh;">{{ traceback }}</pre>
+    </div>
+</div>
+<div class="mt-3">
+    <a href="{{ url_for('admin.dashboard') }}" class="btn btn-link">← Back to dashboard</a>
+</div>
+{% endblock %}

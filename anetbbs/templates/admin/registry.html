@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Federation Registry — Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-diagram-3"></i> Federation Registry</h1>
+    <p class="text-muted mb-0">Sysop approval queue for the <code>anetbbs.lst</code> federation directory.</p>
+</div>
+
+{% if not is_hub %}
+<div class="alert alert-info">
+    <strong>This BBS isn't a federation hub.</strong>
+    Set <code>REGISTRY_MODE_ENABLED=true</code> in <code>.env</code> (or via
+    Admin → Settings) to accept peer registrations on this host. The
+    canonical hub is whoever publishes <code>anetbbs.lst</code> that
+    your install pulls from — see <code>REGISTRY_URL</code>.
+</div>
+{% else %}
+
+{% set pending_verify = rows | selectattr('is_verified', 'equalto', false) | list %}
+{% set pending_approve = rows | selectattr('is_verified', 'equalto', true) | selectattr('is_approved', 'equalto', false) | list %}
+{% set listed = rows | selectattr('is_listed', 'equalto', true) | list %}
+{% set rejected = rows | selectattr('is_approved', 'equalto', false) | selectattr('is_verified', 'equalto', true) | list %}
+
+<div class="row g-2 mb-3">
+    <div class="col"><div class="card"><div class="card-body p-2 text-center"><strong>{{ rows | length }}</strong><br><small>Total</small></div></div></div>
+    <div class="col"><div class="card border-warning"><div class="card-body p-2 text-center"><strong>{{ pending_verify | length }}</strong><br><small>Awaiting email verify</small></div></div></div>
+    <div class="col"><div class="card border-info"><div class="card-body p-2 text-center"><strong>{{ pending_approve | length }}</strong><br><small>Awaiting your approval</small></div></div></div>
+    <div class="col"><div class="card border-success"><div class="card-body p-2 text-center"><strong>{{ listed | length }}</strong><br><small>Listed publicly</small></div></div></div>
+</div>
+
+{% if not rows %}
+<div class="alert alert-secondary">
+    No registry entries yet. Peers register via <code>POST /registry/api/v1/register</code>,
+    then click their emailed verify link, then appear here for your approval.
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body p-0">
+    <table class="table table-sm table-hover mb-0">
+        <thead>
+            <tr>
+                <th>Host / Name</th>
+                <th>Sysop / Location</th>
+                <th>Software</th>
+                <th>State</th>
+                <th>Heartbeat / Probe</th>
+                <th style="width:160px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for e in rows %}
+            <tr>
+                <td>
+                    <strong><code>{{ e.host }}</code></strong>
+                    {% if e.msp_port != 18 or e.systat_port != 11 %}
+                        <small class="text-muted">(msp:{{ e.msp_port }} sys:{{ e.systat_port }})</small>
+                    {% endif %}
+                    <br><small>{{ e.name }}</small>
+                    <br><small class="text-muted">{{ e.contact_email }}</small>
+                </td>
+                <td>
+                    {{ e.sysop or '—' }}
+                    {% if e.location %}<br><small class="text-muted">{{ e.location }}</small>{% endif %}
+                </td>
+                <td>
+                    <small>{{ e.software }}{% if e.software_version %} {{ e.software_version }}{% endif %}</small>
+                </td>
+                <td>
+                    {% if e.is_listed %}
+                        <span class="badge bg-success">listed</span>
+                    {% elif e.is_approved %}
+                        <span class="badge bg-warning text-dark">delisted</span>
+                    {% elif e.is_verified %}
+                        <span class="badge bg-info text-dark">awaiting approval</span>
+                    {% else %}
+                        <span class="badge bg-secondary">awaiting verify</span>
+                        {% if e.registration_token %}
+                        <br><small class="text-muted">verify URL:</small>
+                        <br><a href="{{ url_for('registry.verify', token=e.registration_token, _external=true) }}"
+                              class="small" target="_blank" rel="noopener"
+                              style="word-break:break-all;">
+                            {{ url_for('registry.verify', token=e.registration_token, _external=true) }}
+                        </a>
+                        {% endif %}
+                    {% endif %}
+                    {% if not e.is_active %}<br><span class="badge bg-dark">inactive</span>{% endif %}
+                </td>
+                <td>
+                    <small>
+                        last hb: {% if e.last_heartbeat_at %}{{ e.last_heartbeat_at.strftime('%Y-%m-%d %H:%M') }}{% else %}never{% endif %}<br>
+                        last probe: {% if e.last_probe_at %}
+                            {{ e.last_probe_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% if e.last_probe_ok %}<span class="text-success">✓</span>{% else %}<span class="text-danger">✗</span>{% endif %}
+                            {% if e.consecutive_probe_failures %}({{ e.consecutive_probe_failures }} fail){% endif %}
+                        {% else %}never{% endif %}
+                    </small>
+                </td>
+                <td class="text-nowrap">
+                    {% if not e.is_listed and e.is_verified %}
+                    <form method="post" action="{{ url_for('admin.registry_approve', entry_id=e.id) }}" class="d-inline">
+                        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                        <button class="btn btn-success btn-sm" title="Approve + list publicly"><i class="bi bi-check-lg"></i></button>
+                    </form>
+                    {% endif %}
+                    {% if e.is_listed or e.is_approved %}
+                    <form method="post" action="{{ url_for('admin.registry_reject', entry_id=e.id) }}" class="d-inline">
+                        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                        <button class="btn btn-warning btn-sm" title="Reject (delist, keep row)"><i class="bi bi-pause-fill"></i></button>
+                    </form>
+                    {% endif %}
+                    <button class="btn btn-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#edit-{{ e.id }}" title="Edit metadata"><i class="bi bi-pencil"></i></button>
+                    <form method="post" action="{{ url_for('admin.registry_delete', entry_id=e.id) }}" class="d-inline"
+                          onsubmit="return confirm('Delete registry entry for {{ e.host }}? They can re-register.');">
+                        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                        <button class="btn btn-danger btn-sm" title="Delete row"><i class="bi bi-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="collapse" id="edit-{{ e.id }}">
+                <td colspan="6">
+                    <form method="post" action="{{ url_for('admin.registry_edit', entry_id=e.id) }}" class="row g-2">
+                        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                        <div class="col-md-3"><label class="form-label small">Name</label><input type="text" name="name" class="form-control form-control-sm" value="{{ e.name or '' }}"></div>
+                        <div class="col-md-2"><label class="form-label small">Sysop</label><input type="text" name="sysop" class="form-control form-control-sm" value="{{ e.sysop or '' }}"></div>
+                        <div class="col-md-2"><label class="form-label small">Location</label><input type="text" name="location" class="form-control form-control-sm" value="{{ e.location or '' }}"></div>
+                        <div class="col-md-1"><label class="form-label small">MSP port</label><input type="text" name="msp_port" class="form-control form-control-sm" value="{{ e.msp_port }}"></div>
+                        <div class="col-md-1"><label class="form-label small">SYSTAT port</label><input type="text" name="systat_port" class="form-control form-control-sm" value="{{ e.systat_port }}"></div>
+                        <div class="col-md-3"><label class="form-label small">Software / version</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" name="software" class="form-control" value="{{ e.software or 'ANetBBS' }}">
+                                <input type="text" name="software_version" class="form-control" value="{{ e.software_version or '' }}" placeholder="version">
+                            </div>
+                        </div>
+                        <div class="col-12"><label class="form-label small">Notes</label><textarea name="notes" class="form-control form-control-sm" rows="2">{{ e.notes or '' }}</textarea></div>
+                        <div class="col-12"><button class="btn btn-primary btn-sm">Save</button></div>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-3"><small class="text-muted">
+    Public list URL: <a href="{{ url_for('registry.list_friendly') }}"><code>{{ url_for('registry.list_friendly', _external=true) }}</code></a>
+</small></div>
+
+{% endif %}
+{% endblock %}

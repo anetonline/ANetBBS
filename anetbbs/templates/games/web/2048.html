@@ -1,0 +1,144 @@
+<style>
+#g2048 { max-width: 420px; margin: 0 auto; text-align: center; }
+#board-2048 {
+    display: grid; grid-template-columns: repeat(4,90px); gap: 8px;
+    background: #003300; padding: 8px; border-radius: 6px;
+    border: 2px solid #00ff00; margin: 12px auto; width: max-content;
+}
+.tile-2048 {
+    width: 90px; height: 90px; border-radius: 4px; display: flex;
+    align-items: center; justify-content: center;
+    font-family: 'Courier New', monospace; font-weight: bold;
+    font-size: 1.5rem; border: 1px solid #007700; background: #111;
+    transition: transform .1s;
+}
+.t0{background:#111;color:#111;}
+.t2{background:#001a00;color:#00ff00;}.t4{background:#002200;color:#00ff00;}
+.t8{background:#003300;color:#00ff00;}.t16{background:#004400;color:#00ff00;}
+.t32{background:#005500;color:#00ff00;}.t64{background:#006600;color:#ff9900;}
+.t128{background:#007700;color:#ffcc00;}.t256{background:#008800;color:#ffff00;}
+.t512{background:#009900;color:#ffffff;}.t1024{background:#00aa00;color:#ffffff;font-size:1.1rem;}
+.t2048{background:#00ff00;color:#000;animation: pulse .3s ease-in-out 3;}
+@keyframes pulse { 50%{transform:scale(1.1);} }
+#score-2048 { font-size: 1.3rem; margin: 6px 0; color: #00ff00; }
+#msg-2048 { font-size: 1.2rem; font-weight: bold; min-height: 2rem; }
+</style>
+
+<div id="g2048">
+    <h4 style="color:#00ff00;"><i class="bi bi-grid-fill"></i> 2048</h4>
+    <div id="score-2048">Score: <span id="s2048">0</span> | Best: <span id="b2048">0</span></div>
+    <div id="board-2048"></div>
+    <div id="msg-2048"></div>
+    <p style="color:#007700; font-size:.85rem;">Arrow keys or swipe to slide tiles. Merge to reach 2048!</p>
+    <button id="new-2048" class="btn btn-primary mt-2">
+        <i class="bi bi-arrow-clockwise"></i> New Game
+    </button>
+</div>
+
+<script>
+(function() {
+    var SIZE=4, board, score, best=0, won=false, gameOver=false;
+
+    function start() {
+        board=Array.from({length:SIZE},function(){return Array(SIZE).fill(0);});
+        score=0; won=false; gameOver=false;
+        document.getElementById('s2048').textContent='0';
+        document.getElementById('msg-2048').textContent='';
+        addRandom(); addRandom();
+        render();
+    }
+
+    function addRandom() {
+        var empty=[];
+        for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) if(!board[r][c]) empty.push([r,c]);
+        if (!empty.length) return;
+        var pos=empty[Math.floor(Math.random()*empty.length)];
+        board[pos[0]][pos[1]]=Math.random()<.9?2:4;
+    }
+
+    function render() {
+        var bd=document.getElementById('board-2048');
+        bd.innerHTML='';
+        for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) {
+            var v=board[r][c];
+            var div=document.createElement('div');
+            div.className='tile-2048 t'+(v>2048?2048:v);
+            div.textContent=v||'';
+            bd.appendChild(div);
+        }
+    }
+
+    function slide(row) {
+        var a=row.filter(function(v){return v!==0;});
+        for(var i=0;i<a.length-1;i++) {
+            if(a[i]===a[i+1]) { a[i]*=2; score+=a[i]; if(a[i]===2048) won=true; a.splice(i+1,1); }
+        }
+        while(a.length<SIZE) a.push(0);
+        return a;
+    }
+
+    function move(dir) {
+        if (gameOver) return;
+        var changed=false;
+        var prev=JSON.stringify(board);
+        if(dir==='left') {
+            for(var r=0;r<SIZE;r++){board[r]=slide(board[r]);}
+        } else if(dir==='right') {
+            for(var r=0;r<SIZE;r++){board[r]=slide(board[r].slice().reverse()).reverse();}
+        } else if(dir==='up') {
+            for(var c=0;c<SIZE;c++){var col=board.map(function(r){return r[c];});col=slide(col);col.forEach(function(v,r){board[r][c]=v;});}
+        } else if(dir==='down') {
+            for(var c=0;c<SIZE;c++){var col=board.map(function(r){return r[c];}).reverse();col=slide(col);col.reverse().forEach(function(v,r){board[r][c]=v;});}
+        }
+        changed=JSON.stringify(board)!==prev;
+        if (changed) addRandom();
+        document.getElementById('s2048').textContent=score;
+        if(score>best){best=score;document.getElementById('b2048').textContent=best;}
+        render();
+        if(won && !gameOver){
+            gameOver=true;
+            document.getElementById('msg-2048').textContent='🎉 YOU REACHED 2048!';
+            document.getElementById('msg-2048').style.color='#00ff00';
+            submitScore(score);
+        } else if (isDeadEnd()) {
+            gameOver=true;
+            document.getElementById('msg-2048').textContent='💀 No more moves! Score: '+score;
+            document.getElementById('msg-2048').style.color='#ff4444';
+            submitScore(score);
+        }
+    }
+
+    function isDeadEnd() {
+        for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) {
+            if(!board[r][c]) return false;
+            if(c<SIZE-1&&board[r][c]===board[r][c+1]) return false;
+            if(r<SIZE-1&&board[r][c]===board[r+1][c]) return false;
+        }
+        return true;
+    }
+
+    function submitScore(s) {
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({score:s})
+        }).catch(function(){});
+    }
+
+    var keyMap={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down'};
+    document.addEventListener('keydown',function(e){
+        if(keyMap[e.key]){e.preventDefault();move(keyMap[e.key]);}
+    });
+
+    var ts=null;
+    document.getElementById('board-2048').addEventListener('touchstart',function(e){ts=e.touches[0];e.preventDefault();},{passive:false});
+    document.getElementById('board-2048').addEventListener('touchend',function(e){
+        if(!ts)return;
+        var dx=e.changedTouches[0].clientX-ts.clientX,dy=e.changedTouches[0].clientY-ts.clientY;
+        if(Math.abs(dx)>Math.abs(dy)){move(dx>0?'right':'left');}else{move(dy>0?'down':'up');}
+        e.preventDefault();
+    },{passive:false});
+
+    document.getElementById('new-2048').addEventListener('click',start);
+    start();
+})();
+</script>

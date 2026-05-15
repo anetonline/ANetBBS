@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Sysop Control Panel{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-sliders"></i> Sysop Control Panel</h1>
+</div>
+
+<!-- ====== Services ====== -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-hdd-network"></i> Services</div>
+    <table class="table table-sm mb-0">
+        <thead><tr>
+            <th>Unit</th><th>Description</th><th>State</th><th>Since</th><th>Actions</th>
+        </tr></thead>
+        <tbody>
+        {% for s in services %}
+            <tr>
+                <td><code>{{ s.unit }}</code></td>
+                <td><small>{{ s.label }}</small></td>
+                <td>
+                    {% if s.is_running %}
+                        <span class="badge bg-success">{{ s.active }}/{{ s.sub }}</span>
+                    {% elif s.active in ['failed','activating','deactivating'] %}
+                        <span class="badge bg-warning">{{ s.active }}/{{ s.sub }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ s.active or 'inactive' }}</span>
+                    {% endif %}
+                </td>
+                <td><small>{{ s.since[:19] }}</small></td>
+                <td class="text-nowrap">
+                    {% for action, lbl, cls, icon in [
+                        ('start',   'Start',   'success', 'play'),
+                        ('stop',    'Stop',    'warning', 'stop'),
+                        ('restart', 'Restart', 'primary', 'arrow-clockwise')] %}
+                    <form method="post" action="{{ url_for('control.service_action', unit=s.unit, action=action) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-{{ cls }}"
+                                title="{{ lbl }}"
+                                onclick="return confirm('{{ lbl }} {{ s.unit }}?');">
+                            <i class="bi bi-{{ icon }}"></i>
+                        </button>
+                    </form>
+                    {% endfor %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('control.service_journal', unit=s.unit) }}" title="Journal">
+                        <i class="bi bi-list-task"></i>
+                    </a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="alert alert-info small">
+    <strong>Note:</strong> Service start/stop/restart requires
+    <code>sudoers</code> NOPASSWD entries for the user running the
+    web app. Without them you'll see a "permission denied" failure.
+    See <code>deploy/sudoers.anetbbs</code> for the recommended rule.
+</div>
+
+<!-- ====== NodeSpy ====== -->
+<div class="card mb-3" id="nodespy">
+    <div class="card-header">
+        <i class="bi bi-binoculars"></i> NodeSpy — terminal sessions
+        <small class="text-muted">(eye = view screen, door = kick/disconnect)</small>
+    </div>
+    <table class="table table-sm mb-0">
+        <thead><tr>
+            <th>Slot</th><th>User</th><th>Proto</th><th>Page</th>
+            <th>Last action</th><th>Idle</th><th></th>
+        </tr></thead>
+        <tbody id="nodespy-body">
+            <tr><td colspan="7" class="text-muted">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+<script>
+async function refreshNodeSpy() {
+    try {
+        const r = await fetch('{{ url_for("control.nodespy_json") }}');
+        const data = await r.json();
+        const body = document.getElementById('nodespy-body');
+        if (!body) return;
+        if (!data.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-muted">No terminal sessions.</td></tr>';
+            return;
+        }
+        const now = Date.now();
+        body.innerHTML = data.map(d => {
+            const ls = d.last_seen ? Date.parse(d.last_seen) : 0;
+            const idle = ls ? Math.round((now - ls)/1000) + 's' : '—';
+            return `<tr>
+                <td><strong>#${d.slot}</strong></td>
+                <td>${d.username}</td>
+                <td><span class="badge bg-secondary">${d.protocol||''}</span></td>
+                <td><code>${d.page||''}</code></td>
+                <td><small>${d.action||''}</small></td>
+                <td><small>${idle}</small></td>
+                <td>
+                    <a class="btn btn-sm btn-outline-primary" href="/admin/control/nodespy/${d.slot}" title="View screen"><i class="bi bi-eye"></i></a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="kickNode(${d.slot}, '${(d.username||'').replace(/'/g,"\\'")}')" title="Kick / disconnect">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (e) {}
+}
+refreshNodeSpy();
+setInterval(refreshNodeSpy, 4000);
+
+async function kickNode(slot, username) {
+    const reason = prompt(`Disconnect ${username} on slot ${slot}?\n\nOptional reason (shown to user before disconnect):`, '');
+    if (reason === null) return;   // cancelled
+    try {
+        const fd = new FormData();
+        fd.append('reason', reason);
+        fd.append('csrf_token', '{{ csrf_token() }}');
+        const r = await fetch(`/admin/control/nodespy/${slot}/kick`, {
+            method: 'POST',
+            body: fd,
+            headers: {'X-Requested-With': 'XMLHttpRequest'},
+        });
+        const j = await r.json();
+        if (j.ok) {
+            // Refresh immediately so the kicked row disappears
+            refreshNodeSpy();
+        } else {
+            alert(j.error || j.message || 'Kick failed');
+        }
+    } catch (e) {
+        alert('Kick request failed: ' + e);
+    }
+}
+</script>
+
+<!-- ====== Web users ====== -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people"></i> Online (web + terminal, last 5 min)</span>
+        <small id="who-count" class="text-muted"></small>
+    </div>
+    <table class="table table-sm mb-0">
+        <thead><tr>
+            <th>User</th><th>Page</th><th>IP</th><th>UA</th><th>Last seen</th>
+        </tr></thead>
+        <tbody id="who-body">
+        {% for s in web_sessions %}
+            <tr>
+                <td><strong>{% if s.user %}<a href="{{ url_for('profile.view_user', username=s.user.username) }}">{{ s.user.username }}</a>{% else %}?{% endif %}</strong></td>
+                <td><small><code>{{ s.page or '' }}</code></small></td>
+                <td><small><code>{{ s.ip_address or '' }}</code></small></td>
+                <td><small>{{ (s.user_agent or '')[:40] }}</small></td>
+                <td><small>{{ s.last_seen.strftime('%H:%M:%S') if s.last_seen else '' }}</small></td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5" class="text-muted">Nobody online.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+async function refreshWho() {
+    try {
+        const r = await fetch('{{ url_for("control.who_json") }}');
+        const data = await r.json();
+        const body = document.getElementById('who-body');
+        const count = document.getElementById('who-count');
+        if (count) count.textContent = data.length + ' online';
+        if (!body) return;
+        if (!data.length) {
+            body.innerHTML = '<tr><td colspan="5" class="text-muted">Nobody online.</td></tr>';
+            return;
+        }
+        body.innerHTML = data.map(d => `
+            <tr>
+                <td><strong>${d.username}</strong></td>
+                <td><small><code>${d.page||''}</code></small></td>
+                <td><small><code>${d.ip||''}</code></small></td>
+                <td><small>${d.agent||''}</small></td>
+                <td><small>${(d.last_seen||'').slice(11, 19)}</small></td>
+            </tr>`).join('');
+    } catch (e) {}
+}
+refreshWho();
+setInterval(refreshWho, 5000);
+</script>
+{% endblock %}

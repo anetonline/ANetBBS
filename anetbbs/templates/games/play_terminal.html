@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Playing {{ game.name }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+    /* Door games are written for 80x25 DOS terminals — every gotoxy
+       and ANSI escape assumes that grid. The fit addon used to resize
+       the xterm to fill the viewport, which made it ~150 cols wide
+       and shoved LORD's menu options into the middle of Violet's portrait.
+       Pin the wrapper to a column-width sized container; xterm.js renders
+       inside without auto-fit. Centered so the wrapped 80x25 grid sits
+       cleanly inside larger screens. */
+    #terminal-wrap {
+        background: #000;
+        border: 2px solid #00ff00;
+        border-radius: 4px;
+        padding: 6px;
+        display: inline-block;       /* shrink-to-fit the 80-col grid */
+        max-width: 100%;
+    }
+    #terminal-outer {
+        display: flex;
+        justify-content: center;
+        overflow: auto;              /* horizontal scroll on tiny phones */
+    }
+    #terminal-container {
+        background: #000;
+    }
+    #status-bar {
+        background: #000;
+        border: 1px solid #007700;
+        padding: 4px 12px;
+        font-size: .85rem;
+        color: #007700;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        max-width: 80ch;
+        margin: 0 auto;
+    }
+    /* Hide xterm's internal scrollbar — 80x25 fits without scroll */
+    .xterm-viewport::-webkit-scrollbar { display: none; }
+    .xterm-viewport { scrollbar-width: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-2 d-flex justify-content-between align-items-center">
+    <span><i class="bi {{ game.icon or 'bi-controller' }}"></i>
+        <strong>{{ game.name }}</strong>
+    </span>
+    <div>
+        <span id="conn-status" class="badge" style="background:#003300;color:#00ff00;">Connecting…</span>
+        <a href="{{ url_for('games.lobby') }}" class="btn btn-sm btn-primary ms-2">
+            <i class="bi bi-x-circle"></i> Quit
+        </a>
+    </div>
+</div>
+
+<div id="terminal-outer">
+    <div id="terminal-wrap">
+        <div id="terminal-container"></div>
+    </div>
+</div>
+
+<div id="status-bar">
+    <span id="session-info">Starting game session…</span>
+    <span id="dimensions">80 × 25</span>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<!-- xterm-addon-image: SIXEL + iTerm2 image protocol support so doors
+     like DSR (Digital Showroom) can render images in-terminal on web. -->
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-image@0.5.0/lib/xterm-addon-image.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io/client-dist/socket.io.min.js"></script>
+<script>
+(function () {
+    var gameSlug = {{ game.slug | tojson }};
+    var sessionId = null;
+
+    var term = new Terminal({
+        theme: {
+            // Use full 16-color CGA palette so Synchronet's Ctrl-A colour
+            // codes (and the @CODE@-translated foreground/background swaps
+            // LORD relies on for the menus / portraits) match what the
+            // door author saw on a real PC. xterm.js's default `red` is
+            // a pinkish web-red, not the DOS bright-red, which is why
+            // LORD's "Grizelda" line and the Violet portrait looked
+            // gray-tinted before — we were getting xterm's mid-bright
+            // approximations instead of the CGA primaries.
+            background: '#000000',
+            foreground: '#aaaaaa',
+            cursor:     '#00ff00',
+            cursorAccent: '#000000',
+            selectionBackground: 'rgba(0,255,0,0.2)',
+            black:        '#000000', red:          '#aa0000',
+            green:        '#00aa00', yellow:       '#aa5500',
+            blue:         '#0000aa', magenta:      '#aa00aa',
+            cyan:         '#00aaaa', white:        '#aaaaaa',
+            brightBlack:  '#555555', brightRed:    '#ff5555',
+            brightGreen:  '#55ff55', brightYellow: '#ffff55',
+            brightBlue:   '#5555ff', brightMagenta:'#ff55ff',
+            brightCyan:   '#55ffff', brightWhite:  '#ffffff',
+        },
+        // Use the IBM-PC CP437 font when available; fallback chain keeps
+        // monospace alignment so the 80x25 grid stays square.
+        fontFamily: '"Cascadia Mono","Consolas","Courier New",monospace',
+        fontSize: 16,
+        lineHeight: 1.0,
+        letterSpacing: 0,
+        cursorBlink: true,
+        cols: 80,
+        rows: 25,                    // DOS standard — LORD assumes 25 rows
+        convertEol: false,
+    });
+
+    // No fit addon: door games are 80x25 by contract. Auto-fitting to a
+    // wider browser viewport made gotoxy(x,y) land at the wrong columns
+    // and shoved menu options into the middle of ANSI portraits.
+
+    // Image addon (sixel / iTerm2). DSR + other graphics doors emit sixel
+    // sequences that vanilla xterm.js drops on the floor. With this addon
+    // loaded the same DSR session that works in SyncTERM also works here.
+    try {
+        if (typeof ImageAddon !== 'undefined') {
+            var imgAddon = new ImageAddon.ImageAddon({
+                enableSizeReports: true,
+                pixelLimit: 16777216,
+                sixelSupport: true,
+                sixelScrolling: true,
+                iipSupport: true,
+            });
+            term.loadAddon(imgAddon);
+        }
+    } catch (e) { console.warn('image addon failed to load:', e); }
+    term.open(document.getElementById('terminal-container'));
+
+    function updateDimensions() {
+        document.getElementById('dimensions').textContent =
+            term.cols + ' × ' + term.rows;
+    }
+    updateDimensions();
+
+    var socket = io('/game', { transports: ['websocket'] });
+
+    socket.on('connect', function () {
+        document.getElementById('conn-status').textContent = 'Connected';
+        document.getElementById('conn-status').style.background = '#003300';
+        socket.emit('start_game', { game_slug: gameSlug });
+    });
+
+    socket.on('disconnect', function () {
+        document.getElementById('conn-status').textContent = 'Disconnected';
+        document.getElementById('conn-status').style.background = '#330000';
+        document.getElementById('conn-status').style.color = '#ff0000';
+    });
+
+    socket.on('game_started', function (data) {
+        sessionId = data.session_id;
+        document.getElementById('session-info').textContent =
+            'Session #' + sessionId + ' — node active';
+    });
+
+    socket.on('game_output', function (data) {
+        term.write(data.output);
+    });
+
+    socket.on('game_ended', function (data) {
+        term.writeln('\r\n\r\n*** Game session ended ***\r\n');
+        document.getElementById('conn-status').textContent = 'Ended';
+        sessionId = null;
+    });
+
+    socket.on('game_error', function (data) {
+        term.writeln('\r\n\033[1;31mError: ' + data.message + '\033[0m\r\n');
+    });
+
+    term.onData(function (data) {
+        if (sessionId !== null) {
+            socket.emit('game_input', { session_id: sessionId, input: data });
+        }
+    });
+
+    // No window-resize handler: terminal is pinned at 80x25 by design.
+    // Door games (LORD, BBS Onelinerz, etc.) write to a 25-row screen
+    // and use gotoxy(x,y) for positioning. Resizing breaks every
+    // absolute-positioned screen they draw.
+})();
+</script>
+{% endblock %}

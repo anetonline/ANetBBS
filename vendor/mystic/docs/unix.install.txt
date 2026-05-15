@@ -1,0 +1,399 @@
+
+  .---------------------------------.
+  | Mystic BBS Linux / MacOS Manual |------------------------------------
+  `---------------------------------'
+
+  NOTE: WHILE THE TERMINAL STUFF STILL APPLIES TO 1.11, IN MYSTIC 1.12
+  MYSTIC SUPPORTS UTF8 AND SO IN OPERATING SYSTEMS SUCH AS PI OR OSX
+  THAT DEFAULT TO UTF8, MYSTIC CAN LOOK NEARLY PERFECT WITH LITTLE TO
+  NO CHANGES REQUIRED TO STOCK TERMINALS.  YOU CAN MOSTLY IGNORE THE
+  TERMINAL STUFF.
+
+  THIS GUIDE IS SOMEWHAT OUT OF DATE AND NEEDS A COMPLETE OVERHAUL IF YOU
+  HAVE CHANGES YOU THINK ARE NEEDED PLEASE LET ME KNOW.
+
+
+  INTRODUCTION
+  ============
+
+  This document contains basic information for getting started with
+  Mystic BBS for Linux, MacOS, and possibly other Unix based systems.  There
+  are basically two things you will want to have for doing this:
+
+    1. A terminal capable of displaying high ASCII characters
+    2. Above average knowledge of your OS or patience to learn.
+
+  I recommend first getting your terminal setup before performing the
+  installation.
+
+  In addition it will contain notes and instructions for things like
+  archivers, protocols, and DOS doors with DOSEMU.
+
+
+
+  TERMINAL SETUP
+  ==============
+
+  Basically you want to set a terminal profile for 80x25 with a good font.
+
+  In Linux, terminal setup is usually pretty straight forward.  Most
+  Linux distributions ship with a decent XTERM as well as have some
+  fonts that can display high ASCII characters.  The idea is to find a
+  monospaced font that can handle codepage 437 glyphs.  Recent distributions
+  of Ubuntu, for example, use a wonderful font right out of the box.
+
+  If you are not sure or cannot find an appropriate font, I was able
+  to find "ASCII.ttf" pretty easily online using Google which worked
+  okay for me (in my OS/X setup).
+
+  Some distributions might have Windows that default to a white background
+  or some odd character sets and will require a little more playing around
+  to get going.
+
+  If you are having issues, use the next section on OS/X terminals for
+  guidance on things you might want to change to get it looking just right!
+
+
+
+  TERMINAL SETUP OS/X
+  ===================
+
+  Apple seems to want to move away from supporting a normal terminal
+  found in most Linux distributions.  Therefore, it is HIGHLY
+  recommended that you download a free application called "iTerm2"
+  which will give you a more standard terminal to use.
+
+  After you have downloaded iTerm2, install your ASCII.ttf font which
+  for some reason shows up under the name "New" for me.  Once again, you
+  are looking for a monospaced font that can support CP 437 glyphs.
+
+  Here are some basic instructions for setting up a newly compatible
+  terminal:
+
+    1. Open an iTerm2 window, right click on it, and select "Edit session..."
+    2. On "keys" tab, change the two options at the bottom to "+ESC".
+    3. On "terminal" tab, change the character type to "Western ISO" and term
+       type to "xterm".
+    4. On "text" tab, set your ASCII.ttf font (New).  I use it at 24 point
+       Anti-Aliased on my box, and I even slightly reduced the horizontal
+       and verticle spacing once I had a big ANSI loaded up to make it a show
+       ANSI a little cleaner.
+    5. Finally, go to the "General" tab and click "Copy preferences to Profile"
+       with Default selected.  This will save it so that you never have to mess
+       with the settings again.
+
+
+
+  INSTALLATION
+  ============
+
+  Type ./install in your terminal window to install Mystic BBS.
+
+  If you get an error saying the directory already exists, then you will need
+  to remove that directory or install somewhere else before running ./install
+  again.
+
+  If you get an error saying it cannot create a directory its usually because
+  the user you are running install with does not have rights to create a
+  directory in the place you've tried to install.  You can try executing
+  "sudo ./install" so that the installation will have rights to create a
+  directory anywhere, but keep in mind you will want to chown the files to
+  the BBS user and group after the installation completes:
+
+    chown -R user:group /mystic
+
+  You can also perform a command line installation by using the auto command
+  "./install auto /mystic" but keep in mind the same points mentioned above
+  still apply.  The user running install needs to have rights to create the
+  installation directory, and that directory must not already exist.
+
+  If you want to do an automated install and force it to overwrite an existing
+  location then "./install auto /mystic overwrite" can by used, but again the
+  user running must have the capabilities to access and write to the desired
+  directory.  Be careful as this may overwrite some of your BBS configuration
+  if you install over your existing BBS.
+
+  During automated install you can also assign specific directories for data,
+  theme, and msgs directories.  An example of combining all of those things at
+  once looks like this (less the overwrite keyword):
+ 
+    install auto /mystic theme=/mysticthemes msgs=/mysticmsgs data=/mysticdata
+
+  NOTE 1: You can type "./install help" to see a list of some additional
+  installation options from the terminal.
+
+  NOTE 2: If you are trying to install Mystic under your user directory, do
+  not use the "~" shortcut as it will not work.  For example in MacOS you
+  must type in /Users/MyUserName instead of ~/ for the installation path.
+
+
+  GETTING STARTED WITH MYSTIC
+  ===========================
+
+  Once installed, you should note three major command lines that you can
+  execute from your installation directory:
+
+    Configuration:   ./mystic -cfg
+    Local login:     ./mystic -l
+    Startup servers: ./mis
+                     ./mis -d        <- run in daemon mode    *****
+
+  It is recommended to execute "./mystic -l" and create your SysOp user
+  account, and then after logging out execute "./mystic -cfg" to use the
+  user editor.  Once in the user editor, upgrade your security level to
+  SysOp.
+
+
+  MYSTIC INTERNET SERVERS *****
+  =======================
+
+  Mystic (MIS actually) has built in Telnet, RLOGIN, SSH, SMTP, POP3, FTP,
+  NNTP, BINKP, and HTTP servers.  Most Internet servers also work over SSL
+  using TLS 1.2+.  Mystic allows you to spawn multiple copies of each server
+  type so for example you can easily run multople telnet servers (for
+  example).
+
+  When running in Linux/macOS keep in mind that by default the operating
+  system will not let a service bind to a port less than 1025 unless it is a
+  ROOT user (in Linux) and NOT AT ALL in MacOS.
+
+  In Linux, MIS has the ability to switch from root back to whatever the user
+  and group is that owns the executable AFTER it binds to the ports it needs
+  for the server.  So in Linux you can simply do a:
+
+    sudo ./mis
+
+  Or if you want to run it as a DAEMON you can do:
+
+    sudo ./mis -d
+
+  As mentioned, it will not run as root.  It will only use root to immediately
+  bind the ports and then it will switch to the user who owns the executable.
+
+  There are other ways to reconfigure Linux to allow a specific user to bind to
+  ports less than 1024 but that is not yet covered in this documentation.
+
+  NOW IN MACOS THIS TRICK DOES NOT SEEM TO WORK.
+
+  Instead you have to load the Mystic Configuration and set your server ports
+  greater than 1024.  We will do TELNET for example here.  Set your telnet
+  server port to "2323" and exit the Mystic configuration.
+
+  You can then create a rule to map connections that come in on port 23 to the
+  2323 port that MIS is listening on, using the following command:
+
+    sudo ipfw add 100 fwd 127.0.0.1,2323 tcp from any to any 23 in
+
+  Once that is done you can start MIS using ./mis or ./mis -d
+
+
+  NOTE that some people will want to use inetd or something similar to run their
+  telnet, which Mystic is perfectly capable of.  To do this, turn off the TELNET
+  server in your configuration and refer to the section on external telnet.
+
+
+
+  NODE MONITORING
+  ===============
+
+  If you run MIS as a DAEMON, you might be very interested in the NodeSpy
+  program.  This program will allow you to snoop, kick, and chat with users
+  who are connected to your BBS.  It will also provide you with BBS usage
+  statistics and graphs.  Think of this as your "Waiting for call" screen
+
+  In addition, NodeSpy also has a terminal mode that offers a full blown
+  ANSI BBS telnet client with dialing directory, scrollback, and Zmodem
+  with ZEDZAP file transfers!
+
+  It is important to note that NodeSpy does not currently monitor BBS users
+  while they are using doors.
+
+
+
+  INSTALLATING DOS DOORS USING DOSEMU
+  ===================================
+
+  INTRODUCTION
+  ------------
+
+  Setting up a DOS door with Mystic in Linux is now just about as easy as it
+  is to setup in DOS.  You won't need to create a ton of configuration files
+  and custom startup nonsense unless you have an odd door that behaves
+  strangely.
+
+  Unfortunately, DOSEMU has not been ported to OS/X yet, but in Linux you can
+  use this turtorial on how to setup a DOS door with Mystic.
+
+  This turtorial was written and tested using Ubuntu 32-bit 14.04 and Mystic
+  BBS v1.12 alpha 36
+
+  INSTALLING DOSEMU
+  -----------------
+
+  Most distributions have a package for DOSEMU that will automatically
+  install, so we will not cover this in detail here.  In my distribution of
+  Mint Linux, I can simply type this to install DOSEMU:
+
+     sudo apt-get install dosemu
+
+  This will install DOSEMU 1.40.0 so that is what we are using in this
+  tutorial.
+
+  INITIAL MYSTIC CONFIGURATION
+  ----------------------------
+
+  In this tutorial, we will be installing all doors in /mystic/doors/, so
+  the first thing to do is to create the /mystic/doors directory.
+
+  You'll need to make sure this is accessible by your Linux BBS user and group
+  that you use to run Mystic as.  In my case, I use user "bbs" so I switch to
+  that user to do the work so that everything is owned by "bbs".  You could
+  also do it as root and "sudo chown -R bbs:bbs /mystic/*" to ensure all of
+  Mystic is owned by your bbs user.
+
+  Next you will want to download a FOSSIL driver, since most DOS doors
+  require one.  I personally use BNU which is easily found via Google.  Copy
+  BNU.COM into your /mystic/doors/ directory.
+
+  That's it for Mystic.  Once again, make sure your ownerships are correct!
+
+  INITIAL DOSEMU CONFIGURATION
+  ----------------------------
+
+  Now that DOSEMU is installed type "dosemu" from a command line to start
+  a DOS session.  Once you are there, switch to DRIVE C: and type "edit
+  autoexec.bat".
+
+  Remove any lines you see that have lredir in them, and then add a new
+  lredir command to mount your Mystic directory as the D: drive in DOSEMU.
+
+  Here is what my entire C:\AUTOEXEC.BAT looks like:
+
+     @echo off
+     prompt $p$g
+     path=z:\bin;z:\dosemu
+     lredir d: linux\fs\mystic\
+     d:
+     cd \doors
+     bnu
+     unix -e	
+
+  The contents of this batch file will mount the d: drive to point to
+  /mystic, then switch to the D: drive and load your BNU FOSSIL driver each
+  time DOSEMU starts up.
+
+  Once you have saved your AUTOEXEC.BAT, type exitemu to exit DOSEMU.
+
+  CONFIGURING A DOOR IN MYSTIC
+  ----------------------------
+
+  In this tutorial we are going to use a door called Stack!Em which is a
+  Tetris-like game.  The filename is called STACK!32.ZIP.
+
+  1. Extract the door ZIP file into /mystic/doors/stackem
+
+  2. Type DOSEMU on the command prompt and then switch to the stackem
+     directory (cd \doors\stackem)
+
+  3. Run ST!SETUP.EXE to configure the door game, make sure to set the
+     communication type to FOSSIL.
+
+  4. While still in DOS, move to the D:\doors directory and type
+     "edit stackem.bat".  This will create a DOS batch file which is used to
+     execute the door.  My stackem.bat has two lines that look like this:
+
+       cd\doors\stackem
+       stackem stackem.cfg \temp%1\door.sys
+
+     If you get an error when trying to save your batch file, that means you
+     made a mistake and your ownerships are incorrectly setup.
+
+  5. Exit DOSEMU (exitemu) and switch to your /mystic/ directory.  Start
+     Mystic's configuration and create a new menu item in a menu of the type
+     "DD" which creates the drop files Stack'Em requires.  The command should
+     look something like this:
+
+     Command: DD
+
+     Optional Data:
+     dosemu -I"serial { com 1 virtual }" "/mystic/doors/stackem.bat" %N /DOS
+
+     The %N passes the node number, and the /DOS tells Mystic to create the
+     door files in DOS text file format.  Note that /DOS must be at the end
+     of the command line.  %3 also sends the node number, and was used in
+     older versions of Mystic (and still works in the latest versions)
+
+     Save your menu you are done!
+
+  There you have it.  Setting up a DOS door these days takes the same amount
+  of steps as it does/did in DOS itself, after the intial configuration of
+  course.
+
+
+
+  ARCHIVES AND PROTOCOLS
+  ======================
+
+  Mystic ships with Internal Zmodem and Zmodem/8K (ZEDZAP) protocols.  There
+  are not many protocol drivers for Linux and almost nothing for OS/X, but
+  Zmodem should be fine for most people.
+
+  Archives are pre-configured but may need some tweaking to work.  For example
+  in OS/X, you probably will need to download and install the "rar" command
+  line tool, and then get it into your /bin directory so its accessible from
+  anywhere on your system.
+
+  Many Linux distributions already have rar, zip, etc, so they often times will
+  just magically work right out of the box.
+
+  If you are having issues with uploads of files or QWK, or FILE_ID.DIZ
+  importing, etc, then make sure you have the archive that is configured
+  installed on your system.  Also, make sure any file areas that you might
+  be uploading to have their configured directory on disk created.
+
+  Mystic will allow you to create them from within it's editor, but be aware
+  that the default installation does not always create paths for the default
+  file bases.
+
+
+
+  EXTERNAL TELNET SERVERS
+  =======================
+
+  Mystic can be used with external TELNET servers, which has been the choice
+  of many Unix-based SysOps in the past, as MIS did not always support TELNET
+  directly in Unix.
+
+  The only real requirement is that you pass the -HOST and -IP command line
+  options from whatever TELNET daemon you are using, so that Mystic has a
+  record of the IP and hostname of the connection.
+
+  It is recommended that you use MIS unless you are experiencing problems,
+  otherwise, it is possible to use telnetd/inetx or even a special version
+  of ddTelnet developed specifically for Mystic BBS.
+
+  If you wish to support dialup users, you would use this same method but
+  with some type of mgetty-type daemon.
+ 
+
+
+  USING 32-BIT BINARIES ON 64-BIT LINUX (FILE NOT FOUND/DOES NOT EXIST ERRORS?)
+  =============================================================================
+  
+  Most 64-bit Linux distributions will need support for i386 added in order to
+  execute Mystic, assuming you are not using native 64-bit Mystic binaries.
+
+  Symptoms of this might be the shell saying the file does not exist when you
+  attempt to execute it, when the file clearly does exist.  What is really
+  happening is the operating system does not have the 32-bit libraries needed
+  to run the binary.
+
+  This can vary from distribution to distribution and you may need to refer to
+  the distributions forums for more information on how to add 32-bit support,
+  or your OS may already include the proper libraries.
+
+  Using the 64-bit version of Ubuntu 11.04, I had to follow these steps:
+
+     sudo dpkg --add-architecture i386
+     sudo apt-get update
+     sudo apt-get install libc6:i386

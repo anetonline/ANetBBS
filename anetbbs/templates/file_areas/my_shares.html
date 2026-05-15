@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}My File Shares{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-share-fill"></i> My File Shares</h1>
+    <p>Anonymous-access download links you've created.</p>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>File</th><th>Note</th><th>Token URL</th><th>Downloads</th>
+                <th>Expires</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr {% if not r.is_valid %}class="text-muted"{% endif %}>
+                    <td>
+                        <code>{{ r.filename }}</code>
+                        <div class="small text-muted">
+                            in {{ r.file_area.tag if r.file_area else '?' }}
+                        </div>
+                    </td>
+                    <td><small>{{ r.note or '' }}</small></td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm"
+                               value="{{ url_for('file_areas.fetch_shared', token=r.token, _external=True) }}"
+                               readonly onclick="this.select();" style="font-size:0.75rem;">
+                    </td>
+                    <td>{{ r.download_count or 0 }}{% if r.max_downloads %}/{{ r.max_downloads }}{% endif %}</td>
+                    <td><small>{{ r.expires_at.strftime('%Y-%m-%d %H:%M') if r.expires_at else 'never' }}</small></td>
+                    <td>
+                        {% if r.is_revoked %}<span class="badge bg-secondary">revoked</span>
+                        {% elif not r.is_valid %}<span class="badge bg-warning text-dark">expired/maxed</span>
+                        {% else %}<span class="badge bg-success">active</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if not r.is_revoked %}
+                        <form method="post" action="{{ url_for('file_areas.revoke_share', link_id=r.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">revoke</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No shares yet — share a file from a file area page.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

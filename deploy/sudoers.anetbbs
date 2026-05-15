@@ -1,0 +1,38 @@
+# /etc/sudoers.d/anetbbs
+#
+# Allows the user that runs the anetbbs-web service to manage just the
+# anetbbs-* systemd units + read their journals — no full root shell.
+# Replace 'stingray' with whatever User= the anetbbs-web.service unit
+# actually runs as.
+#
+# Install with:
+#   sudo cp deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+#   sudo chmod 0440 /etc/sudoers.d/anetbbs
+#   sudo visudo -cf /etc/sudoers.d/anetbbs   # syntax-check
+#
+stingray ALL=(root) NOPASSWD: /bin/systemctl start anetbbs-web, \
+                              /bin/systemctl stop anetbbs-web, \
+                              /bin/systemctl restart anetbbs-web, \
+                              /bin/systemctl reload anetbbs-web, \
+                              /bin/systemctl show anetbbs-web *, \
+                              /bin/systemctl start anetbbs-telnet, \
+                              /bin/systemctl stop anetbbs-telnet, \
+                              /bin/systemctl restart anetbbs-telnet, \
+                              /bin/systemctl show anetbbs-telnet *, \
+                              /bin/systemctl start anetbbs-ssh, \
+                              /bin/systemctl stop anetbbs-ssh, \
+                              /bin/systemctl restart anetbbs-ssh, \
+                              /bin/systemctl show anetbbs-ssh *, \
+                              /bin/systemctl start anetbbs-rlogin, \
+                              /bin/systemctl stop anetbbs-rlogin, \
+                              /bin/systemctl restart anetbbs-rlogin, \
+                              /bin/systemctl show anetbbs-rlogin *, \
+                              /bin/systemctl start anetbbs-mrc-bridge, \
+                              /bin/systemctl stop anetbbs-mrc-bridge, \
+                              /bin/systemctl restart anetbbs-mrc-bridge, \
+                              /bin/systemctl show anetbbs-mrc-bridge *, \
+                              /bin/journalctl -u anetbbs-web *, \
+                              /bin/journalctl -u anetbbs-telnet *, \
+                              /bin/journalctl -u anetbbs-ssh *, \
+                              /bin/journalctl -u anetbbs-rlogin *, \
+                              /bin/journalctl -u anetbbs-mrc-bridge *

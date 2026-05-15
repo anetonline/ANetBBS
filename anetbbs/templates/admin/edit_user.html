@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Edit User: {{ user.username }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-person-gear"></i> Edit user — {{ user.username }}</h1>
+    <p class="small text-muted">
+        Created {{ user.created_at.strftime('%Y-%m-%d') if user.created_at }} ·
+        Last login {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'never' }} ·
+        {{ user.login_count or 0 }} logins
+    </p>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+    <div class="row g-2">
+        <div class="col-md-6 mb-2">
+            <label class="form-label">Email</label>
+            <input name="email" class="form-control" value="{{ user.email or '' }}">
+        </div>
+        <div class="col-md-6 mb-2">
+            <label class="form-label">Display name</label>
+            <input name="display_name" class="form-control" value="{{ user.display_name or '' }}">
+        </div>
+        <div class="col-md-3 mb-2">
+            <label class="form-label">Access level (0-255)</label>
+            <input type="number" name="access_level" min="0" max="255" class="form-control" value="{{ user.access_level or 10 }}">
+        </div>
+        <div class="col-md-3 mb-2">
+            <label class="form-label">Session limit (min, 0=∞)</label>
+            <input type="number" name="time_limit_min" min="0" class="form-control" value="{{ budget.time_limit_min if budget else 0 }}">
+        </div>
+        <div class="col-md-3 mb-2">
+            <label class="form-label">Daily limit (min, 0=∞)</label>
+            <input type="number" name="daily_limit_min" min="0" class="form-control" value="{{ budget.daily_limit_min if budget else 0 }}">
+        </div>
+        <div class="col-md-3 mb-2">
+            <label class="form-label">Time bank (min)</label>
+            <input type="number" name="bank_minutes" min="0" class="form-control" value="{{ budget.bank_minutes if budget else 0 }}">
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-3 mt-2">
+        <div class="form-check">
+            <input type="checkbox" name="is_admin" id="is_admin" class="form-check-input" {% if user.is_admin %}checked{% endif %}>
+            <label class="form-check-label" for="is_admin">Sysop</label>
+        </div>
+        <div class="form-check">
+            <input type="checkbox" name="is_active" id="is_active" class="form-check-input" {% if user.is_active %}checked{% endif %}>
+            <label class="form-check-label" for="is_active">Active</label>
+        </div>
+        <div class="form-check">
+            <input type="checkbox" name="is_locked" id="is_locked" class="form-check-input" {% if user.is_locked %}checked{% endif %}>
+            <label class="form-check-label" for="is_locked">Locked</label>
+        </div>
+        <div class="form-check">
+            <input type="checkbox" name="is_verified" id="is_verified" class="form-check-input" {% if user.is_verified %}checked{% endif %}>
+            <label class="form-check-label" for="is_verified">Verified (NUV)</label>
+        </div>
+    </div>
+    <div class="mt-3">
+        <button class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">Back</a>
+    </div>
+</form>
+
+{% if ratio %}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-bar-chart"></i> File ratio</div>
+    <div class="card-body">
+        <strong>Uploaded:</strong> {{ '%.1f'|format(ratio.bytes_uploaded / 1048576) }} MB ({{ ratio.files_uploaded }} files) ·
+        <strong>Downloaded:</strong> {{ '%.1f'|format(ratio.bytes_downloaded / 1048576) }} MB ({{ ratio.files_downloaded }} files)
+    </div>
+</div>
+{% endif %}
+
+<form method="post" class="card p-3 mb-3" onsubmit="return confirm('Reset password for {{ user.username }}?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="reset_password">
+    <div class="d-flex gap-2 align-items-end">
+        <div class="flex-grow-1">
+            <label class="form-label small mb-0">Reset password (min 6 chars)</label>
+            <input type="password" name="new_password" class="form-control" minlength="6">
+        </div>
+        <button class="btn btn-warning"><i class="bi bi-key"></i> Reset</button>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-journal-text"></i> Sysop notes ({{ notes | length }})</div>
+    <ul class="list-group list-group-flush">
+    {% for n in notes %}
+        <li class="list-group-item d-flex justify-content-between">
+            <div>
+                <strong>{{ n.author.username if n.author else '?' }}</strong>
+                <small class="text-muted ms-2">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                <div class="mt-1" style="white-space: pre-wrap;">{{ n.note }}</div>
+            </div>
+            <form method="post" onsubmit="return confirm('Delete note?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="note_delete">
+                <input type="hidden" name="note_id" value="{{ n.id }}">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+        </li>
+    {% else %}
+        <li class="list-group-item text-muted">No notes yet.</li>
+    {% endfor %}
+    </ul>
+    <form method="post" class="card-body border-top">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="note">
+        <textarea name="note" class="form-control mb-2" rows="2" placeholder="Add a private note..." required></textarea>
+        <button class="btn btn-primary btn-sm"><i class="bi bi-plus"></i> Add note</button>
+    </form>
+</div>
+{% endblock %}

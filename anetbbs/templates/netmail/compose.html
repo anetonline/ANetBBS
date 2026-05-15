@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{% if parent %}Reply{% else %}Compose Netmail{% endif %}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pencil-square"></i>
+        {% if parent %}Reply to Netmail{% else %}New Netmail{% endif %}
+    </h1>
+</div>
+
+<form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row g-2 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">To Address (FTN)</label>
+            <input type="text" name="to_address" class="form-control"
+                   value="{{ form.to_address or '' }}"
+                   placeholder="zone:net/node[.point]"
+                   pattern="^\d+:\d+/\d+(\.\d+)?$" required>
+            <div class="form-text">
+                Need to look up an address?
+                <a href="{{ url_for('nodelist.browse') }}" target="_blank">Search the nodelist</a>.
+            </div>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">To Name</label>
+            <input type="text" name="to_name" class="form-control"
+                   value="{{ form.to_name or '' }}" required>
+        </div>
+    </div>
+
+    <div class="row g-2 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">From AKA (optional)</label>
+            <select name="from_aka" class="form-select">
+                <option value="">— auto-pick by destination zone —</option>
+                {% for a in user_akas %}
+                    <option value="{{ a.address }}"
+                            {% if a.is_primary %}selected{% endif %}>
+                        {{ a.address }} ({{ a.domain }})
+                    </option>
+                {% endfor %}
+            </select>
+            <div class="form-text">
+                <a href="{{ url_for('profile.akas') }}" target="_blank">Manage AKAs</a>
+            </div>
+        </div>
+        <div class="col-md-6 d-flex align-items-end">
+            <div class="form-check me-3">
+                <input class="form-check-input" type="checkbox" name="is_crash" id="cb_crash"
+                    {% if form.is_crash %}checked{% endif %}>
+                <label class="form-check-label" for="cb_crash">
+                    Crashmail (direct to recipient)
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="is_private" id="cb_private"
+                    {% if form.is_private %}checked{% endif %}>
+                <label class="form-check-label" for="cb_private">Private</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Subject</label>
+        <input type="text" name="subject" class="form-control"
+               value="{{ form.subject or '' }}" maxlength="200">
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Message</label>
+        <textarea name="body" rows="14" class="form-control"
+                  style="font-family:monospace;">{{ form.body or '' }}</textarea>
+        <div class="form-text">
+            Markdown is supported when viewing if the recipient renders it.
+            Tagline (set in Profile → Edit) is auto-appended.
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+        <i class="bi bi-send"></i> Send
+    </button>
+    <button type="submit" name="save_draft" value="1" class="btn btn-outline-secondary">
+        <i class="bi bi-bookmark"></i> Save as Draft
+    </button>
+    <a href="{{ url_for('netmail.inbox') }}" class="btn btn-link">Cancel</a>
+</form>
+{% endblock %}

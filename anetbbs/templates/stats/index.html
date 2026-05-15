@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}BBS Stats{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-graph-up"></i> Statistics</h1>
+    <p>Activity, milestones, and recent badge earners.</p>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">All-time totals</div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col"><h3>{{ overall.users }}</h3><small class="text-muted">users</small></div>
+                    <div class="col"><h3>{{ overall.posts }}</h3><small class="text-muted">board posts</small></div>
+                    <div class="col"><h3>{{ overall.echomail }}</h3><small class="text-muted">echomail</small></div>
+                    <div class="col"><h3>{{ overall.netmail }}</h3><small class="text-muted">netmail</small></div>
+                </div>
+                <div class="row text-center mt-3">
+                    <div class="col"><h3>{{ overall.pms }}</h3><small class="text-muted">PMs</small></div>
+                    <div class="col"><h3>{{ overall.shouts }}</h3><small class="text-muted">shouts</small></div>
+                    <div class="col"><h3>{{ overall.file_areas }}</h3><small class="text-muted">file areas</small></div>
+                    <div class="col"><h3>{{ overall.achievements }}</h3><small class="text-muted">badges earned</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Last 24 hours</div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col"><h3>{{ last24.logins }}</h3><small class="text-muted">logins</small></div>
+                    <div class="col"><h3>{{ last24.posts }}</h3><small class="text-muted">posts</small></div>
+                    <div class="col"><h3>{{ last24.echomail }}</h3><small class="text-muted">echomail</small></div>
+                    <div class="col"><h3>{{ last24.shouts }}</h3><small class="text-muted">shouts</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Top posters (last 7 days)</div>
+            <div class="card-body p-0">
+            {% if top_posters %}
+                <ol class="list-group list-group-flush list-group-numbered">
+                {% for p in top_posters %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>{{ p.username }}</span>
+                        <strong>{{ p.count }}</strong>
+                    </li>
+                {% endfor %}
+                </ol>
+            {% else %}<div class="p-3 text-muted">No recent posts.</div>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Recent badge earners</div>
+            <div class="card-body p-0">
+            {% if recent_awards %}
+                <ul class="list-group list-group-flush">
+                {% for a in recent_awards %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-{{ a.icon }} text-warning"></i>
+                            <strong>{{ a.user }}</strong>
+                            earned <em>{{ a.name }}</em>
+                        </span>
+                        <small class="text-muted">{{ a.when.strftime('%m-%d %H:%M') }}</small>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% else %}<div class="p-3 text-muted">No badges earned yet.</div>{% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if daily_logins %}
+<div class="card mt-3">
+    <div class="card-header">Daily logins (last 30 days)</div>
+    <div class="card-body p-2">
+        <div style="display:flex;align-items:flex-end;height:120px;gap:4px;">
+            {% set max_count = (daily_logins | map(attribute='count') | list | max) or 1 %}
+            {% for d in daily_logins %}
+                <div title="{{ d.day }}: {{ d.count }} logins"
+                     style="flex:1;background:var(--theme-primary,#0f0);
+                            height:{{ (d.count * 100 / max_count) | round(0, 'floor') }}%;
+                            min-height:2px;"></div>
+            {% endfor %}
+        </div>
+        <small class="text-muted">{{ daily_logins[0].day }} → {{ daily_logins[-1].day }}</small>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

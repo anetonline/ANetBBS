@@ -1,0 +1,25 @@
+{# Up/down vote buttons. Usage:
+     {% include '_vote_buttons.html' with context %}
+   Caller must set msg_type and msg_id locals first, e.g.:
+     {% set msg_type = 'post' %}{% set msg_id = post.id %}
+#}
+{% set tally = vote_tally(msg_type, msg_id) %}
+<span class="vote-widget" data-msg-type="{{ msg_type }}" data-msg-id="{{ msg_id }}">
+    <button type="button"
+            class="btn btn-sm vote-btn vote-up{% if tally.my_vote > 0 %} active{% endif %}"
+            title="Upvote"
+            {% if not current_user.is_authenticated %}disabled{% endif %}
+            data-value="1">
+        <i class="bi bi-hand-thumbs-up{% if tally.my_vote > 0 %}-fill{% endif %}"></i>
+        <span class="vote-up-count">{{ tally.up }}</span>
+    </button>
+    <span class="vote-score mx-1" title="Net score">{{ tally.score }}</span>
+    <button type="button"
+            class="btn btn-sm vote-btn vote-down{% if tally.my_vote < 0 %} active{% endif %}"
+            title="Downvote"
+            {% if not current_user.is_authenticated %}disabled{% endif %}
+            data-value="-1">
+        <i class="bi bi-hand-thumbs-down{% if tally.my_vote < 0 %}-fill{% endif %}"></i>
+        <span class="vote-down-count">{{ tally.down }}</span>
+    </button>
+</span>

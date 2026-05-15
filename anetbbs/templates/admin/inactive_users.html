@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Inactive Users{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-person-dash"></i> Inactive Users</h1>
+    <p class="small text-muted">Users with no login in the last {{ days }} day(s).</p>
+</div>
+
+<form method="get" class="d-flex gap-2 mb-3 align-items-end">
+    <div>
+        <label class="form-label small mb-0">Days inactive</label>
+        <input type="number" name="days" value="{{ days }}" min="1" class="form-control form-control-sm">
+    </div>
+    <button class="btn btn-primary btn-sm">Filter</button>
+</form>
+
+<form method="post" id="bulkForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <table class="table table-sm">
+        <thead><tr>
+            <th><input type="checkbox" onclick="document.querySelectorAll('input[name=user_id]').forEach(c=>c.checked=this.checked)"></th>
+            <th>User</th><th>Email</th><th>Last login</th><th>Logins</th>
+        </tr></thead>
+        <tbody>
+        {% for u in rows %}
+        <tr>
+            <td><input type="checkbox" name="user_id" value="{{ u.id }}"></td>
+            <td><a href="{{ url_for('admin.manage_user', user_id=u.id) }}">{{ u.username }}</a></td>
+            <td><small>{{ u.email }}</small></td>
+            <td><small>{{ u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never' }}</small></td>
+            <td>{{ u.login_count or 0 }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted">Nobody matching.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="card p-3 mb-2">
+        <h5 class="mb-2">Send a "we miss you" PM to checked users</h5>
+        <input name="subject" class="form-control mb-2" placeholder="Subject" value="We miss you!">
+        <textarea name="body" class="form-control mb-2" rows="3" placeholder="Body of the PM..."></textarea>
+        <div>
+            <button name="action" value="pm" class="btn btn-primary"><i class="bi bi-envelope"></i> Send PM</button>
+            <button name="action" value="deactivate" class="btn btn-warning"
+                    onclick="return confirm('Deactivate (soft-disable) checked users?');">
+                <i class="bi bi-power"></i> Deactivate
+            </button>
+            <button name="action" value="delete" class="btn btn-danger"
+                    onclick="return confirm('Permanently DELETE checked users?');">
+                <i class="bi bi-trash"></i> Delete
+            </button>
+        </div>
+    </div>
+</form>
+{% endblock %}

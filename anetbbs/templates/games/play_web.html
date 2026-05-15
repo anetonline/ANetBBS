@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Playing {{ game.name }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="mb-2 d-flex justify-content-between align-items-center">
+    <span><i class="bi {{ game.icon or 'bi-controller' }}"></i>
+        <strong>{{ game.name }}</strong>
+    </span>
+    <a href="{{ url_for('games.lobby') }}" class="btn btn-sm btn-primary">
+        <i class="bi bi-arrow-left"></i> Back to Game Center
+    </a>
+</div>
+
+{% include "games/web/" + module + ".html" %}
+{% endblock %}

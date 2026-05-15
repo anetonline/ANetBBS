@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Sysop Checklist{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-check2-square"></i> Sysop Launch Checklist</h1>
+    <p class="lead">{{ completed }} / {{ total }} complete</p>
+</div>
+
+<div class="progress mb-3" style="height:20px;">
+    <div class="progress-bar bg-success"
+         style="width: {{ (completed * 100 / total) | int }}%;">
+        {{ (completed * 100 / total) | int }}%
+    </div>
+</div>
+
+<ul class="list-group">
+{% for label, ok, hint in items %}
+    <li class="list-group-item d-flex align-items-start">
+        {% if ok %}
+            <i class="bi bi-check-circle-fill text-success me-3 fs-4"></i>
+            <div>
+                <strong>{{ label }}</strong>
+                <div class="text-muted small">Done.</div>
+            </div>
+        {% else %}
+            <i class="bi bi-x-circle-fill text-danger me-3 fs-4"></i>
+            <div>
+                <strong>{{ label }}</strong>
+                <div class="text-muted small">{{ hint }}</div>
+            </div>
+        {% endif %}
+    </li>
+{% endfor %}
+</ul>
+
+<div class="mt-3 small text-muted">
+    Re-check anytime — this is read-only and won't change anything.
+</div>
+{% endblock %}

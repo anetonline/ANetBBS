@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Block List — {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-slash-circle"></i> Block List</h1>
+    <p class="small text-muted">Blocked users can't PM you or @-mention you.</p>
+</div>
+
+<form method="post" action="{{ url_for('blocks.add') }}" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-2">
+        <div class="col-md-4">
+            <input type="text" name="username" class="form-control" placeholder="Username to block" required>
+        </div>
+        <div class="col-md-6">
+            <input type="text" name="reason" class="form-control" placeholder="Reason (optional, private)">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-danger w-100"><i class="bi bi-slash-circle"></i> Block</button>
+        </div>
+    </div>
+</form>
+
+{% if blocks %}
+<table class="table table-sm">
+    <thead><tr><th>User</th><th>Since</th><th>Reason</th><th></th></tr></thead>
+    <tbody>
+    {% for b in blocks %}
+    <tr>
+        <td><strong>{{ b.blocked.username if b.blocked else '?' }}</strong></td>
+        <td><small>{{ b.created_at.strftime('%Y-%m-%d') }}</small></td>
+        <td><small class="text-muted">{{ b.reason or '' }}</small></td>
+        <td>
+            <form method="post" action="{{ url_for('blocks.remove', block_id=b.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary">Unblock</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="text-muted">You haven't blocked anyone.</p>
+{% endif %}
+{% endblock %}

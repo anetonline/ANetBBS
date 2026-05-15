@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Echomail Admin Dashboard — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-diagram-3"></i> Echomail Admin</h1>
+    <p>Network and area management dashboard</p>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#00ff00;">{{ total_networks }}</div>
+                <div>Networks</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#00ff00;">{{ total_areas }}</div>
+                <div>Echo Areas</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#00ff00;">{{ total_messages }}</div>
+                <div>Messages</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#ffff00;">{{ pending_outbound }}</div>
+                <div>Pending Outbound</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-lightning-charge"></i> Quick Actions</div>
+            <div class="card-body d-flex gap-2 flex-wrap">
+                <a href="{{ url_for('echomail_admin.networks') }}" class="btn btn-primary">
+                    <i class="bi bi-diagram-3"></i> Manage Networks
+                </a>
+                <a href="{{ url_for('echomail_admin.new_network') }}" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Add Network
+                </a>
+                <a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary">
+                    <i class="bi bi-chat-square-text"></i> Manage Areas
+                </a>
+                <a href="{{ url_for('echomail_admin.new_area') }}" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Add Area
+                </a>
+                <a href="{{ url_for('echomail_admin.logs') }}" class="btn btn-primary">
+                    <i class="bi bi-journal-text"></i> Poll Logs
+                </a>
+                <a href="{{ url_for('echomail_admin.areafix_log') }}" class="btn btn-primary">
+                    <i class="bi bi-journals"></i> AreaFix Log
+                </a>
+                <a href="{{ url_for('echomail_admin.bad_areas') }}" class="btn btn-warning">
+                    <i class="bi bi-exclamation-triangle"></i> Bad Areas
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-activity"></i> Recent Poll Activity</div>
+    <div class="card-body p-0">
+        {% if recent_logs %}
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr><th>Network</th><th>Started</th><th>Type</th><th>Status</th><th>Sent</th><th>Received</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+                {% for log in recent_logs %}
+                <tr>
+                    <td>{{ log.network.name }}</td>
+                    <td style="font-size:0.85rem;">{{ log.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ log.poll_type }}</td>
+                    <td>
+                        {% if log.status == 'success' %}<span style="color:#00ff00;">✓ success</span>
+                        {% elif log.status == 'error' %}<span style="color:#ff0000;">✗ error</span>
+                        {% else %}<span style="color:#ffff00;">~ {{ log.status }}</span>{% endif %}
+                    </td>
+                    <td>{{ log.messages_sent or 0 }}</td>
+                    <td>{{ log.messages_received or 0 }}</td>
+                    <td style="font-size:0.8rem; max-width:420px;
+                               word-break:break-word; color:#ff8888;">
+                        {{ (log.error_message or '')|truncate(280, True, '…') }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center p-4">No poll history yet.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

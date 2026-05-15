@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Finger{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-search"></i> Finger</h1>
+    <p>Query remote BBSes' finger services (RFC 1288). Leave the user blank to
+       list everyone online on the remote system.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Host (BBS hostname or IP)</label>
+                <input type="text" name="host" value="{{ host }}" class="form-control" required
+                       placeholder="bbs.example.com">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">User (optional)</label>
+                <input type="text" name="user" value="{{ user }}" class="form-control"
+                       placeholder="username">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Port</label>
+                <input type="number" name="port" value="79" class="form-control" min="1" max="65535">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100"><i class="bi bi-send"></i> Finger</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if response %}
+<div class="card">
+    <div class="card-header">Response from <code>{{ host }}</code>{% if user %} for <code>{{ user }}</code>{% endif %}</div>
+    <div class="card-body">
+        <pre style="white-space:pre-wrap;font-family:monospace;margin:0;">{{ response }}</pre>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

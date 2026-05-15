@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Game Engine Config — Admin — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-gear"></i> Game Engine Configuration</h3>
+    <a href="{{ url_for('games_admin.dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Dashboard
+    </a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    These settings are read from environment variables. To change them, update your
+    environment and restart the server.
+</div>
+
+<table class="table table-striped">
+    <thead>
+        <tr><th>Setting</th><th>Value</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>DOSBOX_PATH</code></td>
+            <td>{{ cfg.DOSBOX_PATH or '<em>not set</em>' }}</td>
+            <td>Path to DOSBox binary for DOS door games</td>
+        </tr>
+        <tr>
+            <td><code>DOSEMU_PATH</code></td>
+            <td>{{ cfg.DOSEMU_PATH or '<em>not set</em>' }}</td>
+            <td>Path to dosemu2 binary (alternative to DOSBox)</td>
+        </tr>
+        <tr>
+            <td><code>NODEJS_PATH</code></td>
+            <td>{{ cfg.NODEJS_PATH or '<em>not set</em>' }}</td>
+            <td>Path to Node.js binary for Synchronet JS games</td>
+        </tr>
+        <tr>
+            <td><code>MYSTIC_PYTHON_PATH</code></td>
+            <td>{{ cfg.MYSTIC_PYTHON_PATH or '<em>uses system python3</em>' }}</td>
+            <td>Python binary for Mystic .mpy games</td>
+        </tr>
+        <tr>
+            <td><code>GAMES_MAX_NODES</code></td>
+            <td>{{ cfg.GAMES_MAX_NODES }}</td>
+            <td>Global maximum concurrent game sessions</td>
+        </tr>
+        <tr>
+            <td><code>GAMES_SESSION_TIMEOUT</code></td>
+            <td>{{ cfg.GAMES_SESSION_TIMEOUT }}s</td>
+            <td>Idle session timeout in seconds</td>
+        </tr>
+        <tr>
+            <td><code>GAMES_DATA_DIR</code></td>
+            <td>{{ cfg.GAMES_DATA_DIR }}</td>
+            <td>Base directory for game data files</td>
+        </tr>
+    </tbody>
+</table>
+{% endblock %}

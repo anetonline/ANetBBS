@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Theme Builder{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-palette-fill"></i> Theme Builder</h1>
+    <p>Pick colors with the live preview, save as a new theme, then assign it
+       in <a href="{{ url_for('admin.themes') }}">Themes</a> or apply per-user
+       in <a href="{{ url_for('profile.themes') }}">Profile → Themes</a>.</p>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <form method="post" class="card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="card-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><label class="form-label">Slug (id)</label>
+                        <input type="text" name="name" class="form-control" required pattern="[a-z0-9-]+" placeholder="midnight"></div>
+                    <div class="col-md-6"><label class="form-label">Display Name</label>
+                        <input type="text" name="display_name" class="form-control" required placeholder="Midnight"></div>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-4"><label class="form-label">Primary</label>
+                        <input type="color" id="primary" name="primary" class="form-control form-control-color" value="#00ff00"></div>
+                    <div class="col-md-4"><label class="form-label">Background</label>
+                        <input type="color" id="bg" name="bg" class="form-control form-control-color" value="#000000"></div>
+                    <div class="col-md-4"><label class="form-label">Dark BG</label>
+                        <input type="color" id="bg_dark" name="bg_dark" class="form-control form-control-color" value="#111111"></div>
+                    <div class="col-md-4"><label class="form-label">Text</label>
+                        <input type="color" id="text" name="text" class="form-control form-control-color" value="#cccccc"></div>
+                    <div class="col-md-4"><label class="form-label">Accent</label>
+                        <input type="color" id="accent" name="accent" class="form-control form-control-color" value="#ffff00"></div>
+                    <div class="col-md-4"><label class="form-label">Links</label>
+                        <input type="color" id="link" name="link" class="form-control form-control-color" value="#00ffff"></div>
+                </div>
+                <button class="btn btn-primary mt-3"><i class="bi bi-save"></i> Save Theme</button>
+            </div>
+        </form>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Live preview</div>
+            <div class="card-body" id="previewPanel" style="background:#000;color:#ccc;padding:14px;border-radius:6px;">
+                <h3 id="prevTitle" style="color:#0f0;">Welcome to ANetBBS</h3>
+                <p>This is body text in the new theme. <a href="#" id="prevLink" style="color:#0ff;">A link</a>.</p>
+                <button id="prevBtn" class="btn" style="background:#0f0;color:#000;">Primary Button</button>
+                <button class="btn ms-2" style="background:#ff0;color:#000;" id="prevAccent">Accent</button>
+                <div id="prevDark" style="background:#111;padding:8px;margin-top:8px;border:1px solid #0f0;">
+                    A dark-bg panel for sidebars / cards.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header">Existing themes</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Slug</th><th>Display name</th><th>Active</th></tr></thead>
+            <tbody>
+            {% for t in themes %}
+                <tr>
+                    <td><code>{{ t.name }}</code></td>
+                    <td>{{ t.display_name }}</td>
+                    <td>{% if t.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="3" class="text-muted text-center p-3">No themes saved.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function syncPreview() {
+    document.getElementById('prevTitle').style.color = document.getElementById('primary').value;
+    document.getElementById('prevLink').style.color = document.getElementById('link').value;
+    document.getElementById('prevBtn').style.background = document.getElementById('primary').value;
+    document.getElementById('prevAccent').style.background = document.getElementById('accent').value;
+    const panel = document.getElementById('previewPanel');
+    panel.style.background = document.getElementById('bg').value;
+    panel.style.color = document.getElementById('text').value;
+    const dark = document.getElementById('prevDark');
+    dark.style.background = document.getElementById('bg_dark').value;
+    dark.style.borderColor = document.getElementById('primary').value;
+}
+['primary','bg','bg_dark','text','accent','link'].forEach(id => {
+    document.getElementById(id).addEventListener('input', syncPreview);
+});
+syncPreview();
+</script>
+{% endblock %}

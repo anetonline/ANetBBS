@@ -1,0 +1,105 @@
+<style>
+#memory-game { max-width: 600px; margin: 0 auto; text-align: center; }
+#memory-board { display: grid; gap: 8px; margin: 16px auto; width: max-content; }
+.mem-card {
+    width: 70px; height: 70px; background: #000; border: 2px solid #00ff00;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; border-radius: 4px; transition: transform .2s, background .2s;
+    user-select: none;
+}
+.mem-card.hidden { color: transparent; }
+.mem-card.flipped { background: #001a00; transform: scale(1.05); }
+.mem-card.matched { background: #003300; border-color: #00ff00; cursor: default; }
+.mem-card:hover:not(.matched):not(.flipped) { background: #001100; }
+</style>
+
+<div id="memory-game">
+    <h4 style="color:#00ff00;"><i class="bi bi-layers"></i> MEMORY MATCH</h4>
+    <div class="d-flex justify-content-center gap-4 mb-2">
+        <span style="color:#007700;">Moves: <span id="moves-count">0</span></span>
+        <span style="color:#007700;">Pairs: <span id="pairs-count">0</span> / <span id="total-pairs">0</span></span>
+        <span style="color:#007700;">Time: <span id="mem-time">0</span>s</span>
+    </div>
+    <div id="memory-board"></div>
+    <div id="mem-msg" style="font-size:1.2rem; font-weight:bold; min-height:2rem; color:#00ff00;"></div>
+    <div class="d-flex justify-content-center gap-3 mt-3">
+        <button class="btn btn-primary" onclick="startMemory(4)">Easy (4×4)</button>
+        <button class="btn btn-primary" onclick="startMemory(6)">Hard (6×6)</button>
+    </div>
+</div>
+
+<script>
+var memTimer, memStarted;
+
+function startMemory(size) {
+    clearInterval(memTimer);
+    memStarted = false;
+    var ICONS = ['🎮','🕹️','💾','📡','🖥️','⌨️','🖱️','🔋','📱','💿','🎲','🃏','🌟','⚡','🔮','🎯','🚀','🤖','👾','🔑','💎','🗡️','🛸','🦠'];
+    var pairs = (size * size) / 2;
+    var icons = ICONS.slice(0, pairs);
+    var cards = icons.concat(icons).sort(function(){return Math.random()-.5;});
+
+    document.getElementById('total-pairs').textContent = pairs;
+    document.getElementById('pairs-count').textContent = '0';
+    document.getElementById('moves-count').textContent = '0';
+    document.getElementById('mem-time').textContent = '0';
+    document.getElementById('mem-msg').textContent = '';
+
+    var board = document.getElementById('memory-board');
+    board.style.gridTemplateColumns = 'repeat(' + size + ', 70px)';
+    board.innerHTML = '';
+
+    var moves = 0, matched = 0, flipped = [], locked = false;
+
+    cards.forEach(function(icon, i) {
+        var card = document.createElement('div');
+        card.className = 'mem-card hidden';
+        card.dataset.icon = icon;
+        card.textContent = icon;
+        card.addEventListener('click', function() {
+            if (locked || card.classList.contains('matched') || card.classList.contains('flipped')) return;
+            if (!memStarted) { startTimer(); memStarted = true; }
+            card.classList.remove('hidden');
+            card.classList.add('flipped');
+            flipped.push(card);
+            if (flipped.length === 2) {
+                locked = true;
+                moves++;
+                document.getElementById('moves-count').textContent = moves;
+                setTimeout(function() {
+                    if (flipped[0].dataset.icon === flipped[1].dataset.icon) {
+                        flipped.forEach(function(c){ c.classList.add('matched'); c.classList.remove('flipped'); });
+                        matched++;
+                        document.getElementById('pairs-count').textContent = matched;
+                        if (matched === pairs) endMemory(moves, parseInt(document.getElementById('mem-time').textContent));
+                    } else {
+                        flipped.forEach(function(c){ c.classList.add('hidden'); c.classList.remove('flipped'); });
+                    }
+                    flipped = [];
+                    locked = false;
+                }, 800);
+            }
+        });
+        board.appendChild(card);
+    });
+
+    function startTimer() {
+        var t = 0;
+        memTimer = setInterval(function(){
+            t++;
+            document.getElementById('mem-time').textContent = t;
+        }, 1000);
+    }
+
+    function endMemory(moves, time) {
+        clearInterval(memTimer);
+        var score = Math.max(0, 1000 - moves * 10 - time * 2);
+        document.getElementById('mem-msg').textContent = '🎉 Completed! Moves: ' + moves + ', Time: ' + time + 's';
+        fetch(window.location.pathname.replace('/play','/') + 'score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({score:score, details:{moves:moves, time:time}})
+        }).catch(function(){});
+    }
+}
+startMemory(4);
+</script>

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}NodeSpy — Slot {{ node.slot }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-binoculars"></i> NodeSpy — Slot {{ node.slot }}</h1>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">{{ node.username }} via {{ node.protocol }}</div>
+    <div class="card-body small">
+        <p class="mb-1"><strong>Peer:</strong> {{ node.peer or '—' }}</p>
+        <p class="mb-1"><strong>Started:</strong> {{ node.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        <p class="mb-1"><strong>Last seen:</strong> {{ node.last_seen.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        <p class="mb-1"><strong>Current page:</strong> <code>{{ node.page or '—' }}</code></p>
+        <p class="mb-1"><strong>Last action:</strong> {{ node.action or '—' }}</p>
+    </div>
+</div>
+
+{% if node.last_screen %}
+<div class="card">
+    <div class="card-header"><i class="bi bi-tv"></i> Last screen snapshot</div>
+    <pre style="background:#000;color:#aaa;padding:10px;
+                font-family: 'Cascadia Mono','Consolas','Courier New',monospace;
+                font-size:14px; line-height:1.0; white-space:pre; overflow:auto;">{{ node.last_screen }}</pre>
+</div>
+{% endif %}
+
+<div class="mt-2 d-flex gap-2">
+    <a href="{{ url_for('control.index') }}" class="btn btn-sm btn-secondary">← Back</a>
+    <a href="{{ url_for('control.nodespy_view', slot=node.slot) }}" class="btn btn-sm btn-outline-primary">Refresh</a>
+    <form method="post" action="{{ url_for('control.nodespy_kick', slot=node.slot) }}"
+          onsubmit="return confirm('Kick {{ node.username }} from slot {{ node.slot }}?\nThis drops the connection — they can reconnect immediately. Use IP bans to prevent reconnect.');"
+          class="d-inline d-flex gap-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="reason" class="form-control form-control-sm"
+               placeholder="Optional reason (shown to user)" style="max-width:280px;">
+        <button class="btn btn-sm btn-danger">
+            <i class="bi bi-box-arrow-right"></i> Kick
+        </button>
+    </form>
+</div>
+{% endblock %}

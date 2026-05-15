@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ area.tag }} - File Area{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-folder-fill"></i> {{ area.name or area.tag }}</h1>
+    <p><code>{{ area.tag }}</code>{% if area.description %} — {{ area.description }}{% endif %}</p>
+    <p class="text-muted small">
+        Storage: <code>{{ area.storage_path or '(not set)' }}</code>
+        — Upload: <code>{{ area.upload_permission }}</code>
+        {% if area.password %} — password-protected{% endif %}
+    </p>
+    {% if current_user.is_admin %}
+    <form method="post" action="{{ url_for('file_areas.rescan_descriptions', area_id=area.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-secondary" title="Drop the cached FILE_ID.DIZ descriptions and re-extract from each archive">
+            <i class="bi bi-arrow-clockwise"></i> Re-scan descriptions
+        </button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-body p-0">
+    {% if files %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Filename</th><th>Size</th><th>Date</th><th>Description</th>
+            </tr></thead>
+            <tbody>
+            {% for f in files %}
+                <tr>
+                    <td>
+                        {% if f.is_image %}
+                        <img src="{{ url_for('file_areas.thumbnail', area_id=area.id, filename=f.name) }}"
+                             alt="" style="max-height:48px;max-width:64px;vertical-align:middle;margin-right:8px;border:1px solid #444;">
+                        {% endif %}
+                        <a href="{{ url_for('file_areas.download', area_id=area.id, filename=f.name) }}">
+                            <i class="bi bi-download"></i> {{ f.name }}
+                        </a>
+                    </td>
+                    <td>{{ '%.1f'|format(f.size / 1024) }} KB</td>
+                    <td>{{ f.mtime.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <small class="text-muted">{{ f.description }}</small>
+                        <details class="mt-1">
+                            <summary class="small">share</summary>
+                            <form method="post" action="{{ url_for('file_areas.create_share', area_id=area.id, filename=f.name) }}" class="mt-1 d-flex gap-1">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="text" name="note" class="form-control form-control-sm" placeholder="note (optional)">
+                                <input type="number" name="hours_valid" class="form-control form-control-sm" placeholder="hours" min="1" style="max-width:80px;">
+                                <input type="number" name="max_downloads" class="form-control form-control-sm" placeholder="max DL" min="1" style="max-width:80px;">
+                                <button class="btn btn-sm btn-outline-info">share</button>
+                            </form>
+                        </details>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No files in this area yet.</div>
+    {% endif %}
+    </div>
+</div>
+
+{% set can_upload = (area.upload_permission == 'users') or
+                    (area.upload_permission == 'sysop' and current_user.is_admin) %}
+{% if can_upload %}
+<div class="card">
+    <div class="card-header"><i class="bi bi-upload"></i> Upload File</div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('file_areas.upload', area_id=area.id) }}"
+              enctype="multipart/form-data" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-6">
+                <label class="form-label">File</label>
+                <input type="file" name="file" class="form-control" required>
+            </div>
+            {% if area.password %}
+            <div class="col-md-3">
+                <label class="form-label">Area Password</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            {% endif %}
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100"><i class="bi bi-upload"></i> Upload</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-3">
+    <a href="{{ url_for('file_areas.index') }}" class="btn btn-link">← All file areas</a>
+</div>
+{% endblock %}

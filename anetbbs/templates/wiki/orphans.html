@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Orphan pages — Wiki{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-snow"></i> Orphan pages</h1>
+    <p class="text-muted">Pages that no other page links to. They might still
+       be in the navigation or directly bookmarked, but if not, consider
+       linking them from the relevant section.</p>
+</div>
+
+{% if orphans %}
+<ul class="list-group">
+    {% for p in orphans %}
+    <li class="list-group-item">
+        <a href="{{ url_for('wiki.view', slug=p.slug) }}">{{ p.title }}</a>
+        <small class="text-muted">— {{ p.updated_at.strftime('%Y-%m-%d') }}</small>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> No orphan pages.
+</div>
+{% endif %}
+{% endblock %}

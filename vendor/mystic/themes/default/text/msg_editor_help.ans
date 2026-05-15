@@ -1,0 +1,22 @@
+[0m[1;1H[2J[1;34;44m ° [37mMessage Editor Help                                   Press any key to exit 
+[36;40mÚ[34mÄÄ[0;34mÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ[1mÄÄ[36m¿
+[34m³[77C³
+[0;34m³[27C[1;36mMESSAGE EDITING COMMANDS[26C[0;34m³
+³[77C³
+³[6C[1;30m[[37m^B[30m]  [0mReformat Paragraph at Cursor  [1;30m[[37m^O[30m]  [0mShow this help file[10C[34m³
+³[6C[1;30m[[37m^I[30m]  [0mInsert tab space[14C[1;30m[[37m^Q[30m]  [0mEnter quote mode[13C[34m³
+³[6C[1;30m[[37m^K[30m]  [0mCut current line of text[6C[1;30m[[37m^V[30m]  [0mToggle insert/overwrite[6C[34m³
+³[6C[1;30m[[37m^U[30m]  [0mPaste previously cut text[5C[1;30m[[37m^Y[30m]  [0mDelete current line[10C[34m³
+³[77C³
+³[6C[1;30m[[35m^T[30m]  [0mToggle ANSI Drawing Mode[6C[1;30m[[35m^W[30m]  [0mSpell check under cursor[5C[34m³
+³[77C³
+³[27C[1;36mBASIC MOVEMENT COMMANDS[27C[0;34m³
+³[77C³
+³[17C[0mUP[1;30m/[37m^E[7C[0mLEFT[1;30m/[37m^S[6C[0mPGUP[1;30m/[37m^R[6C[0mHOME[1;30m/[37m^F[15C[0;34m³
+³[15C[0mDOWN[1;30m/[37m^X[6C[0mRIGHT[1;30m/[37m^D[6C[0mPGDN[1;30m/[37m^C[7C[0mEND[1;30m/[37m^G[15C[0;34m³
+³[77C³
+³[77C³
+³[5C[1mEnter [36m/ [34mon a new line[0;34m, [1mor [37mESCAPE[0;34m, [1mor [37mCTRL-Z [34mfor additional commands[5C[0;34m³
+[1m³[77C³
+[36mÀ[34mÄÄ[0;34mÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ[1mÄÄ[36mÙ
+|PN

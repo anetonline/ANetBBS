@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Sysop Broadcast{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-megaphone-fill"></i> Sysop Broadcast</h1>
+    <p>Push a one-line announcement to all online users (web in real time, telnet on next menu loop).</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-9">
+                <label class="form-label">Message</label>
+                <input type="text" name="text" class="form-control" required maxlength="280">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">TTL (minutes)</label>
+                <input type="number" name="ttl_minutes" class="form-control" min="0" placeholder="permanent">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button class="btn btn-warning w-100" onclick="return confirm('Send broadcast to all online users?')">
+                    <i class="bi bi-send"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-header">Recent Broadcasts</div>
+    <div class="card-body p-0">
+    {% if recent %}
+        <table class="table table-sm mb-0">
+            <thead><tr><th>When</th><th>By</th><th>Message</th><th>Expires</th></tr></thead>
+            <tbody>
+            {% for b in recent %}
+                <tr>
+                    <td><code>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</code></td>
+                    <td>{{ b.sender.username if b.sender else '?' }}</td>
+                    <td>{{ b.text }}</td>
+                    <td>{{ b.expires_at.strftime('%Y-%m-%d %H:%M') if b.expires_at else 'permanent' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No broadcasts yet.</div>{% endif %}
+    </div>
+</div>
+{% endblock %}

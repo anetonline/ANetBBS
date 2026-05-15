@@ -1,0 +1,82 @@
+"""
+Tiny in-memory sliding-window rate limiter.
+
+Single-process only — fine for a typical BBS. Not safe across multiple
+gunicorn workers without an external store; flag in deployment docs.
+
+Usage:
+    from anetbbs.features.rate_limit import rate_limit
+
+    @app.route('/login', methods=['POST'])
+    @rate_limit('login', limit=10, window=300)   # 10 / 5 min
+    def login():
+        ...
+
+By default the key is the client IP. Pass `key_fn=lambda: current_user.id`
+for per-user limits.
+"""
+import time
+import threading
+from collections import defaultdict, deque
+from functools import wraps
+from flask import request, jsonify, abort
+
+_buckets = defaultdict(deque)
+_lock = threading.Lock()
+
+
+def _gc(name_key, window):
+    """Drop timestamps older than `window` seconds."""
+    cutoff = time.time() - window
+    bucket = _buckets[name_key]
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+
+
+def _check(name_key, limit, window):
+    with _lock:
+        _gc(name_key, window)
+        if len(_buckets[name_key]) >= limit:
+            return False
+        _buckets[name_key].append(time.time())
+        return True
+
+
+def rate_limit(name, limit, window, key_fn=None, on_block=None):
+    """Decorator. `name` is a unique identifier for the route. `limit`
+    is the maximum allowed requests in `window` seconds. `key_fn` is
+    a callable returning a string identifier (default: client IP).
+    `on_block` is a callable returning a Flask response when blocked
+    (default: 429 JSON for /api/* paths, plain abort(429) otherwise).
+    """
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if key_fn is None:
+                key = request.remote_addr or 'unknown'
+            else:
+                key = str(key_fn())
+            bucket_key = f'{name}:{key}'
+            if not _check(bucket_key, limit, window):
+                if on_block is not None:
+                    return on_block()
+                if request.path.startswith('/api/'):
+                    return jsonify({
+                        'error': 'rate limited',
+                        'limit': limit,
+                        'window_seconds': window,
+                    }), 429
+                abort(429, description=f'Too many requests — limit '
+                      f'{limit} per {window // 60 or 1} min(s).')
+            return fn(*args, **kwargs)
+        return wrapper
+    return deco
+
+
+def _user_or_ip():
+    """Default key for authenticated rate limits — user.id if logged in,
+    else IP. Used for /imsg/send-style routes."""
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        return f'u{current_user.id}'
+    return request.remote_addr or 'unknown'

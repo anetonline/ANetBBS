@@ -1,0 +1,15 @@
+import mystic_bbs as bbs;
+
+bbs.writeln ("Number of parameters..: " + str(bbs.param_count()))
+bbs.writeln ("Full command line.....: " + bbs.param_str())
+bbs.writeln ("Script name...........: " + bbs.param_str(0))
+bbs.writeln ("|CRParameters (param_str):|CR")
+
+count = 0
+
+while count <= bbs.param_count():
+	bbs.writeln ("   Param #" + str(count) + ": " + bbs.param_str(count))
+
+	count = count + 1
+
+bbs.writeln("|CR|PA")

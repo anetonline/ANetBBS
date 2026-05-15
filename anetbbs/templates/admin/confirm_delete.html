@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm Delete - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-trash"></i> Confirm Delete</h1>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Delete {{ item_type|title }}</div>
+            <div class="card-body">
+                <p>Are you sure you want to delete the {{ item_type }} <strong>{{ item_name }}</strong>?</p>
+                {% if warning %}
+                    <div class="alert alert-warning">{{ warning }}</div>
+                {% endif %}
+                <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Yes, Delete</button>
+                        <a href="{{ url_for('admin.' + item_type + 's') }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

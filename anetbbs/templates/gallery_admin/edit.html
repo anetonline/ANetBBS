@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Add' if not g else 'Edit' }} Gallery{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-{{ 'plus-circle' if not g else 'pencil-square' }}"></i>
+        {{ 'Add Gallery' if not g else ('Edit ' ~ g.label) }}</h1>
+</div>
+
+<a href="{{ url_for('gallery_admin.index') }}" class="btn btn-primary btn-sm mb-3">
+    <i class="bi bi-arrow-left"></i> Back to Galleries
+</a>
+
+<div class="card">
+<div class="card-body">
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="mb-3">
+    <label class="form-label">Display Label</label>
+    <input type="text" name="label" class="form-control" required
+           value="{{ g.label if g else '' }}"
+           placeholder="e.g. 90s GIFs Galore">
+</div>
+<div class="mb-3">
+    <label class="form-label">URL Slug
+        <span class="text-muted small">(URL-safe; auto-derived from label if blank)</span>
+    </label>
+    <input type="text" name="slug" class="form-control"
+           value="{{ g.slug if g else '' }}"
+           {% if g %}readonly{% endif %}
+           placeholder="gifs">
+    {% if g %}<div class="form-text">Slug cannot be changed after creation.</div>{% endif %}
+</div>
+<div class="mb-3">
+    <label class="form-label">Filesystem Path</label>
+    <input type="text" name="path" class="form-control" required
+           value="{{ g.path if g else '/home/stingray/anetbbs/' }}"
+           placeholder="/home/stingray/anetbbs/gallery/photos">
+    <div class="form-text">Directory will be auto-created if it doesn't exist.</div>
+</div>
+<div class="mb-3">
+    <label class="form-label">Description (optional)</label>
+    <input type="text" name="description" class="form-control"
+           value="{{ g.description if g else '' }}"
+           placeholder="One-line description shown to users">
+</div>
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label class="form-label">Sort Order</label>
+        <input type="number" name="sort_order" class="form-control"
+               value="{{ g.sort_order if g else 100 }}">
+        <div class="form-text">Lower numbers appear first.</div>
+    </div>
+    <div class="col-md-6 mb-3 d-flex align-items-end">
+        <div class="form-check">
+            <input type="checkbox" name="is_active" id="is_active" class="form-check-input"
+                   {% if not g or g.is_active %}checked{% endif %}>
+            <label for="is_active" class="form-check-label">Active (visible to users)</label>
+        </div>
+    </div>
+</div>
+<button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-circle"></i> Save
+</button>
+<a href="{{ url_for('gallery_admin.index') }}" class="btn btn-sm">Cancel</a>
+</form>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Active Sessions — Admin — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-people"></i> Active Game Sessions</h3>
+    <a href="{{ url_for('games_admin.dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Dashboard
+    </a>
+</div>
+
+{% if sessions %}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>User</th>
+            <th>Game</th>
+            <th>Node</th>
+            <th>Started</th>
+            <th>Duration</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in sessions %}
+        {% set duration = (now - s.started_at).seconds if now is defined else 0 %}
+        <tr>
+            <td>{{ s.id }}</td>
+            <td>{{ s.user.username }}</td>
+            <td>{{ s.game.name }}</td>
+            <td>{{ s.node_number }}</td>
+            <td>{{ s.started_at.strftime('%H:%M:%S') }}</td>
+            <td>active</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('games_admin.disconnect_session', session_id=s.id) }}"
+                      style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm"
+                            style="background:#330000;border:1px solid #ff0000;color:#ff0000;"
+                            onclick="return confirm('Force-disconnect this session?');">
+                        <i class="bi bi-x-circle"></i> Disconnect
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No active game sessions right now.
+</div>
+{% endif %}
+{% endblock %}

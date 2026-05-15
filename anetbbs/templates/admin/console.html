@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Sysop Console{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-terminal"></i> Sysop Console</h1>
+    <p>Quick read-only commands. Type <code>help</code> for the list.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="input-group">
+            <span class="input-group-text">$</span>
+            <input type="text" name="cmd" class="form-control" autofocus
+                   value="{{ cmd }}" placeholder="help">
+            <button class="btn btn-primary">Run</button>
+        </div>
+    </div>
+</form>
+
+{% if output %}
+<div class="card">
+    <div class="card-body p-2">
+        <pre style="background:#000;color:#0f0;padding:8px;font-size:0.85rem;margin:0;max-height:60vh;overflow:auto;white-space:pre-wrap;">{{ output }}</pre>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

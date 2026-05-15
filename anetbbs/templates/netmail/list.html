@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Netmail {{ folder|capitalize }} - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-paper"></i> Netmail
+        <small class="text-muted">{{ folder|capitalize }}</small></h1>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('netmail.inbox') }}"
+       class="btn btn-sm {% if folder == 'inbox' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        <i class="bi bi-inbox"></i> Inbox
+    </a>
+    <a href="{{ url_for('netmail.sent') }}"
+       class="btn btn-sm {% if folder == 'sent' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        <i class="bi bi-send"></i> Sent
+    </a>
+    <a href="{{ url_for('netmail.drafts') }}"
+       class="btn btn-sm {% if folder == 'drafts' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        <i class="bi bi-bookmark"></i> Drafts
+    </a>
+    <a href="{{ url_for('netmail.compose') }}" class="btn btn-sm btn-success">
+        <i class="bi bi-pencil-square"></i> Compose
+    </a>
+    <a href="{{ url_for('contacts.index') }}" class="btn btn-sm btn-outline-info">
+        <i class="bi bi-person-rolodex"></i> Address Book
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if messages %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>{% if folder == 'inbox' %}From{% else %}To{% endif %}</th>
+                <th>Address</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Date</th>
+            </tr></thead>
+            <tbody>
+            {% for m in messages %}
+                <tr {% if folder == 'inbox' and not m.read_at %}style="font-weight:bold;"{% endif %}>
+                    <td>
+                        {% if folder == 'drafts' %}
+                            <a href="{{ url_for('netmail.compose', draft_id=m.id) }}">{{ m.to_name }}</a>
+                        {% else %}
+                            <a href="{{ url_for('netmail.read', msg_id=m.id) }}">
+                                {% if folder == 'inbox' %}{{ m.from_name }}{% else %}{{ m.to_name }}{% endif %}
+                            </a>
+                        {% endif %}
+                    </td>
+                    <td><code>{% if folder == 'inbox' %}{{ m.from_address }}{% else %}{{ m.to_address }}{% endif %}</code></td>
+                    <td>{{ m.subject or '(no subject)' }}</td>
+                    <td>
+                        {% if m.is_crash %}<span class="badge bg-warning text-dark">CRASH</span>{% endif %}
+                        {% if m.is_private %}<span class="badge bg-info text-dark">PVT</span>{% endif %}
+                        <span class="badge bg-secondary">{{ m.status }}</span>
+                    </td>
+                    <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No netmail in {{ folder }}.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

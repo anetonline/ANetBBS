@@ -1,0 +1,65 @@
+# Backup files
+*.bak
+*.bak.*
+*.orig
+*.backup
+backups/
+*.bak-*
+
+# Dated snapshot files (e.g. main.py-0228-0643)
+*-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]
+*-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]
+
+# Runtime data files
+mrc/bridge/data/sessions.json
+mrc/bridge/data/profiles.json
+mrc/bridge/data/*.db
+mrc/bridge/data/*.db-shm
+mrc/bridge/data/*.db-wal
+data/mrc/mrc.log
+data/mrc/mrcstats.dat
+
+# Config files with secrets
+mrc/bridge/config/config.json
+mrc/bridge/config.json
+mrc_bridge/config.json
+config.json
+
+# Zip archives
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.env
+
+# Editor
+*.swp
+*.swo
+*~
+services/mrc_bridge/data/
+services/mrc_bridge/logs/
+bbs.log
+*.log
+
+# Runtime data — DB, user uploads, gallery cache, personal pages,
+# SSH host keys, inbound/outbound mail spools, etc. Anything under
+# data/ is sysop-specific or contains user content. Same for logs/.
+data/
+logs/
+doors/
+gallery-config.json
+
+# Test / cache dirs
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# OS / IDE noise
+.DS_Store
+.idea/
+.vscode/

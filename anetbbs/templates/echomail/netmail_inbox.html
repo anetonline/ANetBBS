@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Netmail — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-envelope-fill"></i> Netmail (Private)</h2>
+        <a href="{{ url_for('echomail.netmail_compose') }}" class="btn btn-success">
+            <i class="bi bi-pencil-square"></i> Compose Netmail
+        </a>
+    </div>
+
+    {% if not netmail_areas %}
+        <div class="alert alert-info">
+            No netmail yet. Use <strong>Compose Netmail</strong> to send a
+            private message to someone on a QWK network.
+        </div>
+    {% endif %}
+
+    {% for nm in netmail_areas %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <strong>{{ nm.network.name }}</strong> — {{ nm.area.name }}
+                <span class="badge bg-secondary">{{ nm.messages|length }}</span>
+            </div>
+            <div class="card-body p-0">
+                {% if nm.messages %}
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Subject</th>
+                            <th>Date</th>
+                            <th>Direction</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for m in nm.messages %}
+                        <tr>
+                            <td><a href="{{ url_for('echomail.read', area_id=nm.area.id, message_id=m.id) }}">{{ m.from_name }}</a></td>
+                            <td>{{ m.to_name }}{% if m.to_address %} &lt;{{ m.to_address }}&gt;{% endif %}</td>
+                            <td>{{ m.subject }}</td>
+                            <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                {% if m.direction == 'netmail' %}
+                                    {% if m.sent_at %}
+                                        <span class="badge bg-success">sent</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">queued</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-info">inbound</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="p-3 text-muted">No messages.</div>
+                {% endif %}
+            </div>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

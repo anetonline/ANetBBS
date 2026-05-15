@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} — Wiki (missing){% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-question-circle"></i> No page at <code>/wiki/{{ slug }}</code></h1>
+</div>
+
+{% if deleted %}
+    <div class="alert alert-warning">
+        <p>This page existed (titled <strong>{{ deleted.title }}</strong>)
+           but was deleted on {{ deleted.updated_at.strftime('%Y-%m-%d') }}
+           {% if deleted.updated_by %}by {{ deleted.updated_by.username }}{% endif %}.
+        </p>
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <form method="post" action="{{ url_for('wiki.restore', slug=slug) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-warning">
+                <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+        </form>
+        {% endif %}
+    </div>
+{% endif %}
+
+<div class="alert alert-info">
+    {% if current_user.is_authenticated %}
+        <p>You can be the first to write this page.</p>
+        <a href="{{ url_for('wiki.edit', slug=slug) }}" class="btn btn-primary">
+            <i class="bi bi-plus-square"></i> Create this page
+        </a>
+    {% else %}
+        <p>This page hasn't been created yet.
+           <a href="{{ url_for('auth.login', next=request.url) }}">Log in</a> to create it.</p>
+    {% endif %}
+</div>
+
+<p>
+    <a href="{{ url_for('wiki.search', q=slug.replace('-', ' ')) }}" class="btn btn-outline-secondary">
+        <i class="bi bi-search"></i> Search for "{{ slug.replace('-', ' ') }}"
+    </a>
+    <a href="{{ url_for('wiki.all_pages') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-list-ul"></i> Browse all pages
+    </a>
+</p>
+{% endblock %}

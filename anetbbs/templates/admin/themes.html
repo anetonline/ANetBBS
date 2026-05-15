@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Theme Management - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-palette"></i> Theme Management</h1>
+</div>
+
+<div class="text-end mb-3">
+    <a href="{{ url_for('admin.add_theme') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Theme</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Display Name</th>
+                    <th>Description</th>
+                    <th>Default</th>
+                    <th>Active</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for theme in themes %}
+                <tr>
+                    <td><code>{{ theme.name }}</code></td>
+                    <td>{{ theme.display_name }}</td>
+                    <td>{{ theme.description or '' }}</td>
+                    <td>{% if theme.is_default %}<i class="bi bi-star-fill text-warning"></i>{% endif %}</td>
+                    <td>
+                        {% if theme.is_active %}
+                            <i class="bi bi-check-circle text-success"></i>
+                        {% else %}
+                            <i class="bi bi-x-circle text-danger"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="{{ url_for('admin.toggle_theme_active', theme_id=theme.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-primary">
+                                <i class="bi bi-{{ 'toggle-on' if theme.is_active else 'toggle-off' }}"></i>
+                            </button>
+                        </form>
+                        <a href="{{ url_for('admin.edit_theme', theme_id=theme.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

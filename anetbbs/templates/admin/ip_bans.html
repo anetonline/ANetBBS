@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}IP Bans{% endblock %}
+{% block content %}
+<div class="bbs-header"><h1><i class="bi bi-ban"></i> IP Bans</h1></div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="row g-2">
+        <div class="col-md-4">
+            <label class="form-label small mb-0">IP / CIDR</label>
+            <input type="text" name="cidr" class="form-control form-control-sm" placeholder="1.2.3.4 or 1.2.3.0/24" required>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label small mb-0">Reason (optional)</label>
+            <input type="text" name="reason" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-0">TTL days (0 = permanent)</label>
+            <input type="number" name="ttl_days" min="0" value="0" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button class="btn btn-danger btn-sm w-100">Ban</button>
+        </div>
+    </div>
+</form>
+
+<table class="table table-sm">
+    <thead><tr><th>CIDR</th><th>Reason</th><th>By</th><th>When</th><th>Expires</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+        <td><code>{{ r.cidr }}</code></td>
+        <td><small>{{ r.reason or '' }}</small></td>
+        <td><small>{{ r.banned_by.username if r.banned_by else '?' }}</small></td>
+        <td><small>{{ r.created_at.strftime('%Y-%m-%d') }}</small></td>
+        <td><small>{{ r.expires_at.strftime('%Y-%m-%d') if r.expires_at else 'never' }}</small></td>
+        <td>
+            <form method="post" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="ban_id" value="{{ r.id }}">
+                <button class="btn btn-sm btn-outline-secondary">Lift</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No active bans.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,3783 @@
+
+     ----------------------------------------------------------------------
+
+      oooo     oooo              oooooooo8  ooooooooooo ooooo   oooooooo8
+       8888o   888  oooo   oooo 888         88  888  88  888  o888     88
+       88 888o8 88   888   888   888oooooo      888      888  888
+       88  888  88    888 888           888     888      888  888o     oo
+      o88o  8  o88o     8888    o88oooo888     o888o    o888o  888oooo88
+                     o8o888                Ascii Art by The Dutch Dude '98
+
+                         Mystic BBS Sysop Documentation
+          Copyright (C) 1997-2014 By James Coyle.  All Rights Reserved
+
+       All mentioned programs are copyrighted by their respected authors.
+
+     ----------------------------------------------------------------------
+     MYSTIC BBS OFFICIAL SUPPORT
+     ----------------------------------------------------------------------
+
+        www:
+              www.mysticbbs.com
+              www.sourceforge.net/projects/mysticbbs
+
+        E-mail:
+
+              mysticbbs@gmail.com
+  
+        FidoNet:
+              MYSTIC
+
+	AgoraNet:
+              AGN_BBS
+
+        IRC:
+              #mysticbbs (efnet)
+
+     -------------------------
+     NOTES ABOUT DOCUMENTATION
+     -------------------------
+
+     This documentation is about 10+ years out of date.  It is provided for
+     now until it is rewritten.  The WHATSNEW file for 1.10 contains all of
+     the changes and documentation of the features in 1.10 (for the most part)
+     and should also be used as a reference guide.  Most of the features not
+     mentioned in this documentation, can be found within the WHATSNEW.
+
+     As always, AgoraNet BBS and FidoNet MYSTIC echos are great places to ask
+     any questions as both are frequented by many Syops using Mystic as well
+     as the author.
+
+     -----------------------------  
+
+     Sysop commands while a user is online (Windows version)
+
+     ALT B   Change status bar display
+     ALT C   Break into line chat mode
+     ALL E   Edit the online user's account
+     ALT H   Hang-up on user
+     ALT J   Shell to DOS
+     ALT S   Break into split screen chat mode
+     ALT T   Toggle status line mode (2 line, 1 line, or none)
+     ALT U   Upgrade user to a defined security level.
+     ALT +   Add a minute to the user's time left.
+     ALT -   Subtract a minute to the user's time left
+     F1..F8  Definable SysOp macros.
+
+     ---
+
+     DOOR MCI Codes: (used when running a door only)
+
+     %0 Socket handle on Windows (1 on Unix)
+     %1 Returns 1 (old comport code from DOS version)
+     %2 Returns 38400 (old baud rate from DOS version)
+     %3 Node number
+     %4 User's IP address
+     %5 User's host name
+     %# User's permanent index number
+     %T User's time left
+     %P Node's temporary directory (where door drop files are created)
+     %U User's handle (All spaces replaced with _ characters)
+
+     Adding /DOS on a door command line will tell Mystic to create a DOS format
+     drop file (ie, lines ending with CRLF) even when running on an operating
+     system that may use a different format (ie Linux, etc)
+
+
+     ---
+
+     General notes (UNDOCUMENTED FEATURES):
+
+     1. NEWUSER.MPX is executed (if it exists) after a user saves their
+        new user information.
+
+     2. TRASHCAN.DAT (stored in the data directory) can be used to block
+        certain user names from being used by a new user.  This file is
+        a straight DOS ASCII file with one user name per line.  For
+        example:
+
+           Mike Hunt
+           Homer Simpson
+
+        If the above were the contents of TRASHCAN.DAT in the data directory,
+        Mystic will refuse to allow new users to use those listed names.
+
+     3. When editing menus, the following can be used in the "hot key"
+        field of the menu command:
+
+             FIRSTCMD : Automatically run the command each time the menu is
+                        loaded.
+             EVERY    : Automatically run the command each time the menu is
+                        redrawn (before its actually redrawn)
+             AFTER    : Automatically run the command each time the menu is
+                        redrawn, just before the prompt is displayed.
+
+        When editing menus, the following can be used in the "hot key"
+        field of the menu command in NON-LIGHTBAR menus only:
+
+             ENTER  : Use the ENTER key as the hot key
+             ESCAPE : Use the ESCAPE key as the hot key
+             TAB    : Use the TAB key as the hot key
+             RIGHT  : Use the RIGHT arrow as the hot key
+             LEFT   : Use the LEFT arrow as the hot key
+             UP     : Use the UP arrow as the hot key
+             DOWN   : Use the DOWN arrow as the hot key
+
+     ---------------------------------------------------------------------
+     About Mystic BBS
+     ---------------------------------------------------------------------
+
+     ---------------------------------------------------------------------
+     System Requirements
+     ---------------------------------------------------------------------
+
+     ---------------------------------------------------------------------
+     DISCLAIMER
+     ---------------------------------------------------------------------
+
+     By attempting to install Mystic BBS, you understand and agree that
+     the author of Mystic BBS makes no guarantees that this program will
+     do anything other than take up space on your drive.  The author will
+     not be held responsible for any damage caused by the use, or misuse,
+     of Mystic BBS or any of it's included programs.
+
+     By continuing to use this program, you hearby agree that the author
+     shall not be held liable for any reason, under any circumstance, due
+     to the use of this program.  If you do not agree with this disclaimer,
+     delete this program and do not use it until you are willing to abide.
+
+     
+     ---------------------------------------------------------------------
+     Starting Mystic BBS
+     ---------------------------------------------------------------------
+
+     Mystic are many command line options which can be used when executing
+     the BBS.  If no command line option is supplied, Mystic will attempt to
+     start up locally so that you may log into the BBS, automatically
+     selecting the first available node for you.
+
+     In addition to no command line, the following options can be used:
+
+        -CFG     This tells Mystic to start in local configuration mode.
+
+        -HOST$   This specifies the user's hostname which should be passed
+                 into Mystic by the telnet server.  Ex: -HOSTphl.verizon.net
+ 
+        -IP$     This specifies the user's IP address which should be passed
+                 into Mystic by the telnet server.  Ex: -IP125.132.54.741
+
+        -N#      This specifies a specific node number.  There is usually
+                 no reason to use this, as Mystic will automatically select
+                 an available node.  Ex: -N1 tells Mystic to start node 1.
+
+        -T#      This specifies the number of numbers the user will be
+                 permitted to use this session.  Ex: -T60 limits the user
+                 to only an hour even if they have many hours of time left
+
+        -TID#    This specifies the socket handle when using Mystic with a
+                 third party telnet server under Windows
+
+        -U$      This specifies the username to login to Mystic with and must
+                 be used along side the -P command to supply the password.  If
+                 a user name has a space in it, the spaces should be replaced
+                 by an underscore.  For example:
+ 
+                    mystic -uJoe_User -pMYPASSWORD
+
+                 The above example will automatically attempt to login as the
+                 Joe User.
+
+         -X$     This specifies a MPL program to execute and then exit Mystic
+                 afterwards.  The -U and -P must also be supplied with this
+                 in order to tell Mystic which user to run the MPL program as
+
+                    mystic -uJoe_User -pMYPASSWORD -xusage
+ 
+                 The above will execute usage.mpx from the scripts directory
+                 after logging in as Joe User, and then exit the BBS after
+                 execution.
+ 
+
+     ---------------------------------------------------------------------
+     Using the ACS System (Access Command Strings)
+     ---------------------------------------------------------------------
+
+     The ACS system is used throughout the BBS to limit access to certain
+     commands and functions.  It is an extremely powerful system designed
+     to give the SysOp total control over who can do what.  In any of the
+     configuration editors where there is an ACS field, these commands are
+     to be used.
+
+     Mystic supports the following ACS commands:
+
+          Ax  -  This command is used to check the user's age.  Where X is
+                 the age the user must be in order to pass.
+
+          Dx   - This command is used to check if a user has a certain flag
+                 toggled ON in their SECOND set of flags.  Where X is the
+                 flag which the user must have in order to pass.  For
+                 example: DA will require the user to have user access flag
+                 D in flag set 2 in order to pass.
+
+          Ex  -  This command is used to check the user's current graphics
+                 mode.  Where X is one of the following:
+
+                      1 - User must have ANSI graphics
+                      0 - User must have ASCII (none) graphics.
+
+          Fx  -  This command is used to check if a user has a certain flag
+                 toggled ON in their FIRST set of flags.  Where X is the
+                 flag which the user must have in order to pass.  For
+                 example: FA will require the user to have user access flag
+                 A in flag set 1 in order to pass.
+
+          Gx  -  This command is used to check if a user is in a certain
+                 message group.  Where X is the number of the group as listed
+                 in the message group editor.  For example: G1 will require
+                 the user to be in message group #1 in order to pass.
+
+          Hx  -  This command is used to check if a user is accessing
+                 a command at a certain hour.  Where X is the hour in the
+                 24-hour mode (ie 00 is midnight or after, 23 is 11pm or
+                 after).  For example: H12 will prevent the user from
+                 accessing this command before 12 noon on any given day.
+
+          Nx  -  This command is used to check if a user is online a
+                 certain node number.  For example: N1 will require that
+                 the user is currently logged in on Node 1 in order to
+                 pass.
+
+          OA  -  This command is used to check the status of the user's
+                 node message availibility.  If the user is able to
+                 receive node messages, OA will return true.  False if
+                 they are not available.
+
+          OI  -  This command is used to check if a user's node status
+                 is invisible to other nodes.  It will be set TRUE if
+                 the user is invisible, false if not.
+
+          OK  -  This command is used to check the result of the last
+                 called Boolean menu command.  For more information, see
+                 the menu commands: -P, -Y, and -N.
+
+          OP  -  This command is used to check the status of the user's
+                 post / call ratio.  If the user meets the currently set
+                 ratio, then OP will be true - otherwise, if will return
+                 false.  This option is useful to restrict users from
+                 downloading if they're not active message posters.
+
+          Sx  -  This command is used to check if a user meets a certain
+                 security level.  For example: S20 will require the user
+                 to have a security level of 20 or higher in order to
+                 pass.
+
+          Tx  -  This command is used to check if a user has at least
+                 X minutes remaining in online time.  For example: T10
+                 would require the user to have a least 10 minutes of
+                 remaining time in order to pass.
+
+          Ux  -  This command is used to check a user's permanent user
+                 number, where X is the number of the permanent index the
+                 user must match.  For example: U1 would require the user
+                 to have the permanent user index of 1.  Each user's
+                 permanent index is listed in the user editor, and no two
+                 users will ever have the same permanent index number.
+
+          Zx  -  This command is used to check if a user is in a certain
+                 File Group.  Where X is the number of the group as listed
+                 in the File Group editor.  For example, Z1 will require
+                 the user to be in File Group #1 in order to pass the ACS
+                 check.
+
+     Any of the above commands can be used together to create an ACS string
+     used by Mystic BBS.  Below are some examples of how they can be used:
+
+          s255     - User must have security of 255 or higher.
+          s255n1fA - User must have a security level of 255 or higher, be
+                     currently logged into Node 1, and have user flag A
+                     toggled on, in order to pass this ACS string.
+          s10z1h12 - User must have a security level of 10 or higher,
+                     be currently in File Group #1, and be accessing this
+                     function after 12:00 noon, in order to pass this
+                     ACS string.
+
+     For added flexibility, Mystic also supports five logical operators
+     which can be used in ACS strings:
+
+          & = Logical AND
+          | = Logical OR
+          ! = Logical NOT
+          ^ = Always TRUE
+          % = Always FALSE
+
+     In addition to the operators, Mystic BBS also allows parenthesis in ACS
+     strings to allow evaluation of grouped ACS commands.  Some examples of
+     using operators and grouping are:
+
+          ^               Always returns TRUE.  Grants access to ALL users.
+          %               Always returns FALSE. Grants access to NO users,
+                          not even the SysOp.
+          s10!s20         User must have a security level which is at least
+                          10 but NOT 20 or greater.
+          t20|s255        User must have 20 minutes of time remaining, OR
+                          have a security level of 255.
+          !(s255|fa)      User must NOT have a security level of 255 and flag
+                          A toggled on.
+          (s20fa)|(s255)  User must have a security level of 20 with flag A
+                          toggled on, *OR* have a security level of 255 or
+                          higher.
+
+     As you can see, the access command system gives Mystic BBS an
+     incredible amount of flexibility when it comes to system security!
+
+     ---------------------------------------------------------------------
+     [S] System Configuration
+     ---------------------------------------------------------------------
+
+     The System Configuration is where setting up the BBS begins.  Here is
+     where all of the basic BBS definitions are found, including System
+     Paths, Modem Setup, and more.  Below is a screen capture of what the
+     System Configuration screen looks like, followed by an explanation as
+     to what each option does.
+
+          System Configuration
+
+          A. System Paths
+          B. Modem/Node Settings
+          C. General Settings
+          D. File Area Settings
+          E. Message Area Settings
+          F. Network Settings
+          L. Language Editor
+          N. New User Settings
+
+          Command (Q/Quit):
+
+          ----------------------------------------------------------------
+          [A] System Paths (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The system paths option will allow you to setup and change the
+          directories that Mystic BBS will use to store and process it's
+          data files.  These paths are setup initially by the installation
+          program and in most cases they don't need to be changed.  The
+          follow options are available in the System Paths setup:
+
+          System Paths
+
+          A. System Path      : C:\MYSTIC\
+          B. Data Path        : C:\MYSTIC\DATA\
+          C. Message Base Path: C:\MYSTIC\MSGS\
+          D. System Logs Path : C:\MYSTIC\LOGS\
+          E. Protocol Path    : C:\MYSTIC\FILES\
+          F. Archive Path     : C:\MYSTIC\ARCS\
+          G. Local QWK Path   : C:\MYSTIC\
+          H. File Attach Path : C:\MYSTIC\ATTACH\
+          I. Script Path      : C:\MYSTIC\SCRIPT\
+
+          Command (Q/Quit):
+
+              [A] System Path
+              ---------------
+              The system path is the main BBS directory where
+              MYSTIC.EXE and its supporting files are located.  In almost
+              all cases, this directory never needs to be changed.
+
+              [B] Data Path
+              -------------
+              The data path is the directory where Mystic BBS will
+              store all of it's data files.  In almost all cases, this
+              directory never needs to be changed.
+
+              [C] Message Base Path
+              ---------------------
+              The message base path is the default directory where Mystic
+              BBS will store it's message base data files.  Mystic BBS also
+              allows the option of storing each message base in a different
+              directory, but in most cases this is not needed and will just
+              clutter up your hard drive.  For more information on storing
+              message bases in different directories, see the Message Base
+              Editor section.
+
+              [D] System Logs Path
+              --------------------
+              The system logs path is the directory where Mystic BBS will
+              keep an updated log file of BBS activity.  The log files can
+              be used to see what each caller was doing while they were
+              online.  These files are not used by Mystic BBS at all and
+              exist for information purposes only.  It is a good idea to
+              delete the files in this directory every so often so they
+              do not become large and waste drive space.
+
+              [E] Protocol Path
+              -----------------
+              The protocol path is the directory where all external
+              protocol drivers are stored.  For more information on file
+              transfer protocols, see the Protocol Editor section.
+
+              [F] Archive Path
+              ----------------
+              The archive path is the directory where all external archive
+              utilities are stored (ie PKZIP.EXE, RAR.EXE, ARJ.EXE, etc).
+              For more information on archives, see the Archive Editor
+              section.
+
+              [G] Local QWK Path
+              ------------------
+              The local QWK path is the directory where Mystic BBS will
+              create QWK offline mail packets if the user is logged into
+              the BBS locally.  This directory usually points to the same
+              directory of your offline mail reader, if you use one.  For
+              more information, see the QWK Offline Mail section.
+
+              [H] File Attach Path
+              --------------------
+              The file attach path is the directory where Mystic BBS will
+              store files that are attached to messages.  Mystic BBS allows
+              users to optionally include a file to any message posted on
+              the BBS system.
+
+              [I] Script Path
+              ---------------
+              The script path is the directory where all compiled Mystic
+              BBS programming files are found.  Mystic BBS supports an
+              internal programming language that can be used by SysOps
+              to create games, utilities, or BBS enhancements with ease.
+              For more information see the MPL.DOC file included with
+              Mystic BBS.
+
+
+          ----------------------------------------------------------------
+          [C] General Settings (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The General Settings section is where all the general options of
+          the BBS are defined.  Below is a screen capture of the General
+          Settings screen followed by an explanation as to what each option
+          does:
+
+          General Settings
+
+          A. BBS Name   : Another Mystic BBS
+          B. Sysop Name : Sysop
+          C. System PW  :
+          D. Sysop PW   : SYSOP
+
+          E. Default Start MNU  : MAIN      1. F1 Macro:
+          F. Default Fallback   : MAIN      2. F2 Macro:
+          G. Default Language   : DEFAULT   3. F3 Macro:
+          H. Max # of Nodes     : 1         4. F4 Macro:
+          I. Screen Saver       : 5
+          J. Inactive Timeout   : 180
+          K. Chat Hours Start   : 00:00
+          L. Chat Hours End     : 23:59
+          M. Allow Sysop E-mail : Yes
+          N. Sysop Chat Logging : Yes
+          O. Login Terminal Mode: Detect
+          P. BBS List Edit ACS  : s255
+          R. Invisible Login ACS: s255
+          S. Status Line Type   : 2 line
+
+          Command (Q/Quit):
+
+              [A] BBS Name
+              ------------
+              This option is used to define the name of your BBS.
+
+              [B] System Operator (SysOp) Name
+              --------------------------------
+              This option is used to define the name of the System
+              Operator (SysOp).
+
+              [C] System Password
+              -------------------
+              This option is used to define a system password, which can be
+              used if you wish to run a private BBS system which only
+              someone who knows the password can access.  If this option is
+              left blank, the system password option will be disabled.  If
+              a system password is set, Mystic BBS will prompt the caller
+              for the system password IMMEDIATELY after connecting to the
+              BBS - before displaying anything else.  If the user does not
+              correctly enter the system password, the display file
+              CLOSED.XXX will be displayed, and the call will be terminated.
+
+              [D] Sysop Password
+              ------------------
+              This option is used to define the Sysop password.  Any time
+              one of the Sysop-related menu commands or functions is
+              selected, the user will have to correctly input this password
+              in order to access that Sysop function.
+
+              [E] Default Start Menu
+              ----------------------
+              This option is used to define the default start menu.  The
+              start menu is the first menu that the user will see after
+              logging into the BBS.  It can be optionally defined by
+              security level, or for each individual user.  If a start
+              menu is NOT defined for the user's security level or for that
+              specific user, Mystic BBS uses the default start menu as the
+              first menu that the user will see.  For more information on
+              the start menu, see the Security Level Editor section and/or
+              the User Editor section.
+
+              [F] Default Fallback Menu
+              -------------------------
+              This option is used to define the default fallback menu.  The
+              fallback menu is the menu that is loaded if the menu the user
+              is trying to access doesn't exist.  The fallback menu can be
+              set for each menu in the Menu Editor, but if a fallback menu
+              is not defined for the menu the user is trying to access,
+              Mystic will use the default fallback menu.
+
+              [G] Default Language File
+              -------------------------
+              This option is used to define the default language file.
+              Mystic BBS supports the use of an unlimited number of
+              language definitions which can be used to customize the
+              the interface of your BBS.  The default language file MUST
+              exist in the data directory, or Mystic BBS will return an
+              error.  For more information on the Language system, see
+              the Language Editor section.
+
+              [H] Maximum Number of Nodes
+              ---------------------------
+              This option is used to define the maximum number of nodes
+              currently in use.  Each copy of Mystic BBS is a node.  If you
+              have multiple phone lines and need to run multiple copies of
+              Mystic BBS, then each copy of Mystic you are running is a
+              node.  For more information see the section on Setting up
+              a Multi-Node BBS.
+
+              [I] Screen Saver
+              ----------------
+              This option is used to define the number of minutes of
+              inactivity to wait before activating the screen saver.  When
+              running a BBS, the software can sometimes sit idle between
+              calls for quite a while.  A screen saver has been implemented
+              to prevent screen burn-in while waiting for calls.
+
+              [J] Inactivity Time Out
+              -----------------------
+              This option is used to set the number of seconds a user can
+              be idle before Mystic BBS will hang up on them for
+              inactivity.
+
+              [K] Sysop Chat Hours - Start
+              ----------------------------
+              This option is used to define when the Sysop will be
+              available for chat.  If a user tries to page the Sysop
+              during off hours, Mystic will not activate the page bell,
+              but instead inform the user that the SysOp is not available
+              and optionally ask the user if they'd like to send e-mail
+              to the Sysop.
+
+              [L] Sysop Chat Hours - End
+              --------------------------
+              This option goes along with the above option which defines
+              the SysOp chat hours.
+
+              [M] Allow Sysop E-Mail
+              ----------------------
+              If this option is set to Yes, the user will be asked if they
+              would like to send e-mail to the SysOp if they try to page
+              during off chat hours.
+
+              [N] SysOp Chat Logging
+              ----------------------
+              If this option is set to Yes, Mystic BBS will record SysOp
+              chat sessions to CHAT.LOG found in the logs directory.
+
+              [O] Login Terminal Mode
+              -----------------------
+              This option sets how Mystic handles getting the users
+              terminal emulation.  If set to Ask, Mystic will ask the
+              user.  If set to detect, Mystic will attempt to detect
+              which terminal emulation to use.  If set to Detect/Ask,
+              Mystic BBS will attempt to detect and if ANSI isn't
+              detected, the user will be asked.
+
+              [P] BBS List Edit ACS
+              ---------------------
+              This option defines the ACS string required to edit entries
+              in the BBS list.  Mystic will also allow the user who added
+              the entry in the BBS list to edit it regardless of this
+              ACS string.
+
+              [R] Invisible Login ACS
+              -----------------------
+              This option defines the ACS string required for a user to
+              have the option of logging onto the BBS as "invisible" mode.
+              When a user is logged in as invisible, they will not appear
+              in any of the Who's Online listings.
+
+              [S] Status Line Type
+              --------------------
+              This option defines the type of "status line" that Mystic BBS
+              will use.  The status line is at the bottom of the screen
+              where information on the logged in user is displayed.  Valid
+              options are 1 line, 2 lines, and none.  This can also be
+              toggled by pressing ALT-T while a user is online.
+
+              [1-4] Sysop Macro
+              -----------------
+              These options define the SysOp macros.  A SysOp macro is
+              text that is displayed whenever a macro key is pressed.
+              Mystic supports four macro keys: F1 through F4.  The text
+              defined for each of these keys will be pushed into the input
+              buffer whenever they are pressed, just as if it was actually
+              typed in.
+
+          ----------------------------------------------------------------
+          [D] File Area Settings (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The File Area Settings section is where all options relating to
+          the file transfer bases are found.  Below is a screen capture of
+          the File Area Settings screen followed by an explanation of
+          what each option does:
+
+          File Settings
+
+          A. Compress area numbers : Yes
+          B. File area list columns: 2
+
+          C. Import FILE_ID.DIZ    : Yes
+          D. Max File Desc. Lines  : 20
+          E. Auto-validate ACS     : s255
+          F. See unvalidated files : s255
+          G. DL unvalidated files  : s255
+          H. See Failed Files      : s255
+          I. DL Failed Files       : s999
+          J. Min UL Space (kb)     : 1000
+          K. Min CD Copy Space (kb): 1000
+          L. Redisplay File Header : Yes
+          M. Default Upload Base   : 0
+
+          N. Test uploaded files   : No
+          O. Pass errorlevel       : 0
+          P. Test command line     :
+
+          Command (Q/Quit):
+
+              [A] Compress File Area Numbers
+              ------------------------------
+              This option, if toggled on, will compress file area numbers
+              so they are always sequential during a file area list.  So
+              in a file area list, if a user does not have access to area
+              number 2, then the next area that the user does have access
+              to will become area number 2.
+
+              [B] File Area List Columns
+              --------------------------
+              This option allows the number of columns used in the file area
+              lists to be configured.  Valid options are 1 or 2 columns.
+              Note: If you change this to 1 column listings, you will have
+              to edit the file area list prompt to reflect a single listing.
+
+              [C] Import FILE_ID.DIZ
+              ----------------------
+              This option, if toggled on, will allow Mystic BBS to search
+              all uploaded files for a FILE_ID.DIZ file.  The FILE_ID.DIZ
+              file is included in many archives and contains a description
+              of the file.  If this file is found, Mystic BBS will
+              automatically read the description and use it as the file
+              description in the file listing.
+
+              [D] Max File Description Lines
+              ------------------------------
+              This option defines the maximum number of file description
+              lines which can be used for each file entry.  It must be
+              within the range of 1 to 99.
+
+              [E] Auto Validate ACS
+              ---------------------
+              This option defines the ACS string a user must pass in
+              order for the files they upload to be marked as validated.
+              If they do not pass this ACS string, the files will be
+              marked as unvalidated.
+
+              [F] See Unvalidated Files ACS
+              -----------------------------
+              This option defines the ACS string a user must pass in
+              order for unvalidated files to appear in a file listing.
+
+              [G] Download Unvalidated Files ACS
+              ----------------------------------
+              This option defines the ACS string a user must pass in
+              order to download a file that is marked as unvalidated.
+
+              [H] See Failed Files ACS
+              ------------------------
+              If upload testing is toggled on and a file fails the upload
+              test, they will be marked as "failed".  This option defines
+              the ACS a user must have to see files which have failed the
+              upload test in their file listing.
+
+              [I] Download Failed Files ACS
+              -----------------------------
+              This option defines the ACS a user must meet in order to
+              download a file which has been marked as "failed".
+
+              [J] Minimum UL Space (kb)
+              -------------------------
+              Mystic BBS has the option to refuse to accept uploaded files
+              when drive space gets low.  This option sets the number of
+              kilobytes that must exist in order for Mystic BBS to accept
+              uploads.  If this option is set to zero (0), it will be
+              disabled.
+
+              [K] Minimum CD Copy Space (kb)
+              ------------------------------
+              This option specifies the number of kilobytes which must be
+              available on the BBS drive for Mystic BBS to use it's
+              CD-ROM copy feature.
+
+              When a file area is marked as a "CD-ROM" file area, Mystic
+              BBS will attempt to copy files from the CD-ROM to the
+              temporary directory before a user downloads it.  This keeps
+              the access to the CD-ROM drive minimal, since CD drives are
+              usually much slower than a hard drive.
+
+              [L] Redisplay File Header
+              -------------------------
+              This option specifies whether Mystic BBS will redisplay the
+              file header after a pause during standard file listings.
+
+              [M] Default Upload Base
+              -----------------------
+              This option defines the default upload base.  When this is
+              set to zero (disabled), all uploaded files will go into the
+              user's currently selected file base.  If set to a non-zero
+              value, all uploads will be uploaded to the set file base
+              number (as listed in the file base editor).
+
+              [N] Test Uploaded Files
+              -----------------------
+              Mystic BBS optionally supports external upload testing.  An
+              upload processor is a program which will search a file for
+              viruses and/or errors which may have occurred during the
+              file transfer.  Any upload processor should work with Mystic
+              but THD Pro Scan is recommended.  It's free and available
+              on the Mystic BBS web page and support BBS.
+
+              If this option is toggled to Yes, Mystic BBS will attempt to
+              run the external processor after all uploaded files.
+
+              [O] Pass Errorlevel
+              -------------------
+              This option defines the Errorlevel which is returned by the
+              external file processor if the file has passed all testing
+              successfully.  For more information, see the documentation
+              included with the upload processor you wish to use.
+
+              [P] Test Command Line
+              ---------------------
+              This option defines the command line which is used to run
+              the external file processor.  The following MCI codes can
+              be used with this command line:
+
+                   %1 = Modem ComPort.
+                   %2 = Modem Baud Rate.
+                   %3 = Path and File Name of file to be tested.
+
+              For more information, see the documentation included with
+              the upload processor you wish to use.
+
+          ----------------------------------------------------------------
+          [E] Message Base Settings (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The Message Base Settings section is where all options relating
+          to the Message Base system are found.  Below is a screen capture
+          of Message Base Settings screen following by an explanation of
+          what each option does:
+
+          Message Base Settings
+
+          A. Compress area numbers: Yes
+          B. Message Area List Col: 2
+          C. Max Auto Sig Lines   : 3
+          D. Redisplay Msg Header : No
+
+          E. QWK/REP filename     : MYSTIC
+          F. Welcome filename     :
+          G. News filename        :
+          H. Goodbye filename     :
+          I. Default Archive      : ZIP
+          J. QWK Max Msgs/Base    : 0
+          K. QWK Max Msgs/Packet  : 0
+
+          L. Quote Color      : XX> Quote
+          M. Text Color       : Text
+          N. Tear Line Color  : --- Tear
+          O. Origin Line Color: * Origin:
+
+          Command (Q/Quit):
+
+              [A] Compress Area Numbers
+              -------------------------
+              This option, if toggled on, will compress message area numbers
+              so they are always sequential during a message area list.  So
+              in a message area list, if a user does not have access to area
+              number 2, then the next area that the user does have access
+              to will become area number 2.
+
+              [B] Message Area List Columns
+              -----------------------------
+              This option allows the number of columns used in message base
+              listings to be configured.  Valid options are 1 or 2 columns.
+              Note: If you change the message area list to 1 from 2, you'll
+              have to edit your message base list prompt to reflect a single
+              column listing.
+
+              [C] Max Auto Sig Lines
+              ----------------------
+              This option defines the maximum number of lines a user will
+              be allowed to use in their auto signature.  An auto signature
+              is a few lines of text which is automatically appended to
+              each message a user posts.  Many users will use their auto
+              signature to add their handle and e-mail address to each
+              message.
+
+              [D] Redisplay Message Header
+              ----------------------------
+              When this option is set to "Yes", Mystic will redisplay the
+              message header after a page full of message text has been
+              displayed.
+
+              [E] QWK/REP File Name
+              ---------------------
+              Mystic BBS internally supports the QWK/REP offline mailing
+              standard.  The QWK offline mailing system allows users to
+              download messages from the BBS message base and read them
+              offline using a QWK mail reader.  This allows the user to
+              read and reply to mail offline when it's convenient to them,
+              and also keeps the phone line free for other callers because
+              the user will not be reading messages online.
+
+              The QWK/REP filename is the name of the packet that
+              Mystic BBS will create for the user when they select to
+              download a QWK packet.  This file name should be unique to
+              your BBS name so it doesn't get mixed up with packets
+              downloaded from another BBS.
+
+              [F] QWK Welcome File Name
+              -------------------------
+              Many QWK offline mail readers offer support to display files
+              which are included with a QWK packet.  This option defines
+              the filename which the QWK reader will display when the user
+              first opens the packet for reading.
+
+              [G] QWK News File Name
+              ----------------------
+              This option is used to define the file that will be displayed
+              by the QWK offline reader as BBS news.
+
+              [H] QWK Goodbye File Name
+              -------------------------
+              This option is used to define the file that will be displayed
+              by the QWK offline reader when the user has finished reading
+              the QWK packet.
+
+              [I] Default Archive Extension
+              -----------------------------
+              This option is used to define the default archive which is
+              used to compress QWK packets.  The extension should match
+              the extension of any archives which have been setup in the
+              Archive Editor.
+
+              [J] QWK Max Msgs/Base
+              ---------------------
+              This option defines the maximum number of messages which
+              can be packed into a QWK packet per message base.  This
+              option is disabled if set to 0.
+
+              [K] QWK Max Msgs/Packet
+              -----------------------
+              This option defines the maximum number of messages which
+              can be packed into a QWK packet.  This option is disabled
+              if set to 0.
+
+              [L] Default Quote Color
+              -----------------------
+              This option is used to set the default display color for
+              Quoted text while reading messages.  This color can also be
+              configured for each individual message base in the Message
+              Base Editor.
+
+              [M] Default Text Color
+              ----------------------
+              This option is used to set the default display color for
+              text while reading messages.  This color can also be
+              configured for each individual message base in the Message
+              Base Editor.
+
+              [N] Default Tear Line Color
+              ---------------------------
+              This option is used to set the default display color for
+              the Tear Line while reading messages.  This color can also
+              be configured for each individual message base in the Message
+              Base Editor.
+
+              [O] Default Origin Line Color
+              -----------------------------
+              This option is used to set the default display color for
+              the Origin line while reading messages.  This color can also
+              be configured for each individual message base in the Message
+              Base Editor.
+
+          ----------------------------------------------------------------
+          [F] Network Settings (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The Network Settings option is used to setup Mystic BBS with
+          message base networks such as FidoNet.  A Message Base network
+          is a collection of BBSes that all share the same message bases,
+          allowing users on a BBS in Europe (for example) to hold a
+          discussion with users on a BBS in the United States.  For more
+          information, see the section on interfacing with message
+          networks.
+
+          The following is a screen capture of the Network Settings screen
+          followed by an explanation of what each option does:
+
+          Network Settings
+
+          1.   0:0/0                         2.   0:0/0
+          3.   0:0/0                         4.   0:0/0
+          5.   0:0/0                         6.   0:0/0
+          7.   0:0/0                         8.   0:0/0
+          9.   0:0/0                         10.  0:0/0
+          11.  0:0/0                         12.  0:0/0
+          13.  0:0/0                         14.  0:0/0
+          15.  0:0/0                         16.  0:0/0
+          17.  0:0/0                         18.  0:0/0
+          19.  0:0/0                         20.  0:0/0
+
+          A. Origin : Mystic BBS * (000)000-0000
+
+          B. Netmail Crash : No
+          C. Netmail Hold  : No
+          D. Netmail Kill  : No
+
+          Command (Q/Quit):
+
+              [1 to 20] Network Addresses
+              ---------------------------
+              These options are used to setup Network addresses.  When a
+              BBS joins a message network, it is assigned a network address
+              which is used to identify the BBS.  Mystic BBS allows up to
+              20 address definitions, meaning that Mystic BBS can
+              be interfaced with up to 20 different message networks at
+              once.
+
+              [A] Default Origin Line
+              -----------------------
+              This option defines the default origin line which will be
+              used for each message base.  This option can also be set
+              for each individual message base in the Message Base Editor.
+
+              An origin line is a line of text which is added at the
+              bottom of each message posted into a networked message base.
+              It is used to identify what BBS the message originated from
+              as well as any other general information you wish to have
+              supplied about your BBS (ie, phone number, modem speed, etc).
+
+              [B] Netmail Crash
+              -----------------
+              When this option is set to "Yes", the CRASH flag will be set
+              true on all outgoing Netmail messages.
+
+              [C] Netmail Hold
+              -----------------
+              When this option is set to "Yes", the HOLD flag will be set
+              true on all outgoing Netmail messages.
+
+              [D] Netmail Kill
+              -----------------
+              When this option is set to "Yes", the KILL flag will be set
+              true on all outgoing Netmail messages.
+
+
+          ----------------------------------------------------------------
+          [L] Language Definition Editor (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          About The Language System
+          -------------------------
+          The language definition editor is where all available language
+          files are defined.  A language file is a file that contains
+          all the text that is displayed to a user while they are online.
+          These files can be edited with any text editor, or the language
+          editor supplied with Mystic BBS (LANGEDIT.EXE).  By editing the
+          language file, the user interface can be totally customized to
+          your liking.  Almost 100% of the text displayed to the user
+          can be customized using the MCI system and the display file
+          system within the language files.  More information on editing
+          language files can be found in the "Editing Language Files"
+          section of the documentation.
+
+          The following is a screen capture of the Language Editor
+          screen followed by an explanation of each available option:
+
+          Language Editor
+
+          ##  FileName  Description
+          --  --------  ------------------------------
+          1   DEFAULT   Default
+
+          (I)nsert, (D)elete, (E)dit, (Q)uit?
+
+              [I] Insert Language
+              -------------------
+              This option is used to insert a new language file into the
+              Language database.  Do not insert a new language file if it
+              has not already been compiled.  If a user selects a language
+              that doesn't have a compiled language file, they will
+              receive an error message and Mystic BBS will then attempt to
+              load the default language file, as defined in the System
+              Configuration -> General Settings.
+
+              [D] Delete Language
+              -------------------
+              This option is used to delete a language entry in the
+              language editor.
+
+              [E] Edit Language
+              -----------------
+              This option is used to edit the settings for a language
+              entry.  When this option is selected, Mystic BBS will then
+              allow the settings for the language file to be edited.  The
+              following is a screen capture of the Edit screen followed
+              by an explanation of what each option does:
+
+              Language 1 of 1
+
+              A. Description: Default
+              B. Filename   : DEFAULT
+              C. Text Path  : D:\TP\MYSTIC\TEXT\
+              D. Menu Path  : D:\TP\MYSTIC\MENUS\
+              M. Allow ASCII: Yes
+              N. Allow ANSI : Yes
+
+              E. Use Lightbar Y/N  : Yes
+              F. Y/N Highlight Yes :  Yes  No
+              G. Y/N Highlight No  : Yes  No
+              H. Input field color : Test
+              I. Quote Bar Color   : Test
+              J. Echo Character    : *
+              K. Input Character   : ú
+              L. File Tag Character: û
+              O. File Search Hi    : Test
+              P. File Desc. Lo     : Test
+
+              Command (Q/Quit):
+
+              [A] Description
+              ---------------
+              This option holds the description of the language file.  The
+              description is what the user will see when they are prompted
+              to select a language file.
+
+              [B] File Name
+              -------------
+              This option sets the file name of the compiled language file.
+              The compiled language file must exist in the DATA directory
+              in order for Mystic BBS to use the language.  Language files
+              can be edited with LANGEDIT.EXE or a standard text editor, and
+              are compiled with MAKELANG.EXE.  For more information, see the
+              "Editing Language Files" section of the documentation.
+
+              [C] Text Path
+              -------------
+              This option sets the directory where all display files for
+              this language exist.  It is possible for language files to
+              share the same text directory as other language files.
+
+              [D] Menu Path
+              -------------
+              This option sets the directory where all system menu files
+              for this language exist.  It is possible for language files
+              to share the same menu directory as other language files.
+
+              [E] Use Lightbar Y/N
+              --------------------
+              This option specifies if Mystic BBS will use lightbar Yes and
+              No prompts for this language.  The user must have ANSI
+              graphics to use any lightbar options.  If the user doesn't
+              support ANSI and this option is turned on, Mystic BBS will
+              ignore it and use standard prompts.
+
+              [F] Y/N Highlight Yes
+              ---------------------
+              This is the text that is displayed in a Y/N lightbar prompt
+              when the user has selected a Yes answer.
+
+              [G] Y/N Highlight No
+              --------------------
+              This is the text that is displayed in a Y/N lightbar prompt
+              when the user has selected a No answer.
+
+              [H] Input Field Color
+              ---------------------
+              Throughout the BBS, Mystic will prompt the user using a
+              colored input field.  The color of these input fields can be
+              set here using standard DOS color numbers:
+
+                   Foreground colors:
+                   0 - Black         6 - Brown           12 - Light Red
+                   1 - Blue          7 - Light Grey      13 - Light Magenta
+                   2 - Green         8 - Dark Grey       14 - Yellow
+                   3 - Cyan          9 - Light Blue      15 - White
+                   4 - Red          10 - Light Green
+                   5 - Magenta      11 - Light Cyan
+
+                   Background colors:
+                   0 - Black         4 - Red
+                   1 - Blue          5 - Magenta
+                   2 - Green         6 - Brown
+                   3 - Cyan          7 - Gray
+
+              [I] Quote Bar Color
+              -------------------
+              This option defines the foreground and background colors of
+              the lightbar used in the quote window of the full screen
+              editor.  See option [H] for a reference to valid colors.
+
+              [J] Echo Character
+              ------------------
+              This option defines the character that will be echoed in
+              the input field when a password is being entered.
+
+              [K] Input Character
+              -------------------
+              This option defines the character used to fill blank spaces
+              during field input.  Here are some recommended settings for
+              this option:
+
+                   Ascii  32 ( )
+                   Ascii 250 (ú)
+                   Ascii 176 (°)
+
+              To enter any of these characters: Select option [K], hold in
+              the ALT key, type the ASCII number on the keypad, then release
+              the ALT key.
+
+              [L] File Tag Character
+              ----------------------
+              This option defines the character used to mark a file as
+              "tagged" into the lightbar file listings.  The suggested
+              setting for this field is ASCII 251 (the û character).  Other
+              lightbar file list options are defined within the ANSIFLST.XXX
+              template file.
+
+              [M] Allow ASCII Graphics
+              ------------------------
+              This option specifies whether or not this language definition
+              will allow users in ASCII (no graphics) mode to use this
+              language file.
+
+              [N] Allow ANSI Graphics
+              -----------------------
+              This option specifies whether or not this language definition
+              will allow users in ANSI (color graphics) mode to use this
+              language file.
+
+              * NOTE *
+              These settings in the DEFAULT language file (as defined in
+              System Configuration -> General Settings) are used to define
+              which graphic modes your BBS will support.  For example,
+              setting Allow ASCII to "No" in the default language file will
+              force Mystic BBS to hangup on any callers using ASCII
+              graphics.
+
+              [O] File Search Hi
+              ------------------
+              This option defines the color of the highlighted text in
+              the file description, when doing a file search.  See option
+              [H] for a reference of available color combinations.
+
+              [P] File Desc. Lo
+              -----------------
+              This option goes along with "File Search Hi".  It specifies
+              the color of normal file description text, when doing a NON
+              LIGHTBAR file listing.  See option [H] for a reference of
+              available color combinations.
+
+          ----------------------------------------------------------------
+          [N] New User Settings (System Configuration Editor)
+          ----------------------------------------------------------------
+
+          The New User Settings section is used to define how Mystic BBS
+          will handle new callers who wish to create an account with the
+          BBS.  The following is a screen capture of the New User Settings
+          screen following by an explanation of what each option does:
+
+          New User Settings
+
+          A. Allow New Users: Yes            P. Use Matrix Login: No
+          B. New User PW    :                R. Matrix Menu Name: MATRIX
+          C. Security Level : 10             S. Matrix Password : MATRIX
+                                             T. Matrix PW ACS   : s20
+          D. Ask Alias      : Yes
+          E. Ask Real Name  : Yes            X. User Name Format: As Typed
+          F. Ask Street     : Yes
+          G. Ask City/State : Yes
+          H. Ask Zip Code   : Yes
+          I. Ask Home Phone : Yes
+          J. Ask Data Phone : Yes
+          K. Ask Birthdate  : Yes
+          L. Ask Gender     : Yes
+          M. Use USA Phone  : Yes
+          N. Date Format    : MM/DD/YY
+          O. Language File  : Ask
+          U. Editor         : Ask
+          V. Sysop Feedback : Yes
+          W. File List Type : Lightbar
+
+          Command (Q/Quit):
+
+              [A] Allow New Users
+              -------------------
+              If this option is toggled off, Mystic BBS will not accept
+              new user accounts.  Instead, the display file CLOSED.XXX
+              will be displayed and the call will be terminated.
+
+              [B] New User Password
+              ---------------------
+              This option is used to define a new user password.  If a
+              password has been defined, a caller who attempts to log in
+              as a new user will be prompted for the new user password
+              before they will be able to continue to log in as a new
+              user.
+
+              [C] New User Security Level
+              ---------------------------
+              This option is used to set what security level a new user
+              will be upgraded to after successfully completing the
+              new user login procedure.  For more information on the
+              security system, see the Security Level Editor section.
+
+              [D] Ask Alias
+              -------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for an Alias.
+
+              [E] Ask Real Name
+              -----------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their real name.
+
+              [F] Ask Street
+              --------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their street address.
+
+              [G] Ask City/State
+              ------------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their City and State.
+
+              [H] Ask Zip Code
+              ----------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their Zip code.
+
+              [I] Ask Home Phone
+              ------------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their home phone number.
+
+              [J] Ask Data Phone
+              ------------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their data phone number.
+
+              [K] Ask Birthdate
+              -----------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their date of birth.
+
+              [L] Ask Gender
+              --------------
+              If this option is set to Yes, Mystic BBS will ask new users
+              for their gender.
+
+              [M] Use USA Phone Numbers
+              -------------------------
+              If this option is set to Yes, Mystic BBS will use USA format
+              phone numbers (XXX-XXX-XXXX).
+
+              [N] Date Format
+              ---------------
+              This option sets the date format which will be used for
+              each user.  Valid options are MM/DD/YY, DD/MM/YY, YY/DD/MM,
+              or Ask.  If this option is set to Ask, Mystic BBS will ask
+              each new user which date format they'd like to use.
+
+              [O] Language File
+              -----------------
+              This option is used to set which language file is used for
+              new users.  Valid options are Use Default and Ask.  If set
+              to Use Default, Mystic BBS will use the default language
+              as defined in the General Settings section.  If set to Ask,
+              Mystic BBS will ask the user which language they'd like to
+              use.
+
+              [P] Use Matrix Login
+              --------------------
+              This option defines whether Mystic BBS will use the Matrix
+              login option.  The Matrix login is an alternative to the
+              standard "Enter your name and password" login.  The Matrix
+              system allows users to apply for an account and then when
+              (if) they are validated, they receive a Matrix Password which
+              is used to log into the BBS.
+
+              [R] Matrix Menu Name
+              --------------------
+              This option defines the menu file name which is used as the
+              Matrix Login menu.  This file must exist in order for the
+              matrix login system to work properly.
+
+              [S] Matrix Password
+              -------------------
+              This option defines the password which is given to the user
+              after their account has been validated.  This is the password
+              which the user will have to know in order to log into the BBS
+              system from the Matrix Login menu.  If this field is left
+              blank, the matrix password option will be disabled and the XL
+              (Matrix Login) menu command will not require a password.
+
+              [T] Matrix PW ACS
+              -----------------
+              This option defines the ACS level which the user must meet
+              in order to be given the matrix login password from the matrix
+              menu.
+
+              [U] Editor
+              ----------
+              This option defines how the BBS will determine the new user's
+              message editor preference.  Valid options are:
+
+                   Line : New user's use the line editor by default.
+                   Full : New user's use the full screen editor by default.
+                   Ask  : Mystic BBS will ask the user their preference.
+
+              [V] Sysop FeedBack
+              ------------------
+              This option defines if Mystic BBS will force new users to
+              send an e-mail to the Sysop after creating a new user
+              account.
+
+              [W] File List Type
+              ------------------
+              This option defines how the BBS will determine the new user's
+              file listing type.  Valid options are:
+
+                   Normal   : Normal file listing.
+                   Lightbar : Lightbar file listing.  This allows users
+                              with ANSI graphics to scroll through the list
+                              of files with arrow keys.
+                   Ask      : Mystic BBS will ask the user their preference.
+
+              [X] User Name Format
+              --------------------
+              This option specifies the way Mystic will handle new user's
+              handle.  Valid options are:
+
+                   As typed   : Mystic will leave the user handle as they
+                                typed it.
+                   Upper case : Mystic will convert the user's handle to
+                                all uppercase letters.
+                   Lower case : Mystic will convert the user's handle to
+                                all lower case letters.
+                   Proper     : Mystic will convert the first letter in
+                                each word of the user's handle to a capital
+                                letter, while forcing all other letters as
+                                lower case.
+
+     ---------------------------------------------------------------------
+     Event Editor
+     ---------------------------------------------------------------------
+
+     The event editor is where all system events are setup.  A system
+     event is when Mystic BBS exits at a specified time so external
+     programs can be ran to help maintain the BBS.  The following is a
+     screen capture of the Event Editor screen followed by an explanation
+     of what each option does:
+
+     Event Editor
+
+     ###  Name
+     ---  ------------------------------
+     -1   New Event
+
+     (I)nsert, (D)elete, (E)dit, (Q)uit?
+
+          [I] Insert Event
+          ----------------
+          The Insert option is used to add a new event into the event
+          database.  After an event has been added, it should be setup
+          to run as you want it to.
+
+          [D] Delete Event
+          ----------------
+          The delete option is used to remove an event from the event
+          database.
+
+          [E] Edit Event
+          --------------
+          The edit option is used to edit an event already in the event
+          database.  When this option is selected, the following screen
+          will be shown:
+
+          Event 1 of 1
+
+          !. Active         : No
+          A. Description    : New Event
+          B. Forced         : No
+          C. Errorlevel     : 0
+          D. Execution Time : 00:00
+          E. Busy Warning   : 0
+          F. Last Ran on    : 00/00/80
+
+          Command (Q/Quit):
+
+              [!] Active Event
+              ----------------
+              This option sets if the event is active.  If the event is
+              not set to active, Mystic BBS will ignore the event as if
+              it doesn't even exist in the event database.
+
+              [A] Description
+              ---------------
+              This option sets the description of the event.  This isn't
+              internally used by Mystic BBS but is added to help keep
+              track of which event does what.
+
+              [B] Forced Event
+              ----------------
+              This option specifies if the event is a forced event.  A
+              forced event will run at the execution time no matter what.
+              the circumstances are.  If a user is online when a forced
+              event approaches, they will be warned and then the call will
+              be terminated if they do not log off by the execution time.
+              If the event is not a forced event, Mystic BBS will wait until
+              the user terminates their call before running the event.
+
+              [C] Errorlevel
+              --------------
+              This option specifies the Errorlevel that Mystic BBS will
+              exit at when this event is being ran.  This is used by the
+              batch file which runs the BBS to determine which event is
+              running.  For more information on Errorlevels and batch
+              files, see the instruction manual for your operating system.
+
+              [D] Execution Time
+              ------------------
+              This option is used to set what time Mystic BBS will run the
+              event.  The time format is in 24-hour format.  For example,
+              12:00 is 12 noon, and 23:59 would be 11:59pm.
+
+              [E] Busy Warning
+              ----------------
+              The busy warning option is used to set when Mystic BBS will
+              warn the user of an upcoming event.  So if this option is
+              set to 5, Mystic BBS will wait until 5 minutes before the
+              event to warn the user.  If the event is not a forced event
+              then Mystic BBS does not run the event until the user logs
+              off, and this option will be ignored.
+
+              [F] Last Ran On
+              ---------------
+              This option is used to show the date when the event was last
+              ran.  In most cases, this option does not need to be touched
+              as Mystic BBS keeps this field up-to-date each time the
+              event is ran.
+
+
+     ---------------------------------------------------------------------
+     Archive Editor
+     ---------------------------------------------------------------------
+
+     The archive editor is where all archive compression and decompression
+     utilities are setup.  Archive utilities are programs which take a
+     number of files and compress them into one file, saving drive space
+     and in the case of a BBS, file transfer time.  Archive utilities are
+     used with Mystic BBS in the file transfer functions, and in the QWK
+     offline mail functions and are almost required if you want to use
+     these features.
+
+     Some popular archive programs are:
+
+         - PkWare's PKZIP utilities              ARJ241A.EXE
+         - Robert Jung's ARJ utilities           PKZ204G.EXE
+         - Eugene Roshal's RAR utilities         RAR202.EXE
+         - Haruyasu Yoshizaki's LHA utilities    LHA225.EXE
+
+     These utilities can be found on most BBSes and throughout the
+     Internet.  Many are free for non-commercial use.
+
+     Below is a screen capture of the Archive Editor followed by an
+     explanation of what each option does:
+
+          Archive Editor
+
+          ###  Ext  Name
+          ---  ---  --------------------
+          1    ZIP  PkWare's ZIP
+          2    LZH  Yoshi's LHA
+          3    RAR  Roshal's RAR
+          4    ARJ  Jung's ARJ
+
+          (I)nsert, (D)elete, (E)dit, (Q)uit?
+
+          [I] Insert Archive
+          ------------------
+          This option is used to insert a new archive definition into the
+          archive editor.
+
+          [D] Delete Archive
+          ------------------
+          This option is used to delete an archive definition from the
+          archive editor.
+
+          [E] Edit Archive
+          ----------------
+          This option is used to edit an archive definition in the
+          archive editor.  Below is a screen capture of the Archive
+          Settings screen followed by an explanation of what each option
+          does:
+
+              Archive 1 of 4
+
+              A. Name      : PkWare's ZIP
+              B. Extension : ZIP
+              C. Pack Cmd  : PKZIP -a -ex -o %1 %2
+              D. Unpack Cmd: PKUNZIP -o -ed %1 %2 %3
+              E. View Cmd  : PKUNZIP -vb %1 >%3%2
+
+              Command (Q/Quit):
+
+              [A] Archive Name
+              ----------------
+              This option defines the description of the archive as it
+              will appear when listed by Mystic BBS.
+
+              [B] Archive Extension
+              ---------------------
+              This option defines the archive extension as created by the
+              archive utility which is currently being setup.
+
+              [C] Pack Command Line
+              ---------------------
+              This option defines the command line that Mystic BBS uses
+              to pack a group of files into one file.  Archive MCI codes
+              must be used for this command line and are listed below.
+
+              [D] Unpack Command Line
+              -----------------------
+              This option defines the command line that Mystic BBS uses
+              to unpack an archive into the temporary directory.  Archive
+              MCI codes must be used for this command line and are listed
+              below.
+
+              [E] View Command Line
+              ---------------------
+              This option defines the command line that Mystic BBS uses
+              to view the contents of an archive.  Mystic BBS internally
+              supports the viewing of ZIP, LZH, ARJ, and RAR files.  If an
+              archive is not of one of the above types, Mystic BBS will
+              look into the archive definitions and use the this command
+              line to view if the extension of the file matches the
+              extension of the archive definition.
+
+          Archive MCI Codes
+          -----------------
+          These codes work just like the MCI display codes, but only work
+          with the archive definitions.  The following MCI codes can be
+          used in the Archive Editor:
+
+          %1 = File name being processed.
+          %2 = Files to pack/unpack.
+          %3 = Temporary file directory where Mystic BBS packs/unpacks
+               archives.
+
+
+     ---------------------------------------------------------------------
+     Protocol Editor (Editing File Transfer Protocols)
+     ---------------------------------------------------------------------
+
+     The protocol editor is where all file transfer protocols are setup
+     and maintained.  A file transfer protocol is a program which is used
+     to transfer files between computer systems.  In almost all cases they
+     are needed if you wish to run a BBS, unless you don't plan on using
+     the entire file transfer section or any of the QWK offline mailing
+     functions.
+
+     By default, Mystic BBS comes pre-configured to use the CEXYZ v1.00
+     protocol driver.  This archive can be found on the Mystic BBS web page
+     as well as on various BBS systems under the filename of CEXYZ100.XXX
+     (where XXX is the archive type).  In most cases, you should only need
+     to copy the CEXYZ.EXE file into the protocol directory as defined in
+     the System Configuration -> System Paths in order to have a fully
+     working protocol setup.  If you wish to use a protocol driver other
+     than CEXYZ, you must make sure that it is capable of producing a
+     compatible DSZ-style log file.
+
+     Below is a screen capture of the Protocol Editor screen followed by
+     an explanation of what each option does:
+
+         Protocol Editor
+
+         ##  Key  Description
+         --  ---  --------------------
+         1    X   (CEXYZ) Xmodem
+         2    Y   (CEXYZ) Ymodem
+         3    Y   (CEXYZ) Ymodem Batch
+         4    G   (CEXYZ) Ymodem-G
+         5    G   (CEXYZ) Ymodem-G Batch
+         6    Z   (CEXYZ) Zmodem
+         7    Z   (CEXYZ) Zmodem Batch
+
+        (I)nsert, (D)elete, (E)dit, (Q)uit?
+
+        [I] Insert Protocol
+        -------------------
+        This option will add a new protocol definition to the protocol
+        editor.
+
+        [D] Delete Protocol
+        -------------------
+        This option will allow an existing protocol definition to be
+        deleted from the protocol editor.
+
+        [E] Edit Protocol
+        -----------------
+        This option allows an existing protocol definition to be edited.
+        The following is a screen capture of the Protocol Editor EDIT
+        screen followed by an explanation of each option:
+
+              Protocol 6 of 7
+
+              A. Key        : Z
+              B. Description: (CEXYZ) Zmodem
+              C. Batch      : No
+              D. UL Command : cexyz.exe /P%1 /B%2 /L%4 /Rz %3
+              E. DL Command : cexyz.exe /P%1 /B%2 /L%4 /Sz %3
+
+              Command (Q/Quit):
+
+              [A] Key
+              -------
+              This option specifies the hotkey which is used to select
+              this protocol from the protocol list.  It is important to
+              make sure that a protocol definition does not use the same
+              hotkey as another protocol definition, or problems may
+              occur.
+
+              [B] Description
+              ---------------
+              This option defines the name / description of the protocol as
+              it will appear when a user is prompted to select a protocol.
+
+              [C] Batch
+              ---------
+              This option defines if this protocol is a batch protocol.  A
+              batch protocol is a protocol which allows a group of files
+              to be sent at one time, consecutively.  If a user has flagged
+              a list of files to download at one time, Mystic BBS will
+              prompt them to select a BATCH protocol.  If a user has
+              selected only one file to download, Mystic BBS will prompt the
+              user to select a non-batch protocol.  Note that some protocols
+              allow both single and batch file transfers, so there might be
+              two definitions on the protocol editor for one protocol.  One
+              being the setup for single file transfers, and one being the
+              setup for batch file transfers.
+
+              [D] Upload Command Line
+              -----------------------
+              This option specifies the command line that is sent to the
+              protocol driver in order to upload (receive) files from
+              another connection.  There is a specific set of MCI codes
+              which can be used in the protocol editor only listed below.
+
+              [E] Download Command Line
+              -------------------------
+              This option specifies the command line that is sent to the
+              protocol driver in order to download (send files FROM the BBS)
+              to a connected user.  The MCI codes available only to the
+              protocol editor are listed below:
+
+              PROTOCOL SPECIFIC MCI CODES:
+
+                   %0 = Comport handle (Win32 and OS/2 only)
+                   %1 = Comport which the modem is using.
+                   %2 = The baud rate the user is currently connected at.
+                   %3 = Name of the file being transferred.
+                   %4 = Baud rate as setup in the Node settings (locked).
+
+     ---------------------------------------------------------------------
+     Message Base Editor (Editing Message Bases)
+     ---------------------------------------------------------------------
+
+     The message base system allows users to post messages which can be
+     publicly read by anyone, or sent privately to an individual user.
+     Mystic also supports to option of having "networked" message bases,
+     meaning, a message base which is shared with several other BBS
+     systems, allowing all users from every system to send messages to
+     each other!  The following is a screen capture of the Message Base
+     Editor along with a description of each available option:
+
+     Message Base 1 of 3
+
+     A. Name         : General Messages
+     B. QWK Name     : General Msgs
+     C. Filename     : GENERAL
+     D. Storage Path : D:\TP\MYSTIC\MSGS\
+     E. Post Type    : Public                    Y. Format Type  : JAM
+
+     F. List ACS     : s10                       O. Quote Color  : XX> Quote
+     G. Read ACS     : s10                       P. Text Color   : Text
+     H. Post ACS     : s10                       R. Tear Color   : --- Tear
+     I. Sysop ACS    : s255                      S. Origin Color : * Origin:
+     J. Password     :                           T. Header File  :
+     K. Base Type    : Local
+     L. Net Address  : 0:0/0
+     M. Origin line  : My BBS * (000)000-0000
+     N. Use Realnames: No
+
+     U. Default New Scan: Yes                    W. Max Messages : 0
+     V. Default QWK Scan: Yes                    X. Max Msg Age  : 0 days
+
+     ([) Prev, (]) Next, (Q)uit:
+
+          [A] Message Base Name
+          ---------------------
+          This option defines the message base name, as it will appear in the
+          list of available message bases.
+
+          [B] QWK Message Base Name
+          -------------------------
+          This option defines the QWK message base name.  This name will be
+          used as the message base name within a user's QWK offline mail
+          packet.
+
+          [C] Storage File Name
+          ---------------------
+          This option defines the file name which Mystic will use to store
+          the message base data in.  This should be a unique name, up to
+          8 characters in length.
+
+          [D] Storage Path
+          ----------------
+
+          This option is used to specify the path on your hard disk that
+          Mystic BBS will use to store data files for this message base.
+          Mystic will automatically assign the "default" message base path
+          to this option, and in most cases it does not need to be changed.
+
+          [E] Post Type
+          -------------
+          This option sets the "type" of message that is allowed to be posted
+          in this base.  Available options are:
+
+               1) Public  : All messages are posted as public and can be read
+                            by all users.
+               2) Private : All messages are posted as private and can ONLY be
+                            read by the user it is sent to.
+
+          [F] List ACS
+          ------------
+          This option defines the Access String (ACS) which the user must meet
+          in order for this base to appear in the message base listing.
+
+          [G] Read ACS
+          ------------
+          This option defines the ACS string which the user must meet in order
+          to read messages in this base.
+
+          [H] Post ACS
+          ------------
+          This option defines the ACS string which the user must meet in order
+          to post a message into this base.
+
+          [I] SysOp ACS
+          -------------
+          This option defines the ACS string which the user must meet in order
+          to access "SysOp" functions for this message base.  Functions such
+          as editing the message header and text, along with (X)porting the
+          message to a text file.
+
+          [J] Password
+          ------------
+          This option defines the password required to access this message
+          base.  If this option is left blank, no password will be required.
+
+          [K] Base Type
+          -------------
+          This option defines the "type" of message base that is being setup.
+          Available options are:
+
+               Local   : Sets the message base as a local base.  This means
+                         that this base is NOT part of any message network
+                         where messages need to be exported, processed, and
+                         sent to another system.
+
+               EchoMail: Sets the message base as a EchoMail message base.
+                         Most message base networks available to BBS SysOps
+                         are "FidoNet" style echomail networks.  This
+                         option causes Mystic to exit with an errorlevel of
+                         5 when new Echomail mail has been entered.  This
+                         allows for your setup to execute the appropriate
+                         Echomail mail processors.
+
+               UseNet  : Sets the message base as a UseNet message base. This
+                         option is for easier integration with the Internet
+                         UseNet newsgroups.  This option works much like a
+                         Echomail base, except it causes Mystic to exit with
+                         errorlevel 6 when new messages have been entered and
+                         it automatically sets all messages "To: ALL".
+
+               NetMail : Sets the message base as an EchoMail / NetMail base.
+                         When a base is set as NetMail, Mystic will also ask
+                         for an echomail destination address along with the
+                         "To" field.
+
+          NOTE: When both Echomail and UseNet mail have been entered,
+                Mystic will exit with an errorlevel of 7.  When this occurs,
+                both Echomail and UseNet mail processors should be executed.
+
+          [L] Network Address
+          -------------------
+          This option defines the FidoNet network address, which is assigned
+          to each BBS in a message base network.
+
+          [M] Origin Line
+          ---------------
+          This option defines the Origin Line which is appended to each
+          message posted in aa Echomail message base.  The origin line usually
+          contains the name or your BBS, the phone number, location, telnet
+          address, etc.
+
+          [N] Use Real Names
+          ------------------
+          This option defines whether Mystic will use the user's REAL name
+          in the "From" field.  Some message base networks require that all
+          message posted use the user's real name.
+
+          [O] Quote Color
+          ---------------
+          This option specifies the color Mystic will use for "quoted" text
+          when reading messages.  Available colors options are:
+
+               Foreground colors:
+               0 - Black         6 - Brown           12 - Light Red
+               1 - Blue          7 - Light Grey      13 - Light Magenta
+               2 - Green         8 - Dark Grey       14 - Yellow
+               3 - Cyan          9 - Light Blue      15 - White
+               4 - Red          10 - Light Green
+               5 - Magenta      11 - Light Cyan
+
+               Background colors:
+               0 - Black         4 - Red
+               1 - Blue          5 - Magenta
+               2 - Green         6 - Brown
+               3 - Cyan          7 - Gray
+
+          [P] Text Color
+          --------------
+          This option defines the color Mystic will use to display "regular"
+          text while a user is reading a message.
+
+          [R] Tear Color
+          --------------
+          This option defines the color Mystic will use to display the tear
+          line of the message.  The tear line is a line of text usually
+          appended at the end of a networked message base.  For example, at
+          the end of each exported message, Mystic will append the following
+          tear and origin line:
+
+               --- Mystic BBS v1.03/DOS
+                * Origin: <your configured origin here> (0:0/0)
+
+          [S] Origin Color
+          ----------------
+          This option defines the color Mystic will use to display the origin
+          line of the message.
+
+          [T] Message Header File
+          -----------------------
+          This option defines the optional external message header which can
+          be used.  The filename specified here should be found in the TEXT
+          directory with all of the other display files.  If this file does
+          not exist, Mystic will generate it's own message header.  The
+          following PromptInfo MCI codes are available in the message header
+          file:
+
+               |&1  From                |&6  Total messages in base
+               |&2  To                  |&7  Reply to message number
+               |&3  Subject             |&8  See also message number
+               |&4  Message Date        |&9  Message status
+               |&5  Message number      |&0  Message Time
+
+          [U] Default New Scan
+          --------------------
+          This option defines if the message base will be toggled ON in
+          all users new message scan settings by default.
+
+          [V] Default QWK Scan
+          --------------------
+          This option defines if the message base will be toggled ON in
+          all users QWK message scan settings by default.
+
+          [W] Max Messages
+          ----------------
+          This option specifies the maximum number of messages which this
+          base can contain before they will be purged.  Mystic does not
+          internally do anything with these values.  They have been added
+          to support the Squish message base standard and their utilities.
+
+          [X] Max Message Age
+          -------------------
+          This option specifies the maximum days a message can be posted
+          before they will be purged.  Mystic does not internally do anything
+          with these values.  They have been added to support the Squish
+          message base standard and their utilities.
+
+          [Y] Format Type
+          ---------------
+          This option specifies the message base "format" to use.  This
+          can be set to either "JAM" or "Squish", the two most popular
+          message base formats.
+
+          *NOTE: If you have an active message base in one format, and wish
+                 to change to another format, you will need to do one of two
+                 things:
+
+                    1) Delete the message base data files, and lose the
+                       current messages in the base, or...
+                    2) Run a utility to convert from one format to the other
+                       THEN switch formats in the message base editor.
+
+     ---------------------------------------------------------------------
+     File Base Editor (Editing File Bases)
+     ---------------------------------------------------------------------
+
+     The file base system allows users to transfer files to and from the
+     BBS system so they can be shared with other users of the BBS.  These
+     files can be categorized into different file bases, which are setup
+     in the File Base Editor.  The following is a screen capture of the
+     file base editor screen along with a description of each available
+     option:
+
+         File Board Editor
+
+         ###  Name
+         ---  --------------------------
+         1    New File Base
+
+         (I)nsert, (D)elete, (E)dit, (M)ove, (Q)uit?
+
+         [I] Insert File Base
+         --------------------
+         This option allows a new file base definition to be added into
+         the database.
+
+         [D] Delete File Base
+         --------------------
+         This option allows an already defined file base to be removed
+         from the file base database.
+
+         [M] Move File Base
+         ------------------
+         This option allows already defined file bases to be moved around
+         within the database.
+
+         [E] Edit File Base
+         ------------------
+         This option allows the settings for an already defined file base
+         to be edited.  The following is a screen capture of the file base
+         modify screen along with an explanation of what each option does:
+
+              File Base 1 of 1
+
+              A. Name           : New File Base
+              B. Filename       : NEW
+              C. Display File   :
+              D. ACS            : s255
+              E. Sysop ACS      : s255
+              F. Upload ACS     : s255
+              G. Download ACS   : s255
+              H. Storage Path   :
+              I. Password       :
+              J. Show Uploader  : Yes
+              K. Default NewScan: Yes
+              L. CD-Rom Area    : No
+
+              Command (Q/Quit):
+
+              [A] Name
+              --------
+              This option defines the file base name / description as it
+              will appear to the user when they select a file base.
+
+              [B] File Name
+              -------------
+              This option defines the data file name that is used to store
+              information for this file base.  This file should be a unique
+              file name, different from all other data files.
+
+              [C] Display File
+              ----------------
+              This option defines the display file that Mystic can display
+              before the files in this base are listed.  This field is
+              optional and should be left blank if you do not wish to have
+              Mystic send a display file before each file list.
+
+              [D] ACS
+              --------
+              This option defines the ACS string which the user must pass
+              in order to gain access to this file base and list files.
+
+              [E] SysOp ACS
+              -------------
+              This option defines the ACS string which the user must pass
+              in order to access SysOp functions such as the File Directory
+              Editor.
+
+              [F] Upload ACS
+              --------------
+              This option defines the ACS string which the user must pass
+              in order to upload (send) files from their computer to this
+              file base.
+
+              [G] Download ACS
+              ----------------
+              This option defines the ACS string which the user must pass
+              in order to download (receive) files from this file base
+              onto their computer.
+
+              [H] Storage Path
+              ----------------
+              This option defines the directory where Mystic will store the
+              files uploaded into this file base.
+
+              [I] Password
+              ------------
+              This option defines the password which is required to access
+              this file base.  If you do not wish to require a password to
+              access this base, leave this field blank.
+
+              [J] Show Uploader
+              -----------------
+              This option defines if Mystic BBS will show the uploader's
+              name during the file list.  If this option is set to yes,
+              Mystic will show who uploaded each file into the file base
+              at the end of the file description.
+
+              [K] Default New Scan Setting
+              ----------------------------
+              This option defines the default new scan setting for this
+              file base.  When a new user logs into the system, their
+              file base new scan setting for this base will be set to the
+              default.
+
+              [L] CD-ROM Area
+              ---------------
+              This option specifies whether the files in this area are
+              being stored on a CD-ROM drive.  If this option is set to
+              "Yes", Mystic BBS will refuse uploads into the area, as
+              well as attempt to copy files from the CD-ROM drive to the
+              hard drive before sending them to the user.  This keeps
+              the CD drive access to a minimal, which is important when
+              multiple users are downloading files from the same CD-ROM
+              drive.
+
+              See also: System Configuration / File Settings.
+
+     ---------------------------------------------------------------------
+     Menu Editor (Editing System Menus)
+     ---------------------------------------------------------------------
+
+     The BBS menus are the core of the BBS system.  It is where all BBS
+     commands and functions available to the user are defined and setup.
+     Mystic BBS supports an unlimited number of defined menus which can
+     be setup in any way, allowing a totally customizable and unique
+     interface to the user.
+
+     When first entering the menu editor, you will be prompted to select
+     which language definition you'd like to edit.  It is possible to have
+     different sets of menus for each language!
+
+     After you've selected the language you'd like to edit, you will be
+     shown the main menu selection screen:
+
+     Menu Editor (Language: Default)
+
+     Directory of C:\MYSTIC\MENUS\*.MNU
+
+     FILE.MNU          MAIN.MNU          PERSONAL.MNU      MESSAGE.MNU
+     GOODBYE.MNU       NEWINFO.MNU       SYSOP.MNU         BATCH.MNU
+     TIMEBANK.MNU      TEST.MNU          BBSLIST.MNU       QWK.MNU
+     PRELOGIN.MNU      MATRIX.MNU        VOTING.MNU
+
+     (M)odify, (I)nsert, (D)elete, (Q)uit?
+
+     The following commands are available from this screen:
+
+     [M]odify
+     --------
+     This option will allow an existing menu to be edited.
+
+     [I]nsert
+     --------
+     This option will allow a new menu to be created.
+
+     [D]elete
+     --------
+     This option will allow an existing menu to be deleted.
+
+     ---------------------------------------------------------------------
+     Menu Editor (Modifying Menus)
+     ---------------------------------------------------------------------
+
+     (THIS PART OF THE DOCUMENTATION HAS NOT BEEN FINISHED)
+
+     ---------------------------------------------------------------------
+     Menu Editor (Menu Command Reference)
+     ---------------------------------------------------------------------
+                         -----------------------
+                         Auto Signature Commands
+                         -----------------------
+
+     Command       : AD
+     Description   : Delete auto signature
+     Optional data : None.
+
+     Command       : AE
+     Description   : Edit auto signature
+     Optional Data : None.
+
+     Command       : AT
+     Description   : Toggle auto signature ON or OFF.
+     Optional Data : None.
+
+     Command       : AV
+     Description   : View current auto signature
+     Optional data : None.
+
+
+                            -----------------
+                            BBS List Commands
+                            -----------------
+
+     Command       : BA
+     Description   : Add to the BBS list.
+     Optional Data : None.
+
+     Command       : BL
+     Description   : Display the extended BBS list.  The optional data field
+                     requires a LIST ID, which is up to an 8 character long
+                     unique name for the BBS list.  This allows multiple BBS
+                     lists to be maintained.  If ;SEARCH is appended after
+                     the LIST ID, Mystic will prompt the user for a search
+                     string to allow them to view only BBSes which contain
+                     the search string.
+     Optional Data : <LIST ID>;SEARCH
+
+     Command       : BS
+     Description   : Display the short BBS list.  The optional data field
+                     requires a <LIST ID>, which is up to an 8 character long
+                     unique name for the BBS list.  This allows multiple BBS
+                     lists to be maintained.  If ;SEARCH is appended after
+                     the LIST ID, Mystic will prompt the user for a search
+                     string to allow them to view only BBSes which contain
+                     the search string.
+     Optional Data : <LIST ID>;SEARCH
+
+                           --------------------
+                           General BBS Commands
+                           --------------------
+
+     Command       : GD
+     Description   : Display a text file.  The optional data field is
+                     required and holds the name of the file to display.
+                     If there is no file extension then the extension of
+                     .ANS or .ASC will be appended according to the user's
+                     terminal settings.
+     Optional Data : <FileName>
+
+     Command       : GE
+     Description   : Edit User Settings.  This command can be used to allow
+                     users to edit their user profile.  The optional data
+                     is required for this menu command, and will set which
+                     field in the user's profile to edit.  The optional
+                     data must be set to one of the following:
+
+                      1 - Street Address         2 - City/State
+                      3 - Zip Code               4 - Home Phone Number
+                      5 - Data Phone Number      6 - Birthdate
+                      7 - Gender                 8 - Date Format
+                      9 - Terminal Emulation    10 - Screen Length
+                     11 - Password             *12 - Real Name
+                    *13 - Alias                 14 - Language
+                     15 - Editor Type           16 - Toggle Invisibility
+                     17 - File List Type        18 - Toggle Availability
+                     19 - Toggle HotKeys        20 - Message Reader Type
+                     21 - Toggle LB Msg Idx     22 - Email Address
+                     23 - User Note             24 - Optional Field 1
+                     25 - Optional Field 2      26 - Optional Field 3
+                     27 - Toggle LB Quote       28 - Toggle LB Email Idx
+                     29 - Toggle Node Chat Type 30 - Toggle QWK FileList
+                     31 - Select Archive Type
+
+                     * NOTE: These commands should not be made available
+                             to the user.  They are added as an option
+                             for use with the NEWINFO.MNU.
+     Optional Data : <Number of Field to Edit>
+
+     Command       : GH
+     Description   : Logoff user.  This command will show the display file
+                     GOODBYE.xxx and then log the user offline.  If the user
+                     has files in their download queue, they will be prompted
+                     to download them before logoff.
+     Optional Data : None.
+
+     Command       : GL
+     Description   : This command lists the last 10 users who called into
+                     the BBS system.  Local logins are not included in this
+                     list.
+     Optional Data : None.
+
+     Command       : GN
+     Description   : One Liners.  This option will allow the user to view
+                     and enter a one-liner if they choose.  The optional
+                     data field allows the maximum number of lines and
+                     the maximum line length (in characters) to be
+                     configured.  If no optional data is supplied, the
+                     default used is 10 lines and 75 characters.
+
+     Optional Data : <max lines>;<max line length>;<max input field length>
+
+     Command       : GO
+     Description   : Go to a new menu.  The optional data field for this
+                     menu command is required.  It holds the name of the
+                     new menu that is to be loaded.
+     Optional Data : <Menu Name>
+
+     Command       : GP
+     Description   : Page the System Operator for chat.  This command will
+                     allow the user to page the System Operator for chat.
+                     If the optional data is set to /F, Mystic BBS will
+                     ignore the defined chat hours and page the SysOp.
+     Optional Data : /F
+
+     Command       : GR
+     Description   : Return from a gosub.  This option will load the
+                     last menu which was saved onto the menu stack by the
+                     GS (Gosub Menu) command.
+     Optional Data : None.
+
+     Command       : GS
+     Description   : Gosub to a new menu.  This option will save the
+                     current menu name on the menu stack and go to a new
+                     menu.  The optional data field is required and holds
+                     the name of the new menu that is to be loaded.
+     Optional Data : <Menu Name>
+
+     Command       : GT
+     Description   : Display line of text.  This command is used to display
+                     a line of text.  The optional data field holds the
+                     text that is to be displayed.
+     Optional Data : <Text to Display>
+
+     Command       : GU
+     Description   : List all system users.  This command will display a
+                     list of all user accounts on the system.  If the
+                     optional data is set to SEARCH, the user will be
+                     able to search the list for a specific user.
+     Optional Data : SEARCH
+
+     Command       : GX
+     Description   : Execute MPE module.  This command will execute a
+                     Mystic BBS programming executable.  Mystic BBS has
+                     a built in programming language which allows the Sysop
+                     to write custom programs for their BBS.  For more
+                     information on this, see the MPL.DOC file included
+                     with the distribution archive in the Script/MPE
+                     directory.
+     Optional Data : None.
+
+
+                             --------------------------
+                             Voting Booth Menu Commands
+                             --------------------------
+
+     Command       : VA
+     Description   : Add Question to Voting Booth.  This command allows
+                     users to add questions into the voting booth.
+     Optional Data : None.
+
+     Command       : VN
+     Description   : Votes on all unvoted on (new) voting questions.
+     Optional Data : None.
+
+     Command       : VR
+     Description   : See results of a voting question.  This command allows
+                     users to display the results of a voting question.
+                     If the question number is supplied in the option data
+                     field, the results for that question will be displayed.
+                     If the optional data field is left blank, the user will
+                     be asked to select which question they'd like to see
+                     the results of.
+     Optional Data : <Question Number>
+
+     Command       : VV
+     Description   : Voting Booth.  This command will allow users to
+                     access and vote on the current voting questions in the
+                     Voting Booth database.  The optional data field can be
+                     used to force a user to vote on a certain question by
+                     supplying the number of the question (as listed in the
+                     voting editor).
+     Optional Data : <Question Number>
+
+                              -----------------------
+                              Time Bank Menu Commands
+                              -----------------------
+
+     Command       : TA
+     Description   : Deposit Kilobytes into Kilobyte bank.
+     Optional Data : None.
+
+     Command       : TD
+     Description   : Deposit time into the time bank.
+     Optional Data : None.
+
+     Command       : TS
+     Description   : Withdrawal Kilobytes from Kilobyte bank.
+     Optional Data : None.
+
+     Command       : TW
+     Description   : Withdrawal time from the time bank.
+     Optional Data : None.
+
+                              -----------------------
+                              File Base Menu Commands
+                              -----------------------
+
+     Command       : FA
+     Description   : Allows the user to change their selected file base.
+                     If the file base number (as listed in the file base
+                     editor) is supplied in the optional data field, Mystic
+                     will automatically change to that file base.  If the
+                     data field is set to "+", Mystic will change to the
+                     next file base.  If the field is set to "-", Mystic
+                     will change to the previous file base.
+     Optional Data : <File Base Number> or "+", "-", "nolist"
+
+     Command       : FD
+     Description   : Download a file.  This command will prompt the user
+                     for a filename and allow them to download a file from
+                     the file database.
+     Optional Data : None.
+
+     Command       : FF
+     Description   : Create a file list.  This command is used to allow
+                     the user to create and download a text file containing
+                     a list of files on the BBS system.
+     Optional Data : </NEW> </ALLGROUPS>
+
+                     /NEW       - Creates a list of only NEW files rather
+                                  then a list of all files.
+                     /ALLGROUPS - Creates a list from all file areas in
+                                  all groups.  If this option is not
+                                  specified, Mystic will create a list of
+                                  files in the user's currently selected
+                                  file group.
+
+     Command       : FG
+     Description   : Select file group.  This command will allow the user
+                     to select which file group they are in.  If the
+                     optional data field holds a file group number as
+                     listed in the File Group Editor, the user will be
+                     automatically put into that File Group if they meet
+                     the access requirements.  If "+" is supplied on the
+                     field, Mystic will move the user into the next available
+                     file group.  If "-" is supplied, Mystic will move the
+                     user into the previous available file group.
+     Optional Data : <File Group Number>, "+", "-"
+
+     Command       : FL
+     Description   : List files.  This command will list files in the
+                     currently selected file base.  If the optional data
+                     field is left blank, all files will be listed.  If the
+                     optional data file is set to "SEARCH", the user will
+                     be prompted for a file mask.  If a <File Mask> is
+                     supplied, files which match the supplied mask will be
+                     listed.
+     Optional Data : "SEARCH" or <File Mask>
+
+     Command       : FN
+     Description   : New file scan.  This command will allow the user to
+                     scan for all files that have been added to the file
+                     database since the last time they preformed a new file
+                     scan.  If the optional data field is set to "C", only
+                     files in the current file base will be scanned.  If
+                     set to "G", all bases in the current group will be
+                     scanned.  If set to "A", all files in all groups will
+                     be scanned.  If left blank, the user will be asked if
+                     they'd like to scan all bases, or just the current
+                     base.
+     Optional Data : "A", "C", "G" or <BLANK>.
+
+     Command       : FP
+     Description   : Set file new scan pointer.  This command will allow the
+                     user to set the date which Mystic will use to search
+                     for new files.
+
+     Command       : FS
+     Description   : Search for files.  This command will allow the user to
+                     search the file database for a matching search string.
+     Optional Data : None.
+
+     Command       : FU
+     Description   : Upload a file.  This command will allow a user to
+                     transfer a file from their computer into the BBS
+                     system's file base.
+     Optional Data : None.
+
+     Command       : FV
+     Description   : View an archive.  This command will allow a user to
+                     view the contents of any archive in the file base.
+     Optional Data : None.
+
+     Command       : FZ
+     Description   : Toggle New Scan File Bases.  This command will allow a
+                     user to set which file bases will be scanned when a
+                     scan for new files is ran.
+     Optional Data : None.
+
+     Command       : F1
+     Description   : Mass file upload.  This command will search the current
+                     file base's directory for files that haven't been added
+                     into the file database.  When a new file is found, the
+                     BBS ask how to handle the file:
+
+                     Upload BLAH.ZIP? (Y)es, (N)o, (A)uto, (S)kip, (Q)uit:
+
+                     (Y)es    - Adds the file into the file base.
+                     (N)o     - Skips the file.
+                     (A)uto   - Upload all files in area without prompting.
+                     (G)lobal - Upload all files in all areas without
+                                prompting.
+                     (S)kip   - Skip this base and move on to the next one.
+                     (Q)uit   - Abort mass upload.
+
+                     Mystic BBS will automatically search for FILE_ID.DIZ
+                     description files and import them if found.  When no
+                     description file is found, Mystic will prompt for a
+                     file description unless in Auto mode. *NOTE* This
+                     command should only be made accessible by a SysOp!
+
+     Optional Data : None.
+
+     Command       : F2
+     Description   : File directory editor.  This command will bring up the
+                     file directory editor for the current file base.  Here
+                     each file listed in the directory can be edited or
+                     deleted. *NOTE* THIS COMMAND SHOULD BE MADE AVAILABLE
+                     ONLY TO A SYSOP.
+     Optional Data : None.
+
+     Command       : F3
+     Description   : File download.  This command will allow the SysOp to
+                     force a user into downloading a file.  The optional
+                     data field is required and holds the full path and
+                     file name of the file to send.  Note that the file
+                     specified in the optional data field does NOT have to
+                     be a file which exists in the file database.  It can
+                     be any file, just as long as it exists somewhere on the
+                     drive.
+     Optional Data : <Full path and file name of file to Send>
+
+
+                       ------------------------------
+                       File Batch Queue Menu Commands
+                       ------------------------------
+
+     Command       : QA
+     Description   : This command will allow a user to add a file to their
+                     batch queue.
+     Optional Data : None.
+
+     Command       : QC
+     Description   : Clear batch queue.  This command will remove all the
+                     files in the user's batch queue.
+     Optional Data : None.
+
+     Command       : QD
+     Description   : Delete batch queue.  This command will allow a user
+                     to remove a file from their batch queue.
+     Optional Data : None.
+
+     Command       : QL
+     Description   : List batch queue.  This command will allow a user to
+                     list the files currently in their batch queue.
+     Optional Data : None.
+
+                         --------------------------
+                         Message Base Menu Commands
+                         --------------------------
+
+     Command       : MA
+     Description   : Select the current message base from a list.  If the
+                     message base number (as listed in the message base
+                     editor) is supplied in the optional data field, Mystic
+                     will automatically change to that message base.  If
+                     the data field is set to "+", Mystic will change to the
+                     next message base.  If the data field is "-", Mystic
+                     will change to the previous message base.
+     Optional Data : <Message Base Number>, "+", "-", "nolist"
+
+     Command       : MC
+     Description   : Checks for any new electronic mail.
+     Optional Data : None.
+
+     Command       : MG
+     Description   : Select a message group. This command will allow the user
+                     to select what group they are in.  The optional data
+                     field can be used to force the user to join a certain
+                     group if the number of the group (as listed in the
+                     Message Group Editor) is supplied.  If "+" is supplied,
+                     Mystic will change to the next message group.  If "-"
+                     is supplied, Mystic will change to the previous message
+                     group.
+     Optional Data : <Group Number>, "+", "-"
+
+     Command       : MM
+     Description   : Mass e-mail.  Allows SysOps to send e-mail to multiple
+                     users at once, by three different options:
+
+                        ACS Level - This will allow the e-mail to be sent to
+                                    all users who pass the given ACS level.
+                        User List - This will allow a list of users to be
+                                    composed, which a copy of the e-mail will
+                                    be sent to.
+                        All Users - This will send the e-mail to all users
+                                    on the BBS system!
+     Optional Data : None.
+
+     Command       : MN
+     Description   : Scans all message bases for new messages.  The optional
+                     data field can be left blank, or can contain any of the
+                     following options:
+
+                          /G : Scans all message bases in all message groups.
+                          /P : Scans for only personal messages in each base.
+                               In other words, only messages directed TO the
+                               user who is scanning will be read.  Mystic will
+                               also scan the electronic mail base when this
+                               command is specified.
+                          /M : Scans only message bases marked as mandatory
+                               scanning.
+     Optional Data : </P or /M> </G>
+
+     Command       : MP
+     Description   : Posts a message to the currently selected message base.
+     Optional Data : </TO:> </SUBJ:> </ADDR:> </F>
+
+                     /TO:<user_name> - Sets the TO field of the message.
+                     /SUBJ:<subject> - Sets the SUBJECT field of the message.
+                     /ADDR:<netaddr> - Sets the netmail address field.
+                     /F              - Forces the user to post the message.
+
+                     The text supplied with the /TO and /SUBJ options should
+                     have any spaces replaced by the "_" character.  An
+                     example menu command for this might be:
+
+                     Command : MP
+                     Data    : /TO:some_user /SUBJ:hello_there! /F
+
+                     The above would post a message to "some user" with
+                     the subject of "hello there!".  The user would not
+                     be able to abort posting this message because the
+                     /F option was supplied.
+
+     Command       : MR
+     Description   : Reads messages in the currently selected message base.
+                     The optional data field specifies the read <MODE>,
+                     which can be any one of the following:
+
+                          <BLANK> Prompts user to select read mode.
+                          "F"     Reads messages forward.
+                          "N"     Reads new messages.
+                          "Y"     Reads messages sent TO the user.
+                          "S"     Text search for messages
+
+     Optional Data : <MODE>
+
+     Command       : MS
+     Description   : Allows searching of one or all message bases for a
+                     text match.  The optional data field has three options
+                     available:
+
+                        C : Prompts the user for search text and searches
+                            the current message base for matches.
+                        G : Prompts the user for search text and searches
+                            all message bases in the current group for
+                            matches.
+                        A : Prompts the user for search text and searches
+                            all message bases in all groups for matches.
+
+                     This command defaults the the "G" option if no optional
+                     data is provided.
+     Optional Data : "C" or "G" or "A"
+
+     Command       : MW
+     Description   : Send electronic mail to another user.
+     Optional Data : </TO:> </SUBJ:> </ADDR:> </F>
+
+                     /TO:<user_name> - Sets the TO field of the message.
+                     /SUBJ:<subject> - Sets the SUBJECT field of the message.
+                     /ADDR:<netaddr> - Sets the netmail address field.
+                     /F              - Forces the user to post the message.
+
+                     The text supplied with the /TO and /SUBJ options should
+                     have any spaces replaced by the "_" character.  An
+                     example menu command for this might be:
+
+                     Command : MP
+                     Data    : /TO:some_user /SUBJ:hello_there! /F
+
+                     The above would post a message to "some user" with
+                     the subject of "hello there!".  The user would not
+                     be able to abort posting this message because the
+                     /F option was supplied.
+
+     Command       : MZ
+     Description   : Allows the user to select which message bases will be
+                     scanned in their new message scan (menu command MN).
+     Optional Data : None.
+
+                            ------------------------
+                            Multi-Node Menu Commands
+                            ------------------------
+
+     Command       : NA
+     Description   : Set Node Action.  This command will set the node action
+                     which appears when a Who's Online (NW) list is done.
+                     The Optional Data field is required and holds the text
+                     that will appear in the "Action" field of a Who's
+                     Online list.
+     Optional Data : <Action>
+
+     Command       : NC
+     Description   : Multi-node chat.  This command will enter the
+                     multi-node chat conference where all users currently
+                     logged in can talk with each other in real time.
+     Optional Data : None.
+
+     Command       : NS
+     Description   : Send message to a node.  This command will allow a user
+                     to send a message to another logged in user.  The
+                     optional data field can be used to force a message
+                     sent to a certain node.  The node number must be
+                     supplied first followed by a semi-colon and then the
+                     message text.  For example, 2;Hello would send a
+                     message to node 2 saying Hello.  If a zero is used as
+                     the node number, the message text will be sent to all
+                     users currently logged in to the BBS system using the
+                     System Message format.  This way it is possible to
+                     have Mystic inform all users online when a user
+                     logs into another node, or when a user basically does
+                     anything you wish everyone to know about.
+
+                     Two MCI codes can be used to send the user name and
+                     node number of where the message originated from:
+
+                     &1 = Name of user where message was sent from
+                     &2 = Node number message was sent from
+
+     Optional Data : <Node>;<Text>
+
+     Command       : NW
+     Description   : Who's Online.  This command will list all the users who
+                     are currently logged into the system.  It will also
+                     give a general idea of what they are doing at the time
+                     of the list, and where they are calling from.
+     Optional Data : None.
+
+                       --------------------------------
+                       Offline Mail (QWK) Menu Commands
+                       --------------------------------
+
+     Command       : OC
+     Description   : Configure user's QWK options.  This option will allow
+                     the user to select which archive format they'd like to
+                     use for their QWK packets, as well as select if they'd
+                     like to have a new files list included in their QWK
+                     packet.
+     Optional Data : None.
+
+     Command       : OD
+     Description   : Download a .QWK packet.  This command will compile,
+                     archive and allow a user to download a .QWK packet.
+     Optional Data : None.
+
+     Command       : OS
+     Description   : Set QWK scanned bases.  This command will allow the
+                     user to select which message bases are included in
+                     their .QWK packet.
+     Optional Data : None.
+
+     Command       : OU
+     Description   : Upload a .REP packet.  This command will allow the user
+                     to upload a .REP packet produced by their offline mail
+                     reader.  After the packet is uploaded, Mystic will then
+                     add the messages into their appropriate message bases.
+     Optional Data : None.
+
+                             ------------------
+                             Door Menu Commands
+                             ------------------
+
+     Command       : D-
+     Description   : Shells to the OS and executes <command line>.
+     Optional Data : <Command Line>
+
+     Command       : DC
+     Description   : Shells to the OS and executes <command line>.
+                     The CHAIN.TXT drop file is created in the node's
+                     temporary directory.
+
+     Command       : DD
+     Description   : Shells to the OS and executes <command line>.
+                     The DORINFO1.DEF drop file is created in the node's
+                     temporary directory.
+     Optional Data : <Command Line>
+
+     Command       : DG
+     Description   : Shells to the OS and executes <command line>. The
+                     DOOR.SYS drop file is created in the node's temporary
+                     directory.
+     Optional Data : <Command Line>
+
+                          --------------------------
+                          Matrix Login Menu Commands
+                          --------------------------
+
+     Command       : XA
+     Description   : Apply for an account.  This menu command allows the
+                     user to log in as a new user, but then is taken back
+                     to the Matrix menu where they will not be able to
+                     enter the BBS without the matrix password.
+
+     Command       : XC
+     Description   : Check for matrix password.  This menu command will
+                     allow the user to check for the matrix password.  If
+                     the user meets the "See Matrix Password" ACS setting
+                     in the New User Settings, they will be given the
+                     matrix password which will then allow them to log into
+                     the BBS.
+
+     Command       : XL
+     Description   : Log into the BBS system.  This command allows a user
+                     to log into the BBS system from the Matrix menu.  When
+                     this option is selected, the user will be prompted for
+                     the Matrix password and will not be able to log in
+                     without it.
+
+     Command       : XP
+     Description   : Page SysOp for chat from Matrix.  This command works
+                     just like the GP (Page SysOp) command, but is to be
+                     used from the Matrix login menu.
+     Optional Data : <same as GP command>
+
+                         -----------------------------
+                         System Operator Menu Commands
+                         -----------------------------
+
+     *NOTE* These commands are for the System Operator (Sysop) only and
+            should NOT be made available to anyone except the Sysop.
+
+     Command       : *#
+     Description   : Menu Editor.
+     Optional Data : None.
+
+     Command       : *A
+     Description   : System Archive Configuration.  This enters the archive
+                     configuration where all compression utilities are
+                     setup and maintained.
+     Optional Data : None.
+
+     Command       : *F
+     Description   : File Base Editor.
+     Optional Data : None.
+
+     Command       : *G
+     Description   : Group Editor.
+     Optional Data : None
+
+     Command       : *L
+     Description   : Security Level Editor.
+     Optional Data : None.
+
+     Command       : *M
+     Description   : Message Base Editor.
+     Optional Data : None.
+
+     Command       : *P
+     Description   : Protocol Editor.
+     Optional Data : None.
+
+     Command       : *S
+     Description   : System Configuration.
+     Optional Data : None.
+
+     Command       : *U
+     Description   : User Editor.
+     Optional Data : None.
+
+     Command       : *V
+     Description   : Voting Booth Editor.
+     Optional Data : None.
+
+                          ---------------------------
+                          Miscellaneous Menu Commands
+                          ---------------------------
+
+     Command       : -D
+     Description   : Set user flags.  This will allow user flags to be set
+                     for each user's SECOND set of flags - using the
+                     following format:
+
+                          <Command><Flag>
+
+                          <Command> This is the action of the flag.  It can
+                          be any one of the following:
+
+                               + = Set <FLAG> to ON.
+                               - = Set <FLAG> to OFF.
+                               ! = Toggle <FLAG>.
+
+                          <FLAG> is the flag to toggle.  Valid flags are
+                          letters A through Z - all capital letters.
+
+                     Example data fields:
+
+                          !A (toggles flag A)
+                          -B (toggles flag B OFF)
+                          +A (toggles flag A ON
+
+                          !A-E+Y (toggles A, turns E OFF, turns Y ON)
+     Optional Data : <Command><Flag>
+
+     Command       : -F
+     Description   : Set user flags.  This will allow user flags to be set
+                     for each user's FIRST set of flags - using the
+                     following format:
+
+                          <Command><Flag>
+
+                          <Command> This is the action of the flag.  It can
+                          be any one of the following:
+
+                               + = Set <FLAG> to ON.
+                               - = Set <FLAG> to OFF.
+                               ! = Toggle <FLAG>.
+
+                          <FLAG> is the flag to toggle.  Valid flags are
+                          letters A through Z - all capital letters.
+
+                     Example data fields:
+
+                          !A (toggles flag A)
+                          -B (toggles flag B OFF)
+                          +A (toggles flag A ON
+
+                          !A-E+Y (toggles A, turns E OFF, turns Y ON)
+     Optional Data : <Command><Flag>
+
+     Command       : -N
+     Description   : Prompts user with a Yes/No question and if the user
+                     answers "Yes", the OK ACS command will be set to TRUE.
+                     The optional data line is the text that will be
+                     displayed to the user as the Yes/No question.
+     Optional Data : <TEXT>
+
+     Command       : -P
+     Description   : Prompts user with <TEXT> to input a <PASSWORD>.  If
+                     the user correctly enters the password, the OK ACS
+                     command will be set to TRUE.  The optional
+                     data field for this command is required.  The <TEXT>
+                     field is the text which prompts the user for the
+                     password.  The <PASSWORD> field is the password that
+                     the user must enter.
+
+                     An example data field for a -P command might be:
+                     |CREnter Password: ;PASSWORD
+
+                     The above line would prompt the user with "Enter
+                     Password" and check to see if they enter "PASSWORD",
+                     storing the result in the OK ACS command.
+     Optional Data : <TEXT>;<PASSWORD>
+
+     Command       : -S
+     Description   : Add line of text into SysOp log file.  This command
+                     will add a line of text into the SysOp log file.  The
+                     optional data field holds the text that will be
+                     appended.
+     Optional Data : <Text to Output>
+
+     Command       : -Y
+     Description   : Prompts user with a Yes/No question and if the user
+                     answers "Yes", the OK ACS command will be set to TRUE.
+                     The optional data field is the text that will be
+                     displayed to the user as the Yes/No question.
+     Optional Data : <TEXT>
+
+     ---------------------------------------------------------------------
+     System Display Files
+     ---------------------------------------------------------------------
+
+     Display files are displayed at certain times while a user is online.
+     These files exist in the TEXT directory and have an extension of
+     either .ANS or .ASC.  If you wish to have your BBS use .ANS files
+     (files which make use of ANSI color and graphics), then it is
+     suggested that you use an ANSI paint program such as TheDraw to create
+     such files.
+
+     .ANS files: These are files which contain ANSI color and graphic codes.
+                 They are displayed if the user supports the ANSI graphics
+                 standard.
+
+     .ASC files: These are files which contain only straight ASCII
+                 characters.  They are displayed if the user does not
+                 support ANSI graphics, OR if the user does support ANSI
+                 graphics but only a display file with the extension .ASC
+                 exists in the text directory.
+
+     Below is a list of all system display files and when they are
+     displayed (where .XXX is either .ANS or .ASC):
+
+          ANSICHAT .XXX - This is the template file for the split screen
+                          chat mode.  For more information on templates,
+                          see the section on the Template System.
+          ANSIEDIT .XXX - This is the template file for the full screen
+                          editor.  For more information on this file,
+                          see the section on the Template System.
+          ANSIFINF .XXX - This is the template file used when displaying
+                          extended file information during the lightbar
+                          file listings.
+          ANSIFLST .XXX - This is the template file used to setup the
+                          ANSI lightbar file listings.  For more information
+                          on this, see the Editing Template section.
+          ANSIMLST .XXX - This is the template file used for the lightbar
+                          message reading index.
+          ANSIMRD  .XXX - This is the tempalte file used for the lightbar
+                          message reading.
+          ANSIQUOT .XXX - This is the template file for the full screen
+                          editor quote mode window.  For more information
+                          on this, see the section on the Template System.
+          ANSITEXT .XXX - This is the template file for the full screen
+                          text editor.  For more information on this,
+                          see the section on the Template System.
+          AMSGHLP1 .XXX - Help file for ANSIMLST.XXX
+          AMSGHLP2 .XXX - Help file for ANSIMRD.XXX
+          BIRTHDAY .XXX - Displayed during login if the user calls on
+                          their birthday.
+          BLINDUL  .XXX - Displayed when a user selects to start a blind
+                          file upload.
+          CLOSED   .XXX - Displayed if a System Password has been defined
+                          and the incoming caller did not enter the
+                          correct password.
+          DOWNLOAD .XXX - Displayed before the "Filename:" prompt when a
+                          user attempts a download.
+          EMAILHLP .XXX - Displayed during the e-mail reading prompt when
+                          the user enters "?".
+          FEEDBACK .XXX - Displayed before new users are forced to send
+                          the SysOp an e-mail message.
+          FGROUPx  .XXX - Displayed after joining file group x.
+          FLAG1x   .XXX - Displayed during login if user has flag 1x set.
+          FLAG2x   .XXX - Displayed during login if user has flag 2x set.
+          FLISTHLP .XXX - Displayed when help is selected during the
+                          lightbar file listings.
+          FSEARCH  .XXX - Displayed before a file search.
+          FSHELP   .XXX - Displayed if user selects help while in the
+                          full screen editor.
+          GROUPx   .XXX - Displayed after joining group x.
+          LOGOFF   .XXX - Displayed right before hanging up the caller when
+                          a user selects to log off the BBS.
+          LOGON1-9 .XXX - Displayed in order from 1 to 9 after a user
+                          successfully enters their password.
+          NEWUSER  .XXX - Displayed before asking the user if they'd like
+                          sign up as a new user.
+          NEWUSER1 .XXX - Displayed after user answers yes to continue to
+                          login as a new user.
+          NONEWUSR .XXX - Displayed if a new user tries to log in when
+                          Allow New Users is toggled off.  The call is
+                          terminated after this file is displayed.
+          PRELOGON .XXX - Displayed after the user selects their terminal
+                          emulation, and before the "login:" prompt.
+          PROTO    .XXX - Displayed as a list of available protocols.  If
+                          this file doesn't exist, Mystic will generate a
+                          protocol list.
+          PROTOB   .XXX - Displayed as a list of available batch protocols.
+                          If this file doesn't exist, Mystic will generate
+                          a batch protocol list.
+          READHLP  .XXX - Displayed during the message reading prompt when
+                          the user enters "?".
+          READSHLP .XXX - Displayed during the message reading prompt when
+                          the user enters "?" AND they have SysOp access to
+                          the message base.
+          SLxxx    .XXX - Displayed during login if user has a security
+                          level of xxx or higher.
+          TELECONF .XXX - Displated when entering the standard
+                          teleconference system, and redisplayed again
+                          after the teleconference help file is displayed.
+          TELEHELP .XXX - The help file displayed in the teleconference
+                          when a /? is entered.
+          UPLOAD   .XXX - Displayed before the "File Name:" prompt when a
+                          user attempts an upload.
+
+     ---------------------------------------------------------------------
+     Random Display Files
+     ---------------------------------------------------------------------
+
+     Mystic BBS supports randomly selected display files.  If you have
+     several different versions of a single display file, it is possible
+     to have Mystic BBS randomly select and display one of the files.
+
+     Here's how the random display system works:  Mystic BBS will check to
+     see if the extension of the file with the last letter replaced by a
+     "1" exists.  If the display file name is TEMP.ASC, Mystic will look to
+     see if TEMP.AS1 exists.  If it does, Mystic will search for all files
+     which follow the TEST.AS? file mask (where ? is replaced by a 1
+     through 9).  Mystic will then randomly select one of the files and
+     display it.
+
+     For example:  If the display file name is TEST.ASC and the TEST.AS1
+     file exists, Mystic BBS will randomly select and display any one of the
+     following files that exist:
+
+         TEST.ASC
+         TEST.AS1
+         TEST.AS2
+         TEST.AS4
+         TEST.AS5
+         TEST.AS6
+         TEST.AS7
+         TEST.AS8
+         TEST.AS9
+
+     The same format works for all display files, so if the file name is
+     TEST.ANS, and TEST.AN1 exists, Mystic will randomly select and display
+     any one of the following files that exist:
+
+         TEST.ANS
+         TEST.AN1
+         TEST.AN2
+         TEST.AN3
+         TEST.AN4
+         TEST.AN5
+         TEST.AN6
+         TEST.AN7
+         TEST.AN8
+         TEST.AN9
+
+     ---------------------------------------------------------------------
+     MCI Display Codes
+     ---------------------------------------------------------------------
+
+     MCI codes are used to display various information about the BBS system
+     or the currently logged in user.  They can be used in all prompts and
+     display files throughout Mystic BBS, and are in the format of |XX
+     (where XX is replaced by any one of the codes listed below).  The
+     following is an example of using the MCI system in a display file:
+
+          Original text:
+          --------------
+          Welcome to this BBS, |UN.
+
+          You have called |CS times total.
+          You have called |CT times today.
+
+          When displayed by Mystic:
+          -------------------------
+          Welcome to this BBS, <User_Name_Will_Be_Here>.
+
+          You have called <Total_Calls_Will_Be_Here> times total.
+          You have called <Calls_Today_Will_Be_Here> times today.
+
+
+     ---------------------------------------------------------------------
+     Available MCI Codes
+     ---------------------------------------------------------------------
+
+     Codes 00 through 15 can be used to set the foreground color:
+
+          00 - Black foreground.
+          01 - Dark blue foreground.
+          02 - Dark green foreground.
+          03 - Dark cyan foreground.
+          04 - Dark red foreground.
+          05 - Dark magenta foreground.
+          06 - Dark yellow foreground.
+          07 - Light gray foreground.
+          08 - Dark gray foreground.
+          09 - Light blue foreground.
+          10 - Light green foreground.
+          11 - Light cyan foreground.
+          12 - Light red foreground.
+          13 - Light magenta foreground.
+          14 - Light yellow foreground.
+          15 - White foreground.
+
+     Codes 16 through 23 can be used to set the background color:
+
+          16 - Black background.
+          17 - Blue background.
+          18 - Green background.
+          19 - Cyan background.
+          20 - Red background.
+          21 - Magenta background.
+          22 - Yellow background.
+          23 - Grey background.
+
+     The following three MCI codes are used to set how the next displayed
+     MCI code is formatted:
+
+          $Rxx - Pads the next MCI code to the right with spaces.  Where
+                 xx is the number of spaces to pad.  It must ALWAYS be
+                 two characters, so if you want to pad an MCI to 5 spaces,
+                 you MUST enter |$R05, not |$R5.
+          $Lxx - Pads the next MCI code to the left xx spaces.
+          $Cxx - Pads the next MCI code to the center.  Where xx is the
+                 number of spaces to center the MCI within.
+
+          The following MCI code is used to duplicate a character a
+          specified number of times:
+
+          $Dxxy - Duplicates the character y, xx number of times.
+
+     Here are some examples of using MCI formatting:
+
+          Original text:
+          --------------
+          |$R30|UNHello
+
+          When displayed by Mystic:
+          -------------------------
+          <User_Name_Here>                              Hello
+
+          Original text:
+          --------------
+          Hello|$L30|UN
+
+          When displayed by Mystic:
+          -------------------------
+          Hello                              <User_Name_Here>
+
+          Original text:
+          --------------
+          |$C70|UN
+
+          When displayed by Mystic:
+          -------------------------
+                                <User_Name_Here>
+
+          Original text:
+          --------------
+          Hello
+          |$D20*
+
+          When displayed by Mystic:
+          -------------------------
+          Hello
+          ********************
+
+     The following MCI codes are used to move the cursor to a specified
+     position on the screen.  They will only work if the user is capable
+     of supporting ANSI graphics, otherwise they will be ignored:
+
+          [Xxx - Moves the cursor to column XX.
+          [Yxx - Moves the cursor to row XX.
+
+          [Axx - Moves the cursor XX rows UP
+          [Bxx - Moves the cursor XX rows DOWN
+          [Cxx - Moves the cursor XX rows RIGHT
+          [Dxx - Moves the cursor XX rows LEFT
+
+     Codes &0 through &9 are used in the language file and hold different
+     values for different display strings.  They are called Prompt Info
+     MCI codes.  The supported prompt info codes for each string are
+     listed in the language file and the language editor (LANGEDIT.EXE).
+
+     Codes !0 through !9 are used with the template system and are called
+     Screen Info MCI codes.  They are usually used to define screen
+     coordinates in each template file.  For more information on these
+     MCI codes and the template system, see the section on the Mystic BBS
+     Template System.
+
+     The following MCI codes are used to display information on the BBS
+     and the currently logged in user:
+
+          AS - Is user's auto signature toggled ON?  (Returns YES or NO)
+          AV - Is the user available to receive node messages (YES or NO)
+          BD - Displays the user's baud rate.
+          BE - Sounds a BEEP.
+          BI - Displays the user's birth date.
+          BN - Displays the BBS name as defined in System Configuration.
+          CL - Clears the screen.
+          CM - Displays "on/off" according to the user's FS node chat setting
+          CR - Sends a carriage return (Enter).
+          CS - Displays the user's total number of calls to the BBS.
+          CT - Displays the number of times the user called today.
+          DA - Displays the current date.
+          DE - Delays for half a second.
+          DF - Displays a text file from the language text directory.
+               For example, |DFHELLO would display the text file
+               HELLO.XXX from the currently language text file directory.
+               Mystic BBS assumes all of the remaining text on a
+               line after a DF code as the file name to display.
+          DK - Displays the user's total number of downloaded kilobytes.
+          DL - Displays the user's total number of downloads.
+          DT - Displays the user's number of downloads today.
+          FB - Displays the current file base name.
+          FG - Displays the current file group name.
+          FK - Displays the user's total number of uploaded kilobytes.
+          FO - Displays the date of the user's first call to the BBS.
+          FU - Displays the user's total number of uploads.
+          HK - Returns either ON or OFF depending on the user's
+               hot key setting.
+          IF - Turns the input field box OFF for the next input.
+          IL - Displays the user's invisibility status (ON/OFF).
+          IN - Format: INxx.  Limits input field to XX characters.
+          KB - Displays the number of KB in user's KB bank.
+          KT - Displays the user's total number of download kilobytes today
+          LO - Displays the date of the user's last login.
+          MB - Displays the name of the current message base.
+          ME - Displays the number of emails the user has sent.
+          MG - Displays the name of the user's current message group.
+          ML - Displays on/off based on the user's lightbar message index.
+          MN - Displays the network name for the current message base.
+          MP - Displays the number of messages the user has posted.
+          ND - Displays the current node number
+          NE - Displays the number of minutes until the next system event.
+          OS - Displays the Mystic BBS OS version.  IE: DOS, WIN, or OS2.
+          PA - Pause. Sends the pause prompt and waits for the user to
+               press a key.
+          PC - Displays the user's current post/call ratio percentage
+          PI - Display a pipe character (|).
+          PN - Pause. Waits for the user to press a key without sending
+               the pause prompt.
+          PO - Temporarily disables screen pauses.
+          QA - Displays the user's current archive setting.
+          QL - Displays the user's current QWK file list setting.
+          QO - Displays a randomly generated quote.
+          RD - Displays the user's set download ratio.
+          RK - Displays the user's set download kilobyte ratio.
+          RP - Format: RPxx. Sets the pause screen counter to xx lines.
+          SA - Displays the max amount of KB allowed in KB bank.
+          SB - Displays the max amount of minutes allowed in time bank.
+          SC - Displays the max number of calls allowed per day.
+          SD - Displays the description of the user's security level.
+          SK - Displays the max number of download Kb allowed per day.
+          SL - Displays the user's security level.
+          SP - Displays the post/call ratio for the user's security level.
+          ST - Displays the # of minutes given to the user per day.
+          SX - Displays the max number of downloads allowed per day.
+          TB - Displays the total minutes in the user's time bank.
+          TC - Displays the total number of callers the BBS has had.
+          TE - Displays the user's terminal emulation (ANSI/ASCII).
+          TI - Displays the current time.
+          TL - Displays the user's time (in minutes) left for the day.
+          TO - Displays the number of minutes the user has been online.
+          U1 - Displays the user's optional field 1
+          U2 - Displays the user's optional field 2
+          U3 - Displays the user's optional field 3
+          UA - Displays the user's address.
+          UB - Displays the user's file listing type.
+          UC - Displays the user's city and state.
+          UD - Displays the user's data phone number.
+          UE - Displays the user's message editor setting.
+          UF - Displays the user's selected date format.
+          UG - Displays the user's gender.
+          UH - Displays the user's handle/alias.
+          UI - Displays the user's user note.
+          UJ - Displays the user's message reader type.
+          UK - Displays the user's e-mail address.
+          UL - Displays the user's current language.
+          UM - Displays the user's lightbar email index setting.
+          UN - Displays the user's real name.
+          UP - Displays the user's home phone number.
+          UQ - Displays the user's current quote mode setting.
+          US - Displays the user's screen length.
+          UZ - Displays the user's zip code.
+          VR - Displays the version of Mystic BBS.
+
+     ---------------------------------------------------------------------
+     Template System (Editing Mystic BBS Templates)
+     ---------------------------------------------------------------------
+
+     The template system is used to customize the display of many options
+     of Mystic BBS which are not part of the language system.  Template
+     files are more or less "screen captures" of the screen that will be
+     displayed to the user, with Screen Info MCI codes inserted to define
+     the X and Y screen coordinates for various things.  These files MUST
+     exist in the text directory for each language in order for Mystic BBS
+     to function properly.  The default installation for Mystic BBS
+     includes these files, but they can be edited if the default files are
+     not satisfactory.
+
+     The following is a list of template files which Mystic BBS requires,
+     and a description of where they are used:
+
+          ANSICHAT.XXX  : Split screen chat template.
+          ANSIEDIT.XXX  : Full screen editor template.
+          ANSIFINF.XXX  : Lightbar file listing: extended file information.
+          ANSIFLST.XXX  : Lightbar file listing template.
+          ANSIMLST.XXX  : Lightbar message reading index.
+          ANSIMRD .XXX  : Lightbar message reader.
+          ANSIQUOT.XXX  : Full screen editor quote mode template.
+          ANSITEXT.XXX  : Full screen TEXT editor template.
+
+     The template system can be confusing for someone who doesn't have much
+     experience with ANSI text file editing.  In most cases, it is
+     suggested that the ANSI file editor "TheDraw" be used, and that the
+     files are saved as ANSI animated files.  If you are not familiar with
+     editing ANSI files then it is suggested that you do not edit the
+     default templates, or at least make a backup of the default templates
+     before attempting to modify them.
+
+     The following is a small section on each template file, with
+     instructions on how each one is used:
+
+          -----------------------------------------
+          ANSICHAT.XXX - Split Screen Chat Template
+          -----------------------------------------
+
+          The ANSICHAT.XXX template is used when the split screen chat mode
+          is activated.  Screen Info MCI codes are used in this template to
+          specify the coordinates of both the sysop and user chat window.
+          The following is a list of the MCI codes used in this template
+          followed by an explanation of where each one should be used:
+
+          |!1  Specifies the upper Y position of the user's window and the
+               text color of the user's window.
+          |!2  Specifies the lower Y position of the user's window
+          |!3  Specifies the left  X position of the user's window
+          |!4  Specifies the right X position of the user's window
+
+          |!5  Specifies the upper Y position of the sysop's window and the
+               text color of the user's window.
+          |!6  Specifies the lower Y position of the sysop's window
+          |!7  Specifies the left  X position of the sysop's window
+          |!8  Specifies the right X position of the sysop's window
+
+          |!9  Specifies the color/location of time left update
+          |!0  Specifies the color/location of system time update
+
+          |&1  Replaced with the user's name.
+          |&2  Replaced with the sysop's name.
+
+          An example of a split screen chat template would be:
+
+                   User: |&1
+                   -----------------------------
+                   |!1
+                   |!3                         |!4
+                   |!2
+                   Sysop: |&2
+                   -----------------------------
+                   |!5
+                   |!7                         |!8
+                   |!6
+                   -----------------------------
+
+          ------------------------------------------
+          ANSIEDIT.XXX - Full Screen Editor Template
+          ------------------------------------------
+
+          The ANSIEDIT.XXX template is used when the full screen editor is
+          activated.  Screen Info MCI codes are used in this file to define
+          the coordinates of the text editing window.  The following list of
+          MCI codes are used in the Full Screen Editor template:
+
+          |!1  Specifies the top line of the edit window, as well as the
+               color of the inputted text.
+          |!2  Specifies the bottom line of the edit window.
+          |!3  Specifies the location of the "INS/OVR" toggle, as well as
+               the color of the "INS/OVR" text.
+          |&1  Who the message is To
+          |&2  Subject of the message
+
+          An example of a full screen editor template:
+
+                   Full Screen Editor   [|!3]   Ctrl-Z = Help
+                   ------------------------------------------
+                   |!1
+
+
+
+                   |!2
+                   ------------------------------------------
+
+          Note: The color which is set after the template is displayed
+          will be the color of the edited text.
+
+          See also: ANSIQUOT.XXX.  The template for the Full Screen Editor
+          Quote window.
+
+          -------------------------------------------------------
+          ANSIFINF.XXX - Extended File Info In Lightbar File List
+          -------------------------------------------------------
+
+          This template is used when displaying extended information on
+          a file during the lightbar file listings.  The following
+          screen info and prompt info MCI codes are available:
+
+          |&1  File name of the file.
+          |&2  File size of the file.
+          |&3  Date the file was added into the database.
+          |&4  Time the file was added into the database.
+          |&5  Number of times the file was downloaded.
+          |&6  Estimated minutes it will take to transfer the file.
+          |&7  Estimated seconds it will take to transfer the file.
+          |&8  Name of the user who uploaded the file.
+
+          |!1  Specifies the color and top Y position of the file description
+               window.
+          |!2  Specifies the bottom Y position of the file description
+               window.
+
+          ---------------------------------------------
+          ANSIFLST.XXX - Lightbar File Listing Template
+          ---------------------------------------------
+
+          The ANSIFLST.XXX template is used to define the coordinates and
+          colors for the lightbar file listings.  The color of each screen
+          info MCI code for this template is saved, and will be used in the
+          file listing.  The following screen info MCI codes are used:
+
+          |!1  Specifies the top Y coordinate of the file list window.  The
+               color of this code is ignored.
+          |!2  Specifies the bottom Y coordinate of the file list window.
+               The color of this code is ignored.
+          |!3  Specifies the Y coordinate and default color for the "prompt"
+               line.  This is the line where general text is displayed, such
+               as "Batch queue full", etc.
+          |!4  This code is optional, and if defined specifies the X/Y
+               coordinates AND the color of the total number of files in
+               the user's batch queue.
+
+          ---------------------------------------------
+          ANSIMLST.XXX - Lightbar Message Reading Index
+          ---------------------------------------------
+
+          |!1  Specifies the top line of the message index list window
+          |!2  Specifies the bottom line of the message index window
+          |!3  Specifies the line Mystic will relocate to when the user
+               selects to quit reading.
+
+          -------------------------------------
+          ANSIMRD.XXX - Lightbar Message Reader
+          -------------------------------------
+
+          The ANSIMRD.XXX template is used when the user is reading actual
+          messages and has the lightbar message reader toggled ON.
+
+
+          ------------------------------------------------
+          ANSIQUOT.XXX - Full Screen Editor Quote Template
+          ------------------------------------------------
+
+          The ANSIQUOT.XXX template file is used to define the quote window
+          used in the full screen editor.  The quote window is always six
+          lines in size, so when creating the ANSIQUOT.XXX, you must make
+          sure that there are at least 6 lines from the beginning of the
+          quote window to the end of the screen.  The following is a list of
+          MCI codes which are used for this template:
+
+          |!1  This defines the position where text scroll at while quoting.
+               This is usually the line before the quote window starts.
+          |!2  This is the line where the actual first line of the quote
+               window is.  The bottom line is not needed since the quote
+               window is always 6 lines long.  The color of this code is
+               saved and is used for non-highlighted text.
+
+          An example of the quote template:
+
+                   <top of screen>
+
+
+                   |!1
+                   --Quote Window (ESC) Quit----------------
+                   |!2
+
+                   <bottom of screen>
+
+          The color for the Quote Window Lightbar can be defined in the
+          System Configuration -> Language Editor section of the BBS.
+
+          -----------------------------------------------
+          ANSITEXT.XXX - Full Screen Text Editor Template
+          -----------------------------------------------
+
+          This template file is identical to the ANSIEDIT.XXX file except
+          that it is used when editing text, and not inputting a message.
+          Ctrl-Z in the text editor SAVES the text, instead of showing the
+          help screen as the full screen editor does.  The &1 and &2 MCI
+          codes are not available for this template.
+
+     ----------------------------------------------------------------------
+     Installing Multiple Nodes of Mystic BBS
+     ----------------------------------------------------------------------
+
+     Mystic BBS is a multi-node BBS package.  This means that multiple
+     incoming connections can be installed - whether they be dial-up or
+     telnet connections.  Mystic BBS will allow up to 255 nodes to be
+     defined.
+
+     Setting up Mystic BBS to run multi-node is VERY easy.  You will not
+     have to change your setup in any way, or create directories and copy
+     files or anything like that.  All you will need is a multi-tasker, or
+     an operating system that has built in multi-tasking capabilities.
+
+     Mystic BBS internally supports to following multi-tasking software and
+     operating systems:
+
+         - Quarterdeck's DesqView (DOS)
+         - Microsoft Windows (any version)
+         - IBM OS/2 (any version)
+
+     In addition, Mystic BBS will give off "generic" time slicing if one of
+     the above environments is not detected.  This means that Mystic BBS will
+     run well under almost ANY obscure multi-tasker!
+
+     Mystic BBS has been tested and ran under the following operating
+     systems.  Mystic may run well in other configurations, but the following
+     have been tested and said to work well:
+
+         - DOS using DesqView
+         - Windows 3.1
+         - Windows 95
+         - Windows 98
+         - Windows NT
+         - IBM OS/2 Warp 3.0
+         - IBM OS/2 Warp 4.0
+         - Linux (using DOSEMU)
+
+     How to setup Mystic BBS to run Multi-node:
+
+         (1) Load Mystic BBS and enter "System Configuration".  From there
+             select "General Settings".  Set the "Max # of Nodes" option
+             to the maximum number of incoming nodes that you plan on
+             loading.  Exit Mystic BBS.
+
+         (2) Load EACH node you wish to setup in local mode.  This can be
+             done by running Mystic BBS with the -Nx and -L command lines.
+             For example, the command line for loading node 2 in local mode
+             would be: "-N2 -L".
+
+             Enter "System Configuration" and select "Modem/Node Settings".
+             You will need to setup each node so it finds the correct modem.
+
+     You're done!  That's it.  The only difference in your setup will be
+     that you MUST specify the node number now when loading your BBS. This
+     is done with the "-N" command line option.
+
+     So loading your BBS would work something like this:
+
+          (1) Create new DOS task.
+          (2) Load Mystic BBS with -Nx option.
+          (3) Repeat for each node.
+
+     I hope this is all understandable.  It really is VERY easy to do - it
+     takes me about 3 minutes to get a new node setup and running!
+
+     ----------------------------------------------------------------------
+     Setting Up Door Programs In Mystic BBS
+     ----------------------------------------------------------------------
+
+     ----------------------------------------------------------------------
+     Setting Up Mystic BBS (DOS Version) To Allow Incoming Telnet
+     ----------------------------------------------------------------------
+
+     Mystic requires the use of a virtual modem driver, such as NetModem
+     for Windows, or Ray Gwinn's SIO drivers for OS/2.  More information
+     will be added to this section in the future.
+
+     ----------------------------------------------------------------------
+     MBBSUTIL.EXE: Mystic BBS External Utilities
+     ----------------------------------------------------------------------
+
+     Mystic BBS comes along with an external utilities program found in the
+     root Mystic BBS directory under the filename of MBBSUTIL.EXE.  This
+     program provides many utilities which can (and should) be ran
+     occasionally to help keep your Mystic BBS system running smoothly.
+
+     When MBBSUTIL.EXE is ran, there are several command line options
+     available which command MBBSUTIL.EXE what to do.  The follow is a list
+     of the available commands, and a brief description of what each option
+     does:
+
+         -BKILL <ID> <Days> : This command will remove all BBS list entries
+                              which haven't been verified in the past <Days>
+                              days.  The <ID> option specifies the BBS list
+                              ID name, as required by Mystic's BBS listing
+                              menu commands.  If <ID> is set to "ALL",
+                              MBBSUTIL will check ALL existing BBS lists.
+
+         -BPACK             : This command will pack the BBS list database.
+                              It will remove any records which have been
+                              marked as deleted from the data files.
+
+         -BSORT <ID> <Type> : This command will sort a BBS list, and also
+                              pack it while sorting!  The <ID> option
+                              specifies the BBS list ID name, as required
+                              by Mystic's BBS listing menu commands.  If
+                              <ID> is set to "ALL", MBBSUTIL will sort all
+                              existing BBS lists.
+
+                              The <TYPE> option specifies the data which
+                              MBBSUTIL will use to sort the list.  The
+                              following options are available:
+
+                                 BBSNAME  : Sort by BBS name
+                                 LOCATION : Sort by Location
+                                 PHONE    : Sort by phone number
+                                 TELNET   : Sort by telnet address
+
+         -FCHECK            : This command will check all file entries in all
+                              file bases to make sure that the file physically
+                              exists.  If the file does not exist, or if the
+                              size of the file is 0 bytes, MBBSUTIL will mark
+                              the file as offline.  Likewise, if a file marked
+                              as offline physically exists, MBBSUTIL will
+                              remove it's offline flag.  The FCHECK command
+                              will also validate the file size of each file
+                              entry.
+
+         -FPACK             : This command will pack the file database.  It
+                              will remove any files which have been marked as
+                              deleted from the data files.
+
+         -FSORT             : This command will sort the file database in
+                              alphabetical order by filename.  It will also
+                              automatically pack the file base while sorting!
+
+         -UKILL <Days>      : This command will delete users who have not called
+                              the BBS for a specified number of <days>.  The
+                              <days> option must be at least 5.  This will
+                              prevent accidentally having a 0 wipe out the
+                              entire user database.
+
+         -UPACK             : This command will pack the user file.  It will
+                              remove any user accounts which have been marked
+                              as deleted from the user data files.
+
+     It is suggested that all of the "packing" functions (-BPACK, -FPACK,
+     -UPACK, etc) are ran at least once every few days, maybe more or less
+     depending on how active your BBS is.  The sorting functions are less
+     important, but they are nice to help keep your BBS organized.  An
+     example command line for running MBBSUTIL.EXE with all the suggested
+     commands follows:
+
+         MBBSUTIL.EXE -BPACK -FPACK -UPACK
+
+     Note: Since MBBSUTIL.EXE makes modifications to the system data files,
+     it should only be ran when there are NO users currently logged into
+     the BBS system.  MBBSUTIL.EXE will attempt to detect if any users are
+     logged into the system, and if so, it will refuse to run.
+
+     ----------------------------------------------------------------------
+     MIDE.EXE and MPLC.EXE: Mystic BBS Programming Executable Compilers
+     ----------------------------------------------------------------------
+
+     Mystic BBS has a built in programming language which can be used to
+     create add-on games and utilities for your BBS.  Two programs are
+     supplied with Mystic BBS which go along with this programming
+     language:
+
+         MPLC.EXE - A command line compiler.  This program translates a
+                    MPS source file into a MPE binary executable file.  A
+                    MPS source file is a text file which contains programming
+                    commands recognized by the MPE engine.  These files can
+                    be edited with any text editor, or the supplied MIDE
+                    program described below.
+
+         MIDE.EXE - MIDE is the Mystic BBS Integrated Development
+                    Environment.  In other words, its a text editor which
+                    helps you to create MPE programs.  This program allows
+                    MPS source files to be edited and compiled, while
+                    offering some other features that a normal text editor
+                    does not.
+
+     For more information on the MPE language, see MPL.DOC located in the
+     scripts directory.  This file will reference all the programming
+     commands supported by the MPE engine.  You may also wish to look at
+     the various .MPS files in the script directory for examples of fully
+     functional programs.
+
+     ----------------------------------------------------------------------
+     System Error Codes (Runtime Errors)
+     ----------------------------------------------------------------------
+
+     If an error happens while Mystic BBS is running, it will return an
+     error message to the user, and terminate the call.  In the log
+     file, an error number will be logged.  Below is a list of what each
+     of those error numbers stand for.  They are provided for reference
+     only, and will probably not be of any help to a Sysop.
+
+          1        Invalid function number
+          2        File not found
+          3        Path not found
+          4        Too many open files
+          5        Access denied (in Unix check file/directory owners!)
+          6        Invalid handle
+          8        Not enough memory
+          10       Invalid environment
+          11       Invalid format
+          12       Invalid file access code
+          15       Invalid drive number
+          16       Cannot remove current directory
+          17       Cannot rename across drives
+          18       No more files
+          100      Disk read error
+          101      Disk write error
+          102      File not assigned
+          103      File not open
+          104      File not open for input
+          105      File not open for output
+          106      Invalid numeric format
+          150      Disk is write-protected
+          151      Bad drive request struct length
+          152      Drive not ready
+          154      CRC error in data
+          156      Disk seek error
+          157      Unknown media type
+          158      Sector Not Found
+          159      Printer out of paper
+          160      Device write fault
+          161      Device read fault
+          162      Hardware failure
+          200      Division by zero
+          201      Range check error
+          202      Stack overflow error
+          203      Heap overflow error
+          204      Invalid pointer operation
+          205      Floating point overflow
+          206      Floating point underflow
+          207      Invalid floating point operation
+          208      Overlay manager not installed
+          209      Overlay file read error
+          210      Object not initialized
+          211      Call to abstract method
+          212      Stream registration error
+          213      Collection index out of range
+          214      Collection overflow error
+
+     ----------------------------------------------------------------------
+     EOF: Mystic BBS Sysop Documentation

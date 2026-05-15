@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Diff r{{ a.rev_num }}…r{{ b.rev_num }} — {{ page.title }}{% endblock %}
+{% block content %}
+{% include "wiki/_layout.html" %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-arrow-left-right"></i> Diff:
+        <a href="{{ url_for('wiki.view', slug=page.slug) }}">{{ page.title }}</a>
+        <small class="text-muted">r{{ a.rev_num }} → r{{ b.rev_num }}</small>
+    </h1>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <strong>r{{ a.rev_num }}</strong>
+                <small class="text-muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% if a.author %}· {{ a.author.username }}{% endif %}</small>
+            </div>
+            <div class="card-body small">
+                <em>{{ a.edit_summary or '(no edit summary)' }}</em>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <strong>r{{ b.rev_num }}</strong>
+                <small class="text-muted">{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% if b.author %}· {{ b.author.username }}{% endif %}</small>
+            </div>
+            <div class="card-body small">
+                <em>{{ b.edit_summary or '(no edit summary)' }}</em>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="wiki-diff">{% for ln in diff -%}
+{% if ln.startswith('+++') or ln.startswith('---') or ln.startswith('@@') %}<span class="hdr">{{ ln }}</span>
+{% elif ln.startswith('+') %}<span class="add">{{ ln }}</span>
+{% elif ln.startswith('-') %}<span class="del">{{ ln }}</span>
+{% else %}{{ ln }}
+{% endif %}{% endfor -%}
+{% if not diff %}<em>No differences.</em>{% endif %}</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('wiki.history', slug=page.slug) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to history</a>
+</div>
+{% endblock %}

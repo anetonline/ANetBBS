@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{% if row %}Edit{% else %}New{% endif %} ANSI Screen{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-tv"></i> {% if row %}Edit screen <code>{{ row.slot }}</code>{% else %}New ANSI screen{% endif %}</h1>
+</div>
+
+<form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <label class="form-label">Slot name (key)</label>
+            {% if row and row.slot in ('welcome','goodbye','newuser') %}
+                <input type="text" name="slot" class="form-control" value="{{ row.slot }}" readonly>
+                <small class="text-muted">This is a built-in slot used by the session lifecycle.</small>
+            {% else %}
+                <input type="text" name="slot" class="form-control"
+                       value="{{ row.slot if row else prefill_slot }}" required
+                       placeholder="welcome, goodbye, newuser, weather_intro, ...">
+                <small class="text-muted">
+                    Built-in slots: <code>welcome</code>, <code>goodbye</code>, <code>newuser</code>.
+                    Custom slots can be referenced from menu items via action_type=<code>ansi</code>.
+                </small>
+            {% endif %}
+        </div>
+        <div class="col-md-8">
+            <label class="form-label">Title (optional, sysop reference only)</label>
+            <input type="text" name="title" class="form-control" value="{{ row.title if row else '' }}" maxlength="120">
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">ANSI body (raw CP437 / ANSI escape codes)</label>
+        <div class="row g-2">
+            <div class="col-md-6">
+                <textarea id="ansi-source" name="body" class="form-control font-monospace"
+                          rows="20" style="white-space: pre;" oninput="updateAnsiPreview()">{{ row.body if row else '' }}</textarea>
+                <small class="text-muted">
+                    Paste any .ans file content. Codes like
+                    <code>\x1b[1;36m</code>, <code>\x1b[2J\x1b[H</code> work.
+                </small>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small">Live preview:</label>
+                <pre id="ansi-preview" class="font-monospace"
+                     style="background:#000;color:#ccc;padding:10px;min-height:400px;
+                            border:1px solid var(--theme-border);border-radius:4px;
+                            white-space:pre;overflow:auto;"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-check mb-2">
+        <input type="checkbox" name="pause_after" id="pa" class="form-check-input"
+               {% if row and row.pause_after %}checked{% endif %}>
+        <label for="pa" class="form-check-label">Wait for user to press Enter before continuing</label>
+    </div>
+    <div class="form-check mb-3">
+        <input type="checkbox" name="is_active" id="ia" class="form-check-input"
+               {% if not row or row.is_active %}checked{% endif %}>
+        <label for="ia" class="form-check-label">Active (uncheck to disable without deleting)</label>
+    </div>
+
+    <button class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+    <a href="{{ url_for('menu_admin.list_screens') }}" class="btn btn-secondary">Cancel</a>
+</form>
+
+<script>
+function ansiToHtml(text) {
+    text = text.replace(/\\x1b/g, '\x1b').replace(/\\033/g, '\x1b').replace(/\\e/g, '\x1b');
+    const fg = {30:'#000',31:'#a00',32:'#0a0',33:'#a50',34:'#00a',35:'#a0a',36:'#0aa',37:'#aaa',
+                90:'#555',91:'#f55',92:'#5f5',93:'#ff5',94:'#55f',95:'#f5f',96:'#5ff',97:'#fff'};
+    const bg = {40:'#000',41:'#a00',42:'#0a0',43:'#a50',44:'#00a',45:'#a0a',46:'#0aa',47:'#aaa'};
+    let out = '', cur = {fg:'#ccc', bg:null, bold:false}, openSpan = false;
+    function reopen() {
+        if (openSpan) { out += '</span>'; openSpan = false; }
+        let style = 'color:' + (cur.fg || '#ccc');
+        if (cur.bg) style += ';background:' + cur.bg;
+        if (cur.bold) style += ';font-weight:bold';
+        out += '<span style="' + style + '">';
+        openSpan = true;
+    }
+    reopen();
+    let i = 0;
+    while (i < text.length) {
+        if (text[i] === '\x1b' && text[i+1] === '[') {
+            let j = text.indexOf('m', i + 2);
+            const cmd = text.indexOf('J', i + 2); if (cmd > 0 && (j < 0 || cmd < j)) { i = cmd + 1; continue; }
+            const H = text.indexOf('H', i + 2); if (H > 0 && (j < 0 || H < j)) { i = H + 1; continue; }
+            if (j < 0) { i++; continue; }
+            const codes = text.substring(i+2, j).split(';').map(s => parseInt(s,10) || 0);
+            for (const c of codes) {
+                if (c === 0) { cur = {fg:'#ccc', bg:null, bold:false}; }
+                else if (c === 1) { cur.bold = true; }
+                else if (c === 22) { cur.bold = false; }
+                else if (fg[c]) { cur.fg = fg[c]; }
+                else if (bg[c]) { cur.bg = bg[c]; }
+            }
+            reopen(); i = j + 1; continue;
+        }
+        const ch = text[i];
+        if (ch === '<') out += '&lt;'; else if (ch === '>') out += '&gt;'; else if (ch === '&') out += '&amp;';
+        else out += ch;
+        i++;
+    }
+    if (openSpan) out += '</span>';
+    return out;
+}
+function updateAnsiPreview() {
+    const src = document.getElementById('ansi-source').value;
+    document.getElementById('ansi-preview').innerHTML = ansiToHtml(src);
+}
+document.addEventListener('DOMContentLoaded', updateAnsiPreview);
+</script>
+{% endblock %}

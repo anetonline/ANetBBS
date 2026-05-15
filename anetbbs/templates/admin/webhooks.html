@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Webhooks{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-link-45deg"></i> Outbound Webhooks</h1>
+    <p>POST a JSON payload to a URL when an event fires (Discord/Slack/IFTTT/etc).</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-4"><label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" required></div>
+            <div class="col-md-2"><label class="form-label">Event</label>
+                <select name="event" class="form-select">
+                    <option value="shout">shout</option>
+                    <option value="post">post</option>
+                    <option value="bulletin">bulletin</option>
+                    <option value="login">login</option>
+                    <option value="achievement">achievement</option>
+                    <option value="broadcast">broadcast</option>
+                    <option value="sysop_page">sysop_page</option>
+                    <option value="echomail">echomail</option>
+                </select></div>
+            <div class="col-md-5"><label class="form-label">URL</label>
+                <input type="url" name="url" class="form-control" required placeholder="https://discord.com/api/webhooks/..."></div>
+            <div class="col-md-1 d-flex align-items-end">
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="is_active" id="cb_a" checked><label for="cb_a" class="form-check-label">on</label></div>
+            </div>
+            <div class="col-md-12">
+                <label class="form-label">Body template (optional, JSON; placeholders <code>{user} {text} {content}</code>)</label>
+                <textarea name="template" rows="3" class="form-control" style="font-family:monospace;" placeholder='{"content": "{content}"}'></textarea>
+            </div>
+            <div class="col-md-6"><label class="form-label">Bearer secret (optional)</label>
+                <input type="text" name="secret" class="form-control"></div>
+            <div class="col-md-12"><button class="btn btn-primary">Add Webhook</button></div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr><th>On</th><th>Event</th><th>Name</th><th>URL</th><th>Last status</th><th></th></tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr {% if not r.is_active %}class="text-muted"{% endif %}>
+                    <td>{% if r.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                    <td><code>{{ r.event }}</code></td>
+                    <td>{{ r.name }}</td>
+                    <td><small><code>{{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}</code></small></td>
+                    <td><small>{{ r.last_status or '—' }}{% if r.last_error %} <span class="text-danger">err</span>{% endif %}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="w_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if r.is_active else 'enable' }}</button>
+                        </form>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="w_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="text-muted text-center p-3">No webhooks configured.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

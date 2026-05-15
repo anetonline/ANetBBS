@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}New Poll{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-plus-square"></i> New Poll</h1>
+</div>
+
+<form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label">Question</label>
+        <input type="text" name="question" class="form-control"
+               value="{{ form.get('question', '') }}" maxlength="400" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Description (optional)</label>
+        <textarea name="description" rows="3" class="form-control">{{ form.get('description', '') }}</textarea>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Options (one per line, minimum 2)</label>
+        <textarea name="options" rows="6" class="form-control" required>{{ form.get('options', '') }}</textarea>
+    </div>
+    <button class="btn btn-primary"><i class="bi bi-check2"></i> Create Poll</button>
+    <a href="{{ url_for('polls.index') }}" class="btn btn-link">Cancel</a>
+</form>
+{% endblock %}

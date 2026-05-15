@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Web Terminal{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<style>
+.term-shell { display: grid; grid-template-rows: auto 1fr auto; height: 80vh; border:1px solid var(--theme-primary); }
+.term-config { padding:8px; background:var(--theme-bg-dark); display:flex; gap:6px; flex-wrap:wrap; align-items:flex-end; }
+.term-config input, .term-config button { font-size:0.85rem; }
+#xterm { background:#000; padding:4px; overflow:hidden; }
+#xterm .xterm { height:100%; }
+.term-status { padding:4px 8px; background:var(--theme-bg-dark); font-size:0.8rem; color:#aaa; border-top:1px solid #333; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-terminal-fill"></i> Web Terminal</h1>
+    <p>Telnet/SSH any BBS right in your browser. Defaults to this BBS's telnet
+       port. CP437 box-drawing renders via xterm.js with high-bit byte passthrough.</p>
+</div>
+
+<div class="term-shell">
+    <div class="term-config">
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Host</label>
+            <input id="cfg_host" type="text" class="form-control form-control-sm"
+                   value="{{ default_host }}" style="width:200px;">
+        </div>
+        <div>
+            <label class="form-label mb-0" style="font-size:0.75rem;">Port</label>
+            <input id="cfg_port" type="number" class="form-control form-control-sm"
+                   value="{{ default_port }}" style="width:90px;">
+        </div>
+        <div class="form-check mb-1">
+            <input id="cfg_ssl" class="form-check-input" type="checkbox">
+            <label for="cfg_ssl" class="form-check-label" style="font-size:0.85rem;">SSL</label>
+        </div>
+        <button id="btnConnect" class="btn btn-success btn-sm">
+            <i class="bi bi-plug"></i> Connect
+        </button>
+        <button id="btnDisconnect" class="btn btn-danger btn-sm" disabled>
+            <i class="bi bi-x-circle"></i> Disconnect
+        </button>
+        <span class="ms-auto small text-muted">
+            Quick:
+            <a href="#" data-quick="bbs.a-net.online:1337">a-net</a>
+        </span>
+    </div>
+    <div id="xterm"></div>
+    <div class="term-status">
+        <span id="status">disconnected</span>
+        <span class="ms-3">Local echo: <input type="checkbox" id="local_echo"></span>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function() {
+    const term = new Terminal({
+        cursorBlink: true,
+        fontFamily: '"Cascadia Mono","Consolas","Courier New",monospace',
+        fontSize: 14,
+        cols: 80, rows: 25,
+        // Full 16-color CGA palette. Without this xterm.js falls back to
+        // its gnome-ish default where "black" (ANSI 40) is #2e3436 — so
+        // the negative space inside DROID MATRIX-style block ANSI art
+        // reads as gray instead of solid black.
+        theme: {
+            background: '#000000',
+            foreground: '#aaaaaa',
+            cursor:     '#00ff00',
+            cursorAccent: '#000000',
+            selectionBackground: 'rgba(0,255,0,0.2)',
+            black:        '#000000', red:          '#aa0000',
+            green:        '#00aa00', yellow:       '#aa5500',
+            blue:         '#0000aa', magenta:      '#aa00aa',
+            cyan:         '#00aaaa', white:        '#aaaaaa',
+            brightBlack:  '#555555', brightRed:    '#ff5555',
+            brightGreen:  '#55ff55', brightYellow: '#ffff55',
+            brightBlue:   '#5555ff', brightMagenta:'#ff55ff',
+            brightCyan:   '#55ffff', brightWhite:  '#ffffff',
+        },
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('xterm'));
+    setTimeout(() => fit.fit(), 100);
+    window.addEventListener('resize', () => fit.fit());
+
+    const status = document.getElementById('status');
+    const sock = io('/term', {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+    });
+    let connected = false;
+
+    sock.on('connect', () => { status.textContent = 'socketio connected'; });
+    sock.on('disconnect', () => { status.textContent = 'socketio disconnected'; });
+    sock.on('term_connected', d => {
+        connected = true;
+        status.textContent = `connected to ${d.host}:${d.port}` + (d.use_ssl ? ' (SSL)' : '');
+        document.getElementById('btnConnect').disabled = true;
+        document.getElementById('btnDisconnect').disabled = false;
+        term.focus();
+    });
+    sock.on('term_disconnected', () => {
+        connected = false;
+        status.textContent = 'disconnected';
+        document.getElementById('btnConnect').disabled = false;
+        document.getElementById('btnDisconnect').disabled = true;
+        term.write('\r\n[disconnected]\r\n');
+    });
+    sock.on('term_error', d => {
+        term.write(`\r\n[error: ${d.message}]\r\n`);
+    });
+    sock.on('term_output', d => {
+        // Server sent latin-1-decoded string; xterm.js writes raw codepoints.
+        term.write(d.data);
+    });
+
+    document.getElementById('btnConnect').addEventListener('click', () => {
+        const host = document.getElementById('cfg_host').value.trim();
+        const port = parseInt(document.getElementById('cfg_port').value, 10) || 23;
+        const ssl = document.getElementById('cfg_ssl').checked;
+        sock.emit('term_open', { host, port, use_ssl: ssl });
+    });
+    document.getElementById('btnDisconnect').addEventListener('click', () => {
+        sock.emit('term_close');
+    });
+    document.querySelectorAll('[data-quick]').forEach(el => {
+        el.addEventListener('click', e => {
+            e.preventDefault();
+            const [h, p] = el.dataset.quick.split(':');
+            document.getElementById('cfg_host').value = h;
+            document.getElementById('cfg_port').value = p;
+            document.getElementById('cfg_ssl').checked = false;
+        });
+    });
+
+    // Keystroke pump → server
+    term.onData(data => {
+        if (!connected) return;
+        if (document.getElementById('local_echo').checked) term.write(data);
+        sock.emit('term_input', { data });
+    });
+})();
+</script>
+{% endblock %}
