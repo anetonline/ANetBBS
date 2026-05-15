@@ -737,30 +737,105 @@ class BinkPClient:
         return len(messages)
 
     def _receive_messages(self, data_dir: str):
-        """Receive inbound .pkt files and parse them.
+        """Receive inbound files from the hub, dispatch by content.
 
-        After we send our M_EOB the hub may either:
-          (a) reply with M_EOB and close cleanly — best case
-          (b) close immediately if it has nothing to send back
-        Both are valid end-of-batch outcomes. We treat a connection
-        close at this stage as a clean session end, NOT a poll failure
-        — otherwise the poller marks the whole poll failed and our
-        outbound messages never get stamped sent_at, so they re-queue
-        and would be sent again next cycle (duplicate on the peer).
+        Three content paths:
+          - raw FTS-0001 packet (magic bytes 02 00 / 02 01 at offset 18)
+              → parse + collect
+          - ZIP bundle (magic bytes 50 4B 03 04)
+              → unzip, parse each member that looks like a packet
+          - anything else (TIC manifests, hatched binaries, unknown)
+              → write to `data/binkp/inbound` for the TIC scanner
+
+        The OLD implementation treated every file as a raw .pkt and
+        used `last 2 bytes == \\x00\\x00` as the completion marker —
+        which Mystic's ZIP-wrapped bundles never satisfy. Result was
+        5 files arrive but nothing imports (the `received=0` we kept
+        seeing in the TQWnet logs). Fixed by using the byte-count
+        from CMD_FILE (`name size mtime offset`) for completion and
+        dispatching through proper content sniffers.
+
+        After our M_EOB the hub may reply M_EOB or close immediately;
+        both are clean (no poll-failure signal).
         """
+        import io as _io
+        import os as _os
+        import zipfile as _zipfile
+
         parsed = []
         self._send_cmd(CMD_EOB)
 
         pending_file = None
+        pending_size = 0
         pending_data = b''
+        # Persistent inbound path — the prior /tmp default was tmpfs
+        # on most distros so anything stashed vanished on restart.
+        inbound_dir = _os.environ.get('BINKP_INBOUND_DIR') or _os.path.join(
+            (data_dir or 'data'), 'binkp', 'inbound')
 
-        for _ in range(500):
+        def _is_fts_packet(buf):
+            return len(buf) >= 60 and buf[18:20] in (b'\x02\x00', b'\x02\x01')
+
+        def _is_zip(buf):
+            return len(buf) >= 4 and buf[:4] == b'PK\x03\x04'
+
+        def _import_completed(fname, buf):
+            """Dispatch a fully-received file. Returns a list of parsed
+            messages (may be empty for non-mail content like TICs)."""
+            if _is_fts_packet(buf):
+                try:
+                    return _parse_ftn_packet(buf)
+                except Exception:
+                    logger.exception('BinkP: failed parsing %s as FTS-0001',
+                                     fname)
+                    return []
+            if _is_zip(buf):
+                out = []
+                try:
+                    with _zipfile.ZipFile(_io.BytesIO(buf)) as zf:
+                        for info in zf.infolist():
+                            if info.is_dir():
+                                continue
+                            try:
+                                inner = zf.read(info.filename)
+                            except Exception as exc:
+                                logger.warning(
+                                    'BinkP: zip member %s in %s unreadable: %s',
+                                    info.filename, fname, exc)
+                                continue
+                            if _is_fts_packet(inner):
+                                try:
+                                    out.extend(_parse_ftn_packet(inner))
+                                except Exception:
+                                    logger.exception(
+                                        'BinkP: failed parsing %s inside %s',
+                                        info.filename, fname)
+                            else:
+                                logger.info(
+                                    'BinkP: zip member %s in %s is not a '
+                                    'FTS-0001 packet — skipped',
+                                    info.filename, fname)
+                except _zipfile.BadZipFile as exc:
+                    logger.warning('BinkP: bad ZIP %s: %s', fname, exc)
+                return out
+            # Anything else → file for TIC scanner
+            try:
+                _os.makedirs(inbound_dir, exist_ok=True)
+                with open(_os.path.join(inbound_dir, fname), 'wb') as fh:
+                    fh.write(buf)
+                logger.info(
+                    'BinkP: stored unrecognised file %s (%d bytes) in %s '
+                    '— neither ZIP nor FTS-0001 packet, scanning for TIC',
+                    fname, len(buf), inbound_dir)
+            except OSError as exc:
+                logger.warning('BinkP: could not stash %s in %s: %s',
+                               fname, inbound_dir, exc)
+            return []
+
+        for _ in range(5000):
             try:
                 is_cmd, data = _recv_frame(self._sock)
             except (ConnectionError, OSError) as exc:
-                # Hub closed after our M_EOB without sending one of its
-                # own. Common with peers that have nothing inbound for
-                # us. Don't surface this as a poll error.
                 logger.info(
                     "BinkP: hub closed after our M_EOB (clean): %s", exc)
                 break
@@ -772,8 +847,15 @@ class BinkPClient:
                 if cmd == CMD_FILE:
                     parts = text.split()
                     pending_file = parts[0] if parts else 'unknown.pkt'
+                    # CMD_FILE is `name size mtime offset`
+                    try:
+                        pending_size = int(parts[1]) if len(parts) > 1 else 0
+                    except ValueError:
+                        pending_size = 0
                     pending_data = b''
-                    logger.debug("BinkP: receiving file %s", pending_file)
+                    logger.debug(
+                        "BinkP: receiving file %s (%d bytes expected)",
+                        pending_file, pending_size)
 
                 elif cmd == CMD_EOB:
                     logger.info("BinkP: end of batch from hub")
@@ -787,15 +869,30 @@ class BinkPClient:
                     pass  # info frame
 
             else:
-                # Data frame — belongs to current pending file
-                if pending_file is not None:
-                    pending_data += data
-                    if len(pending_data) >= 2 and pending_data[-2:] == b'\x00\x00':
-                        # Packet complete
-                        msgs = _parse_ftn_packet(pending_data)
+                if pending_file is None:
+                    continue
+                pending_data += data
+                if pending_size > 0 and len(pending_data) >= pending_size:
+                    msgs = _import_completed(pending_file,
+                                             pending_data[:pending_size])
+                    if msgs:
                         parsed.extend(msgs)
-                        self._send_cmd(CMD_GOT, pending_file)
-                        pending_file = None
-                        pending_data = b''
+                        logger.info(
+                            "BinkP: imported %d msg(s) from %s",
+                            len(msgs), pending_file)
+                    self._send_cmd(CMD_GOT, pending_file)
+                    pending_file = None
+                    pending_size = 0
+                    pending_data = b''
+
+        # Run TIC scan on anything we stashed during this batch.
+        try:
+            if _os.path.isdir(inbound_dir):
+                from .tic import scan_inbound
+                n = scan_inbound(inbound_dir)
+                if n:
+                    logger.info('BinkP: TIC scanner processed %d files', n)
+        except Exception:
+            logger.exception('BinkP: TIC scan after receive failed')
 
         return parsed

@@ -466,6 +466,14 @@ def create_app(config_name=None):
         from .msp.probe import start_probe_thread
         start_probe_thread(app)
 
+    # Self-registration against the federation hub. Off by default;
+    # peer sysops opt in by setting REGISTRY_SELF_REGISTER=true and
+    # filling in SYSOP_EMAIL / BBS_DOMAIN so the hub can email them
+    # the verify token.
+    if app.config.get('REGISTRY_SELF_REGISTER') and not app.config.get('TESTING', False):
+        from .msp.registry_client import start_self_register_thread
+        start_self_register_thread(app)
+
     return app
 
 

@@ -1,8 +1,160 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.19` — alpha 2** (internal v287.18,
+separately. Current release: **`v1.0a2.24` — alpha 2** (internal v287.23,
 May 2026). Previous: `v1.0a` — alpha 1 (internal v196).
+
+## v287.23 — Echomail import: PATH-loop misfire fix (May 2026)
+
+After v287.22 fixed the transaction rollback, 25k messages still didn't
+land — only ~2,300 made it. The log finally surfaced the culprit:
+
+> INFO — Echomail loop: dropping msg with our addr 3/231 in PATH
+
+The previous loop check rejected ANY inbound message whose PATH kludge
+contained our address. But per FTS-0004, the sending tosser
+**correctly** appends the destination address to PATH right before
+shipping. So Mystic was putting `1337:3/231` (us) into PATH on every
+single message destined for us — and our check dropped the entire
+feed as a "loop."
+
+Real echomail loop detection happens via:
+- `msg_id` deduplication (per-area unique constraint) — covers the
+  "same message arrived twice" case.
+- SEEN-BY checks during **forwarding** decisions — covers the
+  "don't relay back to a node that's already seen this" case.
+
+Neither needs a PATH-based import filter. Removed the check entirely.
+
+After this + the v287.22 savepoint fix + the v287.21 BinkP receive
+rewrite, rescanning TQWnet should land the full 25k+ message archive
+into the proper TQW_* areas.
+
+## v287.22 — Echomail import: per-message savepoint (May 2026)
+
+After v287.21 wired up correct BinkP receive, ~50,000 messages parsed
+out of a TQW rescan but **the per-area count stayed at 0**. The poller
+log showed:
+
+> ERROR — Poller loop error: This Session's transaction has been
+> rolled back due to a previous exception during flush. To begin a new
+> transaction with this Session, first issue Session.rollback().
+> Original exception was: Can't reconnect until invalid transaction is
+> rolled back.
+
+Root cause: `_import_message` was adding every message to the same
+SQLAlchemy session and the loop committed only after **all** messages
+landed. ONE bad row (length overflow, FK mismatch, unique-clash race
+on msg_id) raised on the next flush and left the session in 'invalid'
+state. Every subsequent add silently piled onto the broken transaction,
+and the final `commit()` rolled back the ENTIRE batch. 50k messages
+vanished even though every one of them was structurally a valid
+FTS-0001 packet.
+
+Fix: wrap each insert in a `with db.session.begin_nested():`
+(SAVEPOINT). A bad row now rolls back only its own savepoint; the
+outer transaction stays valid; the next message inserts cleanly. Plus:
+
+- Length-truncate the inbound fields to their column maxes
+  (`from_name[:120]`, `subject[:200]`, etc.) so the most common cause
+  of `IntegrityError` — a misbehaving sender exceeding column lengths
+  — silently truncates instead of crashing.
+- Force `db.session.flush()` inside the savepoint so the constraint
+  check happens NOW, not at commit-time half a batch later.
+- Log a single WARNING per skipped message with msgid + from-name +
+  the underlying exception, so a future "where did message X go?"
+  trace is one `grep` away.
+
+After this fix, rescanning the same 50k batch should land them in
+their proper areas. The user's existing %RESCAN gave no new messages
+because Mystic already shipped them once; need another %RESCAN to
+re-pack.
+
+## v287.21 — BinkP CLIENT: real fix for ZIP-wrapped mail (May 2026)
+
+**Root cause of the entire TQWnet-not-flowing saga.** v287.20 fixed the
+extension regex in the BinkP LISTENER (`binkp_server.py`) but the
+outbound POLLER uses `binkp.py` (the CLIENT side) which had a much
+worse bug: file-completion was detected by looking for `\x00\x00` at
+the tail of the data stream — the FTS-0001 raw-packet end marker.
+Mystic (and most modern hubs) ship echomail as ZIP-wrapped bundles
+which never end in `\x00\x00`. So:
+
+  - 5 files arrived ✓ (logged as `BinkP: receiving file ...`)
+  - 0 files reached the "completion → parse → ACK" path ✗
+  - 0 messages imported, 0 `M_GOT` ACKs sent to the hub
+  - `Poller: tqwnet — sent=0 received=0` every cycle
+
+Rewrote `_receive_messages` to:
+
+- Parse the byte-count from CMD_FILE (`name size mtime offset`) and
+  detect completion by byte-count, not by content marker.
+- Dispatch the completed file: raw FTS-0001 → parse; ZIP → unzip and
+  parse each packet member; anything else → stash to
+  `data/binkp/inbound` for the TIC scanner.
+- Log `BinkP: imported N msg(s) from <file>` so the sysop sees progress.
+- Send M_GOT promptly so the hub stops re-queueing.
+
+Same defensive content sniffing as the listener side. Loop budget
+raised from 500 to 5000 frames so very fat batches (a year-of-rescan
+in one session) don't truncate.
+
+**Recovery:** after deploying, send another `%RESCAN R=5000` to the
+TQW hub. Mystic will re-pack the 15,038 / 26,909 / whatever messages
+and this time they'll actually land.
+
+## v287.20 — BinkP: day-of-week bundle extensions + persistent inbound (May 2026)
+
+Mystic hubs deliver bundled mail to nodes using FTS-5003 day-of-week
+extensions: `.mo[0-z]` (Monday), `.tu[0-z]` (Tuesday), … `.fr[0-z]`
+(Friday), `.sa[0-z]`, `.su[0-z]`. Our acceptor regex only covered
+Wednesday (`.we[0-9a-f]`) — every other day's mail got silently
+filed to the inbound dir and ignored by the TIC scanner. StingRay's
+%RESCAN of 26,909 messages dropped on the floor as `.frk` through
+`.fro` (Friday bundles k-o).
+
+Also fixed two adjacent issues that made this hard to diagnose:
+
+- `BINKP_INBOUND_DIR` defaulted to `/tmp/binkp-inbound` — tmpfs on
+  most Linux distros, so unrecognized files vanished on every service
+  restart. New default: `data/binkp/inbound` (persistent).
+- No log line when a file failed to match anything. Now logs an INFO
+  line on every unrecognised file: filename, size, where it landed.
+  Future "where did my mail go?" debugging is one `journalctl | grep`
+  away.
+
+**Recovery for the v287.20 deploy:** after deploying + restarting, the
+sysop should send another %RESCAN to the hub — Mystic will re-bundle
+and the new regex will now accept the resulting `.fr*` files.
+
+## v287.19 — Federation self-registration client (May 2026)
+
+Day 4 of the federation build. Completes the federation loop:
+- v287.13 added the hub side (accept registrations).
+- v287.15 added the puller (read anetbbs.lst → BbsDirectoryEntry).
+- **v287.19 (this) adds the self-register / heartbeat client** so a
+  brand-new ANetBBS install can opt in to the federation directory by
+  flipping one flag in `.env`.
+
+How it works:
+
+1. Set `REGISTRY_SELF_REGISTER=true`, `BBS_DOMAIN=<your-public-hostname>`,
+   `SYSOP_EMAIL=<sysop-inbox>`, and the friendly fields (`SYSOP_NAME`,
+   `BBS_LOCATION`) in `.env`.
+2. On service start, a daemon thread POSTs `/registry/api/v1/register`
+   to the configured `REGISTRY_URL` (default `https://bbs.a-net.fyi`).
+3. The hub returns a verify token + URL, which we persist to
+   `data/registry_state.json` (sysop-private, not committed).
+4. Daily, the thread heartbeats to keep `last_seen` current. If the
+   hub 404s us (we got removed, or rehosted), it falls back to a
+   full re-register.
+5. New admin page `/admin/registry/self` shows: hub URL, our
+   metadata, last hub response, the verify URL (so the sysop can
+   click it without digging through gunicorn logs), and a "Register /
+   Heartbeat Now" button for manual ticks.
+
+Three new config keys: `SYSOP_NAME`, `SYSOP_EMAIL`, `BBS_LOCATION`.
+Required for self-registration; otherwise harmless metadata.
 
 ## v287.18 — Dialout: telnet IAC + raw key reads (May 2026)
 

@@ -252,8 +252,28 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     import re as _re
     import io as _io
     import zipfile as _zipfile
+    # Mail-file extension acceptance. Several FTN conventions coexist:
+    #   .pkt                — raw FTS-0001 packet (any tosser)
+    #   .[cdih]ut/.[cdih]rt — Mystic point flavors (crash/direct/
+    #                         immediate/hold, 'ut' = unzipped, 'rt' = ARC)
+    #   .t[a-z][0-9a-z]     — point-targeted bundles per Mystic naming
+    #   .(mo|tu|we|th|fr|sa|su)[0-9a-z]
+    #                       — FTS-5003 day-of-week bundled mail for nodes,
+    #                         where the prefix is the local day at the
+    #                         sending hub and the trailing char is a
+    #                         per-file sequence (0..9, then a..z = 36 per day).
+    # The OLD regex only matched `we<hex>` (Wednesday only) which made
+    # Friday-bundled mail (`.frk`, `.frl`, …) get silently filed as
+    # non-mail and dropped. Mystic hubs delivering to a node use these
+    # by default. Pattern below now covers all 7 days and 36-char
+    # sequence space.
     _PKT_EXT_RE = _re.compile(
-        r'^\.(?:pkt|[cdih]ut|[cdih]rt|t[a-z][0-9a-f]|we[0-9a-f])$',
+        r'^\.(?:'
+        r'pkt'
+        r'|[cdih]ut|[cdih]rt'
+        r'|t[cdih][0-9a-f]'
+        r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
+        r')$',
         _re.IGNORECASE)
 
     def _is_fts_packet(payload):
@@ -300,12 +320,27 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 else:
                     # Non-packet files (TIC manifests, hatched binaries, etc.)
                     # get written to inbound for later processing.
-                    inbound_dir = inbound_dir or os.environ.get(
-                        'BINKP_INBOUND_DIR', '/tmp/binkp-inbound')
+                    # Default landed in /tmp/ which is tmpfs on most distros
+                    # — files vanish on service restart. Default to data/
+                    # so the sysop can recover from a tossing miss.
+                    inbound_dir = inbound_dir or (
+                        os.environ.get('BINKP_INBOUND_DIR')
+                        or os.path.join(
+                            app.config.get('DATA_DIR') or 'data',
+                            'binkp', 'inbound'))
                     try:
                         os.makedirs(inbound_dir, exist_ok=True)
                         with open(os.path.join(inbound_dir, fname), 'wb') as f:
                             f.write(payload)
+                        # Visible-by-default log so the sysop can spot
+                        # mystery files that don't match the regex /
+                        # magic bytes — easier diagnosis than digging
+                        # at DEBUG level.
+                        logger.info(
+                            'BinkP: stored unrecognised file %s '
+                            '(%d bytes) in %s — neither ZIP nor FTS-0001 '
+                            'packet, scanning for TIC manifest',
+                            fname, len(payload), inbound_dir)
                     except OSError as exc:
                         logger.warning('Failed to write inbound file %s: %s',
                                        fname, exc)

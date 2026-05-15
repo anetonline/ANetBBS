@@ -616,6 +616,40 @@ def registry_delete(entry_id):
     return redirect(url_for('admin.registry_index'))
 
 
+@admin_bp.route('/registry/self')
+@login_required
+@admin_required
+def registry_self():
+    """Status of THIS BBS's self-registration against the upstream hub.
+    Shows the last register/heartbeat response so the sysop can copy
+    the verify URL or see why we're not listed."""
+    from ..msp.registry_client import _load_state, _our_metadata
+    state = _load_state(current_app)
+    meta = _our_metadata(current_app)
+    return render_template('admin/registry_self.html',
+                           state=state,
+                           meta=meta,
+                           enabled=current_app.config.get('REGISTRY_SELF_REGISTER'),
+                           hub=current_app.config.get('REGISTRY_URL'))
+
+
+@admin_bp.route('/registry/self/register-now', methods=['POST'])
+@login_required
+@admin_required
+def registry_self_register_now():
+    """Force a self-register against the hub right now (useful after
+    changing SYSOP_EMAIL or BBS metadata so the new info propagates
+    without waiting for the daily heartbeat)."""
+    from ..msp.registry_client import _tick
+    try:
+        _tick(current_app._get_current_object())
+        flash('Self-registration tick triggered. Check the status below '
+              'for the hub response.', 'success')
+    except Exception as exc:
+        flash(f'Self-registration failed: {exc}', 'danger')
+    return redirect(url_for('admin.registry_self'))
+
+
 @admin_bp.route('/registry/<int:entry_id>/edit', methods=['POST'])
 @login_required
 @admin_required

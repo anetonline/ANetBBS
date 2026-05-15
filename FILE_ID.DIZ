@@ -1,4 +1,4 @@
-ANetBBS v1.0a2.19 - Alpha 2 - Modern BBS
+ANetBBS v1.0a2.24 - Alpha 2 - Modern BBS
 -----------------------------------------
 Web (Flask+SocketIO), telnet, SSH, rlogin,
 FTP front-ends sharing one user database.

@@ -107,6 +107,16 @@ class Config:
         'REGISTRY_PROBE_INTERVAL_SEC', '3600'))
     REGISTRY_PROBE_FAILURE_THRESHOLD = int(os.environ.get(
         'REGISTRY_PROBE_FAILURE_THRESHOLD', '3'))
+    REGISTRY_HEARTBEAT_INTERVAL_SEC = int(os.environ.get(
+        'REGISTRY_HEARTBEAT_INTERVAL_SEC', '86400'))   # daily
+
+    # Sysop / BBS metadata used by self-registration against the
+    # federation hub. SYSOP_EMAIL is the contact_email that receives
+    # the verify token; SYSOP_NAME + BBS_LOCATION show up in the
+    # public anetbbs.lst entry.
+    SYSOP_NAME = os.environ.get('SYSOP_NAME', '')
+    SYSOP_EMAIL = os.environ.get('SYSOP_EMAIL', '')
+    BBS_LOCATION = os.environ.get('BBS_LOCATION', '')
     
     # Web Server
     WEB_HOST = os.environ.get('WEB_HOST', '0.0.0.0')

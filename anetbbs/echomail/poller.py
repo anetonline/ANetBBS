@@ -318,20 +318,20 @@ def _import_message(network, msg_data: dict) -> int:
         return _import_netmail(network, msg_data)
 
     # ----------------- Echomail -----------------
-    # PATH dupe detection: if our address is already in PATH, this is a loop.
-    our_short = ''
-    if network.our_address:
-        try:
-            our_short = '/'.join(network.our_address.split(':', 1)[1].split('.')[0:1])
-            # our_short is now like "218/700" (net/node)
-        except Exception:
-            our_short = ''
-    if our_short:
-        for entry in (msg_data.get('path') or []):
-            if our_short in entry.split():
-                logger.info("Echomail loop: dropping msg with our addr %s in PATH",
-                            our_short)
-                return -1
+    # NO PATH-based loop detection on import. The old check rejected any
+    # message whose PATH contained our address — but Mystic (and every
+    # FTS-0004-compliant tosser) **correctly** appends the destination
+    # address to PATH right before sending. So every single message
+    # legitimately destined for us has our address in PATH, and the
+    # earlier check loop-dropped the entire feed.
+    #
+    # True echomail loop detection happens via:
+    #   - msg_id deduplication below (per-area uniqueness)
+    #   - SEEN-BY checks during FORWARDING decisions, not on import
+    #
+    # The TQWnet rescan of ~25k messages from `1337:3/100` was getting
+    # entirely loop-dropped here because Mystic put `3/231` (us) in
+    # PATH before shipping — exactly as the spec says it must.
 
     # Find the echo area. Behavior differs by network type:
     # - QWK: hub publishes its conference list in CONTROL.DAT, so it's safe
@@ -383,30 +383,52 @@ def _import_message(network, msg_data: dict) -> int:
         if existing:
             return 0
 
-    msg = EchomailMessage(
-        area_id=area.id,
-        network_id=network.id,
-        msg_id=msg_id,
-        reply_id=msg_data.get('reply_id'),
-        from_name=msg_data.get('from_name', ''),
-        from_address=msg_data.get('from_address', ''),
-        to_name=msg_data.get('to_name', 'All'),
-        to_address=msg_data.get('to_address', ''),
-        subject=msg_data.get('subject', '(no subject)'),
-        body=msg_data.get('body', ''),
-        tear_line=msg_data.get('tear_line'),
-        origin_line=msg_data.get('origin_line'),
-        chrs=msg_data.get('chrs') or 'CP437 2',
-        kludges=_json.dumps(msg_data.get('kludges') or []),
-        seenby=_json.dumps(msg_data.get('seenby') or []),
-        path=_json.dumps(msg_data.get('path') or []),
-        direction='inbound',
-    )
-    db.session.add(msg)
-
-    # Update area stats
-    area.total_messages = (area.total_messages or 0) + 1
-    area.last_message_at = datetime.utcnow()
+    # CRITICAL: wrap the insert in a nested transaction (SAVEPOINT) so
+    # one bad message in a 50k-batch rescan doesn't poison the whole
+    # session. Without this, a single row that violates a constraint
+    # (length overflow, FK miss, unique-clash race) propagates an
+    # IntegrityError on the next flush — leaving the SQLAlchemy session
+    # in 'invalid' state. Subsequent _import_message calls then fail
+    # with "Can't reconnect until invalid transaction is rolled back",
+    # the outer commit collapses, and the ENTIRE batch is lost (which
+    # is exactly the symptom of the 50k-message TQWnet rescan that
+    # disappeared into the void on first attempt).
+    try:
+        with db.session.begin_nested():
+            msg = EchomailMessage(
+                area_id=area.id,
+                network_id=network.id,
+                msg_id=msg_id,
+                reply_id=msg_data.get('reply_id'),
+                from_name=(msg_data.get('from_name') or '')[:120],
+                from_address=(msg_data.get('from_address') or '')[:60],
+                to_name=(msg_data.get('to_name') or 'All')[:120],
+                to_address=(msg_data.get('to_address') or '')[:60],
+                subject=(msg_data.get('subject') or '(no subject)')[:200],
+                body=msg_data.get('body', ''),
+                tear_line=(msg_data.get('tear_line') or '')[:200] or None,
+                origin_line=(msg_data.get('origin_line') or '')[:200] or None,
+                chrs=(msg_data.get('chrs') or 'CP437 2')[:40],
+                kludges=_json.dumps(msg_data.get('kludges') or []),
+                seenby=_json.dumps(msg_data.get('seenby') or []),
+                path=_json.dumps(msg_data.get('path') or []),
+                direction='inbound',
+            )
+            db.session.add(msg)
+            # Force flush inside the savepoint so any IntegrityError
+            # surfaces NOW and gets contained by the savepoint, not
+            # leaked to the outer transaction at final-commit time.
+            db.session.flush()
+            # Update area stats — also inside the savepoint so failure
+            # rolls these back too (no orphaned counter increment).
+            area.total_messages = (area.total_messages or 0) + 1
+            area.last_message_at = datetime.utcnow()
+    except Exception as exc:
+        # Savepoint already rolled back; outer session is still valid.
+        logger.warning(
+            "Echomail: skipping malformed msg in %s (msgid=%r from=%r): %s",
+            area_tag, msg_id, msg_data.get('from_name', ''), exc)
+        return -1
 
     return 1
 
