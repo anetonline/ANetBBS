@@ -1,0 +1,38 @@
+## Alpha Early Release Issue Log
+
+### Issue #:
+**Title:**  
+**Date Found:**  
+**Reported By:**  
+
+**Summary:**  
+Brief description of the problem.
+
+**Environment:**  
+- BBS software version:
+- Client/terminal used:
+- OS/platform:
+- Connection type:
+
+**Steps to Reproduce:**  
+1.  
+2.  
+3.  
+
+**Expected Behavior:**  
+What should happen.
+
+**Actual Behavior:**  
+What actually happens.
+
+**Impact:**  
+How serious the issue is and who it affects.
+
+**Notes / Suspected Cause:**  
+Any clues, patterns, or guesses about the cause.
+
+**Status:**  
+- Open / In Progress / Resolved / Deferred
+
+**Resolution:**  
+What was changed to fix it, if applicable.
