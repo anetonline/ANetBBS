@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    #chat-messages {
+        height: 500px;
+        overflow-y: scroll;
+        background-color: #000;
+        border: 1px solid #00ff00;
+        padding: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .chat-message {
+        margin-bottom: 10px;
+        padding: 8px;
+        background-color: #0a0a0a;
+        border-left: 3px solid #00ff00;
+    }
+    
+    .chat-message-system {
+        border-left-color: #ffff00;
+        font-style: italic;
+    }
+    
+    .chat-timestamp {
+        font-size: 0.8em;
+        opacity: 0.7;
+    }
+    
+    .chat-username {
+        font-weight: bold;
+        color: #00ff00;
+    }
+    
+    #chat-input {
+        background-color: #000;
+        border: 1px solid #00ff00;
+        color: #00ff00;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-chat-dots"></i> Real-time Chat
+    </div>
+    <div class="card-body">
+        <!-- Chat Messages Area -->
+        <div id="chat-messages">
+            {% for msg in recent_messages %}
+                <div class="chat-message">
+                    <span class="chat-timestamp">[{{ msg.created_at.strftime('%H:%M:%S') }}]</span>
+                    <span class="chat-username">{{ msg.username }}</span>:
+                    <span class="chat-text">{{ msg.message }}</span>
+                </div>
+            {% endfor %}
+        </div>
+        
+        <!-- Chat Input Form -->
+        <div class="input-group">
+            <input type="text" id="chat-input" class="form-control" placeholder="Type your message..." autocomplete="off">
+            <button class="btn btn-primary" type="button" id="send-button">
+                <i class="bi bi-send"></i> Send
+            </button>
+        </div>
+        
+        <div class="mt-2">
+            <small>Press Enter to send. Connected as: <strong>{{ current_user.username }}</strong></small>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+    // Connect to Socket.IO
+    const socket = io('/chat');
+    
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    
+    // Auto-scroll to bottom
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Add message to chat
+    function addMessage(username, message, timestamp, isSystem = false) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'chat-message' + (isSystem ? ' chat-message-system' : '');
+        
+        const time = new Date(timestamp).toLocaleTimeString('en-US', { hour12: false });
+        
+        if (isSystem) {
+            messageDiv.innerHTML = `
+                <span class="chat-timestamp">[${time}]</span>
+                <span class="chat-text">${message}</span>
+            `;
+        } else {
+            messageDiv.innerHTML = `
+                <span class="chat-timestamp">[${time}]</span>
+                <span class="chat-username">${username}</span>:
+                <span class="chat-text">${message}</span>
+            `;
+        }
+        
+        chatMessages.appendChild(messageDiv);
+        scrollToBottom();
+    }
+    
+    // Send message
+    function sendMessage() {
+        const message = chatInput.value.trim();
+        if (message) {
+            socket.emit('send_message', { message: message });
+            chatInput.value = '';
+        }
+    }
+    
+    // Event listeners
+    sendButton.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+    
+    // Socket.IO event handlers
+    socket.on('connect', () => {
+        console.log('Connected to chat');
+        scrollToBottom();
+    });
+    
+    socket.on('new_message', (data) => {
+        addMessage(data.username, data.message, data.timestamp);
+    });
+    
+    socket.on('user_joined', (data) => {
+        addMessage('', data.message, data.timestamp, true);
+    });
+    
+    socket.on('user_left', (data) => {
+        addMessage('', data.message, data.timestamp, true);
+    });
+    
+    // Focus input on load
+    chatInput.focus();
+</script>
+{% endblock %}

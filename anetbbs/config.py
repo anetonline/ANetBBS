@@ -154,7 +154,21 @@ class Config:
     
     # Data directory
     DATA_DIR = os.path.join(BASE_DIR, 'data')
-    
+
+    # Public Downloads — sysop drops release tarballs / utilities into
+    # this directory and they auto-appear on /downloads/. Defaults to
+    # {DATA_DIR}/releases. Created on first use if missing.
+    DOWNLOADS_ENABLED = os.environ.get(
+        'DOWNLOADS_ENABLED', 'true').lower() == 'true'
+    DOWNLOADS_DIR = os.environ.get(
+        'DOWNLOADS_DIR', os.path.join(BASE_DIR, 'data', 'releases'))
+    # Filename whitelist — only matching files appear on the page. The
+    # default covers every archive format BBS sysops ship + checksum
+    # sidecars. Comma-separated extensions; case-insensitive.
+    DOWNLOADS_EXTENSIONS = os.environ.get(
+        'DOWNLOADS_EXTENSIONS',
+        'tar.gz,tgz,zip,7z,bz2,xz,rar,iso,img,asc,sig,sha256,md5,txt,nfo,diz')
+
     # Inter-BBS Instant Messaging (MSP / RFC 1312)
     MSP_ENABLED = True
     MSP_BIND_HOST = '0.0.0.0'

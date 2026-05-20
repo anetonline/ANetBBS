@@ -224,6 +224,77 @@ def disconnect_session(session_id):
 
 
 # ---------------------------------------------------------------------------
+# TW2 — universe reset
+# ---------------------------------------------------------------------------
+# Trade Wars 2002 keeps every sector, player, port, planet, team, and the
+# Cabal record in one JSON file at
+# {INSTALL_DIR}/data/sbbs_doors/tw2/db/tw2.json (path resolved at runtime
+# via ANETBBS_TW2_DB_DIR — see games/door_runner.py). On first launch
+# tw2.js notices the file is missing and re-runs the universe build
+# cascade. So a "reset" is just deleting that JSON plus the game.ini.
+# Sysop use-cases: a botched test, exploring init bugs, wiping after
+# unsupervised playtesting before a public launch.
+
+import os as _os
+import shutil as _shutil
+
+
+def _tw2_db_dir():
+    """Resolve the tw2 db dir the same way door_runner.py does."""
+    install_root = current_app.config.get('INSTALL_DIR') or \
+        _os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__))))
+    return _os.path.join(install_root, 'data', 'sbbs_doors', 'tw2', 'db')
+
+
+def _tw2_legacy_db_dir():
+    """Pre-v1.0a2.39 location, inside the source tree. We wipe both so a
+    sysop installing the fix doesn't end up running off stale state."""
+    install_root = current_app.config.get('INSTALL_DIR') or \
+        _os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__))))
+    return _os.path.join(install_root, 'anetbbs', 'games',
+                         'sbbs_doors', 'tw2', 'localhost')
+
+
+def _tw2_game_ini():
+    install_root = current_app.config.get('INSTALL_DIR') or \
+        _os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__))))
+    return _os.path.join(install_root, 'anetbbs', 'games',
+                         'sbbs_doors', 'tw2', 'game.ini')
+
+
+@games_admin_bp.route('/tw2/reset-universe', methods=['POST'])
+@_admin_required
+def tw2_reset_universe():
+    wiped = []
+    for d in (_tw2_db_dir(), _tw2_legacy_db_dir()):
+        if not _os.path.isdir(d):
+            continue
+        try:
+            for f in _os.listdir(d):
+                if f.endswith(('.json', '.json.tmp')):
+                    _os.remove(_os.path.join(d, f))
+                    wiped.append(_os.path.join(d, f))
+        except OSError as exc:
+            logger.warning('tw2 reset: cannot scan %s: %s', d, exc)
+    ini = _tw2_game_ini()
+    if _os.path.isfile(ini):
+        try:
+            _os.remove(ini)
+            wiped.append(ini)
+        except OSError as exc:
+            logger.warning('tw2 reset: cannot remove %s: %s', ini, exc)
+    if wiped:
+        flash(f'Trade Wars universe reset — {len(wiped)} file(s) removed. '
+              'Next launch will re-generate the universe.', 'success')
+    else:
+        flash('Nothing to reset — no TW2 state on disk yet.', 'info')
+    return redirect(url_for('games_admin.dashboard'))
+
+
+# ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
 

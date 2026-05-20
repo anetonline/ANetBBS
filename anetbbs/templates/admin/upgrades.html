@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}ANetBBS Upgrades{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .upg-banner {
+    background: linear-gradient(135deg, #1e5631 0%, #2d8048 100%);
+    color: #fff; border-radius: 0.75rem; padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem; box-shadow: 0 2px 12px rgba(0,0,0,.25);
+  }
+  .upg-banner h1 { margin: 0; font-weight: 600; letter-spacing: .01em; }
+  .upg-card { border-radius: .75rem; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+  .upg-version { font-family: monospace; font-size: 1.2rem; }
+  .upg-newer { color: #2d8048; font-weight: 700; }
+  .upg-current { color: #6c757d; }
+  .upg-log {
+    background: #1e1e1e; color: #d4d4d4;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: .85rem; line-height: 1.45;
+    padding: 1rem; border-radius: .5rem;
+    max-height: 540px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .upg-log .line { padding: 0 .25rem; min-height: 1.2em; }
+  .upg-log .ts   { color: #6c757d; margin-right: .5rem; }
+  .upg-log .step {
+    color: #f4d56b; font-weight: 700;
+    border-top: 1px solid #3a3a3a; margin-top: .5rem; padding-top: .35rem;
+  }
+  .upg-log .step:first-child { border-top: none; margin-top: 0; }
+  .upg-log .ok   { color: #6ed16e; }
+  .upg-log .skip { color: #c79324; }
+  .upg-log .fail { color: #ff7575; }
+  .upg-log .info { color: #66c2ff; }
+  .upg-log .warn { color: #f0b04a; }
+  .upg-log .wrap { color: #b58cf2; font-style: italic; }
+  .upg-log .complete {
+    color: #6ed16e; font-weight: 700;
+    background: #15281a; padding: .15rem .25rem;
+    /* No borders — update.sh already draws ╔═╗║╚═╝ box characters,
+       which read as their own frame against the green background. A
+       CSS border on top of that produces three stacked boxes. */
+  }
+  /* Tuck the first/last lines of the banner together. */
+  .upg-log .complete + .complete { padding-top: 0; }
+  .upg-log .complete:has(+ :not(.complete)) { padding-bottom: 0; }
+  .upg-log .exit { color: #b58cf2; font-weight: 700; margin-top: .5rem; }
+  .upg-log .raw  { color: #d4d4d4; }
+  .upg-meta { font-size: .85rem; color: #6c757d; }
+  .upg-meta code { background: #f1f3f5; padding: 0 .25rem; border-radius: .2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+
+  <div class="upg-banner">
+    <h1><i class="bi bi-arrow-up-circle"></i> ANetBBS Upgrades</h1>
+    <div class="text-white-50 mt-1">Sysop-only. Polls the federation hub for new releases.</div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Current version card -->
+    <div class="col-md-6">
+      <div class="card upg-card h-100">
+        <div class="card-header bg-light">
+          <strong>Running version</strong>
+        </div>
+        <div class="card-body">
+          <div class="upg-version upg-current">{{ current }}</div>
+          <div class="upg-meta mt-2">
+            From <code>VERSION</code> at the install root.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upstream card -->
+    <div class="col-md-6">
+      <div class="card upg-card h-100">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+          <strong>Upstream latest</strong>
+          <button id="upg-check-btn" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-arrow-repeat"></i> Re-check
+          </button>
+        </div>
+        <div class="card-body" id="upg-upstream-body">
+          {% if upstream_error %}
+            <div class="text-danger">{{ upstream_error }}</div>
+            <div class="upg-meta mt-2">Tried <code>{{ upstream_url }}</code></div>
+          {% elif upstream %}
+            <div class="upg-version {% if newer %}upg-newer{% else %}upg-current{% endif %}">
+              {{ upstream.version }}
+              {% if newer %}<span class="badge bg-success ms-2">newer</span>
+              {% elif upstream.version == current %}<span class="badge bg-secondary ms-2">same</span>
+              {% else %}<span class="badge bg-secondary ms-2">older</span>{% endif %}
+            </div>
+            <div class="upg-meta mt-2">
+              {{ (upstream.size / 1024 / 1024) | round(1) }} MB &middot;
+              published {{ upstream.published_at }}<br>
+              sha256 <code>{{ upstream.sha256[:16] }}…</code>
+            </div>
+          {% else %}
+            <div class="text-muted">No data — click "Re-check".</div>
+          {% endif %}
+        </div>
+        {% if newer %}
+        <div class="card-footer bg-white">
+          <button id="upg-install-btn" class="btn btn-success"
+                  data-version="{{ upstream.version }}">
+            <i class="bi bi-download"></i>
+            Download &amp; install {{ upstream.version }}
+          </button>
+          <div class="upg-meta mt-2">
+            Runs <code>update.sh</code>. Web service restarts mid-flight —
+            the log panel below stays accessible after gunicorn comes back.
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if rollback_candidates %}
+  <!-- Rollback drawer -->
+  <div class="card upg-card mt-3">
+    <div class="card-header bg-light">
+      <strong><i class="bi bi-arrow-counterclockwise"></i> Roll back</strong>
+      <span class="upg-meta ms-2">— previous releases on disk</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Version</th><th>Size</th><th>Built</th>
+            <th class="text-end"></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rollback_candidates %}
+          <tr>
+            <td class="upg-version">{{ r.version }}</td>
+            <td>{{ (r.size / 1024 / 1024) | round(1) }} MB</td>
+            <td class="upg-meta">{{ r.mtime_str }}</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-warning upg-rollback-btn"
+                      data-version="{{ r.version }}">
+                Roll back to {{ r.version }}
+              </button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer upg-meta">
+      Reinstalls an older tarball already in <code>data/releases/</code>.
+      Same flow as Install — sha256 verified locally before extract.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Install log -->
+  <div class="card upg-card mt-3">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+      <strong>Install log</strong>
+      <span id="upg-log-status" class="upg-meta"></span>
+    </div>
+    <div class="card-body p-2">
+      <div id="upg-log" class="upg-log">(no install in progress)</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const checkBtn = document.getElementById('upg-check-btn');
+  const installBtn = document.getElementById('upg-install-btn');
+  const logBox = document.getElementById('upg-log');
+  const logStatus = document.getElementById('upg-log-status');
+
+  // Pull the CSRF token rendered into <meta> by base.html. POST routes
+  // protected by Flask-WTF reject any request without it AND respond
+  // with HTML, which would crash any caller doing response.json().
+  const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  function csrfHeaders() {
+    return CSRF ? {'X-CSRFToken': CSRF} : {};
+  }
+
+  // Robust JSON parsing — when CSRF/permission/etc. returns HTML,
+  // surface the status + first chunk so debugging doesn't require
+  // opening devtools.
+  async function fetchJson(url, opts) {
+    const o = Object.assign({credentials: 'same-origin'}, opts || {});
+    o.headers = Object.assign({}, csrfHeaders(), o.headers || {});
+    const r = await fetch(url, o);
+    const text = await r.text();
+    try {
+      return {ok: r.ok, status: r.status, json: JSON.parse(text)};
+    } catch (_) {
+      return {ok: false, status: r.status,
+              json: {ok: false,
+                     error: `HTTP ${r.status} returned non-JSON (${text.slice(0, 200)})`}};
+    }
+  }
+
+  // Per-line classifier. The log is structurally consistent enough
+  // that a handful of prefix/regex tests give us readable output
+  // without needing the server to emit anything special.
+  function classifyLine(line) {
+    // Strip leading whitespace for matching, but render with it.
+    const s = line.replace(/^\s+/, '');
+    let cls = 'raw', body = line, tsHtml = '';
+    // Optional ISO timestamp prefix from the Python runner.
+    const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+Z\]\s*(.*)$/);
+    if (tsMatch) {
+      tsHtml = '<span class="ts">' + tsMatch[2] + '</span>';
+      body = tsMatch[3];
+    } else {
+      body = line;
+    }
+    const bs = body.replace(/^\s+/, '');
+    if (/^── Step \d+\/\d+:/.test(bs))                cls = 'step';
+    else if (/^\[upgrade\]/.test(bs))                  cls = 'wrap';
+    else if (/^\[INFO\]/.test(bs))                     cls = 'info';
+    else if (/^\[WARN\]/.test(bs) || /^⏭/.test(bs))   cls = 'skip';
+    else if (/^\[FAIL\]/.test(bs) || /^❌/.test(bs))   cls = 'fail';
+    else if (/^✅/.test(bs) || /^SCHEMA_OK/.test(bs))  cls = 'ok';
+    else if (/^exit \d+$/.test(bs))                    cls = 'exit';
+    else if (/Update Complete!|╔|╚|║.*Update Complete/.test(bs)) cls = 'complete';
+    // <div> is block by default — independent of CSS being applied,
+    // each entry is guaranteed to render on its own row.
+    return '<div class="line ' + cls + '">' + tsHtml + escapeHtml(body) + '</div>';
+  }
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function setLog(text, running) {
+    if (text && text.length) {
+      // Render line by line. Empty trailing line from .split keeps
+      // the trailing-newline scroll position visually consistent.
+      const lines = text.split('\n');
+      logBox.innerHTML = lines.map(classifyLine).join('');
+    }
+    if (running) {
+      logStatus.innerHTML = '<span class="badge bg-warning text-dark">installing…</span>';
+    } else if (logBox.textContent && logBox.textContent !== '(no install in progress)') {
+      logStatus.innerHTML = '<span class="badge bg-secondary">idle</span>';
+    } else {
+      logStatus.innerHTML = '';
+    }
+  }
+
+  // The poll has to survive Step 3's `systemctl stop anetbbs-web` —
+  // gunicorn dies, our fetch fails, and the wrapper (in its own
+  // scope) keeps logging. We need to keep retrying through the
+  // outage until gunicorn comes back AND the log says "exit N".
+  // Stops only when the log contains the wrapper's final exit line
+  // AND running is false, OR after a hard ceiling (30 minutes).
+  let _pollStart = null;
+  function pollLog() {
+    if (_pollStart === null) _pollStart = Date.now();
+    fetch('{{ url_for("upgrades_admin.log_tail") }}',
+          {credentials: 'same-origin'})
+      .then(r => r.text().then(t => ({status: r.status, text: t})))
+      .then(({status, text}) => {
+        if (status !== 200) {
+          // gunicorn mid-restart returns 502 from nginx, 5xx if it
+          // happens to be down outside of nginx, etc. Stay calm,
+          // try again in a moment.
+          logStatus.innerHTML = '<span class="badge bg-warning text-dark">web restarting (HTTP ' + status + ')…</span>';
+          throw new Error('http ' + status);
+        }
+        const j = JSON.parse(text);
+        setLog(j.log || '', !!j.running);
+        logBox.scrollTop = logBox.scrollHeight;
+        // The wrapper writes "exit N" as the very last line when
+        // update.sh returns. That's our terminal condition.
+        const done = !j.running && /\nexit \d+\s*$/.test(j.log || '');
+        if (done) {
+          logStatus.innerHTML = '<span class="badge bg-success">install complete — reload to see new version</span>';
+          return;  // stop polling
+        }
+        setTimeout(pollLog, 2000);
+      })
+      .catch(_ => {
+        // Network or HTTP error — keep retrying until the ceiling.
+        if (Date.now() - _pollStart > 30 * 60 * 1000) {
+          logStatus.innerHTML = '<span class="badge bg-danger">gave up polling after 30 min — check the server</span>';
+          return;
+        }
+        setTimeout(pollLog, 3000);
+      });
+  }
+
+  if (checkBtn) {
+    checkBtn.addEventListener('click', async () => {
+      checkBtn.disabled = true;
+      try {
+        await fetchJson('{{ url_for("upgrades_admin.check") }}', {method: 'POST'});
+        // Simplest is to reload — keeps server-rendered diff in one place.
+        window.location.reload();
+      } finally {
+        checkBtn.disabled = false;
+      }
+    });
+  }
+
+  if (installBtn) {
+    installBtn.addEventListener('click', async () => {
+      if (!confirm('Install ' + installBtn.dataset.version + ' now? '
+                 + 'The web service will restart and you may need to '
+                 + 'reload this page when it comes back up.')) return;
+      installBtn.disabled = true;
+      installBtn.textContent = 'Installing…';
+      const fd = new FormData();
+      fd.append('version', installBtn.dataset.version);
+      const {json: j} = await fetchJson('{{ url_for("upgrades_admin.install") }}',
+                                        {method: 'POST', body: fd});
+      if (!j.ok) {
+        alert('Install refused: ' + (j.error || 'unknown'));
+        installBtn.disabled = false;
+        installBtn.textContent = 'Download & install';
+        return;
+      }
+      // Start polling — the request returns immediately and the
+      // wrapper runs detached so we can follow along.
+      pollLog();
+    });
+  }
+
+  document.querySelectorAll('.upg-rollback-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const v = btn.dataset.version;
+      if (!confirm('Roll back to ' + v + '? '
+                 + 'The web service will restart. Your data is unchanged; '
+                 + 'only the code reverts.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Rolling back…';
+      const fd = new FormData();
+      fd.append('version', v);
+      const {json: j} = await fetchJson('{{ url_for("upgrades_admin.rollback") }}',
+                                        {method: 'POST', body: fd});
+      if (!j.ok) {
+        alert('Rollback refused: ' + (j.error || 'unknown'));
+        btn.disabled = false;
+        btn.textContent = 'Roll back to ' + v;
+        return;
+      }
+      pollLog();
+    });
+  });
+
+  // If the page loaded while an install is mid-flight, jump straight to log poll.
+  pollLog();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Peer health{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .ph-banner { background: linear-gradient(135deg,#243b6a,#3a5fb2); color:#fff; border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,.25); }
+  .ph-card { border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.08); }
+  .ph-ok   { color:#2d8048; font-weight:700; }
+  .ph-bad  { color:#b62c2c; font-weight:700; }
+  .ph-warn { color:#c79324; font-weight:700; }
+  .ph-meta { color:#6c757d; font-size:.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="ph-banner">
+    <h1 class="m-0"><i class="bi bi-diagram-3"></i> Peer health</h1>
+    <div class="text-white-50 mt-1">
+      Federation-hub liveness lens. Heartbeats arrive over HTTP from
+      registered peers; probes are outbound SYSTAT round-trips initiated by this hub.
+    </div>
+  </div>
+
+  {% if not is_hub %}
+    <div class="alert alert-info">
+      This install is not configured as a federation hub
+      (<code>REGISTRY_MODE_ENABLED=false</code>). Only the designated hub
+      probes peers and shows liveness here.
+    </div>
+  {% elif not rows %}
+    <div class="alert alert-warning">
+      No registered peers yet. Peers POST to <code>/registry/api/v1/register</code> to join — share that URL.
+    </div>
+  {% else %}
+  <div class="card ph-card">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Host</th><th>Name</th><th>Sysop</th>
+          <th>Listed</th>
+          <th>Heartbeat</th><th>Probe</th><th>Fails</th>
+          <th class="text-end">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr id="peer-{{ r.id }}">
+          <td><code>{{ r.host }}</code></td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.sysop or '—' }}</td>
+          <td>
+            {% if r.is_listed %}
+              <span class="ph-ok">yes</span>
+            {% elif r.is_approved and r.is_verified %}
+              <span class="ph-warn">paused</span>
+            {% else %}
+              <span class="ph-bad">no</span>
+            {% endif %}
+          </td>
+          <td><span class="ph-meta">{{ r.last_heartbeat_str }}</span></td>
+          <td>
+            {% if r.last_probe_ok %}
+              <span class="ph-ok">{{ r.last_probe_str }}</span>
+            {% else %}
+              <span class="ph-bad">{{ r.last_probe_str }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if r.failures and r.failures > 0 %}
+              <span class="ph-bad">{{ r.failures }}</span>
+            {% else %}
+              <span class="ph-meta">0</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary ph-probe-btn"
+                    data-id="{{ r.id }}">
+              Probe now
+            </button>
+          </td>
+        </tr>
+        <tr id="peer-{{ r.id }}-detail" style="display:none;">
+          <td colspan="8" class="ph-meta"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+// CSRF token from the meta tag base.html exposes. POST routes guarded
+// by Flask-WTF reject any request that lacks this AND respond with
+// HTML, so the response.json() call below would otherwise crash with
+// the "Unexpected token '<', '<!doctype '..." error.
+const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+document.querySelectorAll('.ph-probe-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const detailRow = document.getElementById('peer-' + id + '-detail');
+    const detailCell = detailRow.querySelector('td');
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = 'Probing…';
+    try {
+      const r = await fetch('{{ url_for("peers_health.probe_now", peer_id=0) }}'.replace('/0/', '/' + id + '/'),
+                            {method: 'POST',
+                             headers: CSRF ? {'X-CSRFToken': CSRF} : {},
+                             credentials: 'same-origin'});
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); }
+      catch (_) {
+        j = {ok: false,
+             detail: 'HTTP ' + r.status + ' returned non-JSON (' + text.slice(0, 200) + ')',
+             failures: '?'};
+      }
+      detailRow.style.display = '';
+      detailCell.innerHTML = j.ok
+        ? `<span class="ph-ok">${j.ms.toFixed(1)} ms</span> — ${escapeHtml(j.detail)}`
+        : `<span class="ph-bad">FAIL</span> — ${escapeHtml(j.detail)} (consecutive: ${j.failures})`;
+    } catch (e) {
+      detailRow.style.display = '';
+      detailCell.innerHTML = '<span class="ph-bad">probe request failed: ' + escapeHtml(e.message) + '</span>';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  });
+});
+function escapeHtml(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+{% endblock %}

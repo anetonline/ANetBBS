@@ -383,10 +383,25 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
             "try {\n"
             + user_src + "\n"
             "} catch (e) {\n"
+            "  var trace = (e && e.stack) ? e.stack : String(e);\n"
             "  var msg = '\\r\\n\\r\\n--- Door script error ---\\r\\n'\n"
-            "          + (e && e.stack ? e.stack : String(e))\n"
+            "          + trace\n"
             "          + '\\r\\n\\r\\nPress any key to return to BBS...';\n"
             "  process.stdout.write(msg);\n"
+            "  // Also write the trace to logs/door-errors.log on the server\n"
+            "  // so the sysop can diagnose without depending on the user to\n"
+            "  // copy-paste. ANETBBS_DOOR_ERROR_LOG is set by door_runner.\n"
+            "  try {\n"
+            "    var elog = process.env.ANETBBS_DOOR_ERROR_LOG;\n"
+            "    if (elog) {\n"
+            "      var stamp = new Date().toISOString();\n"
+            "      var slug = process.env.ANETBBS_DOOR_SLUG || '?';\n"
+            "      var who  = process.env.BBS_USERNAME || '?';\n"
+            "      var line = '\\n[' + stamp + '] door=' + slug\n"
+            "               + ' user=' + who + '\\n' + trace + '\\n';\n"
+            "      _fs.appendFileSync(elog, line);\n"
+            "    }\n"
+            "  } catch(_) {}\n"
             "  try { var b = Buffer.alloc(1); _fs.readSync(0, b, 0, 1); } catch(_) {}\n"
             "  process.exit(1);\n"
             "}\n"
@@ -396,6 +411,44 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         tmp.write(combined)
         tmp.close()
         sn_cwd = os.path.dirname(script)
+
+        # Server-side door-crash log. The embedded catch handler appends
+        # to this file on any uncaught Synchronet-compat door error, so
+        # sysops don't have to wait for users to report breakage. Path
+        # under logs/ so it gets rotated alongside the rest.
+        install_root_for_log = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        door_err_log = os.path.join(install_root_for_log, 'logs',
+                                    'door-errors.log')
+        try:
+            os.makedirs(os.path.dirname(door_err_log), exist_ok=True)
+        except OSError:
+            pass
+        os.environ['ANETBBS_DOOR_ERROR_LOG'] = door_err_log
+        os.environ['ANETBBS_DOOR_SLUG'] = (getattr(game, 'slug', '') or '').strip()
+
+        # Per-door runtime state: doors that persist state (TW2's json-client,
+        # etc.) must NOT write into the source tree — the source dir is owned
+        # by the install-account (stingray) and the runtime user (anetbbs uid
+        # 998) can't create files there. Route writes to
+        # {INSTALL}/data/sbbs_doors/<slug>/ which the runtime user owns.
+        # The child reads ANETBBS_TW2_DB_DIR (and any other future
+        # ANETBBS_<SLUG>_DB_DIR) to find its writable home; existing doors
+        # ignore the env var and keep working.
+        slug = (getattr(game, 'slug', '') or '').strip()
+        if slug == 'tw2':
+            # Resolve install root: this file is anetbbs/games/door_runner.py
+            install_root = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            tw2_db = os.path.join(install_root, 'data', 'sbbs_doors',
+                                  'tw2', 'db')
+            try:
+                os.makedirs(tw2_db, exist_ok=True)
+            except OSError as exc:
+                logger.warning('tw2: cannot create db dir %s: %s',
+                               tw2_db, exc)
+            os.environ['ANETBBS_TW2_DB_DIR'] = tw2_db
+
         return [node_path, tmp.name], sn_cwd
 
     raise ValueError(f'Unsupported door game_type: {game.game_type!r}')
@@ -1369,6 +1422,16 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
         for t in (out_task, in_task):
             if not t.done():
                 t.cancel()
+        # CRITICAL: wait for cancellation to actually finish. If we leave
+        # in_task pending on `session.reader.read(1)`, its waiter slot in
+        # the StreamReader collides with the post-game readline() below
+        # and the reader ends up returning b'' forever — which then trips
+        # the game menu's `if not choice` loop. This was the "game menu
+        # loops after exiting LORD" bug.
+        try:
+            await asyncio.gather(out_task, in_task, return_exceptions=True)
+        except Exception:
+            pass
         # If user aborted, `terminate_session` will SIGTERM the door
         # subprocess and stop the bridge. If the door already exited
         # cleanly, this is a no-op (session already removed from
@@ -1378,9 +1441,10 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
     if abort_event.is_set():
         await session.write("\r\n\r\n[Door aborted by user — Ctrl+]q]\r\n")
     else:
-        await session.write("\r\n\r\nGame ended. Press Enter to continue...")
+        # Use the wrapped read_line so telnet IAC bytes left in the buffer
+        # by the door get stripped and either \r or \n terminates the prompt.
         try:
-            await session.reader.readline()
+            await session.read_line("\r\n\r\nGame ended. Press Enter to continue...")
         except Exception:
             pass
     return True
@@ -1703,6 +1767,14 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
             return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
+        # Drain cancellations — see comment in play_door_game_telnet.
+        # Without this, in_task's pending session.reader.read(1) collides
+        # with the post-game prompt and leaves the StreamReader at EOF.
+        if pending:
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -1714,10 +1786,9 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
     if abort_event.is_set():
         await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
     else:
-        await session.write(
-            "\r\n\r\nRemote disconnected. Press Enter to continue...")
         try:
-            await session.reader.readline()
+            await session.read_line(
+                "\r\n\r\nRemote disconnected. Press Enter to continue...")
         except Exception:
             pass
     return True
@@ -1921,6 +1992,11 @@ async def play_dos_game_telnet(game, user, session, bbs_name='ANetBBS',
         for t in (out_task, in_task):
             if not t.done():
                 t.cancel()
+        # Drain cancellations — see comment in play_door_game_telnet.
+        try:
+            await asyncio.gather(out_task, in_task, return_exceptions=True)
+        except Exception:
+            pass
         try: proc.terminate()
         except Exception: pass
         bridge.stop()
@@ -1942,9 +2018,8 @@ async def play_dos_game_telnet(game, user, session, bbs_name='ANetBBS',
     else:
         await session.write(f"\r\n\r\nGame ended (exit {exit_code}).")
 
-    await session.write("\r\nPress Enter to continue...")
     try:
-        await session.reader.readline()
+        await session.read_line("\r\nPress Enter to continue...")
     except Exception:
         pass
     return True

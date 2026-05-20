@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Release Downloads — {{ bbs_name }}{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .dl-hero {
+    background: linear-gradient(135deg, #1a5089 0%, #0d3460 100%);
+    color: #fff; padding: 1.25rem 1.5rem; border-radius: .75rem;
+    margin-bottom: 1.25rem; box-shadow: 0 2px 12px rgba(0,0,0,.25);
+  }
+  .dl-hero h1 { margin: 0; font-weight: 600; }
+  .dl-hero p { margin: .35rem 0 0; opacity: .85; }
+  .dl-table { background: #1c2330; color: #e6e9ef; border-radius: .6rem;
+              overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+  .dl-table table { margin: 0; color: inherit; }
+  .dl-table thead { background: #2a3344; }
+  .dl-table thead th {
+    color: #b7becd; font-size: .76rem; text-transform: uppercase;
+    letter-spacing: .04em; font-weight: 600; border-bottom: 0;
+  }
+  .dl-table tbody tr { border-color: #2a3344; }
+  .dl-table tbody tr:hover { background: rgba(74,140,255,.06); }
+  .dl-name {
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: .9rem;
+    color: #cdd3e0; font-weight: 600;
+  }
+  .dl-meta { color: #8e98ad; font-size: .8rem; }
+  .dl-btn { font-size: .78rem; padding: .28rem .65rem; }
+  .dl-empty {
+    background: #1c2330; color: #b7becd; border-radius: .6rem;
+    padding: 2rem; text-align: center;
+  }
+  .dl-empty code { background: #0e1320; color: #b7becd; padding: .15rem .4rem; border-radius: .25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dl-hero">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+            <h1><i class="bi bi-cloud-download"></i> Release Downloads</h1>
+            <p>Releases, updates, and utilities from {{ bbs_name }}. Files are listed newest-first.</p>
+        </div>
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <div class="text-light-emphasis small" style="opacity:.85;">
+            <i class="bi bi-folder"></i>
+            <code class="text-light-emphasis">{{ base_dir }}</code>
+            <div class="small text-light" style="opacity:.7;">
+                Drop files in that directory to make them appear here.
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if not entries %}
+<div class="dl-empty">
+    <i class="bi bi-inbox" style="font-size:2.2rem; opacity:.55;"></i>
+    <h4 class="mt-2">No downloads available yet</h4>
+    {% if current_user.is_authenticated and current_user.is_admin %}
+    <p class="mb-0">Drop a release into <code>{{ base_dir }}</code> and refresh — it will show up here automatically.</p>
+    {% else %}
+    <p class="mb-0">The sysop hasn't posted any releases yet. Check back soon.</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="dl-table">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>File</th>
+                <th class="text-end">Size</th>
+                <th>Modified</th>
+                <th class="text-end" style="width:1%;">&nbsp;</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr>
+                <td>
+                    <div class="dl-name">
+                        <i class="bi bi-file-earmark-zip" style="opacity:.75;"></i>
+                        {{ e.name }}
+                    </div>
+                    <div class="dl-meta">{{ e.mime }}</div>
+                </td>
+                <td class="text-end dl-meta">{{ e.size_h }}</td>
+                <td class="dl-meta">{{ e.mtime_iso }}</td>
+                <td class="text-end text-nowrap">
+                    <a class="btn btn-success dl-btn"
+                       href="{{ url_for('downloads.serve', filename=e.name) }}">
+                        <i class="bi bi-download"></i> Download
+                    </a>
+                    <a class="btn btn-outline-secondary dl-btn"
+                       href="{{ url_for('downloads.sha256_for', filename=e.name) }}"
+                       title="SHA-256 checksum">
+                        <i class="bi bi-shield-check"></i>
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

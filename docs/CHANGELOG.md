@@ -1,8 +1,459 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.24` — alpha 2** (internal v287.23,
+separately. Current release: **`v1.0a2.36` — alpha 2** (internal v287.35,
 May 2026). Previous: `v1.0a` — alpha 1 (internal v196).
+
+## v287.35 — FTPS: pyOpenSSL dep + soft-fail import (May 2026)
+
+After v1.0a2.34 wired up the cert-perms and supplementary group, FTP
+started crashing on the actual `TLS_FTPHandler` import:
+
+```
+ImportError: cannot import name 'TLS_FTPHandler' from 'pyftpdlib.handlers'
+```
+
+pyftpdlib only exposes `TLS_FTPHandler` when `pyOpenSSL` is importable
+— it's a soft optional dep, but FTPS doesn't work without it. We
+never declared it, so every install was a coin-flip depending on
+what else happened to pull pyOpenSSL into the venv.
+
+Two fixes:
+
+1. **`pyopenssl>=24.0.0` added to `requirements.txt` + `setup.py`** —
+   `update.sh`'s `pip install -e .` step now pulls it on every run.
+2. **`build_server()` catches the ImportError** and falls back to
+   plain FTP with a clear, actionable warning that names the package
+   + the venv pip command, so a future drift can't silently disable
+   FTPS again.
+
+After deploying this release the FTP listener finally comes up on
+:21 with TLS enabled — `AUTH TLS` upgrades succeed and the journal
+shows `FTP: TLS enabled (/etc/letsencrypt/…)`.
+
+## v287.34 — install.sh em-dash banner alignment (May 2026)
+
+Sysop has been hand-patching `install.sh` for every release: two
+boxed banner lines contain an em-dash (`—`, U+2014, 3 bytes UTF-8
+but 1 terminal column) and the byte-counted whitespace layout was
+1 column short of the right-edge `║`. Fixed in the source tree so
+future releases don't need the manual fix-up:
+
+- Line ~53: `║         ANetBBS — UNINSTALL                  ║`
+- Line ~190: `║              ANetBBS — Installation Wizard                   ║`
+
+Each one gets one extra trailing space before the closing `║`. The
+sysop's notes are now stored in auto-memory so future agent
+sessions remember the em-dash gotcha — anytime banner whitespace
+gets regenerated.
+
+## v287.33 — FTPS auto-enable + renewal-hook (May 2026)
+
+`update.sh` now wires up FTPS end-to-end whenever
+`FTP_TLS_CERTFILE` in `.env` points at `/etc/letsencrypt/…`:
+
+1. **`ssl-cert` group**: created (system group) if missing.
+2. **Service user → ssl-cert**: added via `usermod -aG` so the
+   group membership exists on disk.
+3. **letsencrypt perms normalised**: `chgrp -R ssl-cert
+   /etc/letsencrypt/{live,archive}`, `chmod g+rX` on the dirs,
+   `0640` on `privkey*.pem`, `0644` on the other `*.pem` files.
+4. **`anetbbs.service` patched**: `SupplementaryGroups=ssl-cert`
+   injected via `sed` (idempotent). Without this systemd's
+   `User=stingray` doesn't pick up the new group at process start —
+   systemd doesn't call `initgroups()` itself, supplementary groups
+   have to be declared explicitly.
+5. **Certbot renewal hook**:
+   `/etc/letsencrypt/renewal-hooks/deploy/anetbbs-ssl-cert-perms.sh`
+   gets installed. Certbot otherwise resets `archive/` to
+   `0700 root:root` on every renewal, silently breaking FTPS
+   overnight. The hook restores the ssl-cert group + perms
+   after every successful cert renewal.
+
+After deploying this release, restart `anetbbs` once so it picks
+up the new supplementary group, then FTPS should work — `AUTH TLS`
+upgrade on port 21 succeeds and the listener logs
+`FTP: TLS enabled (/etc/letsencrypt/…)` instead of falling back to
+plain.
+
+The whole block is conditional on `FTP_TLS_CERTFILE` pointing at
+`/etc/letsencrypt/…`. Sysops using other cert paths (self-signed
+in `data/ssl/`, ACME from a different client) see no change.
+Sysops with `FTP_TLS_CERTFILE` blank also see no change — FTP
+keeps starting in plain mode.
+
+## v287.32 — CLI logger crash fix (May 2026)
+
+Hotfix on v1.0a2.32: `anetbbs --version` (and any CLI invocation
+from a non-install CWD) was crashing at module-import time with
+`PermissionError: '/tmp/bbs.log'`. `main.py` ran
+`logging.basicConfig(... FileHandler('bbs.log'))` at the top of the
+module, with `'bbs.log'` as a relative path — so running from /tmp
+opened `/tmp/bbs.log`, which existed left over from an earlier
+root-run and refused write to the service user.
+
+Two changes:
+
+- `bbs.log` is now resolved to an absolute path next to the
+  installed package (or honours `ANETBBS_LOG_FILE=` if you want to
+  point it elsewhere — journald-only setups can `=/dev/null`).
+- The `FileHandler` is best-effort: if open fails (read-only fs,
+  permission denied, noexec mount), we log only to stdout and write
+  a one-line warning to stderr. systemd captures stdout regardless,
+  so journald-side logging is unaffected.
+
+This unblocks `anetbbs --version` / `anetbbs-web --version` from
+every CWD.
+
+## v287.31 — Quality-of-life follow-ups (May 2026)
+
+Five field-driven fixes from one diagnostic session on bbs.a-net.fyi.
+
+**FTP listener now survives a leftover root-owned tree.**
+`_build_symlink_tree` was crashing the whole FTP thread on a single
+un-`unlink()`-able symlink (left over from a previous run as a
+different user — typical when migrating from root → service user).
+Now caught with a warning that names the file + the exact `chown`
+command to fix it, and the rest of the tree builds. Belt-and-braces:
+`update.sh` `chown -R`s `data/ftp_root` to the service user on every
+run, so the situation can't drift.
+
+**SCC Restart buttons work again.** Past releases shipped
+`anetbbs-web.service` with
+`CapabilityBoundingSet=CAP_NET_BIND_SERVICE`. That bounding set
+prevents the gunicorn worker's `sudo -n systemctl restart …` child
+from re-acquiring `CAP_SETUID` / `CAP_SETGID` / `CAP_AUDIT_WRITE`
+from its setuid-root bit, so every Restart click failed with
+"sudo: unable to change to root gid" + "error initializing audit
+plugin sudoers_audit". Removed the bounding set; `AmbientCapabilities`
+alone is enough to bind MSP/SYSTAT on privileged ports. `update.sh`
+strips the line from any pre-existing unit and `daemon-reload`s
+before Step 8 picks up the change.
+
+**BBS journal is quiet during SCC probes.** v1.0a2.31 killed the big
+session-loop tracebacks but the per-call `print("Error sending
+telnet command: …")` / `print("Write error: …")` one-liners were
+still hitting stderr → systemd journal on every probe. Now caught as
+expected `BrokenPipeError` / `ConnectionResetError` /
+`ConnectionAbortedError` and swallowed; anything else is logged at
+`DEBUG`. Also turned `asyncssh`'s logger down to `ERROR` so its own
+"socket.send() raised exception" warnings stop multiplying.
+
+**Username validation now matches the web form.** Terminal
+registration was using `str.isalnum()` so "Dr Test" came back
+invalid and the user had to type "drtest" — but the web form has
+never been that strict. Aligned the two: 3–80 chars, must start
+with a letter or digit, allow spaces / `.` / `_` / `-` / `'` in the
+rest. Whitespace runs collapse, leading/trailing whitespace strips.
+
+**Version is now visible everywhere.**
+
+- New `anetbbs/version.py` reads `VERSION` once at import time.
+- `anetbbs --version` and `anetbbs-web --version` print and exit.
+- Every web page footer now shows the running version next to the
+  copyright. (`{{ anetbbs_version }}` is exposed via a context
+  processor, so any template can use it.)
+
+## v287.30 — FTP TLS soft-fail + SCC probe cleanup (May 2026)
+
+Three follow-ups from the v1.0a2.30 field test on bbs.a-net.fyi.
+
+**FTP TLS now soft-fails instead of crashing the listener.** The unit
+referenced `/etc/letsencrypt/live/bbs.a-net.fyi/{fullchain,privkey}.pem`
+but the `archive/` directory was 0700 root-only, so the service user
+couldn't actually read the cert. The previous check used
+`os.path.exists()` — which returns True for an unreadable file — so
+`TLS_FTPHandler` initialized, then crashed during SSL-context build,
+killing the whole FTP thread silently. New code probes both files
+with `os.access(R_OK)` + an `open()` round-trip, and if either fails
+logs a clear warning ("add this user to the ssl-cert group OR copy
+the cert to a readable path") and starts plain FTP instead.
+
+**FTP thread crashes now hit the journal.** `anetbbs/main.py` only
+caught exceptions from `thread.start()`, so any error inside the
+thread's `run()` was lost. The wrapper now `logger.exception`s with
+the most-likely causes inline — sysop won't have to ask why FTP is
+silent again.
+
+**BBS sessions no longer dump BrokenPipeError stacks during SCC port
+probes.** The `/admin/control/` page probes telnet/SSH/rlogin every
+few seconds. Each probe greets the protocol then closes, so the
+BBS's first `writer.drain()` raised `BrokenPipeError` and the
+session loop dumped a 40-line traceback for every probe. `start()`
+now treats `BrokenPipeError` / `ConnectionResetError` /
+`ConnectionAbortedError` the same way it treats `CarrierLost` —
+silent unwind. Also removed a redundant `writer.drain()` from
+`clear_screen()` (it ran *after* `self.write()` had already drained
+and swallowed the error — so the second one bubbled).
+
+**SCC probe results are cached for 4 s.** Opening N admin tabs (or
+multi-poll dashboards) no longer multiplies probe load on the BBS.
+First call per (host, port, proto) actually probes; subsequent calls
+within 4 s read from an in-memory dict. With the BBS-side noise
+suppression above, even uncached probes are now harmless — the cache
+is just hygiene.
+
+## v287.29 — SCC: surface failing listener + FTP cap fix (May 2026)
+
+Field report on v1.0a2.29: SCC banner said "1 Listener problems" but
+the sysop couldn't tell *which* port was failing — the only signal
+was a colored dot on the chip, easy to miss especially in a text
+dump or screen reader.
+
+**Root cause (FTP).** `anetbbs.service` is the unit that owns
+telnet / SSH / rlogin / FTP / LMTP. Telnet 2233, SSH 2234, rlogin
+5132 are all unprivileged ports — they bind fine as the `stingray`
+user. FTP **21 is privileged** and the unit didn't grant
+`CAP_NET_BIND_SERVICE`, so the FTP listener silently failed to bind
+on every startup. The other listeners with privileged ports
+(anetbbs-web's MSP:18, anetbbs-finger's :79) already had the cap on
+their respective units; this one didn't.
+
+**Update.sh patches the live unit in place.** Adding the cap to the
+template alone wouldn't help any existing install — the template
+only runs on first install. The new logic detects an existing
+`anetbbs.service` missing the cap, surgically `sed`-injects the
+two lines after `EnvironmentFile=`, keeps a `.bak` backup, runs
+`systemctl daemon-reload`, and lets Step 8 pick up the new caps on
+restart. Sysop customizations elsewhere in the unit survive.
+
+**UI: named listener-status line per card.** Every service card now
+shows an explicit text row above the port chips:
+
+- All listeners up → green check `All listeners up (4/4)`.
+- One or more down → amber/red triangle `3/4 listening — down: FTP:21`.
+
+So the sysop sees the failing listener by name without hovering for
+a tooltip, and the colored-dot port chips remain as the visual quick
+reference.
+
+## v287.28 — Release Downloads: rename + move to Files dropdown (May 2026)
+
+Sysop polish on the new /downloads/ section:
+
+- Renamed everywhere from **"Downloads"** to **"Release Downloads"**:
+  page title, hero H1, and the nav-bar item. Makes intent clearer
+  alongside the existing File Gallery / File Areas / File Shares.
+- Moved the nav entry from the **Tools** / More dropdown into the
+  **Files** dropdown, where it sits with the other file-serving
+  features. Added a divider above it so it visually groups separately
+  from the user-uploaded-file features.
+
+The on-disk directory path (`{{ base_dir }}`) shown in the hero is
+already gated by `current_user.is_admin` — non-sysop visitors never
+see it. No change needed there.
+
+## v287.27 — SCC: sudoers path mismatch + sudo-free reads (May 2026)
+
+Field report from v1.0a2.27: every service card on `/admin/control/`
+showed **PID `—`** and **state `unknown`**, even though every service
+was actually running and the live CPU / RAM / threads numbers were
+populated. Banner said "0/4 Services up".
+
+Root cause was a path mismatch between sudo's `secure_path` and the
+sudoers rule. On Ubuntu 18.04+ sudo resolves `systemctl` to
+`/usr/bin/systemctl`, but the rule we shipped said `/bin/systemctl` —
+sudo compares the resolved path *literally* against the rule (it
+deliberately does **not** follow the `/bin -> /usr/bin` symlink, for
+security). The rule never matched → every read returned "permission
+denied" → the panel fell through to its `unknown` defaults. The
+metrics sampler kept working because it shells out to plain
+`systemctl show` without sudo (which any unprivileged user can do).
+
+Two fixes:
+
+1. **`anetbbs/web/control.py` split `_systemctl()` into
+   `_systemctl_read()` and `_systemctl_change()`.** The read variant
+   never invokes sudo — `systemctl show / status` and `journalctl`
+   work for any user. Only `start / stop / restart / reload` still
+   need sudo. This makes the panel correct regardless of which
+   `systemctl` path sudo resolves to.
+2. **`deploy/sudoers.anetbbs` now lists both `/bin/systemctl` and
+   `/usr/bin/systemctl` paths**, wrapped in a `Cmnd_Alias` to keep
+   the file readable. Future Ubuntu / Debian / Fedora variations
+   that pick either path are covered.
+
+Side benefit: the "permission denied" toast on Restart now includes
+sudo's stderr verbatim, so future path-mismatch problems surface
+immediately instead of looking like a silent no-op.
+
+## v287.26 — SCC Phase 2 graphs + hub auto-self-register (May 2026)
+
+**Service Control Center — live graphs (Phase 2).**
+
+- New `anetbbs/web/metrics.py` — single daemon thread in the gunicorn
+  worker that samples each known systemd unit's MainPID every 2 s and
+  stores the last 150 values (5 min) of CPU %, RSS in MB, and thread
+  count in a per-(unit, metric) ring buffer. Reads /proc via psutil —
+  no privileges, no sudo. Rebuilds the psutil.Process handle when
+  MainPID changes so cpu_percent baselines reset cleanly across
+  service restarts.
+- New endpoint `/admin/control/metrics.json` returns a JSON-serializable
+  snapshot of every ring buffer. Soft-fails to `available: false` if
+  psutil isn't installed, and the front-end shows a banner telling
+  the sysop to run `update.sh` instead of a broken chart.
+- New endpoint `/admin/control/connections.json` rolls up per-protocol
+  connection counts (web / telnet / SSH / rlogin) from NodeActivity +
+  UserSession over the last 5 min.
+- **Front-end:** Chart.js 4.4 loaded only on the control page.
+  - **Per-card sparkline** of CPU % over the last 5 min, colored per
+    unit and matched against the aggregate charts.
+  - **Aggregate dashboard:** two charts at the top of the page —
+    "CPU % per service" (overlapping lines) and "Memory (MB)"
+    (stacked area). Auto-refresh every 2 s.
+  - **Banner connection chips** for web / telnet / SSH / rlogin
+    counts, plus a new "Active connections" total tile.
+  - **Live metric row** in every card showing the latest CPU %, RAM
+    MB, and thread count alongside the existing PID + uptime.
+- Front-end summary counts (services-up, listener-problems) are now
+  recomputed from the live `/status.json` payload on every refresh,
+  so the banner stays correct after a restart that flips a unit's
+  state without a page reload.
+
+**Federation hub — auto-self-register.**
+
+New module `anetbbs/msp/hub_self_register.py`. When
+`REGISTRY_MODE_ENABLED=true`, the hub seeds its OWN `RegistryEntry`
+row on startup (pre-verified, pre-approved, listed) and a daemon
+thread refreshes `last_heartbeat_at` every 6 hours so the entry
+never trips the 48-hour stale cutoff. Without this, the hub's own
+`/anetbbs.lst` was empty of itself, so `/imsg/directory` never saw
+the hub's own BBS on the directory pull — only the manually-pinned
+"Your BBS" card from v1.0a2.26 surfaced it.
+
+New config key (sensible default in code, not in `.env.example`):
+- `REGISTRY_HUB_SELF_HEARTBEAT_SEC` — default 21 600 (6 h).
+
+**Public Downloads page (`/downloads/`).**
+
+Sysops can now drop a release tarball into a designated directory
+and it auto-appears on `/downloads/` — no copy to `personal_pages/`,
+no manual link plumbing. Scans `DOWNLOADS_DIR` (default
+`{INSTALL_DIR}/data/releases`) on every (cached) page load, sorts
+newest-first, shows filename + size + mtime + MIME type, with a
+Download button and a SHA-256 sidecar button per file.
+
+Defense in depth:
+
+- Filename whitelist by extension (`DOWNLOADS_EXTENSIONS`, default
+  covers archives, ISOs, checksum sidecars, and BBS-era text drops).
+- Filename regex blocks any name containing `..` or other path
+  separators.
+- `realpath()` check on the resolved file path before serving —
+  symlinks and traversal can't reach outside the configured dir.
+- No subdirectory listing or recursion.
+
+SHA-256 sidecars (`<file>.sha256`) are generated on demand the first
+time they're requested and cached on disk next to the file, so
+repeat hits don't re-hash multi-GB ISOs.
+
+Three new config keys (defaults sensible — `.env.example` updated):
+
+- `DOWNLOADS_ENABLED` (default `true`)
+- `DOWNLOADS_DIR` (default `{INSTALL_DIR}/data/releases`)
+- `DOWNLOADS_EXTENSIONS` (default
+  `tar.gz,tgz,zip,7z,bz2,xz,rar,iso,img,asc,sig,sha256,md5,txt,nfo,diz`)
+
+Nav: added a "Downloads" item in the **More** dropdown when enabled.
+
+**Dependencies.**
+
+Added `psutil>=5.9.0` to `requirements.txt` and `setup.py`. Also
+backfilled `aiosmtpd` + `aiosmtplib` into `setup.py` (they were in
+`requirements.txt` only, so fresh `pip install -e .` installs
+missed them).
+
+## v287.25 — Sysop Service Control Center, Phase 1 (May 2026)
+
+Pivoted the v1.0a3 roadmap: Email is on the back burner; the headline
+feature is now a proper Service Control Center. Phase 1 ships the
+foundation; Phase 2 (live graphs, psutil-driven CPU/memory ring buffer)
+and Phase 3 (live log tail, threshold alerts) land in the next two
+releases.
+
+**What changed in Phase 1:**
+
+- **Stale unit list fixed.** `anetbbs/web/control.py::KNOWN_UNITS` was
+  still listing the pre-merge `anetbbs-telnet` / `anetbbs-ssh` /
+  `anetbbs-rlogin` units — the panel showed "unknown" for half the
+  service tree and Restart buttons silently no-op'd because sudoers
+  matched names that no longer exist. KNOWN_UNITS now matches the
+  current four: `anetbbs-web`, `anetbbs` (unified terminal),
+  `anetbbs-mrc-bridge`, `anetbbs-finger`.
+
+- **Per-listener TCP/UDP probes.** Each unit declares its associated
+  ports; the panel probes them independently of systemctl, so the
+  sysop can tell a healthy process from one where the listener
+  crashed. TCP via `socket.create_connection`; UDP via `/proc/net/udp`
+  scan (UDP can't be probed by `connect()` alone).
+
+- **New `/admin/control/status.json` endpoint.** Drives a 5-second
+  live refresh of every card without a full-page reload.
+
+- **Card-grid UI.** Dark professional layout, status pill per service,
+  per-port chips with green/red dots, restart/stop/start + log
+  buttons. Replaces the cramped table-only layout.
+
+- **Journal modal + .txt download.** "Logs" opens an in-page modal
+  with a line-count selector (100 / 500 / 2 000 / 5 000). Each card
+  also gets a one-click `.txt` download of the last 2 000 lines for
+  bug reports.
+
+- **sudoers auto-refresh.** `update.sh` now rewrites
+  `/etc/sudoers.d/anetbbs` on every run, substituting the live service
+  user into the canonical template. Past releases shipped a sudoers
+  file with the pre-merge unit names — fresh installs got Restart
+  buttons that 403'd. Templated and `visudo`-validated before swap so
+  a syntax error can't lock the sysop out.
+
+**Inter-BBS Directory: "Your BBS" pin.**
+
+Sysops reported their own BBS not showing on `/imsg/directory` — the
+directory only renders rows that exist in `BbsDirectoryEntry` (pulled
+from Vertrauen's `sbbsimsg.lst` + the federation hub's `anetbbs.lst`).
+For your own BBS to appear there it needs an approved `RegistryEntry`
+on the hub. The hub at `bbs.a-net.fyi` hadn't yet auto-self-registered
+its own row.
+
+Quick UX fix: a pinned "Your BBS" card at the top of the directory
+that's populated from local config (`BBS_NAME`, `BBS_DOMAIN`,
+`SYSOP_NAME`, `BBS_LOCATION`, `MSP_PORT`, `SYSTAT_PORT`) — always
+visible, with a status badge showing whether the BBS is `Listed` /
+`Pending` / `Not registered` on the federation hub. Independent of
+registry state, so it works on day-1 installs that haven't gone
+through self-registration yet.
+
+## v287.24 — Terminal: carrier-drop spin + door-exit menu loop (May 2026)
+
+Two related telnet/SSH bugs that both showed up as the same symptom —
+a tight redraw loop that pinned a CPU core:
+
+1. **Carrier drop at any menu spiked CPU.** `read_key` and `read_line`
+   returned `''` for both "user pressed bare Enter" and "transport went
+   away." The menu engine's `if not choice: continue` then redrew the
+   menu and immediately re-prompted against an EOF stream — infinite
+   loop. Now the four read primitives (`read_raw`, `read_key`,
+   `read_line`, `read_password`) raise a new `CarrierLost` exception
+   on EOF and on the idle-timeout path. `session.start()` and
+   `menu_engine.run_menu` catch it and unwind cleanly; bare-Enter still
+   returns `''` so menu redraw semantics are unchanged.
+
+2. **Game menu looped forever after exiting any door (LORD, etc.).**
+   `door_runner` cancelled its input/output pumps with `t.cancel()` but
+   never `await`ed them. The in-pump's pending `session.reader.read(1)`
+   was still registered as the StreamReader's waiter when the
+   post-game `Press Enter` prompt fired — the two collided and the
+   reader returned `b''` on every subsequent read, which then tripped
+   the same EOF-spin as bug #1 in the game menu. Now all three door
+   paths (`play_door_game_telnet`, `play_rlogin_telnet`,
+   `play_dos_game_telnet`) drain their pumps via
+   `asyncio.gather(..., return_exceptions=True)` before the post-game
+   prompt. Also switched the prompts from raw `session.reader.readline()`
+   to the wrapped `session.read_line()` so leftover telnet IAC bytes
+   from the door don't choke the prompt terminator.
+
+The number-guessing game was unaffected — no door pump, so the
+StreamReader was never put in a wedged state.
 
 ## v287.23 — Echomail import: PATH-loop misfire fix (May 2026)
 

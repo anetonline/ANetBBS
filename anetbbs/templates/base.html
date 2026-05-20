@@ -405,6 +405,10 @@
                             <li><a class="dropdown-item" href="{{ url_for('file_areas.index') }}" style="color:var(--theme-primary);"><i class="bi bi-folder2-open"></i> File Areas</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('file_areas.my_shares') }}" style="color:var(--theme-primary);"><i class="bi bi-share"></i> My File Shares</a></li>
                             {% endif %}
+                            {% if config.DOWNLOADS_ENABLED %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('downloads.index') }}" style="color:var(--theme-primary);"><i class="bi bi-cloud-download"></i> Release Downloads</a></li>
+                            {% endif %}
                         </ul>
                     </li>
 
@@ -460,6 +464,12 @@
                             <li><a class="dropdown-item" href="{{ url_for('admin.checklist') }}" style="color:var(--theme-primary);"><i class="bi bi-check2-square"></i> Launch Checklist</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('main.tutorial') }}" style="color:var(--theme-primary);"><i class="bi bi-mortarboard"></i> Sysop Tutorial</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('control.index') }}" style="color:var(--theme-primary);"><i class="bi bi-sliders"></i> Control Panel</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('upgrades_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-arrow-up-circle"></i> Check for Updates</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('preflight.index') }}" style="color:var(--theme-primary);"><i class="bi bi-clipboard2-check"></i> Preflight Checklist</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('events_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-calendar2-event"></i> Scheduled Events</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('security_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-shield-check"></i> Security Updates</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('door_errors.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bug"></i> Door Errors</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('backups_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> Pre-update Backups</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('control.index') }}#nodespy" style="color:var(--theme-primary);"><i class="bi bi-binoculars"></i> NodeSpy (kick users)</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.newuser_questions') }}" style="color:var(--theme-primary);"><i class="bi bi-question-circle"></i> New User Questions</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.pending_users') }}" style="color:var(--theme-primary);"><i class="bi bi-person-check"></i> Pending Users (NUV)</a></li>
@@ -491,6 +501,7 @@
                             <li><a class="dropdown-item" href="{{ url_for('echomail_admin.dashboard') }}" style="color:var(--theme-primary);">Echomail</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.default_echos') }}" style="color:var(--theme-primary);">Default Echo Subs</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.registry_index') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Federation Registry</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('peers_health.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast"></i> Peer Health</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.file_echo_subs') }}" style="color:var(--theme-primary);">File-Echo Subs</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.mrc_irc_bridges') }}" style="color:var(--theme-primary);">MRC ↔ IRC Bridges</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin.dialout_admin') }}" style="color:var(--theme-primary);">Dial-Out Directory</a></li>
@@ -607,7 +618,9 @@
         {% if qotd %}
             <p style="font-style:italic;opacity:0.8;margin-bottom:0.25rem;">☆ {{ qotd }}</p>
         {% endif %}
-        <p>&copy; {{ config.BBS_NAME }} | Powered by ANetBBS</p>
+        <p>&copy; {{ config.BBS_NAME }} | Powered by ANetBBS
+           {% if anetbbs_version %}<span class="text-muted" style="opacity:.7;font-size:.85em;">{{ anetbbs_version }}</span>{% endif %}
+        </p>
     </div>
 
     <!-- Bootstrap JS -->

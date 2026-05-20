@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Door errors{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .de-banner {
+    background: linear-gradient(135deg,#6b1818,#a02929); color:#fff;
+    border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem;
+    box-shadow:0 2px 12px rgba(0,0,0,.25);
+  }
+  .de-banner.calm { background: linear-gradient(135deg,#1e5631,#2d8048); }
+  .de-banner h1 { margin: 0; font-weight: 600; }
+  .de-card { border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.08); }
+  .de-entry { border-bottom: 1px solid #ececec; }
+  .de-entry:last-child { border-bottom: none; }
+  .de-summary { padding: .75rem 1rem; cursor: pointer; }
+  .de-summary:hover { background: #f8f9fa; }
+  .de-summary code { background: #f1f3f5; padding: 0 .3rem; border-radius: .2rem; }
+  .de-trace {
+    background:#1e1e1e; color:#d4d4d4; padding: .75rem 1rem;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .82rem;
+    line-height: 1.4; white-space: pre-wrap; word-break: break-word;
+    margin: 0; max-height: 360px; overflow-y: auto;
+  }
+  .de-meta { color:#6c757d; font-size:.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+
+  <div class="de-banner {% if not entries %}calm{% endif %}">
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <h1>
+          <i class="bi bi-{% if entries %}bug-fill{% else %}check-circle{% endif %}"></i>
+          Door errors
+        </h1>
+        <div class="text-white-50 mt-1">
+          {% if entries %}
+            {{ entries | length }} error{{ '' if entries|length == 1 else 's' }} logged.
+            Most recent: {{ entries[0].relative_age }} ({{ entries[0].ts }}).
+          {% else %}
+            No door crashes have been recorded.
+          {% endif %}
+          <code class="ms-2 text-white-50">{{ log_path }}</code>
+        </div>
+      </div>
+      {% if entries %}
+      <form method="POST" action="{{ url_for('door_errors.clear') }}"
+            onsubmit="return confirm('Clear all {{ entries | length }} entries? They will be removed from disk — copy what you need first.');">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <button class="btn btn-light"><i class="bi bi-trash"></i> Clear log</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not entries %}
+    <div class="alert alert-info">
+      <p class="mb-1">
+        Nothing here — every door session that has ended did so cleanly.
+        This page collects uncaught crashes from Synchronet-compat doors
+        (Trade Wars, LORD, BotWars, etc.) so you spot breakage without
+        users having to report it.
+      </p>
+      <p class="mb-0 small text-muted">
+        Source: <code>{{ log_path }}</code>
+        ({% if log_size %}{{ log_size }} bytes, but no parseable entries{% else %}file not yet created{% endif %}).
+      </p>
+    </div>
+  {% else %}
+    <div class="card de-card">
+      <div class="card-body p-0">
+        {% for e in entries %}
+        <details class="de-entry">
+          <summary class="de-summary">
+            <strong>{{ e.ts.split('T')[1].split('.')[0] }}</strong>
+            <span class="de-meta">UTC · {{ e.relative_age }} ·</span>
+            door <code>{{ e.slug }}</code>
+            user <code>{{ e.user }}</code>
+            <span class="de-meta">— click to expand</span>
+          </summary>
+          <pre class="de-trace">{{ e.trace }}</pre>
+        </details>
+        {% endfor %}
+      </div>
+      <div class="card-footer de-meta">
+        Newest first. Click any row to expand the stack trace.
+        Entries are written by the wrapper in <code>games/door_runner.py</code>
+        whenever a Synchronet-compat door session ends with an
+        uncaught exception. Rotation: the daily <em>log_rotate</em>
+        scheduled event handles size — set <code>max_mb</code> on
+        that event to tune.
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

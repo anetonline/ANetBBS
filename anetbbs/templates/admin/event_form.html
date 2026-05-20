@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{% if ev %}Edit event{% else %}New event{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <h2><i class="bi bi-{% if ev %}pencil{% else %}plus-lg{% endif %}"></i>
+    {% if ev %}Edit event: {{ ev.name }}{% else %}New scheduled event{% endif %}</h2>
+
+  <form method="POST" class="card mt-3">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <div class="card-body">
+
+      <div class="mb-3">
+        <label class="form-label">Name</label>
+        <input class="form-control" name="name" required maxlength="120"
+               value="{{ ev.name if ev else '' }}">
+        <div class="form-text">Shown in the admin list. Pick something descriptive.</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Handler</label>
+        <select class="form-select" name="handler_key" id="handler_key" required>
+          {% for key, (label, desc) in handler_meta.items() %}
+            <option value="{{ key }}" {% if ev and ev.handler_key == key %}selected{% endif %}
+                    data-desc="{{ desc }}">
+              {{ label }} <span style="color:#888">({{ key }})</span>
+            </option>
+          {% endfor %}
+        </select>
+        <div class="form-text" id="handler_desc"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Schedule</label>
+        <div class="row g-2">
+          <div class="col-md-3">
+            <select class="form-select" name="schedule_kind" id="schedule_kind">
+              <option value="daily"    {% if schedule.kind == 'daily'    %}selected{% endif %}>Daily</option>
+              <option value="hourly"   {% if schedule.kind == 'hourly'   %}selected{% endif %}>Hourly</option>
+              <option value="weekly"   {% if schedule.kind == 'weekly'   %}selected{% endif %}>Weekly</option>
+              <option value="interval" {% if schedule.kind == 'interval' %}selected{% endif %}>Every N min</option>
+            </select>
+          </div>
+          <div class="col-md-3 sched-field" data-kind="daily,weekly">
+            <input type="time" class="form-control" name="schedule_time"
+                   value="{{ schedule.time or '03:00' }}">
+            <div class="form-text">UTC.</div>
+          </div>
+          <div class="col-md-3 sched-field" data-kind="hourly">
+            <input type="number" class="form-control" name="schedule_minute" min="0" max="59"
+                   value="{{ schedule.minute or 0 }}" placeholder="0–59">
+            <div class="form-text">Minute of each hour.</div>
+          </div>
+          <div class="col-md-3 sched-field" data-kind="weekly">
+            <select class="form-select" name="schedule_day">
+              {% for i, d in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+                <option value="{{ i }}" {% if schedule.day == i %}selected{% endif %}>{{ d }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3 sched-field" data-kind="interval">
+            <input type="number" class="form-control" name="schedule_minutes" min="1"
+                   value="{{ schedule.minutes or 60 }}">
+            <div class="form-text">Repeat every N minutes since last run.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Params (JSON object)</label>
+        <textarea class="form-control font-monospace" name="params_json" rows="3">{{ params_json }}</textarea>
+        <div class="form-text">Handler-specific. See handler description above. <code>{}</code> = no params.</div>
+      </div>
+
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="is_enabled" id="is_enabled"
+               {% if not ev or ev.is_enabled %}checked{% endif %}>
+        <label for="is_enabled" class="form-check-label">Enabled (will fire on schedule)</label>
+      </div>
+
+      <button class="btn btn-primary"><i class="bi bi-check2-circle"></i> Save</button>
+      <a href="{{ url_for('events_admin.index') }}" class="btn btn-link">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+function updateSchedFields() {
+  const kind = document.getElementById('schedule_kind').value;
+  document.querySelectorAll('.sched-field').forEach(el => {
+    const kinds = el.dataset.kind.split(',');
+    el.style.display = kinds.includes(kind) ? '' : 'none';
+  });
+}
+function updateHandlerDesc() {
+  const sel = document.getElementById('handler_key');
+  const opt = sel.options[sel.selectedIndex];
+  document.getElementById('handler_desc').textContent = opt.dataset.desc || '';
+}
+document.getElementById('schedule_kind').addEventListener('change', updateSchedFields);
+document.getElementById('handler_key').addEventListener('change', updateHandlerDesc);
+updateSchedFields();
+updateHandlerDesc();
+</script>
+{% endblock %}

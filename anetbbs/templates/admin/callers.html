@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Caller Log{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-list-ul"></i> Caller Log</h1>
+    <p>Recent connections across all protocols.</p>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if pagination.items %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>When</th><th>User</th><th>Service</th><th>IP</th><th>Duration</th>
+            </tr></thead>
+            <tbody>
+            {% for c in pagination.items %}
+                <tr>
+                    <td><code>{{ c.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td>{{ c.username or '?' }}</td>
+                    <td><span class="badge bg-secondary">{{ c.service }}</span></td>
+                    <td><code>{{ c.ip_address or '' }}</code></td>
+                    <td>{% if c.duration_seconds %}{{ c.duration_seconds }}s{% else %}—{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No callers logged yet.</div>{% endif %}
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination">
+        {% if pagination.has_prev %}<li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}">Prev</a></li>{% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ pagination.page }}/{{ pagination.pages }}</span></li>
+        {% if pagination.has_next %}<li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}">Next</a></li>{% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

@@ -543,9 +543,19 @@ async def run_menu(session, start='main'):
             except Exception:
                 pass
             result = await action(ui, action_args)
-        except Exception:
+        except Exception as exc:
+            # Carrier dropped inside an action — propagate so the session
+            # unwinds cleanly. Anything else: log + continue.
+            from anetbbs.core.session import CarrierLost
+            if isinstance(exc, CarrierLost):
+                raise
             logger.exception('Menu action %s(%r) failed', action_type, action_args)
-            await session.write("\r\nMenu action failed (see server log).\r\n")
+            try:
+                await session.write("\r\nMenu action failed (see server log).\r\n")
+            except CarrierLost:
+                raise
+            except Exception:
+                pass
             continue
 
         if isinstance(result, tuple):

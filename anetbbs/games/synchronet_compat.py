@@ -54,6 +54,61 @@ try {
                          (e && e.message ? e.message : e) + '\n');
 }
 
+// === SpiderMonkey-only Error.prototype.fileName getter ===
+// tw2.js's startup_path probe does:
+//
+//     try { throw barfitty.barf(barf) } catch(e) { startup_path = e.fileName }
+//
+// In Synchronet's JS runtime, caught exceptions expose `.fileName`
+// pointing at the source file where the throw occurred. Node has no
+// such property — `.stack` is the only source of file paths. Add a
+// getter on `Error.prototype` that parses `this.stack` and returns
+// the file path of the most recent frame, so the idiom works.
+Object.defineProperty(Error.prototype, 'fileName', {
+    configurable: true,
+    get: function () {
+        try {
+            var lines = String(this.stack || '').split('\n');
+            for (var i = 1; i < lines.length; i++) {
+                // Frames look like: "    at Foo (path/to/file.js:line:col)"
+                // or                 "    at path/to/file.js:line:col"
+                var m = lines[i].match(/\(([^()]+):\d+:\d+\)\s*$/) ||
+                        lines[i].match(/at\s+([^\s()]+):\d+:\d+\s*$/);
+                if (m && m[1]) return m[1];
+            }
+        } catch (e) {}
+        return undefined;
+    }
+});
+
+// === toSource() polyfill ===
+// SpiderMonkey provides obj.toSource() returning a string that, when
+// eval'd, reproduces the object. Synchronet doors use the idiom
+//     var copy = eval(template.toSource());
+// to deep-clone defaults (e.g. tw2's DefaultSector, DefaultCabal). V8/Node
+// has no toSource. JSON.stringify gives valid JS for plain data-objects
+// when wrapped in parens, which covers every use we've seen in xtrn doors.
+// Functions and circular refs aren't supported — none of the upstream
+// templates we ship use those, so this is sufficient.
+if (typeof Object.prototype.toSource !== 'function') {
+    Object.defineProperty(Object.prototype, 'toSource', {
+        configurable: true, writable: true, enumerable: false,
+        value: function () {
+            try { return '(' + JSON.stringify(this) + ')'; }
+            catch (e) { return '({})'; }
+        }
+    });
+}
+if (typeof Array.prototype.toSource !== 'function') {
+    Object.defineProperty(Array.prototype, 'toSource', {
+        configurable: true, writable: true, enumerable: false,
+        value: function () {
+            try { return JSON.stringify(this); }
+            catch (e) { return '[]'; }
+        }
+    });
+}
+
 // === Standard I/O helpers ===
 // Doors emit CP437 bytes (box-drawing, shading, accented glyphs). Real
 // Synchronet writes those bytes verbatim to the wire; the connecting
@@ -577,7 +632,14 @@ var system = {
     nodes:      4,
     platform:   'Unix',
     version:    'ANetBBS Compat',
-    node_list:  [],
+    // tw2's input.js (CheckNode) and other multi-node doors read
+    // system.node_list[bbs.node_num-1].misc/.status to detect changes
+    // pushed by another node. We're single-BBS, single-node — pre-fill
+    // with inert stubs so the property access works without crashing.
+    node_list:  [
+        {misc:0, status:0}, {misc:0, status:0},
+        {misc:0, status:0}, {misc:0, status:0}
+    ],
     // sbbs_console.js reads these — fill with sensible paths so doors that
     // try to read or write under data_dir/node_dir don't blow up.
     node_dir:   '{EXEC_DIR}/',
@@ -643,6 +705,27 @@ var system = {
             var out = cp.execSync(String(cmd), { encoding: 'utf8' });
             return String(out).split(/\r?\n/);
         } catch (e) { return []; }
+    },
+    // Synchronet's system.timestr(time_t) formats a Unix timestamp using
+    // the system's sys_timestr_default — the SBBS default is "%m/%d/%y %H:%M".
+    // tw2's ports.js calls this for "last visited" displays.
+    timestr: function(t) {
+        if (t === undefined || t === null) t = Math.floor(Date.now() / 1000);
+        var d = new Date(Number(t) * 1000);
+        if (isNaN(d.getTime())) return '';
+        var p = function(n) { return (n < 10 ? '0' : '') + n; };
+        return p(d.getMonth() + 1) + '/' + p(d.getDate()) + '/'
+             + p(d.getFullYear() % 100) + ' '
+             + p(d.getHours()) + ':' + p(d.getMinutes());
+    },
+    // datestr(time_t) — date-only variant. Same SBBS default minus the clock.
+    datestr: function(t) {
+        if (t === undefined || t === null) t = Math.floor(Date.now() / 1000);
+        var d = new Date(Number(t) * 1000);
+        if (isNaN(d.getTime())) return '';
+        var p = function(n) { return (n < 10 ? '0' : '') + n; };
+        return p(d.getMonth() + 1) + '/' + p(d.getDate()) + '/'
+             + p(d.getFullYear() % 100);
     },
 };
 
@@ -847,6 +930,23 @@ function file_copy(from, to) {
 }
 function file_getname(p) {
     return _path.basename(String(p));
+}
+function file_touch(p, atime, mtime) {
+    // Synchronet's file_touch updates the mtime (and creates the file
+    // if missing). tw2's LoadPlayer touches data/user/NNNN.tw2 to mark
+    // the player record as live. Use utimesSync; create-on-missing.
+    try {
+        var t = mtime ? new Date(mtime * 1000) : new Date();
+        var a = atime ? new Date(atime * 1000) : t;
+        try { _fs.utimesSync(p, a, t); }
+        catch (e) {
+            // File doesn't exist — create empty + retry.
+            try { _fs.mkdirSync(_path.dirname(p), {recursive: true}); } catch (_) {}
+            _fs.closeSync(_fs.openSync(p, 'a'));
+            _fs.utimesSync(p, a, t);
+        }
+        return true;
+    } catch (e) { return false; }
 }
 function file_getext(p) {
     return _path.extname(String(p));
@@ -1276,6 +1376,72 @@ File.prototype.iniGetAllObjects = function(idName, prefix) {
     }
     return out;
 };
+// Serialize the cached sections dict back into INI text and overwrite
+// this._content. Real Synchronet's iniSetValue writes through to disk
+// immediately, so flush to fs as well — doors like tw2's
+// GameSettings_Save expect the change to be visible the next time the
+// file is opened.
+File.prototype._writeIni = function() {
+    var s = this._iniCache || { '': {} };
+    var out = '';
+    var root = s[''] || {};
+    var k;
+    for (k in root) {
+        out += k + ' = ' + root[k] + '\n';
+    }
+    for (var name in s) {
+        if (name === '') continue;
+        out += '\n[' + name + ']\n';
+        for (k in s[name]) {
+            out += k + ' = ' + s[name][k] + '\n';
+        }
+    }
+    this._content = out;
+    this._iniCacheLen = out.length;
+    if (this._can_write) {
+        try { _fs.writeFileSync(this.name, Buffer.from(out, 'binary')); }
+        catch (e) {
+            try { process.stderr.write('[BBS] iniWrite ' +
+                JSON.stringify(this.name) + ' failed: ' + e + '\n'); } catch(_) {}
+        }
+    }
+};
+File.prototype.iniSetValue = function(section, key, value) {
+    var s = this._parseIni();
+    var skey = (section === null || section === undefined) ? '' : section;
+    if (!s[skey]) s[skey] = {};
+    s[skey][key] = (value === undefined || value === null) ? '' : String(value);
+    this._writeIni();
+    return true;
+};
+File.prototype.iniRemoveKey = function(section, key) {
+    var s = this._parseIni();
+    var skey = (section === null || section === undefined) ? '' : section;
+    if (s[skey] && key in s[skey]) {
+        delete s[skey][key];
+        this._writeIni();
+        return true;
+    }
+    return false;
+};
+File.prototype.iniRemoveSection = function(section) {
+    var s = this._parseIni();
+    if (section && s[section]) {
+        delete s[section];
+        this._writeIni();
+        return true;
+    }
+    return false;
+};
+File.prototype.iniSetObject = function(section, obj) {
+    if (!obj) return false;
+    var s = this._parseIni();
+    var skey = (section === null || section === undefined) ? '' : section;
+    s[skey] = {};
+    for (var k in obj) s[skey][k] = String(obj[k]);
+    this._writeIni();
+    return true;
+};
 
 // === load / require ===
 // Cache loaded files to prevent infinite recursion (a file `require()`ing
@@ -1470,7 +1636,17 @@ var BG_BROWN   = 6<<4; var BG_LIGHTGRAY = 7<<4;
 // === Global utility functions ===
 function random(n) { return Math.floor(Math.random() * n); }
 function time() { return Math.floor(Date.now() / 1000); }
-function ascii(n) { return String.fromCharCode(n); }
+// Synchronet's ascii() is overloaded: ascii(number) returns the char,
+// ascii(string) returns the code of the first char. tw2/input.js calls
+// ascii(key) to filter control chars with `if(ascii(key)<32) break;` —
+// the number-only version made that comparison a silent no-op.
+function ascii(x) {
+    if (typeof x === 'string') return x.charCodeAt(0);
+    if (typeof x === 'number') return String.fromCharCode(x);
+    if (x == null) return 0;
+    var s = String(x);
+    return s.length ? s.charCodeAt(0) : 0;
+}
 function ascii_str(s) { return s.charCodeAt(0); }
 
 // Synchronet's strftime(fmt, unixSeconds) — same conversion specifiers as
@@ -1612,7 +1788,7 @@ function _unused_format_legacy_removed() {
         'load', 'require', 'log', 'alert',
         'file_exists', 'file_isdir', 'file_isfile', 'file_size', 'file_date',
         'file_remove', 'file_rename', 'file_copy', 'file_getname', 'file_getext',
-        'file_mutex',
+        'file_mutex', 'file_touch',
         'mkdir', 'rmdir', 'directory',
         'lfexpand', 'backslash',
         'console', 'bbs', 'user', 'system', 'js', 'server', 'client',
@@ -1694,7 +1870,11 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
 
     username = _u('username') or 'Guest'
     display_name = _u('display_name') or username
-    user_id = _u('id') or 0
+    # Default to 1 (not 0): tw2's LoadPlayer scans players[] for a record
+    # with UserNumber == user.number; the empty-slot stubs all start with
+    # UserNumber == 0, so user.number == 0 would silently match the first
+    # stub and DeletePlayer would crash on the plain-object record.
+    user_id = _u('id') or 1
     security_level = 255 if _u('is_admin') else 50
     login_count = _u('login_count') or 0
 

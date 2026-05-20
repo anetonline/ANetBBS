@@ -1,11 +1,538 @@
-# ANetBBS v1.0a2.14 — alpha 2
+# ANetBBS v1.0a2.59 — /docs 500 fix
+
+Changes since v1.0a2.58:
+
+- **`/docs/` 500 fix.** The docs index template referenced
+  `url_for('main.healthz')`, but the `/healthz` route was moved
+  into its own blueprint (`healthz_bp`) in .43. The stale
+  endpoint name caused every `/docs/` page load to raise
+  `werkzeug.routing.BuildError`. Template now uses
+  `url_for('healthz.healthz')`. A small bug with a big footprint —
+  the entire docs section was unreachable since .43.
+
+---
+
+# ANetBBS v1.0a2.58 — deletable pre-update backups
+
+Changes since v1.0a2.57:
+
+- **`update.sh` chowns new backup dirs to the service user.** Pre-
+  update backup directories under `/tmp/anetbbs-backup-*` were created
+  by `update.sh` running as root, leaving every file inside root-
+  owned. The `/admin/backups/` Delete button (running as the gunicorn
+  service user) hit "[Errno 13] Permission denied" on every attempt.
+  Backups created by .58+ are owned by the service user from the
+  moment they're written — direct `shutil.rmtree()` works.
+- **Delete falls back to a sudoers helper for older backups.** Pre-.58
+  backups stay root-owned and can't be deleted without privilege.
+  The Delete endpoint now tries direct removal first and falls
+  through to `deploy/run_restore.sh delete` (which has been extended
+  with a `delete` action under the existing sudoers grant) when the
+  direct path errors with `PermissionError`. Sysops can finally
+  clean up the accumulated `/tmp/anetbbs-backup-*` dirs from earlier
+  this week.
+
+---
+
+# ANetBBS v1.0a2.57 — install log "Update Complete" cosmetic fix
+
+Changes since v1.0a2.56:
+
+- **Remove the doubled CSS border on the "Update Complete!" banner.**
+  update.sh draws its own box with `╔═╗║╚═╝` characters; applying a
+  CSS top+bottom border to each of those three lines produced three
+  stacked frames. The CSS now uses only the green text + subtle dark
+  background, letting the ASCII frame speak for itself.
+
+---
+
+# ANetBBS v1.0a2.56 — preflight: targeted sudo + hardening probe
+
+Changes since v1.0a2.55:
+
+- **Preflight "sudo escalation" check rewritten.** The .55 version
+  ran `sudo -n /bin/true` and reported "sudoers grant missing" on
+  every install — because the sudoers grant is intentionally narrow
+  (just the upgrade wrapper + systemctl on anetbbs-*) and
+  `/bin/true` isn't on the list. New probe is two-pronged:
+  1. Read `/etc/systemd/system/anetbbs-web.service` directly and
+     flag `NoNewPrivileges=true` or any narrow
+     `CapabilityBoundingSet=` that would block sudo's setuid
+     escalation. No sudo invoked.
+  2. Run `sudo -n -l <wrapper>` — sudo's "would I be allowed?"
+     query, no execution — to confirm the sudoers grant actually
+     covers the auto-update path.
+  Either failure surfaces with the exact unit file directives to
+  remove. Catches the friend's hardening regression AND a missing
+  sudoers grant, with zero false positives on properly configured
+  boxes.
+
+---
+
+# ANetBBS v1.0a2.55 — preflight: sudo escalation probe
+
+Changes since v1.0a2.54:
+
+- **New preflight check: "sudo escalation from web service".**
+  Tries `sudo -n /bin/true` from the running gunicorn worker. If
+  the unit is hardened with `NoNewPrivileges=true` or a
+  restrictive `CapabilityBoundingSet=`, sudo can't escalate, and
+  the auto-update endpoint would fail later with the cryptic
+  "sudo: unable to change to root gid: Operation not permitted /
+  error initializing audit plugin sudoers_audit". The check
+  surfaces that condition red with a one-line remediation
+  pointing at the unit file. Catches the regression class
+  before a sysop clicks Install.
+
+---
+
+# ANetBBS v1.0a2.54 — install-log rendering (block by default)
+
+Changes since v1.0a2.53:
+
+- **Install log uses `<div>` per line instead of `<span class="line">`.**
+  The CSS rule `.upg-log .line { display: block; }` did the right
+  thing in isolation but a downstream theme override on .51's box
+  flattened the spans back to inline, making the log render as one
+  paragraph. `<div>` is block by default — no CSS needed, no theme
+  override can flatten it. Belt-and-suspenders on the .52 pretty-
+  print work. Hard-refresh the upgrade page after installing this
+  (`Ctrl+Shift+R`) so the browser picks up the new HTML.
+
+---
+
+# ANetBBS v1.0a2.53 — sysop QoL polish
+
+Changes since v1.0a2.52:
+
+- **`/admin/door-errors/`** — readable viewer for
+  `logs/door-errors.log`. Each Synchronet-compat door crash gets
+  collapsed into a single row showing time + slug + user; click to
+  expand the stack trace. "Clear log" button at the top. Sysops
+  notice door breakage without `ssh + tail`.
+- **`/admin/backups/`** — list of every pre-update snapshot
+  `update.sh` has stored at `/tmp/anetbbs-backup-*`. Shows version
+  delta, age, size, which artefacts are present. Per-row actions:
+  Delete, Restore `.env`, Restore DB. Restores go through a new
+  `deploy/run_restore.sh` helper that's strictly arg-validated and
+  sudoers-granted — same security shape as the upgrade wrapper.
+- **Setup wizard: "Test hub connection" button.** Probes
+  `REGISTRY_URL/anetbbs.lst` from this BBS before submit. Sysop
+  sees "✓ reachable" or "✗ firewall blocked" inline before
+  committing to federation registration. No more "did my install
+  end up federated?" guesswork after the wizard closes.
+- **Public homepage welcome card for anonymous visitors.** Big
+  gradient card explaining what ANetBBS is + prominent Sign up /
+  Log in buttons + sysop name & contact + a one-line stat strip.
+  Logged-in users see the unchanged dashboard.
+
+---
+
+# ANetBBS v1.0a2.52 — readable install log
+
+Changes since v1.0a2.51:
+
+- **Pretty-print the install log on `/admin/upgrades/`.** Each line
+  now gets a class based on its content: yellow for `── Step N/8 ──`
+  banners with rule dividers, green for `✅` rows, amber for `⏭`,
+  red for `❌`, blue for `[INFO]`, purple-italic for the wrapper's
+  own `[upgrade]` lines, and a green outlined box around the final
+  "Update Complete!" banner. ISO timestamps from the Python runner
+  collapse to `HH:MM:SS` so the visual rhythm of the steps reads
+  cleanly. ANSI escape sequences emitted by `update.sh`'s colour
+  helpers are stripped server-side so the browser doesn't render
+  them as glyphs.
+
+---
+
+# ANetBBS v1.0a2.51 — port-collision guard for auto-update
+
+Changes since v1.0a2.50:
+
+- **`update.sh` no longer hard-codes `:5000` when writing a missing
+  `anetbbs-web.service`.** The old logic defaulted gunicorn's bind
+  to `:5000` whenever no unit file was present. On installs where
+  the sysop had previously been running gunicorn on a different
+  port (`:8080`, behind nginx, etc.) and where the unit file wasn't
+  named `anetbbs-web.service`, an auto-upgrade would write a fresh
+  unit on `:5000` and leave their bookmarked URL pointing at
+  whatever else was answering the old port — often the MRC bridge
+  on `:8080`. v1.0a2.51's port-selection walks three steps:
+  1. Use `WEB_PORT` from `.env` if set.
+  2. Otherwise probe `ss -tlnp` for a running gunicorn from this
+     install and inherit its bind port.
+  3. Otherwise default to `:5000`, walking upward if it's bound by
+     something else (mrc-bridge etc.), then write the chosen value
+     back into `.env` so future upgrades stay consistent.
+
+- **Preflight checklist: WEB_PORT consistency probe.** New check
+  surfaces two regression shapes that auto-update used to ignore:
+  - `.env`'s `WEB_PORT` disagrees with what the unit actually binds.
+  - The MRC bridge wants the same port the BBS web uses, so visitors
+    to the old URL land on chat.
+  Both show up red in `/admin/preflight/` with a one-line remediation.
+
+If you ran the v1.0a2.50 auto-upgrade on an install that wasn't on
+the default `:5000`, this release will detect it on next launch and
+preserve the original port. On the friend's specific BBS that hit
+the regression, the immediate fix is either:
+- visit `:5000` going forward (BBS lives there now), or
+- edit `.env` to set `WEB_PORT=8080` plus move the MRC bridge to a
+  free port (e.g., `MRC_BRIDGE_PORT=8081`), then restart.
+
+---
+
+# ANetBBS v1.0a2.50 — security update checker + survivable install log
+
+Changes since v1.0a2.49:
+
+- **Install-log poll survives the gunicorn restart.** The originating
+  tab used to silently stop tailing the upgrade log the moment Step 3
+  killed anetbbs-web. The poll loop now stays armed through every
+  HTTP error, returning with a "web restarting…" badge during the
+  outage window and resuming as soon as gunicorn comes back. It
+  terminates only when the log shows the wrapper's final `exit N`
+  line (or after a 30-minute ceiling). No more "did it work?" toggle
+  to a second tab.
+
+- **Daily security update check.** New event handler
+  `security_check` scans `apt list --upgradable` and the install
+  venv's `pip list --outdated`, tags Ubuntu `-security` packages as
+  SECURITY, and writes a JSON report to `logs/security-report.json`.
+  A new `/admin/security/` page renders the report with a red banner
+  + count of pending security updates if any are pending, calm green
+  otherwise. **Run scan now** button on the page fires the handler
+  synchronously when you don't want to wait for the daily 04:00 UTC
+  tick. Seeded as a default event so fresh installs start scanning
+  immediately. Catches nginx / dosbox / openssl / Python and the
+  rest of the system-level stack the sysop has to keep patched.
+
+---
+
+# ANetBBS v1.0a2.49 — recent events widget
+
+Changes since v1.0a2.48:
+
+- **"Recent scheduled events" widget on the admin dashboard.** Shows
+  the last 5 firings from the `ScheduledEvent` table with name,
+  handler, when it ran (absolute + relative), status (ok / fail),
+  and duration. Surfaces TW2 maint, weekly VACUUM, log rotation,
+  and any sysop-defined events at a glance — failures stand out
+  without needing to navigate to `/admin/events/`. Quiet when no
+  events have run yet.
+
+This is also the first release shipped end-to-end through the
+in-place auto-update path on bbs.a-net.fyi. If you're reading this
+in the dashboard "What's new" panel after one-click upgrading from
+.48, the plumbing is officially live.
+
+---
+
+# ANetBBS v1.0a2.48 — auto-update survives its own service stop
+
+Changes since v1.0a2.47:
+
+- **Auto-update wrapper now runs in its own systemd scope.** The .47
+  attempt to upgrade through `/admin/upgrades/` halted at "Step 3/8:
+  Stopping services" — because the upgrade wrapper inherited
+  anetbbs-web's cgroup, `systemctl stop anetbbs-web` killed the
+  wrapper itself before Step 4 (rsync) could run. The install
+  endpoint now spawns the wrapper via
+  `sudo systemd-run --scope --collect --quiet`, putting it in a
+  transient scope under system.slice. The scope persists through
+  the service stop/restart, so update.sh runs end-to-end. Sudoers
+  template + install.sh / update.sh sudoers writer extended to
+  grant both invocation forms (scope and direct).
+
+- **update.sh Step 5 fast path.** Previous updates unconditionally
+  uninstalled + recompiled bcrypt and force-reinstalled cryptography
+  on every run. Both packages have Rust/C extensions; if pip can't
+  find a prebuilt wheel for the running Python, compiling from source
+  takes 5–10 minutes per package on a small VPS — with the web
+  service down the whole time. .48 first probes whether the current
+  install works (`import bcrypt; bcrypt.hashpw(...)`,
+  `Fernet.generate_key()`); if it does, the rebuild is skipped.
+  Typical upgrade time drops from minutes to ~30 seconds. Slow
+  recovery path retained as a fallback for genuinely-broken
+  installs.
+
+---
+
+# ANetBBS v1.0a2.47 — last-upgraded indicator
+
+Changes since v1.0a2.46:
+
+- **"Last upgraded" row in the System Info card on the dashboard.**
+  Reads the mtime of the `VERSION` file in the install root (which
+  `update.sh` rewrites on every patch) and shows both the absolute
+  UTC timestamp + a relative age. Useful when you have several
+  ANetBBS installs and need to know which one fell behind on
+  updates.
+
+This is the first release shipped via the in-place auto-update path
+from /admin/upgrades/ — if you're reading this in the "What's new"
+panel after a one-click upgrade from .46, the plumbing is officially
+end-to-end functional.
+
+---
+
+# ANetBBS v1.0a2.46 — upgrade-wrapper bash regex fix
+
+Changes since v1.0a2.45:
+
+- **`deploy/run_upgrade.sh` URL validation fix.** The previous wrapper
+  used `[[ "$URL" =~ ^https?://[A-Za-z0-9._%/\\:?&=+~\-]+\.tar\.gz$ ]]`
+  to validate the download URL. Bash treats `&` inside `[[ =~ ... ]]`
+  as a logical-operator token even when it's a literal inside a
+  character class — so the wrapper would die at line 33 with:
+
+      run_upgrade.sh: line 33: syntax error in conditional expression:
+      unexpected token `&'
+
+  …and exit non-zero before downloading anything. Auto-update via
+  `/admin/upgrades/` was completely broken from .43 through .45 as a
+  result. Replaced the regex with two `case` pattern checks: one for
+  `https?://...tar.gz` scheme+suffix, one for shell-metacharacter
+  rejection. Same defensive coverage, no bash quirks.
+
+This release has to be installed manually one last time because the
+broken wrapper on .43/.44/.45 can't deliver its own replacement. From
+.46 onward, `/admin/upgrades/` should work end-to-end.
+
+---
+
+# ANetBBS v1.0a2.45 — update-available banner
+
+Changes since v1.0a2.44:
+
+- **"Update available" banner on the admin dashboard.** When the
+  cached `/api/releases/latest` poll reports a version newer than
+  what's running, the dashboard shows a green banner with the version
+  delta and a one-click "Review & install" link to `/admin/upgrades/`.
+  Reuses the same 30-second TTL cache that page already maintains, so
+  the dashboard load doesn't add a network round-trip.
+- **Peer Health "Probe now" CSRF fix.** Same root cause as the .44
+  upgrades-page fix — the probe fetch was missing `X-CSRFToken`, so
+  Flask-WTF replied with HTML and `JSON.parse` blew up with
+  "Unexpected token '<', '<!doctype '…". Probe button now sends the
+  token + degrades non-JSON responses into a readable error inline.
+
+This is the first release ever shipped via the in-place auto-update
+path on bbs.a-net.fyi. If you're reading this in the admin "What's
+new" panel after one-click upgrading from .44, the plumbing works.
+
+---
+
+# ANetBBS v1.0a2.44 — scheduled events + bug fixes
+
+Changes since v1.0a2.43:
+
+- **Generic scheduled-events system.** New
+  `/admin/events/` page + `ScheduledEvent` table + background
+  scheduler thread + handler registry. Bundled handlers: `tw2_maint`,
+  `db_vacuum`, `log_rotate`, `shell`, `noop`. Sysop can add/edit/
+  enable/disable/run-now any event from the UI. Schedule kinds:
+  daily HH:MM, hourly :MM, weekly DOW HH:MM, interval N minutes.
+  Replaces the standalone TW2 maint thread from .43 — that handler is
+  now a seeded default event row.
+- **`/admin/upgrades/` CSRF fix.** Install / Rollback / Check fetch
+  calls were missing `X-CSRFToken`, so Flask-WTF rejected them with
+  HTML — which crashed `JSON.parse` on the browser side
+  ("unexpected character at line 1 column 1"). Added a shared
+  `fetchJson` helper that pulls the token from the meta tag and
+  surfaces non-JSON responses with the HTTP status + body excerpt.
+- **`update.sh` no longer prints "was not running" for legacy units.**
+  The pre-merge `anetbbs-telnet` / `anetbbs-ssh` services were
+  retired in v1.0a2.10. The stop-loop now skips units that don't
+  have a `.service` file on disk, so screenshots from the upgrade
+  flow are noise-free.
+
+---
+
+# ANetBBS v1.0a2.43 — Friday public alpha hardening
 
 > A modern multi-node BBS for the FidoNet / Synchronet world.
 > Web, telnet, SSH, rlogin, FTP front-ends sharing one user database.
 > Federation hub for inter-ANetBBS peer discovery.
 
-The **second public alpha**, point release v1.0a2.14. Changes since
-v1.0a2.13:
+The big "public alpha" point release. Changes since v1.0a2.42:
+
+- **`/healthz` JSON endpoint** — public, unauth, returns `{status,
+  version, db_ok, uptime_sec, started_at, listeners, host}`. Used by
+  `update.sh`'s post-restart probe and by external uptime monitors.
+  Replaces an earlier stubby endpoint that hardcoded `version: "v100"`.
+
+- **Pre-update DB snapshot uses `sqlite3 .backup`.** The previous
+  `cp(1)` of the live SQLite file could produce a torn snapshot
+  during concurrent writes — opens fine, scans broken. Switched to
+  `sqlite3 ... .backup` which uses the WAL to capture a consistent
+  point-in-time copy. Falls back to `cp` only if sqlite3(1) is
+  missing. Also covers `anetbbs_dev.db` (previously only the prod DB
+  was captured). Backup dir now includes a `MANIFEST` recording the
+  version delta + service user, so rollbacks aren't a guessing game.
+
+- **Post-update HTTP probe.** After the systemd restart, `update.sh`
+  curls `/healthz` (then falls back to `/auth/login` on older
+  installs without the new endpoint) for up to 30 seconds. If web
+  fails to respond with a 200, the same critical-failure rollback
+  path that already runs on `systemctl is-active` failures kicks
+  in. Catches the "gunicorn is alive but every request 500s" case
+  the old probe couldn't see.
+
+- **Rollback drawer in the Updates page.** `/admin/upgrades/` now
+  surfaces up to three previous tarballs in `data/releases/` with
+  a "Roll back to vX" button. Reuses the same privileged wrapper
+  that does forward upgrades — sha256 verified against an on-disk
+  computation, not an upstream claim, since the trust anchor for
+  rolling back is "the bytes already live on this box."
+
+- **TW2 — Reset Universe button.** Games admin → "Reset TW2
+  universe" wipes the per-install JSON DB (`data/sbbs_doors/tw2/db/`)
+  plus the legacy in-source-tree path so a botched test or pre-launch
+  cleanup is one click instead of a shell session.
+
+- **Server-side door crash log.** `logs/door-errors.log` now collects
+  the stack trace + door slug + username on any Synchronet-compat
+  door crash. Sysops see breakage without having to wait for users
+  to report it.
+
+- **"What's new" panel on the admin dashboard.** Reads RELEASE.md,
+  finds the section for the running VERSION, renders inline. So
+  whenever you upgrade, the first time you load `/admin/`, you see
+  exactly what landed.
+
+---
+
+# ANetBBS v1.0a2.24 — alpha 2
+
+The **second public alpha**, point release v1.0a2.24. Changes since
+v1.0a2.23:
+
+- **Echomail import — PATH-loop misfire fix.** The previous loop check
+  rejected any inbound message whose PATH kludge contained our address.
+  But per FTS-0004 the sending tosser correctly appends the destination
+  address to PATH right before shipping, so every legitimate inbound
+  message had our address there and got dropped as a "loop." Removed
+  the check entirely — real loop detection happens via `msg_id` dedup
+  and SEEN-BY-at-forward-time, neither needing PATH inspection. Caps
+  off the three-bug TQWnet receive arc (v1.0a2.22, .23, .24). After
+  these fixes, %RESCAN on a populated hub successfully imports tens of
+  thousands of messages into their proper TQW_* echoes.
+
+Changes since v1.0a2.22:
+
+- **Echomail import — per-message SAVEPOINT.** When the BinkP receive
+  finally worked (v1.0a2.22), ~50,000 parsed messages from a TQW
+  rescan all rolled back at outer-commit time:
+
+  > "transaction has been rolled back due to a previous exception
+  >  during flush. Can't reconnect until invalid transaction is rolled
+  >  back."
+
+  One malformed row in a 50k batch was poisoning the session and every
+  subsequent insert was silently piling onto the broken transaction.
+  Final commit rolled back the entire batch. Fixed by wrapping each
+  insert in `with db.session.begin_nested():` so a bad row only rolls
+  back its own savepoint; the outer transaction stays valid. Plus:
+  length-truncate inbound fields to their column maxes (most common
+  cause of `IntegrityError`) and force `db.session.flush()` inside
+  the savepoint so constraint failures surface immediately.
+
+Changes since v1.0a2.21:
+
+- **BinkP CLIENT — real fix for ZIP-wrapped mail.** Root cause of the
+  entire TQWnet-not-flowing saga. v1.0a2.21 fixed the regex in the
+  BinkP LISTENER but the outbound POLLER uses a different file
+  (`binkp.py`) which had a far worse bug: file completion was
+  detected by looking for `\x00\x00` at the tail — the FTS-0001
+  raw-packet end marker. Mystic ships echomail as ZIP-wrapped bundles
+  which never end in `\x00\x00`. So 5+ files arrived per poll, none
+  were marked complete, none were ACKed, none imported.
+
+  Rewrote `_receive_messages` to parse the byte-count from CMD_FILE
+  (`name size mtime offset`) and detect completion by byte-count, then
+  dispatch by content: raw FTS-0001 → parse; ZIP → unzip and parse
+  each packet member; anything else → stash for the TIC scanner.
+  M_GOT ACK now goes back promptly so the hub stops re-queueing.
+
+Changes since v1.0a2.20:
+
+- **BinkP listener — day-of-week bundle extensions.** Mystic hubs
+  deliver bundled mail to nodes using FTS-5003 day-of-week extensions
+  (`.mo[0-z]` Monday through `.fr[0-z]` Friday through `.su[0-z]`
+  Sunday). Our acceptor regex only covered Wednesday (`.we[0-9a-f]`).
+  Every other day got silently filed to inbound and ignored.
+- **Persistent inbound** — `BINKP_INBOUND_DIR` defaulted to
+  `/tmp/binkp-inbound` (tmpfs on most distros), so unrecognized files
+  vanished on every service restart. Default is now
+  `data/binkp/inbound`.
+- **Visible log line for unrecognised files** — INFO-level, so future
+  "where did my mail go?" debugging is one `journalctl | grep` away.
+
+Changes since v1.0a2.19:
+
+- **Federation self-registration client.** Completes the federation
+  loop. Set `REGISTRY_SELF_REGISTER=true` + `BBS_DOMAIN` + `SYSOP_EMAIL`
+  in `.env` and the BBS auto-POSTs `/register` against the hub on
+  startup, heartbeats daily, and persists the verify token to
+  `data/registry_state.json`. New admin page `/admin/registry/self`
+  shows the hub URL, our metadata, last hub response, the verify URL
+  (so the sysop can click it without grepping logs), and a "Register
+  / Heartbeat Now" button.
+
+Changes since v1.0a2.18:
+
+- **Dialout telnet — real IAC negotiation + raw key reads.** First
+  user-filed bug against the pre-alpha. Outbound telnet to another BBS
+  rendered as dumb terminal (no ANSI) and single keys (ESC, `*`,
+  bot-defense challenges) didn't reach the remote — they got buffered
+  until Enter. Rewrote `_proxy` with a minimal telnet IAC state
+  machine that announces WILL TTYPE / NAWS / BINARY, responds to peer
+  options, sends our terminal type ("ANSI") on demand, and uses
+  `session.read_raw(1)` for byte-at-a-time user input. Ctrl+] escape
+  (declared but never wired in the old code) now actually works.
+
+Changes since v1.0a2.17:
+
+- **Admin user delete cascade.** `Admin → Users → Delete` returned 500
+  because `UserSession.user_id` is NOT NULL but the relationship had no
+  cascade — SQLAlchemy tried `UPDATE user_sessions SET user_id=NULL` to
+  detach the session before deleting the user, which the constraint
+  rejected. Fixed by switching the backref to `db.backref('session',
+  uselist=False, cascade='all, delete-orphan')`.
+
+Changes since v1.0a2.16:
+
+- **SYSTAT now sees web users.** Peer BBSes querying our SYSTAT
+  (UDP/11) for "who's online" got `No users currently active.` even
+  when the BBS was busy. Cause: SYSTAT read only `NodeActivity` (the
+  multi-node terminal slot tracker); web users live in `UserSession`.
+  Fixed by unioning both sources. Web sessions get synthetic slot names
+  `web1`, `web2`, …, and their URL paths are sanitized through the
+  same friendly-area-label map as `/who/`.
+
+Changes since v1.0a2.15:
+
+- **anetbbs.lst → BbsDirectoryEntry pull.** Bridges the federation
+  registry into the existing inter-BBS IM directory. New module
+  `anetbbs/msp/anetbbs_directory.py` pulls `REGISTRY_URL/anetbbs.lst`
+  daily and upserts each peer into `BbsDirectoryEntry` with
+  `source='anetbbs'`. Extended `bbs_directory` with `sysop`,
+  `location`, `software`, `software_version`, `msp_port`,
+  `systat_port`, `source`. `/imsg/directory/` shows a blue **ANetBBS**
+  badge per row alongside the grey **Synchronet** rows from Vertrauen.
+
+Changes since v1.0a2.14:
+
+- **Federation registry — CSRF hotfix.** v1.0a2.14's
+  `POST /registry/api/v1/*` endpoints required a CSRF token, fine for
+  browser forms but not for peer ANetBBS hosts calling the API. First
+  attempt to register against the live hub returned
+  `400 The CSRF token is missing.`. Exempted the registry blueprint
+  from CSRF protection at register-time. Admin-side
+  `/admin/registry/*` still requires CSRF (admin blueprint).
+
+Changes since v1.0a2.13:
 
 - **Federation registry — hub side.** First half of the
   ANetBBS-to-ANetBBS federation feature. One BBS designated as the

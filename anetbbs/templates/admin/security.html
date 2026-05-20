@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Security Updates{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .sec-banner { background: linear-gradient(135deg,#6b1818,#a02929); color:#fff; border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,.25); }
+  .sec-banner.calm { background: linear-gradient(135deg,#1e5631,#2d8048); }
+  .sec-banner h1 { margin: 0; font-weight: 600; }
+  .sec-card { border-radius: .75rem; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+  .sec-pill-security { background:#b62c2c; color:#fff; }
+  .sec-pill-update   { background:#c79324; color:#fff; }
+  .sec-meta { color:#6c757d; font-size:.85rem; }
+  .sec-empty { color:#6c757d; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="sec-banner {% if not report or (report.apt_security == 0) %}calm{% endif %}">
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <h1>
+          <i class="bi bi-shield-{% if report and report.apt_security > 0 %}exclamation{% else %}check{% endif %}"></i>
+          Security updates
+        </h1>
+        <div class="text-white-50 mt-1">
+          {% if report %}
+            {{ report.apt_total }} apt updates pending
+            ({{ report.apt_security }} security),
+            {{ report.pip_total }} pip outdated.
+            Last scanned: {{ report.generated_at }}.
+          {% else %}
+            No scan has run yet on this install.
+          {% endif %}
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('security_admin.run_now') }}">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <button class="btn btn-light"><i class="bi bi-arrow-repeat"></i> Run scan now</button>
+      </form>
+    </div>
+  </div>
+
+  {% if not report %}
+    <div class="alert alert-info">
+      Click <strong>Run scan now</strong> to take a snapshot — or wait
+      for the daily <code>04:00 UTC</code> tick (the event is seeded
+      automatically; manage it under
+      <a href="{{ url_for('events_admin.index') }}">Scheduled Events</a>).
+    </div>
+  {% else %}
+
+    {% if report.errors %}
+      <div class="alert alert-warning">
+        Scan errors:
+        <ul class="mb-0">
+          {% for e in report.errors %}<li><code>{{ e }}</code></li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <!-- apt -->
+    <div class="card sec-card mb-3">
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <strong><i class="bi bi-ubuntu"></i> OS packages (apt)</strong>
+        <span class="sec-meta">{{ report.apt_total }} total
+          {% if report.apt_security %}
+            · <span class="badge sec-pill-security">{{ report.apt_security }} security</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="card-body p-0">
+        {% if not report.apt %}
+          <div class="p-3 sec-empty">Nothing pending — system is up to date.</div>
+        {% else %}
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr><th>Package</th><th>Current</th><th>Latest</th><th>Source</th><th>Type</th></tr>
+          </thead>
+          <tbody>
+            {% for u in report.apt %}
+            <tr>
+              <td><code>{{ u.name }}</code></td>
+              <td class="sec-meta">{{ u.current }}</td>
+              <td><code>{{ u.latest }}</code></td>
+              <td class="sec-meta"><small>{{ u.source }}</small></td>
+              <td>
+                {% if u.security %}
+                  <span class="badge sec-pill-security">SECURITY</span>
+                {% else %}
+                  <span class="badge sec-pill-update">update</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% if report.apt %}
+        <div class="card-footer sec-meta">
+          To install everything: <code>sudo apt update &amp;&amp; sudo apt upgrade</code><br>
+          Security-only: <code>sudo unattended-upgrade -d</code> (if the package is installed)
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- pip -->
+    <div class="card sec-card">
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <strong><i class="bi bi-filetype-py"></i> Python packages (pip)</strong>
+        <span class="sec-meta">{{ report.pip_total }} outdated</span>
+      </div>
+      <div class="card-body p-0">
+        {% if not report.pip %}
+          <div class="p-3 sec-empty">Nothing outdated — venv is current.</div>
+        {% else %}
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr><th>Package</th><th>Current</th><th>Latest</th></tr>
+          </thead>
+          <tbody>
+            {% for u in report.pip %}
+            <tr>
+              <td><code>{{ u.name }}</code></td>
+              <td class="sec-meta">{{ u.current }}</td>
+              <td><code>{{ u.latest }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% if report.pip %}
+        <div class="card-footer sec-meta">
+          To upgrade everything inside the install venv:
+          <code>sudo -u anetbbs venv/bin/pip install -U &lt;package&gt;</code>.
+          Pip doesn't expose CVE data — none of these are flagged as
+          security by default. Install <code>pip-audit</code> for that.
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="text-end mt-3 sec-meta">
+      Report file: <code>logs/security-report.json</code>.
+      Driven by the
+      {% if event_id %}<a href="{{ url_for('events_admin.edit', eid=event_id) }}">scheduled event</a>{% else %}<code>security_check</code> handler{% endif %}.
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

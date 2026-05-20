@@ -97,7 +97,25 @@ def _build_symlink_tree(root_dir, areas, mode='user'):
     for name in os.listdir(root_dir):
         full = os.path.join(root_dir, name)
         if os.path.islink(full):
-            os.unlink(full)
+            try:
+                os.unlink(full)
+            except PermissionError as exc:
+                # Leftover from a previous FTP run that executed as a
+                # different user — usually root, before the BBS was
+                # converted to run as `stingray`/`anetbbs`. We can't
+                # remove the stale symlink but we can still operate
+                # around it (worst case the link points at a dead
+                # target). Log + continue rather than crash the whole
+                # FTP thread, which is what kept FTP silently dead
+                # for a week pre-v1.0a2.32. Fix on the sysop side:
+                # `sudo chown -R <service_user>:<group> data/ftp_root`.
+                logger.warning(
+                    'FTP: cannot remove stale symlink %s (%s) — likely '
+                    'a leftover owned by a different user. Fix with: '
+                    'sudo chown -R <service-user>:<group> %s ; then '
+                    'restart anetbbs.', full, exc, root_dir)
+            except OSError as exc:
+                logger.warning('FTP: unlink %s failed: %s', full, exc)
     linked = 0
     for area in areas:
         if mode == 'anon' and not _public_area_filter(area):
@@ -280,18 +298,70 @@ def build_server(app, host, port, anon_enabled=True,
     from pyftpdlib.servers import FTPServer
 
     handler_cls = AnetbbsFTPHandler
-    if tls_certfile and tls_keyfile and \
-            os.path.exists(tls_certfile) and os.path.exists(tls_keyfile):
+
+    # FTPS soft-fail: we need both files to *exist AND be readable*. The
+    # previous `os.path.exists` check passed for /etc/letsencrypt/live/
+    # symlinks even when the linked archive/*.pem files were 0600 root-
+    # only — TLS_FTPHandler then crashed during SSL context init and the
+    # FTP listener died silently (the whole daemon thread, not just one
+    # session). Now we test readability up front, log a clear warning,
+    # and fall back to plain FTP instead of taking the listener down.
+    def _tls_ready():
+        if not (tls_certfile and tls_keyfile):
+            return False
+        for path, label in ((tls_certfile, 'cert'), (tls_keyfile, 'key')):
+            if not os.path.exists(path):
+                logger.warning('FTP: TLS %s missing (%s) — falling back '
+                               'to plain FTP', label, path)
+                return False
+            if not os.access(path, os.R_OK):
+                logger.warning(
+                    'FTP: TLS %s unreadable by service user — falling '
+                    'back to plain FTP. Fix: add this user to the '
+                    'ssl-cert group OR copy the cert to a path the '
+                    'service can read. (%s)', label, path)
+                return False
+            # Belt-and-braces: open the file. Catches stat-vs-open
+            # divergence on weird filesystems (overlayfs, NFS root-squash).
+            try:
+                with open(path, 'rb') as _:
+                    pass
+            except OSError as exc:
+                logger.warning('FTP: TLS %s open failed (%s) — falling '
+                               'back to plain FTP', label, exc)
+                return False
+        return True
+
+    if _tls_ready():
         # FTPS — AUTH TLS on the same port. Implicit FTPS would need 990.
-        from pyftpdlib.handlers import TLS_FTPHandler
-        class _TLSAnetbbsHandler(TLS_FTPHandler, AnetbbsFTPHandler):
-            pass
-        handler_cls = _TLSAnetbbsHandler
-        handler_cls.certfile = tls_certfile
-        handler_cls.keyfile = tls_keyfile
-        handler_cls.tls_control_required = False  # AUTH TLS upgrade is optional
-        handler_cls.tls_data_required = False
-        logger.info('FTP: TLS enabled (%s)', tls_certfile)
+        # ``TLS_FTPHandler`` is only exposed by pyftpdlib when pyOpenSSL
+        # is importable; missing that dep used to crash the whole FTP
+        # thread with ``ImportError: cannot import name 'TLS_FTPHandler'``.
+        # Catch + downgrade to plain FTP with an actionable warning.
+        try:
+            from pyftpdlib.handlers import TLS_FTPHandler  # noqa: WPS433
+        except ImportError as exc:
+            logger.warning(
+                'FTP: TLS_FTPHandler unavailable (%s) — pyOpenSSL is '
+                'probably not installed in the venv. Run '
+                '`venv/bin/pip install pyopenssl` and restart anetbbs '
+                'to enable FTPS. Falling back to plain FTP for now.',
+                exc)
+        else:
+            class _TLSAnetbbsHandler(TLS_FTPHandler, AnetbbsFTPHandler):
+                pass
+            handler_cls = _TLSAnetbbsHandler
+            handler_cls.certfile = tls_certfile
+            handler_cls.keyfile = tls_keyfile
+            handler_cls.tls_control_required = False  # AUTH TLS optional
+            handler_cls.tls_data_required = False
+            logger.info('FTP: TLS enabled (%s)', tls_certfile)
+    elif tls_certfile or tls_keyfile:
+        # Either set, but soft-fail check kicked in — make the
+        # downgrade explicit so the sysop sees one line per startup.
+        logger.warning('FTP: starting without TLS (AUTH TLS clients '
+                       'will fall back to plain). Clear FTP_TLS_CERTFILE/'
+                       'FTP_TLS_KEYFILE in .env to silence this warning.')
 
     # Build three symlink trees — anon (read-only public), users (auth,
     # non-sysop-only), admin (sysop-only included). The authorizer maps

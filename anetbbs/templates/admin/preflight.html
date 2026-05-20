@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Preflight — Ready to go public?{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .pf-banner-ok   { background: linear-gradient(135deg,#1e5631,#2d8048); }
+  .pf-banner-warn { background: linear-gradient(135deg,#8b6914,#c79324); }
+  .pf-banner-fail { background: linear-gradient(135deg,#7e1a1a,#b62c2c); }
+  .pf-banner { color:#fff; border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,.25); }
+  .pf-banner h1 { margin:0; font-weight:600; }
+  .pf-card { border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.08); }
+  .pf-row { padding:.75rem 1rem; border-bottom:1px solid #ececec; }
+  .pf-row:last-child { border-bottom:none; }
+  .pf-status { font-family:monospace; font-weight:700; width:60px; display:inline-block; }
+  .pf-status.ok { color:#2d8048; }
+  .pf-status.warn { color:#c79324; }
+  .pf-status.fail { color:#b62c2c; }
+  .pf-detail { color:#6c757d; font-size:.9rem; margin-top:.15rem; }
+  .pf-fix { color:#2d8048; font-size:.9rem; margin-top:.15rem; font-style:italic; }
+  .pf-fix.warn { color:#c79324; }
+  .pf-fix.fail { color:#b62c2c; }
+  .pf-meta { color:#6c757d; font-size:.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="pf-banner pf-banner-{{ overall }}">
+    <h1>
+      <i class="bi bi-{% if overall=='ok' %}check-circle{% elif overall=='warn' %}exclamation-triangle{% else %}x-octagon{% endif %}"></i>
+      Preflight —
+      {% if overall=='ok' %}ready to go public{% elif overall=='warn' %}ready with caveats{% else %}not ready{% endif %}
+    </h1>
+    <div class="text-white-50 mt-1">
+      {{ counts.ok }} ok &middot; {{ counts.warn }} warn &middot; {{ counts.fail }} fail
+      &middot; ran in {{ elapsed_ms }} ms
+    </div>
+  </div>
+
+  <div class="card pf-card">
+    <div class="card-body p-0">
+      {% for c in checks %}
+        <div class="pf-row d-flex align-items-start">
+          <div class="me-3">
+            <span class="pf-status {{ c.status }}">{{ c.status | upper }}</span>
+          </div>
+          <div class="flex-grow-1">
+            <div><strong>{{ c.name }}</strong></div>
+            {% if c.detail %}<div class="pf-detail">{{ c.detail }}</div>{% endif %}
+            {% if c.fix and c.status != 'ok' %}
+              <div class="pf-fix {{ c.status }}">→ {{ c.fix }}</div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="card-footer pf-meta">
+      Re-run any time by reloading this page. Each check is independent —
+      a fix for one shouldn't surface new failures in others.
+    </div>
+  </div>
+</div>
+{% endblock %}

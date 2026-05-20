@@ -142,22 +142,9 @@ def tutorial():
 _BOOT_AT = datetime.utcnow()
 
 
-@main_bp.route('/healthz')
-def healthz():
-    """Liveness probe + minimal status. Anonymous-readable."""
-    from flask import jsonify
-    db_ok = True
-    try:
-        db.session.execute(db.text('SELECT 1'))
-    except Exception:
-        db.session.rollback()
-        db_ok = False
-    return jsonify({
-        'ok': db_ok,
-        'db': db_ok,
-        'version': 'v100',
-        'uptime_seconds': int((datetime.utcnow() - _BOOT_AT).total_seconds()),
-    })
+# /healthz moved to anetbbs/web/healthz.py — full body with version,
+# listener probe, db status, and a proper 200/503 split. Kept the
+# _BOOT_AT above in case other endpoints reference it.
 
 
 @main_bp.route('/users/suggest')

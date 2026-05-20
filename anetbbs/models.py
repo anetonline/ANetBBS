@@ -2290,3 +2290,52 @@ class WikiRevision(db.Model):
 
     def __repr__(self):
         return f'<WikiRevision page={self.page_id} rev={self.rev_num}>'
+
+
+class ScheduledEvent(db.Model):
+    """Sysop-defined scheduled tasks — door maintenance, DB vacuum, log
+    rotation, ad-hoc shell commands. Anything that needs to run on a
+    cron-style cadence outside the web request lifecycle.
+
+    Each row references one *handler* (``handler_key``) from the bundled
+    registry in :mod:`anetbbs.events.handlers`. Handlers are functions
+    that take a JSON params dict; the runner serializes the dict from
+    ``params_json``. Adding a new scheduled action = adding a handler
+    + a row, no scheduler-thread changes.
+
+    The schedule itself is a JSON document so we don't need a new column
+    per cadence kind. Shapes:
+
+        {"kind": "daily", "time": "03:00"}                  — every day at HH:MM UTC
+        {"kind": "hourly", "minute": 5}                     — every hour at :MM
+        {"kind": "weekly", "day": 6, "time": "04:30"}       — DOW 0=Mon..6=Sun
+        {"kind": "interval", "minutes": 30}                 — every N minutes after last run
+
+    ``last_run_at`` plus the schedule define ``next_run_at`` (computed
+    in code, not stored — recomputing keeps schedule edits simple).
+    """
+    __tablename__ = 'scheduled_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    # Stable identifier the runner looks up. e.g. 'tw2_maint', 'db_vacuum',
+    # 'log_rotate', 'shell'.
+    handler_key = db.Column(db.String(80), nullable=False, index=True)
+    # JSON-encoded params; handler-specific shape. Empty {} when none.
+    params_json = db.Column(db.Text, default='{}', nullable=False)
+    # JSON-encoded schedule descriptor — see class docstring for shapes.
+    schedule_json = db.Column(db.Text, default='{"kind": "daily", "time": "03:00"}',
+                              nullable=False)
+    is_enabled = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    # Liveness tracking — runner stamps these every fire.
+    last_run_at = db.Column(db.DateTime, index=True)
+    last_status = db.Column(db.String(20))   # 'ok' | 'fail' | 'skip'
+    last_duration_ms = db.Column(db.Integer)
+    # Truncated to first ~4 KB of stdout+stderr for the admin UI.
+    last_output = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<ScheduledEvent {self.id} {self.handler_key} enabled={self.is_enabled}>'

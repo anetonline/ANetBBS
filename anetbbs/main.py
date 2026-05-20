@@ -13,14 +13,40 @@ from anetbbs.core.service_locator import ServiceLocator
 from anetbbs.features.chat import ChatManager
 from anetbbs.config import get_config
 
-# Set up logging once
+# Set up logging once. We do this at import time so a fresh
+# `anetbbs --version` or `anetbbs --help` doesn't crash on a missing
+# logger — but the FileHandler is the tricky bit. Past versions hard-
+# coded `FileHandler('bbs.log')`, which resolves relative to the
+# CWD at process start. Running the CLI from /tmp left
+# `/tmp/bbs.log` lingering owned by the wrong user, and every later
+# CLI invocation from /tmp blew up with PermissionError before the
+# argparse even saw the args. We now:
+#   1. Resolve the log path to an absolute location next to the
+#      installed package (or honour an explicit ANETBBS_LOG_FILE env
+#      override, useful for journald-only setups).
+#   2. Treat the FileHandler as best-effort — if we can't open the
+#      file, log only to stdout. The service's logs still hit the
+#      systemd journal regardless.
+def _build_log_handlers():
+    handlers = [logging.StreamHandler(sys.stdout)]
+    log_path = os.environ.get('ANETBBS_LOG_FILE') or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'bbs.log')
+    try:
+        handlers.append(logging.FileHandler(log_path))
+    except (OSError, PermissionError):
+        # Common cases: read-only filesystem, leftover root-owned
+        # /tmp/bbs.log, install dir mounted noexec. Falling back to
+        # stdout-only is harmless — systemd captures it.
+        sys.stderr.write(
+            f'anetbbs: warning: cannot open log file {log_path!r}; '
+            f'logging to stdout only.\n')
+    return handlers
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bbs.log')
-    ]
+    handlers=_build_log_handlers(),
 )
 logger = logging.getLogger(__name__)
 
@@ -111,6 +137,13 @@ class BBSServer:
 
 def main():
     """Main entry point — starts telnet, SSH, and optionally rlogin servers."""
+    # --version / -V: print the running version and exit. Available so
+    # sysops can confirm what's deployed without grepping config.
+    if any(a in ('--version', '-V') for a in sys.argv[1:]):
+        from anetbbs.version import VERSION
+        print(f'ANetBBS {VERSION}')
+        return
+
     env = os.environ.get('FLASK_ENV', 'development')
     config_class = get_config(env)
 
@@ -160,8 +193,26 @@ def main():
             import threading
             from anetbbs.ftp.server import run as _ftp_run, build_minimal_app
             flask_app = build_minimal_app()
+
+            def _ftp_thread_wrapper():
+                """Wrap the FTP entry point so a crash inside it actually
+                lands in the journal. Without this wrapper the thread
+                dies silently — every traceback inside ftp.server.run
+                (TLS init failure, port-bind failure, anything) was lost,
+                which is what masked the cert-permission bug for a week.
+                """
+                try:
+                    _ftp_run(flask_app)
+                except Exception:
+                    logger.exception(
+                        "FTP server thread crashed — listener will NOT "
+                        "be available until the BBS is restarted. "
+                        "Common causes: TLS cert unreadable by the "
+                        "service user, port 21 already bound, missing "
+                        "CAP_NET_BIND_SERVICE on the unit.")
+
             ftp_thread = threading.Thread(
-                target=_ftp_run, args=(flask_app,),
+                target=_ftp_thread_wrapper,
                 name='ftp-server', daemon=True)
             ftp_thread.start()
             logger.info("Starting ANetBBS FTP Server on %s:%d",

@@ -7,6 +7,40 @@
     <h1><i class="bi bi-speedometer2"></i> Admin Dashboard</h1>
 </div>
 
+{% if update_banner %}
+<!-- Update-available banner — surfaces /api/releases/latest delta -->
+<div class="alert alert-success d-flex align-items-center justify-content-between py-2 px-3 mb-3" style="border-left:4px solid #2d8048;">
+  <div>
+    <i class="bi bi-arrow-up-circle-fill me-1"></i>
+    <strong>Update available:</strong>
+    <code>{{ update_banner.current }}</code> →
+    <code class="text-success">{{ update_banner.available }}</code>
+    <span class="text-muted ms-2">({{ update_banner.size_mb }} MB)</span>
+  </div>
+  <a href="{{ url_for('upgrades_admin.index') }}" class="btn btn-sm btn-success">
+    <i class="bi bi-download"></i> Review &amp; install
+  </a>
+</div>
+{% endif %}
+
+{% if whats_new %}
+<!-- What's new in this build -->
+<div class="card mb-3 border-success">
+  <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
+    <span>
+      <i class="bi bi-stars"></i>
+      <strong>What's new in this build</strong>
+    </span>
+    <a href="{{ url_for('upgrades_admin.index') }}" class="btn btn-sm btn-outline-light">
+      <i class="bi bi-arrow-up-circle"></i> Updates
+    </a>
+  </div>
+  <div class="card-body" style="max-height:320px; overflow-y:auto;">
+    <div class="markdown-body">{{ whats_new | markdown | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
     <div class="col-md-2 col-6">
@@ -143,6 +177,12 @@
                 <p><strong>Python:</strong> {{ system_info.python_version }}</p>
                 <p><strong>Flask:</strong> {{ system_info.flask_version }}</p>
                 <p><strong>Database:</strong> {{ system_info.db_type }}</p>
+                {% if system_info.last_upgraded_at %}
+                <p><strong>Last upgraded:</strong>
+                  {{ system_info.last_upgraded_at }}
+                  <span class="text-muted">({{ system_info.last_upgraded_relative }})</span>
+                </p>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -165,6 +205,53 @@
         </div>
     </div>
 </div>
+
+<!-- Recent scheduled events -->
+{% if recent_events %}
+<div class="row g-3 mb-3">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-calendar2-event"></i> Recent scheduled events</span>
+        <a href="{{ url_for('events_admin.index') }}" class="btn btn-sm btn-outline-secondary">
+          Manage events
+        </a>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0 align-middle">
+          <thead>
+            <tr><th>Name</th><th>Handler</th><th>Ran</th><th>Status</th><th>Duration</th></tr>
+          </thead>
+          <tbody>
+            {% for ev in recent_events %}
+            <tr>
+              <td><strong>{{ ev.name }}</strong></td>
+              <td><code class="small">{{ ev.handler_key }}</code></td>
+              <td>
+                <span class="small">{{ ev.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+                <span class="text-muted small">({{ ev.relative_age }})</span>
+              </td>
+              <td>
+                {% if ev.last_status == 'ok' %}
+                  <span class="badge bg-success">ok</span>
+                {% elif ev.last_status == 'fail' %}
+                  <span class="badge bg-danger">fail</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ ev.last_status or '?' }}</span>
+                {% endif %}
+              </td>
+              <td class="small text-muted">
+                {% if ev.last_duration_ms %}{{ ev.last_duration_ms }} ms{% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="row g-3">
     <!-- Recent Registrations -->

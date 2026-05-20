@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Scheduled Events{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .ev-banner { background: linear-gradient(135deg,#3a2d6b,#5b46a6); color:#fff; border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,.25); }
+  .ev-card { border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.08); }
+  .ev-meta { color:#6c757d; font-size:.85rem; }
+  .ev-status-ok   { color:#2d8048; font-weight:700; }
+  .ev-status-fail { color:#b62c2c; font-weight:700; }
+  .ev-status-skip { color:#c79324; font-weight:700; }
+  .ev-out { background:#1e1e1e; color:#d4d4d4; font-family:monospace; font-size:.8rem; padding:.5rem; border-radius:.3rem; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; display:none; margin-top:.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="ev-banner d-flex justify-content-between align-items-center">
+    <div>
+      <h1 class="m-0"><i class="bi bi-calendar2-event"></i> Scheduled Events</h1>
+      <div class="text-white-50 mt-1">
+        Cron-style tasks — door maintenance, DB vacuum, log rotation, ad-hoc shell.
+      </div>
+    </div>
+    <a href="{{ url_for('events_admin.new') }}" class="btn btn-light btn-sm">
+      <i class="bi bi-plus-lg"></i> New event
+    </a>
+  </div>
+
+  {% if not rows %}
+    <div class="alert alert-warning">
+      No events configured. Click <strong>New event</strong> to add one, or run
+      the seeder to drop in defaults (TW2 maint, weekly VACUUM, log rotation).
+    </div>
+  {% else %}
+  <div class="card ev-card">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Name</th><th>Handler</th><th>Schedule</th>
+          <th>Last run</th><th>Next run</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in rows %}
+        {% set ev = v.row %}
+        <tr id="ev-{{ ev.id }}" {% if not ev.is_enabled %}class="text-muted"{% endif %}>
+          <td>
+            <strong>{{ ev.name }}</strong>
+            {% if not ev.is_enabled %}<span class="badge bg-secondary ms-1">disabled</span>{% endif %}
+          </td>
+          <td><code>{{ ev.handler_key }}</code><div class="ev-meta">{{ v.handler_label }}</div></td>
+          <td>{{ v.schedule_human }}</td>
+          <td>
+            {% if ev.last_run_at %}
+              <span class="ev-status-{{ ev.last_status or 'skip' }}">{{ ev.last_status or '?' }}</span>
+              <span class="ev-meta">{{ ev.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+              {% if ev.last_duration_ms %}<span class="ev-meta">({{ ev.last_duration_ms }} ms)</span>{% endif %}
+              {% if ev.last_output %}
+                <button class="btn btn-link btn-sm p-0 ms-1 ev-show-out"
+                        data-target="ev-out-{{ ev.id }}">show</button>
+                <div class="ev-out" id="ev-out-{{ ev.id }}">{{ ev.last_output }}</div>
+              {% endif %}
+            {% else %}
+              <span class="ev-meta">never</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ev.is_enabled and v.next_run %}
+              <span class="ev-meta">{{ v.next_run.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+            {% else %}
+              <span class="ev-meta">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <form method="POST" action="{{ url_for('events_admin.toggle', eid=ev.id) }}" style="display:inline;">
+              {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+              <button class="btn btn-sm btn-outline-secondary" title="Enable / disable">
+                <i class="bi bi-{% if ev.is_enabled %}toggle-on{% else %}toggle-off{% endif %}"></i>
+              </button>
+            </form>
+            <button class="btn btn-sm btn-outline-primary ev-run-btn" data-id="{{ ev.id }}" title="Run now">
+              <i class="bi bi-play-fill"></i>
+            </button>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('events_admin.edit', eid=ev.id) }}">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <form method="POST" action="{{ url_for('events_admin.delete', eid=ev.id) }}" style="display:inline;"
+                  onsubmit="return confirm('Delete this event? Cannot be undone.');">
+              {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+document.querySelectorAll('.ev-show-out').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = document.getElementById(btn.dataset.target);
+    if (!target) return;
+    target.style.display = target.style.display === 'none' ? 'block' : 'none';
+    btn.textContent = target.style.display === 'none' ? 'show' : 'hide';
+  });
+});
+
+document.querySelectorAll('.ev-run-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    try {
+      const r = await fetch('{{ url_for("events_admin.run_now", eid=0) }}'.replace('/0/', '/' + id + '/'),
+                            {method: 'POST',
+                             headers: CSRF ? {'X-CSRFToken': CSRF} : {},
+                             credentials: 'same-origin'});
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); }
+      catch (_) { j = {ok: false, output: 'HTTP ' + r.status + ': ' + text.slice(0, 200)}; }
+      alert((j.ok ? '✓ ok' : '✗ failed') + '\n\n' + (j.output || '(no output)'));
+      window.location.reload();
+    } catch (e) {
+      alert('Run failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+});
+</script>
+{% endblock %}

@@ -119,6 +119,14 @@ def create_app(config_name=None):
                 db.session.rollback()
 
     @app.context_processor
+    def _inject_anetbbs_version():
+        """Expose ``anetbbs_version`` to every template so the footer +
+        About page can show what's running. Read once at import; the
+        per-request cost is just a dict lookup."""
+        from .version import VERSION
+        return {'anetbbs_version': VERSION}
+
+    @app.context_processor
     def inject_online_count():
         from datetime import timedelta
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
@@ -289,6 +297,14 @@ def create_app(config_name=None):
     from .web.oneliners import ol_bp
     from .web.qwk_user import qwk_user_bp
     from .web.control import control_bp
+    from .web.upgrades import upgrades_api_bp, upgrades_admin_bp
+    from .web.healthz import healthz_bp
+    from .web.preflight import preflight_bp
+    from .web.peer_health import peers_health_bp
+    from .web.events_admin import events_admin_bp
+    from .web.security_admin import security_bp
+    from .web.door_errors import door_errors_bp
+    from .web.backups_admin import backups_bp
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
@@ -349,9 +365,41 @@ def create_app(config_name=None):
     app.register_blueprint(ol_bp)
     app.register_blueprint(qwk_user_bp)
     app.register_blueprint(control_bp)
+    # Upgrades: federation API + sysop "Check for updates" UI.
+    # The API is called by peer ANetBBS hosts (no browser) so exempt
+    # it from CSRF for the same reason the registry API is.
+    app.register_blueprint(upgrades_api_bp)
+    csrf.exempt(upgrades_api_bp)
+    app.register_blueprint(upgrades_admin_bp)
+    # /healthz — public, unauth, JSON. Used by update.sh post-restart
+    # probe + external uptime monitors. CSRF-exempt because monitors
+    # don't carry tokens.
+    app.register_blueprint(healthz_bp)
+    csrf.exempt(healthz_bp)
+    # Preflight checklist — admin-only one-page "is this BBS ready to be
+    # public?" probe board. Pure GET, no CSRF concern.
+    app.register_blueprint(preflight_bp)
+    # Federation peer health — admin-only liveness lens on RegistryEntry.
+    # Only meaningful on REGISTRY_MODE_ENABLED installs.
+    app.register_blueprint(peers_health_bp)
+    # Scheduled-events admin: CRUD + run-now for ScheduledEvent rows.
+    # The runner thread for these is started further down with the
+    # other background threads.
+    app.register_blueprint(events_admin_bp)
+    # Security: viewer for the daily-scan JSON report. Admin-only.
+    app.register_blueprint(security_bp)
+    # Door-errors: parses logs/door-errors.log into readable entries.
+    app.register_blueprint(door_errors_bp)
+    # Backups: list + restore + delete /tmp/anetbbs-backup-* snapshots.
+    app.register_blueprint(backups_bp)
     app.register_blueprint(pages_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(wiki_bp)
+
+    # Public downloads — auto-listing of the sysop's release directory.
+    # No DB rows; scans DOWNLOADS_DIR on each (cached) request.
+    from .web.downloads import downloads_bp
+    app.register_blueprint(downloads_bp)
 
     # Personal pages 404 fallback — catches /<dir>/ URLs that no real
     # blueprint handled and tries data/personal_pages/<dir>/index.html.
@@ -465,6 +513,51 @@ def create_app(config_name=None):
     if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
         from .msp.probe import start_probe_thread
         start_probe_thread(app)
+
+    # Federation hub — seed + heartbeat the hub's OWN RegistryEntry so
+    # /anetbbs.lst includes the hub itself. Without this, the hub's
+    # own /imsg/directory shows no self-entry until a sysop creates
+    # the row by hand. Pre-verified + pre-approved (the hub trusts
+    # itself). No-op on peer installs.
+    if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
+        from .msp.hub_self_register import start_hub_self_register_thread
+        start_hub_self_register_thread(app)
+
+    # Federation hub — daily self-test that fetches our own public
+    # surfaces (anetbbs.lst, /api/releases/latest, /healthz) over the
+    # configured REGISTRY_URL. Catches reverse-proxy regressions
+    # before peers start complaining.
+    if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
+        try:
+            from .msp.hub_selftest import start_hub_selftest_thread
+            start_hub_selftest_thread(app)
+        except Exception:
+            app.logger.exception('Hub selftest thread failed to start')
+
+    # Service Control Center — per-PID CPU% / RSS / thread sampler that
+    # feeds the live graphs at /admin/control/. Reads MainPID via
+    # `systemctl show` and /proc via psutil; no privileges required.
+    # Soft-no-ops if psutil isn't installed.
+    if not app.config.get('TESTING', False):
+        try:
+            from .web.metrics import start_sampler as _start_metrics_sampler
+            _start_metrics_sampler()
+        except Exception:
+            app.logger.exception('SCC metrics sampler failed to start')
+
+    # Scheduled-events runner — generic cron-style task scheduler.
+    # Replaces the .43 TW2-specific maint thread. On boot we seed
+    # default rows (TW2 maint, weekly VACUUM, log rotation) so a fresh
+    # install gets reasonable cadence out of the box. Idempotent —
+    # existing rows are never overwritten.
+    if not app.config.get('TESTING', False):
+        try:
+            from .events.runner import (start_event_scheduler,
+                                        ensure_default_events)
+            ensure_default_events(app)
+            start_event_scheduler(app)
+        except Exception:
+            app.logger.exception('Event scheduler failed to start')
 
     # Self-registration against the federation hub. Off by default;
     # peer sysops opt in by setting REGISTRY_SELF_REGISTER=true and
@@ -839,6 +932,30 @@ def _create_default_data():
             'must_exist': os.path.join(vendor_dir, 'anetsims', 'anetsims'),
         },
         {
+            # Trade Wars 2002 — Synchronet's JS port by Deuce, bundled
+            # native (no external rlogin game-server needed). State lives
+            # in anetbbs/games/sbbs_doors/tw2/db/tw2.json via the
+            # ANetBBS-specific file-backed json-client.js drop-in.
+            # Auto-inits the universe on first launch.
+            'name': 'Trade Wars 2002',
+            'slug': 'tw2',
+            'description': (
+                'Trade Wars 2002 — classic 1986 space-trading game, '
+                'Synchronet JS port. Runs natively under ANetBBS Node '
+                'compat. Auto-initializes on first launch.'),
+            'category': 'space',
+            'icon': 'bi-rocket-takeoff',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'tw2', 'tw2.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'tw2'),
+            'sort_order': 20,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'tw2', 'tw2.js'),
+            '_active_default': True,
+        },
+        {
             # LORD — the canonical door game, Synchronet's JS port.
             # The game files ship inside the anetbbs package itself
             # (anetbbs/games/sbbs_doors/lord/), so this seed always runs.
@@ -918,6 +1035,12 @@ def _create_default_data():
 
 def main():
     """Main entry point for web application"""
+    import sys as _sys
+    if any(a in ('--version', '-V') for a in _sys.argv[1:]):
+        from anetbbs.version import VERSION
+        print(f'ANetBBS web {VERSION}')
+        return
+
     app = create_app()
     
     # Get configuration

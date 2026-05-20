@@ -146,7 +146,12 @@ def delete(msg_id):
 @imsg_bp.route('/directory')
 @login_required
 def directory():
-    """Show the inter-BBS directory pulled from sbbsimsg.lst."""
+    """Show the inter-BBS directory pulled from sbbsimsg.lst + anetbbs.lst,
+    with the local BBS always pinned at the top as a "Your BBS" card.
+
+    The pin is independent of registry state — even if this BBS hasn't
+    been approved on the federation hub yet, the sysop and users still
+    see their own system listed."""
     from ..models import BbsDirectoryEntry
     q = (request.args.get('q') or '').strip().lower()
     rows = BbsDirectoryEntry.query
@@ -155,7 +160,42 @@ def directory():
             db.func.lower(BbsDirectoryEntry.hostname).like(f'%{q}%'),
             db.func.lower(BbsDirectoryEntry.name).like(f'%{q}%')))
     rows = rows.order_by(BbsDirectoryEntry.name).limit(500).all()
-    return render_template('imsg/directory.html', rows=rows, q=q)
+
+    # Build the "Your BBS" pin. Prefer BBS_DOMAIN config; fall back to the
+    # Host header the request came in on so it works out-of-the-box on
+    # installs where the sysop hasn't set BBS_DOMAIN yet.
+    cfg = current_app.config
+    own_host = (cfg.get('BBS_DOMAIN') or '').strip() or \
+               (request.host.split(':', 1)[0] if request.host else '')
+    self_entry = {
+        'name': cfg.get('BBS_NAME') or 'ANetBBS',
+        'hostname': own_host,
+        'sysop': cfg.get('SYSOP_NAME') or '',
+        'location': cfg.get('BBS_LOCATION') or '',
+        'msp_port': cfg.get('MSP_PORT') or 18,
+        'systat_port': cfg.get('SYSTAT_PORT') or 11,
+        'software': 'ANetBBS',
+    }
+
+    # If the federation hub has us listed (RegistryEntry), reflect that
+    # in the pin so the sysop can see they're already published.
+    try:
+        from ..models import RegistryEntry
+        reg = (RegistryEntry.query
+               .filter(db.func.lower(RegistryEntry.host) == own_host.lower())
+               .first()) if own_host else None
+        if reg is not None:
+            self_entry['is_listed'] = bool(reg.is_listed)
+            self_entry['is_verified'] = bool(reg.is_verified)
+        else:
+            self_entry['is_listed'] = None  # no registry row at all
+            self_entry['is_verified'] = None
+    except Exception:
+        self_entry['is_listed'] = None
+        self_entry['is_verified'] = None
+
+    return render_template('imsg/directory.html',
+                           rows=rows, q=q, self_entry=self_entry)
 
 
 @imsg_bp.route('/directory/refresh', methods=['POST'])

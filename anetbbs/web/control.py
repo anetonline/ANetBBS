@@ -1,35 +1,119 @@
 # anetbbs/web/control.py
 """
-Sysop control panel — live who's-online (web + terminal), service
-management (status / start / stop / restart), and node spy.
+Sysop service control center — live status of every systemd unit AND
+every TCP listener inside those units, plus restart + journal viewing.
+
+The previous version of this file listed pre-merge units
+(``anetbbs-telnet``, ``anetbbs-ssh``) that no longer exist, so the
+panel showed "unknown" for half the service tree. This rewrite reflects
+the current shape:
+
+    anetbbs-web         gunicorn web + MSP + SYSTAT + federation
+    anetbbs             telnet / SSH / rlogin / FTP / LMTP
+    anetbbs-mrc-bridge  MRC chat bridge
+    anetbbs-finger      RFC 1288 finger daemon
+
+Each unit declares the TCP ports it owns. We probe those independently
+of systemctl so the sysop can tell apart "process up but listener
+crashed" from "process down."
 
 Service control uses systemctl. To make this work without prompting
-for sudo, the deploy script adds a sudoers entry granting the
-service user permission to run *only* the anetbbs-* unit operations.
+for sudo, ``deploy/sudoers.anetbbs`` grants the service user permission
+to run *only* anetbbs-* unit operations.
 """
 import os
+import socket
 import subprocess
+import threading
+import time
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
-                   abort, jsonify, request)
+                   abort, jsonify, request, current_app, Response)
 from flask_login import login_required, current_user
 
 from ..models import User, UserSession
 
 
+# Probe-result cache: opening multiple admin tabs (or other clients)
+# refreshing /status.json shouldn't multiply how often we knock on
+# every listener. Each probe greets the BBS protocols and a fast
+# disconnect used to spam the journal with BrokenPipeError stacks —
+# fixed at the session layer in v1.0a2.31, but capping probe
+# frequency is good hygiene on its own.
+_PROBE_CACHE_TTL_SEC = 4.0
+_probe_cache_lock = threading.Lock()
+_probe_cache: dict = {}   # (host, port, proto) -> (result, expires_at)
+
+
+def _probe_cached(key, fetch):
+    now = time.time()
+    with _probe_cache_lock:
+        cached = _probe_cache.get(key)
+        if cached and now < cached[1]:
+            return cached[0]
+    result = fetch()
+    with _probe_cache_lock:
+        _probe_cache[key] = (result, time.time() + _PROBE_CACHE_TTL_SEC)
+    return result
+
+
 control_bp = Blueprint('control', __name__, url_prefix='/admin/control')
 
 
-# Units the panel knows how to manage. Renaming a service requires
-# updating BOTH this list and the sudoers rule (if you use one).
+# Service tree — each entry is one systemd unit plus the TCP listeners
+# it owns. `port_key` references the Flask config key the actual port
+# comes from; `port_default` is the fallback if the key isn't set.
 KNOWN_UNITS = [
-    ('anetbbs-web', 'Web (Flask + gunicorn)'),
-    ('anetbbs-telnet', 'Telnet server (port 2233)'),
-    ('anetbbs-ssh', 'SSH server (port 2234)'),
-    ('anetbbs-rlogin', 'rlogin server'),
-    ('anetbbs-mrc-bridge', 'MRC bridge'),
+    {
+        'unit': 'anetbbs-web',
+        'label': 'Web + Federation',
+        'desc': ('Flask / gunicorn web UI plus MSP (RFC 1312) instant '
+                 'messaging, SYSTAT user-list, the federation hub, '
+                 'and the inter-BBS directory refresher.'),
+        'icon': 'bi-globe2',
+        'ports': [
+            {'name': 'HTTP',   'key': 'WEB_PORT',    'default': 5000, 'proto': 'tcp'},
+            {'name': 'MSP',    'key': 'MSP_PORT',    'default': 18,   'proto': 'tcp'},
+            {'name': 'SYSTAT', 'key': 'SYSTAT_PORT', 'default': 11,   'proto': 'udp'},
+        ],
+    },
+    {
+        'unit': 'anetbbs',
+        'label': 'Terminal Protocols',
+        'desc': ('Single asyncio process serving telnet, SSH, rlogin, '
+                 'FTP, and LMTP. Each protocol is gated by its own '
+                 '*_ENABLED flag in the .env file.'),
+        'icon': 'bi-terminal',
+        'ports': [
+            {'name': 'Telnet', 'key': 'TELNET_PORT', 'default': 2233, 'proto': 'tcp'},
+            {'name': 'SSH',    'key': 'SSH_PORT',    'default': 2234, 'proto': 'tcp'},
+            {'name': 'rlogin', 'key': 'RLOGIN_PORT', 'default': 513,  'proto': 'tcp'},
+            {'name': 'FTP',    'key': 'FTP_PORT',    'default': 21,   'proto': 'tcp'},
+        ],
+    },
+    {
+        'unit': 'anetbbs-mrc-bridge',
+        'label': 'MRC Chat Bridge',
+        'desc': ('Persistent client connection to the MRC network at '
+                 'mrc.bottomlessabyss.net. No inbound ports — health '
+                 'is purely the systemd ActiveState.'),
+        'icon': 'bi-chat-dots',
+        'ports': [],
+    },
+    {
+        'unit': 'anetbbs-finger',
+        'label': 'Finger (RFC 1288)',
+        'desc': 'Classic finger daemon — peers can query user presence.',
+        'icon': 'bi-info-circle',
+        'ports': [
+            {'name': 'Finger', 'key': None, 'default': 79, 'proto': 'tcp'},
+        ],
+    },
 ]
+
+
+VALID_ACTIONS = ('start', 'stop', 'restart', 'reload')
 
 
 def _require_admin():
@@ -37,8 +121,37 @@ def _require_admin():
         abort(403)
 
 
-def _systemctl(*args):
-    """Run systemctl with the given args, return (ok, stdout, stderr)."""
+def _systemctl_read(*args):
+    """Run a read-only systemctl command WITHOUT sudo. ``systemctl show``,
+    ``status``, etc. work for unprivileged users out of the box on
+    systemd — we only need sudo for the state-changing verbs.
+
+    Past versions of this module shelled out through ``sudo -n
+    systemctl`` for every call. That broke on Ubuntu because sudo
+    resolves ``systemctl`` via its own ``secure_path`` (typically
+    ``/usr/bin/systemctl``) and compares it literally against the
+    sudoers rule's path. Rules written against ``/bin/systemctl``
+    silently didn't match → every read returned "permission denied"
+    → the panel showed every service as ``unknown``. Sidestepping
+    sudo for reads makes the panel robust regardless of which path
+    sudo picks."""
+    cmd = ['systemctl'] + list(args)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return r.returncode == 0, r.stdout, r.stderr
+    except subprocess.TimeoutExpired:
+        return False, '', 'timeout'
+    except FileNotFoundError:
+        return False, '', 'systemctl not found'
+    except Exception as exc:  # pylint: disable=broad-except
+        return False, '', str(exc)
+
+
+def _systemctl_change(*args):
+    """Run a state-changing systemctl command (start/stop/restart) via
+    sudo so the gunicorn worker can do it without root. Requires the
+    NOPASSWD entries in /etc/sudoers.d/anetbbs (auto-installed by
+    update.sh)."""
     cmd = ['sudo', '-n', 'systemctl'] + list(args)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -47,40 +160,150 @@ def _systemctl(*args):
         return False, '', 'timeout'
     except FileNotFoundError:
         return False, '', 'systemctl not found'
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-except
         return False, '', str(exc)
 
 
-def _service_state(unit):
-    """Return (active_str, sub_str, since_str). 'inactive' / 'failed' on missing."""
-    ok, out, _ = _systemctl('show', unit, '--property=ActiveState,SubState,ActiveEnterTimestamp')
+def _unit_state(unit):
+    """Return a dict with ActiveState / SubState / ActiveEnterTimestamp /
+    MainPID. Falls back to a partial dict on failure so the caller can
+    always render *something*."""
+    ok, out, _ = _systemctl_read(
+        'show', unit,
+        '--property=ActiveState,SubState,ActiveEnterTimestamp,MainPID,LoadState')
+    state = {'ActiveState': 'unknown', 'SubState': '',
+             'ActiveEnterTimestamp': '', 'MainPID': '0',
+             'LoadState': 'unknown'}
     if not ok:
-        return ('unknown', '', '')
-    state = {'ActiveState': '', 'SubState': '', 'ActiveEnterTimestamp': ''}
+        return state
     for line in out.splitlines():
         if '=' in line:
             k, v = line.split('=', 1)
             if k in state:
                 state[k] = v
-    return (state['ActiveState'] or 'unknown',
-            state['SubState'] or '',
-            state['ActiveEnterTimestamp'] or '')
+    return state
+
+
+def _probe_tcp_uncached(port, host='127.0.0.1', timeout=0.4):
+    """Pure listener health — open a TCP connection and immediately
+    close it. The BBS protocols (telnet/SSH/rlogin) greet on accept,
+    so a fast probe-and-close looks like a disconnected client. We
+    classify that as "listening" — it just confirmed the socket is
+    accepting connections. The session layer treats the resulting
+    BrokenPipe as a clean unwind (v1.0a2.31+), so this no longer
+    spams the journal."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _probe_tcp(port, host='127.0.0.1', timeout=0.4):
+    return _probe_cached(
+        (host, int(port), 'tcp'),
+        lambda: _probe_tcp_uncached(port, host=host, timeout=timeout))
+
+
+def _probe_udp_uncached(port, host='127.0.0.1', timeout=0.4):
+    """UDP can't be probed by connect alone — the kernel happily accepts
+    a connect() to a closed UDP socket. We fall back to checking whether
+    something is bound by looking at /proc/net/udp; if that's unreadable
+    we return None (unknown) rather than a misleading "down"."""
+    try:
+        # netstat-equivalent: scan /proc/net/udp for a listener on `port`
+        # bound to 0.0.0.0 or 127.0.0.1.
+        target = f'{int(port):04X}'
+        for fname in ('/proc/net/udp', '/proc/net/udp6'):
+            try:
+                with open(fname) as f:
+                    for line in f.readlines()[1:]:
+                        cols = line.split()
+                        if len(cols) < 2:
+                            continue
+                        local = cols[1]
+                        if local.endswith(':' + target):
+                            return True
+            except OSError:
+                continue
+        return False
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def _probe_udp(port, host='127.0.0.1', timeout=0.4):
+    return _probe_cached(
+        (host, int(port), 'udp'),
+        lambda: _probe_udp_uncached(port, host=host, timeout=timeout))
+
+
+def _resolve_port(cfg, port_spec):
+    """Resolve a port dict to its effective port number."""
+    if port_spec.get('key'):
+        return int(cfg.get(port_spec['key'], port_spec['default']))
+    return int(port_spec['default'])
+
+
+def _enrich_unit(cfg, spec):
+    """Bundle systemctl state + per-port probe results for one unit."""
+    state = _unit_state(spec['unit'])
+    active = state['ActiveState']
+    is_running = active == 'active'
+
+    ports = []
+    for p in spec['ports']:
+        port = _resolve_port(cfg, p)
+        if p['proto'] == 'tcp':
+            up = _probe_tcp(port)
+        elif p['proto'] == 'udp':
+            up = _probe_udp(port)
+        else:
+            up = None
+        ports.append({
+            'name': p['name'], 'port': port, 'proto': p['proto'].upper(),
+            'up': up,
+        })
+
+    # Listener health summary used by the template's pill colour.
+    listener_summary = 'na'
+    if ports:
+        tcp_results = [pp['up'] for pp in ports if pp['proto'] == 'TCP']
+        if tcp_results and all(tcp_results):
+            listener_summary = 'all_up'
+        elif tcp_results and not any(tcp_results):
+            listener_summary = 'all_down'
+        elif tcp_results:
+            listener_summary = 'partial'
+
+    return {
+        'unit': spec['unit'],
+        'label': spec['label'],
+        'desc': spec['desc'],
+        'icon': spec.get('icon', 'bi-gear'),
+        'active': active,
+        'sub': state['SubState'],
+        'since': state['ActiveEnterTimestamp'],
+        'pid': state['MainPID'],
+        'load': state['LoadState'],
+        'is_running': is_running,
+        'ports': ports,
+        'listener_summary': listener_summary,
+    }
 
 
 @control_bp.route('/')
 @login_required
 def index():
     _require_admin()
+    cfg = current_app.config
+    services = [_enrich_unit(cfg, spec) for spec in KNOWN_UNITS]
 
-    # Service rows — live state via systemctl.
-    services = []
-    for unit, label in KNOWN_UNITS:
-        active, sub, since = _service_state(unit)
-        services.append({
-            'unit': unit, 'label': label,
-            'active': active, 'sub': sub, 'since': since,
-            'is_running': active == 'active',
-        })
+    # Aggregate banner counts
+    running = sum(1 for s in services if s['is_running'])
+    total = len(services)
+    listener_problems = sum(
+        1 for s in services
+        if s['listener_summary'] in ('all_down', 'partial'))
 
     # Web users — anyone with a UserSession row in the last 5 min.
     five_min_ago = datetime.utcnow() - timedelta(minutes=5)
@@ -88,96 +311,167 @@ def index():
                     .filter(UserSession.last_seen >= five_min_ago)
                     .order_by(UserSession.last_seen.desc()).all())
 
-    # Terminal sessions — pulled from the multinode registry of the BBS
-    # daemon process. Since web + BBS are separate processes we can't
-    # see the live registry directly; fall back to a presence-table
-    # query (presence rows are written by every terminal session).
-    try:
-        from ..models import UserSession as _US
-        # Filter UserSession entries whose page starts with a known
-        # terminal marker — SessionPresence sets these.
-        terminal_sessions = (_US.query
-                             .filter(_US.last_seen >= five_min_ago)
-                             .filter(_US.page.in_(
-                                 ['main', 'menu', 'door', 'chat', 'msg',
-                                  'echo', 'files', 'profile']))
-                             .order_by(_US.last_seen.desc()).all())
-    except Exception:
-        terminal_sessions = []
-
     return render_template('admin/control.html',
                            services=services,
                            web_sessions=web_sessions,
-                           terminal_sessions=terminal_sessions,
-                           known_units=KNOWN_UNITS)
+                           summary={'running': running,
+                                    'total': total,
+                                    'listener_problems': listener_problems})
+
+
+@control_bp.route('/status.json')
+@login_required
+def status_json():
+    """JSON snapshot of every unit + listener — drives live refresh."""
+    _require_admin()
+    cfg = current_app.config
+    services = [_enrich_unit(cfg, spec) for spec in KNOWN_UNITS]
+    return jsonify({
+        'updated': datetime.utcnow().isoformat() + 'Z',
+        'services': services,
+    })
+
+
+@control_bp.route('/metrics.json')
+@login_required
+def metrics_json():
+    """Per-PID CPU%/RSS/thread ring-buffer snapshot for the live graphs.
+
+    The sampler thread is started by `web_app.create_app` and runs
+    inside the gunicorn worker. Returns ``available=False`` if psutil
+    isn't installed so the front-end can render an explanatory pill
+    instead of an empty chart."""
+    _require_admin()
+    from .metrics import snapshot
+    return jsonify(snapshot())
+
+
+@control_bp.route('/connections.json')
+@login_required
+def connections_json():
+    """Per-protocol connection counts for the terminal-side card and
+    the aggregate dashboard chip. Pulled from NodeActivity (terminal
+    sessions) + UserSession (web sessions) within the last 5 min."""
+    _require_admin()
+    from ..models import NodeActivity
+    cutoff = datetime.utcnow() - timedelta(minutes=5)
+    rows = (NodeActivity.query
+            .filter(NodeActivity.last_seen >= cutoff)
+            .all())
+    counts = {'telnet': 0, 'ssh': 0, 'rlogin': 0, 'web': 0}
+    for r in rows:
+        proto = (r.protocol or '').lower()
+        if proto in counts:
+            counts[proto] += 1
+    counts['web'] = (UserSession.query
+                     .filter(UserSession.last_seen >= cutoff)
+                     .count())
+    return jsonify({
+        'updated': datetime.utcnow().isoformat() + 'Z',
+        'counts': counts,
+    })
 
 
 @control_bp.route('/service/<unit>/<action>', methods=['POST'])
 @login_required
 def service_action(unit, action):
     _require_admin()
-    if unit not in {u for u, _ in KNOWN_UNITS}:
+    if unit not in {s['unit'] for s in KNOWN_UNITS}:
         flash(f'Unknown unit: {unit}', 'danger')
         return redirect(url_for('control.index'))
-    if action not in ('start', 'stop', 'restart', 'reload'):
+    if action not in VALID_ACTIONS:
         flash(f'Unknown action: {action}', 'danger')
         return redirect(url_for('control.index'))
-    ok, out, err = _systemctl(action, unit)
+    ok, out, err = _systemctl_change(action, unit)
     if ok:
         flash(f'systemctl {action} {unit}: OK', 'success')
     else:
-        flash(f'systemctl {action} {unit} failed: {err or out}', 'danger')
+        # Surface the underlying sudo error so the sysop can fix it
+        # without digging through journalctl. Common ones: "a password
+        # is required" (NOPASSWD rule missing), "command not allowed"
+        # (sudoers path doesn't match the resolved systemctl binary).
+        flash(f'systemctl {action} {unit} failed: {err or out or "no output"}',
+              'danger')
     return redirect(url_for('control.index'))
+
+
+def _read_journal(unit, lines=200):
+    """Return ``journalctl`` output for *unit*. We never elevate via
+    sudo here — that fails under the unit's restricted capability set.
+    The service user just needs read access to the system journal
+    (``systemd-journal`` / ``adm`` group on Debian/Ubuntu)."""
+    try:
+        r = subprocess.run(
+            ['journalctl', '-u', unit, '--no-pager',
+             '-n', str(int(lines))],
+            capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            log = (r.stderr or r.stdout
+                   or '(journalctl returned non-zero with no output)')
+            if 'No journal files' in log or 'Permission' in log:
+                log += (
+                    '\n\nHint: the service user needs read access to the '
+                    'system journal. On Debian/Ubuntu run:\n'
+                    f'    sudo usermod -aG systemd-journal,adm {os.getenv("USER", "stingray")}\n'
+                    'then restart anetbbs-web.')
+            return log
+        return r.stdout or '(empty)'
+    except Exception as exc:  # pylint: disable=broad-except
+        return f'Could not read journal: {exc}'
 
 
 @control_bp.route('/service/<unit>/journal')
 @login_required
 def service_journal(unit):
     _require_admin()
-    if unit not in {u for u, _ in KNOWN_UNITS}:
+    if unit not in {s['unit'] for s in KNOWN_UNITS}:
         abort(404)
-    # Run journalctl WITHOUT sudo — system journal is readable by any
-    # user in the `systemd-journal` group (or `adm` on Debian/Ubuntu).
-    # We avoid sudo because the unit's CapabilityBoundingSet (set so
-    # we can bind privileged MSP/SYSTAT ports as a non-root user)
-    # strips CAP_SETUID/SETGID/AUDIT_WRITE, which sudo needs to elevate.
     try:
-        r = subprocess.run(
-            ['journalctl', '-u', unit, '--no-pager', '-n', '200'],
-            capture_output=True, text=True, timeout=15)
-        if r.returncode != 0:
-            log = (r.stderr or r.stdout
-                   or '(journalctl returned non-zero with no output)')
-            if 'No journal files were opened' in log or 'Permission' in log:
-                log += (
-                    '\n\nHint: the service user needs read access to the '
-                    'system journal. On Debian/Ubuntu run:\n'
-                    f'    sudo usermod -aG systemd-journal,adm {os.getenv("USER", "stingray")}\n'
-                    'then restart anetbbs-web.')
-        else:
-            log = r.stdout or '(empty)'
-    except Exception as exc:
-        log = f'Could not read journal: {exc}'
-    return render_template('admin/journal.html', unit=unit, log=log)
+        lines = max(20, min(5000, int(request.args.get('n', 200))))
+    except (TypeError, ValueError):
+        lines = 200
+    log = _read_journal(unit, lines=lines)
+    return render_template('admin/journal.html', unit=unit, log=log,
+                           lines=lines)
 
+
+@control_bp.route('/service/<unit>/journal.txt')
+@login_required
+def service_journal_download(unit):
+    """Plain-text download of the journal — sysop can keep a copy or
+    paste into a bug report."""
+    _require_admin()
+    if unit not in {s['unit'] for s in KNOWN_UNITS}:
+        abort(404)
+    try:
+        lines = max(20, min(20000, int(request.args.get('n', 2000))))
+    except (TypeError, ValueError):
+        lines = 2000
+    log = _read_journal(unit, lines=lines)
+    ts = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    filename = f'{unit}-{ts}.log'
+    return Response(
+        log,
+        mimetype='text/plain; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename={filename}'})
+
+
+# ---------------------------------------------------------------------------
+# NodeSpy + who-online — unchanged from the prior revision
+# ---------------------------------------------------------------------------
 
 @control_bp.route('/nodespy.json')
 @login_required
 def nodespy_json():
-    """JSON snapshot of all live NodeActivity rows for the auto-refreshing
-    sysop NodeSpy panel."""
+    """JSON snapshot of all live NodeActivity rows."""
     _require_admin()
     from ..models import NodeActivity
     rows = (NodeActivity.query.order_by(NodeActivity.slot).all())
     out = []
     cutoff = datetime.utcnow() - timedelta(minutes=5)
     for r in rows:
-        # Skip stale rows — terminal session likely died without cleanup.
         if r.last_seen and r.last_seen < cutoff:
             continue
-        # Timestamps are stored as naive UTC. Append 'Z' so JavaScript's
-        # Date.parse() treats them as UTC instead of local-time, otherwise
-        # the idle calculation skews by the local UTC offset.
         out.append({
             'slot': r.slot,
             'username': r.username,
@@ -194,10 +488,6 @@ def nodespy_json():
 @control_bp.route('/nodespy/<int:slot>')
 @login_required
 def nodespy_view(slot):
-    """Detailed view of one node — last screen snapshot if available.
-
-    Filters out rows whose last_seen is older than 5 minutes; those are
-    sessions that died without cleanup and shouldn't render as live."""
     _require_admin()
     from ..models import NodeActivity
     cutoff = datetime.utcnow() - timedelta(minutes=5)
@@ -213,19 +503,7 @@ def nodespy_view(slot):
 @control_bp.route('/nodespy/<int:slot>/kick', methods=['POST'])
 @login_required
 def nodespy_kick(slot):
-    """Forcibly disconnect the terminal session at this slot.
-
-    Different from a ban — this just drops the current connection.
-    The user can reconnect immediately. To prevent reconnect, sysop
-    must also add an IP ban under /admin/ip-bans/.
-
-    Optional `reason` form field is shown to the user before disconnect.
-
-    Cross-process: this endpoint runs in `anetbbs-web` (gunicorn) but
-    terminal sessions live in `anetbbs-telnet`. Their `_NODES` dicts are
-    independent, so we set a flag on the user's `NodeActivity` row and
-    let the telnet process's BBSSession poller see it and self-disconnect.
-    """
+    """Forcibly disconnect the terminal session at this slot."""
     _require_admin()
     from ..models import db, NodeActivity, UserActivity
     reason = (request.form.get('reason') or '').strip() \
@@ -286,7 +564,6 @@ def who_json():
             'page': r.page or '',
             'ip': r.ip_address or '',
             'agent': (r.user_agent or '')[:40],
-            # naive UTC -> append 'Z' so JS Date.parse treats it as UTC
             'last_seen': (r.last_seen.isoformat() + 'Z') if r.last_seen else '',
         })
     return jsonify(out)

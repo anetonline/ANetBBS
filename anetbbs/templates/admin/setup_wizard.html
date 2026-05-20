@@ -33,6 +33,71 @@
                 <input type="text" name="sysop_name" class="form-control" value="{{ current_user.display_name or current_user.username }}"></div>
         </div>
 
+        <h6>Federation</h6>
+        <div class="mb-3 text-muted small">
+            Register this BBS in the public <code>anetbbs.lst</code> so
+            users of other ANetBBS installs can find you. The hub at
+            <code>{{ config.REGISTRY_URL or 'https://bbs.a-net.fyi' }}</code>
+            mails a verification link before listing — nothing goes live
+            without your confirmation.
+        </div>
+        <div class="row g-2 mb-2">
+            <div class="col-md-6"><label class="form-label">Sysop Email</label>
+                <input type="email" name="sysop_email" class="form-control"
+                       value="{{ config.SYSOP_EMAIL or '' }}"
+                       placeholder="you@example.com"></div>
+            <div class="col-md-6"><label class="form-label">BBS Location</label>
+                <input type="text" name="bbs_location" class="form-control"
+                       value="{{ config.BBS_LOCATION or '' }}"
+                       placeholder="City, State, Country"></div>
+        </div>
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox"
+                   name="federation_register" id="cb_fed"
+                   {% if not config.REGISTRY_SELF_REGISTER %}checked{% endif %}>
+            <label for="cb_fed" class="form-check-label">
+                Register with the federation hub now (an email verification
+                link will be sent). Skip if you only intend to run this
+                privately.
+            </label>
+        </div>
+        <div class="mb-3">
+            <button type="button" id="cb_fed_test"
+                    class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-broadcast"></i> Test hub connection
+            </button>
+            <span id="cb_fed_result" class="ms-2 small text-muted"></span>
+        </div>
+        <script>
+        (function() {
+            const btn = document.getElementById('cb_fed_test');
+            const out = document.getElementById('cb_fed_result');
+            const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            btn?.addEventListener('click', async () => {
+                btn.disabled = true;
+                out.className = 'ms-2 small text-muted';
+                out.textContent = 'probing…';
+                try {
+                    const r = await fetch('{{ url_for("admin.setup_wizard_check_hub") }}',
+                                          {method: 'POST',
+                                           headers: CSRF ? {'X-CSRFToken': CSRF} : {},
+                                           credentials: 'same-origin'});
+                    const t = await r.text();
+                    let j;
+                    try { j = JSON.parse(t); }
+                    catch (_) { j = {ok: false, detail: 'non-JSON: ' + t.slice(0,120)}; }
+                    out.className = 'ms-2 small ' + (j.ok ? 'text-success' : 'text-danger');
+                    out.textContent = (j.ok ? '✓ ' : '✗ ') + j.hub + ' — ' + j.detail;
+                } catch (e) {
+                    out.className = 'ms-2 small text-danger';
+                    out.textContent = '✗ probe failed: ' + e.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        })();
+        </script>
+
         <h6>Seed some MOTDs (welcome messages shown at random)</h6>
         <div class="mb-3">
             <input type="text" name="motd" class="form-control mb-1" value="Welcome back to {{ config.BBS_NAME or 'the BBS' }}!">

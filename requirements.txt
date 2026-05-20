@@ -78,9 +78,18 @@ feedparser>=6.0
 
 # FTP server (anetbbs.ftp) — serves the FileArea tree to anonymous + auth users.
 pyftpdlib>=2.0.0
+# pyOpenSSL is what makes pyftpdlib's TLS_FTPHandler importable; without
+# it FTPS is silently disabled and AUTH TLS clients get refused on the
+# control channel. Required for the FTPS path that update.sh wires up
+# when FTP_TLS_CERTFILE is configured.
+pyopenssl>=24.0.0
 
 # Internet email — LMTP listener that takes mail handed off from the
 # sysop's local Postfix/Exim/OpenSMTPD, and an outbound submitter that
 # hands fresh mail back to the MTA at 127.0.0.1:25.
 aiosmtpd>=1.4.0
 aiosmtplib>=3.0.0
+
+# Service Control Center — per-PID CPU% + memory sampling for the
+# live graphs at /admin/control/. Reads /proc, no special privileges.
+psutil>=5.9.0

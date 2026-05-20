@@ -77,7 +77,31 @@ while IFS='=' read -r key value; do
     EXISTING_ENV["$key"]="$value"
 done < <(grep -v '^\s*#' "$ENV_FILE" | grep '=')
 
-SERVICE_USER=$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || echo "anetbbs")
+# Detect the user under which the BBS actually runs. Prefer the running
+# systemd unit's User=, which is authoritative once a service has been
+# installed. Fall back to the install-directory owner only when no unit
+# exists yet (fresh install scenario).
+#
+# Why: the old `stat -c '%U' "$INSTALL_DIR"` logic returned the OWNER of
+# the install dir, which is fine on a stock install (install.sh chowns
+# the tree to the service user). But many installs sit under a sysop
+# home directory like /home/stingray/anetbbs, so the dir owner is the
+# human "stingray" while the actual service user is "anetbbs". Using
+# dir-owner would then write the systemd unit with `User=stingray`
+# AND `chown -R stingray:stingray data/` — which fights the live
+# service every update, breaking writes from doors and the web app.
+SERVICE_USER=""
+if command -v systemctl >/dev/null 2>&1; then
+    SERVICE_USER=$(systemctl show anetbbs-web -p User --value 2>/dev/null)
+    # systemctl prints empty when the unit doesn't exist, but also
+    # prints empty when User= is not set (defaults to root). Normalize.
+    if [ "$SERVICE_USER" = "[not set]" ] || [ "$SERVICE_USER" = "root" ]; then
+        SERVICE_USER=""
+    fi
+fi
+if [ -z "$SERVICE_USER" ]; then
+    SERVICE_USER=$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || echo "anetbbs")
+fi
 VENV_DIR="$INSTALL_DIR/venv"
 
 ok "Installation found at $INSTALL_DIR (user: $SERVICE_USER)"
@@ -91,11 +115,28 @@ mkdir -p "$BACKUP_DIR"
 cp "$ENV_FILE" "$BACKUP_DIR/.env.bak"
 ok "Backed up .env"
 
-DB_FILE="$INSTALL_DIR/data/anetbbs.db"
-if [[ -f "$DB_FILE" ]]; then
-    cp "$DB_FILE" "$BACKUP_DIR/anetbbs.db.bak"
-    ok "Backed up database"
-fi
+# Database backup — use sqlite3's `.backup` rather than cp(1). The
+# services aren't stopped yet (that's Step 3) so the DB might be
+# mid-write; cp can produce a torn snapshot that fails to open with
+# "database disk image is malformed", while .backup uses the WAL to
+# produce a consistent snapshot under concurrent writes. Fall back to
+# cp only if sqlite3(1) isn't installed.
+backup_sqlite() {
+    local src="$1" dst="$2" label="$3"
+    [[ -f "$src" ]] || return 0
+    if command -v sqlite3 >/dev/null 2>&1; then
+        if sqlite3 "$src" ".backup '$dst'" 2>/dev/null; then
+            ok "Backed up $label (sqlite3 .backup, $(du -h "$dst" | cut -f1))"
+            return 0
+        fi
+        warn "sqlite3 .backup of $label failed — falling back to cp"
+    fi
+    cp "$src" "$dst" && ok "Backed up $label (cp)"
+}
+backup_sqlite "$INSTALL_DIR/data/anetbbs.db" "$BACKUP_DIR/anetbbs.db.bak" "production DB"
+backup_sqlite "$INSTALL_DIR/data/anetbbs_dev.db" "$BACKUP_DIR/anetbbs_dev.db.bak" "dev DB"
+
+DB_FILE="$INSTALL_DIR/data/anetbbs.db"  # kept for the failure-rollback block at end-of-script
 
 for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && \
@@ -105,12 +146,38 @@ ok "Backed up systemd service files"
 
 NGINX_AVAIL="/etc/nginx/sites-available/anetbbs"
 [[ -f "$NGINX_AVAIL" ]] && cp "$NGINX_AVAIL" "$BACKUP_DIR/anetbbs-nginx.bak"
-ok "Backup stored at $BACKUP_DIR"
+
+# Manifest so rollback can identify what's inside without guessing.
+OLD_VERSION=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo unknown)
+NEW_VERSION=$(cat "$SOURCE_DIR/VERSION" 2>/dev/null || echo unknown)
+cat > "$BACKUP_DIR/MANIFEST" <<MEOF
+created_at = $(date -u +%Y-%m-%dT%H:%M:%SZ)
+from_version = $OLD_VERSION
+to_version = $NEW_VERSION
+service_user = $SERVICE_USER
+install_dir = $INSTALL_DIR
+MEOF
+# Backup dir + everything inside is owned by root at this point (we
+# ran via sudo). The /admin/backups/ UI runs as the service user and
+# needs to be able to delete these without invoking a helper. Chown
+# the whole tree so plain os.unlink() / shutil.rmtree() from gunicorn
+# works.
+chown -R "$SERVICE_USER":"$SERVICE_USER" "$BACKUP_DIR" 2>/dev/null || true
+chmod 0700 "$BACKUP_DIR" 2>/dev/null || true
+
+ok "Backup stored at $BACKUP_DIR (was $OLD_VERSION → $NEW_VERSION)"
 
 # ─── Step 3: Stop services ─────────────────────────────────────────────────────
 step "Step 3/8: Stopping services"
 
+# Only stop units that actually exist on this host. The legacy split
+# anetbbs-telnet / anetbbs-ssh services were merged into anetbbs.service
+# during v1.0a2.10; iterating over them on a current install just prints
+# "was not running" lines that look like errors in screenshots.
 for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+    if [[ ! -f "/etc/systemd/system/${svc}.service" ]]; then
+        continue
+    fi
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         systemctl stop "$svc" 2>/dev/null && ok "Stopped $svc" || warn "Could not stop $svc"
     else
@@ -239,25 +306,40 @@ else
         warn "pip install failed — dependencies may be out of date"
     fi
 
-    # Nuke + reinstall bcrypt because pip --force-reinstall LEAVES THE OLD .so FILE
-    # if it was put there by a different-named package (e.g. python-bcrypt 0.3.2,
-    # which the original setup.py wrongly listed). The leftover _bcrypt.so causes:
-    #   ImportError: cannot import name '__author__' from 'bcrypt._bcrypt'
-    info "Nuking + reinstalling bcrypt (handles namespace collision with old python-bcrypt)..."
-    SITE_PKGS=$("$VENV_DIR/bin/python" -c "import sys; print([p for p in sys.path if 'site-packages' in p][0])")
-    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || \
-    "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || true
-    rm -rf "$SITE_PKGS/bcrypt" "$SITE_PKGS/bcrypt-"*.dist-info "$SITE_PKGS/python_bcrypt"* "$SITE_PKGS/_bcrypt"*
-    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
-    "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
-    warn "bcrypt reinstall failed"
-    ok "bcrypt reinstalled clean"
+    # bcrypt / cryptography fast path: only nuke-and-reinstall if the
+    # current install is ACTUALLY broken. The old logic ran the slow
+    # rebuild on every update, adding 5-10 minutes per upgrade on
+    # boxes without prebuilt wheels for the running Python — and the
+    # web service is stopped for that entire window. Quick import
+    # probes detect a working install in <100 ms and skip the rebuild.
+    if "$VENV_DIR/bin/python" -c "import bcrypt; bcrypt.hashpw(b'x', bcrypt.gensalt())" >/dev/null 2>&1; then
+        ok "bcrypt imports + hashes cleanly — skipping reinstall"
+    else
+        info "bcrypt broken — running the nuke-and-reinstall recovery path..."
+        # The historical breakage: pip --force-reinstall LEAVES the old
+        # .so FILE if a differently-named package (e.g. python-bcrypt
+        # 0.3.2, which the original setup.py wrongly listed) put it
+        # there. Leftover _bcrypt.so → "cannot import name '__author__'
+        # from 'bcrypt._bcrypt'". Nuke explicitly first.
+        SITE_PKGS=$("$VENV_DIR/bin/python" -c "import sys; print([p for p in sys.path if 'site-packages' in p][0])")
+        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || \
+        "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || true
+        rm -rf "$SITE_PKGS/bcrypt" "$SITE_PKGS/bcrypt-"*.dist-info "$SITE_PKGS/python_bcrypt"* "$SITE_PKGS/_bcrypt"*
+        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
+        "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
+        warn "bcrypt reinstall failed"
+        ok "bcrypt reinstalled clean"
+    fi
 
-    # Cryptography rarely has this problem but doesn't hurt to refresh.
-    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install \
-        --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || \
-    "$VENV_DIR/bin/pip" install \
-        --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || true
+    if "$VENV_DIR/bin/python" -c "from cryptography.fernet import Fernet; Fernet.generate_key()" >/dev/null 2>&1; then
+        ok "cryptography imports cleanly — skipping reinstall"
+    else
+        info "cryptography broken — force-reinstalling..."
+        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install \
+            --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || \
+        "$VENV_DIR/bin/pip" install \
+            --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || true
+    fi
 
     # Wipe any __pycache__ that pip-as-root may have written so the service user
     # can regenerate them on first import.
@@ -434,11 +516,67 @@ fi
 info "Checking for new systemd service files..."
 MRC_BRIDGE_CONFIG="$INSTALL_DIR/mrc/bridge/config.json"
 
-# Auto-install anetbbs-web.service if missing (e.g. updating from a pre-systemd
-# install or one that used a different unit naming scheme).
+# Auto-install anetbbs-web.service if missing (e.g. updating from a
+# pre-systemd install or one that used a different unit naming scheme).
+#
+# Port-selection logic — critical for not breaking existing installs:
+#
+# 1. If .env already sets WEB_PORT, use that (sysop has made an
+#    explicit choice; respect it even if it conflicts with something).
+# 2. Otherwise, probe what's currently bound. If the sysop was running
+#    gunicorn manually on, say, :8080 and we wrote a fresh unit
+#    hard-coded to :5000, their bookmarked URL would land on the MRC
+#    bridge instead. Look for a running gunicorn / python pointing at
+#    the install dir and inherit its bind port.
+# 3. If step 2 finds nothing, default to 5000 — but FIRST verify that
+#    port isn't already held by another anetbbs service (mrc-bridge
+#    defaults to :8080 — overlap is unlikely but possible on weird
+#    configs). If the default is taken, walk up to the next free
+#    port and write THAT value back into .env so the choice survives.
 if [[ ! -f /etc/systemd/system/anetbbs-web.service ]]; then
     info "Installing anetbbs-web.service ..."
-    WEB_PORT_VAL="${EXISTING_ENV[WEB_PORT]:-5000}"
+    WEB_PORT_VAL=""
+
+    # Step 1: explicit env value wins.
+    if [[ -n "${EXISTING_ENV[WEB_PORT]:-}" ]]; then
+        WEB_PORT_VAL="${EXISTING_ENV[WEB_PORT]}"
+        info "  WEB_PORT=$WEB_PORT_VAL (from .env)"
+    fi
+
+    # Step 2: discover existing gunicorn binding for the install.
+    if [[ -z "$WEB_PORT_VAL" ]] && command -v ss >/dev/null 2>&1; then
+        # Walk every listening TCP port, look for one whose owning
+        # process is a gunicorn from this install's venv. ss output:
+        #   LISTEN 0 50 0.0.0.0:8080 0.0.0.0:* users:(("gunicorn",pid=...))
+        DISCOVERED=$(ss -tlnp 2>/dev/null \
+            | grep -E "gunicorn|$INSTALL_DIR" \
+            | grep -oE '0\.0\.0\.0:[0-9]+|127\.0\.0\.1:[0-9]+|\*:[0-9]+|\[::\]:[0-9]+' \
+            | grep -oE '[0-9]+$' \
+            | sort -u | head -1)
+        if [[ -n "$DISCOVERED" ]]; then
+            WEB_PORT_VAL="$DISCOVERED"
+            warn "  WEB_PORT auto-detected from running gunicorn: $WEB_PORT_VAL"
+            warn "  (a manual install was running here; preserving its choice)"
+        fi
+    fi
+
+    # Step 3: fall back to 5000, walking up if taken by something else.
+    if [[ -z "$WEB_PORT_VAL" ]]; then
+        WEB_PORT_VAL=5000
+        if command -v ss >/dev/null 2>&1; then
+            while ss -tlnH 2>/dev/null | grep -qE ":${WEB_PORT_VAL}\b"; do
+                warn "  port $WEB_PORT_VAL is already bound; trying $((WEB_PORT_VAL + 1))"
+                WEB_PORT_VAL=$((WEB_PORT_VAL + 1))
+                [[ "$WEB_PORT_VAL" -gt 5050 ]] && break
+            done
+        fi
+        info "  WEB_PORT=$WEB_PORT_VAL (chosen default; will write to .env)"
+        # Persist so subsequent upgrades don't repeat the discovery dance.
+        if ! grep -qE '^WEB_PORT=' "$ENV_FILE" 2>/dev/null; then
+            echo "WEB_PORT=$WEB_PORT_VAL" >> "$ENV_FILE"
+        fi
+    fi
+
     mkdir -p "$INSTALL_DIR/logs"
     chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/logs" 2>/dev/null || true
     cat > /etc/systemd/system/anetbbs-web.service << SVCEOF
@@ -453,8 +591,14 @@ Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
 # Privileged ports (MSP/18, SYSTAT/11) need this capability.
+# NOTE: We intentionally do NOT set CapabilityBoundingSet here. The
+# Service Control Center's Start/Stop/Restart buttons shell out to
+# sudo, which itself needs to re-acquire CAP_SETUID + CAP_SETGID +
+# CAP_AUDIT_WRITE from its setuid-root bit. A bounding set that
+# excludes those caps makes sudo fail with "unable to change to
+# root gid" + "audit plugin" errors. AmbientCapabilities alone is
+# enough to bind privileged ports without granting full root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=$VENV_DIR/bin/gunicorn \\
     --worker-class eventlet \\
     -w 1 \\
@@ -488,7 +632,7 @@ if [[ ! -f /etc/systemd/system/anetbbs.service ]]; then
     fi
     cat > /etc/systemd/system/anetbbs.service << SVCEOF
 [Unit]
-Description=ANetBBS terminal protocols (telnet / ssh / rlogin)
+Description=ANetBBS terminal protocols (telnet / ssh / rlogin / FTP / LMTP)
 After=network.target
 
 [Service]
@@ -497,6 +641,11 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
+# FTP on port 21 needs CAP_NET_BIND_SERVICE since the unit doesn't run
+# as root. Without this, the FTP listener silently fails to bind and
+# /admin/control/ flags it as a listener problem.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=$VENV_DIR/bin/anetbbs
 Restart=always
 RestartSec=5
@@ -505,6 +654,147 @@ RestartSec=5
 WantedBy=multi-user.target
 SVCEOF
     ok "anetbbs.service installed"
+fi
+
+# Patch existing anetbbs-web.service to REMOVE CapabilityBoundingSet=.
+# Past releases shipped this set to CAP_NET_BIND_SERVICE only, which
+# prevents sudo from re-acquiring CAP_SETUID/SETGID/AUDIT_WRITE — the
+# SCC's Restart buttons then fail with "sudo: unable to change to
+# root gid". AmbientCapabilities= still lets MSP/SYSTAT bind to their
+# privileged ports; the bounding set was overcautious.
+WEB_UNIT=/etc/systemd/system/anetbbs-web.service
+if [[ -f "$WEB_UNIT" ]] && grep -q '^CapabilityBoundingSet=' "$WEB_UNIT"; then
+    info "Patching $WEB_UNIT — removing CapabilityBoundingSet so sudo can elevate..."
+    sed -i.bak '/^CapabilityBoundingSet=/d' "$WEB_UNIT"
+    systemctl daemon-reload 2>/dev/null || true
+    NEEDS_WEB_RESTART=true
+    ok "anetbbs-web.service patched (Restart buttons in the SCC will work)"
+fi
+
+# Ensure data/ftp_root is owned by the service user. Leftover root-
+# owned symlinks here would crash the FTP listener thread during the
+# nightly tree rebuild (the symlink-tree builder couldn't unlink them).
+# v1.0a2.32 also added a soft-skip-on-PermissionError path, so this
+# is belt-and-braces.
+FTP_ROOT_DIR_GUESS="$INSTALL_DIR/data/ftp_root"
+if [[ -d "$FTP_ROOT_DIR_GUESS" ]]; then
+    info "Ensuring $FTP_ROOT_DIR_GUESS is owned by $SERVICE_USER..."
+    chown -R "$SERVICE_USER":"$SERVICE_USER" "$FTP_ROOT_DIR_GUESS" 2>/dev/null && \
+        ok "ftp_root ownership normalised" || \
+        warn "ftp_root chown failed — FTP listener may stay down"
+fi
+
+# ─── FTPS auto-enable ─────────────────────────────────────────────────────────
+# If FTP_TLS_CERTFILE in .env points at /etc/letsencrypt (the common
+# case), get the service into a state where it can actually read the
+# cert + key. Three things have to line up:
+#   1. The ssl-cert group exists and the service user belongs to it.
+#   2. /etc/letsencrypt/{live,archive} are group-readable by ssl-cert,
+#      with privkey*.pem at 0640 (group-readable, not world).
+#   3. anetbbs.service has SupplementaryGroups=ssl-cert so systemd
+#      actually grants the supplementary group at process start.
+# All three are idempotent: re-running update.sh on a healthy install
+# is a no-op.
+#
+# Plus we install a certbot renewal-hook so this doesn't drift on
+# auto-renewal — certbot resets archive/ perms to 0700 root:root on
+# every renewal, which would otherwise break FTPS overnight.
+FTP_CERT="${EXISTING_ENV[FTP_TLS_CERTFILE]:-}"
+if [[ -n "$FTP_CERT" && "$FTP_CERT" =~ ^/etc/letsencrypt/ ]]; then
+    info "FTP_TLS_CERTFILE references /etc/letsencrypt — wiring FTPS access..."
+
+    # 1. Ensure ssl-cert group exists (Debian/Ubuntu usually ship it;
+    #    fallback creates a system group with a stable GID).
+    if ! getent group ssl-cert >/dev/null 2>&1; then
+        groupadd --system ssl-cert 2>/dev/null && \
+            info "  created ssl-cert system group" || \
+            warn "  could not create ssl-cert group"
+    fi
+
+    # 2. Add the service user to ssl-cert if not already a member.
+    if ! id -nG "$SERVICE_USER" 2>/dev/null | tr ' ' '\n' | grep -qx ssl-cert; then
+        if usermod -aG ssl-cert "$SERVICE_USER" 2>/dev/null; then
+            ok "  added $SERVICE_USER to ssl-cert group"
+            NEEDS_ANETBBS_RESTART=true
+        else
+            warn "  could not add $SERVICE_USER to ssl-cert"
+        fi
+    fi
+
+    # 3. Normalise letsencrypt perms so ssl-cert members can read them.
+    #    Done once now; the renewal hook below maintains them.
+    if [[ -d /etc/letsencrypt/archive ]]; then
+        chgrp -R ssl-cert /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+        chmod g+rX /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+        find /etc/letsencrypt/archive -name 'privkey*.pem' -exec chmod 640 {} \; 2>/dev/null || true
+        find /etc/letsencrypt/archive -name '*.pem' ! -name 'privkey*' -exec chmod 644 {} \; 2>/dev/null || true
+        ok "  /etc/letsencrypt perms set for ssl-cert group access"
+    fi
+
+    # 4. Install the renewal-hooks/deploy/ shim so certbot doesn't
+    #    revert the perms on every renewal.
+    HOOK_DIR=/etc/letsencrypt/renewal-hooks/deploy
+    HOOK=$HOOK_DIR/anetbbs-ssl-cert-perms.sh
+    if [[ -d /etc/letsencrypt ]]; then
+        mkdir -p "$HOOK_DIR" 2>/dev/null || true
+        cat > "$HOOK" << 'HOOKEOF'
+#!/bin/bash
+# Installed by anetbbs update.sh.
+#
+# Certbot resets /etc/letsencrypt/archive perms to 0700 root:root on
+# every cert renewal, which silently breaks anetbbs FTPS (and any
+# other non-root service reading the cert). This deploy-hook fires
+# after each successful renewal and restores ssl-cert group access.
+chgrp -R ssl-cert /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+chmod g+rX /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+find /etc/letsencrypt/archive -name 'privkey*.pem' -exec chmod 640 {} \; 2>/dev/null || true
+find /etc/letsencrypt/archive -name '*.pem' ! -name 'privkey*' -exec chmod 644 {} \; 2>/dev/null || true
+HOOKEOF
+        chmod 0755 "$HOOK"
+        ok "  certbot renewal hook installed ($HOOK)"
+    fi
+
+    # 5. Add SupplementaryGroups=ssl-cert to anetbbs.service if missing.
+    #    Without this systemd's User=stingray doesn't pick up the new
+    #    group membership — systemd doesn't call initgroups() on its
+    #    own; you have to declare supplementary groups explicitly.
+    ANETBBS_UNIT_FOR_SSL=/etc/systemd/system/anetbbs.service
+    if [[ -f "$ANETBBS_UNIT_FOR_SSL" ]] && \
+       ! grep -q '^SupplementaryGroups=.*ssl-cert' "$ANETBBS_UNIT_FOR_SSL"; then
+        info "  patching $ANETBBS_UNIT_FOR_SSL — adding SupplementaryGroups=ssl-cert..."
+        if grep -q '^EnvironmentFile=' "$ANETBBS_UNIT_FOR_SSL"; then
+            sed -i.bak '/^EnvironmentFile=/a SupplementaryGroups=ssl-cert' "$ANETBBS_UNIT_FOR_SSL"
+        else
+            sed -i.bak '/^ExecStart=/i SupplementaryGroups=ssl-cert' "$ANETBBS_UNIT_FOR_SSL"
+        fi
+        systemctl daemon-reload 2>/dev/null || true
+        NEEDS_ANETBBS_RESTART=true
+        ok "  anetbbs.service patched (FTPS cert will be readable on next restart)"
+    fi
+fi
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Patch existing anetbbs.service if it's missing CAP_NET_BIND_SERVICE.
+# Releases before v1.0a2.29 shipped a unit without the cap, so the FTP
+# listener could not bind to port 21 — the only listener that needed
+# the cap and the only one that failed. We add the two lines
+# (AmbientCapabilities + CapabilityBoundingSet) in place rather than
+# rewriting the file so any sysop customizations survive.
+ANETBBS_UNIT=/etc/systemd/system/anetbbs.service
+if [[ -f "$ANETBBS_UNIT" ]] && ! grep -q '^AmbientCapabilities=CAP_NET_BIND_SERVICE' "$ANETBBS_UNIT"; then
+    info "Patching $ANETBBS_UNIT — adding CAP_NET_BIND_SERVICE for FTP:21..."
+    # Inject the two Capability lines right after the EnvironmentFile= line.
+    # Fall back to before ExecStart= if EnvironmentFile= is missing for any
+    # reason. sed -i creates a backup at .bak for safety.
+    if grep -q '^EnvironmentFile=' "$ANETBBS_UNIT"; then
+        sed -i.bak '/^EnvironmentFile=/a AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE' "$ANETBBS_UNIT"
+    else
+        sed -i.bak '/^ExecStart=/i AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE' "$ANETBBS_UNIT"
+    fi
+    systemctl daemon-reload 2>/dev/null || true
+    # Mark for restart after Step 8 picks up the new caps.
+    NEEDS_ANETBBS_RESTART=true
+    ok "anetbbs.service patched (FTP listener will bind on next restart)"
 fi
 
 if [[ ! -f /etc/systemd/system/anetbbs-mrc-bridge.service ]]; then
@@ -560,6 +850,58 @@ fi
 mkdir -p "$INSTALL_DIR/data/mrc"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/mrc" 2>/dev/null || true
 
+# Refresh /etc/sudoers.d/anetbbs so the Service Control Center can run
+# systemctl + journalctl against the current unit names. We rewrite it
+# every update because past releases shipped a stale list (anetbbs-telnet,
+# anetbbs-ssh, anetbbs-rlogin — none of which exist post-merge), which
+# left the panel showing "permission denied" on Restart buttons.
+SUDOERS_SRC="$SOURCE_DIR/deploy/sudoers.anetbbs"
+SUDOERS_DST="/etc/sudoers.d/anetbbs"
+if [[ -f "$SUDOERS_SRC" ]]; then
+    info "Refreshing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
+    # Substitute placeholders so the sudoers grants:
+    #   - run as the actual SERVICE_USER (not the template's 'stingray')
+    #   - reference the real upgrade wrapper path ($INSTALL_DIR/deploy/run_upgrade.sh,
+    #     not the template's /opt/anetbbs/ placeholder)
+    UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
+    RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
+    # Substitute both deploy paths plus the user placeholder. Without
+    # the -g flag each sed only hits its first match; we need every
+    # /opt/anetbbs/deploy/* line to land on the real install path.
+    sed -e "s/^stingray /$SERVICE_USER /" \
+        -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
+        -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
+        "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
+    if visudo -cf "$SUDOERS_DST.tmp" >/dev/null 2>&1; then
+        mv "$SUDOERS_DST.tmp" "$SUDOERS_DST"
+        chmod 0440 "$SUDOERS_DST"
+        ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
+    else
+        rm -f "$SUDOERS_DST.tmp"
+        warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+    fi
+fi
+
+# Drop a sentinel /etc/anetbbs.install so the privileged upgrade wrapper
+# (and any other future root helper) can discover the install root
+# without hardcoding a path. Sources cleanly with `. /etc/anetbbs.install`.
+cat > /etc/anetbbs.install <<EOF
+# Written by update.sh — used by deploy/run_upgrade.sh to locate the
+# install root when invoked under sudo. Do not edit by hand; rerun
+# install.sh or update.sh to refresh.
+INSTALL_DIR=$INSTALL_DIR
+SERVICE_USER=$SERVICE_USER
+EOF
+chmod 0644 /etc/anetbbs.install
+
+# Ensure deploy/ wrappers are executable. Tarballs built from FAT
+# source trees lose the +x bit, so we set it explicitly post-extract.
+for w in run_upgrade.sh run_restore.sh; do
+    if [[ -f "$INSTALL_DIR/deploy/$w" ]]; then
+        chmod 0755 "$INSTALL_DIR/deploy/$w"
+    fi
+done
+
 systemctl daemon-reload
 
 # ─── Step 8: Restart services ──────────────────────────────────────────────────
@@ -600,6 +942,40 @@ else
             fi
         fi
     done
+
+    # HTTP-level health check: systemctl is-active only says the process
+    # is up, not that the web app can serve requests. A bad migration or
+    # bad import would still leave gunicorn alive but every request
+    # 500s. Poll /healthz until it returns 200 OR we time out, then
+    # flag as a critical failure so the rollback block below kicks in.
+    if [[ " ${SERVICES_TO_START[*]} " == *" anetbbs-web "* ]]; then
+        WEB_PORT_PROBE="${EXISTING_ENV[WEB_PORT]:-5000}"
+        HEALTH_URL="http://127.0.0.1:$WEB_PORT_PROBE/healthz"
+        info "Probing $HEALTH_URL (up to 30s)..."
+        HEALTH_OK=false
+        for i in $(seq 1 15); do
+            HEALTH_BODY=$(curl --fail --silent --max-time 3 "$HEALTH_URL" 2>/dev/null || true)
+            if [[ -n "$HEALTH_BODY" ]]; then
+                HEALTH_OK=true
+                ok "Web health OK: ${HEALTH_BODY:0:120}"
+                break
+            fi
+            sleep 2
+        done
+        if [[ "$HEALTH_OK" != true ]]; then
+            # /healthz route is in v1.0a2.43+; an older deployed version
+            # that lacks it will 404, which curl --fail treats as failure.
+            # Fall back to a probe of the login page so an upgrade from
+            # a pre-/healthz version doesn't spuriously fail.
+            LOGIN_URL="http://127.0.0.1:$WEB_PORT_PROBE/auth/login"
+            if curl --fail --silent --max-time 3 "$LOGIN_URL" >/dev/null 2>&1; then
+                ok "Web responding at $LOGIN_URL (no /healthz route yet — old version?)"
+            else
+                bad "Web service is up but not responding to HTTP probes"
+                CRITICAL_FAILED=true
+            fi
+        fi
+    fi
 fi
 
 if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then

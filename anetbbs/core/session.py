@@ -1,13 +1,22 @@
 # anetbbs/core/session.py
 import asyncio
+import logging
 import os
 from datetime import datetime
 from typing import Dict, Optional, Any
+
+logger = logging.getLogger(__name__)
 from .protocols import SessionProtocol  # noqa: F401  load-bearing import: telnet/SSH service crash without it (see CHANGELOG v152)
 from ..features.chat import ChatManager
 from ..features.games import GameManager
 from .user_manager import UserManager
 from .service_locator import ServiceLocator
+
+class CarrierLost(ConnectionError):
+    """The transport has gone away mid-read. Raised by read_raw/read_key/
+    read_line/read_password so menu loops can unwind instead of spinning
+    on a stream that will only ever return EOF from here on."""
+
 
 # Telnet commands
 IAC = bytes([255])  # "Interpret As Command"
@@ -168,16 +177,19 @@ class BBSSession:
         loops can no-op + redraw). Discards arrow keys / function keys
         and other multi-byte ESC sequences. The keystroke is echoed
         followed by CRLF — same UX as line input but without the wait
-        for Enter."""
+        for Enter.
+
+        Raises CarrierLost if the transport has gone away — callers
+        must not confuse this with bare-Enter (both used to look like '')."""
         if prompt:
             await self.write(prompt)
         while True:
             try:
                 ch = await self.reader.read(1)
-            except Exception:
-                return ''
+            except (ConnectionError, BrokenPipeError, EOFError) as e:
+                raise CarrierLost(str(e)) from e
             if not ch:
-                return ''
+                raise CarrierLost('client disconnected')
             # Bare Enter: no-op (lets menus redraw without selecting).
             if ch in (b'\r', b'\n'):
                 await self.write('\r\n')
@@ -214,9 +226,12 @@ class BBSSession:
             await self.write(prompt)
         chars = []
         while True:
-            ch = await self.reader.read(1)
+            try:
+                ch = await self.reader.read(1)
+            except (ConnectionError, BrokenPipeError, EOFError) as e:
+                raise CarrierLost(str(e)) from e
             if not ch:
-                break
+                raise CarrierLost('client disconnected')
             # Most telnet/SSH clients send \r when Enter is pressed; some send \r\n
             if ch in (b'\r', b'\n'):
                 # consume any paired \n so it doesn't dirty the next read
@@ -665,14 +680,32 @@ class BBSSession:
 
     async def handle_registration(self) -> bool:
         """Handle new user registration"""
+        import re as _re
         await self.write("\r\n=== New User Registration ===\r\n\r\n")
-        
+
+        # Mirror the web form: 3-80 chars, must start with a letter or
+        # number, allow spaces / hyphens / periods / apostrophes /
+        # underscores in the rest. Previously this used ``str.isalnum``
+        # which rejected anything with a space — so "Dr Test" was
+        # invalid and the user had to fall back to "drtest". The web
+        # registration form has never been that strict; aligning the
+        # two paths so the same name works through either entry point.
+        _NAME_RE = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'\-]{1,79}$")
+
         while True:
-            username = await self.read_line("Choose username (3-20 chars, alphanumeric): ")
-            if not username:
+            raw = await self.read_line(
+                "Choose username (3-80 chars; letters, digits, spaces, "
+                "._'- allowed): ")
+            if not raw:
                 return False
-            if not (3 <= len(username) <= 20 and username.isalnum()):
-                await self.write("\r\nInvalid username format.\r\n")
+            # Trim + collapse runs of whitespace so " dr   test " becomes
+            # "dr test" before the regex check (and before DB storage).
+            username = ' '.join(raw.split())
+            if not (3 <= len(username) <= 80) or not _NAME_RE.match(username):
+                await self.write(
+                    "\r\nInvalid username — must be 3-80 chars, start with "
+                    "a letter or digit, and only use letters, digits, "
+                    "spaces, dot, apostrophe, hyphen, or underscore.\r\n")
                 continue
             break
 
@@ -727,12 +760,17 @@ class BBSSession:
         self._buffer.clear()
 
     async def send_telnet_command(self, command):
-        """Send a telnet command"""
+        """Send a telnet command. Broken pipes during the initial greeting
+        are normal (SCC port probes, scanners) and not worth logging —
+        any *unexpected* error still hits the logger so real bugs surface."""
         try:
             self.writer.write(IAC + command)
             await self.writer.drain()
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError):
+            pass
         except Exception as e:
-            print(f"Error sending telnet command: {e}")
+            logger.debug("send_telnet_command failed: %s", e)
 
     async def handle_telnet_command(self, data):
         """Handle incoming telnet commands"""
@@ -775,7 +813,11 @@ class BBSSession:
         """Read raw bytes from the connection. Honors `self.idle_timeout`
         if set — disconnects sessions that sit idle waiting for a keystroke.
         IRC/MRC are web features and don't go through this path, so the
-        idle timer doesn't affect them."""
+        idle timer doesn't affect them.
+
+        Raises CarrierLost when the transport disconnects or the idle
+        timeout fires, so menu loops break out instead of spinning on
+        a permanently-EOF stream."""
         try:
             timeout = getattr(self, 'idle_timeout', 0) or 0
             if timeout > 0:
@@ -783,6 +825,8 @@ class BBSSession:
                                               timeout=timeout)
             else:
                 data = await self.reader.read(n)
+            if not data:
+                raise CarrierLost('client disconnected')
             return await self.handle_telnet_command(data)
         except asyncio.TimeoutError:
             try:
@@ -795,20 +839,26 @@ class BBSSession:
                 self.writer.close()
             except Exception:
                 pass
-            return b''
-        except Exception as e:
-            print(f"Error reading raw data: {e}")
-            return b''
+            raise CarrierLost('idle timeout')
+        except CarrierLost:
+            raise
+        except (ConnectionError, BrokenPipeError, EOFError) as e:
+            raise CarrierLost(str(e)) from e
 
     async def write(self, text: str):
-        """Write text to the terminal"""
+        """Write text to the terminal. Broken pipes are normal — port
+        probes and rage-quitting clients both close the socket while we
+        still have IAC negotiation in flight. Don't spam the journal."""
         try:
             if isinstance(text, str):
                 text = text.encode(self.encoding, errors='replace')
             self.writer.write(text)
             await self.writer.drain()
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError):
+            pass
         except Exception as e:
-            print(f"Write error: {e}")
+            logger.debug("write failed: %s", e)
 
     async def read_line(self, prompt: str = "") -> str:
         """Read a line of input with echo"""
@@ -819,9 +869,9 @@ class BBSSession:
         while True:
             try:
                 char = await self.read_raw(1)
-                if not char:  # Connection closed
-                    return ""
-                
+                if not char:  # Connection closed (defensive — read_raw raises now)
+                    raise CarrierLost('client disconnected')
+
                 # Handle special characters
                 if char == b'\x7f' or char == b'\x08':  # Backspace
                     if line:
@@ -829,39 +879,45 @@ class BBSSession:
                         if self.echo:
                             await self.write('\b \b')
                     continue
-                
+
                 elif char == b'\r':  # Enter key
                     if self.echo:
                         await self.write('\r\n')
                     break
-                
+
                 elif char == b'\x03':  # Ctrl-C
                     return ''
-                
+
                 # Regular character
                 if len(char) == 1 and 32 <= char[0] <= 126:  # Printable ASCII
                     line.extend(char)
                     if self.echo:
                         await self.write(char.decode(self.encoding))
-            
+
+            except CarrierLost:
+                raise
             except Exception as e:
-                print(f"Error reading line: {e}")
-                return ""
-        
+                logger.debug("read_line failed: %s", e)
+                raise CarrierLost(str(e)) from e
+
         try:
             return bytes(line).decode(self.encoding).strip()
         except Exception as e:
-            print(f"Error decoding line: {e}")
+            logger.debug("read_line decode failed: %s", e)
             return ""
 
     def get_formatted_time(self) -> str:
         return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
     async def clear_screen(self):
-        """Clear the screen and move cursor to home position"""
-        # Clear screen, move to home, reset attributes
+        """Clear the screen and move cursor to home position. ``self.write``
+        already drains internally and swallows write errors quietly, so
+        the previous bare ``await self.writer.drain()`` here was just a
+        double-drain — and it bubbled BrokenPipeError up out of the
+        session loop when a port probe disconnected mid-greeting. The
+        outer start() handler now classifies those as a clean carrier
+        loss too, but removing the redundant drain is the cheap fix."""
         await self.write("\x1b[2J\x1b[H\x1b[0m")
-        await self.writer.drain()
 
     async def _show_notification_summary(self):
         """Render a one-liner counting unread mail, IMs, and notifications.
@@ -1033,6 +1089,13 @@ class BBSSession:
             await self._show_pending_broadcasts()
             try:
                 await run_menu(self, start='main')
+            except (CarrierLost, BrokenPipeError, ConnectionResetError,
+                    ConnectionAbortedError):
+                # Clean unwind — client (or a TCP port probe) disconnected.
+                # Don't dump a traceback: the SCC's listener probes hit
+                # every protocol every few seconds and the BBS would
+                # otherwise spam the journal with BrokenPipeError stacks.
+                pass
             except Exception as menu_exc:
                 import traceback as _tb
                 print(f"Menu error: {menu_exc}")
@@ -1042,6 +1105,12 @@ class BBSSession:
                         f"\r\n\x1b[1;31mMenu error: {menu_exc}\x1b[0m\r\n")
                 except Exception:
                     pass
+        except (CarrierLost, BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError):
+            # Carrier dropped during login / pre-menu setup, OR a TCP
+            # port probe hit telnet/SSH/rlogin and immediately closed.
+            # Both look identical at this layer — unwind quietly.
+            pass
         except Exception as e:
             import traceback as _tb
             print(f"Session error: {e}")

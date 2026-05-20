@@ -18,6 +18,14 @@ from .session import BBSSession
 
 logger = logging.getLogger(__name__)
 
+# asyncssh's "socket.send() raised exception" is logged at WARNING
+# whenever a peer half-closes mid-IAC — that's normal traffic for SCC
+# probes, scanners, and rage-quitting clients. Demote it to DEBUG so
+# the journal stays readable. Anything actually worth seeing
+# (auth failures, key errors) is logged at ERROR by asyncssh, which
+# we keep visible.
+logging.getLogger('asyncssh').setLevel(logging.ERROR)
+
 
 class _SshStreamReader:
     """Adapts an asyncssh SSHReader to the asyncio StreamReader interface

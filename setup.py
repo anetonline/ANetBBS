@@ -46,6 +46,15 @@ setup(
         'feedparser>=6.0',
         # FTP server — anetbbs.ftp serves the FileArea tree
         'pyftpdlib>=2.0.0',
+        # FTPS support: pyftpdlib gates TLS_FTPHandler behind pyOpenSSL
+        # being importable. Without this, FTPS silently fails to enable.
+        'pyopenssl>=24.0.0',
+        # Internet email (Phase: alpha 2 deploy) — LMTP receive + relay
+        'aiosmtpd>=1.4.0',
+        'aiosmtplib>=3.0.0',
+        # Service Control Center — per-PID CPU% + memory sampler at
+        # /admin/control/. Reads /proc, no special privileges.
+        'psutil>=5.9.0',
     ],
     entry_points={
         'console_scripts': [
@@ -55,6 +64,7 @@ setup(
             'anetbbs-upgrade=anetbbs.installer.upgrade:main',
             'anetbbs-symlinks=anetbbs.installer.symlinks:main',
             'anetbbs-cleanup=anetbbs.installer.cleanup:main',
+            'anetbbs-import-users=tools.import_users:main',
         ],
     },
 )

@@ -129,6 +129,34 @@ def dashboard():
     recent_logins = User.query.filter(User.last_login.isnot(None)).order_by(User.last_login.desc()).limit(10).all()
     online_sessions = UserSession.query.filter(UserSession.last_seen >= five_min_ago).all()
 
+    # Recent scheduled-event firings — last 5 across all enabled events.
+    # Surfaces TW2 maint / VACUUM / log rotate / anything else the
+    # scheduler is running so the sysop notices failures without
+    # navigating to /admin/events/. Guard the import + query: a missing
+    # table on a fresh-from-.43-or-earlier install shouldn't 500 the
+    # dashboard.
+    recent_events = []
+    try:
+        from ..models import ScheduledEvent
+        recent_events = (ScheduledEvent.query
+                         .filter(ScheduledEvent.last_run_at.isnot(None))
+                         .order_by(ScheduledEvent.last_run_at.desc())
+                         .limit(5).all())
+        # Pre-format the relative age so the template stays dumb.
+        for ev in recent_events:
+            delta = datetime.utcnow() - ev.last_run_at
+            if delta < timedelta(minutes=1):
+                ev.relative_age = 'just now'
+            elif delta < timedelta(hours=1):
+                ev.relative_age = f'{int(delta.total_seconds() // 60)}m ago'
+            elif delta < timedelta(days=1):
+                ev.relative_age = f'{int(delta.total_seconds() // 3600)}h ago'
+            else:
+                ev.relative_age = f'{delta.days}d ago'
+    except Exception:
+        db.session.rollback()
+        recent_events = []
+
     import flask
     system_info = {
         'python_version': sys.version.split()[0],
@@ -136,13 +164,114 @@ def dashboard():
         'db_type': 'SQLite' if 'sqlite' in str(db.engine.url) else 'PostgreSQL',
     }
 
+    # "Last upgraded" = mtime of the VERSION file in the install root.
+    # update.sh rewrites VERSION on every upgrade (auto-update wrapper +
+    # manual `bash update.sh` both refresh it), so its mtime is a good
+    # proxy for "when did this install last receive a patch." Falls
+    # back to None on permission errors or fresh-installs-from-checkout.
+    try:
+        install_root = current_app.config.get('INSTALL_DIR') or os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ver_mtime = os.path.getmtime(os.path.join(install_root, 'VERSION'))
+        upgraded_at = datetime.utcfromtimestamp(ver_mtime)
+        delta = datetime.utcnow() - upgraded_at
+        if delta.total_seconds() < 60:
+            relative = 'just now'
+        elif delta < timedelta(hours=1):
+            relative = f'{int(delta.total_seconds() // 60)} min ago'
+        elif delta < timedelta(days=1):
+            relative = f'{int(delta.total_seconds() // 3600)}h ago'
+        else:
+            relative = f'{delta.days}d ago'
+        system_info['last_upgraded_at'] = upgraded_at.strftime('%Y-%m-%d %H:%M UTC')
+        system_info['last_upgraded_relative'] = relative
+    except OSError:
+        system_info['last_upgraded_at'] = None
+        system_info['last_upgraded_relative'] = None
+
+    # "What's new" panel — pull the current VERSION's section out of
+    # RELEASE.md so sysops see what changed when they upgrade. Pure best-
+    # effort: a missing/unreadable RELEASE.md just hides the panel.
+    whats_new = _extract_release_notes_for(current_app.config)
+
+    # "Update available" banner — peek at the cached upstream-check the
+    # /admin/upgrades/ page uses. If an upgrade is waiting, the dashboard
+    # surfaces it without making the sysop go look. Reuses the in-process
+    # 30s TTL cache so this doesn't add a network round-trip per page load.
+    update_banner = None
+    try:
+        from .upgrades import _fetch_upstream, _version_newer
+        from ..version import VERSION
+        upstream, err = _fetch_upstream(current_app.config, force=False)
+        if upstream and not err and _version_newer(upstream.get('version', ''), VERSION):
+            update_banner = {
+                'current': VERSION,
+                'available': upstream.get('version'),
+                'size_mb': round((upstream.get('size') or 0) / 1024 / 1024, 1),
+            }
+    except Exception:
+        # Network hiccup or upgrades module not imported — never block
+        # the dashboard for a banner that's nice-to-have.
+        update_banner = None
+
     return render_template('admin/dashboard.html',
                            stats=stats,
                            recent_users=recent_users,
                            recent_logins=recent_logins,
                            online_sessions=online_sessions,
                            recent_callers=recent_callers,
-                           system_info=system_info)
+                           system_info=system_info,
+                           whats_new=whats_new,
+                           update_banner=update_banner,
+                           recent_events=recent_events)
+
+
+def _extract_release_notes_for(cfg):
+    """Find the section of RELEASE.md that names the running VERSION.
+
+    RELEASE.md sections look like:
+        # ANetBBS v1.0a2.42 — alpha 2
+        ...
+        ## Changes since v1.0a2.41
+        ...
+        ## Changes since v1.0a2.40
+
+    We grab everything from the first section header that mentions the
+    running VERSION down to the next header that mentions a different
+    version (so the panel shows the "what landed in this build" delta,
+    not the entire history). Returns markdown ready to be rendered, or
+    None to hide the panel.
+    """
+    try:
+        from ..version import VERSION
+    except Exception:
+        return None
+    import os, re
+    install_root = cfg.get('INSTALL_DIR') or os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(install_root, 'RELEASE.md')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            text = f.read()
+    except OSError:
+        return None
+    # Find the first occurrence of "vX.YaZ.NN" matching VERSION; grab
+    # from the line it lives on through to the next header that
+    # references a DIFFERENT version, or end-of-file.
+    ver_pat = re.escape(VERSION)
+    m = re.search(rf'^[#\s]*[^\n]*{ver_pat}[^\n]*$', text, re.MULTILINE)
+    if not m:
+        return None
+    start = m.start()
+    # Anchor the closing boundary at "## Changes since v1.0aZ.NN" lines
+    # that don't mention our current version.
+    rest = text[m.end():]
+    end_m = re.search(r'\n#{1,3} .*v\d+\.\d+a\d+\.\d+', rest)
+    if end_m:
+        end = m.end() + end_m.start()
+    else:
+        end = len(text)
+    return text[start:end].strip()
 
 
 @admin_bp.route('/users')
@@ -2134,6 +2263,31 @@ def callers_legacy():
     return redirect(url_for('admin.caller_log'))
 
 
+@admin_bp.route('/setup-wizard/check-hub', methods=['POST'])
+@login_required
+@admin_required
+def setup_wizard_check_hub():
+    """Probe the configured federation hub before the wizard submits.
+
+    Lets the sysop see "yes, my outbound HTTPS to the hub works" /
+    "no, your firewall is blocking it" before committing to
+    registration. Pure read-only — does NOT send a register POST.
+    """
+    from flask import jsonify
+    import requests
+    hub = (current_app.config.get('REGISTRY_URL') or 'https://bbs.a-net.fyi').rstrip('/')
+    out = {'hub': hub, 'ok': False, 'detail': ''}
+    try:
+        r = requests.get(hub + '/anetbbs.lst', timeout=8,
+                         headers={'User-Agent': 'ANetBBS/setup-wizard'})
+        out['ok'] = (r.status_code == 200 and 'ANetBBS' in r.text[:512])
+        out['detail'] = (f'HTTP {r.status_code}, {len(r.text)} bytes'
+                         + ('' if out['ok'] else ' — body did not contain "ANetBBS"'))
+    except Exception as exc:  # noqa: BLE001
+        out['detail'] = f'{exc.__class__.__name__}: {exc}'
+    return jsonify(out)
+
+
 @admin_bp.route('/setup-wizard', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -2169,8 +2323,40 @@ def _setup_wizard_impl():
         # Persist a few core .env / DB settings.
         bbs_name = (request.form.get('bbs_name') or '').strip()
         sysop_name = (request.form.get('sysop_name') or '').strip()
+        sysop_email = (request.form.get('sysop_email') or '').strip()
+        bbs_location = (request.form.get('bbs_location') or '').strip()
+        federation_register = request.form.get('federation_register') == 'on'
         seed_motds = request.form.getlist('motd')
         seed_dial = request.form.get('seed_dial') == 'on'
+
+        # Federation self-registration. The plumbing already exists for
+        # daily heartbeats; this just persists the sysop's metadata to
+        # .env and triggers an immediate registration tick. Failures
+        # are non-fatal — the daily thread retries.
+        if federation_register and sysop_email and sysop_name:
+            env_updates = {
+                'SYSOP_NAME': sysop_name,
+                'SYSOP_EMAIL': sysop_email,
+                'BBS_LOCATION': bbs_location,
+                'REGISTRY_SELF_REGISTER': 'true',
+            }
+            try:
+                _write_env_keys(_env_path(), env_updates)
+                # Also push into the live config so the tick below uses
+                # the new values without needing a restart.
+                for k, v in env_updates.items():
+                    current_app.config[k] = (v == 'true') if k == 'REGISTRY_SELF_REGISTER' else v
+            except Exception as exc:
+                flash(f'Federation .env update failed: {exc}', 'warning')
+            try:
+                from ..msp.registry_client import _tick as _registry_tick
+                _registry_tick(current_app._get_current_object())
+                flash(f'Federation registration sent — check {sysop_email} '
+                      f'for the verification email from the hub.', 'success')
+            except Exception as exc:
+                flash(f'Saved sysop details, but the immediate registration '
+                      f'tick failed: {exc}. The daily heartbeat will retry.',
+                      'info')
 
         # Each section is independent — one failure shouldn't abort the others.
         if seed_motds:

@@ -1,0 +1,19 @@
+[Unit]
+Description=ANetBBS SSH Server
+After=network.target
+
+[Service]
+Type=simple
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+Environment=SSH_ENABLED=true
+Environment=TELNET_ENABLED=false
+Environment=RLOGIN_ENABLED=false
+ExecStart=/opt/anetbbs/venv/bin/anetbbs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

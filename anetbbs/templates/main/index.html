@@ -8,6 +8,45 @@
     <p>{{ config.BBS_DESCRIPTION }}</p>
 </div>
 
+{% if not current_user.is_authenticated %}
+<div class="card mb-4 border-0"
+     style="background: linear-gradient(135deg, var(--theme-bg-dark, #0d3460) 0%, var(--theme-primary, #1a5089) 100%);
+            color:#fff; border-radius:.75rem; box-shadow:0 4px 18px rgba(0,0,0,.18);">
+  <div class="card-body p-4">
+    <div class="row align-items-center">
+      <div class="col-md-8">
+        <h2 class="mb-2" style="font-weight:600;">
+          <i class="bi bi-people-fill"></i>
+          New here?
+        </h2>
+        <p class="mb-2" style="opacity:.9;">
+          {{ config.BBS_NAME }} is a modern BBS in the FidoNet /
+          Synchronet tradition — message boards, file libraries, door
+          games (Trade Wars, LORD), inter-BBS chat, and federation
+          with other ANetBBS systems. Sign up for a free account or
+          dial in over telnet / SSH / rlogin.
+        </p>
+        <p class="mb-0 small" style="opacity:.75;">
+          {% if stats.total_users %}{{ stats.total_users }} active members ·{% endif %}
+          {% if stats.total_posts %}{{ stats.total_posts }} posts ·{% endif %}
+          {% if stats.total_boards %}{{ stats.total_boards }} boards ·{% endif %}
+          Sysop: {{ config.SYSOP_NAME or 'Sysop' }}
+          {% if config.SYSOP_EMAIL %}<span class="ms-1">&lt;{{ config.SYSOP_EMAIL }}&gt;</span>{% endif %}
+        </p>
+      </div>
+      <div class="col-md-4 text-md-end mt-3 mt-md-0">
+        <a href="{{ url_for('auth.register') }}" class="btn btn-light btn-lg me-2">
+          <i class="bi bi-person-plus"></i> Sign up
+        </a>
+        <a href="{{ url_for('auth.login') }}" class="btn btn-outline-light btn-lg">
+          <i class="bi bi-box-arrow-in-right"></i> Log in
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if qotd %}
 <div class="card mb-3" style="border-left:3px solid var(--theme-accent);">
     <div class="card-body py-2">

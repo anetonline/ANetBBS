@@ -1,68 +1,373 @@
 {% extends "base.html" %}
-{% block title %}Sysop Control Panel{% endblock %}
+{% block title %}Sysop Service Control Center{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .scc-banner {
+    background: linear-gradient(135deg, #0d3460 0%, #1a5089 100%);
+    color: #fff; border-radius: 0.75rem; padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem; box-shadow: 0 2px 12px rgba(0,0,0,.25);
+  }
+  .scc-banner h1 { margin: 0; font-weight: 600; letter-spacing: .01em; }
+  .scc-banner .scc-counts {
+    display: flex; gap: 1.5rem; margin-top: .75rem; flex-wrap: wrap;
+  }
+  .scc-banner .scc-count {
+    background: rgba(255,255,255,.08); border-radius: .5rem;
+    padding: .5rem .9rem; min-width: 110px;
+  }
+  .scc-banner .scc-count strong {
+    font-size: 1.4rem; display: block; line-height: 1.1;
+  }
+  .scc-banner .scc-count span {
+    font-size: .78rem; text-transform: uppercase; opacity: .8;
+    letter-spacing: .04em;
+  }
+
+  .scc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1rem; margin-bottom: 1.5rem;
+  }
+  .scc-card {
+    background: #1c2330; color: #e6e9ef;
+    border: 1px solid #2a3344; border-radius: .75rem;
+    padding: 1rem 1.1rem; display: flex; flex-direction: column;
+    transition: border-color .15s ease, transform .15s ease;
+  }
+  .scc-card:hover { border-color: #3a4763; transform: translateY(-1px); }
+  .scc-card h5 {
+    margin: 0; font-size: 1.05rem; display: flex; align-items: center;
+    gap: .55rem; font-weight: 600;
+  }
+  .scc-card .scc-unit {
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: .76rem;
+    color: #8e98ad; margin-top: .15rem;
+  }
+  .scc-card p.scc-desc {
+    color: #b7becd; font-size: .82rem; margin: .55rem 0 .6rem;
+    line-height: 1.35;
+  }
+  .scc-pill {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .72rem; font-weight: 600; padding: .15rem .55rem;
+    border-radius: 999px; text-transform: uppercase; letter-spacing: .03em;
+  }
+  .scc-pill.up      { background: rgba(45,170,90,.22);  color: #5ad889; }
+  .scc-pill.partial { background: rgba(245,170,55,.22); color: #f5b651; }
+  .scc-pill.down    { background: rgba(220,75,75,.22);  color: #ff7a7a; }
+  .scc-pill.na      { background: rgba(160,170,200,.18); color: #b8c0d0; }
+  .scc-pill .scc-dot {
+    width: .55rem; height: .55rem; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 6px currentColor;
+  }
+  .scc-meta {
+    color: #8e98ad; font-size: .74rem; margin-top: .25rem;
+  }
+  .scc-listener-status {
+    font-size: .76rem; font-weight: 600; margin: .55rem 0 .25rem;
+    display: flex; align-items: center; gap: .4rem;
+  }
+  .scc-listener-status.ok      { color: #5ad889; }
+  .scc-listener-status.partial { color: #f5b651; }
+  .scc-listener-status.down    { color: #ff7a7a; }
+  .scc-listener-status .scc-down-list {
+    font-weight: 500; color: inherit; opacity: .85; font-size: .72rem;
+  }
+  .scc-ports {
+    margin: .25rem 0 .85rem; display: flex; flex-wrap: wrap; gap: .35rem;
+  }
+  .scc-port {
+    background: #2a3344; color: #cdd3e0; border-radius: .35rem;
+    padding: .2rem .5rem; font-size: .73rem; display: inline-flex;
+    align-items: center; gap: .35rem;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+  }
+  .scc-port .scc-dot {
+    width: .5rem; height: .5rem; border-radius: 50%;
+    background: #6b7388;
+  }
+  .scc-port.up      .scc-dot { background: #5ad889; box-shadow: 0 0 4px #5ad889; }
+  .scc-port.down    .scc-dot { background: #ff7a7a; box-shadow: 0 0 4px #ff7a7a; }
+  .scc-port.unknown .scc-dot { background: #b8c0d0; }
+  .scc-port.unknown { opacity: .8; }
+  .scc-actions {
+    margin-top: auto; display: flex; flex-wrap: wrap; gap: .35rem;
+    padding-top: .6rem; border-top: 1px solid #2a3344;
+  }
+  .scc-actions .btn { font-size: .75rem; padding: .28rem .6rem; }
+
+  .scc-dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 1rem; margin-bottom: 1.25rem;
+  }
+  .scc-chart-card {
+    background: #1c2330; color: #e6e9ef;
+    border: 1px solid #2a3344; border-radius: .75rem;
+    padding: .85rem 1rem;
+  }
+  .scc-chart-card h6 {
+    margin: 0 0 .5rem; font-size: .82rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .05em; color: #b7becd;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .scc-chart-card .scc-chart-host { position: relative; height: 160px; }
+  .scc-card .scc-sparkline {
+    margin: .5rem 0 .65rem;
+    height: 44px; position: relative;
+  }
+  .scc-card .scc-sparkline canvas { display: block; }
+  .scc-card .scc-metric-row {
+    display: flex; gap: .65rem; font-size: .74rem; color: #b7becd;
+    margin-bottom: .35rem;
+  }
+  .scc-card .scc-metric-row strong { color: #fff; font-weight: 600; }
+  .scc-conn-chips {
+    display: flex; gap: .55rem; flex-wrap: wrap;
+    margin-top: .6rem;
+  }
+  .scc-conn-chip {
+    background: rgba(255,255,255,.08); border-radius: .4rem;
+    padding: .3rem .65rem; font-size: .74rem; color: #fff;
+    display: inline-flex; align-items: center; gap: .35rem;
+  }
+  .scc-conn-chip strong { font-size: .95rem; }
+  .scc-conn-chip .scc-conn-label {
+    text-transform: uppercase; letter-spacing: .04em;
+    font-size: .68rem; opacity: .85;
+  }
+  .scc-na-banner {
+    background: rgba(245,170,55,.12);
+    color: #f5b651;
+    border: 1px solid rgba(245,170,55,.35);
+    border-radius: .5rem;
+    padding: .55rem .85rem;
+    font-size: .82rem;
+    margin-bottom: 1rem;
+  }
+  .scc-journal-modal pre {
+    background: #000; color: #d8ffcf; padding: 1rem;
+    font-size: .76rem; line-height: 1.4;
+    white-space: pre-wrap; max-height: 65vh; overflow: auto;
+    border-radius: .35rem; margin: 0;
+  }
+  .scc-journal-modal .modal-content { background: #1c2330; color: #e6e9ef; }
+  .scc-journal-modal .modal-header { border-bottom-color: #2a3344; }
+  .scc-journal-modal .modal-footer { border-top-color: #2a3344; }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-sliders"></i> Sysop Control Panel</h1>
+<!-- ====== Aggregate banner ====== -->
+<div class="scc-banner">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+        <div>
+            <h1><i class="bi bi-sliders"></i> Service Control Center</h1>
+            <div class="text-light-emphasis small" style="opacity:.85;">
+                Live state of every ANetBBS service and listener — restart,
+                tail logs, kick nodes, watch who's online.
+            </div>
+        </div>
+        <div class="scc-counts">
+            <div class="scc-count">
+                <strong id="scc-summary-running">{{ summary.running }}/{{ summary.total }}</strong>
+                <span>Services up</span>
+            </div>
+            <div class="scc-count">
+                <strong id="scc-summary-listeners">{{ summary.listener_problems }}</strong>
+                <span>Listener problems</span>
+            </div>
+            <div class="scc-count">
+                <strong id="scc-summary-conns">—</strong>
+                <span>Active connections</span>
+            </div>
+            <div class="scc-count">
+                <strong id="scc-updated">just now</strong>
+                <span>Auto-refresh: 2s</span>
+            </div>
+        </div>
+
+        <div class="scc-conn-chips" id="scc-conn-chips">
+            <span class="scc-conn-chip"><span class="scc-conn-label">Web</span><strong data-conn="web">0</strong></span>
+            <span class="scc-conn-chip"><span class="scc-conn-label">Telnet</span><strong data-conn="telnet">0</strong></span>
+            <span class="scc-conn-chip"><span class="scc-conn-label">SSH</span><strong data-conn="ssh">0</strong></span>
+            <span class="scc-conn-chip"><span class="scc-conn-label">rlogin</span><strong data-conn="rlogin">0</strong></span>
+        </div>
+    </div>
 </div>
 
-<!-- ====== Services ====== -->
-<div class="card mb-3">
-    <div class="card-header"><i class="bi bi-hdd-network"></i> Services</div>
-    <table class="table table-sm mb-0">
-        <thead><tr>
-            <th>Unit</th><th>Description</th><th>State</th><th>Since</th><th>Actions</th>
-        </tr></thead>
-        <tbody>
-        {% for s in services %}
-            <tr>
-                <td><code>{{ s.unit }}</code></td>
-                <td><small>{{ s.label }}</small></td>
-                <td>
-                    {% if s.is_running %}
-                        <span class="badge bg-success">{{ s.active }}/{{ s.sub }}</span>
-                    {% elif s.active in ['failed','activating','deactivating'] %}
-                        <span class="badge bg-warning">{{ s.active }}/{{ s.sub }}</span>
-                    {% else %}
-                        <span class="badge bg-secondary">{{ s.active or 'inactive' }}</span>
-                    {% endif %}
-                </td>
-                <td><small>{{ s.since[:19] }}</small></td>
-                <td class="text-nowrap">
-                    {% for action, lbl, cls, icon in [
-                        ('start',   'Start',   'success', 'play'),
-                        ('stop',    'Stop',    'warning', 'stop'),
-                        ('restart', 'Restart', 'primary', 'arrow-clockwise')] %}
-                    <form method="post" action="{{ url_for('control.service_action', unit=s.unit, action=action) }}" class="d-inline">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-{{ cls }}"
-                                title="{{ lbl }}"
-                                onclick="return confirm('{{ lbl }} {{ s.unit }}?');">
-                            <i class="bi bi-{{ icon }}"></i>
-                        </button>
-                    </form>
-                    {% endfor %}
-                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('control.service_journal', unit=s.unit) }}" title="Journal">
-                        <i class="bi bi-list-task"></i>
-                    </a>
-                </td>
-            </tr>
+<!-- ====== Aggregate live charts ====== -->
+<div class="scc-dashboard">
+    <div class="scc-chart-card">
+        <h6><span><i class="bi bi-cpu"></i> CPU % per service</span>
+            <span id="scc-cpu-total" class="text-muted small">—</span></h6>
+        <div class="scc-chart-host"><canvas id="scc-cpu-chart"></canvas></div>
+    </div>
+    <div class="scc-chart-card">
+        <h6><span><i class="bi bi-memory"></i> Memory (MB)</span>
+            <span id="scc-mem-total" class="text-muted small">—</span></h6>
+        <div class="scc-chart-host"><canvas id="scc-mem-chart"></canvas></div>
+    </div>
+</div>
+
+<div id="scc-no-psutil" class="scc-na-banner" style="display:none;">
+    <i class="bi bi-info-circle"></i>
+    <strong>Live graphs unavailable</strong> — <code>psutil</code> isn't
+    installed in the gunicorn venv. Run <code>sudo bash update.sh</code>
+    on this host (the v1.0a2.26+ tarball adds it to requirements.txt) or
+    install manually:
+    <code>venv/bin/pip install psutil&gt;=5.9.0 && systemctl restart anetbbs-web</code>.
+</div>
+
+<!-- ====== Services grid ====== -->
+<div class="scc-grid" id="scc-grid">
+{% for s in services %}
+    <div class="scc-card" data-unit="{{ s.unit }}">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h5><i class="bi {{ s.icon }}"></i> {{ s.label }}</h5>
+                <div class="scc-unit">{{ s.unit }}.service</div>
+            </div>
+            <span class="scc-pill {{ 'up' if s.is_running else ('down' if s.active in ['failed','inactive'] else 'partial') }}"
+                  data-role="state-pill">
+                <span class="scc-dot"></span>
+                <span data-role="state-text">{{ s.active }}{% if s.sub %}/{{ s.sub }}{% endif %}</span>
+            </span>
+        </div>
+        <p class="scc-desc">{{ s.desc }}</p>
+        <div class="scc-meta">
+            PID <code data-role="pid">{{ s.pid if s.pid != '0' else '—' }}</code>
+            {% if s.since %}
+            · since <span data-role="since">{{ s.since[:19] }}</span>
+            {% endif %}
+        </div>
+
+        <div class="scc-metric-row" data-role="metric-row">
+            <span>CPU <strong data-role="cpu-latest">—</strong></span>
+            <span>RAM <strong data-role="mem-latest">—</strong></span>
+            <span>Threads <strong data-role="thr-latest">—</strong></span>
+        </div>
+        <div class="scc-sparkline">
+            <canvas data-role="spark" data-unit="{{ s.unit }}"></canvas>
+        </div>
+
+        {% if s.ports %}
+        {% set _down = s.ports | selectattr('up', 'equalto', False) | list %}
+        {% set _up   = s.ports | selectattr('up', 'equalto', True)  | list %}
+        <div class="scc-listener-status {{ 'ok' if not _down else ('partial' if _up else 'down') }}"
+             data-role="listener-status">
+            {% if not _down %}
+                <i class="bi bi-check-circle-fill"></i>
+                <span data-role="listener-summary-text">All listeners up ({{ _up|length }}/{{ s.ports|length }})</span>
+            {% else %}
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <span data-role="listener-summary-text">
+                    {{ _up|length }}/{{ s.ports|length }} listening
+                </span>
+                <span class="scc-down-list">
+                    — down:
+                    {% for p in _down %}{{ p.name }}:{{ p.port }}{% if not loop.last %}, {% endif %}{% endfor %}
+                </span>
+            {% endif %}
+        </div>
+        <div class="scc-ports" data-role="ports">
+        {% for p in s.ports %}
+            <span class="scc-port {{ 'up' if p.up else ('down' if p.up is false else 'unknown') }}"
+                  title="{{ p.proto }} :{{ p.port }} — {{ 'listening' if p.up else ('not listening' if p.up is false else 'unknown') }}">
+                <span class="scc-dot"></span>{{ p.name }}:{{ p.port }}/{{ p.proto }}
+            </span>
         {% endfor %}
-        </tbody>
-    </table>
+        </div>
+        {% endif %}
+
+        <div class="scc-actions">
+            <form method="post" action="{{ url_for('control.service_action', unit=s.unit, action='restart') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-primary" title="Restart"
+                        onclick="return confirm('Restart {{ s.unit }}?');">
+                    <i class="bi bi-arrow-clockwise"></i> Restart
+                </button>
+            </form>
+            {% if s.is_running %}
+            <form method="post" action="{{ url_for('control.service_action', unit=s.unit, action='stop') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-outline-warning" title="Stop"
+                        onclick="return confirm('Stop {{ s.unit }}? It will not auto-restart until you click Start.');">
+                    <i class="bi bi-stop-fill"></i> Stop
+                </button>
+            </form>
+            {% else %}
+            <form method="post" action="{{ url_for('control.service_action', unit=s.unit, action='start') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-success" title="Start">
+                    <i class="bi bi-play-fill"></i> Start
+                </button>
+            </form>
+            {% endif %}
+            <button type="button" class="btn btn-outline-secondary"
+                    onclick="openJournal('{{ s.unit }}')">
+                <i class="bi bi-journal-text"></i> Logs
+            </button>
+            <a class="btn btn-outline-secondary"
+               href="{{ url_for('control.service_journal_download', unit=s.unit, n=2000) }}"
+               title="Download last 2000 lines as .txt">
+                <i class="bi bi-download"></i>
+            </a>
+        </div>
+    </div>
+{% endfor %}
 </div>
 
 <div class="alert alert-info small">
-    <strong>Note:</strong> Service start/stop/restart requires
-    <code>sudoers</code> NOPASSWD entries for the user running the
-    web app. Without them you'll see a "permission denied" failure.
-    See <code>deploy/sudoers.anetbbs</code> for the recommended rule.
+    <i class="bi bi-info-circle"></i>
+    <strong>Note:</strong> Start / Stop / Restart calls
+    <code>sudo -n systemctl</code> and requires the NOPASSWD entries in
+    <code>/etc/sudoers.d/anetbbs</code>. The installer + update script
+    refresh that file automatically — if a button reports "permission
+    denied," re-run <code>sudo bash update.sh</code> on this host.
+</div>
+
+<!-- ====== Journal modal ====== -->
+<div class="modal fade scc-journal-modal" id="scc-journal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-journal-text"></i>
+                    <span id="scc-journal-title">journal</span>
+                </h5>
+                <div class="d-flex align-items-center gap-2 ms-auto me-2">
+                    <label class="text-muted small mb-0" for="scc-journal-n">Lines:</label>
+                    <select id="scc-journal-n" class="form-select form-select-sm" style="width:auto;">
+                        <option value="100">100</option>
+                        <option value="500" selected>500</option>
+                        <option value="2000">2 000</option>
+                        <option value="5000">5 000</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-light" onclick="reloadJournal()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                    <a class="btn btn-sm btn-outline-light" id="scc-journal-dl"
+                       href="#" title="Download .txt">
+                        <i class="bi bi-download"></i>
+                    </a>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="scc-journal-body">Loading…</pre>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ====== NodeSpy ====== -->
 <div class="card mb-3" id="nodespy">
     <div class="card-header">
         <i class="bi bi-binoculars"></i> NodeSpy — terminal sessions
-        <small class="text-muted">(eye = view screen, door = kick/disconnect)</small>
+        <small class="text-muted">(eye = view screen, door = kick)</small>
     </div>
     <table class="table table-sm mb-0">
         <thead><tr>
@@ -70,11 +375,356 @@
             <th>Last action</th><th>Idle</th><th></th>
         </tr></thead>
         <tbody id="nodespy-body">
-            <tr><td colspan="7" class="text-muted">Loading...</td></tr>
+            <tr><td colspan="7" class="text-muted">Loading…</td></tr>
         </tbody>
     </table>
 </div>
+
+<!-- ====== Web + terminal users ====== -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people"></i> Online (web + terminal, last 5 min)</span>
+        <small id="who-count" class="text-muted"></small>
+    </div>
+    <table class="table table-sm mb-0">
+        <thead><tr>
+            <th>User</th><th>Page</th><th>IP</th><th>UA</th><th>Last seen</th>
+        </tr></thead>
+        <tbody id="who-body">
+        {% for s in web_sessions %}
+            <tr>
+                <td><strong>{% if s.user %}<a href="{{ url_for('profile.view_user', username=s.user.username) }}">{{ s.user.username }}</a>{% else %}?{% endif %}</strong></td>
+                <td><small><code>{{ s.page or '' }}</code></small></td>
+                <td><small><code>{{ s.ip_address or '' }}</code></small></td>
+                <td><small>{{ (s.user_agent or '')[:40] }}</small></td>
+                <td><small>{{ s.last_seen.strftime('%H:%M:%S') if s.last_seen else '' }}</small></td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5" class="text-muted">Nobody online.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
+// ===== Service status live refresh =====
+const SCC_STATUS_URL = '{{ url_for("control.status_json") }}';
+const SCC_METRICS_URL = '{{ url_for("control.metrics_json") }}';
+const SCC_CONNS_URL = '{{ url_for("control.connections_json") }}';
+const SCC_JOURNAL_URL = '{{ url_for("control.service_journal", unit="UNIT") }}';
+const SCC_JOURNAL_DL = '{{ url_for("control.service_journal_download", unit="UNIT") }}';
+
+// Color per known unit — kept in sync between sparkline + aggregate charts.
+const SCC_UNIT_COLORS = {
+    'anetbbs-web':         '#4ea3ff',
+    'anetbbs':             '#5ad889',
+    'anetbbs-mrc-bridge':  '#f5b651',
+    'anetbbs-finger':      '#c47bff',
+};
+const SCC_UNIT_LIST = Object.keys(SCC_UNIT_COLORS);
+
+function pillClass(s) {
+    if (s.is_running) return 'up';
+    if (['failed','inactive'].includes(s.active)) return 'down';
+    return 'partial';
+}
+function portClass(p) {
+    if (p.up === true) return 'up';
+    if (p.up === false) return 'down';
+    return 'unknown';
+}
+function fmtSince(iso) { return (iso || '').slice(0, 19); }
+
+async function refreshServices() {
+    try {
+        const r = await fetch(SCC_STATUS_URL, {credentials: 'same-origin'});
+        if (!r.ok) return;
+        const data = await r.json();
+        const now = new Date();
+        const upd = document.getElementById('scc-updated');
+        if (upd) upd.textContent = now.toLocaleTimeString();
+
+        // Roll up summary counts off the same payload
+        let running = 0, problems = 0;
+        for (const s of (data.services || [])) {
+            if (s.is_running) running++;
+            if (['all_down','partial'].includes(s.listener_summary)) problems++;
+        }
+        const runEl = document.getElementById('scc-summary-running');
+        const lstEl = document.getElementById('scc-summary-listeners');
+        if (runEl) runEl.textContent = running + '/' + (data.services || []).length;
+        if (lstEl) lstEl.textContent = problems;
+
+        for (const s of (data.services || [])) {
+            const card = document.querySelector(`.scc-card[data-unit="${s.unit}"]`);
+            if (!card) continue;
+
+            // State pill
+            const pill = card.querySelector('[data-role="state-pill"]');
+            const txt = card.querySelector('[data-role="state-text"]');
+            if (pill) {
+                pill.className = `scc-pill ${pillClass(s)}`;
+                pill.dataset.role = 'state-pill';
+            }
+            if (txt) txt.textContent = s.sub ? `${s.active}/${s.sub}` : (s.active || 'unknown');
+
+            // PID + since
+            const pid = card.querySelector('[data-role="pid"]');
+            if (pid) pid.textContent = (s.pid && s.pid !== '0') ? s.pid : '—';
+            const since = card.querySelector('[data-role="since"]');
+            if (since) since.textContent = fmtSince(s.since);
+
+            // Ports
+            const portsEl = card.querySelector('[data-role="ports"]');
+            if (portsEl && s.ports) {
+                portsEl.innerHTML = s.ports.map(p => {
+                    const cls = portClass(p);
+                    const desc = (p.up === true) ? 'listening'
+                               : (p.up === false ? 'not listening' : 'unknown');
+                    return `<span class="scc-port ${cls}" title="${p.proto} :${p.port} — ${desc}">
+                              <span class="scc-dot"></span>${p.name}:${p.port}/${p.proto}
+                            </span>`;
+                }).join('');
+            }
+
+            // Named listener-status line — surfaces which port is down.
+            const statusEl = card.querySelector('[data-role="listener-status"]');
+            if (statusEl && s.ports) {
+                const down = s.ports.filter(p => p.up === false);
+                const up   = s.ports.filter(p => p.up === true);
+                statusEl.classList.remove('ok','partial','down');
+                if (down.length === 0) {
+                    statusEl.classList.add('ok');
+                    statusEl.innerHTML = `<i class="bi bi-check-circle-fill"></i>
+                        <span>All listeners up (${up.length}/${s.ports.length})</span>`;
+                } else {
+                    statusEl.classList.add(up.length ? 'partial' : 'down');
+                    const downList = down.map(p => `${p.name}:${p.port}`).join(', ');
+                    statusEl.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i>
+                        <span>${up.length}/${s.ports.length} listening</span>
+                        <span class="scc-down-list">— down: ${downList}</span>`;
+                }
+            }
+        }
+    } catch (e) { /* silent — next tick */ }
+}
+refreshServices();
+setInterval(refreshServices, 5000);
+
+// ===== Live metrics — Chart.js sparklines + aggregate charts =====
+const SCC_NULL_GAP_COLOR = 'rgba(255,255,255,.05)';
+const _sccSparks = {};   // unit -> Chart instance
+let _sccCpuChart = null;
+let _sccMemChart = null;
+
+function fmtPct(v)  { return (v === null || v === undefined) ? '—' : v.toFixed(1) + '%'; }
+function fmtMB(v)   { return (v === null || v === undefined) ? '—' : v.toFixed(0) + ' MB'; }
+function fmtInt(v)  { return (v === null || v === undefined) ? '—' : Math.round(v); }
+
+function buildSparkline(canvas, unit, color) {
+    return new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                data: [],
+                borderColor: color,
+                backgroundColor: color + '33',
+                fill: true,
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0.25,
+                spanGaps: false,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {legend: {display: false}, tooltip: {enabled: false}},
+            scales: {
+                x: {display: false},
+                y: {display: false, beginAtZero: true, suggestedMax: 5},
+            },
+        },
+    });
+}
+
+function buildAggregate(canvas, yLabel, fillStack) {
+    return new Chart(canvas, {
+        type: 'line',
+        data: {labels: [], datasets: SCC_UNIT_LIST.map(u => ({
+            label: u, data: [], borderColor: SCC_UNIT_COLORS[u],
+            backgroundColor: SCC_UNIT_COLORS[u] + (fillStack ? '55' : '11'),
+            fill: fillStack ? 'origin' : false,
+            borderWidth: 1.5, pointRadius: 0, tension: 0.25,
+            spanGaps: false,
+        }))},
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: {labels: {color: '#cdd3e0', font: {size: 11}, boxWidth: 12}},
+                tooltip: {mode: 'index', intersect: false},
+            },
+            scales: {
+                x: {ticks: {color: '#8e98ad', maxTicksLimit: 6, font: {size: 10}},
+                    grid: {color: 'rgba(255,255,255,.04)'}},
+                y: {beginAtZero: true, title: {display: true, text: yLabel, color: '#8e98ad'},
+                    ticks: {color: '#8e98ad', font: {size: 10}},
+                    grid: {color: 'rgba(255,255,255,.05)'}},
+            },
+            interaction: {intersect: false, mode: 'index'},
+        },
+    });
+}
+
+function initCharts() {
+    document.querySelectorAll('canvas[data-role="spark"]').forEach(c => {
+        const unit = c.dataset.unit;
+        _sccSparks[unit] = buildSparkline(c, unit,
+            SCC_UNIT_COLORS[unit] || '#4ea3ff');
+    });
+    const cpuEl = document.getElementById('scc-cpu-chart');
+    const memEl = document.getElementById('scc-mem-chart');
+    if (cpuEl) _sccCpuChart = buildAggregate(cpuEl, 'CPU %', false);
+    if (memEl) _sccMemChart = buildAggregate(memEl, 'MB', true);
+}
+
+function fmtTime(t) {
+    const d = new Date(t * 1000);
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+async function refreshMetrics() {
+    try {
+        const r = await fetch(SCC_METRICS_URL, {credentials: 'same-origin'});
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.available === false) {
+            const b = document.getElementById('scc-no-psutil');
+            if (b) b.style.display = 'block';
+            return;
+        }
+        const noPs = document.getElementById('scc-no-psutil');
+        if (noPs) noPs.style.display = 'none';
+
+        // Per-card sparkline + latest values
+        let totalCpu = 0, totalMem = 0;
+        for (const unit of SCC_UNIT_LIST) {
+            const u = (data.units || {})[unit];
+            if (!u) continue;
+            const cpu = u.cpu_pct, mem = u.rss_mb, thr = u.threads;
+
+            // Update card stats
+            const card = document.querySelector(`.scc-card[data-unit="${unit}"]`);
+            if (card) {
+                const cE = card.querySelector('[data-role="cpu-latest"]');
+                const mE = card.querySelector('[data-role="mem-latest"]');
+                const tE = card.querySelector('[data-role="thr-latest"]');
+                if (cE) cE.textContent = fmtPct(cpu.latest);
+                if (mE) mE.textContent = fmtMB(mem.latest);
+                if (tE) tE.textContent = fmtInt(thr.latest);
+            }
+            if (cpu.latest !== null && cpu.latest !== undefined) totalCpu += cpu.latest;
+            if (mem.latest !== null && mem.latest !== undefined) totalMem += mem.latest;
+
+            // Sparkline (CPU%)
+            const spark = _sccSparks[unit];
+            if (spark) {
+                spark.data.labels = cpu.ts.map(fmtTime);
+                spark.data.datasets[0].data = cpu.values;
+                spark.update('none');
+            }
+        }
+
+        // Aggregate CPU% + memory charts
+        const anyUnit = Object.values(data.units)[0];
+        const labels = anyUnit ? anyUnit.cpu_pct.ts.map(fmtTime) : [];
+        if (_sccCpuChart) {
+            _sccCpuChart.data.labels = labels;
+            SCC_UNIT_LIST.forEach((unit, i) => {
+                const u = (data.units || {})[unit];
+                _sccCpuChart.data.datasets[i].data = u ? u.cpu_pct.values : [];
+            });
+            _sccCpuChart.update('none');
+        }
+        if (_sccMemChart) {
+            _sccMemChart.data.labels = labels;
+            SCC_UNIT_LIST.forEach((unit, i) => {
+                const u = (data.units || {})[unit];
+                _sccMemChart.data.datasets[i].data = u ? u.rss_mb.values : [];
+            });
+            _sccMemChart.update('none');
+        }
+
+        // Totals in the chart headers
+        const cpuTotalEl = document.getElementById('scc-cpu-total');
+        const memTotalEl = document.getElementById('scc-mem-total');
+        if (cpuTotalEl) cpuTotalEl.textContent = 'total ' + totalCpu.toFixed(1) + '%';
+        if (memTotalEl) memTotalEl.textContent = 'total ' + totalMem.toFixed(0) + ' MB';
+    } catch (e) { /* silent */ }
+}
+
+async function refreshConnections() {
+    try {
+        const r = await fetch(SCC_CONNS_URL, {credentials: 'same-origin'});
+        if (!r.ok) return;
+        const data = await r.json();
+        const counts = data.counts || {};
+        let total = 0;
+        for (const proto of ['web','telnet','ssh','rlogin']) {
+            const el = document.querySelector(`[data-conn="${proto}"]`);
+            if (el) el.textContent = counts[proto] || 0;
+            total += (counts[proto] || 0);
+        }
+        const sum = document.getElementById('scc-summary-conns');
+        if (sum) sum.textContent = total;
+    } catch (e) { /* silent */ }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    initCharts();
+    refreshMetrics();
+    refreshConnections();
+    setInterval(refreshMetrics, 2000);
+    setInterval(refreshConnections, 5000);
+});
+
+// ===== Journal modal =====
+let _scc_journal_unit = null;
+function openJournal(unit) {
+    _scc_journal_unit = unit;
+    document.getElementById('scc-journal-title').textContent = unit + '.service';
+    reloadJournal();
+    new bootstrap.Modal(document.getElementById('scc-journal')).show();
+}
+async function reloadJournal() {
+    const u = _scc_journal_unit;
+    if (!u) return;
+    const n = document.getElementById('scc-journal-n').value;
+    const body = document.getElementById('scc-journal-body');
+    body.textContent = 'Loading…';
+    const dl = document.getElementById('scc-journal-dl');
+    dl.href = SCC_JOURNAL_DL.replace('UNIT', encodeURIComponent(u)) + '?n=' + n;
+    try {
+        const r = await fetch(SCC_JOURNAL_URL.replace('UNIT', encodeURIComponent(u)) + '?n=' + n,
+                              {credentials: 'same-origin'});
+        const html = await r.text();
+        // The journal route returns the full template; extract <pre>
+        const m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/);
+        body.textContent = m ? m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : '(no log)';
+        // Scroll to bottom
+        body.scrollTop = body.scrollHeight;
+    } catch (e) {
+        body.textContent = 'Failed to load journal: ' + e;
+    }
+}
+document.getElementById('scc-journal-n').addEventListener('change', reloadJournal);
+
+// ===== NodeSpy =====
 async function refreshNodeSpy() {
     try {
         const r = await fetch('{{ url_for("control.nodespy_json") }}');
@@ -111,7 +761,7 @@ setInterval(refreshNodeSpy, 4000);
 
 async function kickNode(slot, username) {
     const reason = prompt(`Disconnect ${username} on slot ${slot}?\n\nOptional reason (shown to user before disconnect):`, '');
-    if (reason === null) return;   // cancelled
+    if (reason === null) return;
     try {
         const fd = new FormData();
         fd.append('reason', reason);
@@ -122,45 +772,12 @@ async function kickNode(slot, username) {
             headers: {'X-Requested-With': 'XMLHttpRequest'},
         });
         const j = await r.json();
-        if (j.ok) {
-            // Refresh immediately so the kicked row disappears
-            refreshNodeSpy();
-        } else {
-            alert(j.error || j.message || 'Kick failed');
-        }
-    } catch (e) {
-        alert('Kick request failed: ' + e);
-    }
+        if (j.ok) refreshNodeSpy();
+        else alert(j.error || j.message || 'Kick failed');
+    } catch (e) { alert('Kick request failed: ' + e); }
 }
-</script>
 
-<!-- ====== Web users ====== -->
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-people"></i> Online (web + terminal, last 5 min)</span>
-        <small id="who-count" class="text-muted"></small>
-    </div>
-    <table class="table table-sm mb-0">
-        <thead><tr>
-            <th>User</th><th>Page</th><th>IP</th><th>UA</th><th>Last seen</th>
-        </tr></thead>
-        <tbody id="who-body">
-        {% for s in web_sessions %}
-            <tr>
-                <td><strong>{% if s.user %}<a href="{{ url_for('profile.view_user', username=s.user.username) }}">{{ s.user.username }}</a>{% else %}?{% endif %}</strong></td>
-                <td><small><code>{{ s.page or '' }}</code></small></td>
-                <td><small><code>{{ s.ip_address or '' }}</code></small></td>
-                <td><small>{{ (s.user_agent or '')[:40] }}</small></td>
-                <td><small>{{ s.last_seen.strftime('%H:%M:%S') if s.last_seen else '' }}</small></td>
-            </tr>
-        {% else %}
-            <tr><td colspan="5" class="text-muted">Nobody online.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-<script>
+// ===== Who's online =====
 async function refreshWho() {
     try {
         const r = await fetch('{{ url_for("control.who_json") }}');

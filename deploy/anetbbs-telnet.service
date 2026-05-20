@@ -1,0 +1,22 @@
+[Unit]
+Description=ANetBBS Telnet Server
+After=network.target
+
+[Service]
+Type=simple
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+# Explicitly own ONLY the telnet listener — the SSH service unit owns SSH,
+# and rlogin is opt-in via the SSH unit. Without these, both services
+# would race for ports 2233/2234 if .env enables them all.
+Environment=TELNET_ENABLED=true
+Environment=SSH_ENABLED=false
+Environment=RLOGIN_ENABLED=false
+ExecStart=/opt/anetbbs/venv/bin/anetbbs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
