@@ -393,6 +393,25 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                 proc.wait()
                 log.write(f'\n[{datetime.utcnow().isoformat()}Z] '
                           f'exit {proc.returncode}\n')
+                if proc.returncode != 0:
+                    # Check for the container/VPS sudo audit restriction.
+                    # On LXC/OpenVZ hosts the kernel audit subsystem is
+                    # unavailable; sudo fails before running our script.
+                    try:
+                        with open(_UPGRADE_LOG_PATH) as lf:
+                            log_text = lf.read()
+                    except OSError:
+                        log_text = ''
+                    if ('unable to change to root gid' in log_text
+                            or 'sudoers_audit' in log_text):
+                        log.write(
+                            '\n[!] Web upgrade is not supported on this host.\n'
+                            '    sudo cannot access the kernel audit subsystem\n'
+                            '    (common on LXC/OpenVZ containers and some VPS).\n'
+                            '    Run the upgrade manually from a terminal:\n\n'
+                            f'      sudo anetbbs-upgrade {target}\n\n'
+                            '    Or extract the tarball and run update.sh as root.\n'
+                        )
         except Exception as exc:
             try:
                 with open(_UPGRADE_LOG_PATH, 'a') as log:

@@ -79,4 +79,13 @@ Cmnd_Alias ANETBBS_SYSCTL = \
     /bin/systemctl stop   anetbbs-finger, \
     /bin/systemctl restart anetbbs-finger
 
+# Disable the sudoers_audit plugin for anetbbs commands. On some VPS /
+# container hosts (LXC, OpenVZ) the Linux audit subsystem is unavailable
+# and sudo fails with "unable to change to root gid / error initializing
+# audit plugin sudoers_audit" before it even runs our script. !log_input
+# and !log_output suppress the other plugin that tries to open a pty.
+Defaults!ANETBBS_UPGRADE  !log_input, !log_output
+Defaults!ANETBBS_RESTORE  !log_input, !log_output
+Defaults!ANETBBS_SYSCTL   !log_input, !log_output
+
 stingray ALL=(root) NOPASSWD: ANETBBS_SYSCTL, ANETBBS_UPGRADE, ANETBBS_RESTORE
