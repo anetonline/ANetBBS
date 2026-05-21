@@ -191,6 +191,14 @@ def security_check(app, params):
         report['errors'].append(f'apt scan failed: {exc!r}')
 
     # ── pip (against the install venv if present) ──────────────────
+    # Packages intentionally pinned below their latest release.
+    # These are excluded from the "outdated" count so the sysop isn't
+    # prompted to upgrade something that would break the service.
+    PIP_PINNED = {
+        # gunicorn 23+ dropped the eventlet worker entry point that
+        # ANetBBS uses. Safe ceiling is <23; do NOT upgrade past 22.x.
+        'gunicorn': 'pinned <23 — gunicorn 23+ dropped eventlet worker support',
+    }
     venv_pip = os.path.join(install_root, 'venv', 'bin', 'pip')
     if os.path.isfile(venv_pip):
         try:
@@ -199,14 +207,25 @@ def security_check(app, params):
                 capture_output=True, text=True, timeout=60,
             )
             data = _json.loads(r.stdout or '[]')
-            report['pip'] = [
-                {'name': d.get('name'),
-                 'current': d.get('version'),
-                 'latest': d.get('latest_version'),
-                 'security': False}  # no signal without pip-audit
-                for d in data if isinstance(d, dict)
-            ]
-            report['pip_total'] = len(report['pip'])
+            pip_rows = []
+            pip_pinned_rows = []
+            for d in data:
+                if not isinstance(d, dict):
+                    continue
+                name = d.get('name', '')
+                row = {'name': name,
+                       'current': d.get('version'),
+                       'latest': d.get('latest_version'),
+                       'security': False}
+                pin_note = PIP_PINNED.get(name) or PIP_PINNED.get(name.lower())
+                if pin_note:
+                    row['pinned'] = pin_note
+                    pip_pinned_rows.append(row)
+                else:
+                    pip_rows.append(row)
+            report['pip'] = pip_rows
+            report['pip_pinned'] = pip_pinned_rows
+            report['pip_total'] = len(pip_rows)
         except subprocess.TimeoutExpired:
             report['errors'].append('pip list --outdated timed out')
         except Exception as exc:  # noqa: BLE001

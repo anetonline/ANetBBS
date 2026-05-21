@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ game.name }}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    color: #00ff00;
+    overflow: hidden;
+}
+#bar {
+    background: #001100;
+    border-bottom: 1px solid #007700;
+    padding: 4px 12px;
+    font-size: .8rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+#bar a { color: #00aa00; text-decoration: none; }
+#bar a:hover { color: #00ff00; }
+#game { flex: 1; min-height: 0; }
+
+/* Game-ended overlay */
+#exit-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.88);
+    z-index: 9999;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    text-align: center;
+}
+#exit-overlay h2 {
+    font-size: 2rem;
+    color: #00ff00;
+    letter-spacing: .1em;
+}
+#exit-overlay p {
+    color: #00bb00;
+    font-size: .9rem;
+}
+.exit-btn {
+    display: inline-block;
+    padding: .75rem 2rem;
+    border: 2px solid #00ff00;
+    color: #00ff00;
+    text-decoration: none;
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    cursor: pointer;
+    background: #001a00;
+}
+.exit-btn:hover { background: #003300; }
+.resume-btn {
+    color: #007700;
+    font-size: .8rem;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: 'Courier New', monospace;
+    text-decoration: underline;
+}
+.resume-btn:hover { color: #00aa00; }
+</style>
+</head>
+<body>
+
+<div id="bar">
+    <span>&#9654; {{ game.name }}</span>
+    <span>F11 fullscreen &nbsp;|&nbsp; <a href="javascript:window.close()">&#x2715; Close Tab</a></span>
+</div>
+<div id="game"></div>
+
+<div id="exit-overlay">
+    <h2>[ GAME OVER ]</h2>
+    <p>{{ game.name }} has exited.</p>
+    <a class="exit-btn" href="javascript:window.close()">&#x2715; Close Tab &amp; Return</a>
+    <button class="resume-btn" onclick="hideOverlay()">&#x25B6; Back to DOS Prompt</button>
+</div>
+
+<script>
+    EJS_player          = '#game';
+    EJS_core            = 'dosbox_pure';
+    EJS_gameUrl         = {{ game.web_game_url | tojson }};
+    EJS_threads         = true;
+    EJS_pathtodata      = 'https://cdn.emulatorjs.org/stable/data/';
+    EJS_color           = '#00ff00';
+    EJS_backgroundColor = '#000000';
+    EJS_volume          = 1;
+    EJS_defaultOptions  = { 'dosbox_pure_menu_time': '0' };
+</script>
+<script src="https://cdn.emulatorjs.org/stable/data/loader.js"></script>
+
+<script>
+(function () {
+    var overlay   = document.getElementById('exit-overlay');
+    var exitTimer = null;
+
+    function showOverlay() {
+        overlay.style.display = 'flex';
+    }
+
+    window.hideOverlay = function () {
+        overlay.style.display = 'none';
+    };
+
+    // Primary signal: pointer lock released after being held for >1 s.
+    // dosbox_pure acquires pointer lock on first click; releases it when
+    // the game exits back to the DOS prompt.
+    var lockAcquiredAt = 0;
+
+    document.addEventListener('pointerlockchange', function () {
+        if (document.pointerLockElement) {
+            lockAcquiredAt = Date.now();
+            if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
+            overlay.style.display = 'none';
+        } else {
+            var heldMs = Date.now() - lockAcquiredAt;
+            if (heldMs > 1000) {
+                // Lock was held for a real game session; show overlay after 2 s
+                // grace period so brief menu/pause releases don't trigger it.
+                exitTimer = setTimeout(showOverlay, 2000);
+            }
+        }
+    });
+
+    // Fallback: Escape key while no pointer lock active.
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !document.pointerLockElement) {
+            showOverlay();
+        }
+    });
+}());
+</script>
+</body>
+</html>

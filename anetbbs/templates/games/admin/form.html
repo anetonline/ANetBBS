@@ -191,6 +191,23 @@
         </div>
     </div>
 
+    <!-- In-Browser DOS Game (js-dos) -->
+    <div id="section_door_dos_browser" class="game-type-section">
+        <div class="section-header"><i class="bi bi-joystick"></i> In-Browser DOS Game Settings</div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-8">
+                {{ form.web_game_url.label(class="form-label") }}
+                {{ form.web_game_url(class="form-control", placeholder="/games/dos-data/doom.zip") }}
+                <small style="color:#007700;">Path served by the <code>/games/dos-data/</code> route, e.g. <code>/games/dos-data/doom.zip</code></small>
+            </div>
+            <div class="col-md-4">
+                {{ form.command_line_args.label(class="form-label") }}
+                {{ form.command_line_args(class="form-control", placeholder="DOOM.EXE") }}
+                <small style="color:#007700;">DOS executable (reference only — autoexec is in the ZIP's dosbox.conf)</small>
+            </div>
+        </div>
+    </div>
+
     <!-- Web Game -->
     <div id="section_builtin_web" class="game-type-section">
         <div class="section-header"><i class="bi bi-browser-chrome"></i> Web Game Settings</div>
@@ -272,7 +289,7 @@
 {% block extra_js %}
 <script>
 (function () {
-    var sections = ['door_dos', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin'];
+    var sections = ['door_dos', 'door_dos_browser', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin'];
     var sel = document.getElementById('game_type_select');
 
     function showSection(type) {

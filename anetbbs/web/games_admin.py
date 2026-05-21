@@ -52,6 +52,7 @@ class GameForm(FlaskForm):
     ], default='other', validate_choice=False)
     game_type = SelectField('Game Type', choices=[
         ('builtin_web', 'Built-in Web Game'),
+        ('door_dos_browser', 'In-Browser DOS Game (js-dos)'),
         ('door_dos', 'DOS Door Game (DOSBox)'),
         ('door_mystic', 'Mystic BBS Python Game'),
         ('door_mystic_mps', 'Mystic BBS Pascal Script (.mps)'),

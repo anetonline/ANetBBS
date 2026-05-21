@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0.0",
+    version="1.0a2.60",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -65,6 +65,7 @@ setup(
             'anetbbs-symlinks=anetbbs.installer.symlinks:main',
             'anetbbs-cleanup=anetbbs.installer.cleanup:main',
             'anetbbs-import-users=tools.import_users:main',
+            'anetbbs-prepare-dos=tools.prepare_dos_games:main',
         ],
     },
 )

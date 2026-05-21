@@ -1,3 +1,44 @@
+# ANetBBS v1.0a2.60 — In-browser DOS games: DOOM + Duke Nukem 3D
+
+New `door_dos_browser` game type — play classic DOS games directly in
+the web browser via EmulatorJS (dosbox_pure core). No DOSBox on the
+server; no telnet required.
+
+**Pre-bundled shareware titles** (included in the tarball):
+- **DOOM (Shareware)** — id Software. SoundBlaster audio.
+- **Duke Nukem 3D (Shareware)** — 3D Realms. GUS/UltraSound audio
+  (only FX device supported by the v1.3D Build Engine binary under
+  dosbox_pure).
+
+**What's new:**
+- `anetbbs/web/games.py` — `/games/dos-frame/<slug>` with COOP/COEP
+  headers; `/games/dos-data/<file>` ZIP server.
+- `anetbbs/templates/games/play_jsdos_frame.html` — EmulatorJS frame
+  with pointer-lock exit overlay and GAME OVER replay loop.
+- `anetbbs/features/games.py` — terminal door menu now excludes
+  browser-only game types (`door_dos_browser`, `builtin_web`).
+- `tools/prepare_dos_games.py` — bundle any DOS game dir into a
+  dosbox_pure ZIP. New `--exclude` and `--gus` flags.
+- `data/dos-games/doom.zip` + `data/dos-games/duke3d.zip` — the
+  pre-built shareware bundles.
+- `docs/14-door-games.md` — full `door_dos_browser` setup guide.
+- `install.sh` — now creates `data/dos-games/` directory.
+
+**Upgrade from v1.0.x:**
+1. Run `update.sh` as usual — it rsyncs the new files including
+   `data/dos-games/*.zip`.
+2. Add two Game rows in **Admin → Door Games → Add Game**:
+   - DOOM: slug `doom`, type `door_dos_browser`,
+     URL `/games/dos-data/doom.zip`
+   - Duke3D: slug `duke3d`, type `door_dos_browser`,
+     URL `/games/dos-data/duke3d.zip`
+3. `sudo systemctl restart anetbbs-web`
+
+See `docs/14-door-games.md` → "In-browser DOS games" for full setup
+and the `prepare_dos_games.py` tool reference.
+
+---
+
 # ANetBBS v1.0a2.59 — /docs 500 fix
 
 Changes since v1.0a2.58:

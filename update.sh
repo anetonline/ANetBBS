@@ -289,6 +289,15 @@ else
         --exclude='/mrc/bridge/*.db-wal' \
         "$SOURCE_DIR/" "$INSTALL_DIR/"
     ok "Files synced (user data + configs preserved)"
+
+    # Copy pre-bundled game ZIPs — these are static assets, not user data,
+    # so they're safe to update alongside the code even though /data/ is
+    # otherwise excluded.
+    if [[ -d "$SOURCE_DIR/data/dos-games" ]]; then
+        mkdir -p "$INSTALL_DIR/data/dos-games"
+        rsync -a "$SOURCE_DIR/data/dos-games/" "$INSTALL_DIR/data/dos-games/"
+        ok "DOS game bundles updated"
+    fi
 fi
 
 # ─── Step 5: Update Python dependencies ───────────────────────────────────────

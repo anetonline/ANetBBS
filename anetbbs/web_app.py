@@ -982,6 +982,35 @@ def _create_default_data():
             # Active by default — runs under Node via the compat shim.
             '_active_default': True,
         },
+        {
+            'name': 'DOOM (Shareware)',
+            'slug': 'doom',
+            'description': 'The 1993 id Software classic — fight demons '
+                           'on Mars. Shareware episode, plays in-browser '
+                           'via EmulatorJS (no install required).',
+            'category': 'action',
+            'icon': 'bi-controller',
+            'game_type': 'door_dos_browser',
+            'web_game_url': '/games/dos-data/doom.zip',
+            'sort_order': 30,
+            'must_exist': os.path.join(base_dir, '..', 'data',
+                                       'dos-games', 'doom.zip'),
+            '_active_default': True,
+        },
+        {
+            'name': 'Duke Nukem 3D (Shareware)',
+            'slug': 'duke3d',
+            'description': 'Duke Nukem 3D shareware episode by 3D Realms '
+                           '(1996). Plays in-browser via EmulatorJS.',
+            'category': 'action',
+            'icon': 'bi-controller',
+            'game_type': 'door_dos_browser',
+            'web_game_url': '/games/dos-data/duke3d.zip',
+            'sort_order': 31,
+            'must_exist': os.path.join(base_dir, '..', 'data',
+                                       'dos-games', 'duke3d.zip'),
+            '_active_default': True,
+        },
     ]
     for d in BUNDLED_DOORS:
         if not os.path.isfile(d['must_exist']):

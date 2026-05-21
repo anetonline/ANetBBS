@@ -819,7 +819,7 @@ else
 fi
 
 # Create all data directories
-for d in data data/uploads data/avatars data/games data/echomail data/mrc logs anetbbs/logs; do
+for d in data data/uploads data/avatars data/games data/dos-games data/echomail data/mrc logs anetbbs/logs; do
     mkdir -p "$INSTALL_DIR/$d"
 done
 ok "Data directories created"

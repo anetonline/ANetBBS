@@ -142,6 +142,33 @@
       {% endif %}
     </div>
 
+    <!-- pip pinned -->
+    {% if report.pip_pinned %}
+    <div class="card sec-card mt-3">
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <strong><i class="bi bi-lock"></i> Intentionally pinned packages</strong>
+        <span class="sec-meta">{{ report.pip_pinned | length }} pinned — do not upgrade</span>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr><th>Package</th><th>Current</th><th>Latest (ignored)</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            {% for u in report.pip_pinned %}
+            <tr class="table-warning">
+              <td><code>{{ u.name }}</code></td>
+              <td class="sec-meta">{{ u.current }}</td>
+              <td class="sec-meta text-decoration-line-through">{{ u.latest }}</td>
+              <td class="sec-meta"><small>{{ u.pinned }}</small></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="text-end mt-3 sec-meta">
       Report file: <code>logs/security-report.json</code>.
       Driven by the

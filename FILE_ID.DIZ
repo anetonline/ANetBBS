@@ -1,18 +1,16 @@
-ANetBBS v1.0a2.24 - Alpha 2 - Modern BBS
+ANetBBS v1.0a2.60 - Modern BBS System
 -----------------------------------------
 Web (Flask+SocketIO), telnet, SSH, rlogin,
 FTP front-ends sharing one user database.
-FidoNet BinkP echomail/netmail w/ full
-kludges, DOVE-Net QWK, Inter-BBS IM via
-MSP (TCP 18) + SYSTAT (UDP 11). MRC chat
-w/ status bar + tab-complete. LORD pre-
-installed (Synchronet JS port via Node
-compat shim - no jsexec required). Built-
-in collaborative wiki at /wiki/ w/ rev
-history + diff + search. RSS reader, web
-+ terminal. 80x25 CGA-palette web term
-for doors. Synchronet .js + Mystic
-.mps/.mpy + DOSBox doors w/ door32.
-Sysop NodeSpy kick. CP437/ANSI throughout.
+FidoNet BinkP echomail/netmail. DOVE-Net
+QWK. Inter-BBS IM via MSP+SYSTAT. MRC
+chat. LORD pre-installed (Synchronet JS).
+In-browser DOS games: DOOM + Duke Nukem
+3D (shareware) via EmulatorJS/dosbox_pure
+-- play classics right in the browser!
+Built-in wiki, RSS reader, 80x25 web
+terminal. Synchronet .js + Mystic .mps +
+DOSBox doors + door32. Sysop NodeSpy.
+CP437/ANSI throughout.
 Linux + Python 3.10+ - ./install.sh
 github.com/anetonline    By StingRay

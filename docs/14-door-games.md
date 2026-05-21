@@ -13,6 +13,7 @@ through their terminal:
 | `door_mystic`        | Mystic Python `.mpy`    | Python with our `mystic_bbs` compat shim. |
 | `door_rlogin`        | remote BBS              | Outbound rlogin TCP bridge to a Synchronet xtrn server / DoorParty / etc. The "door" lives on someone else's BBS. |
 | `builtin_web`        | in-process              | Flask templates — for the 10 web mini-games. |
+| `door_dos_browser`   | DOS .ZIP bundle         | EmulatorJS + dosbox_pure core, runs entirely in the browser. No telnet/SSH — web only. |
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
 
@@ -254,6 +255,185 @@ What's not covered (and where stock doors will fail):
 When in doubt: if the door pack is a self-contained JS file with its
 own data directory, it'll likely work. If it's something Synchronet
 ships *with* Synchronet (like the message reader), it won't.
+
+## In-browser DOS games (`door_dos_browser`)
+
+`door_dos_browser` runs classic DOS games directly in the user's web
+browser via **EmulatorJS** (the dosbox_pure libretro core). No DOSBox
+install on the server, no telnet session — the game plays inside a
+dedicated browser tab with sound, pointer-lock mouse, and fullscreen.
+
+> These games are **web-only**. They do NOT appear in the telnet/SSH
+> door menu.
+
+### How it works
+
+1. The game's DOS files are packaged into a ZIP bundle with a generated
+   `dosbox.conf` and `launch.bat`.
+2. The ZIP lives at `<install>/data/dos-games/<slug>.zip`.
+3. When a web user clicks Play, the BBS serves the ZIP from
+   `/games/dos-data/<slug>.zip` and opens a full-page frame at
+   `/games/dos-frame/<slug>`.
+4. The frame loads EmulatorJS from CDN
+   (`https://cdn.emulatorjs.org/stable/data/`) with `EJS_core =
+   'dosbox_pure'`, fetches the ZIP, and runs the game.
+5. The frame needs `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp` headers for
+   `SharedArrayBuffer` (multi-threaded dosbox_pure). The BBS sets
+   these on the `/games/dos-frame/` route automatically.
+
+### Exit / replay loop
+
+dosbox_pure intentionally blocks the `exit` command from the top-level
+DOS shell (the shell that reads the [autoexec] block). Games are
+therefore wrapped in a `launch.bat` loop:
+
+```bat
+@echo off
+:restart
+GAME.EXE
+echo.
+echo  ==========================================
+echo       G A M E   O V E R
+echo  ==========================================
+echo    Press any key to play again
+echo    -- or --
+echo    Close this tab to exit
+echo  ==========================================
+echo.
+pause > nul
+goto restart
+```
+
+When the game exits, the GAME OVER banner appears and the user can
+press any key to restart or close the tab to quit. A pointer-lock
+overlay in the browser also shows a "Close Tab" button when the
+emulator releases the mouse cursor.
+
+### Pre-installed games
+
+Two classic shareware titles ship bundled with ANetBBS as of v1.0a2.60:
+
+| Game | Slug | Notes |
+|------|------|-------|
+| DOOM (Shareware) | `doom` | id Software shareware — freely distributable |
+| Duke Nukem 3D (Shareware) | `duke3d` | 3D Realms shareware — freely distributable |
+
+Both are seeded as `door_dos_browser` Game rows on first install. If
+the rows are missing (e.g. you upgraded from an earlier release),
+add them manually via **Admin → Door Games → Add Game**:
+
+| Field | DOOM | Duke Nukem 3D |
+|-------|------|--------------|
+| Name | `DOOM (Shareware)` | `Duke Nukem 3D (Shareware)` |
+| Slug | `doom` | `duke3d` |
+| Game Type | `door_dos_browser` | `door_dos_browser` |
+| Web Game URL | `/games/dos-data/doom.zip` | `/games/dos-data/duke3d.zip` |
+
+### Adding a new browser DOS game
+
+**Step 1 — Bundle the game files**
+
+Use `tools/prepare_dos_games.py` from the source tree:
+
+```bash
+python3 tools/prepare_dos_games.py \
+    --source-dir "/path/to/GameDir" \
+    --exe GAME.EXE \
+    --output myslug \
+    --name "My Game (Shareware)" \
+    --exclude SETUP.EXE        # optional: strip out extra EXEs dosbox_pure would pick up
+```
+
+The tool packages all files plus a generated `dosbox.conf` +
+`launch.bat` into `data/dos-games/myslug.zip`.
+
+Key flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--source-dir` | Root directory of the DOS game |
+| `--exe` | Primary EXE (used for validation only — must appear in the bundle) |
+| `--output` | Output slug (also the ZIP filename without extension) |
+| `--exclude` | One or more filenames to omit (case-insensitive), e.g. `SETUP.EXE INSTALL.EXE` |
+| `--gus` | Add GUS/UltraSound emulation section to dosbox.conf — required for Duke Nukem 3D and other Build Engine games |
+| `--dry-run` | List files that would be packaged without writing anything |
+| `--out-dir` | Override output directory (default: `<install>/data/dos-games/`) |
+
+> **Multiple EXEs in the bundle root?** dosbox_pure will show a
+> selection menu instead of auto-starting the game. Use `--exclude`
+> to remove extras (SETUP.EXE, INSTALL.EXE, etc.) so only one EXE
+> remains at the root.
+
+**Step 2 — Deploy the ZIP**
+
+The web service runs as `anetbbs` (uid 998). SCP to `/tmp/` first,
+then move with sudo:
+
+```bash
+scp data/dos-games/myslug.zip stingray@bbs.a-net.fyi:/tmp/
+ssh stingray@bbs.a-net.fyi \
+  "sudo mv /tmp/myslug.zip /opt/anetbbs/data/dos-games/ && \
+   sudo chown anetbbs:anetbbs /opt/anetbbs/data/dos-games/myslug.zip"
+```
+
+**Step 3 — Add the game in admin**
+
+**Admin → Door Games → Add Game**:
+
+- Game Type: `In-Browser DOS Game (js-dos)`
+- Web Game URL: `/games/dos-data/myslug.zip`
+
+### Duke Nukem 3D — GUS / UltraSound requirement
+
+Duke Nukem 3D v1.3D (and other Build Engine games from that era)
+compiled their audiolib with a specific set of sound devices. The
+only FX device that works under dosbox_pure is **FXDevice = 9**
+(UltraSound/GUS). Devices 3, 5, and 13 are compiled out or silent.
+
+GUS emulation in dosbox_pure requires `gusirq=7` (Duke3D refuses IRQ
+values > 7) and the `ULTRASND` environment variable. The `--gus` flag
+on `prepare_dos_games.py` adds both automatically:
+
+```ini
+[gus]
+gus=true
+gusrate=22050
+gusbase=240
+gusirq=7
+gusdma=3
+```
+
+```bat
+SET ULTRASND=240,3,3,7,7
+```
+
+The game's `DUKE3D.CFG` must also have `FXDevice = 9` and matching
+IRQ/DMA values. The pre-bundled Duke3D ZIP ships with a pre-configured
+`DUKE3D.CFG`; if you're bundling a fresh install, run `SETUP.EXE`
+under real DOSBox first, set FXDevice to 9, then bundle with
+`--exclude SETUP.EXE --gus`.
+
+### Rebuild commands (reference)
+
+```bash
+# DOOM (Shareware)
+python3 tools/prepare_dos_games.py \
+  --source-dir "/media/jerry/EXT HDD/Doom" \
+  --exe DOOM.EXE \
+  --output doom \
+  --name "DOOM (Shareware)" \
+  --exclude SETUP.EXE DWANGO.EXE IPXSETUP.EXE SERSETUP.EXE DM.EXE
+
+# Duke Nukem 3D (Shareware)
+python3 tools/prepare_dos_games.py \
+  --source-dir "/media/jerry/EXT HDD/DUKE3D" \
+  --exe DUKE3D.EXE \
+  --output duke3d \
+  --name "Duke Nukem 3D (Shareware)" \
+  --exclude SETUP.EXE SETMAIN.EXE COMMIT.EXE DN3DHELP.EXE \
+  --gus
+```
 
 ## Troubleshooting
 

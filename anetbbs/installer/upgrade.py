@@ -143,6 +143,13 @@ def main():
         '--exclude=*.db', '--exclude=logs/',
         f'{src}/', f'{install_dir}/',
     ], check=True)
+    # Copy pre-bundled game ZIPs — static assets, not user data.
+    dos_src = src / 'data' / 'dos-games'
+    if dos_src.is_dir():
+        dos_dst = install_dir / 'data' / 'dos-games'
+        dos_dst.mkdir(parents=True, exist_ok=True)
+        _run(['rsync', '-a', f'{dos_src}/', f'{dos_dst}/'], check=False)
+        ok('DOS game bundles updated')
     # Restore ownership in case rsync ran as a different user
     user = os.environ.get('SUDO_USER') or 'stingray'
     _run(['chown', '-R', f'{user}:{user}', str(install_dir)],

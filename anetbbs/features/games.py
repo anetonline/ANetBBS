@@ -47,7 +47,7 @@ class GameManager:
         with app.app_context():
             games = (Game.query
                      .filter_by(is_active=True)
-                     .filter(Game.game_type != 'builtin_web')   # web-only games skip telnet
+                     .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
                      .order_by(Game.sort_order, Game.name)
                      .all())
             # Detach into plain dicts so we can use them outside the app context

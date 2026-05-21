@@ -4,9 +4,10 @@ Games blueprint — user-facing Game Center views for ANetBBS.
 """
 import json
 import logging
+import os
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, current_app
+from flask import Blueprint, render_template, request, current_app, send_from_directory, abort, make_response
 from flask_login import login_required, current_user
 from flask_socketio import join_room, emit
 
@@ -92,8 +93,38 @@ def play(slug):
             module=module,
         )
 
+    if game.game_type == 'door_dos_browser':
+        return render_template('games/play_jsdos.html', game=game)
+
     # Terminal (door) games
     return render_template('games/play_terminal.html', game=game)
+
+
+@games_bp.route('/dos-data/<path:filename>')
+@login_required
+def dos_data(filename):
+    """Serve game ZIP bundles for in-browser DOS games (js-dos)."""
+    # Only serve plain filenames — no path traversal.
+    if os.sep in filename or filename.startswith('.'):
+        abort(400)
+    install_root = current_app.config.get('INSTALL_DIR') or \
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    dos_games_dir = os.path.join(install_root, 'data', 'dos-games')
+    return send_from_directory(dos_games_dir, filename)
+
+
+@games_bp.route('/dos-frame/<slug>')
+@login_required
+def dos_frame(slug):
+    """Standalone isolated page for EmulatorJS — served with COOP/COEP headers
+    so dosbox_pure can use SharedArrayBuffer without affecting the main BBS pages."""
+    game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    if game.game_type != 'door_dos_browser':
+        abort(400)
+    resp = make_response(render_template('games/play_jsdos_frame.html', game=game))
+    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    resp.headers['Cross-Origin-Embedder-Policy'] = 'credentialless'
+    return resp
 
 
 @games_bp.route('/<slug>/score', methods=['POST'])

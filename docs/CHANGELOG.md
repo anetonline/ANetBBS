@@ -1,8 +1,62 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.36` — alpha 2** (internal v287.35,
-May 2026). Previous: `v1.0a` — alpha 1 (internal v196).
+separately. Current release: **`v1.0a2.60`** (May 2026). Previous: `v1.0.0`.
+
+## v1.0a2.60 — In-browser DOS games: DOOM + Duke Nukem 3D (May 2026)
+
+New game type `door_dos_browser` — play classic DOS games directly in
+the browser via EmulatorJS (dosbox_pure libretro core). No DOSBox
+install on the server required; games run fully client-side.
+
+**Two shareware titles now ship pre-bundled:**
+
+- **DOOM (Shareware)** — id Software shareware, freely distributable.
+  SoundBlaster audio via dosbox_pure's SB16 emulation (IRQ 7, DMA 1).
+- **Duke Nukem 3D (Shareware)** — 3D Realms shareware, freely
+  distributable. Uses GUS/UltraSound emulation (`--gus` flag) because
+  the v1.3D binary only accepts FXDevice=9 (Build Engine audiolib
+  devices 3, 5, 13 are compiled out or silent in this release).
+
+**New files / changes:**
+
+- `anetbbs/web/games.py` — `door_dos_browser` play route,
+  `/games/dos-data/<file>` ZIP server, `/games/dos-frame/<slug>` with
+  COOP/COEP headers for SharedArrayBuffer.
+- `anetbbs/templates/games/play_jsdos.html` — landing page.
+- `anetbbs/templates/games/play_jsdos_frame.html` — EmulatorJS frame
+  with pointer-lock exit overlay and GAME OVER replay loop.
+- `anetbbs/features/games.py` — terminal door menu now excludes
+  `door_dos_browser` (and `builtin_web`) so browser-only games don't
+  appear in the telnet/SSH game list.
+- `tools/prepare_dos_games.py` — packages a DOS game directory into a
+  dosbox_pure ZIP bundle. New flags: `--exclude` (remove extra EXEs so
+  dosbox_pure auto-starts), `--gus` (GUS/UltraSound emulation for
+  Build Engine games), `--dry-run`.
+- `data/dos-games/doom.zip` and `data/dos-games/duke3d.zip` — the
+  pre-built game bundles (included in the release tarball).
+- `docs/14-door-games.md` — new `door_dos_browser` section with setup
+  guide, flags reference, GUS notes, and rebuild commands.
+
+**Deploy note for upgrades from v1.0.x:**
+
+The `data/dos-games/` directory must be writable by the `anetbbs`
+service user. SCP new ZIPs to `/tmp/` on the server and move with
+`sudo`:
+
+```bash
+sudo mv /tmp/*.zip /opt/anetbbs/data/dos-games/
+sudo chown anetbbs:anetbbs /opt/anetbbs/data/dos-games/*.zip
+```
+
+Add the two Game rows manually if they're missing (see
+`docs/14-door-games.md` → Pre-installed games).
+
+---
+
+Versions are internal build numbers. Public releases are tagged
+separately. Previous internal series: `v1.0a2.36` — alpha 2 (internal v287.35,
+May 2026). `v1.0a` — alpha 1 (internal v196).
 
 ## v287.35 — FTPS: pyOpenSSL dep + soft-fail import (May 2026)
 
