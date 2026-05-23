@@ -1,7 +1,14 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.62`** (May 2026). Previous: `v1.0a2.61`.
+separately. Current release: **`v1.0a2.63`** (May 2026). Previous: `v1.0a2.62`.
+
+## v1.0a2.63 — File gallery 500 fix (May 2026)
+
+Fixed 500 error on `/files/` when any files had been uploaded. The template
+used `f.user` / `f.user_id` but `FileUpload`'s relationship and FK column are
+named `uploader` / `uploader_id`. Gallery was completely broken for anyone
+who had uploaded files.
 
 ## v1.0a2.62 — Installer fix: pip failure on Python 3.13 / ARM64 (May 2026)
 

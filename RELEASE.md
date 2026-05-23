@@ -1,3 +1,11 @@
+# ANetBBS v1.0a2.63 — File gallery 500 fix
+
+Fixed: `/files/` crashed with a 500 error when any files had been uploaded.
+The template referenced `f.user` and `f.user_id` but the `FileUpload` model's
+relationship and column are named `uploader` and `uploader_id`.
+
+---
+
 # ANetBBS v1.0a2.62 — Installer fix: pip failure on Python 3.13 / ARM64
 
 Fixed: `install.sh` would silently swallow `pip install` errors (using

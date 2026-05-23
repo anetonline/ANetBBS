@@ -17,14 +17,14 @@
                 {% for f in uploads %}
                 <tr>
                     <td>{{ f.original_filename }}</td>
-                    <td><a href="{{ url_for('profile.view_user', username=f.user.username) }}">{{ f.user.username }}</a></td>
+                    <td><a href="{{ url_for('profile.view_user', username=f.uploader.username) }}">{{ f.uploader.username }}</a></td>
                     <td>{{ (f.file_size / 1024) | round(1) }} KB</td>
                     <td>{{ f.mime_type }}</td>
                     <td>{{ f.download_count }}</td>
                     <td>{{ f.created_at.strftime('%Y-%m-%d') }}</td>
                     <td>
                         <a href="{{ url_for('files.download', file_id=f.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-download"></i></a>
-                        {% if current_user.is_authenticated and (current_user.id == f.user_id or current_user.is_admin) %}
+                        {% if current_user.is_authenticated and (current_user.id == f.uploader_id or current_user.is_admin) %}
                         <form method="post" action="{{ url_for('files.delete_file', file_id=f.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
