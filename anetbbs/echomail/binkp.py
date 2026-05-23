@@ -817,7 +817,11 @@ class BinkPClient:
                                     info.filename, fname)
                 except _zipfile.BadZipFile as exc:
                     logger.warning('BinkP: bad ZIP %s: %s', fname, exc)
-                return out
+                if out:
+                    return out
+                # ZIP contained no mail packets — it's a hatched file binary
+                # (e.g. a nodelist .zip delivered via TIC). Fall through to
+                # write it to inbound so the TIC scanner can find it.
             # Anything else → file for TIC scanner
             try:
                 _os.makedirs(inbound_dir, exist_ok=True)

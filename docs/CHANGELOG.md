@@ -1,7 +1,22 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.63`** (May 2026). Previous: `v1.0a2.62`.
+separately. Current release: **`v1.0a2.64`** (May 2026). Previous: `v1.0a2.63`.
+
+## v1.0a2.64 — TIC file-echo ZIP binary + duplicate error spam (May 2026)
+
+Fixed two BinkP/TIC processor bugs that caused `tqwinfo.zip` and similar
+hatched file-echo ZIPs to never land in the inbound directory:
+
+- `binkp.py`: inbound ZIPs were always treated as mail-bundle ZIPs and
+  unpacked looking for FTS-0001 packets. If none found, the file was
+  discarded rather than written to inbound for the TIC scanner. Fix: fall
+  through to write as TIC binary when a ZIP contains no mail packets.
+
+- `tic.py` `scan_inbound`: duplicate-skip check compared the `.tic` filename
+  against `TicFile.filename` (which stores the binary name). They never
+  matched, so every echomail poll spawned a fresh error row for the same TIC.
+  Fix: peek at the TIC content to get the binary filename before the DB check.
 
 ## v1.0a2.63 — File gallery 500 fix (May 2026)
 

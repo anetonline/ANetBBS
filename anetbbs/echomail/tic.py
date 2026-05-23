@@ -326,11 +326,20 @@ def scan_inbound(inbound_dir):
         if not fn.lower().endswith('.tic'):
             continue
         tic_path = os.path.join(inbound_dir, fn)
-        # Skip if we already processed this TIC (match on raw filename)
-        existing = TicFile.query.filter_by(
-            filename=os.path.basename(fn)).first()
-        if existing and existing.status == 'filed':
-            continue
+        # Skip TICs whose binary was already successfully filed.
+        # TicFile.filename stores the binary name (e.g. "tqwinfo.zip"), not
+        # the .tic manifest name — so peek at the content to get it.
+        try:
+            with open(tic_path, 'r', encoding='cp437', errors='replace') as _f:
+                _peeked = parse_tic(_f.read())
+            bin_name = _peeked.get('file', '')
+        except Exception:
+            bin_name = ''
+        if bin_name:
+            existing = TicFile.query.filter_by(
+                filename=bin_name, status='filed').first()
+            if existing:
+                continue
         process_tic(tic_path, inbound_dir)
         processed += 1
     return processed

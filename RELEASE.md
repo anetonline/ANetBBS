@@ -1,3 +1,24 @@
+# ANetBBS v1.0a2.64 — TIC file-echo: ZIP binary delivery + duplicate error spam
+
+Two BinkP/TIC processor bugs fixed:
+
+1. **Hatched ZIP binaries silently discarded** (`binkp.py`): any inbound file
+   with ZIP magic bytes was treated as a mail-bundle and unpacked looking for
+   FTS-0001 packets. When none were found (e.g. a nodelist `.zip` delivered
+   via TIC), the file was returned as empty and never written to the inbound
+   directory. The companion `.tic` manifest arrived fine, so the TIC scanner
+   correctly reported "binary not found". Fix: if a ZIP contains no mail
+   packets, fall through to write it to inbound as a TIC binary.
+
+2. **Duplicate error rows on every poll** (`tic.py`): `scan_inbound` skipped
+   already-filed TICs by comparing the `.tic` filename against
+   `TicFile.filename`, but the DB stores the *binary* filename — they never
+   matched, so every echomail poll re-processed and re-errored the same TIC,
+   spamming the TIC log. Fix: peek at the TIC content to get the binary name,
+   then check `TicFile` by that name.
+
+---
+
 # ANetBBS v1.0a2.63 — File gallery 500 fix
 
 Fixed: `/files/` crashed with a 500 error when any files had been uploaded.
