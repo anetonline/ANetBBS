@@ -869,20 +869,26 @@ sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev
 
 info "Installing ANetBBS Python dependencies (this may take a minute)..."
 cd "$INSTALL_DIR"
-if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet 2>/dev/null || \
-   "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet 2>/dev/null; then
+PIP_LOG=$(mktemp)
+# --prefer-binary: use pre-built wheels when available (avoids source-compile
+# failures on ARM64 / Pi where Rust/C toolchains may be incomplete).
+if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --prefer-binary -e "$INSTALL_DIR" 2>"$PIP_LOG" || \
+   "$VENV_DIR/bin/pip" install --prefer-binary -e "$INSTALL_DIR" 2>"$PIP_LOG"; then
     ok "Python dependencies installed"
     STATUS[python]="ok"
 else
-    if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install "$INSTALL_DIR" --quiet 2>/dev/null || \
-       "$VENV_DIR/bin/pip" install "$INSTALL_DIR" --quiet 2>/dev/null; then
+    if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --prefer-binary "$INSTALL_DIR" 2>"$PIP_LOG" || \
+       "$VENV_DIR/bin/pip" install --prefer-binary "$INSTALL_DIR" 2>"$PIP_LOG"; then
         ok "Python dependencies installed (non-editable)"
         STATUS[python]="ok"
     else
-        fail "pip install failed. Check $INSTALL_DIR/setup.py"
+        fail "pip install failed — output below:"
+        cat "$PIP_LOG" | while read -r line; do echo -e "    ${DIM}$line${NC}"; done
+        fail "Fix the dependency error above, then re-run install.sh."
         STATUS[python]="fail"
     fi
 fi
+rm -f "$PIP_LOG"
 
 # Verify that the package actually imports cleanly. setup.py declares aiohttp
 # as a dependency now, so a successful pip install above already pulled it in.
@@ -1068,6 +1074,10 @@ elif [[ -f "$DB_FILE" ]] && $FORCE_OVERWRITE; then
 fi
 
 # ─── Set admin password via Python ─────────────────────────────────────────────
+if [[ "${STATUS[python]:-}" != "ok" ]]; then
+    warn "Skipping admin account setup — Python environment failed to install."
+    warn "Fix the pip error above, then re-run: sudo bash $INSTALL_DIR/install.sh"
+else
 # ★ FIX 5: Ensure the data directory is writable by service user BEFORE we
 # create the database, and run the admin setup as the SERVICE_USER so the
 # SQLite file is created with correct ownership from the start.
@@ -1149,6 +1159,7 @@ ADMINEOF2
     # Fix ownership after root created the db
     chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data"
 fi
+fi  # end: STATUS[python] == ok guard
 
 # ★ FIX 6: Final ownership + permissions sweep on data directory
 # This catches both cases: db created as service user or as root
@@ -1307,6 +1318,11 @@ systemctl daemon-reload
 info "Cleaning up stale log files in /tmp..."
 rm -f /tmp/mrc_*.log 2>/dev/null || true
 
+if [[ "${STATUS[python]:-}" != "ok" ]]; then
+    warn "Skipping service starts — Python environment is not installed."
+    warn "Fix the pip error shown above, then re-run: sudo bash $INSTALL_DIR/install.sh"
+else
+
 SERVICES_TO_START=(anetbbs-web)
 # One service for all terminal protocols — telnet, ssh, rlogin live in
 # the same process driven by .env flags. Start it if any one is on.
@@ -1336,6 +1352,8 @@ for svc in "${SERVICES_TO_START[@]}"; do
         done
     fi
 done
+
+fi  # end: STATUS[python] == ok guard
 
 # ─── Optional: UFW firewall rules ─────────────────────────────────────────────
 if [[ "$CONFIGURE_UFW" == "y" ]]; then

@@ -67,13 +67,3 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
-
-# LORD runtime game state — per-install, not source
-anetbbs/games/sbbs_doors/lord/*.lrd
-anetbbs/games/sbbs_doors/lord/player.bin
-anetbbs/games/sbbs_doors/lord/scores.lrd
-anetbbs/games/sbbs_doors/lord/state.bin
-anetbbs/games/sbbs_doors/lord/nodeon.*
-
-# Door runtime drop files
-vendor/games/*/door32.sys

@@ -1,3 +1,28 @@
+# ANetBBS v1.0a2.62 — Installer fix: pip failure on Python 3.13 / ARM64
+
+Fixed: `install.sh` would silently swallow `pip install` errors (using
+`--quiet 2>/dev/null`), then continue into admin setup and service starts
+against an empty venv — producing a cascade of misleading errors (dotenv,
+gunicorn, sqlalchemy not found). Reported by Ultra_Magnus on Pi 5 (Debian
+trixie / Python 3.13.5).
+
+Changes:
+- `--prefer-binary` flag added to `pip install` — uses pre-built wheels
+  instead of compiling from source (prevents ARM64 / Pi compile failures).
+- Actual pip error output is now shown when install fails.
+- Admin account setup is skipped (with a clear message) when pip failed.
+- Service starts are skipped (with a clear message) when pip failed.
+
+---
+
+# ANetBBS v1.0a2.61 — Newsletter bugfix
+
+Fixed: newsletter "Send to all users" crashed with a 500 error due to a
+wrong field name when creating private messages (`content` → `body`).
+No data was lost — the newsletter table was written but no PMs were sent.
+
+---
+
 # ANetBBS v1.0a2.60 — In-browser DOS games: DOOM + Duke Nukem 3D
 
 New `door_dos_browser` game type — play classic DOS games directly in

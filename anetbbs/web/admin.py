@@ -1781,7 +1781,7 @@ def newsletter():
                 sender_id=current_user.id,
                 recipient_id=u.id,
                 subject=f'[Newsletter] {subject}'[:200],
-                content=body))
+                body=body))
             n += 1
         from datetime import datetime as _dt
         nl.sent_at = _dt.utcnow()

@@ -1,7 +1,29 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.60`** (May 2026). Previous: `v1.0.0`.
+separately. Current release: **`v1.0a2.62`** (May 2026). Previous: `v1.0a2.61`.
+
+## v1.0a2.62 — Installer fix: pip failure on Python 3.13 / ARM64 (May 2026)
+
+Fixed a cascade of misleading install errors on Python 3.13 / ARM64 (Pi 5,
+Debian trixie). The installer was suppressing all `pip install` output with
+`--quiet 2>/dev/null`, then blindly continuing into admin setup and service
+starts against an empty venv — producing "ModuleNotFoundError: dotenv",
+"gunicorn not found", "sqlalchemy not found" etc., all of which were
+consequences of pip never running.
+
+- Added `--prefer-binary` to `pip install` to use pre-built wheels on ARM64.
+- Actual pip error output is now displayed when pip fails, so sysops can
+  diagnose the root cause.
+- Admin account setup is now skipped when pip failed (with a clear message).
+- Service starts are now skipped when pip failed (with a clear message).
+
+## v1.0a2.61 — Newsletter bugfix (May 2026)
+
+Fixed 500 error when sending a newsletter. The admin newsletter route was
+passing `content=body` when constructing `PrivateMessage` objects, but the
+model field is `body`. No PMs were delivered; the newsletter record was
+rolled back cleanly. Corrected to `body=body`.
 
 ## v1.0a2.60 — In-browser DOS games: DOOM + Duke Nukem 3D (May 2026)
 
