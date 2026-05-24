@@ -1,3 +1,26 @@
+# ANetBBS v1.0a2.71 — Fix: Trade Wars 2 player database silently wiped on player deletion
+
+`json-client.js` (ANetBBS's file-backed Synchronet db shim) treated `db.write(scope, key)`
+with no value argument as `db.write(scope, key, undefined)`, assigning `undefined` to the
+key in the in-memory cache. `JSON.stringify` silently omits keys set to `undefined`, so the
+`players` array was permanently deleted from `tw2.json` the first time any player was
+deleted from the game. The universe (`sectors`, `ports`, `planets`, etc.) survived because
+those writes always pass explicit values; only the two no-value write calls (`players` in
+`DeletePlayer`, `teams.N` in the kill handler) triggered the bug.
+
+Fix: `json-client.js` now treats a value-less `write(scope, key)` as "mark dirty and save"
+— the in-place mutation that already happened on the cached reference is preserved and
+flushed to disk without overwriting the key. Also added three guards in `players.js` so
+that if the players table is ever absent, `LoadPlayer` exits with a user-visible error
+message instead of crashing with an unhandled TypeError, and `RankPlayers`/`MatchPlayer`
+treat it as an empty list. Added a warning log to `json-client._load` when a db file
+exists but fails to parse (previously silent).
+
+Affected players must delete `data/sbbs_doors/tw2/db/tw2.json` and relaunch TW2 to
+regenerate the universe; player progress stored before deletion is unrecoverable.
+
+---
+
 # ANetBBS v1.0a2.70 — Fix: DATABASE_URL from EnvironmentFile not overridden correctly
 
 `serve.py` set DATABASE_URL only when it was absent in the environment. But systemd's

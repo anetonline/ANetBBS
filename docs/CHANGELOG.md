@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.70`** (May 2026). Previous: `v1.0a2.69`.
+separately. Current release: **`v1.0a2.71`** (May 2026). Previous: `v1.0a2.70`.
+
+## v1.0a2.71 — Fix: Trade Wars 2 player database silently wiped on player deletion (May 2026)
+
+`json-client.js` treated `db.write(scope, key)` with no value as setting the key to
+`undefined`. `JSON.stringify` omits undefined-valued keys, so the `players` array was
+deleted from `tw2.json` the first time any player was removed from the game. Two call sites
+triggered this: `DeletePlayer` (which flushes the modified players array) and the kill
+handler (which flushes a modified team record). Universe data (`sectors`, `ports`,
+`planets`, etc.) was unaffected because those writes always supply an explicit value.
+
+Fix: `json-client.js` now treats a no-value `write(scope, key)` as "mark dirty and save",
+preserving the in-place mutation already made to the cached reference. Added null guards in
+`LoadPlayer`, `RankPlayers`, and `MatchPlayer` for resilience, and a warning log when a db
+file exists but fails to parse.
 
 ## v1.0a2.70 — Fix: DATABASE_URL from EnvironmentFile not overridden correctly (May 2026)
 

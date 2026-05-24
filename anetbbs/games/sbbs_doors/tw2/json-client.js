@@ -58,6 +58,11 @@ JSONClient.prototype._load = function(scope) {
         var raw = _fs.readFileSync(f, 'utf8');
         this._cache[scope] = JSON.parse(raw);
     } catch (e) {
+        if (e.code !== 'ENOENT') {
+            // File exists but couldn't be parsed — log so sysop can diagnose.
+            process.stderr.write('[tw2 json-client] WARNING: failed to load '
+                + f + ': ' + e.message + '\n');
+        }
         this._cache[scope] = {};
     }
     return this._cache[scope];
@@ -173,6 +178,15 @@ JSONClient.prototype.read = function(scope, key, lock) {
 
 JSONClient.prototype.write = function(scope, key, value, lock) {
     var parts = this._splitKey(key);
+    // Upstream Synchronet tw2 calls db.write(scope, key) with no value after
+    // mutating a cached object in-place, as a "flush this key" signal. Treat
+    // that as mark-dirty-and-save; assigning undefined would make
+    // JSON.stringify silently drop the key from the file.
+    if (value === undefined && parts.length) {
+        this._dirty[scope] = true;
+        this._save(scope);
+        return true;
+    }
     if (!parts.length) {
         this._cache[scope] = value;
     } else {

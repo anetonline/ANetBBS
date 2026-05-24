@@ -359,6 +359,7 @@ function RankPlayers()
 	var fighters=new Array();
 	var universe=db.read(Settings.DB,'sectors',LOCK_READ);
 	var allplayers=db.read(Settings.DB,'players',LOCK_READ);
+	if(!allplayers) allplayers=[];
 
 	for(i=1; i<universe.length; i++) {
 		if(universe[i].Fighters > 0 && universe[i].FighterOwner > 0) {
@@ -578,6 +579,7 @@ function MatchPlayer(name)
 {
 	var i;
 	var allplayers=db.read(Settings.DB,'players',LOCK_READ);
+	if(!allplayers) allplayers=[];
 
 	name=name.toUpperCase();
 	for(i=1; i<allplayers.length; i++) {
@@ -722,6 +724,13 @@ function LoadPlayer()
 	for(var done=false; !done;) {
 		db.lock(Settings.DB,'players',LOCK_WRITE);
 		allplayers=db.read(Settings.DB,'players');
+		if(!allplayers) {
+			db.unlock(Settings.DB,'players');
+			console.attributes="R";
+			console.writeln("ERROR: Trade Wars player database is missing or corrupt.");
+			console.writeln("Please notify the Sysop. (tw2: players table not found in db)");
+			return(false);
+		}
 		for(i=1; i<allplayers.length; i++) {
 			player=allplayers[i];
 			if(player.QWKID==system.qwk_id && player.UserNumber == user.number && (!file_exists(system.data_dir+format("user/%04d.tw2",player.UserNumber)))) {
