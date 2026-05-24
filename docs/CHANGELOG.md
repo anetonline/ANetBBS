@@ -1,7 +1,79 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.64`** (May 2026). Previous: `v1.0a2.63`.
+separately. Current release: **`v1.0a2.70`** (May 2026). Previous: `v1.0a2.69`.
+
+## v1.0a2.70 — Fix: DATABASE_URL from EnvironmentFile not overridden correctly (May 2026)
+
+`serve.py` guarded the DATABASE_URL override with `if not os.environ.get('DATABASE_URL')`.
+Systemd's `EnvironmentFile` loads `.env` before the process starts, so DATABASE_URL is
+always set (even to a stale/relative value from a preserved `.env`), and the conditional
+never triggered. Fix: always set DATABASE_URL from `serve.py`'s own install dir path.
+Operators who need Postgres or a non-default path can set `ANETBBS_DB_URL` instead.
+Added diagnostic log lines (INSTALL_DIR, DATABASE_URL, DB file accessibility).
+
+## v1.0a2.69 — Fix: web server database path wrong after non-editable pip install (May 2026)
+
+`anetbbs-web` crashed with `sqlite3.OperationalError: unable to open database file`.
+`config.py` computes `BASE_DIR = Path(__file__).parent.parent` at import time. With an
+editable install (`pip install -e .`), `__file__` points to the source tree and `BASE_DIR`
+is the install root. When pip falls back to a non-editable install, `__file__` is in
+site-packages and `BASE_DIR` is wrong. The admin setup heredoc always worked because it
+explicitly sets `sys.path` and `DATABASE_URL`. `deploy/serve.py` did not.
+
+Fix: `deploy/serve.py` now inserts `INSTALL_DIR` (from its own `__file__`) at the front
+of `sys.path` and sets `DATABASE_URL` to the absolute path if not already set — mirroring
+what the install.sh admin setup has always done.
+
+## v1.0a2.68 — Python 3.12 fix: patch threading.get_ident for greenlet safety (May 2026)
+
+`eventlet.monkey_patch()` replaces `threading.get_ident` with a greenlet-based call to
+`greenlet.getcurrent()`. During Python 3.12's import-time GC/logging cleanup, the hub
+greenlet isn't fully initialised yet, so `getcurrent()` raises
+`RuntimeError: greenlet is being finalized`. Python 3.12 changed the threading/GC startup
+interaction, triggering a race that Python 3.10/3.11 didn't have.
+
+Fix (in `deploy/serve.py`): after `eventlet.monkey_patch()`, wrap both
+`threading.get_ident` and `eventlet.green.thread.get_ident` to catch `RuntimeError` and
+fall back to `_thread.get_ident()` (real C-level thread ID). Safe because the crash only
+occurs in finalizer paths, not during request handling. Also added `try/except` around
+`create_app()` and `socketio.run()` to surface any other startup errors via the journal.
+
+## v1.0a2.67 — Web server: drop gunicorn+eventlet, use eventlet native WSGI (May 2026)
+
+gunicorn `--worker-class=eventlet` is broken on Python 3.12: fork()+greenlet
+causes `RuntimeError: greenlet is being finalized` at worker boot (exit code 3).
+Flask-SocketIO's own docs say not to use gunicorn+eventlet; use eventlet's
+built-in WSGI server instead (no fork = no crash).
+
+- Added `deploy/serve.py` — calls `socketio.run()` which uses eventlet.wsgi.server
+- Updated `deploy/anetbbs-web.service`, `install.sh`, `update.sh` to use
+  `python deploy/serve.py` instead of gunicorn
+- Logs now go to journalctl instead of a separate gunicorn-access.log
+
+## v1.0a2.66 — Install fix: Python 3.12 gunicorn/eventlet crash (May 2026)
+
+`anetbbs-web` failed to start on Python 3.12 with gunicorn `WORKER_BOOT_ERROR`
+(exit code 3). The eventlet worker crashed during init:
+
+```
+RuntimeError: greenlet is being finalized — eventlet/green/thread.py get_ident()
+```
+
+Python 3.12 changed threading/GC finalization in a way that breaks greenlet < 3.0.0.
+`eventlet>=0.33.0` did not constrain greenlet's version, so pip could resolve
+greenlet 2.x, which crashes at startup. Fix: explicit `greenlet>=3.0.0` +
+`eventlet>=0.35.2` in setup.py.
+
+## v1.0a2.65 — Install fix: PEP 440 version format (May 2026)
+
+Fresh installs failed on Python 3.12+ with newer setuptools:
+`packaging.version.InvalidVersion: Invalid version: '1.0a2.64'`.
+The `1.0a2.NN` format is not valid PEP 440. This was a long-standing bug hidden by
+`--quiet 2>/dev/null` suppressing pip output until v1.0a2.62 made errors visible.
+
+- `setup.py` now uses `1.0a2.postNN` (PEP 440 post-release notation).
+- Display version in admin panel / filenames stays `v1.0a2.NN` (from `__init__.py`).
 
 ## v1.0a2.64 — TIC file-echo ZIP binary + duplicate error spam (May 2026)
 

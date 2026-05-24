@@ -1,3 +1,104 @@
+# ANetBBS v1.0a2.70 — Fix: DATABASE_URL from EnvironmentFile not overridden correctly
+
+`serve.py` set DATABASE_URL only when it was absent in the environment. But systemd's
+`EnvironmentFile` loads `.env` before the process starts, so DATABASE_URL is always
+present — even when it contains a stale or relative value from a preserved `.env`.
+The conditional `if not os.environ.get('DATABASE_URL')` was always False and the
+override never ran.
+
+Fix: always set `DATABASE_URL` to an absolute path derived from `serve.py`'s own location.
+Operators who need Postgres or a custom SQLite path can set `ANETBBS_DB_URL` instead
+(checked first). Added diagnostic log lines showing INSTALL_DIR, DATABASE_URL, and
+whether the DB file and its parent directory are accessible — visible via
+`journalctl -u anetbbs-web`.
+
+---
+
+# ANetBBS v1.0a2.69 — Fix: web server database path wrong after non-editable pip install
+
+`anetbbs-web` crashed with `sqlite3.OperationalError: unable to open database file` when
+started as the service user. Root cause: `anetbbs/config.py` computes `BASE_DIR` from
+`Path(__file__).parent.parent`, which resolves correctly when installed with `pip install -e .`
+(editable — `__file__` points to the source tree) but resolves to the venv's site-packages
+directory when pip fell back to a non-editable install. The admin setup heredoc in
+`install.sh` explicitly does `sys.path.insert(0, INSTALL_DIR)` and sets `DATABASE_URL`,
+so it always works. `deploy/serve.py` did neither.
+
+Fix: added the same two lines to `deploy/serve.py` at startup — insert `INSTALL_DIR`
+(derived from `serve.py`'s own `__file__`) at the front of `sys.path`, and pin
+`DATABASE_URL` to the correct absolute path if not already set in the environment.
+
+---
+
+# ANetBBS v1.0a2.68 — Python 3.12 fix: patch threading.get_ident for greenlet safety
+
+The web server still crashed on Python 3.12 even after switching from gunicorn to
+eventlet's native WSGI server (v1.0a2.67). Root cause confirmed: `eventlet.monkey_patch()`
+replaces `threading.get_ident` with a greenlet-based version that calls
+`greenlet.getcurrent()`. During Python's import-time GC cleanup, `getcurrent()` raises
+`RuntimeError("greenlet is being finalized")` because the hub greenlet hasn't finished
+initialising. Python 3.12 changed how threading/GC interact during startup, triggering this
+race.
+
+Fix: immediately after `eventlet.monkey_patch()` in `deploy/serve.py`, wrap
+`threading.get_ident` (and `eventlet.green.thread.get_ident`) with a safe version that
+catches `RuntimeError` and falls back to the real C-level `_thread.get_ident()`. The
+fallback is safe because the crash only occurs in finalizer/cleanup paths, not normal
+request handling. Also added try/except around `create_app()` and `socketio.run()` so
+the actual error is logged if something else fails.
+
+---
+
+# ANetBBS v1.0a2.67 — Web server: drop gunicorn+eventlet, use eventlet native WSGI
+
+`anetbbs-web` crashed on Python 3.12 with gunicorn exit code 3 because
+gunicorn's `--worker-class=eventlet` fork()-then-greenlet model is fundamentally
+broken on Python 3.12 (flask-socketio's own docs now say not to use it).
+
+Fix: replaced gunicorn with eventlet's built-in WSGI server via
+`socketio.run()`. New entry point: `deploy/serve.py`. Service files updated in
+`install.sh`, `update.sh`, and `deploy/anetbbs-web.service`. No gunicorn fork()
+= no greenlet finalization crash.
+
+**What stays the same:** WebSocket support, all protocols, all features.
+**What changes:** logs now go to journalctl (no separate gunicorn-access.log).
+
+---
+
+# ANetBBS v1.0a2.66 — Install fix: Python 3.12 gunicorn/eventlet crash
+
+`anetbbs-web` failed to start on Python 3.12 with gunicorn exit code 3
+(`WORKER_BOOT_ERROR`). The eventlet worker crashed during initialization with:
+
+```
+RuntimeError: greenlet is being finalized
+  File "eventlet/green/thread.py", in get_ident
+```
+
+Root cause: Python 3.12 changed how threading/GC finalization interacts with
+greenlets. `greenlet` must be >= 3.0.0 for Python 3.12 compatibility, and
+`eventlet` must be >= 0.35.2. The previous requirement (`eventlet>=0.33.0`)
+did not constrain greenlet's version, so pip could install greenlet 2.x which
+crashes on Python 3.12 startup.
+
+Fix: added explicit `greenlet>=3.0.0` and bumped `eventlet>=0.35.2` in setup.py.
+
+---
+
+# ANetBBS v1.0a2.65 — Install fix: PEP 440 version format
+
+Fresh installs failed with `packaging.version.InvalidVersion: Invalid version: '1.0a2.64'`
+on any system with newer setuptools (ships with Python 3.12+). The version format
+`1.0a2.NN` is not valid PEP 440 — newer setuptools enforces this strictly. The bug
+existed in every release since at least v1.0a2.60 but was hidden because `install.sh`
+previously swallowed all pip output with `--quiet 2>/dev/null` (fixed in v1.0a2.62).
+
+Fix: `setup.py` now uses `1.0a2.post65` (valid PEP 440 post-release notation) for the
+pip-visible version. The display version shown in the admin panel and filenames stays
+`v1.0a2.65` (from `anetbbs/__init__.py`).
+
+---
+
 # ANetBBS v1.0a2.64 — TIC file-echo: ZIP binary delivery + duplicate error spam
 
 Two BinkP/TIC processor bugs fixed:

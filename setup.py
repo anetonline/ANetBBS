@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0a2.64",
+    version="1.0a2.post70",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -20,7 +20,10 @@ setup(
         'Flask-Migrate>=4.0.0',
         # Async / WebSockets
         'python-socketio>=5.9.0',
-        'eventlet>=0.33.0',
+        # eventlet 0.35.2+ required for Python 3.12 (greenlet finalization crash).
+        # greenlet 3.0.0+ required for Python 3.12 threading compatibility.
+        'eventlet>=0.35.2',
+        'greenlet>=3.0.0',
         # SSH server
         'asyncssh>=2.14.0',
         # MRC web bridge (standalone aiohttp service)

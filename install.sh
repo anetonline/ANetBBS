@@ -1198,7 +1198,7 @@ systemctl daemon-reload 2>/dev/null || true
 # ─── Web service ────────────────────────────────────────────────────────────��──
 cat > /etc/systemd/system/anetbbs-web.service << SVCEOF
 [Unit]
-Description=ANetBBS Web Application (Gunicorn + eventlet)
+Description=ANetBBS Web Application (eventlet WSGI)
 After=network.target
 
 [Service]
@@ -1210,21 +1210,14 @@ EnvironmentFile=$INSTALL_DIR/.env
 # CAP_NET_BIND_SERVICE lets the unprivileged service user bind to the
 # privileged ports MSP (TCP/18) and SYSTAT/ActiveUser (UDP/11). Without
 # this, those listeners fail to bind and inter-BBS IM is broken silently.
+# NOTE: We intentionally do NOT set CapabilityBoundingSet here so that
+# sudo (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-ExecStart=$VENV_DIR/bin/gunicorn \\
-    --worker-class eventlet \\
-    -w 1 \\
-    -b ${WEB_BIND}:${WEB_PORT} \\
-    --timeout 300 \\
-    --graceful-timeout 30 \\
-    --log-level info \\
-    --access-logfile $INSTALL_DIR/logs/gunicorn-access.log \\
-    --error-logfile $INSTALL_DIR/logs/gunicorn-error.log \\
-    deploy.wsgi_wrapper:app
+ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5
 TimeoutStopSec=45
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

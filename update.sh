@@ -590,7 +590,7 @@ if [[ ! -f /etc/systemd/system/anetbbs-web.service ]]; then
     chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/logs" 2>/dev/null || true
     cat > /etc/systemd/system/anetbbs-web.service << SVCEOF
 [Unit]
-Description=ANetBBS Web Application (Gunicorn + eventlet)
+Description=ANetBBS Web Application (eventlet WSGI)
 After=network.target
 
 [Service]
@@ -599,26 +599,16 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-# Privileged ports (MSP/18, SYSTAT/11) need this capability.
-# NOTE: We intentionally do NOT set CapabilityBoundingSet here. The
-# Service Control Center's Start/Stop/Restart buttons shell out to
-# sudo, which itself needs to re-acquire CAP_SETUID + CAP_SETGID +
-# CAP_AUDIT_WRITE from its setuid-root bit. A bounding set that
-# excludes those caps makes sudo fail with "unable to change to
-# root gid" + "audit plugin" errors. AmbientCapabilities alone is
-# enough to bind privileged ports without granting full root.
+# CAP_NET_BIND_SERVICE lets the unprivileged service user bind to the
+# privileged ports MSP (TCP/18) and SYSTAT/ActiveUser (UDP/11).
+# NOTE: We intentionally do NOT set CapabilityBoundingSet here so that
+# sudo (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-ExecStart=$VENV_DIR/bin/gunicorn \\
-    --worker-class eventlet \\
-    -w 1 \\
-    -b 0.0.0.0:$WEB_PORT_VAL \\
-    --timeout 120 \\
-    --log-level info \\
-    --access-logfile $INSTALL_DIR/logs/gunicorn-access.log \\
-    --error-logfile $INSTALL_DIR/logs/gunicorn-error.log \\
-    deploy.wsgi_wrapper:app
+ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5
+KillMode=mixed
+TimeoutStopSec=45
 
 [Install]
 WantedBy=multi-user.target

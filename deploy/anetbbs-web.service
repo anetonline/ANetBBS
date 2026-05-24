@@ -1,5 +1,5 @@
 [Unit]
-Description=ANetBBS Web Application (Gunicorn + eventlet)
+Description=ANetBBS Web Application (eventlet WSGI)
 After=network.target
 
 [Service]
@@ -8,23 +8,10 @@ User=anetbbs
 Group=anetbbs
 WorkingDirectory=/opt/anetbbs
 EnvironmentFile=/opt/anetbbs/.env
-# Privileged ports (MSP/18, SYSTAT/11) need this capability.
+# CAP_NET_BIND_SERVICE lets the unprivileged service user bind to the
+# privileged ports MSP (TCP/18) and SYSTAT/ActiveUser (UDP/11).
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-ExecStart=/opt/anetbbs/venv/bin/gunicorn \
-    --worker-class eventlet \
-    -w 1 \
-    --worker-connections 1000 \
-    -b 0.0.0.0:5000 \
-    --timeout 300 \
-    --graceful-timeout 30 \
-    --log-level info \
-    --access-logfile /opt/anetbbs/logs/gunicorn-access.log \
-    --error-logfile /opt/anetbbs/logs/gunicorn-error.log \
-    deploy.wsgi_wrapper:app
-# Reap the whole gunicorn process group on stop. Without this, a child
-# worker can survive past the master and hold port 5000, causing the
-# next start to fail with EADDRINUSE in a tight crash loop.
+ExecStart=/opt/anetbbs/venv/bin/python /opt/anetbbs/deploy/serve.py
 KillMode=mixed
 TimeoutStopSec=20
 Restart=always
