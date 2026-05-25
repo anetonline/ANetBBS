@@ -78,10 +78,10 @@ sudo ufw enable
 
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0a2.74.tar.gz
+wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0a2.76.tar.gz
 # or check /downloads/ on bbs.a-net.fyi for the latest tarball
 
-tar xzf ANetBBS-v1.0a2.74.tar.gz
+tar xzf ANetBBS-v1.0a2.76.tar.gz
 cd ANetBBS-v1.0a2.74
 ```
 
@@ -302,8 +302,8 @@ rm -rf "$INSTALL_DIR/data.bak"
 
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0a2.74.tar.gz
-tar xzf ANetBBS-v1.0a2.74.tar.gz
+wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0a2.76.tar.gz
+tar xzf ANetBBS-v1.0a2.76.tar.gz
 sudo bash ANetBBS-v1.0a2.74/update.sh
 ```
 

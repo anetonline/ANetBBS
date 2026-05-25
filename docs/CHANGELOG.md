@@ -1,7 +1,25 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.75`** (May 2026). Previous: `v1.0a2.74`.
+separately. Current release: **`v1.0a2.76`** (May 2026). Previous: `v1.0a2.75`.
+
+## v1.0a2.76 — Fix: web MRC chat "MRCClient is not defined" (May 2026)
+
+`anetbbs/static/mrc/client.js` was never created, so every web user opening
+`/mrc/` got a JS `ReferenceError: MRCClient is not defined` and the chat page
+was non-functional.
+
+Added `anetbbs/static/mrc/client.js` with the full `MRCClient` WebSocket
+class:
+- `connect()` — opens the WebSocket to the bridge, resolves on open
+- `joinRoom(handle, room)` — sends `join_room` to the bridge
+- `sendMessage(text)` — sends `send_message` to the current room
+- `sendServerCommand(cmd)` — sends `server_cmd` (slash commands)
+- `leaveRoom()` — sends `leave_room`
+- `disconnect()` — tears down the WebSocket cleanly
+- 30-second keepalive ping so the bridge doesn't drop idle connections
+- Tracks current room/handle from `joined` / `room_changed` / `handle_changed`
+  events so callers don't need to pass the room on every message
 
 ## v1.0a2.75 — Raspberry Pi full install guide (May 2026)
 
