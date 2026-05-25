@@ -1,7 +1,36 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.72`** (May 2026). Previous: `v1.0a2.71`.
+separately. Current release: **`v1.0a2.73`** (May 2026). Previous: `v1.0a2.72`.
+
+## v1.0a2.73 — ANSI file drop-in, bulletin word-wrap, screen-slot editor link, sysop name fix (May 2026)
+
+**ANSI file drop-in system** (`data/text/`): sysops can now drop `.ans` files
+into the install to override screens without touching the admin UI. Resolution
+order: file first, then DB, then built-in fallback.
+- `data/text/welcome.ans` — pre-login / logon screen
+- `data/text/goodbye.ans` — logoff screen
+- `data/text/newuser.ans` — new-user registration screen
+- `data/text/menus/<name>.ans` — menu header ANSI (e.g. `main.ans`, `games.ans`)
+Display codes (`@USER@`, `|BN`, etc.) are applied to file-based screens too.
+
+**ANSI editor → screen slot link**: the ANSI editor now has an "Apply to Screen
+Slot" card alongside "Apply to Menu". One click pushes the art directly into
+the welcome/goodbye/newuser DB slot — no copy-paste required.
+
+**Bulletin word-wrap**: bulletin text in the terminal pager now word-wraps to
+the user's negotiated terminal width (NAWS) instead of silently truncating every
+line at 78 characters.
+
+**Sysop name as admin username default**: the installer now defaults the admin
+login username to the sysop display name entered earlier, so sysops who type
+"Firehawke" as their sysop name get "Firehawke" as the default admin account
+name instead of "admin". `install.sh` also now writes `SYSOP_NAME` to `.env`
+and asks for a sysop display name separately.
+
+**Logged-out intro screen uses BBS_NAME**: the fallback login menu shown when no
+custom welcome ANSI is configured now reads `BBS_NAME` from config instead of
+always printing "Welcome to AnetBBS".
 
 ## v1.0a2.72 — Fix: login fails with CSRF error on HTTP-only installs (May 2026)
 

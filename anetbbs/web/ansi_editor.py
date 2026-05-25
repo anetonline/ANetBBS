@@ -464,3 +464,26 @@ def apply_to_menu():
     db.session.commit()
     flash(f'Applied "{art.name}" to menu "{menu.name}".', 'success')
     return redirect(url_for('ansi_editor.edit', art_id=art.id))
+
+
+@ansi_bp.route('/apply-to-screen', methods=['POST'])
+@login_required
+def apply_to_screen():
+    """Set this AnsiArt as a BbsAnsiScreen slot (welcome, goodbye, newuser)."""
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    from ..models import BbsAnsiScreen
+    art = AnsiArt.query.get_or_404(request.form.get('art_id', type=int))
+    slot = (request.form.get('slot') or '').strip()
+    if not slot:
+        flash('No screen slot specified.', 'danger')
+        return redirect(url_for('ansi_editor.edit', art_id=art.id))
+    screen = BbsAnsiScreen.query.filter_by(slot=slot).first()
+    if not screen:
+        screen = BbsAnsiScreen(slot=slot)
+        db.session.add(screen)
+    screen.body = art.ansi_text
+    screen.is_active = True
+    db.session.commit()
+    flash(f'Applied "{art.name}" to the "{slot}" screen slot.', 'success')
+    return redirect(url_for('ansi_editor.edit', art_id=art.id))

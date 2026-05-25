@@ -315,7 +315,8 @@ ask INSTALL_DIR     "Install directory"      "$DEF_INSTALL_DIR"
 echo ""
 
 echo -e "${BOLD}  ── Sysop Admin Account ──${NC}"
-ask ADMIN_USER      "Sysop username"         "$DEF_ADMIN_USER"
+ask SYSOP_NAME      "Sysop display name"     "$BBS_NAME Sysop"
+ask ADMIN_USER      "Sysop username"         "${SYSOP_NAME:-admin}"
 ask_secret ADMIN_PASS "Sysop password"
 
 # Auto-generate password if blank
@@ -819,7 +820,7 @@ else
 fi
 
 # Create all data directories
-for d in data data/uploads data/avatars data/games data/dos-games data/echomail data/mrc logs anetbbs/logs; do
+for d in data data/uploads data/avatars data/games data/dos-games data/echomail data/mrc data/text data/text/menus logs anetbbs/logs; do
     mkdir -p "$INSTALL_DIR/$d"
 done
 ok "Data directories created"
@@ -957,6 +958,7 @@ WEB_PORT=$WEB_PORT
 # Application
 BBS_NAME=$BBS_NAME
 BBS_DESCRIPTION=$BBS_DESC
+SYSOP_NAME=$SYSOP_NAME
 
 # Inter-BBS Instant Messaging (MSP / RFC 1312, ports 18 TCP + 11 UDP).
 # Disabled here means the listener threads don't start; outbound /imsg/send

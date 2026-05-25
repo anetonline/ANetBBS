@@ -158,7 +158,7 @@ def main():
 
     # 5. Admin user
     step('Sysop account')
-    admin_user = ask('Admin username', default='admin', validator=non_empty)
+    admin_user = ask('Admin username', default=sysop_name, validator=non_empty)
     admin_email = ask('Admin email', default=sysop_email)
     while True:
         admin_pass = ask('Admin password (min 8 chars)', secret=True,
@@ -215,7 +215,7 @@ def main():
     # 9. Make dirs
     step('Creating directories')
     for d in ('data', 'logs', 'data/uploads', 'data/avatars',
-              'data/file-queue'):
+              'data/file-queue', 'data/text', 'data/text/menus'):
         p = install_dir / d
         p.mkdir(parents=True, exist_ok=True)
     ok('data/, logs/, etc. ready')

@@ -529,6 +529,11 @@ class BBSSession:
         """Render a sysop-defined ANSI screen by slot name. Best-effort —
         silently no-ops if the slot doesn't exist or the DB is unavailable.
 
+        Resolution order:
+          1. {DATA_DIR}/text/{slot}.ans  — file drop-in (highest priority)
+          2. BbsAnsiScreen DB row        — set via /admin/menus/screens
+          3. nothing                     — silently skip
+
         IMPORTANT: never import anetbbs.web_app here. That module calls
         eventlet.monkey_patch() at import time, which corrupts threading
         primitives in the telnet/SSH/rlogin processes (those use plain
@@ -536,13 +541,29 @@ class BBSSession:
         with "cannot notify on un-acquired lock" errors.
         """
         try:
-            from ..models import BbsAnsiScreen
+            import pathlib as _pl
             from ..features.bbs_ui import _app
-            with _app().app_context():
-                row = BbsAnsiScreen.query.filter_by(
-                    slot=slot, is_active=True).first()
-                pause = bool(row.pause_after) if row else False
-                body = row.body if row else None
+
+            # 1. File-based override
+            pause = False
+            body = None
+            try:
+                _data_dir = _app().config.get('DATA_DIR', '')
+                _ans_file = _pl.Path(_data_dir) / 'text' / f'{slot}.ans'
+                if _ans_file.exists():
+                    body = _ans_file.read_bytes().decode('latin-1')
+            except Exception:
+                pass
+
+            # 2. DB lookup if no file found
+            if body is None:
+                from ..models import BbsAnsiScreen
+                with _app().app_context():
+                    row = BbsAnsiScreen.query.filter_by(
+                        slot=slot, is_active=True).first()
+                    pause = bool(row.pause_after) if row else False
+                    body = row.body if row else None
+
             if not body:
                 return
             # Substitute Synchronet @-codes / Mystic |XX placeholders so
@@ -624,15 +645,22 @@ class BBSSession:
         # SSH/rlogin already short-circuited above and never reaches here).
         await self._show_ansi_screen('welcome')
 
+        try:
+            from ..features.bbs_ui import _app as _bbs_app
+            _bbs_name = _bbs_app().config.get('BBS_NAME', 'ANetBBS')
+        except Exception:
+            _bbs_name = 'ANetBBS'
+
         while True:
             await self.clear_screen()
             # Colorful ANSI banner — cyan border, white title, yellow hotkeys.
             B = '\x1b[1m'; R = '\x1b[0m'
             CY = '\x1b[96m'; YE = '\x1b[93m'; GR = '\x1b[92m'; WH = '\x1b[97m'; DI = '\x1b[37m'
+            _title = f'Welcome to {_bbs_name}'[:38].center(38)
             menu = (
                 "\r\n"
                 f"{B}{CY}╔════════════════════════════════════════╗{R}\r\n"
-                f"{B}{CY}║           {WH}Welcome to AnetBBS{CY}           ║{R}\r\n"
+                f"{B}{CY}║ {WH}{_title}{CY} ║{R}\r\n"
                 f"{B}{CY}╠════════════════════════════════════════╣{R}\r\n"
                 f"{B}{CY}║  {YE}1{DI}. {GR}Login{' ' * 30}{CY}║{R}\r\n"
                 f"{B}{CY}║  {YE}2{DI}. {GR}New User Registration{' ' * 14}{CY}║{R}\r\n"

@@ -430,6 +430,19 @@ async def run_menu(session, start='main'):
             prompt = menu.prompt or 'Choice: '
             item_list = [(it.hotkey.upper(), it.label, it.action_type, it.action_args)
                          for it in items]
+            # File-based ANSI override: data/text/menus/<name>.ans takes
+            # priority over the DB field, so sysops can drop a file in place.
+            import os as _os
+            from flask import current_app as _ca
+            _ans_path = _os.path.join(
+                _ca.config.get('DATA_DIR', ''), 'text', 'menus',
+                f'{menu.name}.ans')
+            if _os.path.exists(_ans_path):
+                try:
+                    with open(_ans_path, 'rb') as _fh:
+                        screen = _fh.read().decode('latin-1')
+                except Exception:
+                    pass
 
         # ANSI palette
         RESET = '\x1b[0m'

@@ -849,6 +849,10 @@ fi
 mkdir -p "$INSTALL_DIR/data/mrc"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/mrc" 2>/dev/null || true
 
+# Ensure data/text/ and data/text/menus/ exist for file-based ANSI overrides
+mkdir -p "$INSTALL_DIR/data/text/menus"
+chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/text" 2>/dev/null || true
+
 # Refresh /etc/sudoers.d/anetbbs so the Service Control Center can run
 # systemctl + journalctl against the current unit names. We rewrite it
 # every update because past releases shipped a stale list (anetbbs-telnet,

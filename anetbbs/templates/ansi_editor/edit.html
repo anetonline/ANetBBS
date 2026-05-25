@@ -190,6 +190,34 @@
     </div>
 </div>
 
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-display"></i> Apply to a Screen Slot</div>
+    <div class="card-body">
+        <p class="small text-muted mb-2">Set this art as a logon, logoff, or new-user
+            screen. Save your work first. This writes directly to the screen slot — no
+            paste required.</p>
+        <form method="post" action="{{ url_for('ansi_editor.apply_to_screen') }}"
+              class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="art_id" value="{{ art.id }}">
+            <div class="col-md-8">
+                <label class="form-label">Screen Slot</label>
+                <select name="slot" class="form-select" required>
+                    <option value="welcome">welcome — pre-login / logon screen</option>
+                    <option value="goodbye">goodbye — logoff screen</option>
+                    <option value="newuser">newuser — new user registration screen</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-info w-100"
+                        onclick="return confirm('Apply this art to the selected screen slot?')">
+                    <i class="bi bi-check2-circle"></i> Apply
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 (function() {
     const initial = {{ grid_json | safe }};

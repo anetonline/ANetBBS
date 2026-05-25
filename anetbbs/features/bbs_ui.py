@@ -315,19 +315,22 @@ class BBSMenuUI:
         await self.session.write(
             f'{BOLD}{CYAN}╚{"═" * 76}╝{RESET}\r\n')
 
-        lines = (body or '').splitlines() or ['(empty)']
+        # Word-wrap plain-text lines to the terminal width; pass ANSI lines
+        # through unchanged (their visible width is hard to compute).
+        col_w = max(40, (getattr(self.session, 'window_size', (80, 24))[0] or 80) - 2)
+        raw_lines = (body or '').splitlines() or ['(empty)']
+        lines = []
+        for _ln in raw_lines:
+            if '\x1b' in _ln:
+                lines.append(_ln)
+            else:
+                lines.extend(self._wrap_text(_ln, col_w) or [''])
         total = len(lines)
         page = 0
         while page * page_size < total:
             chunk = lines[page * page_size:(page + 1) * page_size]
             for line in chunk:
-                # Don't truncate ANSI-escaped lines — visible width <= 80 isn't
-                # easy to compute. Truncating bare text at 78 keeps the layout
-                # tidy on standard terminals.
-                if '\x1b' in line:
-                    await self.session.write(line + '\r\n')
-                else:
-                    await self.session.write(line[:78] + '\r\n')
+                await self.session.write(line + '\r\n')
             page += 1
             if page * page_size >= total:
                 # End of bulletin
