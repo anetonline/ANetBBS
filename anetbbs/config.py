@@ -124,7 +124,11 @@ class Config:
     
     # Session
     PERMANENT_SESSION_LIFETIME = 3600 * 24 * 7  # 7 days
-    SESSION_COOKIE_SECURE = False
+    # Set SESSION_COOKIE_SECURE=true in .env only when serving over HTTPS.
+    # Leaving it false (the default) lets HTTP-only installs work correctly;
+    # the Secure flag makes browsers silently drop the session cookie on plain
+    # HTTP connections, which breaks CSRF token delivery.
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     
@@ -246,8 +250,7 @@ class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
     TESTING = False
-    SESSION_COOKIE_SECURE = True
-    
+
     # Use PostgreSQL in production or fallback to SQLite
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
         f'sqlite:///{os.path.join(Config.DATA_DIR, "anetbbs.db")}'

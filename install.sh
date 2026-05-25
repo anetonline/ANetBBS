@@ -926,6 +926,10 @@ FLASK_ENV=production
 
 # Security
 SECRET_KEY=$SECRET_KEY
+# Set to true only when the web interface is served over HTTPS (e.g. via nginx
+# with TLS). Leaving false lets HTTP-only installs work; with true the browser
+# silently drops the session cookie on plain HTTP, breaking login (CSRF error).
+SESSION_COOKIE_SECURE=$( [[ "$ENABLE_SSL" == "y" ]] && echo "true" || echo "false" )
 
 # Database — ABSOLUTE path so it works from any working directory
 DATABASE_URL=sqlite:///${INSTALL_DIR}/data/anetbbs.db

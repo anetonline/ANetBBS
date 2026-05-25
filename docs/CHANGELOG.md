@@ -1,7 +1,19 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.71`** (May 2026). Previous: `v1.0a2.70`.
+separately. Current release: **`v1.0a2.72`** (May 2026). Previous: `v1.0a2.71`.
+
+## v1.0a2.72 — Fix: login fails with CSRF error on HTTP-only installs (May 2026)
+
+`ProductionConfig` hardcoded `SESSION_COOKIE_SECURE = True`. Browsers silently
+discard Secure-flagged cookies on plain HTTP connections, so the CSRF token stored
+in the session on the GET of `/auth/login` was never returned on the POST — Flask-WTF
+saw no token and returned 400 Bad Request. Affected any install without nginx+TLS
+(direct port 5000 access).
+
+Fix: `SESSION_COOKIE_SECURE` is now an env-var flag (default `false`). `install.sh`
+sets it to `true` only when SSL was enabled during setup. Upgrading installs that
+lack the key in `.env` automatically get `false` via the env-var default.
 
 ## v1.0a2.71 — Fix: Trade Wars 2 player database silently wiped on player deletion (May 2026)
 
