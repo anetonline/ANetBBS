@@ -1,7 +1,23 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.76`** (May 2026). Previous: `v1.0a2.75`.
+separately. Current release: **`v1.0a2.77`** (May 2026). Previous: `v1.0a2.76`.
+
+## v1.0a2.77 — Fix: web MRC WebSocket connection error on HTTPS installs (May 2026)
+
+Web MRC chat connected for the sysop (direct HTTP on port 5000) but failed for
+all users on HTTPS installs with a WebSocket connection error. Two bugs:
+
+**Bug 1 — wrong protocol (`ws://` vs `wss://`):** Flask sits behind nginx, so
+`request.is_secure` is always False — Flask only sees plain HTTP from the
+proxy. The template was generating `ws://` WebSocket URLs on HTTPS sites, which
+browsers block as mixed content. Fixed by checking `X-Forwarded-Proto: https`
+header in `mrc_web.py`.
+
+**Bug 2 — nginx proxied to wrong bridge path:** The nginx template forwarded
+`/mrcws` to `http://127.0.0.1:8080/mrcws`, but the bridge only registered its
+WebSocket handler at `/ws`. Added `/mrcws` as an alias route in
+`mrc/bridge/main.py` and corrected the nginx template to proxy to `/ws`.
 
 ## v1.0a2.76 — Fix: web MRC chat "MRCClient is not defined" (May 2026)
 

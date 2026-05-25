@@ -36,7 +36,10 @@ def index():
     # Fall back to the legacy host:port form for direct connections.
     legacy_host = current_app.config.get('MRC_BRIDGE_HOST', '')
     legacy_port = current_app.config.get('MRC_BRIDGE_PORT', 8080)
-    protocol = 'wss' if (use_ssl or request.is_secure) else 'ws'
+    # Flask sits behind nginx so request.is_secure is always False (Flask
+    # sees plain HTTP from the proxy). Check X-Forwarded-Proto instead.
+    forwarded_https = request.headers.get('X-Forwarded-Proto', '') == 'https'
+    protocol = 'wss' if (use_ssl or request.is_secure or forwarded_https) else 'ws'
 
     if legacy_host and legacy_host not in ('localhost', '127.0.0.1', '0.0.0.0'):
         # Explicit host configured — use it (direct bridge connection)

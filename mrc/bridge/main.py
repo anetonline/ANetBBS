@@ -1249,6 +1249,7 @@ def create_app(config_path: Optional[str] = None) -> web.Application:
     app["bridge"] = bridge
 
     app.router.add_get("/ws",                bridge.handle_websocket)
+    app.router.add_get("/mrcws",             bridge.handle_websocket)  # nginx proxy alias
     app.router.add_get("/",                  bridge.handle_index)
     app.router.add_get("/static/{filename}", bridge.handle_static)
 
