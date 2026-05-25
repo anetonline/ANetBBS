@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.77`** (May 2026). Previous: `v1.0a2.76`.
+separately. Current release: **`v1.0a2.78`** (May 2026). Previous: `v1.0a2.77`.
+
+## v1.0a2.78 — Fix: web MRC full UI (real index.html + client.js wired to Flask) (May 2026)
+
+The web MRC chat UI was rendering from a 406-line stub template rather than
+the real 2300-line `mrc/web/index.html` that runs on the live server. The stub
+was missing themes, the user sidebar, macros, mentions panel, reconnection, pipe
+color rendering, server selection, mobile layout, and the full slash-command UI.
+
+- Replaced `anetbbs/templates/mrc/index.html` with the real `mrc/web/index.html`
+- Three minimal Jinja2 injections added: `url_for` for client.js static path,
+  `window.RETURN_TO_BBS_URL` for the back-to-BBS link, `{{ suggested_handle }}`
+  pre-fills the handle input with the logged-in username
+- `anetbbs/static/mrc/client.js` updated to the production version from
+  `mrc/web/client.js` (reconnection, pipe colors, auto-rejoin)
 
 ## v1.0a2.77 — Fix: web MRC WebSocket connection error on HTTPS installs (May 2026)
 

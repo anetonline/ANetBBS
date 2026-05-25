@@ -1,31 +1,19 @@
-# ANetBBS v1.0a2.77 — Fix: web MRC WebSocket connection error on HTTPS installs
+# ANetBBS v1.0a2.78 — Fix: web MRC full UI
 
-Web MRC chat worked for the sysop but failed for all regular users on HTTPS
-installs with a WebSocket connection error. Two bugs found and fixed.
+The web MRC chat page was rendering a stripped-down stub template instead of
+the real full-featured interface that runs on bbs.a-net.fyi. Users could
+connect (after v1.0a2.77 fixes) but the UI was missing themes, the user
+sidebar, macros, mentions panel, reconnection, pipe color rendering, server
+selection, and mobile layout.
 
 ## What's fixed
 
-**`anetbbs/web/mrc_web.py`** — WebSocket URL was always `ws://` (insecure)
-because Flask sees plain HTTP from nginx and `request.is_secure` is always
-False behind a proxy. Now checks `X-Forwarded-Proto: https` header so HTTPS
-installs correctly generate `wss://` URLs.
+Replaced `anetbbs/templates/mrc/index.html` with the real `mrc/web/index.html`
+with three minimal Flask/Jinja2 injections:
 
-**`mrc/bridge/main.py`** — The bridge only registered its WebSocket handler at
-`/ws`. Nginx proxies `/mrcws` to the bridge, but the bridge returned 404 for
-that path. Added `/mrcws` as an alias route so both paths work.
+- `client.js` loaded via Flask `url_for('static', ...)` instead of hardcoded path
+- `window.RETURN_TO_BBS_URL` set to the BBS home URL for the Return to BBS link
+- Handle input pre-filled with the logged-in user's username
 
-**`deploy/anetbbs-nginx.conf.template`** — Corrected the proxy_pass target
-from `http://127.0.0.1:8080/mrcws` to `http://127.0.0.1:8080/ws` for new
-installs.
-
-## Upgrading
-
-Run `update.sh` as usual. If you already have nginx configured from the
-template, update `/mrcws` proxy_pass to point to `/ws` on port 8080, then
-reload nginx:
-
-```bash
-sudo sed -i 's|proxy_pass.*8080/mrcws|proxy_pass http://127.0.0.1:8080/ws|' \
-    /etc/nginx/sites-available/anetbbs
-sudo nginx -t && sudo systemctl reload nginx
-```
+`anetbbs/static/mrc/client.js` is also the production version with
+reconnection, pipe color rendering, and auto-rejoin.
