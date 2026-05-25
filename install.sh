@@ -1413,6 +1413,9 @@ server {
     listen 80;
     server_name ${DOMAIN};
 
+    # Accept uploads up to the BBS's UPLOAD_MAX_SIZE (100MB) plus headroom.
+    client_max_body_size 110m;
+
     proxy_set_header Host              \$host;
     proxy_set_header X-Real-IP         \$remote_addr;
     proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
@@ -1431,18 +1434,32 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # MRC Bridge WebSocket — gated by Flask auth_request so unauthenticated
+    # browsers can't open the upstream WS even if they know the URL.
+    location = /mrc-auth-check {
+        internal;
+        proxy_pass http://127.0.0.1:${WEB_PORT}/mrc/auth-check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI \$request_uri;
+        proxy_set_header Cookie \$http_cookie;
+    }
+
     location /mrcws {
-        proxy_pass         http://127.0.0.1:8080/mrcws;
+        auth_request /mrc-auth-check;
+        proxy_pass         http://127.0.0.1:8080/ws;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade    \$http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_read_timeout 86400s;
     }
 
+    # Static files served directly by nginx for performance.
+    # max-age=86400 (1 day) intentionally omits 'immutable': static files
+    # change between BBS upgrades, so browsers must re-fetch after an update.
     location /static/ {
         alias ${INSTALL_DIR}/anetbbs/static/;
-        expires 7d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public, max-age=86400";
     }
 }
 NGINXEOF

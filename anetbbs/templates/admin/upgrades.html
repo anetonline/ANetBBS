@@ -277,9 +277,18 @@
         const j = JSON.parse(text);
         setLog(j.log || '', !!j.running);
         logBox.scrollTop = logBox.scrollHeight;
-        // The wrapper writes "exit N" as the very last line when
-        // update.sh returns. That's our terminal condition.
-        const done = !j.running && /\nexit \d+\s*$/.test(j.log || '');
+        // Terminal condition: the Python runner writes "exit N" as the
+        // very last line when update.sh returns. BUT — gunicorn is stopped
+        // and restarted mid-update (Step 3 of update.sh), which kills the
+        // Python thread before it can write "exit N". The new gunicorn has
+        // running=false, and the log ends with the wrapper's own completion
+        // line instead. Accept either marker so the UI doesn't poll forever.
+        const log_ = j.log || '';
+        const done = !j.running && (
+            /\nexit \d+\s*$/.test(log_) ||
+            /\[upgrade\] upgrade to \S+ complete/.test(log_) ||
+            /\[upgrade\] FAIL:/.test(log_)
+        );
         if (done) {
           logStatus.innerHTML = '<span class="badge bg-success">install complete — reload to see new version</span>';
           return;  // stop polling

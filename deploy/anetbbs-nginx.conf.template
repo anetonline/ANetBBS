@@ -68,10 +68,12 @@ server {
         proxy_read_timeout 86400s;
     }
 
-    # Static files served directly by nginx for performance
+    # Static files served directly by nginx for performance.
+    # max-age=86400 (1 day) intentionally omits 'immutable': static files
+    # change between BBS upgrades, so browsers must be able to re-fetch
+    # them with a forced refresh (Ctrl+Shift+R) after an update.
     location /static/ {
         alias /opt/anetbbs/anetbbs/static/;
-        expires 7d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public, max-age=86400";
     }
 }

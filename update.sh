@@ -70,6 +70,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
+# Snapshot which optional services are CURRENTLY active before we stop anything.
+# update.sh only restarts optional services (mrc-bridge, finger) if they were
+# running before the update — this prevents force-starting a service that the
+# sysop had stopped or that never successfully ran on this install.
+SERVICES_PREVIOUSLY_ACTIVE=()
+for svc in anetbbs-mrc-bridge anetbbs-finger; do
+    if [[ -f "/etc/systemd/system/${svc}.service" ]] && \
+       systemctl is-active --quiet "$svc" 2>/dev/null; then
+        SERVICES_PREVIOUSLY_ACTIVE+=("$svc")
+    fi
+done
+
 # Read existing .env into associative array
 declare -A EXISTING_ENV
 while IFS='=' read -r key value; do
@@ -907,13 +919,101 @@ done
 
 systemctl daemon-reload
 
+# ─── Patch nginx config (known bug fixes from past releases) ──────────────────
+# Never rewrite the whole config — sysops may have customized it.
+# Only surgically fix known bad values from old install.sh templates.
+NGINX_AVAIL="/etc/nginx/sites-available/anetbbs"
+if [[ -f "$NGINX_AVAIL" ]]; then
+    NGINX_CHANGED=false
+
+    # Fix: MRC bridge proxy_pass used /mrcws path; bridge only listens on /ws.
+    # Old: proxy_pass http://127.0.0.1:8080/mrcws;
+    # New: proxy_pass http://127.0.0.1:8080/ws;
+    if grep -q '8080/mrcws' "$NGINX_AVAIL" 2>/dev/null; then
+        info "Patching nginx: MRC bridge proxy path /mrcws → /ws"
+        sed -i 's|8080/mrcws;|8080/ws;|g' "$NGINX_AVAIL"
+        NGINX_CHANGED=true
+        ok "nginx: MRC bridge proxy path fixed"
+    fi
+
+    # Fix: 'immutable' Cache-Control caused browsers to permanently cache
+    # 404 responses from old installs (before anetbbs/static/mrc/ existed).
+    # Replace with a 1-day max-age without immutable so forced-refresh works.
+    if grep -q 'Cache-Control.*immutable' "$NGINX_AVAIL" 2>/dev/null; then
+        info "Patching nginx: removing 'immutable' from static file cache headers"
+        sed -i 's|add_header Cache-Control "public, immutable";|add_header Cache-Control "public, max-age=86400";|g' "$NGINX_AVAIL"
+        # Also remove the now-redundant 'expires 7d' line if it's still there
+        sed -i '/^\s*expires 7d;$/d' "$NGINX_AVAIL"
+        NGINX_CHANGED=true
+        ok "nginx: static cache headers updated (no longer immutable)"
+    fi
+
+    # Fix: Add /static/ location if the config pre-dates it entirely.
+    # Without it, static files fall through to Flask — still works but slower.
+    if ! grep -q 'location /static/' "$NGINX_AVAIL" 2>/dev/null; then
+        info "Adding /static/ location to nginx config (missing from old install)..."
+        STATIC_BLOCK="
+    # Static files served directly by nginx for performance.
+    location /static/ {
+        alias ${INSTALL_DIR}/anetbbs/static/;
+        add_header Cache-Control \"public, max-age=86400\";
+    }"
+        # Insert before the last closing brace in the last server{} block
+        python3 -c "
+import re, sys
+txt = open('$NGINX_AVAIL').read()
+# Insert before final closing brace
+idx = txt.rfind('}')
+if idx != -1:
+    txt = txt[:idx] + '''$STATIC_BLOCK
+}'''
+    open('$NGINX_AVAIL', 'w').write(txt)
+    print('inserted')
+" 2>/dev/null && { NGINX_CHANGED=true; ok "nginx: /static/ location added"; } || \
+        warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
+    fi
+
+    if [[ "$NGINX_CHANGED" == "true" ]]; then
+        if nginx -t 2>/dev/null; then
+            if nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null; then
+                ok "nginx config patched and reloaded"
+            else
+                warn "nginx config patched but reload failed — run: sudo nginx -s reload"
+            fi
+        else
+            warn "nginx config test failed after patching — reverting nginx to backup"
+            [[ -f "$BACKUP_DIR/anetbbs-nginx.bak" ]] && cp "$BACKUP_DIR/anetbbs-nginx.bak" "$NGINX_AVAIL"
+            nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null || true
+        fi
+    else
+        ok "nginx config looks good — no patches needed"
+    fi
+else
+    skip "No nginx config at $NGINX_AVAIL — skipping nginx patch step"
+fi
+
 # ─── Step 8: Restart services ──────────────────────────────────────────────────
 step "Step 8/8: Restarting services"
 
-# Build list from units that ACTUALLY exist on disk after Step 7's auto-install pass.
+# Build the restart list:
+#   anetbbs-web and anetbbs are always restarted (core services).
+#   anetbbs-mrc-bridge and anetbbs-finger are optional: only restart them
+#   if they were already running before the update. Sysops who don't use
+#   MRC (or who have it in a failed/stopped state) should not have it
+#   force-started during an update — that would create a loud failure
+#   in the log and could delay the web service health check.
 SERVICES_TO_START=()
-for svc in anetbbs-web anetbbs anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-web anetbbs; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && SERVICES_TO_START+=("$svc")
+done
+for svc in anetbbs-mrc-bridge anetbbs-finger; do
+    if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
+        if printf '%s\n' "${SERVICES_PREVIOUSLY_ACTIVE[@]}" | grep -qx "$svc" 2>/dev/null; then
+            SERVICES_TO_START+=("$svc")
+        else
+            skip "$svc was not active before the update — skipping restart (start it manually if needed)"
+        fi
+    fi
 done
 
 if [[ ${#SERVICES_TO_START[@]} -eq 0 ]]; then
@@ -921,6 +1021,8 @@ if [[ ${#SERVICES_TO_START[@]} -eq 0 ]]; then
 else
     for svc in "${SERVICES_TO_START[@]}"; do
         systemctl enable "$svc" >/dev/null 2>&1 || true
+        # Clear start-limit-hit so a previously failed service can restart cleanly
+        systemctl reset-failed "$svc" 2>/dev/null || true
         # Capture restart errors so we can surface them
         RESTART_ERR=$(systemctl restart "$svc" 2>&1)
         [[ -n "$RESTART_ERR" ]] && warn "$svc restart returned: $RESTART_ERR"

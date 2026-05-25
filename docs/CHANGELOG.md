@@ -1,7 +1,37 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.78`** (May 2026). Previous: `v1.0a2.77`.
+separately. Current release: **`v1.0a2.79`** (May 2026). Previous: `v1.0a2.78`.
+
+## v1.0a2.79 — Fix: nginx immutable caching + MRC-optional update + web update completion (May 2026)
+
+**nginx `Cache-Control: immutable` caused permanently-cached 404s.** The
+`/static/` nginx block shipped with `public, immutable` which tells browsers
+the URL will never change. When `anetbbs/static/mrc/client.js` didn't exist
+(pre-v1.0a2.76), nginx 404'd the file *with* the immutable header — browsers
+cached that 404 forever and never re-fetched the real file after upgrading.
+Fixed: `immutable` removed, `expires 7d` removed, replaced with
+`max-age=86400`. `update.sh` now auto-patches the running nginx config and
+reloads nginx.
+
+**`install.sh` nginx block fixed** — MRC bridge `proxy_pass` corrected from
+`/mrcws` to `/ws`; MRC `auth_request` block added (prevents unauthenticated
+WebSocket connections); `client_max_body_size 110m` added (nginx's 1m default
+was rejecting avatar uploads and large file posts).
+
+**`update.sh` no longer force-starts MRC bridge on servers that don't use
+it.** Optional services (`anetbbs-mrc-bridge`, `anetbbs-finger`) are now only
+restarted if they were running *before* the update. Servers where MRC is
+stopped or failed skip MRC bridge restart entirely. `systemctl reset-failed`
+added before each restart to clear start-limit-hit state.
+
+**Web update UI completion detection fixed.** The "Check for Updates" web
+upgrade was polling forever after a successful update: the `exit N` marker
+was written by a Python thread that dies when gunicorn stops mid-update
+(Step 3). After the new gunicorn restarted, the UI saw `running=false` but
+no `exit N`, then polled for 30 minutes and gave up. The UI now also accepts
+`[upgrade] upgrade to X complete` (written by `run_upgrade.sh`) as a
+terminal condition.
 
 ## v1.0a2.78 — Fix: web MRC full UI (real index.html + client.js wired to Flask) (May 2026)
 
