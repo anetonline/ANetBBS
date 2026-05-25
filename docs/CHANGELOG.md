@@ -1,7 +1,32 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.73`** (May 2026). Previous: `v1.0a2.72`.
+separately. Current release: **`v1.0a2.75`** (May 2026). Previous: `v1.0a2.74`.
+
+## v1.0a2.75 — Raspberry Pi full install guide (May 2026)
+
+Added `docs/INSTALL-PI.md` — a comprehensive guide for running ANetBBS on
+Raspberry Pi 4/5, covering hardware selection, OS recommendations, DDNS setup,
+port forwarding, Let's Encrypt SSL, moving `data/` to a USB SSD, service
+management, door game compatibility, and a troubleshooting section covering
+all known Pi-specific issues (SQLite path bug, CSRF cookie, disk space).
+Linked from README.md documentation section.
+
+## v1.0a2.74 — Fix: telnet/SSH "unable to open database file" on Pi / wizard installs (May 2026)
+
+`main.py` (the `anetbbs` telnet/SSH entry point) was not pinning `DATABASE_URL`
+before importing `anetbbs.config`. At import time, if `DATABASE_URL` was absent
+from the environment — wizard installs wrote `SQLALCHEMY_DATABASE_URI` instead,
+a key the config never reads — the fallback resolved `DATA_DIR` from
+`config.py`'s location in the venv site-packages, which doesn't exist, causing
+"sqlite3.OperationalError: unable to open database file" on every DB operation
+in the terminal session. The web server was unaffected because `deploy/serve.py`
+always pins `DATABASE_URL` from its own `__file__` location before any imports.
+
+Fix: `main.py` now applies the same self-pinning logic at startup, before any
+anetbbs imports. Also corrected `wizard.py` to write `DATABASE_URL` (not
+`SQLALCHEMY_DATABASE_URI`) to `.env` so wizard-installed systems have the right
+key going forward.
 
 ## v1.0a2.73 — ANSI file drop-in, bulletin word-wrap, screen-slot editor link, sysop name fix (May 2026)
 

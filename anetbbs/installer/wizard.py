@@ -184,7 +184,7 @@ def main():
         env_lines = [
             'FLASK_ENV=production',
             f'SECRET_KEY={secret_key}',
-            f'SQLALCHEMY_DATABASE_URI={db_uri}',
+            f'DATABASE_URL={db_uri}',
             f'DATA_DIR={data_dir}',
             f'LOG_FILE={install_dir}/logs/anetbbs.log',
             'WEB_HOST=0.0.0.0',

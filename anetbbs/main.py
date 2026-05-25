@@ -8,6 +8,21 @@ import logging
 import signal
 import sys
 import os
+
+# Pin DATABASE_URL to an absolute path derived from this file's own location
+# before any anetbbs imports — mirroring what deploy/serve.py does for the
+# web process. Without this, the telnet/SSH service falls back to whatever
+# DATABASE_URL is in the environment. If it's absent (e.g. wizard install
+# wrote SQLALCHEMY_DATABASE_URI instead) or wrong, anetbbs.config resolves
+# DATA_DIR from config.py's location in the venv site-packages, which doesn't
+# exist, causing "unable to open database file" on every DB query.
+_INSTALL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.environ['DATABASE_URL'] = (
+    os.environ.get('ANETBBS_DB_URL')          # explicit operator override
+    or os.environ.get('DATABASE_URL')          # already-correct EnvironmentFile value
+    or f'sqlite:///{_INSTALL_DIR}/data/anetbbs.db'
+)
+
 from anetbbs.core.session import BBSSession
 from anetbbs.core.service_locator import ServiceLocator
 from anetbbs.features.chat import ChatManager

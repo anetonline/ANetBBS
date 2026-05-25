@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: alpha 2** (`v1.0a2.73`, May 2026)
+**Status: alpha 2** (`v1.0a2.75`, May 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0a2.73.tar.gz
-cd ANetBBS-v1.0a2.73
+tar xzf ANetBBS-v1.0a2.75.tar.gz
+cd ANetBBS-v1.0a2.75
 sudo bash install.sh
 ```
 
@@ -144,6 +144,7 @@ For details on individual services and post-install configuration see
 - [`FEATURES.md`](FEATURES.md) — full feature inventory for the alpha
 - [`docs/00-overview.md`](docs/00-overview.md) — architecture + table of contents
 - [`docs/INSTALL.md`](docs/INSTALL.md) — full install
+- [`docs/INSTALL-PI.md`](docs/INSTALL-PI.md) — Raspberry Pi install guide (hardware, DDNS, SSD, troubleshooting)
 - [`docs/PORTS.md`](docs/PORTS.md) — every port the BBS uses
 - [`docs/SECURITY.md`](docs/SECURITY.md) — security defaults + production hardening
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — version history

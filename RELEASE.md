@@ -1,44 +1,24 @@
-# ANetBBS v1.0a2.73 — ANSI file drop-in, bulletin word-wrap, screen-slot link, sysop name fix
+# ANetBBS v1.0a2.75 — Raspberry Pi full install guide
 
-## ANSI file drop-in system (`data/text/`)
+Added `docs/INSTALL-PI.md`, a comprehensive guide for Raspberry Pi 4/5 installs.
 
-Sysops can now drop `.ans` files directly into the install directory to override
-any screen — no admin UI, no copy-paste. Resolution order: file → DB slot → built-in.
+## Covered in the guide
 
-| File | Screen |
-|------|--------|
-| `data/text/welcome.ans` | Pre-login / logon screen |
-| `data/text/goodbye.ans` | Logoff screen |
-| `data/text/newuser.ans` | New user registration screen |
-| `data/text/menus/main.ans` | Main menu ANSI header |
-| `data/text/menus/games.ans` | Games menu ANSI header |
-| `data/text/menus/<name>.ans` | Any menu by its internal name |
-
-Display codes (`@USER@`, `@BBS@`, `|UN`, etc.) are applied to file-based screens.
-The directories are created on fresh install and on upgrade via `update.sh`.
-
-## ANSI editor → screen slot link
-
-The ANSI editor (`/admin/ansi/`) now has an **Apply to Screen Slot** card
-alongside the existing Apply to Menu card. Select welcome, goodbye, or newuser
-from the dropdown and click Apply — the art is written directly to the DB slot.
-No more copy-paste into the screen editor.
-
-## Bulletin word-wrap
-
-Bulletin text in the terminal pager now word-wraps to the negotiated terminal
-width (NAWS) instead of truncating every line at 78 characters. Long lines
-reflow correctly; ANSI-escaped lines pass through unchanged.
-
-## Sysop name as admin username default
-
-The installer now defaults the admin login username to the sysop display name
-entered earlier in the wizard. If you type "Firehawke" as sysop name, the admin
-account username defaults to "Firehawke" instead of "admin". `install.sh` also
-now asks for a sysop display name separately and writes `SYSOP_NAME` to `.env`.
-
-## Logged-out intro screen uses BBS_NAME
-
-The fallback login menu (shown when no custom welcome ANSI screen is configured)
-now shows "Welcome to <BBS_NAME>" using the configured BBS name instead of the
-hardcoded "Welcome to AnetBBS".
+- **Hardware**: Pi 4 4GB minimum, Pi 5 8GB recommended; A2-rated SD cards;
+  USB SSD for write-heavy `data/` directory
+- **OS**: 64-bit Raspberry Pi OS Lite (Bookworm) or Ubuntu 24.04 Server
+- **Pre-install**: system packages, ufw rules, static IP
+- **Installer prompts**: Pi-specific recommended answers (install to home dir,
+  use your own username as service user, etc.)
+- **DDNS**: DuckDNS auto-update cron, No-IP, FreeDNS, Dynu; router port
+  forwarding table for all BBS ports
+- **SSL**: Let's Encrypt via certbot + nginx with DDNS hostname
+- **SESSION_COOKIE_SECURE**: explains the default-false behavior and when to
+  set it true (only with nginx+SSL)
+- **Moving data/ to USB SSD**: full procedure — partition, format, fstab,
+  copy, symlink, update .env
+- **Service management**: systemctl commands, journalctl log viewing
+- **Troubleshooting**: SQLite path error, CSRF cookie error, port connectivity,
+  disk space, thermal throttling, low memory / swap
+- **Door games on Pi**: what works out of the box vs what needs extra setup
+- **Confirmed working configurations** table (Pi 4/5, Raspbian/Ubuntu)
