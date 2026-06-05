@@ -523,22 +523,15 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
     # runs (--version succeeds): an install can leave a broken binary on PATH
     # (wrong arch, snap-stub for newer CPUs that SIGILLs, etc.) and execvp()
     # would die with Errno 8 "Exec format error" before we got useful output.
-    import subprocess as _sp
     def _runnable(path):
-        if not path or not os.path.isfile(path):
-            return False
-        try:
-            # SDL_VIDEODRIVER=dummy prevents dosbox / dosbox-x from trying to
-            # open a display when run headlessly for the version check — without
-            # it the SDL init can hang or time out on servers without X/Wayland.
-            env = dict(os.environ)
-            env['SDL_VIDEODRIVER'] = 'dummy'
-            env['DISPLAY'] = ''
-            _sp.run([path, '--version'], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                    timeout=5, check=False, env=env)
-            return True
-        except (OSError, _sp.TimeoutExpired):
-            return False
+        # Just verify the file exists and is executable. A subprocess --version
+        # probe sounds appealing for arch-mismatch detection, but dosbox-x
+        # (and some dosbox-staging builds) hang on SDL/audio init when run
+        # headlessly — even with SDL_VIDEODRIVER=dummy — causing the check to
+        # time out and falsely report the binary as unusable. If apt installed
+        # it, the arch is correct; if someone put a wrong-arch binary on PATH
+        # they'll get a clear exec-format error when the door actually launches.
+        return bool(path and os.path.isfile(path) and os.access(path, os.X_OK))
 
     dosbox = None
     _tried = []

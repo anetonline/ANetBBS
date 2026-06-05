@@ -105,7 +105,7 @@ log "sha256 verified"
 EXTRACT="$TMP/ext"
 mkdir -p "$EXTRACT"
 log "extracting"
-tar -xzf "$TARBALL" -C "$EXTRACT" || fail "tar extract failed"
+tar -xzf "$TARBALL" -C "$EXTRACT" --no-same-owner || fail "tar extract failed"
 
 # The tarball contains a single top-level dir named ANetBBS-vX.YaZ.NN/
 INNER=$(find "$EXTRACT" -maxdepth 1 -mindepth 1 -type d | head -n 1)

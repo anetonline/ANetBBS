@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.80`** (June 2026). Previous: `v1.0a2.79`.
+separately. Current release: **`v1.0a2.81`** (June 2026). Previous: `v1.0a2.80`.
+
+## v1.0a2.81 — Fix: DOSBox-X detection (revised) + web auto-update tar failure on VPS hosts (June 2026)
+
+**DOSBox-X detection fix revised.** The v1.0a2.80 fix (`SDL_VIDEODRIVER=dummy`)
+was insufficient — dosbox-x on headless Debian/Ubuntu still hangs during the
+subprocess version probe (audio init, not just display). Detection now simply
+checks file existence and executable bit. If apt installed the binary, it's
+the right arch; exec-format errors surface clearly at door launch time.
+
+**Web auto-update "tar extract failed" on VPS hosts fixed.** On LXC containers
+and some cloud VPS hosts, root cannot `chown` files to the uid baked into the
+tarball (uid 1000 = developer's build machine). `run_upgrade.sh` now passes
+`--no-same-owner` to tar, letting extracted files take the ownership of the
+extracting process instead.
 
 ## v1.0a2.80 — Fix: duplicate Admin Caller Log entry + DOSBox-X detection on headless servers (June 2026)
 
