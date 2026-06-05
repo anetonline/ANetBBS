@@ -528,19 +528,30 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
         if not path or not os.path.isfile(path):
             return False
         try:
+            # SDL_VIDEODRIVER=dummy prevents dosbox / dosbox-x from trying to
+            # open a display when run headlessly for the version check — without
+            # it the SDL init can hang or time out on servers without X/Wayland.
+            env = dict(os.environ)
+            env['SDL_VIDEODRIVER'] = 'dummy'
+            env['DISPLAY'] = ''
             _sp.run([path, '--version'], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                    timeout=5, check=False)
+                    timeout=5, check=False, env=env)
             return True
         except (OSError, _sp.TimeoutExpired):
             return False
 
     dosbox = None
+    _tried = []
     for cand in (dosbox_staging, dosbox_x, vanilla):
         if _runnable(cand):
             dosbox = cand
             break
+        if cand:
+            _tried.append(cand)
     if not dosbox:
         msg_lines = ['No usable DOSBox found.']
+        if _tried:
+            msg_lines.append(f'Tried but failed: {", ".join(_tried)}')
         if snap_rejected:
             msg_lines.append(
                 'Detected snap-packaged binaries — those don\'t work because '
@@ -549,7 +560,8 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
             )
         msg_lines.extend([
             '  sudo snap remove dosbox dosbox-staging dosbox-x  # if any are snap-installed',
-            '  sudo apt install dosbox                          # vanilla — works for BBS doors via TCP nullmodem',
+            '  sudo apt install dosbox-x                        # preferred (more compatible)',
+            '  sudo apt install dosbox                          # vanilla — also works for BBS doors via TCP nullmodem',
             '  # OR install dosbox-staging from GitHub release tarball into /opt/dosbox-staging',
             '  # OR set game type to door_dosemu if you have dosemu2 (apt install dosemu2)',
         ])

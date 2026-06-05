@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.79`** (May 2026). Previous: `v1.0a2.78`.
+separately. Current release: **`v1.0a2.80`** (June 2026). Previous: `v1.0a2.79`.
+
+## v1.0a2.80 — Fix: duplicate Admin Caller Log entry + DOSBox-X detection on headless servers (June 2026)
+
+**Duplicate "Caller Log" entry in Admin menu removed.** The Admin dropdown
+showed two Caller Log links — a plain-text duplicate and the correct icon
+version. The duplicate has been removed.
+
+**DOSBox-X detection fixed on headless servers.** Running `dosbox-x --version`
+without a display could hang on SDL display init, timing out the 5-second
+runability check and making dosbox-x appear absent even when installed via
+`apt install dosbox-x`. The detection subprocess now sets
+`SDL_VIDEODRIVER=dummy` so SDL skips display init. The "No usable DOSBox"
+error message now lists the paths that were actually tried, and `dosbox-x`
+is now the first install recommendation.
 
 ## v1.0a2.79 — Fix: nginx immutable caching + MRC-optional update + web update completion (May 2026)
 
