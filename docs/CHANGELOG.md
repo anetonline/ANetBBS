@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.81`** (June 2026). Previous: `v1.0a2.80`.
+separately. Current release: **`v1.0a2.82`** (June 2026). Previous: `v1.0a2.81`.
+
+## v1.0a2.82 — Fix: custom ANSI menu screens showing garbled CP437 block characters (June 2026)
+
+**Custom ANSI menu `.ans` files displayed wrong characters (Ü, ß, etc. instead
+of block graphics).** The menu engine decoded the file as latin-1 (correct and
+lossless), but then passed the string to `session.write()` which re-encodes as
+CP437 — a non-symmetric transformation that mapped e.g. `▄` (0xDC) → Ü (0x9A)
+and `▀` (0xDF) → ß/β (0xE1). Fixed by writing the ANSI content as raw
+`latin-1`-encoded bytes via `session.writer.write()` directly, same as
+`_show_ansi_screen()` already did.
 
 ## v1.0a2.81 — Fix: DOSBox-X detection (revised) + web auto-update tar failure on VPS hosts (June 2026)
 

@@ -1,33 +1,31 @@
-# ANetBBS v1.0a2.81 — Fix: DOSBox-X detection + web auto-update tar failure on some VPS hosts
+# ANetBBS v1.0a2.82 — Fix: custom ANSI menu screens showing garbled CP437 block characters
 
 ## What's fixed
 
-### DOSBox-X (and dosbox-staging) not detected — revised fix
+### Custom ANSI menu screens displaying wrong characters (Ü, ß instead of block graphics)
 
-v1.0a2.80 attempted to fix DOSBox-X detection by setting `SDL_VIDEODRIVER=dummy`
-before the version probe. This was not enough: dosbox-x on headless Debian/Ubuntu
-servers still hangs during the probe (audio subsystem, not just display), causing
-the 5-second timeout to fire and marking the binary as unusable even when
-correctly installed via `apt install dosbox-x`.
+ANSI art files created in Moebius, PabloDraw, or any CP437 editor were
+displaying correctly in those editors but showing corrupted block-graphic
+characters when uploaded to the BBS. Specifically, characters like `▄` (lower
+half block, CP437 0xDC) appeared as `Ü`, and `▀` (upper half block, 0xDF)
+appeared as `ß`.
 
-The detection logic now simply checks that the file exists and is executable.
-A subprocess version probe is unnecessary — if `apt` installed the binary, the
-arch is correct. Any real execution failure will produce a clear error when the
-door actually launches.
+**Root cause:** The menu engine read the `.ans` file as raw bytes decoded with
+`latin-1` (correct — this is a lossless round-trip for any byte value 0x00–0xFF).
+However, it then passed the resulting string to `session.write()`, which
+re-encodes strings as CP437. The latin-1 decode produces Unicode codepoints that
+don't map back to the same CP437 byte positions:
 
-### Web auto-update failing with "tar extract failed" on some VPS hosts
+- File byte `0xDC` (CP437: `▄`) → latin-1 decode → `U+00DC` (Ü) → CP437
+  encode → byte `0x9A` (CP437: `Ü`) ← **wrong glyph**
+- File byte `0xDF` (CP437: `▀`) → latin-1 decode → `U+00DF` (ß) → CP437
+  encode → byte `0xE1` (CP437: `β`) ← **wrong glyph**
 
-On VPS hosts with user-namespace restrictions (common on LXC containers,
-some cloud providers), `tar` running as root cannot `chown` files to the
-uid/gid baked into the tarball (uid 1000 = the developer's local account).
-This caused `run_upgrade.sh` to abort at the extract step with:
+**Fix:** The menu engine now writes the ANSI content as raw bytes via
+`session.writer.write(rendered.encode('latin-1'))`, exactly as
+`session._show_ansi_screen()` already did. This sends the original CP437 bytes
+directly to the terminal without any re-encoding.
 
-```
-tar: ...: Cannot change ownership to uid 1000, gid 1000: Operation not permitted
-tar: Exiting with failure status due to previous errors
-[upgrade] FAIL: tar extract failed
-```
-
-Fixed: `--no-same-owner` added to the tar extract in `run_upgrade.sh` so the
-extracted files take the ownership of the extracting process rather than the
-original build machine's uid/gid.
+**For sysops:** place your custom `.ans` files at
+`data/text/menus/<menu-name>.ans` (e.g. `data/text/menus/main.ans`) — this
+takes priority over the DB field set via the web admin.

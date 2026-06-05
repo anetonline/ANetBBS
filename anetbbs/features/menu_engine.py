@@ -480,7 +480,16 @@ async def run_menu(session, start='main'):
                 )
             except Exception:
                 rendered = screen
-            await session.write(rendered)
+            # Write as raw bytes to preserve CP437 high-byte characters.
+            # session.write() re-encodes strings as CP437, which corrupts
+            # content decoded from latin-1: e.g. U+00DC (from byte 0xDC ▄)
+            # re-encodes to CP437 byte 0x9A (Ü) — wrong glyph on terminal.
+            # Mirrors the pattern in session._show_ansi_screen().
+            try:
+                session.writer.write(rendered.encode('latin-1'))
+                await session.writer.drain()
+            except (UnicodeEncodeError, AttributeError):
+                await session.write(rendered)
             await session.write("\r\n")
         else:
             # Auto-render — a more polished default screen than before.
