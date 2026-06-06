@@ -1226,6 +1226,88 @@ is no quota.
 """),
 
     # ------------------------------------------------------------------
+    ('ansi-screens', 'Custom ANSI Screens', """
+# Custom ANSI Screens
+
+ANetBBS supports replacing every built-in menu header and session screen
+with a sysop-supplied CP437 ANSI art file. If the file is present it is
+displayed; if absent the built-in menu renders as normal. No restart needed —
+the file is read fresh on every menu entry.
+
+## How it works
+
+Drop a standard CP437 `.ans` file (Moebius, PabloDraw, TheDraw, etc.) into
+the correct directory with the slot name shown below. The BBS reads it as raw
+bytes and sends it directly to the terminal, so every block graphic and color
+code reaches the user exactly as drawn.
+
+## Slot reference
+
+### Session screens — `data/text/<slot>.ans`
+
+These appear at connection time, not inside a menu loop.
+
+| Filename | When it appears |
+|----------|-----------------|
+| `welcome.ans` | Login / welcome screen (shown before the main menu) |
+| `newuser.ans` | Shown to a user who just created an account |
+| `goodbye.ans` | Logoff screen |
+
+### Menu headers — `data/text/menus/<slot>.ans`
+
+These replace the banner at the top of the named menu. The menu items
+(hotkeys, labels, prompt) are still rendered below the ANSI art.
+
+| Filename | Menu |
+|----------|------|
+| `main.ans` | Main BBS menu |
+| `game_center.ans` | Game Center (top-level games menu) |
+| `door_games.ans` | Door Games list (shows installed doors) |
+| `chat.ans` | Chat Systems menu |
+| `irc_chat.ans` | IRC Chat menu |
+| `dialout.ans` | Dial Out — Visit Another BBS |
+
+Any menu you create through **Admin → Menus** also supports a file override
+using the menu's name as the filename (e.g. a menu named `utilities` →
+`data/text/menus/utilities.ans`).
+
+## File format
+
+Standard CP437 ANSI art. SAUCE records (metadata appended by editors) are
+harmless — the file is sent as-is, so keep the file 23–25 lines tall to
+avoid pushing the menu items off screen.
+
+Recommended editors:
+- **Moebius** (cross-platform, free)
+- **PabloDraw** (Windows/Mac)
+- **TheDraw** (DOS classic, runs in DOSBox)
+
+## Permissions
+
+Files must be readable by the service user (`anetbbs`). After copying via
+SCP as `stingray`, set ownership:
+
+```bash
+sudo chown anetbbs:anetbbs /home/stingray/anetbbs/data/text/menus/game_center.ans
+```
+
+Or fix the whole directory at once:
+
+```bash
+sudo chown -R anetbbs:anetbbs /home/stingray/anetbbs/data/text/
+```
+
+## Removing an override
+
+Delete (or rename) the `.ans` file. The built-in menu returns on the next
+visit — no restart needed.
+
+## See also
+
+- [[Themes]] — web UI color palette
+- [[Sysop Guide]]
+"""),
+
     ('themes', 'Themes', """
 # Themes
 
@@ -1267,6 +1349,12 @@ ANetBBS is dark-by-default — every list-group, table-row tint, and
 alert palette is hand-tuned for dark backgrounds. Light themes are
 possible but require overriding the few "dark" overrides in
 base.html. There's no shipped light theme today.
+
+## Terminal menu art
+
+The web theme system doesn't affect the telnet/SSH/rlogin menus —
+those use CP437 ANSI art files instead. See [[Custom ANSI Screens]]
+for the full slot reference and how to drop in your own `.ans` files.
 """),
 
     # ------------------------------------------------------------------
@@ -1444,7 +1532,7 @@ Backing up an ANetBBS install.
 | `data/anetbbs.db` | The sqlite database (everything) |
 | `data/uploads/` | User uploads + file library |
 | `data/avatars/` | Profile pictures |
-| `data/ansi/` | Custom ANSI screens |
+| `data/text/` | Custom ANSI screens (see [[Custom ANSI Screens]]) |
 | `data/echomail/` | Inbound/outbound BinkP packets |
 | `data/secrets.env` | API keys (CHMOD 600!) |
 | `/var/lib/anetbbs/doors/` | Door binaries & per-door state |
