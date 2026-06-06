@@ -1,7 +1,14 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.83`** (June 2026). Previous: `v1.0a2.82`.
+separately. Current release: **`v1.0a2.84`** (June 2026). Previous: `v1.0a2.83`.
+
+## v1.0a2.84 — Fix: custom ANSI menu files not loading (DATA_DIR path bug) (June 2026)
+
+**`load_menu_ansi()` always returned None.** It used `os.environ.get('DATA_DIR')`
+which is never written to `.env` — `DATA_DIR` is derived from `__file__` at
+runtime in `config.py`, not stored in the environment. Fixed by computing the
+data directory path from `__file__` directly (same logic as `config.py`).
 
 ## v1.0a2.83 — Feature: custom ANSI headers for all hard-coded menus/submenus (June 2026)
 

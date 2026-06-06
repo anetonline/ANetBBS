@@ -83,15 +83,15 @@ def load_menu_ansi(slot: str):
     directly via session.writer.write()/drain() instead of banner() so the
     original CP437 block characters reach the terminal unmodified.
     """
-    import os
-    data_dir = os.environ.get('DATA_DIR', '')
-    if not data_dir:
-        return None
-    path = os.path.join(data_dir, 'text', 'menus', f'{slot}.ans')
+    from pathlib import Path
+    # DATA_DIR is never written to .env — derive it from __file__ the same
+    # way config.py does: BASE_DIR = Path(__file__).parent.parent (install root).
+    # ansi_ui.py lives at <install>/anetbbs/features/ansi_ui.py so go up 3 levels.
+    data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
+    path = data_dir / 'text' / 'menus' / f'{slot}.ans'
     try:
-        if os.path.isfile(path):
-            with open(path, 'rb') as fh:
-                return fh.read()
+        if path.is_file():
+            return path.read_bytes()
     except OSError:
         pass
     return None

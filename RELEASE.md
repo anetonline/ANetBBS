@@ -1,33 +1,23 @@
-# ANetBBS v1.0a2.83 — Feature: custom ANSI headers for all hard-coded menus/submenus
+# ANetBBS v1.0a2.84 — Fix: custom ANSI menu files not loading
 
-## What's new
+## What's fixed
 
-### Custom ANSI art for all menus — not just the main menu
+### Custom `.ans` menu files were silently ignored
 
-All hard-coded telnet/SSH/rlogin menus now support optional `.ans` file
-overrides. If the file exists it is used; if not, the built-in menu renders
-exactly as before.
+The `load_menu_ansi()` helper introduced in v1.0a2.83 used
+`os.environ.get('DATA_DIR', '')` to locate the files. `DATA_DIR` is never
+written to `.env` — it's derived from `__file__` at runtime inside `config.py`
+and not exported as an environment variable. The result was that
+`load_menu_ansi()` always got an empty string, returned `None` immediately, and
+fell back to the built-in banner every time.
 
-Drop your file into `data/text/menus/` with the slot name shown below:
+Fixed: the path is now computed from `__file__` directly, the same way
+`config.py` derives `BASE_DIR` / `DATA_DIR`:
 
-| Slot name       | Menu it replaces                          |
-|-----------------|-------------------------------------------|
-| `game_center`   | Game Center (top-level games menu)        |
-| `door_games`    | Door Games list (shows installed doors)   |
-| `chat`          | Chat Systems menu                         |
-| `irc_chat`      | IRC Chat menu                             |
-| `dialout`       | Dial Out — Visit Another BBS              |
+```
+<install_root>/anetbbs/features/ansi_ui.py
+              ↑ parent ↑ parent ↑ parent → install root → + data/
+```
 
-Plus the previously supported slots from v1.0a2.82:
-
-| Slot name       | Menu it replaces                          |
-|-----------------|-------------------------------------------|
-| `main`          | Main BBS menu (and any BbsMenu by name)   |
-| `welcome`       | Login / welcome screen                    |
-| `goodbye`       | Logoff screen                             |
-| `newuser`       | New user welcome screen                   |
-
-All files must be standard CP437 ANSI art (Moebius, PabloDraw, TheDraw, etc.).
-Place them at `data/text/menus/<slot>.ans` (menus) or `data/text/<slot>.ans`
-(welcome/goodbye/newuser). Files take priority over anything set in the web
-admin — remove the file to revert to the built-in display.
+No configuration change needed — drop your `.ans` files in place and they
+will be picked up immediately.
