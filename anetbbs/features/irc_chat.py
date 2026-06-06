@@ -63,20 +63,27 @@ class IRCChat(BaseChatSystem):
     # ------------------------------------------------------------------
 
     async def show_menu(self):
+        from .ansi_ui import load_menu_ansi
         while True:
-            menu = (
-                "\r\n"
-                "╔════════════════════════════════════════╗\r\n"
-                "║              IRC Chat                  ║\r\n"
-                "╠════════════════════════════════════════╣\r\n"
-                "║  1. Connect to a server                ║\r\n"
-                "║  2. Quick-connect to Libera.Chat       ║\r\n"
-                "║  3. Return to Chat menu                ║\r\n"
-                "╚════════════════════════════════════════╝\r\n"
-                "\r\n"
-                "Choice: "
-            )
-            choice = await self.session.read_line(menu)
+            ansi = load_menu_ansi('irc_chat')
+            if ansi:
+                self.session.writer.write(ansi)
+                await self.session.writer.drain()
+                choice = await self.session.read_line("Choice: ")
+            else:
+                menu = (
+                    "\r\n"
+                    "╔════════════════════════════════════════╗\r\n"
+                    "║              IRC Chat                  ║\r\n"
+                    "╠════════════════════════════════════════╣\r\n"
+                    "║  1. Connect to a server                ║\r\n"
+                    "║  2. Quick-connect to Libera.Chat       ║\r\n"
+                    "║  3. Return to Chat menu                ║\r\n"
+                    "╚════════════════════════════════════════╝\r\n"
+                    "\r\n"
+                    "Choice: "
+                )
+                choice = await self.session.read_line(menu)
             if choice == '1':
                 server = (await self.session.read_line(
                     "Server [irc.libera.chat]: ")) or 'irc.libera.chat'

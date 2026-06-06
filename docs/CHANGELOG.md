@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.82`** (June 2026). Previous: `v1.0a2.81`.
+separately. Current release: **`v1.0a2.83`** (June 2026). Previous: `v1.0a2.82`.
+
+## v1.0a2.83 — Feature: custom ANSI headers for all hard-coded menus/submenus (June 2026)
+
+All hard-coded telnet/SSH/rlogin menus now support optional `.ans` file
+overrides via `data/text/menus/<slot>.ans`. Supported slots: `game_center`,
+`door_games`, `chat`, `irc_chat`, `dialout` (plus `main` and any BbsMenu name
+already supported by the menu engine). If the file is absent the built-in
+menu renders unchanged.
 
 ## v1.0a2.82 — Fix: custom ANSI menu screens showing garbled CP437 block characters (June 2026)
 

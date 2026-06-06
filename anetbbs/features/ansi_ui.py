@@ -74,3 +74,24 @@ def footer(width=64):
 
 def prompt(text='Choice: '):
     return f"\r\n{FG['cyan']}{BOLD}{text}{RESET}"
+
+
+def load_menu_ansi(slot: str):
+    """Return raw bytes from data/text/menus/<slot>.ans, or None if absent.
+
+    Call at the top of each menu loop. If bytes are returned, write them
+    directly via session.writer.write()/drain() instead of banner() so the
+    original CP437 block characters reach the terminal unmodified.
+    """
+    import os
+    data_dir = os.environ.get('DATA_DIR', '')
+    if not data_dir:
+        return None
+    path = os.path.join(data_dir, 'text', 'menus', f'{slot}.ans')
+    try:
+        if os.path.isfile(path):
+            with open(path, 'rb') as fh:
+                return fh.read()
+    except OSError:
+        pass
+    return None

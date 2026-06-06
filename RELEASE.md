@@ -1,31 +1,33 @@
-# ANetBBS v1.0a2.82 — Fix: custom ANSI menu screens showing garbled CP437 block characters
+# ANetBBS v1.0a2.83 — Feature: custom ANSI headers for all hard-coded menus/submenus
 
-## What's fixed
+## What's new
 
-### Custom ANSI menu screens displaying wrong characters (Ü, ß instead of block graphics)
+### Custom ANSI art for all menus — not just the main menu
 
-ANSI art files created in Moebius, PabloDraw, or any CP437 editor were
-displaying correctly in those editors but showing corrupted block-graphic
-characters when uploaded to the BBS. Specifically, characters like `▄` (lower
-half block, CP437 0xDC) appeared as `Ü`, and `▀` (upper half block, 0xDF)
-appeared as `ß`.
+All hard-coded telnet/SSH/rlogin menus now support optional `.ans` file
+overrides. If the file exists it is used; if not, the built-in menu renders
+exactly as before.
 
-**Root cause:** The menu engine read the `.ans` file as raw bytes decoded with
-`latin-1` (correct — this is a lossless round-trip for any byte value 0x00–0xFF).
-However, it then passed the resulting string to `session.write()`, which
-re-encodes strings as CP437. The latin-1 decode produces Unicode codepoints that
-don't map back to the same CP437 byte positions:
+Drop your file into `data/text/menus/` with the slot name shown below:
 
-- File byte `0xDC` (CP437: `▄`) → latin-1 decode → `U+00DC` (Ü) → CP437
-  encode → byte `0x9A` (CP437: `Ü`) ← **wrong glyph**
-- File byte `0xDF` (CP437: `▀`) → latin-1 decode → `U+00DF` (ß) → CP437
-  encode → byte `0xE1` (CP437: `β`) ← **wrong glyph**
+| Slot name       | Menu it replaces                          |
+|-----------------|-------------------------------------------|
+| `game_center`   | Game Center (top-level games menu)        |
+| `door_games`    | Door Games list (shows installed doors)   |
+| `chat`          | Chat Systems menu                         |
+| `irc_chat`      | IRC Chat menu                             |
+| `dialout`       | Dial Out — Visit Another BBS              |
 
-**Fix:** The menu engine now writes the ANSI content as raw bytes via
-`session.writer.write(rendered.encode('latin-1'))`, exactly as
-`session._show_ansi_screen()` already did. This sends the original CP437 bytes
-directly to the terminal without any re-encoding.
+Plus the previously supported slots from v1.0a2.82:
 
-**For sysops:** place your custom `.ans` files at
-`data/text/menus/<menu-name>.ans` (e.g. `data/text/menus/main.ans`) — this
-takes priority over the DB field set via the web admin.
+| Slot name       | Menu it replaces                          |
+|-----------------|-------------------------------------------|
+| `main`          | Main BBS menu (and any BbsMenu by name)   |
+| `welcome`       | Login / welcome screen                    |
+| `goodbye`       | Logoff screen                             |
+| `newuser`       | New user welcome screen                   |
+
+All files must be standard CP437 ANSI art (Moebius, PabloDraw, TheDraw, etc.).
+Place them at `data/text/menus/<slot>.ans` (menus) or `data/text/<slot>.ans`
+(welcome/goodbye/newuser). Files take priority over anything set in the web
+admin — remove the file to revert to the built-in display.

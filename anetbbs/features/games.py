@@ -16,9 +16,14 @@ class GameManager:
         self.session = session
 
     async def show_menu(self):
-        from .ansi_ui import banner, menu_item, footer, prompt as _p
+        from .ansi_ui import banner, menu_item, footer, prompt as _p, load_menu_ansi
         while True:
-            await self.session.write(banner('Game Center'))
+            ansi = load_menu_ansi('game_center')
+            if ansi:
+                self.session.writer.write(ansi)
+                await self.session.writer.drain()
+            else:
+                await self.session.write(banner('Game Center'))
             for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
                             ('2', 'Number Guessing (built-in)'),
                             ('3', 'Return to Main Menu')):
@@ -62,12 +67,18 @@ class GameManager:
             await self.session.read_line("\r\nPress Enter to continue...")
             return
 
+        from .ansi_ui import load_menu_ansi
         CYAN = '\x1b[96m'; WHT = '\x1b[97m'; YEL = '\x1b[93m'
         GRN = '\x1b[92m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         while True:
-            await self.session.write(f"\r\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════╗{RESET}\r\n")
-            await self.session.write(f"{BOLD}{CYAN}║                    {WHT}Door Games{CYAN}                        ║{RESET}\r\n")
-            await self.session.write(f"{BOLD}{CYAN}╠══════════════════════════════════════════════════════╣{RESET}\r\n")
+            ansi = load_menu_ansi('door_games')
+            if ansi:
+                self.session.writer.write(ansi)
+                await self.session.writer.drain()
+            else:
+                await self.session.write(f"\r\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════╗{RESET}\r\n")
+                await self.session.write(f"{BOLD}{CYAN}║                    {WHT}Door Games{CYAN}                        ║{RESET}\r\n")
+                await self.session.write(f"{BOLD}{CYAN}╠══════════════════════════════════════════════════════╣{RESET}\r\n")
             # Inner width = 54 chars between the two ║ pillars.
             for i, g in enumerate(game_list, 1):
                 line = (f"{BOLD}{CYAN}║  {YEL}{i:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
