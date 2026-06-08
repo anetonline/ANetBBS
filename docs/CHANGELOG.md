@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.84`** (June 2026). Previous: `v1.0a2.83`.
+separately. Current release: **`v1.0a2.85`** (June 2026). Previous: `v1.0a2.84`.
+
+## v1.0a2.85 — Fix: ANSI menu overlays double-rendering stock menus + missing screen clear (June 2026)
+
+**Stock menu appeared beneath custom ANSI art.** When `load_menu_ansi()` found
+a `.ans` file the ANSI bytes were written correctly, but the stock menu items
+(items for-loop, footer box) were outside the `if/else` block and ran
+unconditionally every time. Fixed by moving all stock-only output inside the
+`else` branch. Affected menus: `door_games`, `game_center`, `chat`, `dialout`.
+
+**Screen not cleared before ANSI write.** ANSI art was written over existing
+terminal content without first sending an erase sequence, so leftover text
+showed through wherever the art didn't fill every cell. Fixed by prepending
+`\x1b[2J\x1b[H` (erase display + cursor home) to the ANSI bytes across all
+five ANSI-override slots.
 
 ## v1.0a2.84 — Fix: custom ANSI menu files not loading (DATA_DIR path bug) (June 2026)
 

@@ -18,16 +18,16 @@ class ChatManager:
         while True:
             ansi = load_menu_ansi('chat')
             if ansi:
-                self.session.writer.write(ansi)
+                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
                 await self.session.write(banner('Chat Systems'))
-            for hk, lbl in (('1', 'Local Chat'),
-                            ('2', 'IRC Chat (multi-server)'),
-                            ('3', 'MRC Chat (Inter-BBS)'),
-                            ('4', 'Return to Main Menu')):
-                await self.session.write(menu_item(hk, lbl) + '\r\n')
-            await self.session.write(footer() + '\r\n')
+                for hk, lbl in (('1', 'Local Chat'),
+                                ('2', 'IRC Chat (multi-server)'),
+                                ('3', 'MRC Chat (Inter-BBS)'),
+                                ('4', 'Return to Main Menu')):
+                    await self.session.write(menu_item(hk, lbl) + '\r\n')
+                await self.session.write(footer() + '\r\n')
             choice = (await self.session.read_line(_p('Choice: ')) or '').strip()
             if choice == "1":
                 await self.local_chat()

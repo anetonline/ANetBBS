@@ -54,19 +54,19 @@ class DialoutMenu:
             destinations = self._load_directory()
             ansi = load_menu_ansi('dialout')
             if ansi:
-                self.session.writer.write(ansi)
+                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
                 await self.session.write(banner('Dial Out — Visit Another BBS'))
-            for i, (name, host, port, proto) in enumerate(destinations, 1):
-                line = f"  [{i:2d}] {name:<22} {host}:{port}  ({proto})"
-                line = line.replace(
-                    f'[{i:2d}]',
-                    f"{FG['yel']}{BOLD}[{i:2d}]{RESET}{FG['grn']}", 1)
-                await self.session.write(f"{FG['grn']}{line}{RESET}\r\n")
-            await self.session.write(footer() + '\r\n')
-            await self.session.write(
-                f"{FG['cyan']}  [C] Custom destination  [Q] Back{RESET}\r\n\r\n")
+                for i, (name, host, port, proto) in enumerate(destinations, 1):
+                    line = f"  [{i:2d}] {name:<22} {host}:{port}  ({proto})"
+                    line = line.replace(
+                        f'[{i:2d}]',
+                        f"{FG['yel']}{BOLD}[{i:2d}]{RESET}{FG['grn']}", 1)
+                    await self.session.write(f"{FG['grn']}{line}{RESET}\r\n")
+                await self.session.write(footer() + '\r\n')
+                await self.session.write(
+                    f"{FG['cyan']}  [C] Custom destination  [Q] Back{RESET}\r\n\r\n")
             choice = (await self.session.read_line(_prompt('Pick a BBS: '))
                       or '').strip().upper()
             if not choice or choice == 'Q':

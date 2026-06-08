@@ -20,15 +20,15 @@ class GameManager:
         while True:
             ansi = load_menu_ansi('game_center')
             if ansi:
-                self.session.writer.write(ansi)
+                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
                 await self.session.write(banner('Game Center'))
-            for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
-                            ('2', 'Number Guessing (built-in)'),
-                            ('3', 'Return to Main Menu')):
-                await self.session.write(menu_item(hk, lbl) + '\r\n')
-            await self.session.write(footer() + '\r\n')
+                for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
+                                ('2', 'Number Guessing (built-in)'),
+                                ('3', 'Return to Main Menu')):
+                    await self.session.write(menu_item(hk, lbl) + '\r\n')
+                await self.session.write(footer() + '\r\n')
             choice = (await self.session.read_line(_p('Choice: ')) or '').strip()
 
             if choice == '3':
@@ -73,19 +73,19 @@ class GameManager:
         while True:
             ansi = load_menu_ansi('door_games')
             if ansi:
-                self.session.writer.write(ansi)
+                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
                 await self.session.write(f"\r\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════╗{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}║                    {WHT}Door Games{CYAN}                        ║{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}╠══════════════════════════════════════════════════════╣{RESET}\r\n")
-            # Inner width = 54 chars between the two ║ pillars.
-            for i, g in enumerate(game_list, 1):
-                line = (f"{BOLD}{CYAN}║  {YEL}{i:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
-                        f"[{g['game_type']:<15}]     {CYAN}║{RESET}\r\n")
-                await self.session.write(line)
-            await self.session.write(f"{BOLD}{CYAN}║   {YEL}Q{DIM}. {GRN}Return{' ' * 42}{CYAN}║{RESET}\r\n")
-            await self.session.write(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════╝{RESET}\r\n\r\n")
+                # Inner width = 54 chars between the two ║ pillars.
+                for i, g in enumerate(game_list, 1):
+                    line = (f"{BOLD}{CYAN}║  {YEL}{i:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
+                            f"[{g['game_type']:<15}]     {CYAN}║{RESET}\r\n")
+                    await self.session.write(line)
+                await self.session.write(f"{BOLD}{CYAN}║   {YEL}Q{DIM}. {GRN}Return{' ' * 42}{CYAN}║{RESET}\r\n")
+                await self.session.write(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════╝{RESET}\r\n\r\n")
 
             choice = await self.session.read_line("Pick a game (number or Q): ")
             if not choice or choice.lower() == 'q':

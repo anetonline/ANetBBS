@@ -1,23 +1,28 @@
-# ANetBBS v1.0a2.84 — Fix: custom ANSI menu files not loading
+# ANetBBS v1.0a2.85 — Fix: ANSI menu overlays double-rendering stock menus
 
 ## What's fixed
 
-### Custom `.ans` menu files were silently ignored
+### Stock menu rendered on top of custom ANSI when a `.ans` file was present
 
-The `load_menu_ansi()` helper introduced in v1.0a2.83 used
-`os.environ.get('DATA_DIR', '')` to locate the files. `DATA_DIR` is never
-written to `.env` — it's derived from `__file__` at runtime inside `config.py`
-and not exported as an environment variable. The result was that
-`load_menu_ansi()` always got an empty string, returned `None` immediately, and
-fell back to the built-in banner every time.
+When `load_menu_ansi()` found a custom `.ans` file the code correctly wrote the
+ANSI bytes, but the stock menu items (for-loop rows, footer box) were outside
+the `if/else` block and executed unconditionally — so the stock menu appeared
+beneath the ANSI art on every render.
 
-Fixed: the path is now computed from `__file__` directly, the same way
-`config.py` derives `BASE_DIR` / `DATA_DIR`:
+Affected menus: `door_games`, `game_center`, `chat`, `dialout`.
+(`irc_chat` was already structured correctly in v1.0a2.83.)
 
-```
-<install_root>/anetbbs/features/ansi_ui.py
-              ↑ parent ↑ parent ↑ parent → install root → + data/
-```
+Fixed: the items loop, footer, and any other stock-only output are now inside
+the `else` block so they only render when no ANSI file is present.
 
-No configuration change needed — drop your `.ans` files in place and they
-will be picked up immediately.
+### Screen not cleared before ANSI write
+
+ANSI art was written over whatever was already on the terminal without first
+clearing the screen, causing leftover content to show through where the art
+didn't cover every cell.
+
+Fixed: `\x1b[2J\x1b[H` (erase display + cursor home) is now prepended to the
+ANSI bytes before they are sent to the terminal, for all five ANSI-override
+menu slots (`door_games`, `game_center`, `chat`, `irc_chat`, `dialout`).
+
+No configuration change needed.

@@ -67,7 +67,7 @@ class IRCChat(BaseChatSystem):
         while True:
             ansi = load_menu_ansi('irc_chat')
             if ansi:
-                self.session.writer.write(ansi)
+                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
                 choice = await self.session.read_line("Choice: ")
             else:
