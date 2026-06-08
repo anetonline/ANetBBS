@@ -887,7 +887,7 @@ class BBSMenuUI:
         from anetbbs.models import FileUpload, TicFile, User, FileArea
         from .ansi_ui import FG, RESET, BOLD
         app = _app()
-        PAGE = 20
+        PAGE = 9   # 9 × 2-line entries + 4 header + 2 nav = 24 lines, fits 80×25
         page = 0
 
         while True:

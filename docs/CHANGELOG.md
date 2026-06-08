@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.94`** (June 2026). Previous: `v1.0a2.93`.
+separately. Current release: **`v1.0a2.95`** (June 2026). Previous: `v1.0a2.94`.
+
+## v1.0a2.95 — File browser page size fix for 80×25 terminals (June 2026)
+
+**File browser page size reduced from 20 to 9.** Files with descriptions take
+2 lines each; 20 items = 40+ lines, causing items 1-9 to scroll off-screen in a
+standard 80×25 terminal. New page size: 9 items worst-case = 24 lines total.
 
 ## v1.0a2.94 — ZMODEM definitive fix, file desc view, batch downloads (June 2026)
 
