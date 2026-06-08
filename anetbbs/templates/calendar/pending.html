@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Pending Events{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-hourglass-split"></i> Pending Event Submissions</h1>
+</div>
+
+<p class="text-muted small">
+    These events were submitted by users and are awaiting your approval.
+    <strong>Approve</strong> to publish; <strong>Reject</strong> to delete.
+    <a href="{{ url_for('calendar.index') }}" class="ms-3">← Back to Calendar</a>
+</p>
+
+{% if events %}
+<div class="list-group">
+{% for e in events %}
+<div class="list-group-item">
+    <div class="d-flex justify-content-between align-items-start">
+        <div>
+            <strong>{{ e.title }}</strong>
+            <span class="text-muted ms-2 small">{{ e.starts_at.strftime('%a %Y-%m-%d %H:%M UTC') }}</span>
+            {% if e.ends_at %}<span class="text-muted small"> – {{ e.ends_at.strftime('%H:%M UTC') }}</span>{% endif %}
+            {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
+            <div class="text-muted small mt-1">
+                Submitted by <strong>{{ e.created_by.username }}</strong>
+                on {{ e.created_at.strftime('%Y-%m-%d %H:%M') }}
+            </div>
+            {% if e.description %}<div class="small mt-1">{{ e.description }}</div>{% endif %}
+        </div>
+        <div class="d-flex gap-2 ms-3 flex-shrink-0">
+            <form method="post" action="{{ url_for('calendar.approve_event', event_id=e.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-success">Approve</button>
+            </form>
+            <form method="post" action="{{ url_for('calendar.reject_event', event_id=e.id) }}"
+                  onsubmit="return confirm('Reject and delete this event?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger">Reject</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="alert alert-secondary">No events pending review.</div>
+{% endif %}
+{% endblock %}

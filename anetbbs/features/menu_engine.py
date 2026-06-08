@@ -24,7 +24,7 @@ async def _act_logoff(ui, args):
     sess = ui.session
     from .ansi_ui import FG, RESET, BOLD
     answer = await sess.read_key(
-        f"\r\n{FG['yel']}{BOLD}Log off — are you sure? (Y/N): {RESET}")
+        f"\r\n{FG['yel']}{BOLD}Log off - are you sure? (Y/N): {RESET}")
     if (answer or '').upper() == 'Y':
         return ('quit', None)
     await sess.write(f"{FG['cyan']}Cancelled.{RESET}\r\n")
@@ -75,7 +75,7 @@ async def _act_multinode(ui, args):
     sess = ui.session
     entry = getattr(sess, '_node_entry', None)
     if entry is None:
-        await sess.write("\r\nNo multinode slot — chat unavailable.\r\n")
+        await sess.write("\r\nNo multinode slot - chat unavailable.\r\n")
         return None
     entry.listening = True
 
@@ -520,7 +520,7 @@ async def run_menu(session, start='main'):
                     hk, lbl, _, _ = it
                     text = f"  [{hk}] {lbl}"
                     if len(text) > col_w:
-                        text = text[:col_w - 1] + '…'
+                        text = text[:col_w - 1] + '>'
                     text = text.ljust(col_w)
                     # Colour the hotkey letter
                     text = text.replace(
@@ -595,7 +595,7 @@ async def run_menu(session, start='main'):
 
 DEFAULT_MENUS = [
     {
-        'name': 'main', 'title': 'ANetBBS — Main Menu', 'is_default': True,
+        'name': 'main', 'title': 'ANetBBS - Main Menu', 'is_default': True,
         'items': [
             {'hotkey': 'M', 'label': 'Message Boards', 'action_type': 'boards', 'sort_order': 10},
             {'hotkey': 'B', 'label': 'Bulletins', 'action_type': 'bulletins', 'sort_order': 20},

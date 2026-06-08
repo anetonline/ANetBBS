@@ -61,13 +61,6 @@ class User(UserMixin, db.Model):
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)
-    # Internet email — when enabled (sysop-approved per the
-    # MAIL_ALLOCATION=sysop policy), inbound mail addressed to
-    # `<email_local_part>@<MAIL_DOMAIN>` lands in this user's mail
-    # inbox via the LMTP listener. `email_local_part` defaults to a
-    # lowercased + slugified username if blank.
-    email_enabled = db.Column(db.Boolean, default=False, index=True)
-    email_local_part = db.Column(db.String(64), index=True)
 
     # Relationships
     posts = db.relationship('Post', backref='author', lazy='dynamic', cascade='all, delete-orphan')
@@ -675,64 +668,6 @@ class RegistryEntry(db.Model):
 
     def __repr__(self):
         return f'<RegistryEntry {self.host}>'
-
-
-class InternetMail(db.Model):
-    """RFC 5322 email received via the LMTP listener (from the sysop's
-    local Postfix/Exim/OpenSMTPD instance) or sent via the BBS's web
-    composer (handed off to 127.0.0.1:25).
-
-    Inbox model: one row per delivered message. The `raw` column keeps
-    the full RFC 822 source so a future POP3/IMAP server can render
-    bit-for-bit what hit the wire — important for crypto signatures,
-    inline images, and quoted-printable bodies. The structured columns
-    are extracted at receive time so we can render quickly without
-    re-parsing on every page load.
-    """
-    __tablename__ = 'internet_mail'
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
-                        nullable=False, index=True)
-    direction = db.Column(db.String(10), default='inbound', index=True)
-    # 'inbound' / 'outbound' / 'quarantine' (held — SPF soft-fail etc)
-    status = db.Column(db.String(20), default='received', index=True)
-    # inbound: received / read
-    # outbound: queued / sent / failed
-    # any: quarantine
-    from_addr = db.Column(db.String(255), index=True)
-    from_name = db.Column(db.String(255))
-    to_addr = db.Column(db.String(255), index=True)
-    to_name = db.Column(db.String(255))
-    cc = db.Column(db.Text)        # comma-joined; not the canonical addr list
-    subject = db.Column(db.String(998))   # RFC 5322 line limit
-    # Pre-extracted plain body for fast rendering. Multipart messages
-    # get their `text/plain` part here; HTML stays in `raw` for later.
-    body = db.Column(db.Text)
-    has_html = db.Column(db.Boolean, default=False)
-    has_attachments = db.Column(db.Boolean, default=False)
-    raw = db.Column(db.LargeBinary)        # full RFC 5322 source
-    raw_size = db.Column(db.Integer, default=0)
-    message_id = db.Column(db.String(255), index=True)
-    in_reply_to = db.Column(db.String(255), index=True)
-    refs = db.Column(db.Text)              # space-joined Message-IDs
-    # Anti-spam / provenance
-    spf_result = db.Column(db.String(20))  # pass / fail / softfail / neutral / none / temperror / permerror
-    dkim_result = db.Column(db.String(20))
-    received_via = db.Column(db.String(40), default='lmtp')
-    # lmtp / smtp / submission (future) / web
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow,
-                           index=True, nullable=False)
-    read_at = db.Column(db.DateTime)
-    sent_at = db.Column(db.DateTime)        # outbound only
-
-    user = db.relationship('User',
-                           backref=db.backref('internet_mail', lazy='dynamic',
-                                              cascade='all, delete-orphan'))
-
-    def __repr__(self):
-        return f'<InternetMail {self.id} {self.direction} {self.from_addr!r} -> {self.to_addr!r}>'
 
 
 class NetmailMessage(db.Model):

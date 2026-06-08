@@ -653,15 +653,19 @@ def _lightweight_migrate(app):
     _ensure_column('users', 'date_of_birth', 'DATE')
     _ensure_column('users', 'show_email', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('users', 'theme_id', 'INTEGER')
+    # FileUpload: is_public defaulted to True in Python but old rows have NULL.
+    _ensure_column('file_uploads', 'is_public', 'BOOLEAN NOT NULL DEFAULT 1')
+    try:
+        with db.engine.connect() as _conn:
+            _conn.execute(db.text(
+                "UPDATE file_uploads SET is_public=1 WHERE is_public IS NULL"))
+            _conn.commit()
+    except Exception:
+        pass
     # File areas: nodelist-source auto-import flag + which domain to tag with.
     _ensure_column('file_areas', 'is_nodelist_source',
                    'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('file_areas', 'nodelist_domain', 'VARCHAR(40)')
-    # Internet email enable + local-part. Default disabled — sysop must
-    # approve each user (MAIL_ALLOCATION=sysop).
-    _ensure_column('users', 'email_enabled',
-                   'BOOLEAN NOT NULL DEFAULT 0')
-    _ensure_column('users', 'email_local_part', 'VARCHAR(64)')
     # BbsDirectoryEntry — federation pull adds software/sysop/location
     # / port columns so anetbbs.lst entries are first-class alongside
     # sbbsimsg.lst entries.

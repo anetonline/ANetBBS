@@ -2,8 +2,14 @@
 {% block title %}New Event{% endblock %}
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-calendar-plus"></i> New Event</h1>
+    <h1><i class="bi bi-calendar-plus"></i> Submit Event</h1>
 </div>
+
+{% if not current_user.is_admin %}
+<div class="alert alert-info small">
+    Your event will be held for sysop review before appearing on the calendar.
+</div>
+{% endif %}
 
 <form method="post" class="card p-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

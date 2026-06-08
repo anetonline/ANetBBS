@@ -9,7 +9,7 @@ panel showed "unknown" for half the service tree. This rewrite reflects
 the current shape:
 
     anetbbs-web         gunicorn web + MSP + SYSTAT + federation
-    anetbbs             telnet / SSH / rlogin / FTP / LMTP
+    anetbbs             telnet / SSH / rlogin / FTP
     anetbbs-mrc-bridge  MRC chat bridge
     anetbbs-finger      RFC 1288 finger daemon
 
@@ -82,7 +82,7 @@ KNOWN_UNITS = [
         'unit': 'anetbbs',
         'label': 'Terminal Protocols',
         'desc': ('Single asyncio process serving telnet, SSH, rlogin, '
-                 'FTP, and LMTP. Each protocol is gated by its own '
+                 'and FTP. Each protocol is gated by its own '
                  '*_ENABLED flag in the .env file.'),
         'icon': 'bi-terminal',
         'ports': [

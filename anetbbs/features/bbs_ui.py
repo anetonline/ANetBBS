@@ -13,6 +13,7 @@ Currently provides view-mode for:
 All operations push a transient Flask app context so they can use the
 SQLAlchemy-mapped models without needing to be inside a Flask request.
 """
+import asyncio
 import os
 import logging
 from datetime import datetime, timedelta
@@ -29,6 +30,37 @@ def _app():
     app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
     db.init_app(app)
     return app
+
+
+def _parse_file_selection(text, lo, hi):
+    """Parse a file-number selection string.
+
+    Accepts:
+      "5"       → [5]
+      "1,3,5"   → [1, 3, 5]
+      "1-5"     → [1, 2, 3, 4, 5]
+      "1-3,7"   → [1, 2, 3, 7]
+
+    Returns a sorted, deduplicated list of ints in [lo, hi], or None if
+    the input is not parseable as a numeric selection.
+    """
+    text = text.strip()
+    if not text:
+        return None
+    nums = set()
+    try:
+        for part in text.split(','):
+            part = part.strip()
+            if '-' in part:
+                a, b = part.split('-', 1)
+                for n in range(int(a.strip()), int(b.strip()) + 1):
+                    nums.add(n)
+            else:
+                nums.add(int(part))
+    except (ValueError, TypeError):
+        return None
+    valid = sorted(n for n in nums if lo <= n <= hi)
+    return valid if valid else None
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +321,7 @@ class BBSMenuUI:
                     ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
                     await self._page_text(content or '',
                                           title=title,
-                                          subtitle=f'by {who} — {ts}')
+                                          subtitle=f'by {who} - {ts}')
             except ValueError:
                 pass
 
@@ -625,7 +657,7 @@ class BBSMenuUI:
         BODY_PAGE = 18    # rows before --more-- inside a message body
         while True:
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(f'{tag} — latest 30'))
+            await self.session.write(banner(f'{tag} - latest 30'))
             await self.session.write(
                 f"  {FG['cyan']}{BOLD}{'#':>2}  {'Subject':<38} "
                 f"{'From':<12} {'Date':<6}{RESET}\r\n"
@@ -699,35 +731,652 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_files(self):
-        from anetbbs.models import FileUpload, User
-        with _app().app_context():
-            files = (FileUpload.query
-                     .order_by(FileUpload.uploaded_at.desc() if hasattr(FileUpload, 'uploaded_at')
-                               else FileUpload.id.desc())
-                     .limit(50).all())
-            f_list = []
-            for f in files:
-                u = User.query.get(getattr(f, 'user_id', None) or getattr(f, 'uploader_id', None) or 0)
-                f_list.append((
-                    getattr(f, 'filename', None) or getattr(f, 'original_filename', '?'),
-                    getattr(f, 'size', None) or getattr(f, 'file_size', 0),
-                    u.username if u else '?',
-                    getattr(f, 'description', '') or '',
-                ))
+        """Browse file areas, download via ZMODEM/YMODEM/XMODEM, upload via ZMODEM."""
+        from anetbbs.models import FileUpload, FileArea, TicFile
+        from .xfer import available_protocols
+        from .ansi_ui import FG, RESET, BOLD
+        app = _app()
 
-        if not f_list:
-            await self.session.write("\r\nNo files in the library yet.\r\n")
+        while True:
+            with app.app_context():
+                is_sysop = bool(self.session.user.get('is_admin'))
+                # Sysop sees ALL areas (active + inactive, public + sysop-only).
+                # Regular users only see active non-sysop areas.
+                if is_sysop:
+                    areas = (FileArea.query
+                             .order_by(FileArea.name).all())
+                else:
+                    areas = (FileArea.query
+                             .filter_by(is_active=True, is_sysop_only=False)
+                             .order_by(FileArea.name).all())
+
+                from anetbbs.web.file_areas import _scan_area as _disk_scan
+
+                area_rows = []
+                for a in areas:
+                    if a.storage_path and os.path.isdir(a.storage_path):
+                        # Count directly from disk (matches web view)
+                        try:
+                            cnt = sum(
+                                1 for f in os.listdir(a.storage_path)
+                                if not f.startswith('.')
+                                and os.path.isfile(
+                                    os.path.join(a.storage_path, f)))
+                        except OSError:
+                            cnt = 0
+                    else:
+                        up_cnt = FileUpload.query.filter(
+                            FileUpload.file_area_id == a.id,
+                            FileUpload.is_public.isnot(False)).count()
+                        tic_cnt = TicFile.query.filter_by(
+                            file_area_id=a.id, status='filed').count()
+                        cnt = up_cnt + tic_cnt
+                    perm = (a.upload_permission or 'users').lower()
+                    can_upload = (perm == 'users' or
+                                  (perm == 'sysop' and is_sysop))
+                    inactive = not a.is_active
+                    sysop_flag = a.is_sysop_only
+                    # Strip FidoNet network-prefix artifacts like "0 ! " or "1 !"
+                    import re as _re
+                    raw_name = (a.name or a.tag or '?').strip()
+                    disp_name = _re.sub(r'^\d+\s*!\s*', '', raw_name).strip() or raw_name
+                    area_rows.append({
+                        'id': a.id, 'name': disp_name, 'tag': a.tag or '',
+                        'desc': (a.description or '').strip(),
+                        'can_upload': can_upload, 'cnt': cnt,
+                        'inactive': inactive, 'sysop_only': sysop_flag,
+                        'storage_path': a.storage_path or '',
+                    })
+
+                top_cnt = (FileUpload.query.filter(
+                    FileUpload.file_area_id.is_(None),
+                    FileUpload.is_public.isnot(False)).count() +
+                    TicFile.query.filter_by(
+                    file_area_id=None, status='filed').count())
+
+                domain = app.config.get('BBS_DOMAIN', '')
+                port = app.config.get('WEB_PORT', 5000)
+                web_base = (f"https://{domain}" if domain
+                            else f"http://localhost:{port}")
+                uploads_dir = app.config.get(
+                    'UPLOADS_DIR',
+                    os.path.join(app.config['DATA_DIR'], 'uploads'))
+
+            protos = available_protocols()
+
+            # ---- Draw area list ----
+            await self.session.write('\x1b[2J\x1b[H')
+            hdr = (f"{FG['cyan']}{BOLD}"
+                   f"{'─'*44}\r\n"
+                   f" File Library - Areas\r\n"
+                   f"{'─'*44}{RESET}\r\n\r\n")
+            await self.session.write(hdr)
+
+            if top_cnt or is_sysop:
+                await self.session.write(
+                    f"  {FG['yel']} 0.{RESET} "
+                    f"{FG['wht']}{'General / Top-level':<38}{RESET}"
+                    f"  {FG['gry']}({top_cnt} files){RESET}\r\n")
+
+            for i, ar in enumerate(area_rows, 1):
+                cnt_str = f"({ar['cnt']} files)"
+                flags = ''
+                if ar['inactive']:
+                    flags += f" {FG['red']}[inactive]{RESET}"
+                if ar['sysop_only']:
+                    flags += f" {FG['mag']}[sysop]{RESET}"
+                await self.session.write(
+                    f"  {FG['yel']}{i:2d}.{RESET} "
+                    f"{FG['wht']}{ar['name'][:38]:<38}{RESET}"
+                    f"  {FG['gry']}{cnt_str}{RESET}"
+                    f"{flags}\r\n")
+
+            if not area_rows and not top_cnt:
+                await self.session.write(
+                    f"  {FG['gry']}(no file areas configured){RESET}\r\n")
+
+            if protos:
+                proto_note = ' / '.join(p.upper() for p in protos)
+                await self.session.write(
+                    f"\r\n  {FG['gry']}Transfer protocols: {proto_note}{RESET}\r\n")
+            else:
+                await self.session.write(
+                    f"\r\n  {FG['red']}lrzsz not installed - "
+                    f"downloads will show web URL only{RESET}\r\n")
+
+            choice = (await self.session.read_line(
+                f"\r\n{FG['cyan']}Enter area #, A=All, Q=Back:{RESET} ")
+                      or '').strip().upper()
+
+            if choice == 'Q' or not choice:
+                return
+            if choice == 'A':
+                area_filter, area_name, area_id, can_up, stor = \
+                    'all', 'All Files', None, False, ''
+            elif choice == '0' and (top_cnt or is_sysop):
+                area_filter, area_name, area_id, can_up, stor = \
+                    'top', 'General / Top-level', None, True, ''
+            else:
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(area_rows):
+                        ar = area_rows[idx]
+                        area_id     = ar['id']
+                        area_name   = ar['name']
+                        can_up      = ar['can_upload']
+                        stor        = ar['storage_path']
+                        area_filter = 'area'
+                    else:
+                        await self.session.write(
+                            f"{FG['red']}Invalid area number.{RESET}\r\n")
+                        continue
+                except ValueError:
+                    await self.session.write(
+                        f"{FG['red']}Enter a number, A, or Q.{RESET}\r\n")
+                    continue
+
+            await self._file_area_browse(
+                area_id, area_name, area_filter,
+                can_up, uploads_dir, web_base, protos, stor)
+
+    async def _file_area_browse(self, area_id, area_name, area_filter,
+                                can_upload, uploads_dir, web_base, protos,
+                                storage_path=''):
+        """Paginated file browser. Reads disk (storage_path) when available,
+        falls back to FileUpload+TicFile DB tables otherwise."""
+        from anetbbs.models import FileUpload, TicFile, User, FileArea
+        from .ansi_ui import FG, RESET, BOLD
+        app = _app()
+        PAGE = 20
+        page = 0
+
+        while True:
+            with app.app_context():
+                f_list = []
+
+                if area_filter == 'area' and storage_path and os.path.isdir(storage_path):
+                    # Primary path: read files from disk (matches web view)
+                    from anetbbs.web.file_areas import _scan_area as _disk_scan
+                    area_obj = FileArea.query.get(area_id)
+                    if area_obj:
+                        disk_files = _disk_scan(area_obj)
+                        for df in disk_files:
+                            full_desc = (df.get('description') or '').strip()
+                            f_list.append({
+                                'upload_id': None,
+                                'tic_id':    None,
+                                'name': df['name'],
+                                'size': df['size'],
+                                'who':  'FidoNet' if full_desc else 'sysop',
+                                'desc': full_desc.split('\n')[0][:60],
+                                'desc_full': full_desc,
+                                'path': os.path.join(storage_path, df['name']),
+                                'date': df.get('mtime'),
+                                'area_id_for_web': area_id,
+                            })
+                        # Sort newest-modified first
+                        f_list.sort(
+                            key=lambda x: x['date'] or datetime.min, reverse=True)
+                else:
+                    # Fallback: DB-based (FileUpload + TicFile)
+                    uq = FileUpload.query.filter(FileUpload.is_public.isnot(False))
+                    if area_filter == 'area':
+                        uq = uq.filter(FileUpload.file_area_id == area_id)
+                    elif area_filter == 'top':
+                        uq = uq.filter(FileUpload.file_area_id.is_(None))
+                    uploads = uq.order_by(FileUpload.id.desc()).all()
+
+                    tq = TicFile.query.filter_by(status='filed')
+                    if area_filter == 'area':
+                        tq = tq.filter_by(file_area_id=area_id)
+                    elif area_filter == 'top':
+                        tq = tq.filter_by(file_area_id=None)
+                    tics = tq.order_by(TicFile.received_at.desc()).all()
+
+                    for f in uploads:
+                        u = User.query.get(f.uploader_id or 0)
+                        full_d = (f.description or '').strip()
+                        f_list.append({
+                            'upload_id': f.id,
+                            'tic_id':    None,
+                            'name': (f.original_filename or f.filename or '?'),
+                            'size': f.file_size or 0,
+                            'who':  u.username if u else '?',
+                            'desc': full_d.split('\n')[0][:60],
+                            'desc_full': full_d,
+                            'path': (f.file_path or
+                                     os.path.join(uploads_dir, f.filename)),
+                            'date': f.created_at,
+                            'area_id_for_web': None,
+                        })
+                    for t in tics:
+                        full_d = (t.description or '').strip()
+                        f_list.append({
+                            'upload_id': t.file_upload_id,
+                            'tic_id':    t.id,
+                            'name': t.filename or '?',
+                            'size': t.size_bytes or 0,
+                            'who':  t.origin or t.from_address or 'FidoNet',
+                            'desc': full_d.split('\n')[0][:60],
+                            'desc_full': full_d,
+                            'path': t.stored_path or '',
+                            'date': t.received_at,
+                            'area_id_for_web': None,
+                        })
+                    f_list.sort(
+                        key=lambda x: x['date'] or datetime.min, reverse=True)
+
+                total = len(f_list)
+
+            page_files = f_list[page * PAGE: (page + 1) * PAGE]
+            pages = max(1, (total + PAGE - 1) // PAGE)
+
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(
+                f"{FG['cyan']}{BOLD}"
+                f"{'─'*44}\r\n"
+                f" {area_name}  "
+                f"{FG['gry']}(page {page+1}/{pages}, {total} files){RESET}"
+                f"{FG['cyan']}{BOLD}\r\n"
+                f"{'─'*44}{RESET}\r\n\r\n")
+
+            if not page_files:
+                await self.session.write(
+                    f"  {FG['gry']}(no files here yet){RESET}\r\n")
+
+            for i, f in enumerate(page_files, page * PAGE + 1):
+                sz = (f"{f['size']:>10,}" if isinstance(f['size'], int)
+                      else f"{str(f['size']):>10}")
+                src = ('FTN' if f['tic_id'] else f['who'][:10])
+                await self.session.write(
+                    f"  {FG['yel']}{i:3d}.{RESET} "
+                    f"{FG['wht']}{f['name'][:32]:<32}{RESET} "
+                    f"{FG['gry']}{sz}  {src:<12}{RESET}\r\n")
+                if f['desc']:
+                    await self.session.write(
+                        f"        {FG['dim']}{f['desc'][:60]}{RESET}\r\n")
+
+            nav = []
+            if page > 0:     nav.append("P=Prev")
+            if (page+1) < pages: nav.append("N=Next")
+            nav.append("#=DL  #,#=Batch  V#=Info")
+            if can_upload and protos: nav.append("U=Upload")
+            nav.append("Q=Back")
+
+            choice = (await self.session.read_line(
+                f"\r\n{FG['cyan']}[{'  '.join(nav)}]:{RESET} ")
+                      or '').strip()
+
+            cu = choice.upper()
+            if cu == 'Q' or not choice:  return
+            if cu == 'N' and (page+1) < pages:
+                page += 1; continue
+            if cu == 'P' and page > 0:
+                page -= 1; continue
+            if cu == 'U' and can_upload and protos:
+                await self._upload_terminal_file(area_id, uploads_dir, protos)
+                continue
+
+            # V# — view extended description
+            if cu.startswith('V') and len(cu) > 1:
+                try:
+                    num = int(cu[1:].strip())
+                    local_idx = num - page * PAGE - 1
+                    if 0 <= local_idx < len(page_files):
+                        await self._view_file_desc(page_files[local_idx])
+                    else:
+                        await self.session.write(
+                            f"{FG['red']}Number not on this page.{RESET}\r\n")
+                except ValueError:
+                    await self.session.write(
+                        f"{FG['red']}Enter V followed by a file number.{RESET}\r\n")
+                continue
+
+            # Parse batch (1,3,5 or 1-5) or single number
+            nums = _parse_file_selection(choice, page * PAGE + 1,
+                                         page * PAGE + len(page_files))
+            if nums is None:
+                await self.session.write(
+                    f"{FG['red']}Enter a number, range (1-5), list (1,3,5), or command.{RESET}\r\n")
+                continue
+
+            if len(nums) == 1:
+                local_idx = nums[0] - page * PAGE - 1
+                if 0 <= local_idx < len(page_files):
+                    await self._download_file(page_files[local_idx], web_base, protos)
+                else:
+                    await self.session.write(
+                        f"{FG['red']}Number not on this page.{RESET}\r\n")
+            else:
+                # Batch download
+                batch = []
+                for n in nums:
+                    li = n - page * PAGE - 1
+                    if 0 <= li < len(page_files):
+                        batch.append(page_files[li])
+                if batch:
+                    await self._batch_download(batch, web_base, protos)
+                else:
+                    await self.session.write(
+                        f"{FG['red']}No valid files in that selection.{RESET}\r\n")
+
+    async def _view_file_desc(self, f):
+        """Show extended description for a file, with word-wrap."""
+        from .ansi_ui import FG, RESET, BOLD
+        name  = f['name']
+        size  = f['size']
+        desc  = f.get('desc_full') or f.get('desc') or ''
+        date  = f.get('date')
+
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(
+            f"{FG['cyan']}{BOLD}"
+            f"{'─'*44}\r\n"
+            f" {name[:40]}\r\n"
+            f"{'─'*44}{RESET}\r\n\r\n")
+
+        sz_str = f"{size:,}" if isinstance(size, int) else str(size)
+        await self.session.write(
+            f"  {FG['yel']}Size:{RESET} {FG['wht']}{sz_str} bytes{RESET}\r\n")
+        if date and hasattr(date, 'strftime'):
+            await self.session.write(
+                f"  {FG['yel']}Date:{RESET} "
+                f"{FG['wht']}{date.strftime('%Y-%m-%d')}{RESET}\r\n")
+
+        if desc:
+            await self.session.write('\r\n')
+            for line in desc.split('\n'):
+                # Lines with ESC sequences are ANSI art — pass through as-is
+                if '\x1b' in line:
+                    await self.session.write(f"  {line}\r\n")
+                    continue
+                line = line.rstrip()
+                if not line:
+                    await self.session.write('\r\n')
+                    continue
+                # Word-wrap plain text at 76 chars
+                while len(line) > 76:
+                    split = line.rfind(' ', 0, 76)
+                    if split == -1:
+                        split = 76
+                    await self.session.write(f"  {line[:split]}\r\n")
+                    line = line[split:].lstrip()
+                if line:
+                    await self.session.write(f"  {line}\r\n")
+        else:
+            await self.session.write(
+                f"\r\n  {FG['gry']}(no description available){RESET}\r\n")
+
+        await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
+
+    async def _batch_download(self, files, web_base, protos):
+        """Prompt for protocol once, then sequentially send multiple files."""
+        from .xfer import send_file
+        from .ansi_ui import FG, RESET, BOLD
+
+        if not protos:
+            await self.session.write(
+                f"\r\n{FG['red']}lrzsz not installed - "
+                f"cannot batch download.{RESET}\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+
+        labels = {'zmodem': 'Z=ZMODEM', 'ymodem': 'Y=YMODEM', 'xmodem': 'X=XMODEM'}
+        opts   = [labels[p] for p in protos] + ['Q=Cancel']
+
+        names_str = ', '.join(f['name'] for f in files[:5])
+        if len(files) > 5:
+            names_str += f' (+{len(files)-5} more)'
+
+        await self.session.write(
+            f"\r\n{FG['cyan']}Batch download: {FG['wht']}{names_str}{RESET}\r\n")
+
+        proto_choice = (await self.session.read_line(
+            f"{FG['cyan']}Protocol [{' '.join(opts)}]:{RESET} ")
+                        or '').strip().upper()
+
+        proto_map = {'Z': 'zmodem', 'Y': 'ymodem', 'X': 'xmodem'}
+        if proto_choice == 'Q' or not proto_choice:
+            return
+        protocol = proto_map.get(proto_choice)
+        if not protocol or protocol not in protos:
+            await self.session.write(f"{FG['red']}Unknown protocol.{RESET}\r\n")
+            return
+
+        for idx, f in enumerate(files, 1):
+            fpath = f['path']
+            name  = f['name']
+            if not fpath or not os.path.isfile(fpath):
+                await self.session.write(
+                    f"  {FG['red']}[{idx}/{len(files)}] {name}: "
+                    f"file not on disk - skipped{RESET}\r\n")
+                continue
+
+            await self.session.write(
+                f"\r\n{FG['grn']}[{idx}/{len(files)}] Sending {name} ...{RESET}\r\n"
+                f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
+            await asyncio.sleep(1)
+
+            try:
+                ok = await send_file(self.session, fpath, protocol)
+            except Exception as exc:
+                logger.exception('batch send_file failed for %s: %s', fpath, exc)
+                ok = False
+
+            if ok:
+                await self.session.write(
+                    f"\r\n{FG['grn']}[OK] {name}{RESET}\r\n")
+            else:
+                await self.session.write(
+                    f"\r\n{FG['red']}[FAILED] {name}{RESET}\r\n")
+
+        # Drain any residual binary from the terminal
+        try:
+            while True:
+                chunk = await asyncio.wait_for(
+                    self.session.reader.read(4096), timeout=0.3)
+                if not chunk:
+                    break
+        except (asyncio.TimeoutError, Exception):
+            pass
+        await self.session.read_line(f"\r\n{FG['cyan']}Batch complete. Press Enter...{RESET}")
+
+    async def _download_file(self, f, web_base, protos):
+        """Offer ZMODEM/YMODEM/XMODEM or web URL for one file."""
+        from .xfer import send_file
+        from .ansi_ui import FG, RESET, BOLD
+        name  = f['name']
+        size  = f['size']
+        fpath = f['path']
+        web_id = f.get('upload_id')
+        web_area_id = f.get('area_id_for_web')
+
+        # Build web URL: storage_path files served at /file-areas/<id>/<name>,
+        # FileUpload records served at /files/download/<id>
+        if web_area_id:
+            web_url = f"{web_base}/file-areas/{web_area_id}/{name}"
+        elif web_id:
+            web_url = f"{web_base}/files/download/{web_id}"
+        else:
+            web_url = None
+
+        sz_str = f"{size:,}" if isinstance(size, int) else str(size)
+        await self.session.write(
+            f"\r\n{FG['wht']}{BOLD}{name}{RESET}  "
+            f"{FG['gry']}({sz_str} bytes){RESET}\r\n")
+
+        # No lrzsz - web URL only
+        if not protos:
+            if web_url:
+                await self.session.write(
+                    f"\r\n{FG['yel']}lrzsz not installed. Web URL:{RESET}\r\n"
+                    f"  {web_url}\r\n")
+            else:
+                await self.session.write(
+                    f"\r\n{FG['red']}No transfer protocols "
+                    f"(install lrzsz) and no web URL for this file.{RESET}\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
-        await self.session.write("\r\n=== File Library (latest 50) ===\r\n\r\n")
-        for i, (name, size, who, desc) in enumerate(f_list, 1):
-            sz = f"{size:>9,}" if isinstance(size, int) else f"{str(size):>9}"
-            await self.session.write(f"  {i:2d}. {name[:30]:<30} {sz}  by {who[:12]:<12}\r\n")
-            if desc:
-                await self.session.write(f"      {desc[:60]}\r\n")
-        await self.session.write("\r\n(Downloads via web at /files/ — telnet download next iteration.)\r\n")
-        await self.session.read_line("\r\nPress Enter...")
+        # File not on disk - fall back gracefully
+        if not fpath or not os.path.isfile(fpath):
+            if web_url:
+                await self.session.write(
+                    f"\r\n{FG['yel']}File not on disk. Web URL:{RESET}\r\n"
+                    f"  {web_url}\r\n")
+            else:
+                await self.session.write(
+                    f"\r\n{FG['red']}File not found on server disk.{RESET}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        labels = {'zmodem': 'Z=ZMODEM', 'ymodem': 'Y=YMODEM', 'xmodem': 'X=XMODEM'}
+        opts = [labels[p] for p in protos]
+        if web_url:
+            opts.append("W=Web URL")
+        opts.append("Q=Cancel")
+
+        proto_choice = (await self.session.read_line(
+            f"{FG['cyan']}Protocol [{' '.join(opts)}]:{RESET} ")
+                        or '').strip().upper()
+
+        proto_map = {'Z': 'zmodem', 'Y': 'ymodem', 'X': 'xmodem'}
+        if proto_choice == 'Q' or not proto_choice:
+            return
+        if proto_choice == 'W' and web_url:
+            await self.session.write(
+                f"\r\n{FG['yel']}Web URL:{RESET}\r\n  {web_url}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        protocol = proto_map.get(proto_choice)
+        if not protocol or protocol not in protos:
+            await self.session.write(
+                f"{FG['red']}Unknown protocol choice.{RESET}\r\n")
+            return
+
+        await self.session.write(
+            f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
+            f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
+        await asyncio.sleep(1)
+
+        try:
+            ok = await send_file(self.session, fpath, protocol)
+        except Exception as exc:
+            logger.exception('send_file failed for %s: %s', fpath, exc)
+            ok = False
+
+        if ok:
+            await self.session.write(
+                f"\r\n\r\n{FG['grn']}[Transfer complete: {name}]{RESET}\r\n")
+        else:
+            await self.session.write(
+                f"\r\n\r\n{FG['red']}[Transfer failed or cancelled.]{RESET}\r\n")
+        # Drain any binary garbage the terminal sent during the failed
+        # transfer before returning to the menu loop.
+        try:
+            while True:
+                chunk = await asyncio.wait_for(
+                    self.session.reader.read(4096), timeout=0.3)
+                if not chunk:
+                    break
+        except (asyncio.TimeoutError, Exception):
+            pass
+        await self.session.read_line("Press Enter...")
+
+    async def _upload_terminal_file(self, area_id, uploads_dir, protos):
+        """Receive a file upload from the user via ZMODEM/YMODEM/XMODEM."""
+        from anetbbs.models import db, FileUpload
+        from .xfer import recv_file
+        import uuid, mimetypes, shutil as _shutil
+        from ..features.archive_meta import extract_archive_description
+
+        opts = []
+        labels = {'zmodem': 'Z=ZMODEM', 'ymodem': 'Y=YMODEM', 'xmodem': 'X=XMODEM'}
+        for p in protos:
+            opts.append(labels[p])
+        opts.append("Q=Cancel")
+
+        proto_choice = (await self.session.read_line(
+            f"\r\nUpload protocol [{' '.join(opts)}]: ") or '').strip().upper()
+        if proto_choice == 'Q' or not proto_choice:
+            return
+
+        proto_map = {'Z': 'zmodem', 'Y': 'ymodem', 'X': 'xmodem'}
+        protocol = proto_map.get(proto_choice)
+        if not protocol or protocol not in protos:
+            await self.session.write("\r\nUnknown protocol.\r\n")
+            return
+
+        desc = (await self.session.read_line(
+            "Description (optional, blank to skip): ") or '').strip()
+
+        await self.session.write(
+            f"\r\nReady for {protocol.upper()} receive.\r\n"
+            f"Begin your terminal's send now.\r\n\r\n")
+        await asyncio.sleep(1)
+
+        received = await recv_file(self.session, protocol)
+
+        if not received:
+            await self.session.write("\r\n[Upload failed or no file received.]\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+
+        os.makedirs(uploads_dir, exist_ok=True)
+
+        app = _app()
+        uid = self.session.user.get('id')
+        saved = []
+
+        for orig_name, tmp_path in received:
+            try:
+                ext = orig_name.rsplit('.', 1)[-1].lower() \
+                      if '.' in orig_name else ''
+                stored = f"{uuid.uuid4().hex}.{ext}" if ext \
+                         else uuid.uuid4().hex
+                dest = os.path.join(uploads_dir, stored)
+                _shutil.move(tmp_path, dest)
+                size = os.path.getsize(dest)
+                mime = mimetypes.guess_type(orig_name)[0] \
+                       or 'application/octet-stream'
+
+                # Auto-extract FILE_ID.DIZ if user left desc blank
+                file_desc = desc
+                if not file_desc:
+                    try:
+                        file_desc = extract_archive_description(dest) or ''
+                    except Exception:
+                        pass
+
+                with app.app_context():
+                    fu = FileUpload(
+                        uploader_id=uid,
+                        filename=stored,
+                        original_filename=orig_name,
+                        file_path=dest,
+                        file_size=size,
+                        mime_type=mime,
+                        description=file_desc,
+                        file_area_id=area_id,
+                        is_public=True,
+                    )
+                    db.session.add(fu)
+                    db.session.commit()
+                saved.append(orig_name)
+            except Exception as exc:
+                await self.session.write(f"\r\nFailed to save {orig_name}: {exc}\r\n")
+            finally:
+                try:
+                    _shutil.rmtree(os.path.dirname(tmp_path),
+                                   ignore_errors=True)
+                except Exception:
+                    pass
+
+        if saved:
+            await self.session.write(
+                f"\r\n[Uploaded: {', '.join(saved)}]\r\n")
+        await self.session.read_line("Press Enter...")
 
     # ------------------------------------------------------------------
     # User profile
@@ -972,7 +1621,7 @@ class BBSMenuUI:
                                   i.feed.name, i.published_at,
                                   i.id in read_ids))
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('RSS — All Feeds'))
+            await self.session.write(banner('RSS - All Feeds'))
             if not rows:
                 await self.session.write(
                     f"  {FG['gry']}No items across any feed yet.{RESET}\r\n")
@@ -1016,37 +1665,43 @@ class BBSMenuUI:
 
     async def show_profile(self):
         from anetbbs.models import User
-        with _app().app_context():
-            u = User.query.get(self.session.user['id'])
-            if not u:
-                await self.session.write("\r\nProfile not found.\r\n")
-                await self.session.read_line("\r\nPress Enter...")
-                return
+        while True:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                if not u:
+                    await self.session.write("\r\nProfile not found.\r\n")
+                    await self.session.read_line("\r\nPress Enter...")
+                    return
 
-        from .ansi_ui import banner, footer, FG, RESET
-        await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Your Profile'))
-        for label, value in [
-            ('Username', u.username),
-            ('Display name', u.display_name or '-'),
-            ('Email', u.email or '-'),
-            ('Joined', u.created_at.strftime('%Y-%m-%d') if u.created_at else '?'),
-            ('Last login', u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'never'),
-            ('Login count', str(u.login_count or 0)),
-            ('Admin', 'yes' if u.is_admin else 'no'),
-            ('Location', u.location or '-'),
-            ('Bio', (u.bio or '-')[:60]),
-        ]:
-            await self.session.write(
-                f"  {FG['cyan']}{label:<14}{RESET} "
-                f"{FG['gry']}:{RESET} "
-                f"{FG['grn']}{value}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
-        await self.session.write(
-            f"{FG['dim']}Profile editing via web at /profile/edit — "
-            f"telnet edit next iteration.{RESET}\r\n")
-        await self.session.read_line(
-            f"\r\n{FG['cyan']}Press Enter...{RESET}")
+            from .ansi_ui import banner, footer, FG, RESET
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Your Profile'))
+            for label, value in [
+                ('Username', u.username),
+                ('Display name', u.display_name or '-'),
+                ('Email', u.email or '-'),
+                ('Joined', u.created_at.strftime('%Y-%m-%d') if u.created_at else '?'),
+                ('Last login', u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'never'),
+                ('Login count', str(u.login_count or 0)),
+                ('Admin', 'yes' if u.is_admin else 'no'),
+                ('Location', u.location or '-'),
+                ('Bio', (u.bio or '-')[:60]),
+            ]:
+                await self.session.write(
+                    f"  {FG['cyan']}{label:<14}{RESET} "
+                    f"{FG['gry']}:{RESET} "
+                    f"{FG['grn']}{value}{RESET}\r\n")
+            await self.session.write('\r\n' + footer() + '\r\n')
+            choice = (await self.session.read_line(
+                f"\r\n{FG['cyan']}E{RESET}=Edit Profile  "
+                f"{FG['cyan']}W{RESET}=Change Password  "
+                f"{FG['cyan']}Q{RESET}=Back  > ") or '').strip().upper()
+            if choice == 'Q' or not choice:
+                return
+            elif choice == 'E':
+                await self.edit_profile()
+            elif choice == 'W':
+                await self.change_password()
 
 
 # ---------------------------------------------------------------------------
@@ -1203,7 +1858,7 @@ async def _compose_echomail(self):
         db.session.add(em)
         db.session.commit()
     await self.session.write(
-        f"\r\n  {FG['grn']}{BOLD}✓ Queued for next BinkP poll.{RESET}"
+        f"\r\n  {FG['grn']}{BOLD}[OK] Queued for next BinkP poll.{RESET}"
         f"  {FG['gry']}(msg id={em.id}){RESET}\r\n")
     await self.session.read_line(
         f"\r\n{FG['cyan']}Press Enter...{RESET}")
@@ -1239,9 +1894,9 @@ BBSMenuUI.edit_profile = _edit_profile
 async def _change_password(self):
     from anetbbs.models import db, User
     from werkzeug.security import check_password_hash, generate_password_hash
-    cur = await self.session.read_line("\r\nCurrent password: ")
-    new1 = await self.session.read_line("New password: ")
-    new2 = await self.session.read_line("Confirm new: ")
+    cur = await self.session.read_password("\r\nCurrent password: ")
+    new1 = await self.session.read_password("New password: ")
+    new2 = await self.session.read_password("Confirm new: ")
     if not new1 or new1 != new2:
         await self.session.write("\r\nPasswords don't match (or empty). Cancelled.\r\n")
         await self.session.read_line("Press Enter...")

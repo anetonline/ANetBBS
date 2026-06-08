@@ -97,12 +97,16 @@ def _js_str(s):
     return json.dumps(s)
 
 
-def _resolve_path(p, base='/home/stingray/anetbbs'):
+def _resolve_path(p, base=None):
     """Convert a possibly-relative path to absolute, anchored at base."""
     if not p:
         return p
     if os.path.isabs(p):
         return p
+    if base is None:
+        # This file is anetbbs/games/door_runner.py — install root is 3 dirs up.
+        base = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
     return os.path.normpath(os.path.join(base, p))
 
 
@@ -570,6 +574,15 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
     extra = _xp(game.command_line_args or '').replace('{node}', str(node_number)).strip()
     wd_raw = _xp(game.working_directory or '')
     wd = _resolve_path(wd_raw) if wd_raw else None
+
+    # If exe_path_raw is relative and doesn't resolve at the install root,
+    # try resolving it against working_directory. Sysops naturally expect
+    # "executable_path=TW2002.EXE + working_directory=/path/to/TW2002" to work.
+    if (not os.path.isabs(exe_path_raw) and wd
+            and not os.path.isfile(exe_path) and not os.path.isdir(exe_path)):
+        candidate = os.path.normpath(os.path.join(wd, exe_path_raw))
+        if os.path.isfile(candidate) or os.path.isdir(candidate):
+            exe_path = candidate
 
     if os.path.isdir(exe_path):
         # Convention B: executable_path is the game dir; first token of args is the exe
@@ -1078,6 +1091,11 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
             os.environ.setdefault('SBBS_NODE_NUM', str(node))
         except Exception:
             pass
+        # For DOS doors: suppress SDL display/audio probes so dosbox-x starts
+        # cleanly on headless servers and in containers without X11 or audio hw.
+        if game.game_type == 'door_dos' and not os.environ.get('DISPLAY'):
+            os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
+            os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
         os.execvp(cmd[0], cmd)
         os._exit(1)
 

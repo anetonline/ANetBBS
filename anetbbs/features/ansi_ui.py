@@ -59,7 +59,7 @@ def menu_items_two_col(items, width=64):
             hk, lbl = it
             text = f"  [{hk}] {lbl}"
             if len(text) > col_w:
-                text = text[:col_w - 1] + '…'
+                text = text[:col_w - 1] + '>'
             text = text.ljust(col_w)
             text = text.replace(f'[{hk}]',
                                 f'{FG["yel"]}{BOLD}[{hk}]{RESET}{FG["grn"]}', 1)

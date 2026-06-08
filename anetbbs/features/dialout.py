@@ -57,7 +57,7 @@ class DialoutMenu:
                 self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
-                await self.session.write(banner('Dial Out — Visit Another BBS'))
+                await self.session.write(banner('Dial Out - Visit Another BBS'))
                 for i, (name, host, port, proto) in enumerate(destinations, 1):
                     line = f"  [{i:2d}] {name:<22} {host}:{port}  ({proto})"
                     line = line.replace(
@@ -97,7 +97,7 @@ class DialoutMenu:
 
     async def _connect(self, name, host, port, proto):
         await self.session.write(
-            f"\r\n{FG['cyan']}Connecting to {name} ({host}:{port}) — "
+            f"\r\n{FG['cyan']}Connecting to {name} ({host}:{port}) - "
             f"Press Ctrl+] then Q to disconnect.{RESET}\r\n\r\n")
         try:
             reader, writer = await asyncio.wait_for(

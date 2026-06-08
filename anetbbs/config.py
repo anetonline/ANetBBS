@@ -59,28 +59,6 @@ class Config:
     # Banner shown on connect — replace at will.
     FTP_BANNER = os.environ.get('FTP_BANNER', 'ANetBBS FTP — file areas')
 
-    # Internet email — ANetBBS doesn't ship an MTA. We ride on top of the
-    # sysop's existing Postfix (or Exim/OpenSMTPD) instance:
-    #   - Inbound: a postfix virtual-alias routes `*@MAIL_DOMAIN` to
-    #     `lmtp:unix:MAIL_LMTP_SOCKET`. ANetBBS reads from there.
-    #   - Outbound: ANetBBS submits to `MAIL_RELAY_HOST:MAIL_RELAY_PORT`
-    #     (default 127.0.0.1:25 — the local MTA). The MTA does MX
-    #     lookup, DKIM signing, retries, bounces, deliverability.
-    # See docs/19-email.md for the postfix recipe.
-    MAIL_ENABLED = os.environ.get('MAIL_ENABLED', 'false').lower() == 'true'
-    MAIL_DOMAIN = os.environ.get('MAIL_DOMAIN', '')
-    MAIL_LMTP_SOCKET = os.environ.get(
-        'MAIL_LMTP_SOCKET', '/run/anetbbs/lmtp.sock')
-    MAIL_RELAY_HOST = os.environ.get('MAIL_RELAY_HOST', '127.0.0.1')
-    MAIL_RELAY_PORT = int(os.environ.get('MAIL_RELAY_PORT', '25'))
-    # Maximum inbound message size — anything larger is rejected at
-    # `MAIL FROM` time with a 552 status. Default 25 MB matches Gmail.
-    MAIL_MAX_SIZE = int(os.environ.get('MAIL_MAX_SIZE', str(25 * 1024 * 1024)))
-    # 'sysop' / 'auto' / 'optin' — controls who gets an address.
-    # Day-1 ships with the sysop-approved default; the other modes
-    # are wired up in the admin UI in Day 4.
-    MAIL_ALLOCATION = os.environ.get('MAIL_ALLOCATION', 'sysop')
-
     # ANetBBS federation registry —
     #   REGISTRY_MODE_ENABLED: this BBS doubles as the central hub for
     #     anetbbs.lst (the federation directory). Most installs leave it

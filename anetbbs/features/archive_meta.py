@@ -205,5 +205,5 @@ def _decode(data, source_name):
     # Strip trailing nulls / whitespace
     text = text.rstrip('\x00 \r\n\t')
     if len(text) > MAX_DESCRIPTION_BYTES:
-        text = text[:MAX_DESCRIPTION_BYTES].rstrip() + '\n…'
+        text = text[:MAX_DESCRIPTION_BYTES].rstrip()
     return text

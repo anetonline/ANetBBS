@@ -344,12 +344,12 @@ class ResetPasswordForm(FlaskForm):
 def forgot_password():
     """Request a password-reset token by username or email.
 
+    The reset URL is logged to the server journal. The sysop can retrieve it
+    from there (or from the Admin > Password Resets panel) and pass it to the
+    user via any out-of-band channel (PM, chat, etc.).
+
     To avoid leaking which usernames/emails exist, we always show the same
-    success message regardless of whether the lookup matched. The token URL
-    is currently surfaced via flash on the next page IF a sysop is testing
-    via console — production would email the link instead. Until SMTP is
-    wired in, the sysop can pull the token from the
-    `password_reset_tokens` table by hand.
+    success message regardless of whether the lookup matched.
     """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
@@ -371,18 +371,13 @@ def forgot_password():
             reset_url = url_for('auth.reset_password', token=token,
                                 _external=True)
             current_app.logger.info(
-                'Password reset requested for user %s (%s) — token %s URL %s',
-                user.username, user.email, token, reset_url)
-            # Surface to console for now — production should email this.
-            flash(
-                f'Reset link (logged to server console — email integration '
-                f'pending): {reset_url}',
-                'info')
+                'Password reset requested for user %s — reset URL: %s',
+                user.username, reset_url)
             _log_activity(user.id, 'password_reset_requested')
 
         # Always return the same generic success message to the user
         flash('If that account exists, a password-reset link has been issued. '
-              'Ask the sysop if you don\'t receive it.',
+              'Contact the sysop to receive your reset link.',
               'success')
         return redirect(url_for('auth.login'))
 

@@ -180,10 +180,8 @@ def register():
 
     db.session.commit()
 
-    # Mailing the token is Email Day 2's job; for now we return it in
-    # the response so manual testing works + the registry sysop can
-    # paste it to the registrant. Once email is wired we'll suppress
-    # the response field and send a proper notification.
+    # Token is returned in the response so the hub sysop can
+    # paste it to the registrant via any out-of-band channel (PM, chat, etc.).
     return jsonify({
         'ok': True,
         'status': 'pending_verification' if not entry.is_verified

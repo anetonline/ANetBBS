@@ -14,7 +14,7 @@ from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Board, Post, Message, Theme, UserSession,
-                       UserActivity, RegistrationAttempt)
+                       UserActivity, RegistrationAttempt, PasswordResetToken)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -2745,3 +2745,41 @@ def word_filter():
         return redirect(url_for('admin.word_filter'))
     rows = WordFilter.query.order_by(WordFilter.pattern).all()
     return render_template('admin/word_filter.html', rows=rows)
+
+
+@admin_bp.route('/password-resets')
+@login_required
+@admin_required
+def password_resets():
+    """List pending (unused, unexpired) password-reset tokens so the sysop
+    can copy the URL and pass it to the user out-of-band (PM, chat, etc.)."""
+    now = datetime.utcnow()
+    pending = (PasswordResetToken.query
+               .filter(PasswordResetToken.used_at.is_(None),
+                       PasswordResetToken.expires_at > now)
+               .order_by(PasswordResetToken.created_at.desc())
+               .all())
+    # Build full reset URLs here so the template doesn't need url_for tricks.
+    from flask import request as _req
+    base = _req.host_url.rstrip('/')
+    tokens_with_url = [
+        {
+            'token': rt,
+            'reset_url': f"{base}/auth/reset/{rt.token}",
+        }
+        for rt in pending
+    ]
+    return render_template('admin/password_resets.html',
+                           tokens=tokens_with_url, now=now)
+
+
+@admin_bp.route('/password-resets/<int:token_id>/revoke', methods=['POST'])
+@login_required
+@admin_required
+def revoke_reset_token(token_id):
+    """Invalidate a pending token (mark it used so it can't be clicked)."""
+    rt = PasswordResetToken.query.get_or_404(token_id)
+    rt.used_at = datetime.utcnow()
+    db.session.commit()
+    flash(f'Reset token for {rt.user.username} revoked.', 'success')
+    return redirect(url_for('admin.password_resets'))

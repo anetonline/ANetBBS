@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0a2.post85",
+    version="1.0a2.post94",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -52,9 +52,6 @@ setup(
         # FTPS support: pyftpdlib gates TLS_FTPHandler behind pyOpenSSL
         # being importable. Without this, FTPS silently fails to enable.
         'pyopenssl>=24.0.0',
-        # Internet email (Phase: alpha 2 deploy) — LMTP receive + relay
-        'aiosmtpd>=1.4.0',
-        'aiosmtplib>=3.0.0',
         # Service Control Center — per-PID CPU% + memory sampler at
         # /admin/control/. Reads /proc, no special privileges.
         'psutil>=5.9.0',

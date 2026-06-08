@@ -166,32 +166,11 @@ def main():
     ssh_enabled = config_class.SSH_ENABLED
     rlogin_enabled = config_class.RLOGIN_ENABLED
     ftp_enabled = getattr(config_class, 'FTP_ENABLED', False)
-    mail_enabled = getattr(config_class, 'MAIL_ENABLED', False)
 
     if not telnet_enabled and not ssh_enabled and not rlogin_enabled \
-            and not ftp_enabled and not mail_enabled:
+            and not ftp_enabled:
         logger.info("All BBS servers are disabled. Use 'anetbbs-web' to run the web interface.")
         return
-
-    # LMTP receiver runs in its own daemon thread. Same pattern as FTP:
-    # build a MINIMAL Flask app (no blueprints, no pollers) so we don't
-    # contaminate the asyncio loop with threading-based subsystems.
-    if mail_enabled:
-        try:
-            import threading
-            from anetbbs.mail.lmtp_server import run as _lmtp_run, build_minimal_app as _mail_app
-            mail_app = _mail_app()
-            mail_thread = threading.Thread(
-                target=_lmtp_run, args=(mail_app,),
-                name='mail-lmtp', daemon=True)
-            mail_thread.start()
-            logger.info("Starting ANetBBS Mail LMTP listener on unix:%s",
-                        config_class.MAIL_LMTP_SOCKET)
-        except ImportError as exc:
-            logger.warning("aiosmtpd not installed — Mail LMTP disabled. "
-                           "Install: pip install aiosmtpd>=1.4.0 (%s)", exc)
-        except Exception:
-            logger.exception("Failed to start Mail LMTP listener")
 
     # FTP server runs in a daemon thread alongside the asyncio servers.
     # pyftpdlib has its own selectors-based loop and doesn't natively mix

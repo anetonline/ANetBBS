@@ -347,7 +347,7 @@ class MRCChat(BaseChatSystem):
             import aiohttp
         except ImportError:
             await self.session.write(
-                '\r\n\x1b[31maiohttp not installed — cannot reach the MRC '
+                '\r\n\x1b[31maiohttp not installed - cannot reach the MRC '
                 'bridge. Install it (pip install aiohttp).\x1b[0m\r\n')
             return
 
@@ -456,7 +456,7 @@ class MRCChat(BaseChatSystem):
         # Truncate topic if even with min gap we'd overflow.
         overflow = (left_visible + right_visible + 1) - self._term_columns
         if overflow > 0 and self._topic:
-            new_topic = self._topic[:max(1, len(self._topic) - overflow - 1)] + '…'
+            new_topic = self._topic[:max(1, len(self._topic) - overflow - 1)] + '>'
             topic = f' \x1b[36m{new_topic}\x1b[0m'
             gap = 1
 
@@ -495,7 +495,7 @@ class MRCChat(BaseChatSystem):
         prompt_visible_len = 2
         max_text = max(8, self._term_columns - prompt_visible_len - 1)
         if len(text) > max_text:
-            text = '…' + text[-(max_text - 1):]
+            text = '<' + text[-(max_text - 1):]
 
         await self.session.write(
             f'\x1b[{self._input_row};1H'
@@ -1414,7 +1414,7 @@ class MRCChat(BaseChatSystem):
 
         if cmd == 'scroll':
             await self._emit(
-                '\x1b[33m/scroll has been removed — use your terminal\'s '
+                '\x1b[33m/scroll has been removed - use your terminal\'s '
                 'native scrollback (Shift+PgUp / mouse wheel).\x1b[0m')
             return True
 
@@ -1437,7 +1437,7 @@ class MRCChat(BaseChatSystem):
             # Header
             await self._emit(
                 f'\x1b[36mMentions:\x1b[0m {n} unread '
-                f'({len(log)} in log) — \x1b[2mtime  room  from  message\x1b[0m')
+                f'({len(log)} in log) - \x1b[2mtime  room  from  message\x1b[0m')
             for m in log:
                 # Trim body to fit a reasonable width but keep enough
                 # context to recognize what was said.

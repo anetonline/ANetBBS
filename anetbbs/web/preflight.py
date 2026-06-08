@@ -277,21 +277,6 @@ def _check_sudoers():
     return _check('sudoers grant present', 'ok', path)
 
 
-def _check_email_config(cfg):
-    smtp_host = cfg.get('SMTP_HOST') or ''
-    sysop_email = cfg.get('SYSOP_EMAIL') or os.environ.get('SYSOP_EMAIL') or ''
-    if not smtp_host:
-        return _check('Outbound email configured', 'warn',
-                      'SMTP_HOST not set in .env',
-                      'Set SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS so '
-                      'NUV verifications and password resets actually mail out.')
-    if not sysop_email:
-        return _check('Outbound email configured', 'warn',
-                      'SYSOP_EMAIL not set',
-                      'Sysop alerts (login failures, federation problems) need a destination.')
-    return _check('Outbound email configured', 'ok',
-                  f'SMTP={smtp_host}, sysop={sysop_email}')
-
 
 def _check_federation_reachable(cfg):
     reg_url = cfg.get('REGISTRY_URL') or 'https://bbs.a-net.fyi'
@@ -349,7 +334,6 @@ def _run_all(cfg):
     checks.append(_check_listener('ftp', cfg.get('FTP_PORT', 2121), cfg))
     checks.append(_check_listener('finger', cfg.get('FINGER_PORT', 79), cfg))
     checks.append(_check_sudoers())
-    checks.append(_check_email_config(cfg))
     checks.append(_check_federation_reachable(cfg))
     checks.append(_check_secret_key(cfg))
     checks.append(_check_anetbbs_install_sentinel())

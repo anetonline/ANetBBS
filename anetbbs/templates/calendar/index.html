@@ -5,9 +5,12 @@
     <h1><i class="bi bi-calendar3"></i> Calendar</h1>
 </div>
 
-{% if current_user.is_authenticated and current_user.is_admin %}
+{% if current_user.is_authenticated %}
 <div class="mb-3">
-    <a href="{{ url_for('calendar.new_event') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Add Event</a>
+    <a href="{{ url_for('calendar.new_event') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Submit Event</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('calendar.pending_events') }}" class="btn btn-outline-warning ms-2"><i class="bi bi-hourglass-split"></i> Pending Review</a>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -22,7 +25,7 @@
                 <span class="text-muted ms-2">{{ e.starts_at.strftime('%a %Y-%m-%d %H:%M UTC') }}</span>
                 {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
                 {% if e.description %}<div class="text-muted small">{{ e.description }}</div>{% endif %}
-                {% if current_user.is_authenticated and current_user.is_admin %}
+                {% if current_user.is_authenticated and (current_user.is_admin or e.created_by_id == current_user.id) %}
                 <form method="post" action="{{ url_for('calendar.delete', event_id=e.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-link btn-sm text-danger p-0">delete</button>

@@ -1,7 +1,142 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.85`** (June 2026). Previous: `v1.0a2.84`.
+separately. Current release: **`v1.0a2.94`** (June 2026). Previous: `v1.0a2.93`.
+
+## v1.0a2.94 — ZMODEM definitive fix, file desc view, batch downloads (June 2026)
+
+**ZMODEM root cause fixed.** `asyncio.wait_for` with a 150ms timeout polled
+`StreamReader.read()` dozens of times per second during transfers. Each cancelled
+read left `StreamReader._waiter` in a pending state; after the transfer the stale
+waiter caused `RuntimeError` in `read_line()`, which became "Menu action failed".
+Replaced with `asyncio.ensure_future + asyncio.wait` — one persistent read task,
+cancelled only when the transfer ends and awaited to completion so `_waiter` is
+guaranteed clean. Fix applied to both `send_file` and `recv_file`.
+
+**V# — view extended file description.** Type `V3` in the file browser to see the
+full description for file 3. ANSI art (FILE_ID.DIZ with ESC sequences) renders
+in CP437; plain-text descriptions word-wrap at 76 characters.
+
+**Batch downloads: `1,3,5` or `1-5`.** Enter a comma list or range in the browser
+to queue multiple downloads. Protocol selected once; files transfer sequentially.
+
+**Area list count-column alignment fixed.** "0. General / Top-level" now pads
+its name to 38 chars, matching the numbered rows.
+
+**Web UI: expandable full descriptions.** File area page shows the first line
+inline; files with multi-line or ANSI descriptions get a collapsible "full
+description" `<pre>` block.
+
+## v1.0a2.93 — File area: clear pages, ZMODEM fix attempt, FidoNet name cleanup (June 2026)
+
+**ZMODEM/YMODEM/XMODEM transfers fixed.** `-Z` was an invalid lrzsz flag;
+`sz` crashed immediately, the terminal sent binary handshake bytes, and they
+corrupted the following `read_line()` call causing "Menu action failed". Fixed
+flags: `--escape --binary` for send, `--escape` for receive. Added post-transfer
+input drain to flush stale binary bytes.
+
+**Clear screen on every page.** Area list and file browser now clear the terminal
+before each draw so content from previous pages doesn't remain visible.
+
+**FidoNet "0 !" prefix stripped from area names.** Pattern `^\d+\s*!\s*` removed
+at display time.
+
+## v1.0a2.92 — Terminal file areas read from disk (storage_path) (June 2026)
+
+**Root cause found for 0 file counts.** Terminal queried only `FileUpload` +
+`TicFile` DB tables. Most file areas store files on disk under `storage_path`
+with no DB records — exactly how the web works. Terminal now uses the same
+`_scan_area()` function the web uses. File counts and browser listings now
+match the web view. Web URL for disk-based files now uses `/file-areas/` path.
+
+## v1.0a2.91 — CP437 encoding fixes and file area 0-count bug (June 2026)
+
+**No more ? characters in the terminal.** Em dashes, ellipsis, and checkmarks
+throughout the terminal UI were not in CP437 and silently became `?`. All replaced
+with ASCII equivalents (`-`, `>`, `[OK]`). Affects `bbs_ui.py`, `menu_engine.py`,
+`ansi_ui.py`, `mrc_chat.py`, `dialout.py`, `xfer.py`, `archive_meta.py`.
+
+**File areas showing 0 files fixed.** Files uploaded before `is_public` column
+was added have `NULL` in that column; `filter_by(is_public=True)` missed them.
+Terminal queries now use `isnot(False)`. Startup migration sets existing NULLs to 1.
+
+## v1.0a2.90 — File area: ANSI colors, sysop visibility, FidoNet TicFile display (June 2026)
+
+**ANSI colors throughout file area.** Area list and file browser now use full color
+output: cyan headers, yellow item numbers, white filenames, gray counts, red/magenta
+flags for inactive/sysop-only areas.
+
+**Sysop sees all file areas.** Previously sysop was filtered to `is_active=True`
+same as regular users. Sysop now sees all areas with status flags shown.
+
+**TicFile records shown.** FidoNet hatched files (`TicFile`, `status='filed'`) are
+now counted in area totals and shown in the file browser merged with `FileUpload`
+records, sorted by date. Downloads use `stored_path`; falls back to web URL.
+
+**lrzsz status notice** shown at bottom of area list.
+
+## v1.0a2.89 — Full terminal file area: area browsing + ZMODEM/YMODEM/XMODEM (June 2026)
+
+**Terminal file library rewritten.** `F` in the main menu now shows a proper
+area browser (numbered list of all file areas with file counts), paginated file
+listing (20/page with N/P navigation), and full protocol download/upload.
+
+**ZMODEM / YMODEM / XMODEM download.** Selecting a file offers Z/Y/X protocol
+choice. Server runs `sz`/`sb`/`sx` from `lrzsz`, piping raw binary through the
+terminal connection with `--escape` for 8-bit-safe telnet transfer. Falls back
+to web URL if lrzsz not installed.
+
+**ZMODEM / YMODEM / XMODEM upload.** `U` in any area that allows user uploads
+runs `rz`/`rb`/`rx`, saves the file, and registers it in the DB. FILE_ID.DIZ
+auto-extracted for description if user leaves it blank.
+
+**New `anetbbs/features/xfer.py`** — transfer engine. `available_protocols()`,
+`send_file(session, path, proto)`, `recv_file(session, proto)`.
+
+**Requirement:** `apt install lrzsz` on the server.
+
+## v1.0a2.88 — Terminal: profile editing + file library URL lookup (June 2026)
+
+**Terminal profile view wired up.** `Y. Your Profile` now offers inline E=Edit
+Profile and W=Change Password options instead of "telnet edit next iteration."
+`change_password` now uses `read_password()` (masked input) instead of plaintext.
+
+**Terminal file library: real filenames + download URL.** Files now display their
+`original_filename` instead of the storage UUID hash. Entering a file number
+shows the full web download URL. "telnet download next iteration" placeholder removed.
+
+## v1.0a2.87 — Remove internet email; calendar user submissions; password-reset admin panel (June 2026)
+
+**Internet email / LMTP removed.** `anetbbs/mail/` module, `MAIL_ENABLED` config
+key, LMTP thread in `main.py`, `email_enabled`/`email_local_part` user columns,
+`InternetMail` DB model, and `aiosmtpd`/`aiosmtplib` deps are all removed.
+No user-visible features were removed.
+
+**Admin > Password Resets panel.** New admin page at `/admin/password-resets`
+lists all pending (unused, unexpired) reset tokens with a Copy button for the
+URL and a Revoke button. Sysop can now pass the link to the user out-of-band
+without grepping the journal. The `forgot_password` flash message updated to
+remove "email integration pending" wording.
+
+**Calendar user event submissions.** Any logged-in user can now submit a
+calendar event. Non-admin submissions land in a pending queue (`is_published=False`).
+New `/calendar/pending` sysop review page with Approve/Reject buttons.
+Admin submissions still go live immediately.
+
+## v1.0a2.86 — Fix: door_dos path resolution + headless dosbox-x (June 2026)
+
+**`door_dos` relative `executable_path` resolved against wrong directory.**
+`_resolve_path()` was hardcoded to `/home/stingray/anetbbs` as the base for
+relative paths, so any install at a different path got "executable_path does
+not exist: /home/stingray/anetbbs/GAME.EXE". Fixed: base now derived from
+`__file__` at runtime. Additionally, when `working_directory` is set, a
+relative `executable_path` is now resolved against it — so sysops can use
+`executable_path=TW2002.EXE` + `working_directory=/path/to/TW2002` as expected.
+
+**`door_dos` dosbox-x failed with EPERM/SDL errors on headless servers.**
+The child process now sets `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy`
+before exec'ing dosbox-x when no `DISPLAY` is set. Prevents SDL from trying to
+open a display or audio device in containers and headless VPS environments.
 
 ## v1.0a2.85 — Fix: ANSI menu overlays double-rendering stock menus + missing screen clear (June 2026)
 
