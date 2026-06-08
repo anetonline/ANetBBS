@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.95`** (June 2026). Previous: `v1.0a2.94`.
+separately. Current release: **`v1.0a2.96`** (June 2026). Previous: `v1.0a2.95`.
+
+## v1.0a2.96 — Web file area: ANSI/CP437 art renders correctly (June 2026)
+
+**FILE_ID.DIZ ANSI art now renders as colored HTML** in the web file area.
+Previously the expanded description showed raw escape codes (`□[0;40;37m…`).
+Added `ansi_art` Jinja2 filter that calls the existing `_ansi_to_html` pipeline
+directly on already-decoded Unicode strings (no latin-1 round-trip that would
+corrupt block-drawing characters above U+00FF). Added `strip_ansi` filter for
+the inline short description. `<pre>` block uses black background + `Courier New`
+so block art columns align correctly.
 
 ## v1.0a2.95 — File browser page size fix for 80×25 terminals (June 2026)
 

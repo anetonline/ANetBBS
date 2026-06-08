@@ -45,11 +45,11 @@
                     <td>
                         {% if f.description %}
                         {% set short_desc = f.description.split('\n')[0][:120] %}
-                        <small class="text-muted">{{ short_desc }}</small>
+                        <small class="text-muted">{{ short_desc | strip_ansi }}</small>
                         {% if '\n' in f.description or f.description|length > 120 %}
                         <details class="mt-1">
                             <summary class="small text-secondary">full description</summary>
-                            <pre class="mt-1 p-2 rounded small" style="background:#1a1a1a;color:#ccc;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;font-size:0.75rem;">{{ f.description }}</pre>
+                            <pre class="mt-1 p-2 rounded" style="background:#000;color:#aaaaaa;white-space:pre;overflow-x:auto;overflow-y:auto;max-height:320px;font-family:'Courier New',Courier,monospace;font-size:0.8rem;line-height:1.2;">{{ f.description | ansi_art }}</pre>
                         </details>
                         {% endif %}
                         {% endif %}

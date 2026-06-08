@@ -209,6 +209,31 @@ def create_app(config_name=None):
         Use for local boards/PMs where users may paste image links."""
         return _render_msg_body_rich(value, chrs)
 
+    @app.template_filter('ansi_art')
+    def ansi_art_filter(value):
+        """Render a pre-decoded CP437/ANSI string (e.g. FILE_ID.DIZ) as HTML.
+
+        Unlike msgbody, the description is already a proper Unicode string
+        (decoded from CP437 bytes by archive_meta._decode) — no latin-1
+        round-trip needed.  Just runs ANSI SGR -> HTML spans and pipe codes.
+        Newlines are left as-is so the caller's <pre> block preserves them.
+        """
+        from markupsafe import Markup
+        from .web.render_msg import _ansi_to_html, _pipe_to_ansi
+        if not value:
+            return Markup('')
+        return Markup(_ansi_to_html(_pipe_to_ansi(str(value))))
+
+    @app.template_filter('strip_ansi')
+    def strip_ansi_filter(value):
+        """Strip ANSI escape sequences, returning plain text."""
+        import re as _re
+        from markupsafe import Markup, escape
+        if not value:
+            return Markup('')
+        clean = _re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', str(value))
+        return Markup(str(escape(clean)))
+
     @app.template_filter('markdown')
     def markdown_filter(value):
         """Render Markdown to safe HTML.
