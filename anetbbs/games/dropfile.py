@@ -170,7 +170,7 @@ def generate_dorinfo(user, node_number, minutes_remaining=60, bbs_name='ANetBBS'
 
 
 def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
-                    output_path=None):
+                    output_path=None, comm_handle=None):
     """
     Generate a DOOR32.SYS drop file (modern 32-bit format).
 
@@ -180,6 +180,14 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
         minutes_remaining: Session time remaining in minutes
         bbs_name: Name of the BBS
         output_path: Full path to write the file (optional)
+        comm_handle: Override for the comm handle field.
+            None / not supplied → type 1 / handle 0 (FOSSIL, for DOS doors).
+            -1   → type 2 / handle -1 (Mystic Linux STDIO convention).
+                   RMDoor/DDPlus and most modern FPC door kits treat
+                   ComNum=-1 on UNIX as a signal to use Write(StdOut)/ReadKey
+                   (PTY-safe) instead of fpSend/fpRecv, which fail with
+                   ENOTSOCK on a PTY and produce an instant carrier-drop exit.
+            >= 0 → type 2 / handle N (real inherited socket fd).
 
     Returns:
         String content of the drop file
@@ -191,15 +199,23 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
 
     security_level = 255 if _u(user, 'is_admin') else 50
 
-    # Comm type 1 = FOSSIL (the door speaks INT 14h to BNU on COM1, which
-    # talks over our TCP nullmodem). Type 2 = "telnet socket" — only works
-    # for doors that natively know how to read from the socket fd. Most
-    # classic doors (LORD, TradeWars, etc.) don't, so type 1 / FOSSIL is
-    # what we want by default.
+    # Comm type and handle selection:
+    # DOS doors (door_dos) → type 1 / handle 0: FOSSIL on COM1 via TCP nullmodem.
+    # Native Linux PTY doors (door_native) → type 2 / handle -1: Mystic STDIO
+    # convention. fpSend/fpRecv fail with ENOTSOCK on a PTY fd, so we signal
+    # the door kit to use stdin/stdout directly instead.
+    if comm_handle is None:
+        comm_type = 1
+        comm_handle = 0
+    elif comm_handle == -1:
+        comm_type = 2
+    else:
+        comm_type = 2
+
     lines = [
-        '1',               # Comm type (1=FOSSIL on COM1)
-        '0',               # Comm or socket handle (unused with FOSSIL)
-        '38400',           # Baud rate
+        str(comm_type),        # Comm type
+        str(comm_handle),      # Comm or socket handle
+        '38400',               # Baud rate
         bbs_name,          # BBS name
         str(_u(user, 'id') or 0), # User ID
         full_name,                 # User's real name
@@ -290,6 +306,11 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
     elif drop_type == 'dorinfo':
         generate_dorinfo(user, node_number, minutes_remaining, bbs_name, output_path)
     elif drop_type == 'door32.sys':
-        generate_door32(user, node_number, minutes_remaining, bbs_name, output_path)
+        # Native Linux PTY doors need comm_handle=-1 (Mystic STDIO convention)
+        # so the door kit uses stdin/stdout instead of fpSend/fpRecv on a PTY fd.
+        game_type = getattr(game, 'game_type', '') or ''
+        ch = -1 if game_type == 'door_native' else None
+        generate_door32(user, node_number, minutes_remaining, bbs_name, output_path,
+                        comm_handle=ch)
 
     return output_path

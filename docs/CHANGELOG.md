@@ -1,7 +1,20 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.96`** (June 2026). Previous: `v1.0a2.95`.
+separately. Current release: **`v1.0a2.97`** (June 2026). Previous: `v1.0a2.96`.
+
+## v1.0a2.97 — Fix: native Linux door games (RMDoor/DDPlus/FPC) carrier drop (June 2026)
+
+**Instant carrier drop on `door_native` launch fixed.** Doors built with the
+RMDoor / DDPlus Free Pascal toolkit use `fpSend`/`fpRecv` (socket syscalls) for
+all I/O on Linux. ANetBBS was writing DOOR32.SYS with `CommType=1` (FOSSIL),
+`CommNum=0` — `fpSend(0, …)` on a PTY fd returns `ENOTSOCK`, which set
+`FCarrier=false` and triggered the hangup handler immediately on startup.
+Fix: `door_native` games now get `CommType=2, CommNum=-1` (Mystic Linux STDIO
+convention). RMDoor checks `ComNum==-1` on UNIX and switches to
+`Write(StdOut)/ReadKey` (PTY-safe). Applies automatically; DOS doors unaffected.
+Config for RMDoor doors: Drop File Type=`door32.sys`, Drop File Path=`%P`,
+Command Line Args=`-D%f`.
 
 ## v1.0a2.96 — Web file area: ANSI/CP437 art renders correctly (June 2026)
 

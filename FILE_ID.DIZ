@@ -1,4 +1,4 @@
-ANetBBS v1.0a2.96 - Modern BBS System
+ANetBBS v1.0a2.97 - Modern BBS System
 -----------------------------------------
 Web (Flask+SocketIO), telnet, SSH, rlogin,
 FTP front-ends sharing one user database.
@@ -11,6 +11,7 @@ In-browser DOS games: DOOM + Duke Nukem
 Built-in wiki, RSS reader, 80x25 web
 terminal. Synchronet .js + Mystic .mps +
 DOSBox doors + door32. Sysop NodeSpy.
-CP437/ANSI throughout.
+CP437/ANSI throughout. Native Linux doors
+(RMDoor/DDPlus/FPC) work via STDIO mode.
 Linux + Python 3.10+ - ./install.sh
 github.com/anetonline    By StingRay
