@@ -1,34 +1,39 @@
-# ANetBBS v1.0a2.97 — Fix: native Linux door games (RMDoor/DDPlus/FPC) — carrier drop on launch
+# ANetBBS v1.0a2.98 — Fix: DOS door games (DOSBox-X) never connect on headless servers
 
 ## What's new
 
-### Fix: `door_native` games instantly drop carrier on launch
+### Fix: `door_dos` games — "DOSBox never connected; closing bridge" on headless servers
 
-All doors built with the RMDoor / DDPlus Free Pascal door toolkit (the
-dominant toolkit for new Linux BBS door development) produced an immediate
-"Carrier Dropped" exit as soon as the game launched.
+DOS door games (TradeWars, LORD, etc. via DOSBox) failed silently on headless
+servers with the message "DOSBox failed to dial in: timed out" / "DOSBox never
+connected; closing bridge". The TCP nullmodem bridge waited 60 seconds and gave
+up. No crash was visible because DOSBox's output was silently discarded.
 
-**Root cause:** RMDoor on Linux compiles with `{$DEFINE COMM_SOCKET}` and
-routes all I/O through `fpSend(fd, ...)` / `fpRecv(fd, ...)` — POSIX socket
-syscalls. ANetBBS previously wrote DOOR32.SYS with `CommType=1` (FOSSIL) and
-`CommNum=0` (stdin fd). When the door called `CommOpen(0)`, it issued
-`fpSend(0, …)` on the PTY slave fd, which is not a socket — this returned
-`ENOTSOCK`, set `FCarrier = false`, and triggered the hangup handler within
-milliseconds of startup.
+**Root cause 1 — SDL init failure (main cause):**
+The DOSBox-X `[sdl]` config section had only `fullscreen=false` with no `output=`
+directive. On headless servers (no DISPLAY, `SDL_VIDEODRIVER=dummy`), dosbox-x
+needs an explicit `output=surface` to initialize SDL2 via the dummy driver. Without
+it, dosbox-x may fail SDL init and exit before the autoexec even starts — so it
+never loads BNU.COM or connects to the TCP nullmodem bridge. Added `output=surface`
+to the generated conf when running headless.
 
-**Fix:** For `door_native` games, DOOR32.SYS is now written with
-`CommType=2, CommNum=-1` — the Mystic BBS Linux STDIO convention. RMDoor's
-`door.pas` explicitly checks for `ComNum == -1` on UNIX and switches to
-`Write(StdOut, …)` / `ReadKey` (stdin), which are PTY-safe. This is the same
-mechanism Mystic, Synchronet, and ENiGMA½ use when running RMDoor-based doors
-via a PTY/pipe rather than a raw socket.
+**Root cause 2 — dosbox stdout/stderr silently discarded:**
+DOSBox's stdout and stderr were connected to the PTY (alongside all other door
+processes), but for `door_dos` the PTY reader uses a no-op lambda since actual
+door I/O goes through the TCP bridge. Any dosbox crash output (SDL errors, missing
+file messages, etc.) was invisibly dropped. Added per-game log file:
+`logs/dosbox_<slug>_nodeN.log` — check this file when a DOS door fails to launch.
 
-This fix applies automatically to all `door_native` games — no per-game
-reconfiguration needed. DOS doors (`door_dos`) are unaffected; they continue
-to use CommType=1 / FOSSIL via the TCP nullmodem bridge.
+**Root cause 3 — no command/config logging:**
+The exact dosbox command and generated config path were never logged, making it
+impossible to reproduce or inspect a failing launch. Both are now logged at INFO
+so they appear in `journalctl -u anetbbs-telnet` and the web admin log viewer.
 
-**Game admin config for RMDoor/DDPlus doors:**
-- Game Type: `door_native`
-- Drop File Type: `door32.sys`
-- Drop File Path: `%P` (per-node temp dir, appends DOOR32.SYS automatically)
-- Command Line Args: `-D%f` (`%f` expands to full DOOR32.SYS path)
+**How to diagnose a DOS door that won't start:**
+```
+# See the config + command used:
+journalctl -u anetbbs-telnet | grep "DOS door"
+
+# See dosbox output (SDL errors, BNU output, etc.):
+cat /home/stingray/anetbbs/logs/dosbox_<slug>_node1.log
+```

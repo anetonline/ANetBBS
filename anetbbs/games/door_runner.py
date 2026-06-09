@@ -662,12 +662,19 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
         "exit\n"
     )
 
+    headless = not os.environ.get('DISPLAY')
+
     if dosbox in (dosbox_staging, dosbox_x):
-        # DOSBox-staging 0.82.x removed `output=null`/`autolock`. Use the
-        # closest valid options. `headless` would be ideal but staging
-        # doesn't support it — we rely on xvfb-run below if no DISPLAY.
+        # output=surface is required for headless operation. Without an explicit
+        # output directive, dosbox-x on a headless server (SDL_VIDEODRIVER=dummy,
+        # no DISPLAY) may fail SDL init silently and exit before the autoexec
+        # runs — which is why DOSBox never connects to the nullmodem bridge.
+        # output=surface works with SDL_VIDEODRIVER=dummy on both dosbox-x and
+        # dosbox-staging and adds no overhead since we hide the window anyway.
+        sdl_output = 'output=surface\n' if headless else ''
         conf = (
             "[sdl]\n"
+            + sdl_output +
             "fullscreen=false\n"
             "\n"
             + serial_section +
@@ -693,9 +700,10 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
                                       prefix='anetbbs_dos_', delete=False)
     tmp.write(conf)
     tmp.close()
+    logger.info('DOS door config written to %s (dosbox=%s, headless=%s)',
+                tmp.name, os.path.basename(dosbox), headless)
     base_cmd = [dosbox, '-conf', tmp.name, '-noconsole', '-exit']
-    if not os.environ.get('DISPLAY'):
-        # Try xvfb-run; if not installed the launch will fail with a clear error
+    if headless:
         from shutil import which
         xvfb = which('xvfb-run')
         if xvfb:
@@ -981,6 +989,9 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         cmd, cwd = _build_command(game, node, bbs_name, user=user,
                                    token_ctx=token_ctx,
                                    bridge_port=bridge_port)
+        logger.info('Launching game %s (type=%s, node=%d): %s',
+                    game.slug, game.game_type, node,
+                    ' '.join(str(c) for c in cmd))
     except Exception as exc:  # pylint: disable=broad-except
         logger.error('Failed to build command for game %s: %s', game.slug, exc)
         if dos_bridge:
@@ -1096,6 +1107,28 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         if game.game_type == 'door_dos' and not os.environ.get('DISPLAY'):
             os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
             os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
+        # For DOS doors: redirect dosbox stdout+stderr to a per-game log file.
+        # The dos_bridge uses the TCP nullmodem for actual door I/O; dosbox's
+        # stdio goes nowhere useful (PTY watcher discards it with a no-op
+        # lambda). Redirecting to a log lets sysops see SDL init failures,
+        # BNU errors, or any other dosbox crash output that would otherwise
+        # be silently lost. Check logs/dosbox_<slug>_nodeN.log after a failure.
+        if game.game_type == 'door_dos':
+            try:
+                _install_root = os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))))
+                _log_dir = os.path.join(_install_root, 'logs')
+                os.makedirs(_log_dir, exist_ok=True)
+                _slug = (getattr(game, 'slug', None) or 'door').strip() or 'door'
+                _dlog = os.path.join(_log_dir,
+                                     f'dosbox_{_slug}_node{node}.log')
+                _lfd = os.open(_dlog,
+                               os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                os.dup2(_lfd, 1)   # dosbox stdout → log
+                os.dup2(_lfd, 2)   # dosbox stderr → log
+                os.close(_lfd)
+            except OSError:
+                pass
         os.execvp(cmd[0], cmd)
         os._exit(1)
 

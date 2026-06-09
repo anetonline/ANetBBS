@@ -1,7 +1,20 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.97`** (June 2026). Previous: `v1.0a2.96`.
+separately. Current release: **`v1.0a2.98`** (June 2026). Previous: `v1.0a2.97`.
+
+## v1.0a2.98 — Fix: DOS door games never connect on headless servers (June 2026)
+
+**"DOSBox never connected; closing bridge" on headless servers fixed.** Three changes:
+(1) Added `output=surface` to the generated dosbox-x `[sdl]` config when running
+headless (`SDL_VIDEODRIVER=dummy`, no DISPLAY). Without this, dosbox-x may fail SDL
+init silently and exit before running the autoexec — so it never loads BNU.COM or
+connects to the TCP nullmodem bridge.
+(2) DOSBox stdout/stderr now go to `logs/dosbox_<slug>_nodeN.log` instead of being
+silently discarded via the PTY no-op lambda. Sysops can inspect this file to see any
+SDL errors, missing-file messages, or BNU output from a failing door launch.
+(3) The exact dosbox command and config file path are now logged at INFO level, visible
+in `journalctl -u anetbbs-telnet` and the web admin log viewer.
 
 ## v1.0a2.97 — Fix: native Linux door games (RMDoor/DDPlus/FPC) carrier drop (June 2026)
 
