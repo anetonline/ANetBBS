@@ -747,7 +747,7 @@ def _lightweight_migrate(app):
 
 def _create_default_data():
     """Create default boards and admin user if they don't exist"""
-    from .models import Board, User, Game
+    from .models import Board, User, Game, GameCategory
     
     # Create default boards
     default_boards = [
@@ -1089,6 +1089,22 @@ def _create_default_data():
             _ca.logger.warning('Wiki seed skipped: %s', exc)
         except Exception:
             pass
+
+    # ─── Default game categories ─────────────────────────────────────
+    # Idempotent: only inserts if the table is completely empty.
+    if not GameCategory.query.first():
+        defaults = [
+            ('Action',      'action',   1),
+            ('Classic DOS', 'classic',  2),
+            ('Puzzle',      'puzzle',   3),
+            ('RPG',         'rpg',      4),
+            ('Space',       'space',    5),
+            ('Strategy',    'strategy', 6),
+            ('Other',       'other',    99),
+        ]
+        for name, slug, order in defaults:
+            db.session.add(GameCategory(name=name, slug=slug, sort_order=order))
+        db.session.commit()
 
 
 def main():

@@ -57,17 +57,23 @@
             {{ form.description.label(class="form-label") }}
             {{ form.description(class="form-control", rows=3) }}
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             {{ form.category.label(class="form-label") }}
             {{ form.category(class="form-control") }}
+            <small style="color:#007700;"><a href="{{ url_for('games_admin.list_categories') }}" style="color:#007700;">Manage categories</a></small>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             {{ form.game_type.label(class="form-label") }}
             {{ form.game_type(class="form-control", id="game_type_select") }}
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             {{ form.icon.label(class="form-label") }}
             {{ form.icon(class="form-control", placeholder="bi-controller") }}
+        </div>
+        <div class="col-md-3">
+            {{ form.min_access_level.label(class="form-label") }}
+            {{ form.min_access_level(class="form-control") }}
+            <small style="color:#007700;">0=all, 10=user, 50=power, 100=sysop</small>
         </div>
         <div class="col-md-3">
             {{ form.max_nodes.label(class="form-label") }}
@@ -120,6 +126,43 @@
                     {{ form.use_dosbox(class="form-check-input") }}
                     {{ form.use_dosbox.label(class="form-check-label") }}
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- dosemu2 Door -->
+    <div id="section_door_dosemu" class="game-type-section">
+        <div class="section-header"><i class="bi bi-terminal"></i> dosemu2 Door Settings</div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-6">
+                {{ form.executable_path.label(class="form-label") }}
+                {{ form.executable_path(class="form-control", placeholder="/games/TW2002/TW.EXE") }}
+            </div>
+            <div class="col-md-6">
+                {{ form.working_directory.label(class="form-label") }}
+                {{ form.working_directory(class="form-control", placeholder="/games/TW2002/") }}
+            </div>
+            <div class="col-md-6">
+                {{ form.command_line_args.label(class="form-label") }}
+                {{ form.command_line_args(class="form-control") }}
+            </div>
+            <div class="col-md-3">
+                {{ form.drop_file_type.label(class="form-label") }}
+                {{ form.drop_file_type(class="form-control") }}
+            </div>
+            <div class="col-md-3">
+                {{ form.drop_file_path.label(class="form-label") }}
+                {{ form.drop_file_path(class="form-control") }}
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
+            <div class="col-12">
+                <small class="text-muted">
+                    Drives inside DOS: <strong>G:</strong> = FOSSIL bundle,
+                    <strong>H:</strong> = game dir, <strong>I:</strong> = per-node temp (drop files).
+                    Set your game's drop-file path to <code>I:\</code> in its config.
+                    Requires <code>sudo apt install dosemu2</code>.
+                </small>
             </div>
         </div>
     </div>
@@ -289,7 +332,7 @@
 {% block extra_js %}
 <script>
 (function () {
-    var sections = ['door_dos', 'door_dos_browser', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin'];
+    var sections = ['door_dos', 'door_dosemu', 'door_dos_browser', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin'];
     var sel = document.getElementById('game_type_select');
 
     function showSection(type) {

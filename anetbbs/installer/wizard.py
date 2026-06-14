@@ -158,10 +158,11 @@ def main():
 
     # 5. Admin user
     step('Sysop account')
-    admin_user = ask('Admin username', default=sysop_name, validator=non_empty)
-    admin_email = ask('Admin email', default=sysop_email)
+    admin_user = sysop_name
+    admin_email = sysop_email
+    info(f'Sysop login username: {admin_user}')
     while True:
-        admin_pass = ask('Admin password (min 8 chars)', secret=True,
+        admin_pass = ask('Sysop password (min 8 chars)', secret=True,
                          validator=lambda s: (len(s) >= 8,
                                               'Need at least 8 chars.'))
         confirm = ask('Confirm password', secret=True)
@@ -238,14 +239,19 @@ def main():
     step('Initializing database')
     pyexe = venv / 'bin' / 'python'
     bootstrap = (
-        f"import os; os.environ['FLASK_ENV']='production'; "
+        f"import os, sys; "
+        f"sys.path.insert(0, {str(install_dir)!r}); "
+        f"os.chdir({str(install_dir)!r}); "
+        f"os.environ['FLASK_ENV']='production'; "
+        f"os.environ['DATABASE_URL']={db_uri!r}; "
         f"from anetbbs.web_app import create_app; "
         f"app = create_app('production'); "
         f"from anetbbs.models import db, User; "
         f"ctx = app.app_context(); ctx.push(); "
-        f"u = User.query.filter_by(username='{admin_user}').first(); "
+        f"db.create_all(); "
+        f"u = User.query.filter_by(username={admin_user!r}).first(); "
         f"u = u or User(); "
-        f"u.username='{admin_user}'; u.email='{admin_email}'; "
+        f"u.username={admin_user!r}; u.email={admin_email!r}; "
         f"u.is_admin=True; u.is_active=True; "
         f"u.set_password({admin_pass!r}); "
         f"db.session.add(u); db.session.commit(); "

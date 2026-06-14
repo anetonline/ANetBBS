@@ -315,8 +315,8 @@ ask INSTALL_DIR     "Install directory"      "$DEF_INSTALL_DIR"
 echo ""
 
 echo -e "${BOLD}  ── Sysop Admin Account ──${NC}"
-ask SYSOP_NAME      "Sysop display name"     "$BBS_NAME Sysop"
-ask ADMIN_USER      "Sysop username"         "${SYSOP_NAME:-admin}"
+ask SYSOP_NAME      "Sysop username (your handle / login)"   "$BBS_NAME Sysop"
+ADMIN_USER="$SYSOP_NAME"
 ask_secret ADMIN_PASS "Sysop password"
 
 # Auto-generate password if blank
@@ -1042,8 +1042,8 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
     cat > "$MRC_CONFIG_FILE" << MRCEOF
 {
   "mrc_host": "mrc.bottomlessabyss.net",
-  "mrc_port": 5000,
-  "use_ssl": false,
+  "mrc_port": 5001,
+  "use_ssl": true,
   "bridge_bbs": "$BBS_NAME",
   "platform_info": "ANETBBS/Linux.$(uname -m)/$BBS_VERSION",
   "info_web": "$INFO_WEB",

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{% if category %}Edit{% else %}Add{% endif %} Category — Admin — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>{% if category %}<i class="bi bi-pencil"></i> Edit: {{ category.name }}
+        {% else %}<i class="bi bi-plus-circle"></i> Add Category{% endif %}</h3>
+    <a href="{{ url_for('games_admin.list_categories') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<form method="post" style="max-width:480px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ form.hidden_tag() }}
+
+    {% if form.errors %}
+    <div class="alert alert-danger">
+        <strong>Fix errors below:</strong>
+        <ul class="mb-0">
+            {% for field_name, errs in form.errors.items() %}
+                {% for err in errs %}
+                <li><code>{{ field_name }}</code>: {{ err }}</li>
+                {% endfor %}
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="mb-3">
+        {{ form.name.label(class="form-label") }}
+        {{ form.name(class="form-control", placeholder="Space") }}
+    </div>
+    <div class="mb-3">
+        {{ form.slug.label(class="form-label") }}
+        {{ form.slug(class="form-control", placeholder="space") }}
+        <small style="color:#007700;">Lowercase, no spaces. Used to tag games. Example: <code>space</code>, <code>rpg</code></small>
+    </div>
+    <div class="mb-3">
+        {{ form.sort_order.label(class="form-label") }}
+        {{ form.sort_order(class="form-control") }}
+        <small style="color:#007700;">Lower numbers appear first in menus.</small>
+    </div>
+    <div>
+        {{ form.submit(class="btn btn-primary") }}
+        <a href="{{ url_for('games_admin.list_categories') }}" class="btn btn-primary ms-2">Cancel</a>
+    </div>
+</form>
+
+{% if not category %}
+<script>
+(function() {
+    var name = document.querySelector('[name="name"]');
+    var slug = document.querySelector('[name="slug"]');
+    if (!name || !slug) return;
+    name.addEventListener('input', function() {
+        if (slug.dataset.edited) return;
+        slug.value = name.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    });
+    slug.addEventListener('input', function() { slug.dataset.edited = '1'; });
+})();
+</script>
+{% endif %}
+{% endblock %}

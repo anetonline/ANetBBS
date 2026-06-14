@@ -280,3 +280,104 @@ class DosBridge:
                 except OSError: pass
         self._dos_sock = None
         self.listener = None
+
+
+class DosEmuBridge:
+    """Bridge between dosemu2's COM1 PTY master fd and the BBS session.
+
+    dosemu2 is configured with ``$_com1 = "/dev/pts/N"`` pointing to the slave
+    end of a PTY pair we create before forking. The FOSSIL driver (BNU) sees
+    that device as COM1. All door serial I/O flows through the PTY to/from this
+    bridge — completely separate from dosemu2's keyboard stdin — no competition,
+    no dropped keystrokes.
+
+    ``com_slave_fd`` (optional): the slave end of the same PTY pair.  Keeping it
+    open in the bridge prevents a race where the parent closes the slave before
+    dosemu2 opens ``/dev/pts/N``, which would cause an immediate EIO on the
+    master and kill the pump before dosemu2 starts.  The bridge closes it in
+    ``stop()`` so the master sees EIO only after real cleanup is triggered.
+
+    Interface is intentionally identical to :class:`DosBridge` so callers can
+    treat both interchangeably.
+    """
+
+    def __init__(self, com_master_fd: int, com_slave_fd: int = None):
+        self._fd = com_master_fd
+        self._slave_fd = com_slave_fd
+        self._stop_event = threading.Event()
+        self._threads = []
+        import time
+        self._last_active = time.monotonic()
+
+    def bind_emit(self, emit_fn, on_close=None, idle_timeout=300):
+        """Start a thread that reads from the COM1 PTY master and calls
+        ``emit_fn(bytes)`` for each chunk. Stops when dosemu2 exits (EIO on
+        the PTY master). ``on_close`` is called once when the pump exits."""
+        import time
+        self._last_active = time.monotonic()
+
+        def _pump():
+            fd = self._fd
+            total_bytes = 0
+            chunks = 0
+            try:
+                # Use the same blocking-read pattern as _pty_reader.
+                # select.select() on a PTY fd under eventlet/epoll can
+                # silently miss readability events; blocking os.read() goes
+                # through eventlet's hub correctly (same as socket.recv).
+                while not self._stop_event.is_set():
+                    try:
+                        data = os.read(fd, 4096)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    self._last_active = time.monotonic()
+                    chunks += 1
+                    total_bytes += len(data)
+                    if chunks <= 5:
+                        preview = data[:60].decode('cp437', errors='replace')
+                        logger.info(
+                            'DosEmuBridge: chunk #%d, %d bytes — %r',
+                            chunks, len(data), preview)
+                    elif chunks == 6:
+                        logger.info(
+                            'DosEmuBridge: data flowing (>5 chunks); '
+                            'further logging suppressed.')
+                    try:
+                        emit_fn(data)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.warning('DosEmuBridge emit_fn raised: %s', exc)
+            finally:
+                logger.info('DosEmuBridge: closing — total %d chunks, %d bytes',
+                            chunks, total_bytes)
+                self.stop()
+                if on_close is not None:
+                    try:
+                        on_close()
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.warning('DosEmuBridge on_close raised: %s', exc)
+
+        t = threading.Thread(target=_pump, daemon=True, name='dosemu-bridge-pump')
+        t.start()
+        self._threads.append(t)
+
+    def write(self, data: bytes) -> None:
+        """Forward user keystrokes to dosemu2's COM1."""
+        try:
+            os.write(self._fd, data)
+            import time
+            self._last_active = time.monotonic()
+        except OSError as exc:
+            logger.warning('DosEmuBridge write failed: %s', exc)
+            self.stop()
+
+    def stop(self):
+        self._stop_event.set()
+        for fd in (self._fd, self._slave_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self._slave_fd = None

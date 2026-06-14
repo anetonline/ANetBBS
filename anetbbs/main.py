@@ -19,7 +19,6 @@ import os
 _INSTALL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ['DATABASE_URL'] = (
     os.environ.get('ANETBBS_DB_URL')          # explicit operator override
-    or os.environ.get('DATABASE_URL')          # already-correct EnvironmentFile value
     or f'sqlite:///{_INSTALL_DIR}/data/anetbbs.db'
 )
 

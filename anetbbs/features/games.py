@@ -43,11 +43,13 @@ class GameManager:
         # Need a Flask app context to query the SQLAlchemy Game table
         from flask import Flask
         from anetbbs.config import get_config
-        from anetbbs.models import db, Game
+        from anetbbs.models import db, Game, GameCategory
 
         app = Flask(__name__)
         app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
         db.init_app(app)
+
+        user_access = (self.session.user or {}).get('access_level') or 10
 
         with app.app_context():
             games = (Game.query
@@ -55,17 +57,34 @@ class GameManager:
                      .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
                      .order_by(Game.sort_order, Game.name)
                      .all())
-            # Detach into plain dicts so we can use them outside the app context
+            # Filter by access level; detach into plain dicts
             game_list = [{
                 'id': g.id, 'name': g.name, 'description': g.description,
-                'category': g.category, 'game_type': g.game_type,
-            } for g in games]
+                'category': g.category or 'other', 'game_type': g.game_type,
+                'min_access_level': g.min_access_level or 0,
+            } for g in games if (g.min_access_level or 0) <= user_access]
+
+            # Build slug->name map from DB categories
+            cat_rows = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+            cat_names = {c.slug: c.name for c in cat_rows}
+            cat_order = [c.slug for c in cat_rows]
 
         if not game_list:
             await self.session.write("\r\n\r\nNo door games are configured yet.\r\n"
                                      "An admin can add games via the web at /admin/games/.\r\n")
             await self.session.read_line("\r\nPress Enter to continue...")
             return
+
+        # Group games by category, preserving DB sort order
+        grouped = {}
+        for g in game_list:
+            grouped.setdefault(g['category'], []).append(g)
+        # Ordered category slugs: DB-ordered first, then any unknown slugs
+        ordered_slugs = [s for s in cat_order if s in grouped]
+        ordered_slugs += [s for s in grouped if s not in ordered_slugs]
+
+        # Build a flat numbered list (for input parsing) alongside grouped display
+        flat_list = [g for slug in ordered_slugs for g in grouped[slug]]
 
         from .ansi_ui import load_menu_ansi
         CYAN = '\x1b[96m'; WHT = '\x1b[97m'; YEL = '\x1b[93m'
@@ -80,10 +99,20 @@ class GameManager:
                 await self.session.write(f"{BOLD}{CYAN}║                    {WHT}Door Games{CYAN}                        ║{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}╠══════════════════════════════════════════════════════╣{RESET}\r\n")
                 # Inner width = 54 chars between the two ║ pillars.
-                for i, g in enumerate(game_list, 1):
-                    line = (f"{BOLD}{CYAN}║  {YEL}{i:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
-                            f"[{g['game_type']:<15}]     {CYAN}║{RESET}\r\n")
-                    await self.session.write(line)
+                num = 1
+                for slug in ordered_slugs:
+                    cat_name = cat_names.get(slug, slug.capitalize())
+                    # Category header: "  ─── Name ─────...─ " filling 54 chars
+                    label = f"  ─── {cat_name} "
+                    fill = '─' * max(0, 54 - len(label))
+                    inner = label + fill
+                    await self.session.write(
+                        f"{BOLD}{CYAN}║{DIM}{inner}{BOLD}{CYAN}║{RESET}\r\n")
+                    for g in grouped[slug]:
+                        line = (f"{BOLD}{CYAN}║  {YEL}{num:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
+                                f"[{g['game_type']:<15}]     {CYAN}║{RESET}\r\n")
+                        await self.session.write(line)
+                        num += 1
                 await self.session.write(f"{BOLD}{CYAN}║   {YEL}Q{DIM}. {GRN}Return{' ' * 42}{CYAN}║{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════╝{RESET}\r\n\r\n")
 
@@ -92,8 +121,8 @@ class GameManager:
                 return
             try:
                 idx = int(choice) - 1
-                if 0 <= idx < len(game_list):
-                    await self._launch(game_list[idx])
+                if 0 <= idx < len(flat_list):
+                    await self._launch(flat_list[idx])
                     continue
             except ValueError:
                 pass

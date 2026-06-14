@@ -8,6 +8,9 @@
         <a href="{{ url_for('games_admin.add_game') }}" class="btn btn-primary btn-sm">
             <i class="bi bi-plus-circle"></i> Add Game
         </a>
+        <a href="{{ url_for('games_admin.list_categories') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-tags"></i> Categories
+        </a>
         <a href="{{ url_for('games_admin.dashboard') }}" class="btn btn-primary btn-sm">
             <i class="bi bi-arrow-left"></i> Dashboard
         </a>
@@ -20,6 +23,7 @@
             <th>Name</th>
             <th>Type</th>
             <th>Category</th>
+            <th>Min Level</th>
             <th>Plays</th>
             <th>Status</th>
             <th>Actions</th>
@@ -34,6 +38,7 @@
             </td>
             <td><small>{{ game.game_type }}</small></td>
             <td>{{ game.category | capitalize }}</td>
+            <td>{{ game.min_access_level or 0 }}</td>
             <td>{{ game.play_count or 0 }}</td>
             <td>
                 <span class="badge"
@@ -64,7 +69,7 @@
             </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center" style="color:#007700;">No games yet.</td></tr>
+        <tr><td colspan="7" class="text-center" style="color:#007700;">No games yet.</td></tr>
         {% endfor %}
     </tbody>
 </table>

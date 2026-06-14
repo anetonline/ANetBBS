@@ -14,7 +14,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, Post, Theme, UserSession, UserAka
+from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS
 from ..echomail.routing import parse_address
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
@@ -349,6 +349,55 @@ def akas():
     user_akas = UserAka.query.filter_by(user_id=current_user.id).order_by(
         UserAka.is_primary.desc(), UserAka.address).all()
     return render_template('profile/akas.html', akas=user_akas)
+
+
+@profile_bp.route('/security-questions', methods=['GET', 'POST'])
+@login_required
+def security_questions():
+    """Set or update security questions for password recovery."""
+    existing = {qa.question: qa for qa in current_user.security_answers}
+    q_choices = [(q, q) for q in SECURITY_QUESTIONS]
+
+    if request.method == 'POST':
+        # Collect up to 3 question/answer pairs from the form
+        saved = 0
+        for i in range(1, 4):
+            q = request.form.get(f'question_{i}', '').strip()
+            a = request.form.get(f'answer_{i}', '').strip()
+            if not q or not a:
+                continue
+            if q not in SECURITY_QUESTIONS:
+                continue
+            rec = existing.get(q)
+            if rec:
+                rec.answer_hash = UserSecurityAnswer.hash_answer(a)
+            else:
+                rec = UserSecurityAnswer(
+                    user_id=current_user.id,
+                    question=q,
+                    answer_hash=UserSecurityAnswer.hash_answer(a),
+                )
+                db.session.add(rec)
+            saved += 1
+
+        # Remove any questions that were cleared (question slot left blank)
+        submitted_questions = set()
+        for i in range(1, 4):
+            q = request.form.get(f'question_{i}', '').strip()
+            if q and q in SECURITY_QUESTIONS:
+                submitted_questions.add(q)
+        for qa in list(current_user.security_answers):
+            if qa.question not in submitted_questions:
+                db.session.delete(qa)
+
+        db.session.commit()
+        flash(f'Security questions updated ({saved} saved).', 'success')
+        return redirect(url_for('profile.security_questions'))
+
+    current_answers = list(current_user.security_answers)
+    return render_template('profile/security_questions.html',
+                           q_choices=q_choices,
+                           current_answers=current_answers)
 
 
 @profile_bp.route('/export')

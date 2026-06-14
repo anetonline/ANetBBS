@@ -168,6 +168,19 @@ class ChatMessage(db.Model):
         return f'<ChatMessage from {self.username}>'
 
 
+class GameCategory(db.Model):
+    """Sysop-managed door/game categories (e.g. Space, RPG, Strategy)."""
+    __tablename__ = 'game_categories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    slug = db.Column(db.String(80), unique=True, nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f'<GameCategory {self.name}>'
+
+
 class Game(db.Model):
     """Game model for the Game Center"""
     __tablename__ = 'games'
@@ -177,6 +190,7 @@ class Game(db.Model):
     slug = db.Column(db.String(100), unique=True, nullable=False)
     description = db.Column(db.Text)
     category = db.Column(db.String(50), default='other')
+    min_access_level = db.Column(db.Integer, default=0)
 
     # Game type determines how it's launched
     # Types: 'door_dos', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web'
@@ -824,6 +838,45 @@ class PasswordResetToken(db.Model):
 
     def __repr__(self):
         return f'<PasswordResetToken user={self.user_id} valid={self.is_valid}>'
+
+
+SECURITY_QUESTIONS = [
+    "What was the name of your first pet?",
+    "What city were you born in?",
+    "What is your mother's maiden name?",
+    "What was the name of your elementary school?",
+    "What was the make of your first car?",
+    "What is the name of the street you grew up on?",
+    "What was your childhood nickname?",
+    "What is the name of your favorite childhood friend?",
+    "What was the name of your first employer?",
+    "What is the middle name of your oldest sibling?",
+]
+
+
+class UserSecurityAnswer(db.Model):
+    """Hashed answers to user-chosen security questions for password recovery."""
+    __tablename__ = 'user_security_answers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    question = db.Column(db.String(300), nullable=False)
+    answer_hash = db.Column(db.String(256), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('security_answers',
+                                                      cascade='all, delete-orphan'))
+
+    def check_answer(self, raw):
+        return check_password_hash(self.answer_hash, raw.strip().lower())
+
+    @staticmethod
+    def hash_answer(raw):
+        return generate_password_hash(raw.strip().lower())
+
+    def __repr__(self):
+        return f'<UserSecurityAnswer user={self.user_id}>'
 
 
 class UserActivity(db.Model):

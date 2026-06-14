@@ -11,7 +11,7 @@ from flask import Blueprint, render_template, request, current_app, send_from_di
 from flask_login import login_required, current_user
 from flask_socketio import join_room, emit
 
-from ..models import db, Game, GameSession, GameScore
+from ..models import db, Game, GameSession, GameScore, GameCategory
 from ..web_app import socketio
 
 logger = logging.getLogger(__name__)
@@ -35,27 +35,44 @@ def _active_sessions():
 @games_bp.route('/')
 def lobby():
     """Game lobby — list all active games grouped by category."""
+    from flask_login import current_user
+
     category_filter = request.args.get('category', '')
     search = request.args.get('q', '').strip()
 
-    query = Game.query.filter_by(is_active=True)
+    user_access = 0
+    if current_user.is_authenticated:
+        user_access = getattr(current_user, 'access_level', 10) or 10
+
+    query = (Game.query
+             .filter_by(is_active=True)
+             .filter(Game.min_access_level <= user_access))
     if category_filter:
         query = query.filter_by(category=category_filter)
     if search:
         query = query.filter(Game.name.ilike(f'%{search}%'))
     games = query.order_by(Game.sort_order, Game.name).all()
 
-    # Group by category
-    categories = {}
+    # Load categories from DB for ordering and display names
+    db_cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+    cat_names = {c.slug: c.name for c in db_cats}
+    cat_order = [c.slug for c in db_cats]
+
+    # Group by category preserving DB order
+    cat_buckets = {}
     for game in games:
-        cat = game.category or 'other'
-        categories.setdefault(cat, []).append(game)
+        cat_buckets.setdefault(game.category or 'other', []).append(game)
+    ordered_slugs = [s for s in cat_order if s in cat_buckets]
+    ordered_slugs += [s for s in cat_buckets if s not in ordered_slugs]
+    categories = {s: cat_buckets[s] for s in ordered_slugs}
 
     now_playing = _active_sessions().all()
 
     return render_template(
         'games/lobby.html',
         categories=categories,
+        cat_names=cat_names,
+        db_cats=db_cats,
         now_playing=now_playing,
         category_filter=category_filter,
         search=search,

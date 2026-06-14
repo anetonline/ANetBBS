@@ -13,7 +13,7 @@ from wtforms import (StringField, TextAreaField, SelectField, IntegerField,
                      BooleanField, SubmitField)
 from wtforms.validators import DataRequired, Length, Optional, NumberRange
 
-from ..models import db, Game, GameSession
+from ..models import db, Game, GameSession, GameCategory
 
 logger = logging.getLogger(__name__)
 
@@ -37,23 +37,41 @@ def _admin_required(fn):
 # Forms
 # ---------------------------------------------------------------------------
 
+class GameCategoryForm(FlaskForm):
+    """Add/Edit game category form."""
+    name = StringField('Category Name', validators=[DataRequired(), Length(max=80)])
+    slug = StringField('Slug (URL-safe)', validators=[DataRequired(), Length(max=80)])
+    sort_order = IntegerField('Sort Order', validators=[Optional()], default=0)
+    submit = SubmitField('Save Category')
+
+
+def _category_choices():
+    """Load category choices from DB, falling back to a sensible default."""
+    try:
+        cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+        if cats:
+            return [(c.slug, c.name) for c in cats]
+    except Exception:
+        pass
+    return [('other', 'Other')]
+
+
 class GameForm(FlaskForm):
     """Add/Edit game form."""
     name = StringField('Name', validators=[DataRequired(), Length(max=100)])
     slug = StringField('Slug (URL-safe)', validators=[DataRequired(), Length(max=100)])
     description = TextAreaField('Description', validators=[Optional()])
-    category = SelectField('Category', choices=[
-        ('action', 'Action'),
-        ('classic', 'Classic DOS'),
-        ('other', 'Other'),
-        ('puzzle', 'Puzzle'),
-        ('rpg', 'RPG'),
-        ('strategy', 'Strategy'),
-    ], default='other', validate_choice=False)
+    category = SelectField('Category', choices=[], default='other', validate_choice=False)
+    min_access_level = IntegerField(
+        'Min Access Level',
+        validators=[Optional(), NumberRange(min=0, max=255)],
+        default=0,
+    )
     game_type = SelectField('Game Type', choices=[
         ('builtin_web', 'Built-in Web Game'),
         ('door_dos_browser', 'In-Browser DOS Game (js-dos)'),
         ('door_dos', 'DOS Door Game (DOSBox)'),
+        ('door_dosemu', 'DOS Door Game (dosemu2)'),
         ('door_mystic', 'Mystic BBS Python Game'),
         ('door_mystic_mps', 'Mystic BBS Pascal Script (.mps)'),
         ('door_native', 'Native/Script Door Game'),
@@ -135,6 +153,7 @@ def list_games():
 @_admin_required
 def add_game():
     form = GameForm()
+    form.category.choices = _category_choices()
     if form.validate_on_submit():
         game = Game()
         _populate_game(game, form)
@@ -151,6 +170,7 @@ def add_game():
 def edit_game(game_id):
     game = Game.query.get_or_404(game_id)
     form = GameForm(obj=game)
+    form.category.choices = _category_choices()
     if form.validate_on_submit():
         _populate_game(game, form)
         db.session.commit()
@@ -305,6 +325,7 @@ def _populate_game(game, form):
     game.slug = form.slug.data
     game.description = form.description.data
     game.category = form.category.data
+    game.min_access_level = form.min_access_level.data or 0
     game.game_type = form.game_type.data
     game.icon = form.icon.data
     game.max_nodes = form.max_nodes.data or 1
@@ -322,3 +343,61 @@ def _populate_game(game, form):
     game.synchronet_exec_dir = form.synchronet_exec_dir.data
     game.web_game_module = form.web_game_module.data
     game.web_game_url = form.web_game_url.data
+
+
+# ---------------------------------------------------------------------------
+# Category management routes
+# ---------------------------------------------------------------------------
+
+@games_admin_bp.route('/categories')
+@login_required
+@_admin_required
+def list_categories():
+    cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+    return render_template('games/admin/categories.html', categories=cats)
+
+
+@games_admin_bp.route('/categories/add', methods=['GET', 'POST'])
+@login_required
+@_admin_required
+def add_category():
+    form = GameCategoryForm()
+    if form.validate_on_submit():
+        cat = GameCategory(
+            name=form.name.data,
+            slug=form.slug.data,
+            sort_order=form.sort_order.data or 0,
+        )
+        db.session.add(cat)
+        db.session.commit()
+        flash(f'Category "{cat.name}" added.', 'success')
+        return redirect(url_for('games_admin.list_categories'))
+    return render_template('games/admin/category_form.html', form=form, category=None)
+
+
+@games_admin_bp.route('/categories/<int:cat_id>/edit', methods=['GET', 'POST'])
+@login_required
+@_admin_required
+def edit_category(cat_id):
+    cat = GameCategory.query.get_or_404(cat_id)
+    form = GameCategoryForm(obj=cat)
+    if form.validate_on_submit():
+        cat.name = form.name.data
+        cat.slug = form.slug.data
+        cat.sort_order = form.sort_order.data or 0
+        db.session.commit()
+        flash(f'Category "{cat.name}" updated.', 'success')
+        return redirect(url_for('games_admin.list_categories'))
+    return render_template('games/admin/category_form.html', form=form, category=cat)
+
+
+@games_admin_bp.route('/categories/<int:cat_id>/delete', methods=['POST'])
+@login_required
+@_admin_required
+def delete_category(cat_id):
+    cat = GameCategory.query.get_or_404(cat_id)
+    name = cat.name
+    db.session.delete(cat)
+    db.session.commit()
+    flash(f'Category "{name}" deleted.', 'success')
+    return redirect(url_for('games_admin.list_categories'))

@@ -390,7 +390,15 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                 log.flush()
                 proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
                                         close_fds=True, start_new_session=True)
-                proc.wait()
+                try:
+                    proc.wait()
+                except RuntimeError as _e:
+                    # eventlet's hub raises "Second simultaneous read on fileno N"
+                    # when its internal fd-monitoring conflicts with proc.wait().
+                    # The upgrade is already running detached in its own systemd
+                    # scope (systemd-run --scope), so this is non-fatal — drop it.
+                    if 'simultaneous read' not in str(_e):
+                        raise
                 log.write(f'\n[{datetime.utcnow().isoformat()}Z] '
                           f'exit {proc.returncode}\n')
                 if proc.returncode != 0:

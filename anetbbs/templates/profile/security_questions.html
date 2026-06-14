@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Security Questions - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-shield-lock"></i> Security Questions</h1>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-7">
+        <div class="card mb-3">
+            <div class="card-header">Password Recovery Questions</div>
+            <div class="card-body">
+                <p class="text-muted">
+                    Set up to 3 security questions. If you forget your password, you can answer
+                    one of these instead of waiting for the sysop. Answers are not case-sensitive.
+                </p>
+
+                {% if current_answers %}
+                <div class="alert alert-success py-2">
+                    <i class="bi bi-check-circle"></i>
+                    {{ current_answers|length }} question{{ 's' if current_answers|length != 1 }} currently set.
+                </div>
+                {% else %}
+                <div class="alert alert-warning py-2">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    No security questions set. Without them, only a sysop can reset your password.
+                </div>
+                {% endif %}
+
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% for i in range(1, 4) %}
+                    {% set existing = current_answers[i-1] if current_answers|length >= i else none %}
+                    <div class="border rounded p-3 mb-3">
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Question {{ i }}</label>
+                            <select name="question_{{ i }}" class="form-select">
+                                <option value="">(none)</option>
+                                {% for q in q_choices %}
+                                <option value="{{ q[0] }}" {% if existing and existing.question == q[0] %}selected{% endif %}>
+                                    {{ q[1] }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">Answer</label>
+                            <input type="text" name="answer_{{ i }}" class="form-control"
+                                   placeholder="{% if existing %}Leave blank to keep current answer{% else %}Your answer{% endif %}">
+                        </div>
+                    </div>
+                    {% endfor %}
+                    <button class="btn btn-primary">Save Security Questions</button>
+                    <a href="{{ url_for('profile.edit') }}" class="btn btn-secondary ms-2">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

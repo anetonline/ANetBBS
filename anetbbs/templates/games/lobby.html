@@ -13,9 +13,9 @@
            placeholder="Search games…" value="{{ search }}">
     <select name="category" class="form-control" style="max-width:180px;">
         <option value="">All Categories</option>
-        {% for cat in ['action','classic','other','puzzle','rpg','strategy'] %}
-        <option value="{{ cat }}" {% if category_filter == cat %}selected{% endif %}>
-            {{ cat | capitalize }}
+        {% for cat in db_cats %}
+        <option value="{{ cat.slug }}" {% if category_filter == cat.slug %}selected{% endif %}>
+            {{ cat.name }}
         </option>
         {% endfor %}
     </select>
@@ -35,7 +35,7 @@
         {% if categories %}
             {% for cat, game_list in categories.items() %}
             <h4 class="mt-3 mb-2" style="color:#00ff00;border-bottom:1px solid #00ff00;">
-                {{ cat | capitalize }}
+                {{ cat_names.get(cat, cat | capitalize) }}
                 <span class="badge" style="background:#003300;color:#00ff00;font-size:.7rem;">{{ game_list|length }}</span>
             </h4>
             <div class="row row-cols-1 row-cols-md-3 g-3 mb-4">

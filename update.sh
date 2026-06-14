@@ -252,6 +252,61 @@ if [[ -f "$INSTALL_DIR/anetbbs/main.py" ]] && \
 fi
 ok "Legacy paths cleared"
 
+# ── Safety: refuse to run if the source dir contains live user data ──────────
+# Only applies when SOURCE_DIR != INSTALL_DIR (i.e. rsync path).  When
+# update.sh is run from the install dir itself (SOURCE_DIR == INSTALL_DIR,
+# e.g. after extracting a tarball directly into the live tree), data/ is
+# supposed to be there — checking for it would always fire a false alarm.
+#
+# A raw "rsync --delete" from a source that includes data/anetbbs.db will
+# silently wipe the live database.  update.sh's rsync excludes /data/, but if
+# someone bypasses this script that protection is gone.  Guard here so that
+# even running update.sh from a polluted extract can't do damage:
+#   • If source data/anetbbs.db is larger than 500 KB it is almost certainly a
+#     live or dev database (the seeded-only DB is ~100 KB).  Abort.
+#   • If source data/uploads/ or data/avatars/ exist they are user-uploaded
+#     files that must never be rsync'd over the install.  Abort.
+if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
+for _danger in \
+        "$SOURCE_DIR/data/anetbbs_dev.db" \
+        "$SOURCE_DIR/data/uploads" \
+        "$SOURCE_DIR/data/avatars" \
+        "$SOURCE_DIR/data/echomail" \
+        "$SOURCE_DIR/data/personal_pages" \
+        "$SOURCE_DIR/data/ftp_root"; do
+    if [[ -e "$_danger" ]]; then
+        echo ""
+        echo "  ╔══════════════════════════════════════════════════════════════╗"
+        echo "  ║  SAFETY ABORT: source dir contains live user data            ║"
+        echo "  ║                                                              ║"
+        echo "  ║  Found: $_danger"
+        echo "  ║                                                              ║"
+        echo "  ║  The release tarball should never include data/, uploads,    ║"
+        echo "  ║  or user databases.  Rebuild the tarball with the correct    ║"
+        echo "  ║  build command (see docs/DEPLOY.md) then re-run update.sh.  ║"
+        echo "  ╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+        exit 1
+    fi
+done
+_src_db="$SOURCE_DIR/data/anetbbs.db"
+if [[ -f "$_src_db" ]]; then
+    _src_db_kb=$(du -k "$_src_db" 2>/dev/null | cut -f1)
+    if [[ "${_src_db_kb:-0}" -gt 500 ]]; then
+        echo ""
+        echo "  ╔══════════════════════════════════════════════════════════════╗"
+        echo "  ║  SAFETY ABORT: source data/anetbbs.db looks like a live DB  ║"
+        echo "  ║  (${_src_db_kb} KB > 500 KB threshold)                      ║"
+        echo "  ║                                                              ║"
+        echo "  ║  The release tarball must not include the production DB.     ║"
+        echo "  ║  Rebuild with the correct tarball build command.             ║"
+        echo "  ╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+        exit 1
+    fi
+fi
+fi  # SOURCE_DIR != INSTALL_DIR
+
 if [[ "$SOURCE_DIR" == "$INSTALL_DIR" ]]; then
     # Running from the install dir — try git pull
     if [[ -d "$INSTALL_DIR/.git" ]]; then

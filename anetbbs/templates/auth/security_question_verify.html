@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Identity{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-shield-lock"></i> Security Question
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Answer your security question to reset your password.</p>
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">{{ question }}</label>
+                        <input type="text" name="answer" class="form-control" autofocus required>
+                        <small class="text-muted">Answer is not case-sensitive.</small>
+                    </div>
+                    <button class="btn btn-primary w-100">Verify &amp; Reset Password</button>
+                </form>
+                <div class="mt-3">
+                    <a href="{{ url_for('auth.forgot_password') }}">← Try a different account</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

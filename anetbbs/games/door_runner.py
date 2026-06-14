@@ -39,9 +39,20 @@ class DoorSession:
         self.master_fd = master_fd
         self.pid = pid
         self.started_at = datetime.utcnow()
+        # For door_dosemu: separate pipe write-end used as COM1 RX instead of
+        # PTY master, so ESC injection bypasses PTY line-discipline entirely.
+        # None for all other game types (PTY master is used for all I/O).
+        self.com1_w = None
         # Optional TCP bridge for DOSBox sessions. Set by launch_door_game
         # right after construction for door_dos game type. None otherwise.
         self.dos_bridge = None
+        # Seconds after start during which all input is silently discarded.
+        # Set > 0 for door_dosemu. ESC sequences (terminal probe responses) pass
+        # through immediately so TW2002 detects the remote terminal and sends
+        # the title screen via COM1 TX. Plain keyboard bytes are held back until
+        # the window closes to prevent TW2002 from advancing past the title
+        # screen before the user sees it.
+        self.startup_delay_secs = 0.0
 
     def write(self, data):
         """Write raw bytes to the door (user → game)."""
@@ -57,8 +68,23 @@ class DoorSession:
         if self.dos_bridge is not None:
             self.dos_bridge.write(data)
             return
+        # Startup filter for door_dosemu (startup_delay_secs > 0).
+        # Block ALL browser input during the startup window so no keystroke
+        # can pollute COM1 RX before TW2002's connection check and ESC[6n
+        # exchange are complete (both handled server-side via _pty_reader).
+        if self.startup_delay_secs > 0.0:
+            elapsed = (datetime.utcnow() - self.started_at).total_seconds()
+            if elapsed < self.startup_delay_secs:
+                return
+        # Filter Ctrl+C (0x03) to prevent DOS INT 23h / BREAK from aborting
+        # the running program via the PTY.
+        data = data.replace(b'\x03', b'')
+        if not data:
+            return
+        # door_dosemu: keyboard goes to the COM1 RX pipe, not the PTY master.
+        _out_fd = self.com1_w if self.com1_w is not None else self.master_fd
         try:
-            os.write(self.master_fd, data)
+            os.write(_out_fd, data)
         except OSError as exc:
             logger.warning('PTY write error (session %d): %s', self.session_id, exc)
 
@@ -89,6 +115,12 @@ class DoorSession:
             os.close(self.master_fd)
         except OSError:
             pass
+        if self.com1_w is not None:
+            try:
+                os.close(self.com1_w)
+            except OSError:
+                pass
+            self.com1_w = None
 
 
 def _js_str(s):
@@ -248,7 +280,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
     # Pick a sensible cwd default based on game type (each type uses different
     # path fields). All paths get resolved to absolute against the install dir.
-    if game.game_type in ('door_dos', 'door_native'):
+    if game.game_type in ('door_dos', 'door_dosemu', 'door_native'):
         anchor = game.executable_path or game.working_directory
     elif game.game_type in ('door_mystic', 'door_mystic_mps'):
         anchor = game.mystic_script_path or game.working_directory
@@ -270,6 +302,18 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
     if game.game_type == 'door_dos':
         return _build_dos_command(game, node_number, cwd, token_ctx=token_ctx,
                                    bridge_port=bridge_port)
+
+    if game.game_type == 'door_dosemu':
+        import shutil
+        dosemu = (shutil.which('dosemu2') or shutil.which('dosemu')
+                  or shutil.which('dosemu2-bin') or shutil.which('dosemu.bin'))
+        if not dosemu:
+            raise FileNotFoundError(
+                'dosemu2 not found on this server. '
+                'Install with: sudo apt install dosemu2'
+            )
+        return _build_dosemu_command(game, node_number, dosemu,
+                                     token_ctx=token_ctx)
 
     if game.game_type == 'door_native':
         exe_raw = _xp(game.executable_path or '')
@@ -714,22 +758,32 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
 
 
 def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
-    """dosemu / dosemu2 invocation for BBS doors.
+    """dosemu2 invocation for BBS doors (FOSSIL/SHARE-based doors like TW2002).
 
-    Why dosemu instead of DOSBox? dosemu2 has native ``-dumb`` stdio mode —
-    DOS app I/O streams directly through stdin/stdout, no FOSSIL juggling
-    over a TCP nullmodem. That's a better fit for telnet/SSH doors.
+    Why dosemu instead of DOSBox? dosemu2 runs FDPP (real FreeDOS) which
+    includes SHARE.EXE. DOSBox's SHARE emulation is a stub that doesn't
+    actually support file locking — TradeWars 2002 and similar doors check
+    for SHARE on startup and will fail or hang without it.
 
-    Drive layout (matches the DOSBox path so docs are consistent):
+    Architecture: ``$_com1 = "virtual"`` routes COM1 I/O through /dev/tty
+    (the controlling terminal), which is the PTY slave (set via TIOCSCTTY).
+    dosemu2's internal keyboard handler reads from **fd 0 (stdin)**, while
+    the virtual COM1 reads from **/dev/tty** — two separate file descriptors.
+    By redirecting fd 0 → ``/dev/null`` in the child process, the keyboard
+    handler reads nothing (harmless: TW2002 in DOOR mode uses COM1, not INT
+    16h), and virtual COM1 has exclusive access to /dev/tty.  Injecting ESC
+    via the PTY master then flows: master_fd → PTY slave = /dev/tty →
+    dosemu2 COM1 RX → FOSSIL → TW2002.
 
-      ``D:`` = the FOSSIL bundle (``anetbbs/games/dos_runtime/`` — read-only)
-      ``E:`` = the game dir (``Game.working_directory`` or dir of the .exe)
-      ``F:`` = the per-node scratch dir (``<install>/data/temp/nodeN/``)
+    Drive layout (dosemu2 with FDPP assigns C:–F: to internal FreeDOS drives;
+    user ``-d`` mounts start at G:):
 
-    LORDCFG / TWCFG etc. should be configured with the dropfile path =
-    ``F:\\``. The autoexec loads BNU on COM1 just like DOSBox so doors
-    that demand FOSSIL still work, even though dosemu2's stdio is what's
-    actually under the hood.
+      ``G:`` = FOSSIL bundle (``anetbbs/games/dos_runtime/``)
+      ``H:`` = game dir (``executable_path``'s dir, or ``working_directory``)
+      ``I:`` = per-node scratch dir (``data/temp/nodeN/``) — optional
+
+    In the door's config point the drop-file path at ``I:\\`` (e.g.,
+    ``I:\\DOOR32.SYS`` or ``I:\\DOOR.SYS``).
     """
     def _xp(value):
         if not value or token_ctx is None:
@@ -755,35 +809,46 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
         exe_name, extra = parts[0], ' '.join(parts[1:])
     elif os.path.isfile(exe_path):
         wd_raw = _xp(game.working_directory or '')
-        game_dir = wd_raw or os.path.dirname(exe_path)
+        game_dir = (_resolve_path(wd_raw) if wd_raw
+                    else os.path.dirname(exe_path))
         exe_name = os.path.basename(exe_path)
     else:
         raise FileNotFoundError(f'executable_path not found: {exe_path!r}')
 
-    # FOSSIL bundle (BNU.COM) — same dir we use for DOSBox.
-    fossil_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              'dos_runtime')
+    # G: = dos_runtime/ (available for future use; FOSSIL drivers not used in Standard mode)
+    fossil_base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'dos_runtime')
 
-    # Per-node scratch — drop file + per-session writes go here so
-    # multi-node games don't collide.
+    # I: = per-node scratch dir (drop file lands here, multi-node safe)
     try:
         from .node_paths import node_dir as _node_dir
         per_node_host = _node_dir(node_number).rstrip(os.sep) or None
     except Exception:
         per_node_host = None
 
-    # Build a tiny autoexec.bat that:
-    #   1. Switches to E: (game dir)
-    #   2. Adds D:\FOSSIL to PATH and loads BNU on COM1
-    #   3. Runs the game
     cmd_str = (exe_name + (' ' + extra if extra else '')).strip()
-    bat_path = os.path.join(game_dir, '_anet.bat')
+    bat_path = os.path.join(game_dir, '_ANET.BAT')
     bat_body = (
         '@echo off\r\n'
-        'PATH=D:\\FOSSIL;%PATH%\r\n'
-        'BNU /P1\r\n'
-        'E:\r\n'
-        'CD \\\r\n'
+        # TWNODE defaults to 0 in DOS env, and node 0 in TWNODE.DAT is LOCL
+        # (local mode — ignores DOOR.SYS and serial port entirely).  Node 1
+        # is configured as DOOR mode which enables BBS mode.
+        'SET TWNODE=1\r\n'
+        # TW2002 I/O Type: Standard (direct UART at 03F8h, no FOSSIL).
+        # dosemu2's virtual COM1 emulates the 16550 UART.  TW2002 polls the LSR
+        # (0x3FD) directly; dosemu2 marks data-ready when stdin bytes arrive.
+        # No FOSSIL driver (BNU/X00) needed — and no IRQ4 dependency.
+        # FOSSIL mode + BNU was tried but BNU's INT 14h AH=02h waits for IRQ4
+        # which dosemu2 software-emulation (no KVM) does not fire reliably.
+        # TW2002 also installs its own IRQ4 handler in Standard mode which is
+        # compatible with dosemu2's virtual COM1 interrupt delivery.
+        #
+        # TW2002 looks for DOOR.SYS in its working directory (H:\).  The drop
+        # file is written to I:\ (per-node scratch); copy it into H:\ so TW2002
+        # finds it regardless of its compiled-in drop-file path.
+        'IF EXIST I:\\DOOR.SYS COPY I:\\DOOR.SYS H:\\DOOR.SYS >NUL\r\n'
+        'H:\r\n'                        # switch to game drive
+        'CD \\\r\n'                     # root of game drive
         + cmd_str + '\r\n'
         'EXIT\r\n'
     )
@@ -793,20 +858,53 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
     except OSError as exc:
         raise OSError('Cannot write {}: {}'.format(bat_path, exc))
 
-    # dosemu2 -d flags assign drives in order, starting at C: AFTER the
-    # FreeDOS boot drives. In practice with FDPP the user-mounted drives
-    # land at D, E, F... — but the actual letter depends on dosemu's
-    # config. To make the autoexec robust we use `-K` to set the boot
-    # drive, then -I to alias drives.
-    cmd = [
-        dosemu_path,
-        '-dumb',                                     # terminal stdio
-        '-K', fossil_dir,                            # D: = FOSSIL
-        '-d', game_dir,                              # E: = game
+    logger.info('dosemu2 bat written to %s (game=%s, node=%d)',
+                bat_path, game.slug, node_number)
+
+    # Always use -td directly — never -dumb.
+    # The Debian/Ubuntu wrapper (/usr/bin/dosemu) converts -dumb → "-td -ks".
+    # -ks starts a keyboard scanner that reads fd 0 in dosemu2's own event
+    # loop.  We redirect fd 0 → /dev/null in the child, so -ks would read
+    # nothing.  Passing -td directly bypasses the wrapper so -ks is never added.
+    _raw_bin = '/usr/libexec/dosemu2/dosemu2.bin'
+    if os.path.isfile(_raw_bin):
+        _exe = _raw_bin
+        # dosemu2.bin needs -o or it won't write a boot log; use user's
+        # default ~/.dosemu/boot.log (same path the wrapper uses).
+        try:
+            _dosemu_dir = os.path.join(os.path.expanduser('~'), '.dosemu')
+            os.makedirs(_dosemu_dir, exist_ok=True)
+            _boot_log = os.path.join(_dosemu_dir, 'boot.log')
+        except OSError:
+            _boot_log = '/tmp/dosemu_boot.log'
+        logger.info('dosemu2: using raw binary %s', _raw_bin)
+    else:
+        _exe = dosemu_path
+        _boot_log = None
+        logger.info('dosemu2: using wrapper %s (passing -td to suppress -ks)',
+                    dosemu_path)
+
+    cmd = [_exe]
+    if _boot_log:
+        cmd += ['-o', _boot_log]
+    cmd += [
+        '-td',        # text/dumb mode — renders INT 10h video to stdout (fd 1)
+        # "virtual" COM1: dosemu2 internal port that always reports DCD=1
+        # (no hardware modem-line polling).  TX→fd 1 (PTY slave→master_fd→
+        # browser); RX←dup(stdin=fd 0=PTY slave)←master_fd (our injection).
+        # Without -ks dosemu2 does NOT read fd 0 for INT 16h keyboard, so
+        # there is no race between keyboard and virtual COM1 on fd 0.
+        # Note: "/dev/tty" was tried but PTY TIOCMGET returns DCD=0 and
+        # TW2002 waits silently for carrier; TIOCMBIS is ENOTTY on PTYs.
+        '-I', '$_com1 = "virtual"',   # COM1 = dup(stdin) → PTY slave, DCD=1
+        '-I', '$_layout = (us)',       # suppress keyboard-map probe error
+        '-I', '$_loglevel = (0)',      # silence dosemu2 startup banner
+        '-d', fossil_base,             # G: = FOSSIL bundle
+        '-d', game_dir,                # H: = game dir
     ]
     if per_node_host:
-        cmd.extend(['-d', per_node_host])            # F: = per-node temp
-    cmd.extend(['-E', 'E:\\_ANET.BAT'])              # run the autoexec
+        cmd.extend(['-d', per_node_host])  # I: = per-node scratch
+    cmd.extend(['-E', 'H:\\_ANET.BAT'])
     return cmd, game_dir
 
 
@@ -962,8 +1060,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         token_ctx['%f'] = drop_path
 
     # For door_dos: spin up the TCP nullmodem bridge BEFORE building the
-    # command — DOSBox's config needs the port written into it. Other game
-    # types use direct PTY stdio so no bridge.
+    # command — DOSBox's config needs the port written into it.
     dos_bridge = None
     bridge_port = None
     if game.game_type == 'door_dos':
@@ -1003,6 +1100,26 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         release_node(game.id, node)
         return None
 
+    # door_dosemu: always write DOOR.SYS directly into the game directory
+    # (H:\) in addition to whatever drop_file_path is configured.  The BAT
+    # file copies I:\DOOR.SYS → H:\DOOR.SYS, but if the per-node scratch
+    # dir (I:\) is not mounted or drop_file_path is unconfigured, TW2002
+    # finds no DOOR.SYS and defaults to 0 minutes → "BBS Time Expired".
+    # Writing it here guarantees the file exists in H:\ before dosemu2 forks.
+    if game.game_type == 'door_dosemu':
+        try:
+            from .dropfile import generate_door_sys
+            _dsys_path = os.path.join(cwd, 'DOOR.SYS')
+            generate_door_sys(user, node, minutes_remaining, bbs_name,
+                              _dsys_path)
+            logger.info('door_dosemu: DOOR.SYS → %s (drop_path=%s, min=%d)',
+                        _dsys_path, drop_path, minutes_remaining)
+        except Exception as _dsys_exc:
+            logger.warning('door_dosemu: DOOR.SYS write to game dir failed: %s',
+                           _dsys_exc)
+
+    com1_rx_r = com1_rx_w = -1  # kept for code-path compatibility
+
     try:
         master_fd, slave_fd = pty.openpty()
         # Set initial winsize to 80x25 — the DOS-terminal contract every
@@ -1031,6 +1148,9 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         logger.error('Failed to fork process for game %s: %s', game.slug, exc)
         os.close(master_fd)
         os.close(slave_fd)
+        if dos_bridge:
+            try: dos_bridge.stop()
+            except Exception: pass
         gs.status = 'crashed'
         gs.ended_at = datetime.utcnow()
         db.session.commit()
@@ -1040,8 +1160,15 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     if pid == 0:
         # Child process
         os.close(master_fd)
+        # For door_dosemu: COM1 RX comes from the pipe, not the PTY slave.
+        # Close the write end — parent keeps it. Read end becomes fd 0 below.
+        if com1_rx_w >= 0:
+            try: os.close(com1_rx_w)
+            except OSError: pass
         os.setsid()
         fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+        # All game types: fd 0/1/2 = PTY slave.
+        # door_dosemu: COM1 uses /dev/tty (= slave_fd, the controlling terminal).
         os.dup2(slave_fd, 0)
         os.dup2(slave_fd, 1)
         os.dup2(slave_fd, 2)
@@ -1129,16 +1256,91 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
                 os.close(_lfd)
             except OSError:
                 pass
+        # For dosemu2 doors, fd layout after child setup:
+        #   fd 0 → PTY slave   (COM1 "virtual" = dup(stdin) → same PTY slave;
+        #                        our CR injection: master_fd write → slave → COM1)
+        #   fd 1 → PTY slave   (INT 10h -td video + COM1 TX → master_fd → browser)
+        #   fd 2 → log file    (dosemu2 startup/crash output)
+        # Without -ks, dosemu2 does NOT poll fd 0 for INT 16h keyboard,
+        # so there is no race between the keyboard handler and COM1 "virtual".
+        # setraw on fd 1 so COM1 TX bytes and INT 10h video pass through the
+        # PTY line discipline without ONLCR translation or ICANON buffering.
+        if game.game_type == 'door_dosemu':
+            try:
+                import tty as _tty
+                _tty.setraw(1)  # raw mode on PTY slave (fd 1)
+            except Exception:
+                pass
+            try:
+                _install_root = os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))))
+                _log_dir = os.path.join(_install_root, 'logs')
+                os.makedirs(_log_dir, exist_ok=True)
+                _slug = (getattr(game, 'slug', None) or 'door').strip() or 'door'
+                _dlog = os.path.join(_log_dir,
+                                     f'dosemu_{_slug}_node{node}.log')
+                _lfd = os.open(_dlog,
+                               os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                os.dup2(_lfd, 2)   # dosemu2 stderr/errors → log
+                os.close(_lfd)
+            except OSError:
+                pass
         os.execvp(cmd[0], cmd)
         os._exit(1)
 
     # Parent
     os.close(slave_fd)
+    # door_dosemu: child owns the read end; we keep only the write end.
+    if com1_rx_r >= 0:
+        try: os.close(com1_rx_r)
+        except OSError: pass
     gs.pid = pid
     db.session.commit()
 
     door_session = DoorSession(gs.id, master_fd, pid)
     door_session.dos_bridge = dos_bridge   # None for non-door_dos sessions
+
+    # ESC injection for door_dosemu (TW2002 DOOR mode):
+    # After TW2002 finishes loading it blocks on FOSSIL INT 14h fn-2 waiting
+    # for a character on COM1 RX.  We inject ESC to wake it up.  Two layers:
+    #   1. "Port index" trigger (via _pty_reader): delayed 500ms after detection
+    #      so TW2002's own COM1 RX purge (INT 14h AH=0Ah) completes first.
+    #   2. T+5s fallback: always fires UNLESS _ansi_probed_flag[0] is set
+    #      (meaning _pty_reader intercepted ESC[6n → TW2002 confirmed ANSI).
+    # Both inject via master_fd → PTY slave = /dev/tty → dosemu2 virtual COM1 RX.
+    # Inject via master_fd → PTY slave = fd 0 = "virtual" COM1 RX.
+    # Without -ks, dosemu2 does not read fd 0 for INT 16h; COM1 has sole access.
+    _esc_sent = None
+    _ansi_probed_flag = None
+
+    if game.game_type == 'door_dosemu':
+        _esc_sent = [False]
+        _ansi_probed_flag = [False]   # set by _pty_reader when ESC[6n intercepted
+        _mfd_for_inject = master_fd
+        _sid_for_inject = gs.id
+        _ansi_probed_ref = _ansi_probed_flag
+        def _inject_ansi_esc():
+            import time as _time
+            _time.sleep(5.0)
+            # Skip if ESC[6n already intercepted (ANSI confirmed).
+            if _ansi_probed_ref[0]:
+                logger.warning('door_dosemu: T+5s fallback: ESC[6n already '
+                               'intercepted, skipping (session %d)',
+                               _sid_for_inject)
+                return
+            try:
+                os.write(_mfd_for_inject, b'\r')
+                logger.warning('door_dosemu: T+5s injected CR → master_fd '
+                               '(session %d)', _sid_for_inject)
+            except OSError as _e:
+                logger.warning('door_dosemu: T+5s CR inject failed: %s '
+                               '(session %d)', _e, _sid_for_inject)
+        threading.Thread(target=_inject_ansi_esc, daemon=True,
+                         name=f'esc-inject-{gs.id}').start()
+        logger.warning('door_dosemu: ESC injection thread started '
+                       '(session %d, T+5s fallback)', gs.id)
+        door_session.startup_delay_secs = 6.0
+
     with _sessions_lock:
         _sessions[gs.id] = door_session
 
@@ -1258,6 +1460,10 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         t = threading.Thread(
             target=_pty_reader,
             args=(gs.id, master_fd, socketio_emit_fn, reader_app),
+            kwargs={'ansi_inject': game.game_type == 'door_dosemu',
+                    'com1_w': door_session.com1_w,
+                    'esc_sent_ref': _esc_sent,
+                    'ansi_probed_ref': _ansi_probed_flag},
             daemon=True,
             name=f'pty-reader-{gs.id}',
         )
@@ -1266,13 +1472,103 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     return gs.id
 
 
-def _pty_reader(session_id, master_fd, emit_fn, app=None):
-    """Background thread: read PTY output and call emit_fn(bytes)."""
+def _pty_reader(session_id, master_fd, emit_fn, app=None, ansi_inject=False,
+                com1_w=None, esc_sent_ref=None, ansi_probed_ref=None):
+    """Background thread: read PTY output and call emit_fn(bytes).
+
+    ansi_inject=True (door_dosemu / TW2002):
+
+    Primary ESC injection: when TW2002 prints "Port index" (the last index
+    entry before its COM1 connection check), spawn a 500ms-delayed thread to
+    inject ESC.  The delay lets TW2002's INT 14h AH=0Ah (purge COM1 RX)
+    complete before our ESC lands, preventing it from being flushed away.
+    esc_sent_ref [bool] is set immediately so the caller knows a trigger fired.
+
+    T+5s fallback (in the launch function) always fires UNLESS ansi_probed_ref
+    is set here (meaning ESC[6n was intercepted and ANSI is confirmed).
+
+    ESC[6n interception: TW2002 sends this after it confirms ANSI mode.
+    We reply ESC[24;80R immediately and strip the probe from the stream.
+    ansi_probed_ref[0] is set True to suppress the T+5s fallback.
+    """
+    logger.warning('_pty_reader started (session=%d ansi_inject=%s com1_w=%s)',
+                   session_id, ansi_inject, com1_w)
+
+    # ESC[6n intercept state.
+    _ansi_probed = False
+
+    # Where to write COM1 RX bytes: master_fd (via /dev/tty → COM1 virtual).
+    _inject_fd = com1_w if com1_w is not None else master_fd
+
+    # Rolling suffix buffer for "Port index" trigger (door_dosemu only).
+    # TW2002 prints "  Port index" as the last index entry before its COM1
+    # connection check.  We keep the tail of recent output so the string is
+    # detected even when it spans two consecutive os.read() chunks.
+    _suffix_buf = b''
+    _SUFFIX_MAX = 256
+    _PORT_INDEX = b'Port index'
+
+    # Post-"Port index" hex dump: capture the first 2000 bytes that arrive
+    # AFTER TW2002 prints "Port index".  The first 500 bytes from launch are
+    # all dosemu2 startup banner (useless); we want what TW2002 sends next.
+    _post_pi_logging = False
+    _post_pi_logged  = 0
+    _POST_PI_LIMIT   = 2000 if ansi_inject else 0
+
     while True:
         try:
             data = os.read(master_fd, 4096)
             if not data:
                 break
+
+            if _post_pi_logging and _post_pi_logged < _POST_PI_LIMIT:
+                _chunk = data[:_POST_PI_LIMIT - _post_pi_logged]
+                logger.warning('_pty_reader POST-PI HEX[%d+%d]: %s',
+                               _post_pi_logged, len(_chunk), _chunk.hex())
+                _post_pi_logged += len(_chunk)
+
+            # "Port index" trigger: inject CR repeatedly after TW2002 finishes
+            # loading its index files — right before it blocks on COM1 RX.
+            if (ansi_inject and esc_sent_ref is not None
+                    and not esc_sent_ref[0] and not _ansi_probed):
+                _suffix_buf = (_suffix_buf + data)[-_SUFFIX_MAX:]
+                if _PORT_INDEX in _suffix_buf:
+                    esc_sent_ref[0] = True
+                    _post_pi_logging = True   # start hex capture from next chunk
+                    # Inject CR at 1s, 2s, and 3.5s after Port index. Multiple
+                    # attempts cover the window where TW2002's INT 14h AH=0Ah
+                    # COM1 RX purge may still be running on the first attempt.
+                    _ifd = _inject_fd
+                    _sid = session_id
+                    def _delayed_esc():
+                        import time as _t
+                        for _inc in (1.0, 1.0, 1.5):
+                            _t.sleep(_inc)
+                            try:
+                                os.write(_ifd, b'\r')
+                                logger.warning('_pty_reader: CR injected after '
+                                               '"Port index" (session %d)', _sid)
+                            except OSError as _e2:
+                                logger.warning('_pty_reader: CR inject FAILED: '
+                                               '%s (session %d)', _e2, _sid)
+                                break
+                    threading.Thread(target=_delayed_esc, daemon=True,
+                                     name=f'esc-port-{session_id}').start()
+
+            if ansi_inject and not _ansi_probed and b'\x1b[6n' in data:
+                _ansi_probed = True
+                if ansi_probed_ref is not None:
+                    ansi_probed_ref[0] = True  # suppress T+5s fallback
+                try:
+                    os.write(_inject_fd, b'\x1b[24;80R')
+                    logger.info('PTY reader: ESC[6n intercepted, replied '
+                                'ESC[24;80R (session %d)', session_id)
+                except OSError as _e:
+                    logger.error('PTY reader: ESC[6n reply FAILED: %s '
+                                 '(session %d)', _e, session_id)
+                data = data.replace(b'\x1b[6n', b'')
+                if not data:
+                    continue
             emit_fn(data)
         except OSError:
             break

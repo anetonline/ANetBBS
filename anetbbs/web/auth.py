@@ -6,14 +6,15 @@ import secrets
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
-                   request, current_app)
+                   request, current_app, session as flask_session)
 from flask_login import login_user, logout_user, login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, PasswordResetToken, RegistrationAttempt, UserActivity
+from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
+                      UserActivity, UserSecurityAnswer)
 from ..features.rate_limit import rate_limit
 
 
@@ -344,12 +345,9 @@ class ResetPasswordForm(FlaskForm):
 def forgot_password():
     """Request a password-reset token by username or email.
 
-    The reset URL is logged to the server journal. The sysop can retrieve it
-    from there (or from the Admin > Password Resets panel) and pass it to the
-    user via any out-of-band channel (PM, chat, etc.).
-
-    To avoid leaking which usernames/emails exist, we always show the same
-    success message regardless of whether the lookup matched.
+    If the account has security questions, the user is redirected to the
+    self-service verify page.  Otherwise the token is logged to the journal
+    and the sysop passes the link out-of-band.
     """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
@@ -360,6 +358,17 @@ def forgot_password():
         user = (User.query.filter_by(username=ident).first()
                 or User.query.filter_by(email=ident).first())
         if user and user.is_active:
+            answers = list(user.security_answers)
+            if answers:
+                import random
+                chosen = random.choice(answers)
+                nonce = secrets.token_urlsafe(24)
+                flask_session['sq_nonce'] = nonce
+                flask_session['sq_user_id'] = user.id
+                flask_session['sq_answer_id'] = chosen.id
+                return redirect(url_for('auth.security_question_verify'))
+
+            # No security questions — fall back to sysop-copy-link flow
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user.id,
@@ -375,13 +384,60 @@ def forgot_password():
                 user.username, reset_url)
             _log_activity(user.id, 'password_reset_requested')
 
-        # Always return the same generic success message to the user
         flash('If that account exists, a password-reset link has been issued. '
               'Contact the sysop to receive your reset link.',
               'success')
         return redirect(url_for('auth.login'))
 
     return render_template('auth/forgot_password.html', form=form)
+
+
+@auth_bp.route('/forgot/verify', methods=['GET', 'POST'])
+def security_question_verify():
+    """Self-service password recovery via security question."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.index'))
+
+    nonce = flask_session.get('sq_nonce')
+    user_id = flask_session.get('sq_user_id')
+    answer_id = flask_session.get('sq_answer_id')
+    if not nonce or not user_id or not answer_id:
+        flash('Session expired. Please try again.', 'warning')
+        return redirect(url_for('auth.forgot_password'))
+
+    qa = UserSecurityAnswer.query.get(answer_id)
+    if qa is None or qa.user_id != user_id:
+        flask_session.pop('sq_nonce', None)
+        flask_session.pop('sq_user_id', None)
+        flask_session.pop('sq_answer_id', None)
+        flash('Session expired. Please try again.', 'warning')
+        return redirect(url_for('auth.forgot_password'))
+
+    error = None
+    if request.method == 'POST':
+        raw = request.form.get('answer', '').strip()
+        if not raw:
+            error = 'Please enter your answer.'
+        elif qa.check_answer(raw):
+            # Correct — issue reset token and send user straight to reset page
+            flask_session.pop('sq_nonce', None)
+            flask_session.pop('sq_user_id', None)
+            flask_session.pop('sq_answer_id', None)
+            token = secrets.token_urlsafe(32)
+            db.session.add(PasswordResetToken(
+                user_id=user_id,
+                token=token,
+                expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
+                requested_ip=_client_ip(),
+            ))
+            db.session.commit()
+            _log_activity(user_id, 'password_reset_via_security_question')
+            return redirect(url_for('auth.reset_password', token=token))
+        else:
+            error = 'Incorrect answer. Please try again.'
+
+    return render_template('auth/security_question_verify.html',
+                           question=qa.question, error=error)
 
 
 @auth_bp.route('/reset/<token>', methods=['GET', 'POST'])

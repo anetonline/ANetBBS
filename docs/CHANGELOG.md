@@ -1,7 +1,49 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.98`** (June 2026). Previous: `v1.0a2.97`.
+separately. Current release: **`v1.0a2.111`** (June 2026). Previous: `v1.0a2.110`.
+
+## v1.0a2.111 — Fix: SQLite path on new installs; MRC defaults SSL+5001; security questions for password recovery (June 2026)
+
+**Terminal "unable to open database file" on new installs fixed.** `main.py` now always
+derives `DATABASE_URL` from its own `__file__` location (same as `serve.py` has done since
+v1.0a2.70), rather than trusting whatever the EnvironmentFile supplies. An `.env` with a
+stale or relative path can no longer cause every telnet/SSH session to fail at DB open time.
+Custom Postgres or alternate SQLite paths still use `ANETBBS_DB_URL`.
+
+**MRC bridge default connection changed to SSL port 5001.** Fresh `install.sh` runs now
+generate `mrc/bridge/config.json` with `"mrc_port": 5001` and `"use_ssl": true`.
+Bottomless Abyss MRC supports unencrypted (5000) and SSL (5001); SSL is the better default.
+Existing installs are unaffected (their `config.json` is preserved on update).
+
+**Password recovery via security questions.** Users can now set up to 3 security
+question/answer pairs on their profile (`/profile/security-questions`). On the Forgot
+Password page, accounts with security questions configured are offered a self-service
+"Answer security question" path that issues a reset token directly — no sysop required.
+Answers are stored hashed (werkzeug); matching is case- and whitespace-insensitive.
+Accounts without security questions continue to use the existing sysop-copy-link flow.
+New DB table: `user_security_answers` (auto-created by `db.create_all()`).
+
+**Install wizard simplified.** The wizard no longer asks for a separate admin username —
+the sysop display name chosen at the start is used as the account login, removing a
+redundant prompt that confused fresh installs.
+
+## v1.0a2.108 — Door categories + security levels (June 2026)
+
+**Game categories (dynamic):** New `GameCategory` DB table replaces the hardcoded
+category dropdown. Sysop manages categories at `/admin/games/categories` — add, rename,
+reorder, delete. Default categories seeded on first start: Action, Classic DOS, Puzzle,
+RPG, Space, Strategy, Other. Terminal door menu now groups games by category with
+separator headers. Web lobby filter dropdown loads from DB.
+
+**Min access level per game:** New `min_access_level` field on `Game` (0=all users,
+10=regular, 50=power, 100=sysop). Set it in the game add/edit form. Terminal door menu
+and web lobby both hide games the user's access level doesn't reach.
+
+## v1.0a2.105 — Fix: upgrade runner eventlet RuntimeError (June 2026)
+
+**upgrade runner:** "Second simultaneous read" RuntimeError from eventlet
+during `proc.wait()` is now caught (non-fatal; upgrade runs in its own scope).
 
 ## v1.0a2.98 — Fix: DOS door games never connect on headless servers (June 2026)
 

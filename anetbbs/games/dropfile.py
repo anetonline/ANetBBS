@@ -34,16 +34,15 @@ def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS
     Returns:
         String content of the drop file
     """
-    now = datetime.utcnow()
+    now = datetime.now()  # local time — must match dosemu2's DOS clock
     last_login = _u(user, 'last_login')
     last_call = last_login.strftime('%m/%d/%Y') if last_login else '01/01/2000'
     seconds_remaining = minutes_remaining * 60
 
-    # Split username into first/last for compatibility
+    # Split username into first/last for standard DOOR.SYS lines 7/8
     parts = (_u(user, 'username') or 'User').split(None, 1)
     first_name = parts[0]
-    last_name = parts[1] if len(parts) > 1 else 'User'
-    full_name = f'{first_name} {last_name}'
+    last_name = parts[1] if len(parts) > 1 else ''
 
     security_level = 255 if _u(user, 'is_admin') else 50
     login_count = _u(user, 'login_count') or 1
@@ -55,59 +54,71 @@ def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS
     # is set to FOSSIL — and the BBS's TCP-nullmodem bridge then sees no
     # bytes. LORD's local-detection logic looks at lines 1+2 of DOOR.SYS
     # and short-circuits the FOSSIL path if either is "local".
+    #
+    # TW2002 DOOR.SYS layout (confirmed from TW2002 validation warnings):
+    #   Line 7-9:  first name / last name / location
+    #   Line 13:   caller security level
+    #   Line 14:   times called
+    #   Line 15:   sysop security level  (numeric — NOT last call date)
+    #   Line 16:   seconds remaining
+    #   Line 17:   time on today (numeric)
+    #   Line 18:   time left today in minutes  (numeric "Time Left")
+    #   Line 19:   GR/NG/7E  ← TW2002 reads ANSI type from HERE, not line 18
+    #   Line 20:   expert mode
+    #   Line 21:   page length  (numeric)
     lines = [
-        'COM1:',          # Line 1: COM port (COM1 = use FOSSIL on COM1)
-        '38400',          # Line 2: Baud rate (any non-zero = non-local)
-        '8',              # Line 3: Data bits
-        str(node_number), # Line 4: Node number
-        '38400',          # Line 5: DTE rate (match line 2)
-        'Y',              # Line 6: Screen display (Y=on)
-        'Y',              # Line 7: Printer (Y=on)
-        'Y',              # Line 8: Page bell
-        'Y',              # Line 9: Caller alarm
-        full_name,        # Line 10: User's full name
-        'Unknown',        # Line 11: Location/city
-        '000-000-0000',   # Line 12: Home phone
-        '000-000-0000',   # Line 13: Business phone
-        'PASSWORD',       # Line 14: Password placeholder
-        str(security_level),  # Line 15: Security level
-        str(login_count),     # Line 16: Times called
-        last_call,            # Line 17: Last call date
-        str(seconds_remaining),  # Line 18: Seconds remaining
-        str(minutes_remaining),  # Line 19: Minutes remaining
-        'GR',                    # Line 20: Graphics (GR=ANSI)
-        '25',                    # Line 21: Page length
-        'N',                     # Line 22: Expert mode
-        '',                      # Line 23: Conference joined
-        '',                      # Line 24: Conference scanned
-        '01/01/2099',            # Line 25: Expiration date
-        str(_u(user, 'id') or 0), # Line 26: User file record position
-        'ANSI',                  # Line 27: Default protocol (ANSI)
-        '0',                     # Line 28: Total uploads
-        '0',                     # Line 29: Total downloads
-        '0',                     # Line 30: Daily download total (KB)
-        '9999999',               # Line 31: Daily download limit (KB)
-        now.strftime('%m/%d/%Y'),  # Line 32: Today's date
-        now.strftime('%H:%M'),     # Line 33: Current time
-        bbs_name,                  # Line 34: BBS name
-        'Sysop',                   # Line 35: SysOp name
-        str(node_number),          # Line 36: Node number (again)
-        '38400',                   # Line 37: Max baud rate
-        'Y',                       # Line 38: FOSSIL driver
-        _u(user, 'username') or '',# Line 39: User's handle
-        '0',                       # Line 40: Total uploads (KB)
-        '0',                       # Line 41: Total downloads (KB)
-        _u(user, 'email') or '',   # Line 42: User's email
-        '0',                       # Line 43: Number of messages posted
-        '0',                       # Line 44: Number of messages read
-        '0',                       # Line 45: Page length in lines
-        'Y',                       # Line 46: ANSI graphics
-        'Y',                       # Line 47: Record locking
-        '1',                       # Line 48: Default transfer protocol
-        'N',                       # Line 49: Door registration flag
-        str(security_level),       # Line 50: Network access level
-        'N',                       # Line 51: Screen blanking
-        '0',                       # Line 52: Number of calls today
+        'COM1:',          # Line 1:  COM port (COM1 = use FOSSIL on COM1)
+        '38400',          # Line 2:  Baud rate (any non-zero = non-local)
+        '8',              # Line 3:  Data bits
+        str(node_number), # Line 4:  Node number
+        '38400',          # Line 5:  DTE rate (match line 2)
+        'Y',              # Line 6:  Screen clear (Y=on)
+        first_name,       # Line 7:  First name
+        last_name,        # Line 8:  Last name
+        'Unknown',        # Line 9:  Location/city
+        '000-000-0000',   # Line 10: Home phone
+        '000-000-0000',   # Line 11: Business phone
+        'PASSWORD',       # Line 12: Password placeholder
+        str(security_level),     # Line 13: Caller security level
+        str(login_count),        # Line 14: Times called
+        str(security_level),     # Line 15: Sysop level (numeric — TW2002 validates)
+        str(seconds_remaining),  # Line 16: Seconds remaining today
+        '0',                     # Line 17: Time on today
+        str(seconds_remaining),  # Line 18: TW2002 reads this as SECONDS (not minutes)
+        'GR',                    # Line 19: Graphics (GR=ANSI) ← TW2002 reads from HERE
+        'N',                     # Line 20: Expert mode
+        '25',                    # Line 21: Page length (TW2002 validates)
+        '',                      # Line 22: Conference scanned
+        '01/01/2099',            # Line 23: Expiration date
+        str(_u(user, 'id') or 0), # Line 24: User file record position
+        'ANSI',                  # Line 25: Default protocol (ANSI)
+        '0',                     # Line 26: Total uploads
+        '0',                     # Line 27: Total downloads
+        '0',                     # Line 28: Daily download total (KB)
+        '9999999',               # Line 29: Daily download limit (KB)
+        now.strftime('%m/%d/%Y'),  # Line 30: Today's date
+        now.strftime('%H:%M'),     # Line 31: Current time
+        bbs_name,                  # Line 32: BBS name
+        'Sysop',                   # Line 33: SysOp name
+        str(node_number),          # Line 34: Node number (again)
+        '38400',                   # Line 35: Max baud rate
+        'Y',                       # Line 36: FOSSIL driver
+        _u(user, 'username') or '',# Line 37: User's handle
+        '0',                       # Line 38: Total uploads (KB)
+        '0',                       # Line 39: Total downloads (KB)
+        _u(user, 'email') or '',   # Line 40: User's email
+        '0',                       # Line 41: Number of messages posted
+        '0',                       # Line 42: Number of messages read
+        '0',                       # Line 43: Page length in lines
+        'Y',                       # Line 44: ANSI graphics
+        'Y',                       # Line 45: Record locking
+        '1',                       # Line 46: Default transfer protocol
+        'N',                       # Line 47: Door registration flag
+        str(security_level),       # Line 48: Network access level
+        'N',                       # Line 49: Screen blanking
+        '0',                       # Line 50: Number of calls today
+        'N',                       # Line 51:
+        '0',                       # Line 52:
     ]
 
     content = '\r\n'.join(lines) + '\r\n'
