@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0a2.111.tar.gz
-cd ANetBBS-v1.0a2.111
+tar xzf ANetBBS-v1.0a2.112.tar.gz
+cd ANetBBS-v1.0a2.112
 sudo bash install.sh
 ```
 
