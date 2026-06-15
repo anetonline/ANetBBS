@@ -20,7 +20,7 @@ def _u(user, field, default=None):
 
 
 def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
-                      output_path=None):
+                      output_path=None, tw2002_compat=False):
     """
     Generate a DOOR.SYS drop file (52-line format).
 
@@ -44,8 +44,11 @@ def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS
     first_name = parts[0]
     last_name = parts[1] if len(parts) > 1 else ''
 
-    security_level = 255 if _u(user, 'is_admin') else 50
-    login_count = _u(user, 'login_count') or 1
+    security_level = 200 if _u(user, 'is_admin') else 50
+    # Pascal BYTE holds 0-255; many DOS doors store times-called in a BYTE.
+    # login_count above 255 causes a range-check error (Turbo Pascal error 201)
+    # in games that read DOOR.SYS line 14 into a BYTE variable.
+    login_count = min(_u(user, 'login_count') or 1, 255)
 
     # NOTE: COM1: + 38400 (NOT COM0: + 0) — telling LORD/TradeWars/etc.
     # that the user is a remote BBS caller on a FOSSIL-driven COM1, NOT
@@ -81,7 +84,11 @@ def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS
         'PASSWORD',       # Line 12: Password placeholder
         str(security_level),     # Line 13: Caller security level
         str(login_count),        # Line 14: Times called
-        str(security_level),     # Line 15: Sysop level (numeric — TW2002 validates)
+        # Line 15: Standard PCBoard format = last date on (MM/DD/YYYY).
+        # TW2002 is the exception — it reads line 15 as sysop security level
+        # (numeric). LORD and all other doors expect a date string; passing
+        # a number causes date parsing to fail → array[0] → error 201.
+        str(security_level) if tw2002_compat else last_call,  # Line 15
         str(seconds_remaining),  # Line 16: Seconds remaining today
         '0',                     # Line 17: Time on today
         str(seconds_remaining),  # Line 18: TW2002 reads this as SECONDS (not minutes)
@@ -151,7 +158,7 @@ def generate_dorinfo(user, node_number, minutes_remaining=60, bbs_name='ANetBBS'
     last_name = parts[1] if len(parts) > 1 else 'User'
 
     sysop_parts = 'Sysop User'.split()
-    security_level = 255 if _u(user, 'is_admin') else 50
+    security_level = 200 if _u(user, 'is_admin') else 50
 
     # COM1 + 38400 baud — same FOSSIL/non-local rationale as DOOR.SYS above.
     lines = [
@@ -208,7 +215,7 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
     last_name = parts[1] if len(parts) > 1 else 'User'
     full_name = f'{first_name} {last_name}'
 
-    security_level = 255 if _u(user, 'is_admin') else 50
+    security_level = 200 if _u(user, 'is_admin') else 50
 
     # Comm type and handle selection:
     # DOS doors (door_dos) → type 1 / handle 0: FOSSIL on COM1 via TCP nullmodem.

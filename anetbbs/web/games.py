@@ -297,6 +297,11 @@ def handle_start_game(data):
     try:
         cmd, cwd = _build_command(game, 1, bbs_name)
     except Exception as exc:
+        import traceback as _tb
+        logger.error('_build_command failed for game %s (type=%s): %s\n%s',
+                     getattr(game, 'slug', '?'),
+                     getattr(game, 'game_type', '?'),
+                     exc, _tb.format_exc())
         emit('game_error', {'message': f'Cannot start: {exc}'})
         return
 

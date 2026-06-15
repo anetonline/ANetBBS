@@ -1,7 +1,27 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.111`** (June 2026). Previous: `v1.0a2.110`.
+separately. Current release: **`v1.0a2.112`** (June 2026). Previous: `v1.0a2.111`.
+
+## v1.0a2.112 — Fix: dosemu2 bat generic for non-TW2002 games; TW2002 ANSI via DORINFO1.DEF (June 2026)
+
+**dosemu2 `_ANET.BAT` was TW2002-only for all door games.** `_build_dosemu_command()` was
+injecting `SET TWNODE=1`, `MKDIR I:\NODE2`, and `COPY I:\DOOR.SYS I:\NODE2\DOOR.SYS` into
+the generated batch file for **every** `door_dosemu` game. These lines are TW2002-specific
+(node config environment variable + TW2002's per-node drop-file path). Fixed: the three
+lines are now conditional on the game slug containing `"tw2002"`. Any other DOS game
+launched via dosemu2 now gets a clean generic bat. Also added `DOOR32.SYS` and
+`DORINFO1.DEF` copies to the generic path so games using those drop file types find them
+in their working directory.
+
+**TW2002 ANSI colors require DORINFO1.DEF, not DOOR.SYS.** When using DOOR.SYS, TW2002
+detects ANSI by sending an `ESC[6n` cursor-position probe via COM1 and waiting for the
+terminal reply. This round-trip through dosemu2's pts COM1 is timing-sensitive and
+unreliable — TW2002 times out and falls back to ASCII. DORINFO1.DEF carries an explicit
+ANSI flag (line 10 = `1`) with no probe needed. Set *Drop File Type* = `DORINFO1.DEF`
+and *Drop File Path* = `%P` in the ANetBBS game admin. In TEDIT.EXE set *BBS Drop file
+type* = `RBBS` (TW2002's name for the DORINFO1.DEF format), *I/O Type* = `Standard`,
+*Comport* = `1`. Confirmed working with full ANSI color output.
 
 ## v1.0a2.111 — Fix: SQLite path on new installs; MRC defaults SSL+5001; security questions for password recovery (June 2026)
 
