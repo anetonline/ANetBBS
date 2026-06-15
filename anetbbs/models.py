@@ -203,6 +203,7 @@ class Game(db.Model):
     drop_file_type = db.Column(db.String(20))
     drop_file_path = db.Column(db.String(500))
     use_dosbox = db.Column(db.Boolean, default=False)
+    needs_fossil_driver = db.Column(db.Boolean, default=False)
 
     # Mystic BBS Python game settings
     mystic_script_path = db.Column(db.String(500))

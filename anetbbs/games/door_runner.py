@@ -843,14 +843,35 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
     except Exception:
         per_node_host = None
 
+    _slug_lc = (game.slug or '').lower()
+    _is_tw2002 = 'tw2002' in _slug_lc or exe_name.lower().startswith('tw2002')
+
+    # Load FOSSIL driver only when the game admin explicitly opted in via the
+    # "Requires FOSSIL Driver" checkbox.  Auto-detection was removed because
+    # dosemu2 virtual COM1 (used by TW2002) conflicts with FOSSIL drivers.
+    _fossil_names = {'bnu.com', 'fossil.com', 'x00.com', 'fosdrv.com', 'bnu2.com'}
+    _fossil_load = ''
+    if getattr(game, 'needs_fossil_driver', False):
+        try:
+            for _fn in os.listdir(game_dir):
+                if _fn.lower() in _fossil_names:
+                    _fossil_load = f'{_fn}\r\n'
+                    break
+        except OSError:
+            pass
+
+    # %P in command_line_args expands to a Linux per-node path via _xp(), but
+    # inside a dosemu2 bat I: is the per-node scratch drive. Fix it up here.
+    if per_node_host and extra:
+        _pn_slash = per_node_host.rstrip(os.sep) + os.sep
+        extra = extra.replace(_pn_slash, 'I:\\').replace(per_node_host.rstrip(os.sep), 'I:\\')
+
     cmd_str = (exe_name + (' ' + extra if extra else '')).strip()
     bat_path = os.path.join(game_dir, '_ANET.BAT')
 
     # TW2002-specific setup: TWNODE env var selects the node config entry in
     # TWNODE.DAT, and node 1 maps its DOOR.SYS path to I:\NODE2\DOOR.SYS.
     # Other dosemu2 games don't need any of this — only inject it for TW2002.
-    _slug_lc = (game.slug or '').lower()
-    _is_tw2002 = 'tw2002' in _slug_lc or exe_name.lower().startswith('tw2002')
     tw2002_lines = ''
     if _is_tw2002:
         tw2002_lines = (
@@ -865,6 +886,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
 
     bat_body = (
         '@echo off\r\n'
+        + _fossil_load
         + tw2002_lines +
         # Generic: copy drop file from per-node scratch (I:\) into game dir
         # (H:\) so the door finds it in its own working directory.
@@ -877,6 +899,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
         'EXIT\r\n'
     )
     try:
+        os.makedirs(game_dir, exist_ok=True)
         with open(bat_path, 'w', newline='') as f:
             f.write(bat_body)
     except OSError as exc:

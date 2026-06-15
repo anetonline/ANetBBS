@@ -1,61 +1,36 @@
-# ANetBBS v1.0a2.112 — Fix: dosemu2 bat generic; TW2002 ANSI colors via DORINFO1.DEF
+# ANetBBS v1.0a2.116 — Add per-game FOSSIL driver checkbox; fix TW2002 black screen
 
 ## Changes
 
-### Fix: dosemu2 `_ANET.BAT` was hardcoded for TW2002 on all dosemu2 games
+### Add: "Requires FOSSIL Driver" checkbox in Game admin
 
-`_build_dosemu_command()` previously injected three TW2002-specific lines into
-`_ANET.BAT` for **every** dosemu2 door game, not just TradeWars 2002:
+A new **Requires FOSSIL Driver (BNU.COM / X00.COM)** checkbox has been added to
+the dosemu2 door game admin form. Previously, ANetBBS auto-detected FOSSIL driver
+files in the game's working directory and loaded them automatically. This caused
+TW2002 to show a black screen because dosemu2's virtual COM1 (`$_com1 = "virtual"`)
+conflicts with any loaded FOSSIL driver.
 
-- `SET TWNODE=1`
-- `MKDIR I:\NODE2`
-- `COPY I:\DOOR.SYS I:\NODE2\DOOR.SYS`
+The auto-detection has been replaced with an explicit opt-in per game:
 
-These lines are harmless for TW2002 but wrong for any other game launched via
-`door_dosemu`. Fixed: the three lines are now conditional on the game slug
-containing `"tw2002"` (case-insensitive). All other dosemu2 games receive a
-clean generic bat with only the standard drop-file copies.
+- Check **Requires FOSSIL Driver** for games like Zombie Slots / Mega Slots that
+  ship with BNU.COM or similar and need it loaded before launch.
+- Leave it unchecked for TW2002 and any other game that uses dosemu2 virtual COM.
+- The first matching FOSSIL driver found in the game's working directory is loaded
+  (`BNU.COM`, `FOSSIL.COM`, `X00.COM`, `FOSDRV.COM`, or `BNU2.COM`).
 
-Also added `DOOR32.SYS` and `DORINFO1.DEF` to the generic copy block so games
-using those drop file formats also get them inside the game directory.
+The `needs_fossil_driver` column is added to the `games` table automatically by
+`update.sh` (Step 7 schema migration — `ALTER TABLE games ADD COLUMN`).
 
-### TW2002 configuration: use DORINFO1.DEF for correct ANSI colors
+### Fix: TW2002 black screen (regression from v1.0a2.113)
 
-TradeWars 2002 detects ANSI mode differently depending on which drop file type
-it reads:
-
-- **DOOR.SYS** (line 19 = `GR`): TW2002 sends an `ESC[6n` cursor-position probe
-  via COM1 and waits for the terminal's `ESC[row;colR` reply. The timing of this
-  round-trip through dosemu2's pts COM1 is unreliable — TW2002 often times out
-  and falls back to ASCII mode even when the user's terminal is ANSI-capable.
-- **DORINFO1.DEF** (line 10 = `1`): ANSI flag is explicit, no probe needed.
-  TW2002 reads it directly and enters color mode immediately.
-
-**The fix**: set Drop File Type to `DORINFO1.DEF` in both places:
-
-1. **ANetBBS game admin** (`/admin/games`): set *Drop File Type* = `DORINFO1.DEF`,
-   *Drop File Path* = `%P`.
-2. **TEDIT.EXE** (TW2002's node editor): set *BBS Drop file type* = `RBBS`
-   (RBBS is what TW2002 calls the DORINFO1.DEF format).
-
-TW2002 TEDIT.EXE confirmed working settings:
-- Path to Drop file: `I:\`
-- BBS Drop file type: `RBBS`
-- I/O Type: `Standard`
-- Comport: `1`
-- Override port Addr: `03FB`
-- Override port IRQ: `4`
-- Active Node: `Yes`
-
-ANetBBS game admin confirmed working settings:
-- Game Type: `DOS Door Game (dosemu2)`
-- Executable Path: `doors/dos/tw/TW2002.EXE`
-- Working Directory: `doors/dos/tw/`
-- Command Line Args: `twnode=1`
-- Drop File Type: `DORINFO1.DEF`
-- Drop File Path: `%P`
-- Max Players: `10`
+TW2002 is no longer affected by FOSSIL auto-detection. With the checkbox approach,
+TW2002 (unchecked) gets no FOSSIL driver loaded and dosemu2 virtual COM1 works
+correctly again.
 
 ## Files changed
 
-- `anetbbs/games/door_runner.py` — `_build_dosemu_command()`: TW2002-specific bat lines conditional on slug
+- `anetbbs/models.py` — `needs_fossil_driver` column added to Game model
+- `anetbbs/web/games_admin.py` — `needs_fossil_driver` BooleanField in GameForm + save block
+- `anetbbs/templates/games/admin/form.html` — checkbox in dosemu2 section
+- `anetbbs/games/door_runner.py` — replace auto-detection with `game.needs_fossil_driver` opt-in
+- `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md` — version bump

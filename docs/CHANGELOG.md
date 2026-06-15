@@ -1,7 +1,59 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.112`** (June 2026). Previous: `v1.0a2.111`.
+separately. Current release: **`v1.0a2.116`** (June 2026). Previous: `v1.0a2.115`.
+
+## v1.0a2.116 — Add per-game FOSSIL driver checkbox; fix TW2002 black screen (June 2026)
+
+Replaced FOSSIL driver auto-detection (introduced in v1.0a2.113) with an explicit
+per-game checkbox in the Game admin: **Requires FOSSIL Driver (BNU.COM / X00.COM)**.
+Check it for games like Zombie Slots / Mega Slots that ship a FOSSIL driver and
+need it loaded. Leave it unchecked for TW2002 — dosemu2 virtual COM1 conflicts
+with FOSSIL drivers and caused the black screen regression. The `needs_fossil_driver`
+column is auto-migrated by `update.sh` Step 7.
+
+## v1.0a2.115 — Fix: TW2002 black screen; fix game terminal right-side overflow (June 2026)
+
+FOSSIL auto-detection (v1.0a2.113) loaded BNU.COM/FOSSIL.COM if present in the
+game dir. TW2002 uses dosemu2 virtual COM1 which conflicts with any FOSSIL driver
+— loading one caused a black screen. FOSSIL auto-load now skipped for TW2002.
+
+Game terminal CSS: Bootstrap `.container` + `padding: 24px` limited content area
+to ~700px on laptop viewports. 80-col terminal needs ~784px → rightmost ~20
+columns overflowed outside the green border, showing game sidebars/stat panels
+floating beside the terminal box. Fix: `max-width: 100%` override + `overflow:
+hidden` clip on `#terminal-wrap`.
+
+## v1.0a2.114 — Fix: web door-game terminal animation ghosting (June 2026)
+
+Full-screen animation door games (slot machines, etc.) showed ghost artifacts
+in the web game terminal — previous animation frames persisting visually while
+new frames drew on top. SSH/telnet sessions were unaffected.
+
+Root cause: xterm.js retains a 1000-line scrollback buffer by default. When a
+door game fills the 25-row screen, the terminal scrolls, pushing the current
+frame into the scrollback. The game then homes the cursor and redraws, but
+the scrollback content remains visible above the viewport, creating doubled
+headers/footers. Fix: `scrollback: 0` — DOS door games are 80×25 full-screen
+apps that reuse the same grid via cursor addressing and need no scrollback.
+
+## v1.0a2.113 — Fix: terminal DATABASE_URL; clean release tarball (June 2026)
+
+Terminal service (`anetbbs/main.py`) hardcoded `anetbbs.db` instead of
+respecting `DATABASE_URL` from `.env`, splitting terminal and web onto
+different databases. Menu changes, password resets, and door configs made
+via the web had no effect in terminal sessions. Fix: resolution order is now
+`ANETBBS_DB_URL` → `DATABASE_URL` (from `.env`) → absolute-path fallback.
+
+Release tarball now excludes `doors/dos/` (x86 DOS game binaries, sysop-
+installed) and `data/ftp_root/` (created by installer). Tarball returns to
+~29 MB. Pi/ARM installs no longer fail on oversized tarball with wrong-arch
+binaries.
+
+dosemu2 door launch now auto-creates the game working directory if missing.
+`%P` in command_line_args now correctly maps to `I:\` (per-node scratch
+drive) instead of a Linux path in the generated bat file. FOSSIL drivers
+(BNU.COM etc.) are auto-loaded if present in the game directory.
 
 ## v1.0a2.112 — Fix: dosemu2 bat generic for non-TW2002 games; TW2002 ANSI via DORINFO1.DEF (June 2026)
 

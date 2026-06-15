@@ -157,6 +157,15 @@
         </div>
         <div class="row g-3 mb-2">
             <div class="col-12">
+                <div class="form-check">
+                    {{ form.needs_fossil_driver(class="form-check-input") }}
+                    {{ form.needs_fossil_driver.label(class="form-check-label") }}
+                    <small class="text-muted d-block">Only enable if this game requires a FOSSIL serial driver loaded before launch. Do NOT enable for TW2002 — dosemu2 virtual COM1 conflicts with FOSSIL drivers.</small>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
+            <div class="col-12">
                 <small class="text-muted">
                     Drives inside DOS: <strong>G:</strong> = FOSSIL bundle,
                     <strong>H:</strong> = game dir, <strong>I:</strong> = per-node temp (drop files).

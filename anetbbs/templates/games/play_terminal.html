@@ -4,6 +4,13 @@
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
 <style>
+    /* Bootstrap's .container max-width + 24px custom padding constrains the
+       content area to under ~700px on laptop viewports. An 80×25 terminal
+       at 16px font needs ~784px. Without this override the rightmost ~20
+       columns overflow outside the green border and appear beside it.
+       Full-width here is fine — the game terminal IS the whole page. */
+    .container { max-width: 100% !important; padding-left: 12px !important; padding-right: 12px !important; }
+
     /* Door games are written for 80x25 DOS terminals — every gotoxy
        and ANSI escape assumes that grid. The fit addon used to resize
        the xterm to fill the viewport, which made it ~150 cols wide
@@ -17,7 +24,7 @@
         border-radius: 4px;
         padding: 6px;
         display: inline-block;       /* shrink-to-fit the 80-col grid */
-        max-width: 100%;
+        overflow: hidden;            /* clip any subpixel overflow at right edge */
     }
     #terminal-outer {
         display: flex;
@@ -115,6 +122,8 @@
         cursorBlink: true,
         cols: 80,
         rows: 25,                    // DOS standard — LORD assumes 25 rows
+        scrollback: 0,               // full-screen games reuse the 25-row grid; scrollback
+                                     // accumulates old frames and creates ghost artifacts
         convertEol: false,
     });
 
