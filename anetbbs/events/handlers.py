@@ -266,8 +266,10 @@ def shell(app, params):
     timeout = int(params.get('timeout', 60))
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True,
-                           text=True, timeout=timeout)
-        out = ('stdout:\n' + r.stdout + '\nstderr:\n' + r.stderr).strip()
+                           timeout=timeout)
+        stdout = r.stdout.decode('utf-8', errors='replace')
+        stderr = r.stderr.decode('utf-8', errors='replace')
+        out = ('stdout:\n' + stdout + '\nstderr:\n' + stderr).strip()
         return (r.returncode == 0), out[:4096]
     except subprocess.TimeoutExpired:
         return False, f'shell handler: timed out after {timeout}s'
