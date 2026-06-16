@@ -65,12 +65,11 @@ def db_vacuum(app, params):
         url = str(db.engine.url)
         if 'sqlite' not in url:
             return True, 'skipped: not a SQLite DB'
-        # SQLite's VACUUM can't run inside a transaction; SQLAlchemy
-        # opens an implicit transaction for execute(). Use an isolation
-        # bypass connection.
+        # SQLite's VACUUM can't run inside a transaction. AUTOCOMMIT
+        # isolation tells the pysqlite dialect to skip its implicit
+        # BEGIN, so there's no transaction for VACUUM to conflict with.
         eng = db.engine
-        with eng.connect() as conn:
-            conn.execute(text('COMMIT'))           # close any implicit tx
+        with eng.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
             t0 = time.monotonic()
             conn.execute(text('VACUUM'))
             ms = (time.monotonic() - t0) * 1000
