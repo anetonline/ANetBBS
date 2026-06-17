@@ -468,6 +468,7 @@ async def run_menu(session, start='main'):
             try:
                 from .display_codes import apply as _apply_codes
                 from .bbs_ui import _app as _bbs_app
+                import anetbbs as _anetbbs_pkg
                 _cfg = _bbs_app().config
                 rendered = _apply_codes(
                     screen,
@@ -476,7 +477,7 @@ async def run_menu(session, start='main'):
                     sysop=_cfg.get('SYSOP_NAME', ''),
                     node=(getattr(session, '_node_entry', None).slot
                           if getattr(session, '_node_entry', None) else 1),
-                    version='v1.0a',
+                    version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
                 )
             except Exception:
                 rendered = screen

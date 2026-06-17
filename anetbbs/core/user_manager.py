@@ -53,6 +53,8 @@ class UserManager:
         return {
             "id": user.id,
             "username": user.username,
+            "display_name": getattr(user, 'display_name', None) or '',
+            "location": getattr(user, 'location', None) or '',
             "email": user.email,
             "is_admin": bool(user.is_admin),
             "is_active": bool(user.is_active),

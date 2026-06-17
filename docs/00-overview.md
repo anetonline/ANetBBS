@@ -71,3 +71,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [14 — Door games](14-door-games.md)
 - [15 — Synchronet door compat](15-synchronet-compat.md)
 - [16 — RSS reader](16-rss-reader.md)
+- [21 — Scheduled events (cron-style maintenance jobs)](21-scheduled-events.md)

@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.116`** (June 2026). Previous: `v1.0a2.115`.
+separately. Current release: **`v1.0a2.117`** (June 2026). Previous: `v1.0a2.116`.
+
+## v1.0a2.117 — Fix: @-code / display code substitution in ANSI screens (June 2026)
+
+All Synchronet `@-codes` that resolve user identity (`@ALIAS@`, `@USER@`, `@NAME@`,
+`@HANDLE@`, `@REAL@`, `@FIRST@`, `@EMAIL@`, `@LOCATION@`, `@CALLS@`, `@SECURITY@`)
+were returning blank because `session.user` is a dict but the resolver used
+`getattr()` instead of `.get()`. Fixed. Also: `display_name` and `location` added
+to the user dict; `@SECURITY@` bool comparison fixed; `@VER@`/`@VERSION@` now
+returns the real build version. Parametric codes like `@BPS:19200@` are now stripped
+instead of printing as literal text.
 
 ## v1.0a2.116 — Add per-game FOSSIL driver checkbox; fix TW2002 black screen (June 2026)
 

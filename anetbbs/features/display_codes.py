@@ -32,7 +32,13 @@ def _u(ctx, attr, default=''):
     u = ctx.get('user')
     if u is None:
         return default
-    return str(getattr(u, attr, '') or default)
+    # session.user is a dict from user_manager._user_to_dict; support both
+    # dict and ORM-object callers.
+    if isinstance(u, dict):
+        val = u.get(attr, default)
+    else:
+        val = getattr(u, attr, default)
+    return str(val if val is not None and val != '' else default)
 
 
 SYNCHRONET_AT = {
@@ -61,7 +67,7 @@ SYNCHRONET_AT = {
     # Stats
     'CALLS':     lambda c: str(_u(c, 'login_count', 0)),
     'POSTS':     lambda c: '',
-    'SECURITY':  lambda c: ('100' if _u(c, 'is_admin') == 'True' else '50'),
+    'SECURITY':  lambda c: ('100' if _u(c, 'is_admin') not in ('', 'False', '0', 'None') else '50'),
     'LASTON':    lambda c: '',
 }
 
@@ -85,6 +91,9 @@ MYSTIC_PIPE_NAMED = {
 
 
 _AT_RE = re.compile(r'@([A-Z][A-Z0-9_]{0,15})@')
+# Parametric @CODE:value@ codes (e.g. @BPS:19200@) — strip these rather than
+# displaying literal text; most are Synchronet rendering hints we don't model.
+_AT_PARAM_RE = re.compile(r'@[A-Z][A-Z0-9_]{0,15}:[^@]{0,32}@')
 # Mystic named codes: 2-letter uppercase, after a `|` not followed by a digit
 # (color codes like |07 are 2-digit and handled elsewhere by _pipe_to_ansi).
 _MY_NAMED_RE = re.compile(r'\|([A-Z]{2})\b')
@@ -129,6 +138,7 @@ def apply(text: str, *, user=None, bbs_name: str = '', sysop: str = '',
         except Exception:
             return ''
 
+    text = _AT_PARAM_RE.sub('', text)      # strip @BPS:19200@ etc. before token sub
     text = _AT_RE.sub(_at_sub, text)
     text = _MY_NAMED_RE.sub(_my_sub, text)
     return text

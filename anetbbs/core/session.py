@@ -571,6 +571,7 @@ class BBSSession:
             try:
                 from ..features.display_codes import apply as _apply_codes
                 from ..features.bbs_ui import _app as _bbs_app
+                import anetbbs as _anetbbs_pkg
                 _cfg = _bbs_app().config
                 body = _apply_codes(
                     body,
@@ -579,7 +580,7 @@ class BBSSession:
                     sysop=_cfg.get('SYSOP_NAME', ''),
                     node=(self._node_entry.slot
                           if getattr(self, '_node_entry', None) else 1),
-                    version='v1.0a',
+                    version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
                 )
             except Exception:
                 pass

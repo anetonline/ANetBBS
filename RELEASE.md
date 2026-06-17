@@ -1,36 +1,43 @@
-# ANetBBS v1.0a2.116 — Add per-game FOSSIL driver checkbox; fix TW2002 black screen
+# ANetBBS v1.0a2.117 — Fix: @-code / display code substitution in ANSI screens
 
 ## Changes
 
-### Add: "Requires FOSSIL Driver" checkbox in Game admin
+### Fix: Synchronet @-codes now resolve correctly in ANSI screens
 
-A new **Requires FOSSIL Driver (BNU.COM / X00.COM)** checkbox has been added to
-the dosemu2 door game admin form. Previously, ANetBBS auto-detected FOSSIL driver
-files in the game's working directory and loaded them automatically. This caused
-TW2002 to show a black screen because dosemu2's virtual COM1 (`$_com1 = "virtual"`)
-conflicts with any loaded FOSSIL driver.
+`@ALIAS@`, `@USER@`, `@NAME@`, `@HANDLE@`, `@REAL@`, `@FIRST@`, `@EMAIL@`,
+`@LOCATION@`, `@CALLS@`, and `@SECURITY@` were all resolving to blank (empty
+string) in ANSI files stored under `text/menus/` or set via Admin → Screens.
 
-The auto-detection has been replaced with an explicit opt-in per game:
+Root cause: `session.user` is a dict (not a SQLAlchemy ORM object), but the
+`_u()` helper in `display_codes.py` used `getattr(user, attr, '')` — which
+does not read dict keys. Only codes that read directly from the context dict
+(e.g. `@BBS@`, `@TIME@`, `@DATE@`) were working.
 
-- Check **Requires FOSSIL Driver** for games like Zombie Slots / Mega Slots that
-  ship with BNU.COM or similar and need it loaded before launch.
-- Leave it unchecked for TW2002 and any other game that uses dosemu2 virtual COM.
-- The first matching FOSSIL driver found in the game's working directory is loaded
-  (`BNU.COM`, `FOSSIL.COM`, `X00.COM`, `FOSDRV.COM`, or `BNU2.COM`).
+Fixed `_u()` to detect dict vs. ORM object and use `.get()` accordingly.
 
-The `needs_fossil_driver` column is added to the `games` table automatically by
-`update.sh` (Step 7 schema migration — `ALTER TABLE games ADD COLUMN`).
+Also added `display_name` and `location` to the user dict returned by
+`user_manager._user_to_dict()` so `@NAME@`/`@REAL@`/`@FIRST@` and
+`@LOCATION@` resolve to the correct values.
 
-### Fix: TW2002 black screen (regression from v1.0a2.113)
+Fixed `@SECURITY@` — `is_admin` in the dict is a Python `bool`, not the
+string `'True'`; the old string comparison always returned `50`.
 
-TW2002 is no longer affected by FOSSIL auto-detection. With the checkbox approach,
-TW2002 (unchecked) gets no FOSSIL driver loaded and dosemu2 virtual COM1 works
-correctly again.
+Fixed `@VER@` / `@VERSION@` — the version string was hardcoded `'v1.0a'`
+at the two call sites in `session.py` and `menu_engine.py`; now reads
+`anetbbs.__version__` at runtime.
+
+### Fix: Parametric @CODE:value@ codes no longer print as literal text
+
+`@BPS:19200@` and similar Synchronet parametric codes contain a colon which
+the existing `@CODE@` regex doesn't match, so they printed as-is in the
+rendered ANSI. These codes are now stripped before substitution.
+`@BPS:NNNN@` (baud-rate slow-draw) is not modelled — stripping it is the
+correct behavior.
 
 ## Files changed
 
-- `anetbbs/models.py` — `needs_fossil_driver` column added to Game model
-- `anetbbs/web/games_admin.py` — `needs_fossil_driver` BooleanField in GameForm + save block
-- `anetbbs/templates/games/admin/form.html` — checkbox in dosemu2 section
-- `anetbbs/games/door_runner.py` — replace auto-detection with `game.needs_fossil_driver` opt-in
+- `anetbbs/features/display_codes.py` — fix `_u()` dict access; fix `@SECURITY@` bool check; add `_AT_PARAM_RE` to strip parametric codes
+- `anetbbs/core/user_manager.py` — add `display_name` and `location` to `_user_to_dict`
+- `anetbbs/core/session.py` — pass real `anetbbs.__version__` to `_apply_codes`
+- `anetbbs/features/menu_engine.py` — pass real `anetbbs.__version__` to `_apply_codes`
 - `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md` — version bump
