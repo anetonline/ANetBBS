@@ -54,6 +54,7 @@ SYNCHRONET_AT = {
     'AGE':       lambda c: '',
     'SEX':       lambda c: '',
     # System
+    'CLS':       lambda c: '\x1b[2J\x1b[H',
     'BBS':       lambda c: c.get('bbs_name', ''),
     'SYSOP':     lambda c: c.get('sysop', ''),
     'NODE':      lambda c: str(c.get('node', 1)),
@@ -94,6 +95,7 @@ _AT_RE = re.compile(r'@([A-Z][A-Z0-9_]{0,15})@')
 # Parametric @CODE:value@ codes (e.g. @BPS:19200@) — strip these rather than
 # displaying literal text; most are Synchronet rendering hints we don't model.
 _AT_PARAM_RE = re.compile(r'@[A-Z][A-Z0-9_]{0,15}:[^@]{0,32}@')
+_BPS_RE = re.compile(r'@BPS:(\d+)@')
 # Mystic named codes: 2-letter uppercase, after a `|` not followed by a digit
 # (color codes like |07 are 2-digit and handled elsewhere by _pipe_to_ansi).
 _MY_NAMED_RE = re.compile(r'\|([A-Z]{2})\b')
@@ -142,3 +144,17 @@ def apply(text: str, *, user=None, bbs_name: str = '', sysop: str = '',
     text = _AT_RE.sub(_at_sub, text)
     text = _MY_NAMED_RE.sub(_my_sub, text)
     return text
+
+
+def extract_bps(text: str) -> int | None:
+    """Return the baud rate from the first @BPS:NNNN@ code in *text*, or None.
+
+    Call this BEFORE apply() — apply() strips the code.
+    Clamps to 300–56000 so a typo can't produce an absurd delay.
+    """
+    if not text or '@' not in text:
+        return None
+    m = _BPS_RE.search(text)
+    if not m:
+        return None
+    return max(300, min(56000, int(m.group(1))))

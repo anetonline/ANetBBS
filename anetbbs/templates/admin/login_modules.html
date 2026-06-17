@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Logon/Logoff Modules - Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-lightning-charge-fill"></i> Logon / Logoff Modules</h1>
+</div>
+
+<div class="d-flex gap-3 align-items-center mb-4 flex-wrap">
+    <a href="{{ url_for('login_modules_admin.new') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> Add Module
+    </a>
+    <form method="post" action="{{ url_for('login_modules_admin.fast_logon_toggle') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn {{ 'btn-success' if fast_logon_enabled else 'btn-outline-secondary' }}">
+            <i class="bi bi-lightning-fill"></i>
+            Fast Logon: <strong>{{ 'ON' if fast_logon_enabled else 'OFF' }}</strong>
+        </button>
+    </form>
+    <small class="text-muted">When ON, users are prompted at login to skip intro modules.</small>
+</div>
+
+{% for event_label, mods in [('Logon', logon_mods), ('Logoff', logoff_mods)] %}
+<h5 class="mt-4">{{ event_label }} Modules</h5>
+{% if mods %}
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+    <thead>
+        <tr>
+            <th>Sort</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Min Level</th>
+            <th>Skip Fast?</th>
+            <th>Active</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for mod in mods %}
+        <tr class="{{ 'table-secondary text-muted' if not mod.is_active }}">
+            <td>{{ mod.sort_order }}</td>
+            <td>
+                <strong>{{ mod.name }}</strong>
+                {% if mod.description %}<br><small class="text-muted">{{ mod.description }}</small>{% endif %}
+            </td>
+            <td><code>{{ mod.module_type }}</code></td>
+            <td>{{ mod.min_access_level }}</td>
+            <td>{{ '✓' if mod.skip_on_fast_logon else '—' }}</td>
+            <td>
+                <form method="post" action="{{ url_for('login_modules_admin.toggle', mod_id=mod.id) }}" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm {{ 'btn-success' if mod.is_active else 'btn-outline-secondary' }}">
+                        {{ 'On' if mod.is_active else 'Off' }}
+                    </button>
+                </form>
+            </td>
+            <td>
+                <a href="{{ url_for('login_modules_admin.edit', mod_id=mod.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                <form method="post" action="{{ url_for('login_modules_admin.delete', mod_id=mod.id) }}" style="display:inline"
+                      onsubmit="return confirm('Delete module {{ mod.name }}?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger">Del</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="text-muted">No {{ event_label.lower() }} modules configured.</p>
+{% endif %}
+{% endfor %}
+
+<div class="mt-4 card p-3">
+    <h6>Module Types</h6>
+    <ul class="mb-0 small">
+        <li><code>wall</code> — Show the Graffiti Wall</li>
+        <li><code>ansi</code> — Display an ANSI screen slot (params: <code>{"slot":"welcome"}</code>)</li>
+        <li><code>shell</code> — Run a shell command (params: <code>{"command":"/path/script.sh"}</code>)</li>
+        <li><code>door_native</code> — Native Linux door binary (params: <code>{"path":"/path/door","args":"--node $NODE"}</code>)</li>
+        <li><code>door_python</code> — Python door module (params: <code>{"module":"anetbbs.doors.mything","func":"run"}</code>)</li>
+    </ul>
+</div>
+{% endblock %}

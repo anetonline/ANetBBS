@@ -174,6 +174,16 @@ async def _act_ansi(ui, args):
     return None
 
 
+async def _act_wall(ui, args):
+    """Launch the graffiti wall."""
+    try:
+        from .wall import show_wall
+        await show_wall(ui.session)
+    except Exception:
+        logger.exception('wall action failed')
+    return None
+
+
 async def _act_exec(ui, args):
     """Run an external program with the user's terminal attached.
 
@@ -365,6 +375,7 @@ _ACTIONS = {
     'page': _act_page,
     'dialout': _act_dialout,
     'ansi': _act_ansi,
+    'wall': _act_wall,
     'exec': _act_exec,
     'multinode': _act_multinode,
 }

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if mod else 'New' }} Logon Module - Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-lightning-charge-fill"></i> {{ 'Edit' if mod else 'New' }} Logon/Logoff Module</h1>
+</div>
+
+<div class="row justify-content-center">
+<div class="col-lg-7">
+<form method="post" class="card p-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+        <label class="form-label">Name <span class="text-danger">*</span></label>
+        <input type="text" name="name" class="form-control" required
+               value="{{ mod.name if mod else '' }}" placeholder="Graffiti Wall">
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Description</label>
+        <input type="text" name="description" class="form-control"
+               value="{{ mod.description if mod else '' }}" placeholder="Short note for sysop reference">
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Event Type <span class="text-danger">*</span></label>
+            <select name="event_type" class="form-select" required>
+                {% for val, label in event_types %}
+                <option value="{{ val }}" {{ 'selected' if mod and mod.event_type == val }}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Module Type <span class="text-danger">*</span></label>
+            <select name="module_type" class="form-select" id="module_type_sel" required>
+                {% for val, label in module_types %}
+                <option value="{{ val }}" {{ 'selected' if mod and mod.module_type == val }}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Parameters (JSON)</label>
+        <textarea name="params_json" class="form-control font-monospace" rows="3"
+                  placeholder='{}'>{{ mod.params_json if mod else '{}' }}</textarea>
+        <div id="params_help" class="form-text text-muted"></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <label class="form-label">Sort Order</label>
+            <input type="number" name="sort_order" class="form-control"
+                   value="{{ mod.sort_order if mod else 10 }}">
+            <small class="text-muted">Lower = runs first</small>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Min Access Level</label>
+            <input type="number" name="min_access_level" class="form-control" min="0" max="255"
+                   value="{{ mod.min_access_level if mod else 0 }}">
+            <small class="text-muted">0=all, 10=users, 100=sysop</small>
+        </div>
+    </div>
+
+    <div class="mb-3 d-flex gap-4">
+        <div class="form-check">
+            <input type="checkbox" name="is_active" class="form-check-input" id="is_active"
+                   {{ 'checked' if (not mod) or mod.is_active }}>
+            <label class="form-check-label" for="is_active">Active</label>
+        </div>
+        <div class="form-check">
+            <input type="checkbox" name="skip_on_fast_logon" class="form-check-input" id="skip_fast"
+                   {{ 'checked' if (not mod) or mod.skip_on_fast_logon }}>
+            <label class="form-check-label" for="skip_fast">Skip when user selects Fast Logon</label>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        <a href="{{ url_for('login_modules_admin.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+</div>
+</div>
+
+<script>
+const helps = {{ params_helps | tojson }};
+const sel = document.getElementById('module_type_sel');
+const helpEl = document.getElementById('params_help');
+function updateHelp() { helpEl.textContent = 'Example: ' + (helps[sel.value] || '{}'); }
+sel.addEventListener('change', updateHelp);
+updateHelp();
+</script>
+{% endblock %}

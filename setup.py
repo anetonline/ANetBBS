@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0a2.post117",
+    version="1.0a2.post119",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -21,8 +21,10 @@ setup(
         # Async / WebSockets
         'python-socketio>=5.9.0',
         # eventlet 0.35.2+ required for Python 3.12 (greenlet finalization crash).
+        # <0.38 because eventlet 0.38+ removed asyncio hub support and raises a
+        # hard error that breaks gunicorn's eventlet worker on startup.
         # greenlet 3.0.0+ required for Python 3.12 threading compatibility.
-        'eventlet>=0.35.2',
+        'eventlet>=0.35.2,<0.38',
         'greenlet>=3.0.0',
         # SSH server
         'asyncssh>=2.14.0',

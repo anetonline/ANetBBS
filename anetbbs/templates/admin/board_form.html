@@ -34,6 +34,12 @@
                         {{ form.order(class="form-control") }}
                     </div>
 
+                    <div class="mb-3">
+                        {{ form.min_access_level.label(class="form-label") }}
+                        {{ form.min_access_level(class="form-control", min=0, max=255) }}
+                        <small class="text-muted">0=everyone, 10=registered users (default), 50=VIP, 100=sysop</small>
+                    </div>
+
                     <div class="mb-3 form-check">
                         {{ form.is_active(class="form-check-input") }}
                         {{ form.is_active.label(class="form-check-label") }}

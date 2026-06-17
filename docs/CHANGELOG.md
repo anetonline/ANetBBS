@@ -1,7 +1,22 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.117`** (June 2026). Previous: `v1.0a2.116`.
+separately. Current release: **`v1.0a2.119`** (June 2026). Previous: `v1.0a2.118`.
+
+## v1.0a2.119 — Security levels, graffiti wall, logon/logoff modules, fast logon (June 2026)
+
+Security levels (0–255) on all content areas (boards, file areas, echomail, RSS).
+New graffiti wall feature with pipe colors, pagination, and admin panel.
+Logon/logoff module system — run wall/ANSI/shell/door at login or logout.
+Fast logon option lets users skip intro modules. Menu `action_type = wall` added.
+
+## v1.0a2.118 — Add: @BPS:NNNN@ throttled ANSI output; add @CLS@ clear-screen (June 2026)
+
+`@BPS:NNNN@` in any ANSI screen file now throttles output to simulate the
+specified modem baud rate (300–56000). 9600 bps = 960 bytes/sec; output is
+sent in 48-byte chunks every 50 ms for smooth rendering. The goodbye, welcome,
+newuser, and custom ANSI slots all support it. Also added `@CLS@` which
+outputs `ESC[2J ESC[H` (clear screen + cursor home).
 
 ## v1.0a2.117 — Fix: @-code / display code substitution in ANSI screens (June 2026)
 

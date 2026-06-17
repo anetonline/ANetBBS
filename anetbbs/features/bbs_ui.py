@@ -176,7 +176,12 @@ class BBSMenuUI:
         from anetbbs.models import Board
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
         with _app().app_context():
-            boards = Board.query.filter_by(is_active=True).order_by(Board.order, Board.name).all()
+            _user_level = int((self.session.user or {}).get('access_level', 10))
+            _is_admin = bool((self.session.user or {}).get('is_admin'))
+            _bq = Board.query.filter_by(is_active=True)
+            if not _is_admin:
+                _bq = _bq.filter(Board.min_access_level <= _user_level)
+            boards = _bq.order_by(Board.order, Board.name).all()
             board_list = [(b.id, b.name, b.description or '', b.posts.count()) for b in boards]
 
         if not board_list:
@@ -580,10 +585,15 @@ class BBSMenuUI:
     async def list_echo_areas(self):
         from anetbbs.models import EchoArea, EchomailNetwork, EchomailMessage
         with _app().app_context():
-            areas = (EchoArea.query
-                     .join(EchomailNetwork)
-                     .order_by(EchomailNetwork.name, EchoArea.name)
-                     .all())
+            _user_level = int((self.session.user or {}).get('access_level', 10))
+            _is_admin = bool((self.session.user or {}).get('is_admin'))
+            _eq = EchoArea.query.join(EchomailNetwork)
+            if not _is_admin:
+                _eq = _eq.filter(
+                    EchoArea.is_sysop_only == False,
+                    EchoArea.min_access_level <= _user_level,
+                )
+            areas = _eq.order_by(EchomailNetwork.name, EchoArea.name).all()
             a_list = [(a.id, a.tag, a.name, a.network.name,
                        EchomailMessage.query.filter_by(area_id=a.id).count()) for a in areas]
 
@@ -742,12 +752,14 @@ class BBSMenuUI:
                 is_sysop = bool(self.session.user.get('is_admin'))
                 # Sysop sees ALL areas (active + inactive, public + sysop-only).
                 # Regular users only see active non-sysop areas.
+                user_level = int((self.session.user or {}).get('access_level', 10))
                 if is_sysop:
                     areas = (FileArea.query
                              .order_by(FileArea.name).all())
                 else:
                     areas = (FileArea.query
                              .filter_by(is_active=True, is_sysop_only=False)
+                             .filter(FileArea.min_access_level <= user_level)
                              .order_by(FileArea.name).all())
 
                 from anetbbs.web.file_areas import _scan_area as _disk_scan
@@ -1396,8 +1408,12 @@ class BBSMenuUI:
 
         while True:
             with _app().app_context():
-                feeds = (RssFeed.query.filter_by(is_active=True)
-                         .order_by(RssFeed.sort_order, RssFeed.name).all())
+                _user_level_rss = int((self.session.user or {}).get('access_level', 10))
+                _is_admin_rss = bool((self.session.user or {}).get('is_admin'))
+                _rq = RssFeed.query.filter_by(is_active=True)
+                if not _is_admin_rss:
+                    _rq = _rq.filter(RssFeed.min_access_level <= _user_level_rss)
+                feeds = _rq.order_by(RssFeed.sort_order, RssFeed.name).all()
                 # Snapshot the data we need so the rest of the loop can
                 # touch session.write/read_line without a stale session.
                 feed_rows = []

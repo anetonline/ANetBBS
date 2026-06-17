@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from functools import wraps
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, current_app
 from flask_login import login_required, current_user
-from wtforms import StringField, TextAreaField, SubmitField, BooleanField, PasswordField
-from wtforms.validators import DataRequired, Length, Optional, ValidationError
+from wtforms import StringField, TextAreaField, SubmitField, BooleanField, PasswordField, IntegerField
+from wtforms.validators import DataRequired, Length, Optional, ValidationError, NumberRange
 from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
@@ -63,6 +63,9 @@ class BoardForm(FlaskForm):
     category = StringField('Category / sub-conference (e.g. General, Tech)',
                            validators=[Length(max=80)])
     order = StringField('Order', validators=[DataRequired()])
+    min_access_level = IntegerField(
+        'Min Access Level (0=all, 10=registered, 50=VIP, 100=sysop)',
+        validators=[Optional(), NumberRange(min=0, max=255)], default=10)
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Board')
 
@@ -453,6 +456,7 @@ def add_board():
             description=form.description.data,
             category=(form.category.data or '').strip(),
             order=int(form.order.data),
+            min_access_level=form.min_access_level.data or 10,
             is_active=form.is_active.data
         )
         db.session.add(board)
@@ -475,6 +479,7 @@ def edit_board(board_id):
         board.description = form.description.data
         board.category = (form.category.data or '').strip()
         board.order = int(form.order.data)
+        board.min_access_level = form.min_access_level.data or 10
         board.is_active = form.is_active.data
         db.session.commit()
         flash(f'Board "{board.name}" updated!', 'success')
@@ -484,6 +489,7 @@ def edit_board(board_id):
         form.description.data = board.description
         form.category.data = board.category or ''
         form.order.data = str(board.order)
+        form.min_access_level.data = board.min_access_level if board.min_access_level is not None else 10
         form.is_active.data = board.is_active
 
     return render_template('admin/board_form.html', form=form, title='Edit Board', board=board)
@@ -1275,6 +1281,7 @@ def file_areas_admin():
             fa.is_nodelist_source = bool(request.form.get('is_nodelist_source'))
             fa.nodelist_domain = (request.form.get('nodelist_domain')
                                   or '').strip().lower() or None
+            fa.min_access_level = int(request.form.get('min_access_level') or 10)
             db.session.commit()
             flash(f'Updated {fa.tag}.', 'success')
         elif action == 'delete':

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Graffiti Wall Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-pen-fill"></i> Graffiti Wall</h1>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-8">
+        <div class="card p-3">
+            <h6 class="mb-2">Color Scheme</h6>
+            <form method="post" action="{{ url_for('wall_admin.settings') }}" class="d-flex gap-2 align-items-center flex-wrap">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% for key, label in schemes.items() %}
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="color_scheme"
+                           id="cs_{{ key }}" value="{{ key }}"
+                           {{ 'checked' if current_scheme == key }}>
+                    <label class="form-check-label" for="cs_{{ key }}">{{ label }}</label>
+                </div>
+                {% endfor %}
+                <button type="submit" class="btn btn-sm btn-primary ms-2">Apply</button>
+            </form>
+        </div>
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('wall_admin.index') }}" class="btn btn-sm {{ 'btn-primary' if not show_deleted else 'btn-outline-secondary' }}">Active</a>
+            <a href="{{ url_for('wall_admin.index', deleted=1) }}" class="btn btn-sm {{ 'btn-primary' if show_deleted else 'btn-outline-secondary' }}">Show Deleted</a>
+            {% if not show_deleted %}
+            <form method="post" action="{{ url_for('wall_admin.clear_all') }}"
+                  onsubmit="return confirm('Soft-delete ALL active wall posts?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-danger">Clear All</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if pagination.items %}
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>User</th>
+            <th>Node</th>
+            <th>Line 1</th>
+            <th>Line 2</th>
+            <th>Posted</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for post in pagination.items %}
+        <tr class="{{ 'table-secondary text-muted' if post.is_deleted }}">
+            <td>{{ post.id }}</td>
+            <td>{{ post.display_name or post.username }}</td>
+            <td>{{ post.node }}</td>
+            <td><code>{{ post.line1 }}</code></td>
+            <td><code>{{ post.line2 or '' }}</code></td>
+            <td><small>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td>
+                {% if post.is_deleted %}
+                <form method="post" action="{{ url_for('wall_admin.restore', post_id=post.id) }}" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-success">Restore</button>
+                </form>
+                {% else %}
+                <form method="post" action="{{ url_for('wall_admin.delete', post_id=post.id) }}" style="display:inline"
+                      onsubmit="return confirm('Delete post #{{ post.id }}?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav>
+    <ul class="pagination pagination-sm">
+        {% for p in pagination.iter_pages() %}
+            {% if p %}
+            <li class="page-item {{ 'active' if p == pagination.page }}">
+                <a class="page-link" href="{{ url_for('wall_admin.index', page=p, deleted=1 if show_deleted else 0) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<p class="text-muted">No wall posts found.</p>
+{% endif %}
+{% endblock %}

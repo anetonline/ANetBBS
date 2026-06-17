@@ -568,11 +568,14 @@ class BBSSession:
                 return
             # Substitute Synchronet @-codes / Mystic |XX placeholders so
             # the sysop can drop @USER@ / |UN / etc into welcome screens.
+            # extract_bps MUST run before apply() since apply() strips @BPS:NNNN@.
+            bps = None
             try:
-                from ..features.display_codes import apply as _apply_codes
+                from ..features.display_codes import apply as _apply_codes, extract_bps as _extract_bps
                 from ..features.bbs_ui import _app as _bbs_app
                 import anetbbs as _anetbbs_pkg
                 _cfg = _bbs_app().config
+                bps = _extract_bps(body)
                 body = _apply_codes(
                     body,
                     user=self.user,
@@ -592,8 +595,22 @@ class BBSSession:
             # codepoints above 0xFF (proper UTF-8 source content).
             try:
                 raw = body.encode('latin-1')
-                self.writer.write(b'\r\n' + raw + b'\r\n')
-                await self.writer.drain()
+                data = b'\r\n' + raw + b'\r\n'
+                if bps:
+                    # Throttle output to simulate the requested baud rate.
+                    # 8N1 serial = 10 bits/byte → bytes_per_sec = bps / 10.
+                    # 20 chunks/sec gives smooth rendering at all speeds.
+                    _bps_sec = bps / 10
+                    _chunk = max(1, int(_bps_sec / 20))
+                    _delay = _chunk / _bps_sec
+                    for _i in range(0, len(data), _chunk):
+                        self.writer.write(data[_i:_i + _chunk])
+                        await self.writer.drain()
+                        if _i + _chunk < len(data):
+                            await asyncio.sleep(_delay)
+                else:
+                    self.writer.write(data)
+                    await self.writer.drain()
             except UnicodeEncodeError:
                 await self.write('\r\n' + body + '\r\n')
             if pause:
@@ -1107,6 +1124,26 @@ class BBSSession:
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
 
+            # Fast logon check — if the sysop has enabled it, offer the user
+            # a chance to skip logon modules and jump straight to the menu.
+            fast_logon = False
+            try:
+                from ..features.bbs_ui import _app as _fl_app
+                _fl_cfg = _fl_app().config
+                if _fl_cfg.get('FAST_LOGON_ENABLED', False):
+                    _fl_resp = (await self.read_line(
+                        '\r\n\x1b[93m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
+                    fast_logon = _fl_resp.strip().lower() == 'y'
+            except Exception:
+                pass
+
+            # Run logon modules (wall, ansi screens, shell hooks, etc.)
+            try:
+                from ..features.login_modules import run_modules as _run_logon
+                await _run_logon(self, 'logon', fast_logon=fast_logon)
+            except Exception:
+                pass
+
             # Prefer the data-driven menu engine if any BbsMenu rows exist;
             # otherwise fall back to the hard-coded BBSMenuUI.show_main().
             from ..features.menu_engine import run_menu
@@ -1150,6 +1187,13 @@ class BBSSession:
             except Exception:
                 pass
         finally:
+            # Run logoff modules before tearing down the session.
+            if self.user:
+                try:
+                    from ..features.login_modules import run_modules as _run_logoff
+                    await _run_logoff(self, 'logoff', fast_logon=False)
+                except Exception:
+                    pass
             if presence is not None:
                 presence.disconnect()
             # Release the multinode slot + announce departure.

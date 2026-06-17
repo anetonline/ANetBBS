@@ -50,6 +50,12 @@
                    value="{{ feed.sort_order if feed else 10 }}">
             <small class="text-muted">Lower = appears first.</small>
         </div>
+        <div class="col-md-3">
+            <label class="form-label">Min Access Level</label>
+            <input type="number" name="min_access_level" class="form-control" min="0" max="255"
+                   value="{{ feed.min_access_level if feed else 0 }}">
+            <small class="text-muted">0=all users, 10=registered, 50=VIP, 100=sysop</small>
+        </div>
         <div class="col-md-3 d-flex align-items-end pb-1">
             <div class="form-check">
                 <input type="checkbox" id="is_active" name="is_active" class="form-check-input"

@@ -1,43 +1,72 @@
-# ANetBBS v1.0a2.117 — Fix: @-code / display code substitution in ANSI screens
+# ANetBBS v1.0a2.119 — Security levels, graffiti wall, logon/logoff modules, fast logon
 
 ## Changes
 
-### Fix: Synchronet @-codes now resolve correctly in ANSI screens
+### Add: Security levels on all areas
 
-`@ALIAS@`, `@USER@`, `@NAME@`, `@HANDLE@`, `@REAL@`, `@FIRST@`, `@EMAIL@`,
-`@LOCATION@`, `@CALLS@`, and `@SECURITY@` were all resolving to blank (empty
-string) in ANSI files stored under `text/menus/` or set via Admin → Screens.
+All content areas now have a `min_access_level` field (0–255, default 10).
+The sysop can restrict any area to VIP users (50) or sysop-only (100) via the
+admin panel. File areas, message boards, echomail, and RSS feeds all support
+this. Default new-user access level is 10 — they can access everything not
+explicitly restricted.
 
-Root cause: `session.user` is a dict (not a SQLAlchemy ORM object), but the
-`_u()` helper in `display_codes.py` used `getattr(user, attr, '')` — which
-does not read dict keys. Only codes that read directly from the context dict
-(e.g. `@BBS@`, `@TIME@`, `@DATE@`) were working.
+### Add: Graffiti Wall
 
-Fixed `_u()` to detect dict vs. ORM object and use `.get()` accordingly.
+A retro-style graffiti wall, available as a logon/logoff module or menu action
+(`action_type = wall`). Features:
 
-Also added `display_name` and `location` to the user dict returned by
-`user_manager._user_to_dict()` so `@NAME@`/`@REAL@`/`@FIRST@` and
-`@LOCATION@` resolve to the correct values.
+- Pipe color codes (`|15HELLO` = bright white HELLO)
+- 2-line posts per user, 200 chars per line
+- Paginated display (6 posts/page, `[N]ewer [O]lder` navigation)
+- `[W]rite` to post, `[D]el` for sysop delete by post ID
+- ANSI box-drawing header/footer
+- Sysop admin panel at `/admin/wall/` with soft-delete + restore + clear-all
 
-Fixed `@SECURITY@` — `is_admin` in the dict is a Python `bool`, not the
-string `'True'`; the old string comparison always returned `50`.
+### Add: Logon/Logoff Module system
 
-Fixed `@VER@` / `@VERSION@` — the version string was hardcoded `'v1.0a'`
-at the two call sites in `session.py` and `menu_engine.py`; now reads
-`anetbbs.__version__` at runtime.
+Sysops can configure modules that run automatically at logon or logoff.
+Admin panel at `/admin/login-modules/`. Each module has:
 
-### Fix: Parametric @CODE:value@ codes no longer print as literal text
+- Event type: `logon` or `logoff`
+- Module type: `wall`, `ansi`, `shell`, `door_native`, `door_python`
+- Min access level (skip for low-level users)
+- Sort order (lower = runs first)
+- Skip on fast logon option
 
-`@BPS:19200@` and similar Synchronet parametric codes contain a colon which
-the existing `@CODE@` regex doesn't match, so they printed as-is in the
-rendered ANSI. These codes are now stripped before substitution.
-`@BPS:NNNN@` (baud-rate slow-draw) is not modelled — stripping it is the
-correct behavior.
+### Add: Fast Logon option
+
+When enabled via `FAST_LOGON_ENABLED` config key, users are prompted at login:
+
+```
+[F]ast logon — skip intro modules? [y/N]:
+```
+
+Modules flagged "skip on fast logon" are bypassed for users who say yes.
+
+### Add: `wall` menu action type
+
+Menus can now include `action_type = wall` items that open the Graffiti Wall
+directly from any BBS menu.
 
 ## Files changed
 
-- `anetbbs/features/display_codes.py` — fix `_u()` dict access; fix `@SECURITY@` bool check; add `_AT_PARAM_RE` to strip parametric codes
-- `anetbbs/core/user_manager.py` — add `display_name` and `location` to `_user_to_dict`
-- `anetbbs/core/session.py` — pass real `anetbbs.__version__` to `_apply_codes`
-- `anetbbs/features/menu_engine.py` — pass real `anetbbs.__version__` to `_apply_codes`
+- `anetbbs/models.py` — add `min_access_level` to `Board`, `FileArea`, `EchoArea`, `RssFeed`; add `WallPost` and `LoginModule` models
+- `anetbbs/features/wall.py` — NEW: graffiti wall terminal feature
+- `anetbbs/features/login_modules.py` — NEW: logon/logoff module runner
+- `anetbbs/features/menu_engine.py` — add `_act_wall` and register `wall` action type
+- `anetbbs/features/bbs_ui.py` — filter areas by `min_access_level`
+- `anetbbs/core/session.py` — fast logon prompt; logon/logoff module hooks
+- `anetbbs/web/login_modules_admin.py` — NEW: admin CRUD for login modules
+- `anetbbs/web/wall_admin.py` — NEW: admin for wall posts
+- `anetbbs/web/rss_admin.py` — save `min_access_level` for feeds
+- `anetbbs/web/echomail_admin.py` — add `min_access_level` to EchoAreaForm
+- `anetbbs/web/admin.py` — add `min_access_level` to BoardForm + FileArea update
+- `anetbbs/web_app.py` — register login_modules_admin_bp and wall_admin_bp
+- `anetbbs/templates/admin/login_modules.html` — NEW
+- `anetbbs/templates/admin/login_module_form.html` — NEW
+- `anetbbs/templates/admin/wall.html` — NEW
+- `anetbbs/templates/admin/board_form.html` — add min_access_level field
+- `anetbbs/templates/admin/file_areas.html` — add min_access_level field
+- `anetbbs/templates/rss_admin/edit.html` — add min_access_level field
+- `anetbbs/templates/base.html` — add Logon Modules + Graffiti Wall to admin nav
 - `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md` — version bump

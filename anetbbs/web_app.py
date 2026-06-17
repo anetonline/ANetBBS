@@ -330,6 +330,8 @@ def create_app(config_name=None):
     from .web.security_admin import security_bp
     from .web.door_errors import door_errors_bp
     from .web.backups_admin import backups_bp
+    from .web.login_modules_admin import login_modules_admin_bp
+    from .web.wall_admin import wall_admin_bp
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
@@ -420,6 +422,9 @@ def create_app(config_name=None):
     app.register_blueprint(pages_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(wiki_bp)
+    # Logon/logoff modules and graffiti wall admin.
+    app.register_blueprint(login_modules_admin_bp)
+    app.register_blueprint(wall_admin_bp)
 
     # Public downloads — auto-listing of the sysop's release directory.
     # No DB rows; scans DOWNLOADS_DIR on each (cached) request.

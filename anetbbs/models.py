@@ -103,6 +103,8 @@ class Board(db.Model):
     # Sub-conference / category — group related boards. e.g. "General",
     # "Tech", "FidoNet". Boards in the same category are listed together.
     category = db.Column(db.String(80), default='', index=True)
+    # Minimum user access_level required to read this board (0=public, 10=registered).
+    min_access_level = db.Column(db.Integer, default=10)
 
     # Relationships
     posts = db.relationship('Post', backref='board', lazy='dynamic', cascade='all, delete-orphan')
@@ -408,6 +410,7 @@ class EchoArea(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_subscribed = db.Column(db.Boolean, default=True)
     is_sysop_only = db.Column(db.Boolean, default=False, index=True)
+    min_access_level = db.Column(db.Integer, default=10)
     order = db.Column(db.Integer, default=0)
     total_messages = db.Column(db.Integer, default=0)
     last_message_at = db.Column(db.DateTime)
@@ -1090,6 +1093,7 @@ class FileArea(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_subscribed = db.Column(db.Boolean, default=True)   # receive from upstream
     is_sysop_only = db.Column(db.Boolean, default=False)
+    min_access_level = db.Column(db.Integer, default=10)
     upload_permission = db.Column(db.String(20), default='users')
     # upload_permission values: 'users' / 'sysop' / 'none'
     password = db.Column(db.String(80))           # optional area password
@@ -2146,6 +2150,7 @@ class RssFeed(db.Model):
     category = db.Column(db.String(60), default='general')
     sort_order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
+    min_access_level = db.Column(db.Integer, default=0)  # 0 = all registered users
     last_fetched_at = db.Column(db.DateTime)
     last_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -2328,3 +2333,63 @@ class ScheduledEvent(db.Model):
 
     def __repr__(self):
         return f'<ScheduledEvent {self.id} {self.handler_key} enabled={self.is_enabled}>'
+
+
+# ---------------------------------------------------------------------------
+# Graffiti Wall
+# ---------------------------------------------------------------------------
+
+class WallPost(db.Model):
+    """One graffiti-wall post — up to two pipe-color-encoded lines."""
+    __tablename__ = 'wall_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    display_name = db.Column(db.String(100))
+    # Raw text with Synchronet/Mystic pipe color codes (|12Hello |07world).
+    # Each line max ~160 bytes stored; 79 printable chars displayed.
+    line1 = db.Column(db.String(200), nullable=False, default='')
+    line2 = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False)
+    node = db.Column(db.Integer, default=1)
+
+    def __repr__(self):
+        return f'<WallPost {self.id} by {self.username}>'
+
+
+# ---------------------------------------------------------------------------
+# Logon / Logoff Modules
+# ---------------------------------------------------------------------------
+
+class LoginModule(db.Model):
+    """An action that runs automatically at logon or logoff for the user.
+
+    module_type values:
+      wall        — show/prompt on the graffiti wall (params: none)
+      ansi        — display an ANSI screen slot (params: {"slot": "welcome"})
+      shell       — run a shell command (params: {"command": "/path/to/script"})
+      door_native — run a native Linux door (params: {"path": "...", "args": "..."})
+      door_python — run a Python door module (params: {"module": "...", ...})
+
+    event_type:  'logon' | 'logoff'
+    """
+    __tablename__ = 'login_modules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    event_type = db.Column(db.String(10), nullable=False, index=True)   # logon | logoff
+    module_type = db.Column(db.String(20), nullable=False)              # wall | ansi | shell | …
+    params_json = db.Column(db.Text, default='{}', nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    # Minimum user access_level to see this module (0 = everyone after login).
+    min_access_level = db.Column(db.Integer, default=0, nullable=False)
+    # Sort order — lower numbers run first.
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    # If True, skip this module when the user chooses fast logon.
+    skip_on_fast_logon = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<LoginModule {self.id} {self.event_type}:{self.module_type} {self.name!r}>'

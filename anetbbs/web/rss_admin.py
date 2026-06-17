@@ -55,6 +55,7 @@ def _save(feed):
     category = (request.form.get('category') or 'general').strip()
     sort_order = int(request.form.get('sort_order') or 0)
     is_active = request.form.get('is_active') == 'on'
+    min_access_level = int(request.form.get('min_access_level') or 0)
 
     if not name or not url:
         flash('Name and URL are required.', 'danger')
@@ -75,6 +76,7 @@ def _save(feed):
     feed.category = category or 'general'
     feed.sort_order = sort_order
     feed.is_active = is_active
+    feed.min_access_level = min_access_level
     db.session.commit()
     flash(f'Feed "{name}" saved.', 'success')
 

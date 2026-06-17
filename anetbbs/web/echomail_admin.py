@@ -96,6 +96,9 @@ class EchoAreaForm(FlaskForm):
     order = IntegerField('Sort Order', validators=[Optional()], default=0)
     is_active = BooleanField('Active', default=True)
     is_subscribed = BooleanField('Subscribed', default=True)
+    min_access_level = IntegerField(
+        'Min Access Level (0=all users, 50=VIP, 100=sysop)',
+        validators=[Optional(), NumberRange(min=0, max=255)], default=10)
     submit = SubmitField('Save Area')
 
 

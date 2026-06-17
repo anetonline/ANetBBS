@@ -38,10 +38,9 @@ def _list_docs():
                 title = first_line[2:].strip()
         except Exception:
             pass
-        # Filename prefixes like "01-foo.md" sort first.
+        # Filename prefixes like "01-foo.md" control sort order.
         if '-' in slug and slug.split('-', 1)[0].isdigit():
             order = int(slug.split('-', 1)[0])
-            title = title.split(' ', 1)[1] if ' ' in title else title
         out.append({'slug': slug, 'title': title, 'order': order, 'path': p})
     out.sort(key=lambda d: (d['order'], d['title'].lower()))
     return out
