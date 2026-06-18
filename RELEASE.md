@@ -1,72 +1,69 @@
-# ANetBBS v1.0a2.119 — Security levels, graffiti wall, logon/logoff modules, fast logon
+# ANetBBS v1.0a2.123 — MRC scrollback stability; arrow-key scroll
 
 ## Changes
 
-### Add: Security levels on all areas
+### Fix: `/scroll` view drifting as new messages arrived
 
-All content areas now have a `min_access_level` field (0–255, default 10).
-The sysop can restrict any area to VIP users (50) or sysop-only (100) via the
-admin panel. File areas, message boards, echomail, and RSS feeds all support
-this. Default new-user access level is 10 — they can access everything not
-explicitly restricted.
+When the user scrolled up (`/scroll` or Up arrow), new messages kept arriving and
+`_redraw_chat_area` recalculated the visible window as `all_lines[end-rows:end]`
+where `end = total - offset`. As `total` grew with each new message, `end` grew
+too — the view silently drifted forward even though the offset was fixed.
 
-### Add: Graffiti Wall
+**Fix**: `_emit` now increments `_scroll_offset` by the number of display lines
+the new message produces (accounting for word-wrap). The view is locked to a
+fixed historical position. New messages accumulate in the background; the
+`PAUSED+N` indicator in the status bar shows how many lines behind the live view
+the user is.
 
-A retro-style graffiti wall, available as a logon/logoff module or menu action
-(`action_type = wall`). Features:
+### New: Up/Down arrow keys scroll the chat
 
-- Pipe color codes (`|15HELLO` = bright white HELLO)
-- 2-line posts per user, 200 chars per line
-- Paginated display (6 posts/page, `[N]ewer [O]lder` navigation)
-- `[W]rite` to post, `[D]el` for sysop delete by post ID
-- ANSI box-drawing header/footer
-- Sysop admin panel at `/admin/wall/` with soft-delete + restore + clear-all
+Up arrow (`ESC[A` / `ESCOA`) scrolls the chat up by 1 line.
+Down arrow (`ESC[B` / `ESCOB`) scrolls it down by 1 line.
+Left/Right arrows still cycle the outgoing text color as before.
 
-### Add: Logon/Logoff Module system
+### Fix: `/scroll up N` argument parsing
 
-Sysops can configure modules that run automatically at logon or logoff.
-Admin panel at `/admin/login-modules/`. Each module has:
+`n_str.isdigit()` returned False for `' 10'` (a leading space from `'up 10'.replace('up', '')`).
+Fixed by calling `.strip().isdigit()` so `/scroll up 10` correctly scrolls 10 lines.
 
-- Event type: `logon` or `logoff`
-- Module type: `wall`, `ansi`, `shell`, `door_native`, `door_python`
-- Min access level (skip for low-level users)
-- Sort order (lower = runs first)
-- Skip on fast logon option
+### Fix: Multi-byte escape sequences polluting input buffer
 
-### Add: Fast Logon option
+PgUp/PgDn keys send `ESC [ 5 ~` / `ESC [ 6 ~` (4 bytes after ESC). The old
+`_read_escape_seq` only consumed `[ 5` and left the trailing `~` in the reader
+buffer. On the next `reader.read(1)` call, `~` would be appended to the input
+buffer and echoed as a literal character. Fixed: if the third byte is a digit,
+`_read_escape_seq` drains bytes until it hits a non-digit/non-semicolon (the
+terminating letter or `~`), discarding them.
 
-When enabled via `FAST_LOGON_ENABLED` config key, users are prompted at login:
+### Quality of life: scroll auto-snaps to live view on send
 
-```
-[F]ast logon — skip intro modules? [y/N]:
-```
+When the user is scrolled up and sends a message (not a slash command), the
+scroll is automatically reset to 0 (live / bottom) so they can see their
+own message echo back from the server.
 
-Modules flagged "skip on fast logon" are bypassed for users who say yes.
+### New: `/scroll live` alias
 
-### Add: `wall` menu action type
-
-Menus can now include `action_type = wall` items that open the Graffiti Wall
-directly from any BBS menu.
+`/scroll 0`, `/scroll bottom`, `/scroll end`, `/scroll latest`, and
+`/scroll live` all return to the live (bottom) view.
 
 ## Files changed
 
-- `anetbbs/models.py` — add `min_access_level` to `Board`, `FileArea`, `EchoArea`, `RssFeed`; add `WallPost` and `LoginModule` models
-- `anetbbs/features/wall.py` — NEW: graffiti wall terminal feature
-- `anetbbs/features/login_modules.py` — NEW: logon/logoff module runner
-- `anetbbs/features/menu_engine.py` — add `_act_wall` and register `wall` action type
-- `anetbbs/features/bbs_ui.py` — filter areas by `min_access_level`
-- `anetbbs/core/session.py` — fast logon prompt; logon/logoff module hooks
-- `anetbbs/web/login_modules_admin.py` — NEW: admin CRUD for login modules
-- `anetbbs/web/wall_admin.py` — NEW: admin for wall posts
-- `anetbbs/web/rss_admin.py` — save `min_access_level` for feeds
-- `anetbbs/web/echomail_admin.py` — add `min_access_level` to EchoAreaForm
-- `anetbbs/web/admin.py` — add `min_access_level` to BoardForm + FileArea update
-- `anetbbs/web_app.py` — register login_modules_admin_bp and wall_admin_bp
-- `anetbbs/templates/admin/login_modules.html` — NEW
-- `anetbbs/templates/admin/login_module_form.html` — NEW
-- `anetbbs/templates/admin/wall.html` — NEW
-- `anetbbs/templates/admin/board_form.html` — add min_access_level field
-- `anetbbs/templates/admin/file_areas.html` — add min_access_level field
-- `anetbbs/templates/rss_admin/edit.html` — add min_access_level field
-- `anetbbs/templates/base.html` — add Logon Modules + Graffiti Wall to admin nav
+- `anetbbs/features/mrc_chat.py` — scrollback stability; arrow scroll; escape seq drain; auto-snap on send
 - `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md` — version bump
+
+## ANSI menu slot names (for sysop-created ANSI overrides)
+
+Place `.ans` files in `data/text/menus/` to override any stock terminal menu.
+See `docs/04-ansi-screens.md` for full details.
+
+| Slot name      | Menu                                          |
+| -------------- | --------------------------------------------- |
+| `chat`         | Chat Systems top menu (IRC / MRC / Local)     |
+| `irc_chat`     | IRC Chat — server connection options          |
+| `sysop_menu`   | Sysop Tools top-level menu                   |
+| `sysop_users`  | Sysop → Manage Users list header             |
+| `sysop_boards` | Sysop → Manage Boards list header            |
+| `sysop_status` | Sysop → Server Status header                 |
+| `game_center`  | Game Center                                   |
+| `door_games`   | Door Games list                               |
+| `dialout`      | Dial-Out Directory                            |

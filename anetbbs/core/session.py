@@ -1123,14 +1123,28 @@ class BBSSession:
             wname = type(self.writer).__name__.lower()
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
+            _hb_task = None
 
             # Fast logon check — if the sysop has enabled it, offer the user
             # a chance to skip logon modules and jump straight to the menu.
+            # Read directly from .env so changes take effect without restart.
             fast_logon = False
             try:
-                from ..features.bbs_ui import _app as _fl_app
-                _fl_cfg = _fl_app().config
-                if _fl_cfg.get('FAST_LOGON_ENABLED', False):
+                import os as _os
+                _fl_enabled = False
+                _fl_env = _os.path.abspath(_os.path.join(
+                    _os.path.dirname(_os.path.abspath(__file__)),
+                    '..', '..', '.env'))
+                try:
+                    with open(_fl_env) as _fe:
+                        for _fl_line in _fe:
+                            if _fl_line.startswith('FAST_LOGON_ENABLED='):
+                                _fl_val = _fl_line.split('=', 1)[1].strip().lower()
+                                _fl_enabled = _fl_val in ('true', '1', 'yes')
+                                break
+                except Exception:
+                    pass
+                if _fl_enabled:
                     _fl_resp = (await self.read_line(
                         '\r\n\x1b[93m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
                     fast_logon = _fl_resp.strip().lower() == 'y'
@@ -1148,6 +1162,15 @@ class BBSSession:
             # otherwise fall back to the hard-coded BBSMenuUI.show_main().
             from ..features.menu_engine import run_menu
             presence.set_page('main')
+
+            # Periodic heartbeat so idle users stay in the "who's online"
+            # 5-minute window even when they're not actively navigating menus.
+            async def _presence_heartbeat():
+                while True:
+                    await asyncio.sleep(120)
+                    presence.heartbeat()
+            _hb_task = asyncio.ensure_future(_presence_heartbeat())
+
             # Surface any unread sysop broadcasts on entry — telnet/SSH/rlogin
             # users see them on the way into the menu loop, mirroring the
             # toast that pops in the web UI.
@@ -1187,6 +1210,9 @@ class BBSSession:
             except Exception:
                 pass
         finally:
+            # Cancel the periodic presence heartbeat task.
+            if _hb_task is not None:
+                _hb_task.cancel()
             # Run logoff modules before tearing down the session.
             if self.user:
                 try:

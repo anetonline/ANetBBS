@@ -2007,20 +2007,23 @@ async def _sysop_menu(self):
         await self.session.write("\r\nSysop access required.\r\n")
         await self.session.read_line("Press Enter...")
         return
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    from .ansi_ui import (load_menu_ansi, banner, menu_item, footer,
+                          prompt as _prompt, FG, RESET)
     while True:
-        await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Sysop Tools'))
-        for hk, lbl in (('U', 'Manage users'),
-                        ('B', 'Manage boards'),
-                        ('S', 'Server status'),
-                        ('Q', 'Return')):
-            await self.session.write(
-                f"  {FG['yel']}{BOLD}[{hk}]{RESET} "
-                f"{FG['grn']}{lbl}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
-        choice = await self.session.read_key(_prompt('Choice: '))
-        choice = (choice or '').upper()
+        ansi = load_menu_ansi('sysop_menu')
+        if ansi:
+            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+            await self.session.writer.drain()
+        else:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Sysop Tools'))
+            for hk, lbl in (('U', 'Manage users'),
+                            ('B', 'Manage boards'),
+                            ('S', 'Server status'),
+                            ('Q', 'Return')):
+                await self.session.write(menu_item(hk, lbl) + '\r\n')
+            await self.session.write('\r\n' + footer() + '\r\n')
+        choice = (await self.session.read_line(_prompt('Choice: ')) or '').upper()
         if choice == 'Q' or not choice:
             return
         elif choice == 'U':
@@ -2034,18 +2037,35 @@ BBSMenuUI.sysop_menu = _sysop_menu
 
 async def _sysop_users(self):
     from anetbbs.models import User
+    from .ansi_ui import load_menu_ansi, banner, footer, FG, RESET, BOLD, prompt as _p
     while True:
         with _app().app_context():
             users = User.query.order_by(User.id).all()
             u_list = [(u.id, u.username, u.email or '-', u.is_active, u.is_admin,
                        u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never',
                        u.login_count or 0) for u in users]
-        await self.session.write("\r\n=== Users ===\r\n\r\n")
-        await self.session.write(f"  {'ID':<4}{'Username':<18}{'Active':<8}{'Admin':<8}{'Last login':<14}Logins\r\n")
+        ansi = load_menu_ansi('sysop_users')
+        if ansi:
+            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+            await self.session.writer.drain()
+        else:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Manage Users'))
+        await self.session.write(
+            f"  {FG['cyan']}{BOLD}{'ID':<4}{'Username':<18}{'Active':<8}"
+            f"{'Admin':<8}{'Last login':<14}Logins{RESET}\r\n"
+            f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
         for uid, name, _, active, admin, lastl, n in u_list:
-            await self.session.write(f"  {uid:<4}{name[:18]:<18}{'yes' if active else 'no':<8}"
-                                     f"{'yes' if admin else 'no':<8}{lastl:<14}{n}\r\n")
-        choice = (await self.session.read_line("\r\nUser ID to edit (or Q): ") or '').strip()
+            active_s = f"{FG['grn']}yes{RESET}" if active else f"{FG['red']} no{RESET}"
+            admin_s  = f"{FG['yel']}yes{RESET}" if admin  else f"{FG['dim']} no{RESET}"
+            await self.session.write(
+                f"  {FG['wht']}{uid:<4}{RESET}"
+                f"{FG['grn']}{name[:18]:<18}{RESET}"
+                f"{active_s:<20}{admin_s:<20}"
+                f"{FG['dim']}{lastl:<14}{RESET}"
+                f"{FG['cyan']}{n}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        choice = (await self.session.read_line(_p('User ID to edit (or Q): ')) or '').strip()
         if choice.upper() == 'Q' or not choice:
             return
         try:
@@ -2059,22 +2079,32 @@ BBSMenuUI.sysop_users = _sysop_users
 async def _sysop_edit_user(self, uid):
     from anetbbs.models import db, User
     from werkzeug.security import generate_password_hash
+    from .ansi_ui import banner, menu_item, footer, FG, RESET, prompt as _p
     with _app().app_context():
         u = User.query.get(uid)
         if not u:
-            await self.session.write("\r\nNo such user.\r\n")
+            await self.session.write(f"\r\n{FG['red']}No such user.{RESET}\r\n")
             await self.session.read_line("Press Enter...")
             return
         info = (u.username, u.email, u.is_active, u.is_admin)
     while True:
-        await self.session.write(f"\r\nEditing #{uid} {info[0]} ({info[1]}) "
-                                 f"active={info[2]} admin={info[3]}\r\n"
-                                 "  T. Toggle active\r\n"
-                                 "  A. Toggle admin\r\n"
-                                 "  P. Reset password\r\n"
-                                 "  D. Delete user (PERMANENT)\r\n"
-                                 "  Q. Back\r\n")
-        choice = (await self.session.read_line("Choice: ") or '').strip().upper()
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner(f'Edit User #{uid}'))
+        active_s = f"{FG['grn']}yes{RESET}" if info[2] else f"{FG['red']}no{RESET}"
+        admin_s  = f"{FG['yel']}yes{RESET}" if info[3] else f"{FG['dim']}no{RESET}"
+        await self.session.write(
+            f"  {FG['cyan']}User:{RESET}   {FG['wht']}{info[0]}{RESET}\r\n"
+            f"  {FG['cyan']}Email:{RESET}  {FG['dim']}{info[1]}{RESET}\r\n"
+            f"  {FG['cyan']}Active:{RESET} {active_s}    "
+            f"{FG['cyan']}Admin:{RESET} {admin_s}\r\n\r\n")
+        for hk, lbl in (('T', 'Toggle active'),
+                        ('A', 'Toggle admin'),
+                        ('P', 'Reset password'),
+                        ('D', 'Delete user (PERMANENT)'),
+                        ('Q', 'Back')):
+            await self.session.write(menu_item(hk, lbl) + '\r\n')
+        await self.session.write('\r\n' + footer() + '\r\n')
+        choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
         if choice == 'Q' or not choice:
             return
         with _app().app_context():
@@ -2084,20 +2114,25 @@ async def _sysop_edit_user(self, uid):
             if choice == 'T':
                 u.is_active = not u.is_active
                 info = (u.username, u.email, u.is_active, u.is_admin)
+                await self.session.write(
+                    f"\r\n{FG['grn']}Active toggled to {u.is_active}.{RESET}\r\n")
             elif choice == 'A':
                 u.is_admin = not u.is_admin
                 info = (u.username, u.email, u.is_active, u.is_admin)
+                await self.session.write(
+                    f"\r\n{FG['grn']}Admin toggled to {u.is_admin}.{RESET}\r\n")
             elif choice == 'P':
                 new = await self.session.read_line("New password: ")
                 if new:
                     u.password_hash = generate_password_hash(new)
-                    await self.session.write("Password updated.\r\n")
+                    await self.session.write(f"\r\n{FG['grn']}Password updated.{RESET}\r\n")
             elif choice == 'D':
-                confirm = await self.session.read_line("Type DELETE to confirm: ")
+                confirm = await self.session.read_line(
+                    f"\r\n{FG['red']}Type DELETE to confirm: {RESET}")
                 if confirm == 'DELETE':
                     db.session.delete(u)
                     db.session.commit()
-                    await self.session.write("Deleted.\r\n")
+                    await self.session.write(f"\r\n{FG['red']}User deleted.{RESET}\r\n")
                     await self.session.read_line("Press Enter...")
                     return
             db.session.commit()
@@ -2106,18 +2141,32 @@ BBSMenuUI._sysop_edit_user = _sysop_edit_user
 
 async def _sysop_boards(self):
     from anetbbs.models import db, Board
+    from .ansi_ui import load_menu_ansi, banner, menu_item, footer, FG, RESET, BOLD, prompt as _p
     while True:
         with _app().app_context():
             boards = Board.query.order_by(Board.order, Board.name).all()
             b_list = [(b.id, b.name, b.description or '', b.is_active, b.posts.count()) for b in boards]
-        await self.session.write("\r\n=== Boards ===\r\n\r\n")
+        ansi = load_menu_ansi('sysop_boards')
+        if ansi:
+            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+            await self.session.writer.drain()
+        else:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Manage Boards'))
         for bid, name, desc, active, count in b_list:
-            mark = ' ' if active else 'X'
-            await self.session.write(f"  [{mark}] {bid:<3} {name:<25} ({count:4d} threads)\r\n")
+            mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+            await self.session.write(
+                f"  [{mark}] {FG['wht']}{bid:<3}{RESET} "
+                f"{FG['grn']}{name[:25]:<25}{RESET} "
+                f"{FG['cyan']}({count:4d} threads){RESET}\r\n")
             if desc:
-                await self.session.write(f"          {desc[:60]}\r\n")
-        await self.session.write("\r\n  N. New board\r\n  Q. Back\r\n  Or board ID to edit\r\n")
-        choice = (await self.session.read_line("Choice: ") or '').strip()
+                await self.session.write(f"          {FG['dim']}{desc[:60]}{RESET}\r\n")
+        await self.session.write('\r\n')
+        await self.session.write(menu_item('N', 'New board') + '\r\n')
+        await self.session.write(menu_item('Q', 'Back') + '\r\n')
+        await self.session.write(f"  {FG['dim']}Or enter a board ID to edit{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        choice = (await self.session.read_line(_p('Choice: ')) or '').strip()
         u = choice.upper()
         if u == 'Q' or not choice:
             return
@@ -2129,6 +2178,7 @@ async def _sysop_boards(self):
             with _app().app_context():
                 db.session.add(Board(name=name[:100], description=desc, is_active=True))
                 db.session.commit()
+            await self.session.write(f"\r\n{FG['grn']}Board created.{RESET}\r\n")
             continue
         try:
             bid = int(choice)
@@ -2137,19 +2187,29 @@ async def _sysop_boards(self):
         with _app().app_context():
             b = Board.query.get(bid)
             if not b:
+                await self.session.write(f"\r\n{FG['red']}Board not found.{RESET}\r\n")
                 continue
-            await self.session.write("\r\nT=toggle active, R=rename, X=delete (with confirm), Q=back\r\n")
-            sub = (await self.session.read_line("Choice: ") or '').strip().upper()
+            await self.session.write(
+                f"\r\n{FG['cyan']}Editing board #{bid}: {FG['wht']}{b.name}{RESET}\r\n"
+                f"  {FG['yel']}[T]{RESET} toggle active  "
+                f"{FG['yel']}[R]{RESET} rename  "
+                f"{FG['yel']}[X]{RESET} delete  "
+                f"{FG['yel']}[Q]{RESET} back\r\n")
+            sub = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
             if sub == 'T':
                 b.is_active = not b.is_active
+                await self.session.write(f"\r\n{FG['grn']}Active toggled.{RESET}\r\n")
             elif sub == 'R':
                 new = (await self.session.read_line("New name: ") or '').strip()
                 if new:
                     b.name = new[:100]
+                    await self.session.write(f"\r\n{FG['grn']}Renamed.{RESET}\r\n")
             elif sub == 'X':
-                confirm = await self.session.read_line("Type DELETE to confirm: ")
+                confirm = await self.session.read_line(
+                    f"\r\n{FG['red']}Type DELETE to confirm: {RESET}")
                 if confirm == 'DELETE':
                     db.session.delete(b)
+                    await self.session.write(f"\r\n{FG['red']}Deleted.{RESET}\r\n")
             db.session.commit()
 BBSMenuUI.sysop_boards = _sysop_boards
 
@@ -2158,23 +2218,33 @@ async def _sysop_status(self):
     """Quick server-status snapshot for sysops (counts + recent activity)."""
     from anetbbs.models import (User, UserSession, Post, Message as Bulletin,
                                 PrivateMessage, EchomailMessage)
+    from .ansi_ui import load_menu_ansi, banner, footer, FG, RESET, BOLD, prompt as _p
     with _app().app_context():
         five = datetime.utcnow() - timedelta(minutes=5)
         stats = {
-            'users': User.query.count(),
-            'active30d': User.query.filter(User.last_login >= datetime.utcnow() - timedelta(days=30)).count(),
-            'online': UserSession.query.filter(UserSession.last_seen >= five).count(),
-            'posts': Post.query.count(),
-            'pms': PrivateMessage.query.count(),
-            'bulletins': Bulletin.query.count(),
-            'echo_in': EchomailMessage.query.filter_by(direction='inbound').count(),
-            'echo_out_q': EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count(),
-            'echo_out_sent': EchomailMessage.query.filter(EchomailMessage.sent_at != None).count(),
+            'Users total':      User.query.count(),
+            'Active (30d)':     User.query.filter(User.last_login >= datetime.utcnow() - timedelta(days=30)).count(),
+            'Online now':       UserSession.query.filter(UserSession.last_seen >= five).count(),
+            'Posts':            Post.query.count(),
+            'Private msgs':     PrivateMessage.query.count(),
+            'Bulletins':        Bulletin.query.count(),
+            'Echo inbound':     EchomailMessage.query.filter_by(direction='inbound').count(),
+            'Echo out (queue)': EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count(),
+            'Echo out (sent)':  EchomailMessage.query.filter(EchomailMessage.sent_at != None).count(),
         }
-    await self.session.write("\r\n=== Server Status ===\r\n\r\n")
+    ansi = load_menu_ansi('sysop_status')
+    if ansi:
+        self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+        await self.session.writer.drain()
+    else:
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Server Status'))
     for k, v in stats.items():
-        await self.session.write(f"  {k:<14} {v}\r\n")
-    await self.session.read_line("\r\nPress Enter...")
+        await self.session.write(
+            f"  {FG['cyan']}{k:<18}{RESET} "
+            f"{FG['wht']}{BOLD}{v}{RESET}\r\n")
+    await self.session.write('\r\n' + footer() + '\r\n')
+    await self.session.read_line(_p('Press Enter...'))
 BBSMenuUI.sysop_status = _sysop_status
 
 

@@ -955,6 +955,25 @@ class IrcServerConfig(db.Model):
         return f'<IrcServerConfig user={self.user_id} {self.server}:{self.port}>'
 
 
+class IrcPreset(db.Model):
+    """Sysop-configured IRC server presets shown in the terminal IRC chat menu."""
+    __tablename__ = 'irc_presets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)        # e.g. "Libera.Chat"
+    server = db.Column(db.String(120), nullable=False)
+    port = db.Column(db.Integer, default=6667)
+    use_ssl = db.Column(db.Boolean, default=False)
+    default_nick = db.Column(db.String(40))
+    channels = db.Column(db.Text)                           # auto-join, comma-separated
+    is_active = db.Column(db.Boolean, default=True)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<IrcPreset {self.name} {self.server}:{self.port}>'
+
+
 class AddressBookEntry(db.Model):
     """Per-user contacts — FTN addresses + email + free-form notes."""
     __tablename__ = 'address_book'

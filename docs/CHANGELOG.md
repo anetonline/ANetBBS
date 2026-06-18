@@ -1,7 +1,48 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.119`** (June 2026). Previous: `v1.0a2.118`.
+separately. Current release: **`v1.0a2.123`** (June 2026). Previous: `v1.0a2.122`.
+
+## v1.0a2.123 — MRC scrollback stability; arrow-key scroll; escape-seq drain (June 2026)
+
+Fix `/scroll` scrollback drifting: when scrolled up, `_emit` now increments
+`_scroll_offset` by the number of new lines added so the historical view stays
+locked even as new messages arrive. Up/Down arrow keys now scroll the chat view
+1 line (previously swallowed). Fix `/scroll up N` parsing (strip before isdigit).
+Fix PgUp/PgDn escape sequences polluting the input buffer (drain trailing bytes).
+Sending a message while scrolled auto-snaps to the live (bottom) view. Added
+`_scroll_chat(delta)` helper; `/scroll 0` / `/scroll bottom` / `/scroll live`
+all return to the live view. Updated docstring.
+
+## v1.0a2.122 — MRC input visibility; /scroll; wall color; fast logon fixes (June 2026)
+
+Fix MRC terminal input not showing while typing: `_redraw_chat_area` was clearing the
+input row on every incoming message, erasing the SSH client's local echo. Fixed by not
+touching the input row during chat area redraws — only `_draw_input_line()` (called per
+keystroke) updates that row. Added `/scroll [n]` / `/scroll down [n]` / `/scroll 0`
+command for scrolling through chat history; status bar shows `PAUSED+N` when scrolled.
+Removed `/split on|off` command (not needed). Fixed graffiti wall color scheme not
+updating after admin change: now reads `.env` directly at render time instead of using
+a stale config class. Fixed fast logon prompt never appearing: same root cause — now
+reads `.env` directly at login time.
+
+## v1.0a2.121 — Terminal MRC client rewrite (June 2026)
+
+Complete rewrite of `mrc_chat.py`. Fixed core scroll bug: word-wrapped messages
+were writing past the DECSTBM scroll region into the input row, corrupting it.
+Now each wrapped line emits as its own scroll event so the cursor never escapes
+the scroll region. Added 60-second WebSocket keepalive ping (latency shown in
+status bar). Added IAMHERE AWAY tracking after 10 min idle (matches ANetMRC
+behaviour). New commands: /afk, /back, /broadcast, /ctcp, /roomconfig, /status.
+Documented ANSI menu override slots in `docs/04-ansi-screens.md`.
+
+## v1.0a2.120 — IRC presets admin; who's online fix; colored sysop/chat menus; screen-clear (June 2026)
+
+Remove MRC-IRC bridge admin; add IRC Server Presets (`/admin/irc-presets`) with per-preset
+name/server/port/SSL/nick/channels. Fix who's online: background heartbeat task every 2 min.
+Colored IRC chat menu with Q-to-quit and screen-clear. Chat Systems menu screen-clear fixed.
+All sysop terminal sub-menus now colorized and support ANSI overrides (sysop_menu/sysop_users/
+sysop_boards/sysop_status.ans slots). New `IrcPreset` model (`irc_presets` table, auto-created).
 
 ## v1.0a2.119 — Security levels, graffiti wall, logon/logoff modules, fast logon (June 2026)
 

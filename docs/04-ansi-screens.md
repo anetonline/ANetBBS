@@ -47,6 +47,54 @@ You can paste:
 - Raw escape codes typed as `\x1b[1;36m` etc.
 - Output from `ansiedit`, Pablo, Moebius, ACiDDraw
 
+## ANSI menu overrides (file-based)
+
+Beyond the database-driven ANSI screens above, built-in terminal menus
+(IRC chat, sysop tools, etc.) support **file-based** ANSI overrides.
+Place a `.ans` file in `data/text/menus/` with the correct slot name
+and ANetBBS will show your ANSI instead of the stock colored menu.
+
+### How it works
+
+1. Drop `<slot>.ans` into `data/text/menus/` (create the directory if needed).
+2. No restart required — the file is read on every menu visit.
+3. The screen is cleared, your ANSI is displayed, then the normal
+   prompt appears below it (the sysop is still responsible for the art;
+   ANetBBS always appends the live prompt so the user can make a choice).
+4. If the file is absent or unreadable, the stock colored menu is shown.
+
+### File naming requirements
+
+- Extension **must** be `.ans` (lowercase)
+- Encoding: CP437 + standard ANSI escape codes (same as any BBS art)
+- File name is the slot name + `.ans`, e.g. `chat.ans`
+
+### Slot names reference
+
+| Slot name      | Menu shown                                    |
+| -------------- | --------------------------------------------- |
+| `chat`         | Chat Systems top menu (IRC / MRC / Local)     |
+| `irc_chat`     | IRC Chat — server connection options          |
+| `sysop_menu`   | Sysop Tools top-level menu                   |
+| `sysop_users`  | Sysop → Manage Users list header             |
+| `sysop_boards` | Sysop → Manage Boards list header            |
+| `sysop_status` | Sysop → Server Status header                 |
+| `game_center`  | Game Center                                   |
+| `door_games`   | Door Games list                               |
+| `dialout`      | Dial-Out Directory                            |
+
+### Tips
+
+- Keep art at ≤ 23 rows so the prompt fits on a 24-line terminal.
+- If the art is taller than the terminal, the user can scroll up to see
+  the full art after the prompt renders — but the prompt always appears
+  at the current cursor position, not at the bottom of the art.
+- Color pipe-codes (`|07` etc.) inside the art are **not** translated here;
+  use raw ANSI escape sequences from your art tool instead.
+- The menu slot system is separate from the database `ansi_screen` field
+  on menus — those are for user-facing menu header art and support
+  `@CODE@` substitution; these file overrides do not.
+
 ## SAUCE
 
 When you import an `.ans` file into the **ANSI Editor** (`/ansi/`),

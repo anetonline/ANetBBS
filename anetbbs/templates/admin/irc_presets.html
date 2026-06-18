@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}IRC Server Presets{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-dots"></i> IRC Server Presets</h1>
+    <p>Sysop-configured IRC servers shown as quick-connect options in the terminal IRC chat menu.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add Preset</div>
+    <div class="card-body">
+        <form method="post" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-4"><label class="form-label">Display Name</label>
+                <input type="text" name="name" class="form-control" required
+                       placeholder="Libera.Chat"></div>
+            <div class="col-md-4"><label class="form-label">Server</label>
+                <input type="text" name="server" class="form-control" required
+                       placeholder="irc.libera.chat"></div>
+            <div class="col-md-2"><label class="form-label">Port</label>
+                <input type="number" name="port" class="form-control" value="6667"></div>
+            <div class="col-md-2"><label class="form-label">Order</label>
+                <input type="number" name="order" class="form-control" value="0"
+                       title="Lower numbers appear first"></div>
+            <div class="col-md-4"><label class="form-label">Default Nick <small class="text-muted">(optional)</small></label>
+                <input type="text" name="default_nick" class="form-control"
+                       placeholder="leave blank to use BBS username"></div>
+            <div class="col-md-4"><label class="form-label">Auto-join Channels <small class="text-muted">(optional, comma-separated)</small></label>
+                <input type="text" name="channels" class="form-control"
+                       placeholder="#libera,#bbs"></div>
+            <div class="col-md-2 d-flex align-items-end gap-3">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="use_ssl" id="add_ssl">
+                    <label class="form-check-label" for="add_ssl">SSL</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="is_active"
+                           id="add_active" checked>
+                    <label class="form-check-label" for="add_active">Active</label>
+                </div>
+            </div>
+            <div class="col-12">
+                <button class="btn btn-primary" type="submit">Add Preset</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if presets %}
+<div class="card">
+    <div class="card-header">Configured Presets</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Order</th><th>Name</th><th>Server</th><th>Port</th>
+                <th>SSL</th><th>Nick</th><th>Channels</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>
+            {% for p in presets %}
+            <tr>
+                <td>{{ p.order }}</td>
+                <td><strong>{{ p.name }}</strong></td>
+                <td>{{ p.server }}</td>
+                <td>{{ p.port }}</td>
+                <td>{{ '✓' if p.use_ssl else '' }}</td>
+                <td>{{ p.default_nick or '<em class="text-muted">BBS username</em>'|safe }}</td>
+                <td><small>{{ p.channels or '' }}</small></td>
+                <td>
+                    {% if p.is_active %}
+                        <span class="badge bg-success">Active</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Disabled</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <!-- Toggle -->
+                    <form method="post" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="toggle">
+                        <input type="hidden" name="preset_id" value="{{ p.id }}">
+                        <button class="btn btn-sm btn-outline-secondary"
+                                type="submit">{{ 'Disable' if p.is_active else 'Enable' }}</button>
+                    </form>
+                    <!-- Edit (inline expand via details) -->
+                    <button class="btn btn-sm btn-outline-primary"
+                            onclick="document.getElementById('edit-{{ p.id }}').hidden=!document.getElementById('edit-{{ p.id }}').hidden">Edit</button>
+                    <!-- Delete -->
+                    <form method="post" class="d-inline"
+                          onsubmit="return confirm('Delete {{ p.name }}?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="preset_id" value="{{ p.id }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            <tr id="edit-{{ p.id }}" hidden>
+                <td colspan="9">
+                    <form method="post" class="row g-2 p-2 bg-body-secondary rounded">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="edit">
+                        <input type="hidden" name="preset_id" value="{{ p.id }}">
+                        <div class="col-md-3"><label class="form-label">Name</label>
+                            <input type="text" name="name" class="form-control"
+                                   value="{{ p.name }}" required></div>
+                        <div class="col-md-3"><label class="form-label">Server</label>
+                            <input type="text" name="server" class="form-control"
+                                   value="{{ p.server }}" required></div>
+                        <div class="col-md-1"><label class="form-label">Port</label>
+                            <input type="number" name="port" class="form-control"
+                                   value="{{ p.port }}"></div>
+                        <div class="col-md-1"><label class="form-label">Order</label>
+                            <input type="number" name="order" class="form-control"
+                                   value="{{ p.order }}"></div>
+                        <div class="col-md-2"><label class="form-label">Default Nick</label>
+                            <input type="text" name="default_nick" class="form-control"
+                                   value="{{ p.default_nick or '' }}"></div>
+                        <div class="col-md-2"><label class="form-label">Channels</label>
+                            <input type="text" name="channels" class="form-control"
+                                   value="{{ p.channels or '' }}"></div>
+                        <div class="col-md-2 d-flex align-items-end gap-3">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="use_ssl"
+                                       id="ssl-{{ p.id }}" {{ 'checked' if p.use_ssl else '' }}>
+                                <label class="form-check-label" for="ssl-{{ p.id }}">SSL</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="is_active"
+                                       id="active-{{ p.id }}" {{ 'checked' if p.is_active else '' }}>
+                                <label class="form-check-label" for="active-{{ p.id }}">Active</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">No IRC presets configured yet. Add one above.</div>
+{% endif %}
+
+<div class="mt-3 text-muted small">
+    <strong>How presets work:</strong> Active presets appear as numbered options in the terminal IRC chat menu.
+    Users can also still connect manually to any server. Inactive presets are hidden from the menu.
+</div>
+{% endblock %}

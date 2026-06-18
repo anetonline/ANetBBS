@@ -62,29 +62,64 @@ class IRCChat(BaseChatSystem):
     # Menu
     # ------------------------------------------------------------------
 
+    def _load_presets(self):
+        """Return list of active IrcPreset rows ordered by order,name."""
+        try:
+            from ..web.admin import admin_bp  # noqa — just trigger app init
+            from ..models import IrcPreset
+            from ..features.bbs_ui import _app
+            with _app().app_context():
+                return (IrcPreset.query
+                        .filter_by(is_active=True)
+                        .order_by(IrcPreset.order, IrcPreset.name)
+                        .all())
+        except Exception:
+            return []
+
     async def show_menu(self):
-        from .ansi_ui import load_menu_ansi
+        from .ansi_ui import (load_menu_ansi, banner, menu_item, footer,
+                              prompt as _p, FG, RESET)
         while True:
+            # Build preset map regardless of ANSI mode so numbered choices
+            # always work the same way.
+            presets = self._load_presets()
+            preset_map = {str(i + 1): p for i, p in enumerate(presets)}
+
             ansi = load_menu_ansi('irc_chat')
             if ansi:
                 self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
-                choice = await self.session.read_line("Choice: ")
             else:
-                menu = (
-                    "\r\n"
-                    "╔════════════════════════════════════════╗\r\n"
-                    "║              IRC Chat                  ║\r\n"
-                    "╠════════════════════════════════════════╣\r\n"
-                    "║  1. Connect to a server                ║\r\n"
-                    "║  2. Quick-connect to Libera.Chat       ║\r\n"
-                    "║  3. Return to Chat menu                ║\r\n"
-                    "╚════════════════════════════════════════╝\r\n"
-                    "\r\n"
-                    "Choice: "
-                )
-                choice = await self.session.read_line(menu)
-            if choice == '1':
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('IRC Chat'))
+                for key, p in preset_map.items():
+                    ssl_tag = ' (SSL)' if p.use_ssl else ''
+                    await self.session.write(
+                        menu_item(key,
+                                  f'{p.name} — {p.server}:{p.port}{ssl_tag}') + '\r\n')
+                await self.session.write(
+                    menu_item('M', 'Manual connect to any server') + '\r\n')
+                await self.session.write(
+                    menu_item('Q', 'Return to Chat menu') + '\r\n')
+                await self.session.write('\r\n' + footer() + '\r\n')
+
+            choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
+
+            if choice == 'Q' or not choice:
+                if self.irc_client:
+                    await self.disconnect()
+                break
+            elif choice in preset_map:
+                p = preset_map[choice]
+                default_nick = p.default_nick or self.session.user.get('username', '')
+                nick = (await self.session.read_line(
+                    f"Nick [{default_nick}]: ")).strip() or default_nick
+                if await self.connect(p.server, p.port, nick=nick, use_ssl=p.use_ssl):
+                    if p.channels:
+                        for ch in (c.strip() for c in p.channels.split(',') if c.strip()):
+                            await self.irc_client.join(ch)
+                    await self.chat_loop()
+            elif choice == 'M':
                 server = (await self.session.read_line(
                     "Server [irc.libera.chat]: ")) or 'irc.libera.chat'
                 port_s = (await self.session.read_line(
@@ -105,15 +140,8 @@ class IRCChat(BaseChatSystem):
                         for ch in (c.strip() for c in channels.split(',') if c.strip()):
                             await self.irc_client.join(ch)
                     await self.chat_loop()
-            elif choice == '2':
-                if await self.connect('irc.libera.chat', 6667, nick='', use_ssl=False):
-                    await self.chat_loop()
-            elif choice == '3':
-                if self.irc_client:
-                    await self.disconnect()
-                break
             else:
-                await self.session.write('\r\nUnknown choice.\r\n')
+                await self.session.write(f'\r\n{FG["red"]}Unknown choice.{RESET}\r\n')
 
     # ------------------------------------------------------------------
     # Main chat loop
@@ -183,7 +211,6 @@ class IRCChat(BaseChatSystem):
                         else:
                             await self.session.write('\r\nNot in any channel.\r\n')
                     elif cmd == 'list':
-                        # Server-side /LIST — if arg given, filter (e.g. /list ##python).
                         await self.irc_client.send(
                             f'LIST {arg.strip()}' if arg.strip() else 'LIST')
                     elif cmd == 'whois' and arg.strip():

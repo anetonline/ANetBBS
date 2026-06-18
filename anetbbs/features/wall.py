@@ -67,12 +67,19 @@ WALL_SCHEME_LABELS = {
 
 def _get_colors():
     """Return (border, title, user, key) for the configured color scheme."""
+    import os
+    scheme = 'cyan'
     try:
-        from .bbs_ui import _app as _bbs_app
-        scheme = _bbs_app().config.get('WALL_COLOR_SCHEME', 'cyan')
-        return WALL_SCHEMES.get(scheme, WALL_SCHEMES['cyan'])
+        env_path = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', '.env'))
+        with open(env_path) as _ef:
+            for _ln in _ef:
+                if _ln.startswith('WALL_COLOR_SCHEME='):
+                    scheme = _ln.split('=', 1)[1].strip()
+                    break
     except Exception:
-        return WALL_SCHEMES['cyan']
+        pass
+    return WALL_SCHEMES.get(scheme, WALL_SCHEMES['cyan'])
 
 
 def _pipe_to_ansi(s: str) -> str:

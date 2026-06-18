@@ -2012,51 +2012,58 @@ def user_notes(user_id):
     return render_template('admin/user_notes.html', target=target, notes=notes)
 
 
-@admin_bp.route('/mrc-irc-bridges', methods=['GET', 'POST'])
+@admin_bp.route('/irc-presets', methods=['GET', 'POST'])
 @login_required
 @admin_required
-def mrc_irc_bridges():
-    """CRUD for MRC↔IRC bridge configurations."""
-    from ..models import MrcIrcBridge
+def irc_presets():
+    """CRUD for sysop-configured IRC server presets (shown in terminal IRC menu)."""
+    from ..models import IrcPreset
 
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'add':
-            b = MrcIrcBridge(
-                name=(request.form.get('name') or 'bridge').strip(),
-                mrc_room=(request.form.get('mrc_room') or '').strip(),
-                mrc_handle=(request.form.get('mrc_handle') or 'ircbridge').strip(),
-                mrc_ws_url=(request.form.get('mrc_ws_url') or 'ws://127.0.0.1:8080/ws').strip(),
-                irc_server=(request.form.get('irc_server') or '').strip(),
-                irc_port=request.form.get('irc_port', type=int) or 6667,
-                irc_use_ssl=bool(request.form.get('irc_use_ssl')),
-                irc_nick=(request.form.get('irc_nick') or 'ANETBridge').strip(),
-                irc_channel=(request.form.get('irc_channel') or '').strip(),
-                irc_channel_key=(request.form.get('irc_channel_key') or '').strip() or None,
-                sasl_user=(request.form.get('sasl_user') or '').strip() or None,
-                sasl_pass=(request.form.get('sasl_pass') or '').strip() or None,
+            p = IrcPreset(
+                name=(request.form.get('name') or '').strip(),
+                server=(request.form.get('server') or '').strip(),
+                port=request.form.get('port', type=int) or 6667,
+                use_ssl=bool(request.form.get('use_ssl')),
+                default_nick=(request.form.get('default_nick') or '').strip() or None,
+                channels=(request.form.get('channels') or '').strip() or None,
                 is_active=bool(request.form.get('is_active')),
+                order=request.form.get('order', type=int) or 0,
             )
-            if not b.mrc_room or not b.irc_server or not b.irc_channel:
-                flash('mrc_room, irc_server, and irc_channel are required.', 'danger')
+            if not p.name or not p.server:
+                flash('Name and server are required.', 'danger')
             else:
-                db.session.add(b); db.session.commit()
-                flash(f'Bridge "{b.name}" created. Run with '
-                      f'`python -m anetbbs.features.mrc_irc_bridge --bridge-id {b.id}` '
-                      f'or via the systemd unit.', 'success')
+                db.session.add(p)
+                db.session.commit()
+                flash(f'Preset "{p.name}" created.', 'success')
+        elif action == 'edit':
+            p = IrcPreset.query.get_or_404(request.form.get('preset_id', type=int))
+            p.name = (request.form.get('name') or p.name).strip()
+            p.server = (request.form.get('server') or p.server).strip()
+            p.port = request.form.get('port', type=int) or p.port
+            p.use_ssl = bool(request.form.get('use_ssl'))
+            p.default_nick = (request.form.get('default_nick') or '').strip() or None
+            p.channels = (request.form.get('channels') or '').strip() or None
+            p.is_active = bool(request.form.get('is_active'))
+            p.order = request.form.get('order', type=int) or 0
+            db.session.commit()
+            flash(f'Preset "{p.name}" updated.', 'success')
         elif action == 'toggle':
-            b = MrcIrcBridge.query.get_or_404(request.form.get('bridge_id', type=int))
-            b.is_active = not bool(b.is_active)
+            p = IrcPreset.query.get_or_404(request.form.get('preset_id', type=int))
+            p.is_active = not p.is_active
             db.session.commit()
             flash('Toggled.', 'success')
         elif action == 'delete':
-            b = MrcIrcBridge.query.get_or_404(request.form.get('bridge_id', type=int))
-            db.session.delete(b); db.session.commit()
+            p = IrcPreset.query.get_or_404(request.form.get('preset_id', type=int))
+            db.session.delete(p)
+            db.session.commit()
             flash('Deleted.', 'success')
-        return redirect(url_for('admin.mrc_irc_bridges'))
+        return redirect(url_for('admin.irc_presets'))
 
-    bridges = MrcIrcBridge.query.order_by(MrcIrcBridge.name).all()
-    return render_template('admin/mrc_irc_bridges.html', bridges=bridges)
+    presets = IrcPreset.query.order_by(IrcPreset.order, IrcPreset.name).all()
+    return render_template('admin/irc_presets.html', presets=presets)
 
 
 @admin_bp.route('/connection-test', methods=['GET', 'POST'])
