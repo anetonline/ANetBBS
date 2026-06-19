@@ -1,9 +1,34 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.128`** (June 2026). Previous: `v1.0a2.127`.
+separately. Current release: **`v1.0a2.131`** (June 2026). Previous: `v1.0a2.130`.
 
-## v1.0a2.128 — IRC ESC exit fix; docs sidebar; bulletins; chat.ans; read/write security (June 2026)
+## v1.0a2.131 — ANEdit wired into message boards, PMs, echomail; board/thread coloring (June 2026)
+
+- **ANEdit now used for all message composition** — `_post_compose`, `_send_pm`,
+  and `_compose_echomail` all launch the full ANEdit screen editor instead of the
+  old line-by-line prompt. Reply flow pre-loads the parent post as `> ` quoted text
+  and pre-fills `Re: subject`.
+- **Thread list coloring** — board message list now uses full ANSI color: yellow
+  numbers, cyan reply count, white subject, green author, grey timestamp. Clears
+  screen and shows the board-name banner.
+- **Thread reader coloring** — post header shows yellow [OP]/grey [Reply N] tags,
+  cyan subject, green author. Quoted lines (`>`) rendered in grey. Footer + prompt
+  added.
+
+## v1.0a2.130 — ANEdit terminal message editor; security questions on registration (June 2026)
+
+- **ANEdit** — new full-featured 79×23 ANSI message editor (`features/anedit.py`).
+  Undo/redo (60 levels), block mark/cut/copy/paste, find & replace-all, smart
+  word-wrap, live word/char count, three color themes (F9), help overlay (F1),
+  Mystic |XX color-code picker (F4), draft auto-save every 30 s with recovery on
+  next entry. Entry point: `await launch_anedit(session, quote, subject, username)`.
+- **Security questions at registration** — new users must now complete all 3
+  password-reset security questions during signup. `RegisterForm` extended with 3
+  `SelectField`+`StringField` pairs with duplicate-question validation. Answers
+  saved via `UserSecurityAnswer` before commit.
+
+## v1.0a2.129 — IRC ESC exit fix; docs sidebar; bulletins; chat.ans; read/write security (June 2026)
 
 - **IRC startup ESC exit** — ESC from startup screen now correctly exits IRC. Root
   cause: `run()` loop condition checked `not self.bms` which is always False (list

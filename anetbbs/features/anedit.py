@@ -1,0 +1,1411 @@
+# anetbbs/features/anedit.py
+"""
+ANEdit v1 — full-featured terminal message editor for ANetBBS.
+
+Beyond Synchronet SlyEdit/DCTEdit/IceEdit:
+  - Undo/redo stack  (Ctrl+Z / Ctrl+R)
+  - Block mark/cut/copy/paste  (F3, Ctrl+X/C/V)
+  - Find + Replace  (Ctrl+F / Ctrl+H)
+  - Word/char count live in status bar
+  - Smart word-wrap  (wraps as you type)
+  - Draft auto-save + recovery on next entry
+  - Three color themes  (F9 to cycle)
+  - Ctrl+Left/Right word navigation
+  - Beautiful 79×23 double-border frame
+
+Entry point:
+    text = await launch_anedit(session, quote="", subject="", username="guest")
+Returns the composed string, or None if the user aborted.
+"""
+import asyncio
+import os
+import re
+import time
+from typing import Optional
+
+# ── Layout ─────────────────────────────────────────────────────────────────────
+_W      = 79          # terminal width
+_H      = 23          # terminal height
+_TW     = _W - 2      # inner text width  (cols 2-78 = 77 chars)
+_TEXT_T = 4           # first text row (1-indexed)
+_TEXT_B = 20          # last text row
+_TEXT_H = _TEXT_B - _TEXT_T + 1   # 17 visible lines
+_MAX_LINES = 500
+
+# ── ANSI helpers ───────────────────────────────────────────────────────────────
+_E = "\x1b"
+def _mv(r, c):   return f"{_E}[{r};{c}H"
+def _cls():      return f"{_E}[2J{_E}[H"
+def _alt_on():   return f"{_E}[?1049h"
+def _alt_off():  return f"{_E}[?1049l"
+def _hide():     return f"{_E}[?25l"
+def _show():     return f"{_E}[?25h"
+def _reset():    return f"{_E}[0m"
+def _bold():     return f"{_E}[1m"
+def _rev():      return f"{_E}[7m"
+def _fg(n):      return f"{_E}[38;5;{n}m"
+def _bg(n):      return f"{_E}[48;5;{n}m"
+def _clreol():   return f"{_E}[K"
+
+# ── Themes ─────────────────────────────────────────────────────────────────────
+_THEMES = [
+    {   # Cyan
+        'name':      'Cyan',
+        'border':    _fg(51),
+        'title':     _bold() + _fg(255),
+        'vtitle':    _bold() + _fg(87),
+        'ruler_dim': _fg(24),
+        'ruler_num': _fg(87),
+        'stat_bg':   _bg(17)  + _fg(252),
+        'stat_hi':   _bg(17)  + _bold() + _fg(51),
+        'hint_bg':   _bg(234) + _fg(244),
+        'hint_key':  _bg(234) + _bold() + _fg(51),
+        'sel':       _bg(31)  + _fg(255),
+        'quote':     _fg(179),
+        'dirty':     _bold()  + _fg(196),
+        'info':      _bold()  + _fg(226),
+    },
+    {   # Green
+        'name':      'Green',
+        'border':    _fg(46),
+        'title':     _bold() + _fg(255),
+        'vtitle':    _bold() + _fg(120),
+        'ruler_dim': _fg(22),
+        'ruler_num': _fg(120),
+        'stat_bg':   _bg(22)  + _fg(252),
+        'stat_hi':   _bg(22)  + _bold() + _fg(46),
+        'hint_bg':   _bg(234) + _fg(244),
+        'hint_key':  _bg(234) + _bold() + _fg(46),
+        'sel':       _bg(34)  + _fg(255),
+        'quote':     _fg(179),
+        'dirty':     _bold()  + _fg(196),
+        'info':      _bold()  + _fg(226),
+    },
+    {   # Amber
+        'name':      'Amber',
+        'border':    _fg(214),
+        'title':     _bold() + _fg(255),
+        'vtitle':    _bold() + _fg(223),
+        'ruler_dim': _fg(130),
+        'ruler_num': _fg(223),
+        'stat_bg':   _bg(52)  + _fg(252),
+        'stat_hi':   _bg(52)  + _bold() + _fg(214),
+        'hint_bg':   _bg(234) + _fg(244),
+        'hint_key':  _bg(234) + _bold() + _fg(214),
+        'sel':       _bg(166) + _fg(255),
+        'quote':     _fg(190),
+        'dirty':     _bold()  + _fg(196),
+        'info':      _bold()  + _fg(226),
+    },
+]
+
+
+# ── Key parser ─────────────────────────────────────────────────────────────────
+class _Keys:
+    def __init__(self):
+        self._buf = b""
+
+    def feed(self, data: bytes):
+        self._buf += data
+
+    def next(self) -> Optional[str]:
+        if not self._buf:
+            return None
+        b = self._buf
+
+        if b[0:1] == b'\x1b':
+            if len(b) < 2:
+                return None
+
+            if b[1:2] == b'[':
+                if len(b) < 3:
+                    return None
+                seq = b[2:].decode('latin-1', errors='replace')
+                end = 0
+                while end < len(seq) and not seq[end].isalpha() and seq[end] != '~':
+                    end += 1
+                if end == len(seq):
+                    return None
+                full = seq[:end + 1]
+                self._buf = b[3 + end:]
+                csi = {
+                    'A':'UP','B':'DOWN','C':'RIGHT','D':'LEFT',
+                    'H':'HOME','F':'END',
+                    'P':'F1','Q':'F2','R':'F3','S':'F4',
+                }
+                if full in csi:
+                    return csi[full]
+                tbl = {
+                    '2~':'INS',  '3~':'DEL',
+                    '5~':'PGUP', '6~':'PGDN',
+                    '15~':'F5',  '17~':'F6',  '18~':'F7',  '19~':'F8',
+                    '20~':'F9',  '21~':'F10', '23~':'F11', '24~':'F12',
+                    '1;5A':'CTRL_UP',   '1;5B':'CTRL_DOWN',
+                    '1;5C':'CTRL_RIGHT','1;5D':'CTRL_LEFT',
+                    '1;5H':'CTRL_HOME', '1;5F':'CTRL_END',
+                    '1;2C':'SHIFT_RIGHT','1;2D':'SHIFT_LEFT',
+                }
+                return tbl.get(full)
+
+            if b[1:2] == b'O':
+                if len(b) < 3:
+                    return None
+                c = chr(b[2])
+                self._buf = b[3:]
+                return {'P':'F1','Q':'F2','R':'F3','S':'F4',
+                        'H':'HOME','F':'END'}.get(c)
+
+            # Alt+key
+            if len(b) >= 2:
+                c = b[1:2].decode('latin-1', errors='replace')
+                self._buf = b[2:]
+                amap = {'s':'ALT_S','x':'ALT_X','z':'ALT_Z'}
+                return amap.get(c.lower(), f'ALT_{c.upper()}')
+
+        # Single byte
+        c = b[0:1].decode('latin-1')
+        self._buf = b[1:]
+        ctrl = {
+            '\r':'ENTER', '\n':'ENTER',
+            '\x7f':'BACKSPACE', '\x08':'BACKSPACE',
+            '\t':'TAB',
+            '\x02':'CTRL_B',   # block mark
+            '\x03':'CTRL_C',   # copy
+            '\x04':'CTRL_D',   # delete word
+            '\x06':'CTRL_F',   # find
+            '\x07':'CTRL_G',   # delete char (WordStar compat)
+            '\x08':'BACKSPACE',
+            '\x0b':'CTRL_K',   # kill to EOL
+            '\x0c':'CTRL_L',   # refresh
+            '\x0e':'CTRL_N',   # new line below cursor
+            '\x11':'CTRL_Q',   # quit
+            '\x12':'CTRL_R',   # redo
+            '\x13':'CTRL_S',   # save draft
+            '\x14':'CTRL_T',   # delete word right (alt)
+            '\x15':'CTRL_U',   # undo alt
+            '\x16':'CTRL_V',   # paste
+            '\x17':'CTRL_W',   # send/submit
+            '\x18':'CTRL_X',   # cut
+            '\x19':'CTRL_Y',   # delete line
+            '\x1a':'CTRL_Z',   # undo
+        }
+        if c in ctrl:
+            return ctrl[c]
+        return c
+
+
+# ── Undo stack ─────────────────────────────────────────────────────────────────
+class _UndoStack:
+    MAX = 60
+
+    def __init__(self, lines: list):
+        self._stack = [list(lines)]
+        self._pos   = 0
+
+    def push(self, lines: list):
+        self._stack = self._stack[:self._pos + 1]
+        self._stack.append(list(lines))
+        if len(self._stack) > self.MAX:
+            self._stack.pop(0)
+        self._pos = len(self._stack) - 1
+
+    def undo(self) -> Optional[list]:
+        if self._pos > 0:
+            self._pos -= 1
+            return list(self._stack[self._pos])
+        return None
+
+    def redo(self) -> Optional[list]:
+        if self._pos < len(self._stack) - 1:
+            self._pos += 1
+            return list(self._stack[self._pos])
+        return None
+
+    @property
+    def can_undo(self): return self._pos > 0
+    @property
+    def can_redo(self): return self._pos < len(self._stack) - 1
+
+
+# ── Screen renderer ────────────────────────────────────────────────────────────
+class _Screen:
+    def __init__(self, theme: dict):
+        self.t = theme
+
+    # ── Frame ──────────────────────────────────────────────────────────────────
+    def draw_frame(self, subject: str, modified: bool) -> str:
+        t  = self.t
+        b  = t['border']
+        W  = _W
+        o  = [_reset(), _hide()]
+
+        # Row 1: top border + title
+        tag   = " ANEdit v1 "
+        subj  = f" {subject[:30]} " if subject else ""
+        mid   = f"{tag}{'●' if modified else '○'}{subj}"
+        pad   = W - 2 - len(mid)
+        lp    = "═" * (pad // 2)
+        rp    = "═" * (pad - pad // 2)
+        o.append(_mv(1, 1) + b + "╔" + lp
+                 + t['title'] + mid + b
+                 + rp + "╗" + _reset())
+
+        # Row 2: ruler
+        o.append(self.draw_ruler())
+
+        # Row 3: separator
+        o.append(_mv(3, 1) + b + "╠" + "═" * (W - 2) + "╣" + _reset())
+
+        # Rows 4-20: side borders
+        for r in range(_TEXT_T, _TEXT_B + 1):
+            o.append(_mv(r, 1)   + b + "║" + _reset())
+            o.append(_mv(r, W)   + b + "║" + _reset())
+
+        # Row 21: separator
+        o.append(_mv(21, 1) + b + "╠" + "═" * (W - 2) + "╣" + _reset())
+
+        # Row 23: bottom border + hints
+        hints = (
+            f" F1:Help  ^W:Send  ^S:Draft  ^F:Find  "
+            f"F3:Mark  ^Z:Undo  ^R:Redo  F9:Theme "
+        )
+        ph  = W - 2 - len(hints)
+        rph = "═" * max(ph, 0)
+        o.append(_mv(23, 1) + b + "╚" + hints[:W-2] + rph + "╝" + _reset())
+
+        return "".join(o)
+
+    def draw_ruler(self) -> str:
+        t   = self.t
+        b   = t['border']
+        out = [_mv(2, 1) + b + "║" + _reset()]
+        ruler = []
+        for i in range(1, _TW + 1):
+            if i % 10 == 0:
+                s = str(i)
+                ruler.append((i, s, 'num'))
+            elif i % 5 == 0:
+                ruler.append((i, '+', 'dim'))
+            else:
+                ruler.append((i, '-', 'dim'))
+        # Overlay numbers: a number occupies its last digit's column
+        display = [' '] * _TW
+        styles  = ['dim'] * _TW
+        for i in range(1, _TW + 1):
+            if i % 10 == 0:
+                s = str(i)
+                for j, ch in enumerate(s):
+                    pos = i - len(s) + j
+                    if 0 <= pos < _TW:
+                        display[pos] = ch
+                        styles[pos]  = 'num'
+            elif i % 5 == 0:
+                if styles[i - 1] == 'dim':
+                    display[i - 1] = '+'
+            else:
+                if display[i - 1] == ' ':
+                    display[i - 1] = '-'
+
+        result = []
+        cur_style = None
+        for ch, st in zip(display, styles):
+            color = t['ruler_num'] if st == 'num' else t['ruler_dim']
+            if color != cur_style:
+                result.append(color)
+                cur_style = color
+        # Simpler: just build the string
+        result2 = []
+        for ch, st in zip(display, styles):
+            color = t['ruler_num'] if st == 'num' else t['ruler_dim']
+            result2.append(color + ch)
+        out.append("".join(result2) + _reset())
+        out.append(b + "║" + _reset())
+        return "".join(out)
+
+    # ── Text area ──────────────────────────────────────────────────────────────
+    def draw_text(self, lines: list, scroll: int,
+                  mark: Optional[tuple], cy: int, cx: int) -> str:
+        t  = self.t
+        o  = []
+
+        # Normalise selection bounds
+        sel_s = sel_e = None
+        if mark is not None:
+            a = mark
+            b2 = (cy, cx)
+            sel_s = min(a, b2)
+            sel_e = max(a, b2)
+
+        for i in range(_TEXT_H):
+            ly  = scroll + i
+            row = _TEXT_T + i
+            o.append(_mv(row, 2))
+
+            if ly >= len(lines):
+                o.append(_reset() + " " * _TW)
+                continue
+
+            line    = lines[ly]
+            padded  = line[:_TW].ljust(_TW)
+            is_q    = line.lstrip().startswith('>')
+
+            if sel_s is None:
+                # No selection — fast path
+                col = t['quote'] if is_q else _reset()
+                o.append(col + padded + _reset())
+            else:
+                # Render char-by-char for selection
+                chunks = []
+                for ci in range(_TW):
+                    pos = (ly, ci)
+                    in_sel = sel_s <= pos < sel_e
+                    ch = padded[ci]
+                    if in_sel:
+                        chunks.append(t['sel'] + ch)
+                    else:
+                        chunks.append((t['quote'] if is_q else _reset()) + ch)
+                o.append("".join(chunks) + _reset())
+
+        return "".join(o)
+
+    # ── Status bar ─────────────────────────────────────────────────────────────
+    def draw_status(self, cy: int, cx: int, total: int,
+                    words: int, chars: int,
+                    overwrite: bool, modified: bool,
+                    theme_name: str, flash: str) -> str:
+        t     = self.t
+        mode  = "OVR" if overwrite else "INS"
+        dirty = "●" if modified else " "
+        ln    = f"Ln:{cy+1}/{total}"
+        col   = f"Col:{cx+1}"
+        wc    = f"W:{words}"
+        cc    = f"C:{chars}"
+        th    = f"[{theme_name}]"
+
+        if flash:
+            msg = flash.center(_TW)[:_TW]
+            return (_mv(22, 2) + t['stat_bg'] + t['info']
+                    + msg + _reset())
+
+        left  = f" {dirty} {ln}  {col}  {wc}  {cc}  "
+        right = f"  [{mode}]  {th} "
+        mid_w = _TW - len(left) - len(right)
+        mid_w = max(mid_w, 0)
+
+        line = (t['stat_bg'] + left
+                + t['stat_hi'] + f"[{mode}]" + t['stat_bg']
+                + " " * (mid_w + 2)
+                + th + " " + _reset())
+        # Simpler, safe version:
+        stat = f"{dirty} {ln}  {col}  {wc}  {cc}  [{mode}]  {th}"
+        stat = stat[:_TW].ljust(_TW)
+        return _mv(22, 2) + t['stat_bg'] + stat + _reset()
+
+    # ── Cursor ─────────────────────────────────────────────────────────────────
+    def move_cursor(self, cy: int, cx: int, scroll: int) -> str:
+        row = _TEXT_T + (cy - scroll)
+        col = cx + 2
+        if _TEXT_T <= row <= _TEXT_B:
+            return _mv(row, col) + _show()
+        return _hide()
+
+    # ── Overlay box (generic) ──────────────────────────────────────────────────
+    def box(self, title: str, lines: list, r1: int, c1: int) -> str:
+        t   = self.t
+        b   = t['border']
+        w   = max(len(title) + 4, max((len(l) for l in lines), default=0) + 4)
+        w   = min(w, _W - c1 - 1)
+        o   = [_reset(), _hide()]
+        # top
+        o.append(_mv(r1, c1) + b + "╔" + "═" * (w - 2)
+                 + "╗" + _reset())
+        # title row
+        ttl = f" {title} ".center(w - 2, "═")
+        o.append(_mv(r1 + 1, c1) + b + "║" + t['title'] + ttl + b + "║" + _reset())
+        # content lines
+        for i, ln in enumerate(lines):
+            safe = ln[:w - 4]
+            pad  = " " + safe.ljust(w - 4) + " "
+            o.append(_mv(r1 + 2 + i, c1) + b + "║" + _reset()
+                     + pad + b + "║" + _reset())
+        # bottom
+        o.append(_mv(r1 + 2 + len(lines), c1) + b + "╚" + "═" * (w - 2)
+                 + "╝" + _reset())
+        return "".join(o)
+
+
+# ── Main editor ────────────────────────────────────────────────────────────────
+class ANEdit:
+    def __init__(self, session, lines: list, subject: str = "",
+                 draft_path: str = "", theme_idx: int = 0):
+        self.session    = session
+        self.lines      = lines if lines else [""]
+        self.subject    = subject
+        self.draft_path = draft_path
+        self._tidx      = theme_idx % len(_THEMES)
+        self._scr       = _Screen(_THEMES[self._tidx])
+
+        self.cy         = 0
+        self.cx         = 0
+        self.scroll     = 0
+        self.overwrite  = False
+        self.modified   = False
+
+        self._mark:  Optional[tuple] = None   # (y, x) anchor, or None
+        self._clip:  list            = []     # clipboard lines
+        self._undo   = _UndoStack(self.lines)
+        self._keys   = _Keys()
+
+        self._find_q    = ""
+        self._repl_q    = ""
+        self._find_case = False
+
+        self._flash_msg  = ""
+        self._flash_time = 0.0
+        self._last_save  = time.time()
+        self._typing_run = False   # True while user is in a continuous typing run
+
+        # Dirty flags
+        self._df = True   # frame
+        self._dt = True   # text
+        self._ds = True   # status
+        self._dc = True   # cursor
+
+        self.done    = False   # user submitted
+        self.aborted = False   # user aborted
+
+    # ── I/O ────────────────────────────────────────────────────────────────────
+    async def _wr(self, text: str):
+        try:
+            await self.session.write(text)
+        except Exception:
+            pass
+
+    async def _read_key(self) -> Optional[str]:
+        k = self._keys.next()
+        if k is not None:
+            return k
+        try:
+            data = await asyncio.wait_for(self.session.read_raw(64), timeout=0.08)
+            if data:
+                self._keys.feed(data)
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            pass
+        k = self._keys.next()
+        if k is not None:
+            return k
+        # ESC disambiguation
+        if self._keys._buf == b'\x1b':
+            try:
+                data = await asyncio.wait_for(self.session.read_raw(8), timeout=0.09)
+                if data:
+                    self._keys.feed(data)
+            except asyncio.TimeoutError:
+                self._keys._buf = b''
+                return 'ESC'
+            except Exception:
+                self._keys._buf = b''
+                return 'ESC'
+        return self._keys.next()
+
+    # ── Flash message ──────────────────────────────────────────────────────────
+    def _flash(self, msg: str):
+        self._flash_msg  = msg
+        self._flash_time = time.time()
+        self._ds = True
+
+    # ── Entry / exit ───────────────────────────────────────────────────────────
+    async def run(self) -> Optional[str]:
+        await self._wr(_alt_on() + _cls() + _hide())
+        # Check for recoverable draft
+        draft_loaded = False
+        if self.draft_path and os.path.exists(self.draft_path):
+            if not any(self.lines) or self.lines == [""]:
+                try:
+                    with open(self.draft_path, encoding='utf-8', errors='replace') as f:
+                        saved = [l.rstrip('\r\n') for l in f.readlines()]
+                    if saved:
+                        self.lines = saved
+                        draft_loaded = True
+                except Exception:
+                    pass
+        if draft_loaded:
+            self._flash("Draft recovered — Ctrl+S to keep, Ctrl+Q to discard")
+
+        self._df = self._dt = self._ds = self._dc = True
+        try:
+            while not self.done and not self.aborted:
+                await self._redraw()
+                key = await self._read_key()
+                if key:
+                    # End typing run on any non-printable key
+                    if not (len(key) == 1 and (key.isprintable() or key == ' ')):
+                        self._typing_run = False
+                    await self._handle(key)
+                # Flash timeout
+                if self._flash_msg and time.time() - self._flash_time > 2.5:
+                    self._flash_msg = ""
+                    self._ds = True
+                # Auto-save draft every 30 s if modified
+                if (self.modified and self.draft_path
+                        and time.time() - self._last_save > 30):
+                    self._save_draft()
+        finally:
+            await self._wr(_alt_off() + _show() + _reset() + "\r\n")
+
+        if self.done:
+            if self.draft_path and os.path.exists(self.draft_path):
+                try:
+                    os.remove(self.draft_path)
+                except Exception:
+                    pass
+            return "\r\n".join(self.lines)
+        return None
+
+    # ── Redraw ─────────────────────────────────────────────────────────────────
+    async def _redraw(self):
+        out = []
+        if self._df:
+            out.append(self._scr.draw_frame(self.subject, self.modified))
+            self._dt = self._ds = True
+            self._df = False
+        if self._dt:
+            out.append(self._scr.draw_text(
+                self.lines, self.scroll, self._mark, self.cy, self.cx))
+            self._dt = False
+        if self._ds:
+            fm = self._flash_msg if self._flash_msg else ""
+            out.append(self._scr.draw_status(
+                self.cy, self.cx, len(self.lines),
+                self._word_count(), self._char_count(),
+                self.overwrite, self.modified,
+                _THEMES[self._tidx]['name'], fm))
+            self._ds = False
+        if self._dc or out:
+            out.append(self._scr.move_cursor(self.cy, self.cx, self.scroll))
+            self._dc = False
+        if out:
+            await self._wr("".join(out))
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+    def _word_count(self) -> int:
+        text = " ".join(self.lines)
+        return len(text.split()) if text.strip() else 0
+
+    def _char_count(self) -> int:
+        return sum(len(l) for l in self.lines)
+
+    # ── Scroll helper ──────────────────────────────────────────────────────────
+    def _ensure_visible(self):
+        if self.cy < self.scroll:
+            self.scroll = self.cy
+            self._dt = True
+        elif self.cy >= self.scroll + _TEXT_H:
+            self.scroll = self.cy - _TEXT_H + 1
+            self._dt = True
+        self._dc = True
+
+    # ── Navigation ─────────────────────────────────────────────────────────────
+    def _clamp_cx(self):
+        self.cx = min(self.cx, len(self.lines[self.cy]))
+
+    def _up(self):
+        if self.cy > 0:
+            self.cy -= 1
+            self._clamp_cx()
+            self._ensure_visible()
+
+    def _down(self):
+        if self.cy < len(self.lines) - 1:
+            self.cy += 1
+            self._clamp_cx()
+            self._ensure_visible()
+
+    def _left(self):
+        if self.cx > 0:
+            self.cx -= 1
+        elif self.cy > 0:
+            self.cy -= 1
+            self.cx = len(self.lines[self.cy])
+            self._ensure_visible()
+        self._dc = True
+
+    def _right(self):
+        line = self.lines[self.cy]
+        if self.cx < len(line):
+            self.cx += 1
+        elif self.cy < len(self.lines) - 1:
+            self.cy += 1
+            self.cx = 0
+            self._ensure_visible()
+        self._dc = True
+
+    def _home(self):
+        # Toggle: first non-space, then col 0
+        line    = self.lines[self.cy]
+        first_c = len(line) - len(line.lstrip())
+        self.cx = 0 if self.cx != first_c else 0
+        self.cx = first_c if self.cx == 0 and first_c != 0 else 0
+        self._dc = True
+
+    def _end(self):
+        self.cx = len(self.lines[self.cy])
+        self._dc = True
+
+    def _pgup(self):
+        self.cy     = max(0, self.cy - _TEXT_H)
+        self.scroll = max(0, self.scroll - _TEXT_H)
+        self._clamp_cx()
+        self._dt = self._dc = True
+
+    def _pgdn(self):
+        last        = len(self.lines) - 1
+        self.cy     = min(last, self.cy + _TEXT_H)
+        self.scroll = max(0, min(self.cy - _TEXT_H + 1,
+                                  len(self.lines) - _TEXT_H))
+        self._clamp_cx()
+        self._dt = self._dc = True
+
+    def _doc_start(self):
+        self.cy = self.cx = self.scroll = 0
+        self._dt = self._dc = True
+
+    def _doc_end(self):
+        self.cy = len(self.lines) - 1
+        self.cx = len(self.lines[self.cy])
+        self._ensure_visible()
+
+    def _word_left(self):
+        if self.cx > 0:
+            line = self.lines[self.cy]
+            i = self.cx - 1
+            while i > 0 and line[i - 1].isspace():
+                i -= 1
+            while i > 0 and not line[i - 1].isspace():
+                i -= 1
+            self.cx = i
+        elif self.cy > 0:
+            self.cy -= 1
+            self.cx = len(self.lines[self.cy])
+            self._ensure_visible()
+        self._dc = True
+
+    def _word_right(self):
+        line = self.lines[self.cy]
+        i    = self.cx
+        while i < len(line) and not line[i].isspace():
+            i += 1
+        while i < len(line) and line[i].isspace():
+            i += 1
+        if i <= len(line):
+            self.cx = i
+        elif self.cy < len(self.lines) - 1:
+            self.cy += 1
+            self.cx = 0
+            self._ensure_visible()
+        self._dc = True
+
+    # ── Editing primitives ─────────────────────────────────────────────────────
+    def _push_undo(self):
+        self._undo.push(self.lines)
+
+    def _mark_modified(self):
+        self.modified = True
+        self._ds = self._dc = True
+
+    def _insert_char(self, ch: str):
+        if not self._typing_run:
+            self._push_undo()
+            self._typing_run = True
+        line = self.lines[self.cy]
+        if self.overwrite and self.cx < len(line):
+            self.lines[self.cy] = line[:self.cx] + ch + line[self.cx + 1:]
+        else:
+            self.lines[self.cy] = line[:self.cx] + ch + line[self.cx:]
+        self.cx += 1
+        self._mark_modified()
+        self._dt = True
+        # Word-wrap if needed
+        if len(self.lines[self.cy]) > _TW:
+            self._wrap_line(self.cy)
+
+    def _wrap_line(self, ly: int):
+        line = self.lines[ly]
+        if len(line) <= _TW:
+            return
+        # Find best break point: last space within _TW
+        wp = _TW
+        for i in range(_TW - 1, max(_TW - 25, 0) - 1, -1):
+            if i < len(line) and line[i] == ' ':
+                wp = i
+                break
+        before   = line[:wp].rstrip()
+        overflow = line[wp:].lstrip()
+        self.lines[ly] = before
+
+        if self.cx > wp:
+            # Cursor was in the wrapped-off part
+            self.cy += 1
+            self.cx  = self.cx - wp
+            if self.cx < 0:
+                self.cx = 0
+
+        if ly + 1 < len(self.lines):
+            next_line = self.lines[ly + 1]
+            # Don't merge with a quote line
+            if next_line.lstrip().startswith('>') or next_line == "":
+                self.lines.insert(ly + 1, overflow)
+            else:
+                sep = " " if overflow and next_line else ""
+                self.lines[ly + 1] = overflow + sep + next_line
+        else:
+            self.lines.append(overflow)
+
+        if len(self.lines) > _MAX_LINES:
+            self.lines = self.lines[:_MAX_LINES]
+
+        self._ensure_visible()
+        self._dt = True
+
+    def _insert_newline(self):
+        self._push_undo()
+        self._typing_run = False
+        line = self.lines[self.cy]
+        self.lines[self.cy] = line[:self.cx]
+        self.lines.insert(self.cy + 1, line[self.cx:])
+        self.cy += 1
+        self.cx  = 0
+        self._mark_modified()
+        self._dt = True
+        self._ensure_visible()
+
+    def _backspace(self):
+        if self.cx > 0:
+            if not self._typing_run:
+                self._push_undo()
+            line = self.lines[self.cy]
+            self.lines[self.cy] = line[:self.cx - 1] + line[self.cx:]
+            self.cx -= 1
+            self._typing_run = True
+        elif self.cy > 0:
+            self._push_undo()
+            self._typing_run = False
+            prev      = self.lines[self.cy - 1]
+            curr      = self.lines[self.cy]
+            self.cx   = len(prev)
+            self.lines[self.cy - 1] = prev + curr
+            self.lines.pop(self.cy)
+            self.cy  -= 1
+            self._ensure_visible()
+        self._mark_modified()
+        self._dt = True
+
+    def _delete_char(self):
+        self._push_undo()
+        self._typing_run = False
+        line = self.lines[self.cy]
+        if self.cx < len(line):
+            self.lines[self.cy] = line[:self.cx] + line[self.cx + 1:]
+        elif self.cy < len(self.lines) - 1:
+            self.lines[self.cy] = line + self.lines[self.cy + 1]
+            self.lines.pop(self.cy + 1)
+        self._mark_modified()
+        self._dt = True
+
+    def _delete_line(self):
+        self._push_undo()
+        self._typing_run = False
+        if len(self.lines) > 1:
+            self.lines.pop(self.cy)
+            self.cy = min(self.cy, len(self.lines) - 1)
+        else:
+            self.lines[0] = ""
+        self.cx = min(self.cx, len(self.lines[self.cy]))
+        self._mark_modified()
+        self._dt = True
+        self._ensure_visible()
+        self._flash("Line deleted")
+
+    def _kill_to_eol(self):
+        self._push_undo()
+        self._typing_run = False
+        line = self.lines[self.cy]
+        if self.cx < len(line):
+            self.lines[self.cy] = line[:self.cx]
+        elif self.cy < len(self.lines) - 1:
+            # Join with next line (delete the newline)
+            self.lines[self.cy] = line + self.lines[self.cy + 1]
+            self.lines.pop(self.cy + 1)
+        self._mark_modified()
+        self._dt = True
+
+    def _delete_word(self):
+        self._push_undo()
+        self._typing_run = False
+        line = self.lines[self.cy]
+        i    = self.cx
+        # Skip non-space chars
+        while i < len(line) and not line[i].isspace():
+            i += 1
+        # Skip trailing spaces
+        while i < len(line) and line[i].isspace():
+            i += 1
+        self.lines[self.cy] = line[:self.cx] + line[i:]
+        self._mark_modified()
+        self._dt = True
+
+    def _insert_tab(self):
+        spaces = 4 - (self.cx % 4)
+        for _ in range(spaces):
+            self._insert_char(' ')
+
+    # ── Undo / Redo ────────────────────────────────────────────────────────────
+    def _undo_action(self):
+        result = self._undo.undo()
+        if result is not None:
+            self.lines = result
+            self.cy    = min(self.cy, len(self.lines) - 1)
+            self.cx    = min(self.cx, len(self.lines[self.cy]))
+            self._dt = self._ds = True
+            self._ensure_visible()
+            self._flash("Undo")
+        else:
+            self._flash("Nothing to undo")
+
+    def _redo_action(self):
+        result = self._undo.redo()
+        if result is not None:
+            self.lines = result
+            self.cy    = min(self.cy, len(self.lines) - 1)
+            self.cx    = min(self.cx, len(self.lines[self.cy]))
+            self._dt = self._ds = True
+            self._ensure_visible()
+            self._flash("Redo")
+        else:
+            self._flash("Nothing to redo")
+
+    # ── Block mark / copy / cut / paste ────────────────────────────────────────
+    def _toggle_mark(self):
+        if self._mark is None:
+            self._mark = (self.cy, self.cx)
+            self._flash("Mark set — move cursor, then Ctrl+C/X")
+        else:
+            self._mark = None
+            self._flash("Mark cleared")
+        self._dt = True
+
+    def _sel_bounds(self):
+        if self._mark is None:
+            return None
+        a = self._mark
+        b = (self.cy, self.cx)
+        return min(a, b), max(a, b)
+
+    def _copy_block(self):
+        bounds = self._sel_bounds()
+        if bounds is None:
+            self._flash("No selection — F3 to mark")
+            return
+        (sy, sx), (ey, ex) = bounds
+        self._clip = self._extract(sy, sx, ey, ex)
+        self._mark = None
+        self._dt   = True
+        self._flash(f"Copied {len(self._clip)} line(s)")
+
+    def _cut_block(self):
+        bounds = self._sel_bounds()
+        if bounds is None:
+            self._flash("No selection — F3 to mark")
+            return
+        self._push_undo()
+        (sy, sx), (ey, ex) = bounds
+        self._clip = self._extract(sy, sx, ey, ex)
+        self._delete_range(sy, sx, ey, ex)
+        self._mark = None
+        self._mark_modified()
+        self._dt = True
+        self._flash(f"Cut {len(self._clip)} line(s)")
+
+    def _paste_block(self):
+        if not self._clip:
+            self._flash("Clipboard empty")
+            return
+        self._push_undo()
+        clip = list(self._clip)
+        line = self.lines[self.cy]
+        before = line[:self.cx]
+        after  = line[self.cx:]
+
+        if len(clip) == 1:
+            self.lines[self.cy] = before + clip[0] + after
+            self.cx += len(clip[0])
+        else:
+            self.lines[self.cy] = before + clip[0]
+            for i, cline in enumerate(clip[1:-1], 1):
+                self.lines.insert(self.cy + i, cline)
+            end_idx = self.cy + len(clip) - 1
+            self.lines.insert(end_idx, clip[-1] + after)
+            self.cy = end_idx
+            self.cx = len(clip[-1])
+
+        self._mark_modified()
+        self._dt = True
+        self._ensure_visible()
+        self._flash("Pasted")
+
+    def _extract(self, sy: int, sx: int, ey: int, ex: int) -> list:
+        if sy == ey:
+            return [self.lines[sy][sx:ex]]
+        result = [self.lines[sy][sx:]]
+        for y in range(sy + 1, ey):
+            result.append(self.lines[y])
+        result.append(self.lines[ey][:ex])
+        return result
+
+    def _delete_range(self, sy: int, sx: int, ey: int, ex: int):
+        if sy == ey:
+            line = self.lines[sy]
+            self.lines[sy] = line[:sx] + line[ex:]
+        else:
+            first = self.lines[sy][:sx]
+            last  = self.lines[ey][ex:]
+            self.lines[sy] = first + last
+            del self.lines[sy + 1:ey + 1]
+        self.cy = sy
+        self.cx = sx
+        self._ensure_visible()
+
+    # ── Draft ──────────────────────────────────────────────────────────────────
+    def _save_draft(self):
+        if not self.draft_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.draft_path), exist_ok=True)
+            with open(self.draft_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(self.lines))
+            self._last_save = time.time()
+            self._flash("Draft saved")
+        except Exception:
+            self._flash("Draft save failed")
+
+    # ── Theme ──────────────────────────────────────────────────────────────────
+    def _cycle_theme(self):
+        self._tidx = (self._tidx + 1) % len(_THEMES)
+        self._scr  = _Screen(_THEMES[self._tidx])
+        self._df = self._dt = self._ds = True
+        self._flash(f"Theme: {_THEMES[self._tidx]['name']}")
+
+    # ── Dialogs ────────────────────────────────────────────────────────────────
+    async def _confirm_abort(self) -> bool:
+        """Returns True if the user confirmed abort."""
+        if not self.modified:
+            self.aborted = True
+            return True
+        lines = [
+            "",
+            "  You have unsaved changes.",
+            "  Abort anyway?",
+            "",
+            "  [Y] Yes — abandon message   [N] No — keep editing",
+            "",
+        ]
+        box = self._scr.box("Abort?", lines, 8, 10)
+        await self._wr(box)
+        while True:
+            key = await self._read_key()
+            if key in ('y', 'Y'):
+                self.aborted = True
+                return True
+            elif key in ('n', 'N', 'ESC'):
+                self._df = self._dt = self._ds = True
+                return False
+
+    async def _show_help(self):
+        t  = self._scr.t
+        b  = t['border']
+        hk = t['hint_key']
+        hb = t['hint_bg']
+
+        def kv(k, v):
+            return hk + f"  {k:<18}" + hb + _reset() + t['hint_bg'] + f"{v}"
+
+        rows = [
+            hb + t['border'] + "  MOVEMENT" + " " * 28 + "EDITING" + "  " + _reset(),
+            kv("Arrow keys",   "Move cursor") + "  " + kv("Enter",     "New line"),
+            kv("Home / End",   "Line start/end") + "  " + kv("Backspace",  "Delete left"),
+            kv("PgUp / PgDn", "Scroll 17 rows") + "  " + kv("Del",        "Delete right"),
+            kv("Ctrl+Home/End","Doc start/end") + "  " + kv("Ctrl+Y",     "Delete line"),
+            kv("Ctrl+Left/Rt", "Word left/right") + "  " + kv("Ctrl+K",     "Kill to EOL"),
+            kv("Ins",          "Toggle INS/OVR") + "  " + kv("Ctrl+T",     "Delete word"),
+            kv("Tab",          "Indent 4 spaces") + "  " + kv("Ctrl+N",     "New line below"),
+            "",
+            hb + t['border'] + "  CLIPBOARD" + " " * 25 + "FIND / REPLACE" + "  " + _reset(),
+            kv("F3 / Ctrl+B",  "Start/end mark") + "  " + kv("Ctrl+F",     "Find"),
+            kv("Ctrl+C",       "Copy selection") + "  " + kv("Ctrl+H",     "Find & Replace"),
+            kv("Ctrl+X",       "Cut selection") + "  " + kv("F9",          "Cycle color theme"),
+            kv("Ctrl+V",       "Paste") + "",
+            "",
+            hb + t['border'] + "  MESSAGE" + _reset(),
+            kv("Ctrl+W / F10", "Send message"),
+            kv("Ctrl+S",       "Save draft"),
+            kv("Ctrl+Z",       "Undo"),
+            kv("Ctrl+R",       "Redo"),
+            kv("Esc",          "Abort (will confirm)"),
+            "",
+            hb + "  " + t['info'] + "Press any key to close" + _reset(),
+        ]
+
+        w  = _W - 4
+        o  = [_reset(), _hide()]
+        r1 = 2
+        o.append(_mv(r1, 3) + b + "╔" + "═" * (w - 2) + "╗" + _reset())
+        ttl = " ANEdit v1 — Key Reference ".center(w - 2, "═")
+        o.append(_mv(r1 + 1, 3) + b + "║" + t['title'] + ttl + b + "║" + _reset())
+
+        for i, row in enumerate(rows):
+            content = (row[:w - 4]).ljust(w - 4)
+            o.append(_mv(r1 + 2 + i, 3) + b + "║ " + _reset()
+                     + content + _reset() + b + " ║" + _reset())
+
+        bot = r1 + 2 + len(rows)
+        o.append(_mv(bot, 3) + b + "╚" + "═" * (w - 2) + "╝" + _reset())
+        await self._wr("".join(o))
+
+        while True:
+            key = await self._read_key()
+            if key:
+                break
+
+        self._df = self._dt = self._ds = True
+
+    async def _input_line(self, prompt: str, prefill: str = "") -> Optional[str]:
+        """Single-line input in the hint bar row (row 22)."""
+        t     = self._scr.t
+        value = prefill
+        cur   = len(value)
+        max_w = _TW - len(prompt) - 2
+
+        while True:
+            disp = value[max(0, cur - max_w):cur + max_w]
+            bar  = (t['stat_bg'] + " " + t['stat_hi'] + prompt + " "
+                    + _reset() + t['stat_bg']
+                    + disp.ljust(max_w)[:max_w] + " " + _reset())
+            await self._wr(_mv(22, 2) + _hide() + bar
+                           + _mv(22, len(prompt) + cur - max(0, cur - max_w) + 3)
+                           + _show())
+            key = await self._read_key()
+            if key is None:
+                continue
+            if key == 'ESC':
+                self._ds = True
+                return None
+            if key == 'ENTER':
+                self._ds = True
+                return value
+            if key == 'BACKSPACE' and cur > 0:
+                value = value[:cur - 1] + value[cur:]
+                cur  -= 1
+            elif key == 'DEL' and cur < len(value):
+                value = value[:cur] + value[cur + 1:]
+            elif key == 'LEFT' and cur > 0:
+                cur -= 1
+            elif key == 'RIGHT' and cur < len(value):
+                cur += 1
+            elif key == 'HOME':
+                cur = 0
+            elif key == 'END':
+                cur = len(value)
+            elif len(key) == 1 and (key.isprintable() or key == ' '):
+                value = value[:cur] + key + value[cur:]
+                cur  += 1
+
+    async def _find_dialog(self):
+        q = await self._input_line("Find:", self._find_q)
+        if q is None:
+            return
+        self._find_q = q
+        self._do_find(q, forward=True)
+
+    async def _find_next(self, forward: bool = True):
+        if not self._find_q:
+            await self._find_dialog()
+            return
+        self._do_find(self._find_q, forward)
+
+    def _do_find(self, q: str, forward: bool = True):
+        if not q:
+            return
+        lines = self.lines
+        fq    = q if self._find_case else q.lower()
+        total = len(lines)
+
+        # Search from cursor position
+        start_y = self.cy
+        start_x = self.cx + (1 if forward else 0)
+
+        for delta in range(total + 1):
+            ly = (start_y + delta) % total if forward else (start_y - delta) % total
+            line = lines[ly]
+            haystack = line if self._find_case else line.lower()
+
+            start = (start_x if delta == 0 else 0) if forward else 0
+            idx   = haystack.find(fq, start) if forward else haystack.rfind(fq)
+
+            if idx != -1:
+                self.cy = ly
+                self.cx = idx
+                self._ensure_visible()
+                self._flash(f"Found at line {ly+1}")
+                return
+
+        self._flash(f"'{q}' not found")
+
+    async def _replace_dialog(self):
+        q = await self._input_line("Find:", self._find_q)
+        if q is None:
+            return
+        self._find_q = q
+        r = await self._input_line("Replace with:", self._repl_q)
+        if r is None:
+            return
+        self._repl_q = r
+        self._do_replace_all(q, r)
+
+    def _do_replace_all(self, q: str, r: str):
+        if not q:
+            return
+        count = 0
+        self._push_undo()
+        for i, line in enumerate(self.lines):
+            new_line = (line.replace(q, r) if self._find_case
+                        else re.sub(re.escape(q), r, line, flags=re.IGNORECASE))
+            if new_line != line:
+                self.lines[i] = new_line
+                count += 1
+        if count:
+            self._mark_modified()
+            self._dt = True
+            self._flash(f"Replaced {count} occurrence(s)")
+        else:
+            self._flash(f"'{q}' not found")
+
+    async def _color_picker(self):
+        """Insert a Mystic |XX color code at cursor."""
+        t  = self._scr.t
+        names = ["Black","Blue","Green","Cyan","Red","Magenta",
+                 "Brown","White","Gray","Lt.Blue","Lt.Green","Lt.Cyan",
+                 "Lt.Red","Lt.Mag","Yellow","Br.White"]
+        cmap  = [0,4,2,6,1,5,3,7,8,12,10,14,9,13,11,15]
+        w     = 72
+        r1    = 8
+
+        def render():
+            b  = t['border']
+            o  = [_mv(r1, 4) + b + "╔" + "═"*(w-2) + "╗",
+                  _mv(r1+1, 4) + b + "║" + t['title']
+                  + " Color Code Picker — 0-9,A-F=FG  Shift=BG  Esc=cancel ".center(w-2)
+                  + b + "║"]
+            # FG row
+            fg_row = ""
+            for i, (name, cn) in enumerate(zip(names, cmap)):
+                fg_row += _bg(cn) + _fg(15 if cn < 8 else 0) + f" {i:X}:{name[:7]:<7}" + _reset()
+            o.append(_mv(r1+2, 4) + b + "║ " + _reset() + fg_row[:w-4] + b + " ║")
+            o.append(_mv(r1+3, 4) + b + "╚" + "═"*(w-2) + "╝" + _reset())
+            return "".join(o)
+
+        await self._wr(render())
+        while True:
+            key = await self._read_key()
+            if key is None:
+                continue
+            if key == 'ESC':
+                break
+            ch = key.upper() if len(key) == 1 else None
+            if ch and ch in '0123456789ABCDEF':
+                idx   = int(ch, 16)
+                shift = key != key.lower() and key.isalpha()
+                code  = f"|1{ch}" if shift else f"|0{ch}"
+                for c in code:
+                    self._insert_char(c)
+                self._flash(f"Inserted {code}")
+                break
+        self._df = self._dt = self._ds = True
+
+    # ── Main key dispatcher ────────────────────────────────────────────────────
+    async def _handle(self, key: str):
+        # Navigation (never modify text)
+        nav = {
+            'UP':         self._up,
+            'DOWN':       self._down,
+            'LEFT':       self._left,
+            'RIGHT':      self._right,
+            'HOME':       self._home,
+            'END':        self._end,
+            'PGUP':       self._pgup,
+            'PGDN':       self._pgdn,
+            'CTRL_HOME':  self._doc_start,
+            'CTRL_END':   self._doc_end,
+            'CTRL_LEFT':  self._word_left,
+            'CTRL_RIGHT': self._word_right,
+        }
+        if key in nav:
+            nav[key]()
+            if self._mark is not None:
+                self._dt = True   # redraw selection highlight
+            return
+
+        # Submit / abort
+        if key in ('CTRL_W', 'F10'):
+            self.done = True
+            return
+        if key in ('ESC', 'CTRL_Q'):
+            await self._confirm_abort()
+            return
+
+        # Draft / refresh
+        if key in ('CTRL_S', 'ALT_S'):
+            self._save_draft(); return
+        if key == 'CTRL_L':
+            self._df = self._dt = self._ds = True; return
+
+        # Mode toggle
+        if key == 'INS':
+            self.overwrite = not self.overwrite; self._ds = True; return
+
+        # Theme
+        if key == 'F9':
+            self._cycle_theme(); return
+
+        # Help
+        if key == 'F1':
+            await self._show_help(); return
+
+        # Block
+        if key in ('F3', 'CTRL_B'):
+            self._toggle_mark(); return
+        if key == 'CTRL_C':
+            self._copy_block(); return
+        if key == 'CTRL_X':
+            self._cut_block(); return
+        if key == 'CTRL_V':
+            await self._paste_block() if asyncio.iscoroutinefunction(self._paste_block) else self._paste_block(); return
+
+        # Undo/Redo
+        if key in ('CTRL_Z', 'CTRL_U'):
+            self._undo_action(); return
+        if key == 'CTRL_R':
+            self._redo_action(); return
+
+        # Find / Replace
+        if key == 'CTRL_F':
+            await self._find_dialog(); return
+        if key == 'CTRL_H':
+            await self._replace_dialog(); return
+        if key == 'F2':   # find next
+            self._do_find(self._find_q, forward=True); return
+
+        # Color picker
+        if key == 'F4':
+            await self._color_picker(); return
+
+        # Editing
+        if key == 'ENTER':
+            self._insert_newline(); return
+        if key == 'BACKSPACE':
+            self._backspace(); return
+        if key in ('DEL', 'CTRL_G'):
+            self._delete_char(); return
+        if key == 'CTRL_Y':
+            self._delete_line(); return
+        if key == 'CTRL_K':
+            self._kill_to_eol(); return
+        if key in ('CTRL_D', 'CTRL_T'):
+            self._delete_word(); return
+        if key == 'TAB':
+            self._insert_tab(); return
+        if key == 'CTRL_N':
+            # Insert blank line below cursor
+            self._push_undo()
+            self.lines.insert(self.cy + 1, "")
+            self.cy += 1; self.cx = 0
+            self._mark_modified(); self._dt = True
+            self._ensure_visible(); return
+
+        # Printable character
+        if len(key) == 1 and (key.isprintable() or key == ' '):
+            self._insert_char(key)
+
+
+# ── Quote formatter ────────────────────────────────────────────────────────────
+def _format_quote(raw: str, width: int = 74) -> list:
+    """
+    Wrap a quoted reply into '> ' prefixed lines.
+    Strips existing quote markers to avoid deep >>>>> nesting.
+    """
+    lines_out = []
+    for para in raw.split('\n'):
+        para = para.rstrip('\r')
+        # Strip existing quote prefixes
+        clean = para
+        while clean.lstrip().startswith('>'):
+            clean = clean.lstrip()[1:].lstrip()
+        if not clean.strip():
+            lines_out.append('>')
+            continue
+        # Word-wrap at (width - 2) to leave room for '> '
+        avail = width - 2
+        words = clean.split()
+        line  = '> '
+        for w in words:
+            if len(line) + len(w) + 1 > width and line != '> ':
+                lines_out.append(line.rstrip())
+                line = '> ' + w + ' '
+            else:
+                line += w + ' '
+        if line != '> ':
+            lines_out.append(line.rstrip())
+    return lines_out
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+async def launch_anedit(session, quote: str = "", subject: str = "",
+                         username: str = "guest") -> Optional[str]:
+    """
+    Launch the ANEdit full-screen terminal message editor.
+
+    Args:
+        session:  BBS session object with .write(str) and .read_raw(n).
+        quote:    Optional quoted text to pre-fill (reply scenario).
+        subject:  Message subject shown in the title bar.
+        username: BBS username — used to locate the draft file.
+
+    Returns:
+        The composed message as a string, or None if the user aborted.
+    """
+    # Build initial line list
+    if quote:
+        q_lines = _format_quote(quote)
+        lines   = q_lines + ["", ""]
+        # Start cursor at the blank line below the quote
+        start_y = len(q_lines) + 1
+    else:
+        lines   = [""]
+        start_y = 0
+
+    # Draft path
+    try:
+        here  = os.path.dirname(os.path.abspath(__file__))
+        root  = os.path.abspath(os.path.join(here, '..', '..'))
+        ddir  = os.path.join(root, 'data', 'anedit', 'drafts')
+        dpath = os.path.join(ddir, f"{username}.txt")
+    except Exception:
+        dpath = ""
+
+    editor = ANEdit(session, lines, subject=subject,
+                    draft_path=dpath, theme_idx=0)
+    editor.cy = min(start_y, len(editor.lines) - 1)
+    editor.cx = 0
+
+    return await editor.run()

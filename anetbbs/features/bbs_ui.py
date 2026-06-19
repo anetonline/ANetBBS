@@ -1754,25 +1754,54 @@ class _ComposeMixin:
 
 async def _post_compose(self, board_id, board_name, parent_id=None):
     from anetbbs.models import db, Post
+    from .ansi_ui import banner, FG, RESET, BOLD
+    from .anedit import launch_anedit
+
+    # Gather quote text when replying
+    quote = ""
+    subject_default = ""
     if parent_id:
-        await self.session.write(f"\r\n=== Reply to thread in {board_name} ===\r\n")
+        with _app().app_context():
+            parent = Post.query.get(parent_id)
+            if parent:
+                quote = parent.content or ""
+                subject_default = parent.subject or ""
+                if not subject_default.lower().startswith('re:'):
+                    subject_default = f"Re: {subject_default}"
+
+    await self.session.write('\x1b[2J\x1b[H')
+    if parent_id:
+        await self.session.write(banner(f'Reply — {board_name}'))
     else:
-        await self.session.write(f"\r\n=== New thread in {board_name} ===\r\n")
-    subject = (await self.session.read_line("Subject: ") or '').strip()
+        await self.session.write(banner(f'New Thread — {board_name}'))
+
+    prompt_subj = (f"  {FG['cyan']}Subject{RESET}"
+                   + (f" [{subject_default[:40]}]" if subject_default else "")
+                   + f"{FG['cyan']}:{RESET} ")
+    subject = (await self.session.read_line(prompt_subj) or '').strip()
+    if not subject and subject_default:
+        subject = subject_default
     if not subject:
-        await self.session.write("Cancelled (empty subject).\r\n")
+        await self.session.write(f"  {FG['gry']}Cancelled (empty subject).{RESET}\r\n")
+        await self.session.read_line("  Press Enter...")
         return
-    body = await _ComposeMixin._read_body(self)
+
+    username = self.session.user.get('username', 'guest')
+    body = await launch_anedit(self.session, quote=quote,
+                               subject=subject, username=username)
     if body is None:
-        await self.session.write("Aborted.\r\n")
+        await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+        await self.session.read_line("  Press Enter...")
         return
+
     with _app().app_context():
         p = Post(board_id=board_id, author_id=self.session.user['id'],
                  parent_id=parent_id, subject=subject[:200], content=body)
         db.session.add(p)
         db.session.commit()
-    await self.session.write(f"\r\nPosted (id={p.id}).\r\n")
-    await self.session.read_line("\r\nPress Enter...")
+    await self.session.write(
+        f"\r\n  {FG['grn']}{BOLD}[OK]{RESET} Posted (#{p.id}).\r\n")
+    await self.session.read_line("\r\n  Press Enter...")
 BBSMenuUI._post_compose = _post_compose
 
 
@@ -1792,20 +1821,23 @@ async def _send_pm(self):
             await self.session.read_line("Press Enter...")
             return
         recipient_id = recipient.id
-    subject = (await self.session.read_line("Subject: ") or '').strip()
+    subject = (await self.session.read_line(f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
     if not subject:
         return
-    body = await _ComposeMixin._read_body(self)
+    from .anedit import launch_anedit
+    username = self.session.user.get('username', 'guest')
+    body = await launch_anedit(self.session, subject=subject, username=username)
     if body is None:
-        await self.session.write("Aborted.\r\n")
+        await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+        await self.session.read_line("  Press Enter...")
         return
     with _app().app_context():
         pm = PrivateMessage(sender_id=self.session.user['id'], recipient_id=recipient_id,
                             subject=subject[:200], body=body)
         db.session.add(pm)
         db.session.commit()
-    await self.session.write(f"\r\nSent to {to_username}.\r\n")
-    await self.session.read_line("Press Enter...")
+    await self.session.write(f"\r\n  {FG['grn']}{BOLD}[OK]{RESET} Sent to {to_username}.\r\n")
+    await self.session.read_line("  Press Enter...")
 BBSMenuUI.send_pm = _send_pm
 
 
@@ -1857,10 +1889,14 @@ async def _compose_echomail(self):
         f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
     if not subject:
         return
-    body = await _ComposeMixin._read_body(self)
+    from .anedit import launch_anedit
+    username = self.session.user.get('username', 'guest')
+    body = await launch_anedit(self.session, subject=subject, username=username)
     if body is None:
+        await self.session.write(
+            f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+        await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
         return
-    username = self.session.user['username']
     with _app().app_context():
         em = EchomailMessage(
             area_id=area[0],
@@ -1934,6 +1970,7 @@ BBSMenuUI.change_password = _change_password
 # Override list_threads to add 'N' for new thread + 'R' from inside read_thread
 async def _list_threads_v2(self, board_id, board_name):
     from anetbbs.models import Post, User
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
     while True:
         with _app().app_context():
             threads = (Post.query
@@ -1946,14 +1983,23 @@ async def _list_threads_v2(self, board_id, board_name):
                 t_list.append((t.id, t.subject, author.username if author else '?',
                                t.created_at, t.replies.count()))
 
-        await self.session.write(f"\r\n=== {board_name} (latest 50) ===\r\n\r\n")
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner(board_name))
         if not t_list:
-            await self.session.write("  (no threads yet)\r\n")
+            await self.session.write(f"  {FG['gry']}(no threads yet){RESET}\r\n")
         for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
             ts = when.strftime('%m-%d %H:%M') if when else '?'
-            line = f"  {i:2d}. [{n_replies:2d}] {subj[:35]:<35} by {who[:12]:<12} {ts}"
-            await self.session.write(line + "\r\n")
-        choice = (await self.session.read_line("\r\nNumber to read, N=new thread, Q=back: ") or '').strip()
+            rep = f"[{n_replies}]" if n_replies else "   "
+            await self.session.write(
+                f"  {FG['yel']}{BOLD}{i:2d}{RESET}"
+                f"{FG['gry']}.{RESET} "
+                f"{FG['cyan']}{rep:<5}{RESET}"
+                f"{FG['wht']}{subj[:35]:<35}{RESET}  "
+                f"{FG['grn']}{who[:14]:<14}{RESET}"
+                f"{FG['gry']}{ts}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        choice = (await self.session.read_line(
+            _prompt('Number / N=new / Q=back: ')) or '').strip()
         u = choice.upper()
         if u == 'Q' or not choice:
             return
@@ -1971,6 +2017,7 @@ BBSMenuUI.list_threads = _list_threads_v2
 
 async def _read_thread_v2(self, post_id, board_id, board_name):
     from anetbbs.models import Post, User
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
     with _app().app_context():
         root = Post.query.get(post_id)
         if not root:
@@ -1982,17 +2029,27 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
             rendered.append({
                 'subject': p.subject, 'author': author.username if author else '?',
                 'when': p.created_at, 'content': p.content,
+                'pid': p.id,
             })
-    await self.session.write("\r\n" + "═" * 64 + "\r\n")
+    await self.session.write('\x1b[2J\x1b[H')
+    await self.session.write(banner(f'{board_name} — {rendered[0]["subject"][:40]}'))
     for i, p in enumerate(rendered):
         ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
-        tag = '[OP]' if i == 0 else f'[Reply {i}]'
-        await self.session.write(f"\r\n{tag} {p['subject']}\r\n")
-        await self.session.write(f"From: {p['author']}    Date: {ts}\r\n")
-        await self.session.write("─" * 64 + "\r\n")
+        tag = f"{FG['yel']}{BOLD}[OP]{RESET}" if i == 0 else f"{FG['gry']}[Reply {i}]{RESET}"
+        await self.session.write(
+            f"\r\n{tag}  "
+            f"{FG['cyan']}{BOLD}{p['subject']}{RESET}\r\n"
+            f"  {FG['grn']}From:{RESET} {p['author']:<16}"
+            f"  {FG['gry']}Date:{RESET} {ts}\r\n"
+            f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
         for line in (p['content'] or '').splitlines():
-            await self.session.write(line[:78] + "\r\n")
-    choice = (await self.session.read_line("\r\nR=reply, Enter=back: ") or '').strip().upper()
+            if line.lstrip().startswith('>'):
+                await self.session.write(f"  {FG['gry']}{line[:76]}{RESET}\r\n")
+            else:
+                await self.session.write(f"  {line[:76]}\r\n")
+    await self.session.write('\r\n' + footer() + '\r\n')
+    choice = (await self.session.read_line(
+        _prompt('R=reply  Enter=back: ')) or '').strip().upper()
     if choice == 'R':
         await self._post_compose(board_id, board_name, parent_id=post_id)
 BBSMenuUI.read_thread_v2 = _read_thread_v2

@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-6">
+    <div class="col-md-7">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-person-plus"></i> Register
@@ -12,62 +12,78 @@
             <div class="card-body">
                 <form method="POST" action="{{ url_for('auth.register') }}">
                     {{ form.hidden_tag() }}
-                    
+
                     <div class="mb-3">
                         {{ form.username.label(class="form-label") }}
                         {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}
                         {% if form.username.errors %}
-                            <div class="invalid-feedback">
-                                {% for error in form.username.errors %}
-                                    {{ error }}
-                                {% endfor %}
-                            </div>
+                            <div class="invalid-feedback">{% for e in form.username.errors %}{{ e }}{% endfor %}</div>
                         {% endif %}
                     </div>
-                    
+
                     <div class="mb-3">
                         {{ form.email.label(class="form-label") }}
                         {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else "")) }}
                         {% if form.email.errors %}
-                            <div class="invalid-feedback">
-                                {% for error in form.email.errors %}
-                                    {{ error }}
-                                {% endfor %}
-                            </div>
+                            <div class="invalid-feedback">{% for e in form.email.errors %}{{ e }}{% endfor %}</div>
                         {% endif %}
                     </div>
-                    
+
                     <div class="mb-3">
                         {{ form.password.label(class="form-label") }}
                         {{ form.password(class="form-control" + (" is-invalid" if form.password.errors else "")) }}
                         {% if form.password.errors %}
-                            <div class="invalid-feedback">
-                                {% for error in form.password.errors %}
-                                    {{ error }}
-                                {% endfor %}
-                            </div>
+                            <div class="invalid-feedback">{% for e in form.password.errors %}{{ e }}{% endfor %}</div>
                         {% endif %}
                     </div>
-                    
-                    <div class="mb-3">
+
+                    <div class="mb-4">
                         {{ form.password2.label(class="form-label") }}
                         {{ form.password2(class="form-control" + (" is-invalid" if form.password2.errors else "")) }}
                         {% if form.password2.errors %}
-                            <div class="invalid-feedback">
-                                {% for error in form.password2.errors %}
-                                    {{ error }}
-                                {% endfor %}
-                            </div>
+                            <div class="invalid-feedback">{% for e in form.password2.errors %}{{ e }}{% endfor %}</div>
                         {% endif %}
                     </div>
-                    
-                    <div class="d-grid gap-2">
+
+                    <hr>
+                    <p class="small text-muted mb-3">
+                        <i class="bi bi-shield-lock"></i>
+                        Choose <strong>3 security questions</strong> — used to verify your identity if you forget your password.
+                        Pick questions only you know the answer to.
+                    </p>
+
+                    {% for n, q_field, a_field in [
+                        (1, form.question_1, form.answer_1),
+                        (2, form.question_2, form.answer_2),
+                        (3, form.question_3, form.answer_3),
+                    ] %}
+                    <div class="card mb-3 border-secondary">
+                        <div class="card-body py-3">
+                            <div class="mb-2">
+                                <label class="form-label fw-semibold small">Security Question {{ n }}</label>
+                                {{ q_field(class="form-select form-select-sm" + (" is-invalid" if q_field.errors else "")) }}
+                                {% if q_field.errors %}
+                                    <div class="invalid-feedback">{% for e in q_field.errors %}{{ e }}{% endfor %}</div>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <label class="form-label small">Your Answer</label>
+                                {{ a_field(class="form-control form-control-sm" + (" is-invalid" if a_field.errors else ""),
+                                           placeholder="Answer (not case-sensitive)") }}
+                                {% if a_field.errors %}
+                                    <div class="invalid-feedback">{% for e in a_field.errors %}{{ e }}{% endfor %}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    <div class="d-grid gap-2 mt-3">
                         {{ form.submit(class="btn btn-primary") }}
                     </div>
                 </form>
-                
-                <hr style="border-color: #00ff00;">
-                
+
+                <hr>
                 <p class="text-center mb-0">
                     Already have an account? <a href="{{ url_for('auth.login') }}">Login here</a>
                 </p>

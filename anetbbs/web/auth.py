@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 from flask import (Blueprint, render_template, redirect, url_for, flash,
                    request, current_app, session as flask_session)
 from flask_login import login_user, logout_user, login_required, current_user
-from wtforms import StringField, PasswordField, SubmitField
+from wtforms import StringField, PasswordField, SubmitField, SelectField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
-                      UserActivity, UserSecurityAnswer)
+                      UserActivity, UserSecurityAnswer, SECURITY_QUESTIONS)
 from ..features.rate_limit import rate_limit
 
 
@@ -90,7 +90,7 @@ class LoginForm(FlaskForm):
 class RegisterForm(FlaskForm):
     """Registration form"""
     username = StringField('Username', validators=[
-        DataRequired(), 
+        DataRequired(),
         Length(min=3, max=80, message='Username must be between 3 and 80 characters')
     ])
     email = StringField('Email', validators=[DataRequired(), Email()])
@@ -102,17 +102,37 @@ class RegisterForm(FlaskForm):
         DataRequired(),
         EqualTo('password', message='Passwords must match')
     ])
+    question_1 = SelectField('Security Question 1', validators=[DataRequired()])
+    answer_1   = StringField('Answer 1', validators=[DataRequired(), Length(min=2, max=200)])
+    question_2 = SelectField('Security Question 2', validators=[DataRequired()])
+    answer_2   = StringField('Answer 2', validators=[DataRequired(), Length(min=2, max=200)])
+    question_3 = SelectField('Security Question 3', validators=[DataRequired()])
+    answer_3   = StringField('Answer 3', validators=[DataRequired(), Length(min=2, max=200)])
     submit = SubmitField('Register')
-    
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [(q, q) for q in SECURITY_QUESTIONS]
+        self.question_1.choices = choices
+        self.question_2.choices = choices
+        self.question_3.choices = choices
+
     def validate_username(self, field):
-        """Check if username already exists"""
         if User.query.filter_by(username=field.data).first():
             raise ValidationError('Username already taken. Please choose a different one.')
-    
+
     def validate_email(self, field):
-        """Check if email already exists"""
         if User.query.filter_by(email=field.data).first():
             raise ValidationError('Email already registered. Please use a different one.')
+
+    def validate_question_2(self, field):
+        if field.data and field.data == self.question_1.data:
+            raise ValidationError('Please choose a different question.')
+
+    def validate_question_3(self, field):
+        if field.data and (field.data == self.question_1.data
+                           or field.data == self.question_2.data):
+            raise ValidationError('Please choose a different question.')
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -262,6 +282,23 @@ def register():
             success=True,
             user_agent=(request.headers.get('User-Agent') or '')[:255],
         ))
+        db.session.flush()   # get user.id before saving answers
+
+        # Save security questions chosen during registration
+        for i, (q_field, a_field) in enumerate([
+            (form.question_1, form.answer_1),
+            (form.question_2, form.answer_2),
+            (form.question_3, form.answer_3),
+        ], 1):
+            q = (q_field.data or '').strip()
+            a = (a_field.data or '').strip()
+            if q and a and q in SECURITY_QUESTIONS:
+                db.session.add(UserSecurityAnswer(
+                    user_id=user.id,
+                    question=q,
+                    answer_hash=UserSecurityAnswer.hash_answer(a),
+                ))
+
         db.session.commit()
 
         flash(f'Account created successfully! Welcome, {user.username}!', 'success')
