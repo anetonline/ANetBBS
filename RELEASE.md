@@ -1,34 +1,45 @@
-# ANetBBS v1.0a2.131 — ANEdit wired into message boards, PMs, echomail; board/thread coloring
+# ANetBBS v1.0a2.132 — ANEdit CP437 fix; slash /commands replace F-keys
 
 ## Changes
 
-### ANEdit wired into all terminal message composition
+### Bug fix: ANEdit CP437 character encoding
 
-`bbs_ui.py` — all three compose paths now launch ANEdit instead of the old
-line-by-line "enter your text, end with `.`" prompt:
+Title bar and status bar used `●` (U+25CF) and `○` (U+25CB) for the
+modified/clean indicator. Neither character is in the CP437 code page, so they
+displayed as `?` on telnet/SSH terminals running in IBM PC character mode.
 
-- **Board posts / replies** (`_post_compose`) — full ANEdit editor. Reply flow
-  fetches the parent post's body, passes it as quote text (pre-formatted with `> `
-  prefixes and word-wrap), and pre-fills the subject with `Re: <original subject>`.
-- **Private messages** (`_send_pm`) — full ANEdit editor.
-- **Echomail** (`_compose_echomail`) — full ANEdit editor.
+Replaced with:
+- `■` (U+25A0, CP437 0xFE) — modified indicator
+- `·` (U+00B7, CP437 0xFA) — clean indicator
 
-### Thread list now fully colorized
+Also fixed em-dash `—` (U+2014, not in CP437) in flash messages and the help
+overlay box title — replaced with plain hyphens.
 
-`_list_threads_v2` — board message list now clears the screen, shows the
-board-name banner, and renders each thread row with ANSI color:
-- Yellow bold index number
-- Cyan reply count badge
-- White subject
-- Green author
-- Grey timestamp and separator
+### New: Slash /commands as primary command interface
 
-### Thread reader now fully colorized
+F-keys are unreliable over SSH (key code sequences vary by terminal emulator,
+and many SSH clients silently swallow them). ANEdit now treats `/` typed at
+column 0 as a command prefix, matching BBS convention.
 
-`_read_thread_v2` — full ANSI treatment for reading posts:
-- Yellow `[OP]` / grey `[Reply N]` tags
-- Cyan bold subject line
-- Green author name, grey date
-- Grey separator line
-- Quoted lines (starting with `>`) rendered in grey to distinguish from body text
-- Footer + colored prompt at bottom
+**How it works:** type `/` at the start of a line → a command prompt appears on
+the status bar row → type the command word + Enter/Tab → command executes.
+Unrecognized commands fall back to inserting the typed text.
+
+**Command table:**
+
+| Command | Action |
+|---------|--------|
+| `/?` or `/help` | Help overlay |
+| `/t` or `/theme` | Cycle color theme (Cyan/Green/Amber) |
+| `/m` or `/mark` | Toggle block mark |
+| `/cc` or `/color` | Color code picker (Mystic \|XX codes) |
+| `/find` or `/f` | Find dialog |
+| `/replace` or `/r` | Find & Replace |
+| `/undo` or `/u` or `/z` | Undo |
+| `/redo` | Redo |
+| `/save` or `/s` | Save draft |
+| `/send` or `/w` | Send/submit message |
+| `/q` or `/quit` or `/abort` | Abort (with confirmation) |
+
+F-keys (F1, F3, F9, F10) retained as secondary bindings for terminals that
+support them. Hint bar and help overlay updated to show slash commands.

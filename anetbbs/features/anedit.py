@@ -242,7 +242,7 @@ class _Screen:
         # Row 1: top border + title
         tag   = " ANEdit v1 "
         subj  = f" {subject[:30]} " if subject else ""
-        mid   = f"{tag}{'●' if modified else '○'}{subj}"
+        mid   = f"{tag}{'■' if modified else '·'}{subj}"
         pad   = W - 2 - len(mid)
         lp    = "═" * (pad // 2)
         rp    = "═" * (pad - pad // 2)
@@ -266,8 +266,8 @@ class _Screen:
 
         # Row 23: bottom border + hints
         hints = (
-            f" F1:Help  ^W:Send  ^S:Draft  ^F:Find  "
-            f"F3:Mark  ^Z:Undo  ^R:Redo  F9:Theme "
+            f" /?:Help  ^W:Send  ^S:Draft  ^F:Find  "
+            f"/m:Mark  ^Z:Undo  ^R:Redo  /t:Theme "
         )
         ph  = W - 2 - len(hints)
         rph = "═" * max(ph, 0)
@@ -375,7 +375,7 @@ class _Screen:
                     theme_name: str, flash: str) -> str:
         t     = self.t
         mode  = "OVR" if overwrite else "INS"
-        dirty = "●" if modified else " "
+        dirty = "■" if modified else " "
         ln    = f"Ln:{cy+1}/{total}"
         col   = f"Col:{cx+1}"
         wc    = f"W:{words}"
@@ -532,7 +532,7 @@ class ANEdit:
                 except Exception:
                     pass
         if draft_loaded:
-            self._flash("Draft recovered — Ctrl+S to keep, Ctrl+Q to discard")
+            self._flash("Draft recovered - Ctrl+S to keep, Ctrl+Q to discard")
 
         self._df = self._dt = self._ds = self._dc = True
         try:
@@ -890,7 +890,7 @@ class ANEdit:
     def _toggle_mark(self):
         if self._mark is None:
             self._mark = (self.cy, self.cx)
-            self._flash("Mark set — move cursor, then Ctrl+C/X")
+            self._flash("Mark set - move cursor, then Ctrl+C/X")
         else:
             self._mark = None
             self._flash("Mark cleared")
@@ -906,7 +906,7 @@ class ANEdit:
     def _copy_block(self):
         bounds = self._sel_bounds()
         if bounds is None:
-            self._flash("No selection — F3 to mark")
+            self._flash("No selection - /m to mark, then Ctrl+C/X")
             return
         (sy, sx), (ey, ex) = bounds
         self._clip = self._extract(sy, sx, ey, ex)
@@ -917,7 +917,7 @@ class ANEdit:
     def _cut_block(self):
         bounds = self._sel_bounds()
         if bounds is None:
-            self._flash("No selection — F3 to mark")
+            self._flash("No selection - /m to mark, then Ctrl+C/X")
             return
         self._push_undo()
         (sy, sx), (ey, ex) = bounds
@@ -1008,7 +1008,7 @@ class ANEdit:
             "  You have unsaved changes.",
             "  Abort anyway?",
             "",
-            "  [Y] Yes — abandon message   [N] No — keep editing",
+            "  [Y] Yes - abandon message   [N] No - keep editing",
             "",
         ]
         box = self._scr.box("Abort?", lines, 8, 10)
@@ -1023,54 +1023,91 @@ class ANEdit:
                 return False
 
     async def _show_help(self):
-        t  = self._scr.t
-        b  = t['border']
-        hk = t['hint_key']
-        hb = t['hint_bg']
+        """Full-screen help overlay.
+        Strategy: draw the box with blank inner rows first, then write
+        each content cell using absolute _mv() positioning.  ANSI escape
+        codes in the cell strings never affect the box border positions."""
+        t   = self._scr.t
+        b   = t['border']
+        hk  = t['hint_key']
+        rst = _reset()
 
-        def kv(k, v):
-            return hk + f"  {k:<18}" + hb + _reset() + t['hint_bg'] + f"{v}"
+        # Box: full screen 1-23, cols 1-79
+        BX   = 1; BW = _W; r1 = 1
+        inn  = BW - 2     # 77 usable cols inside ║…║
+        LC   = BX + 2     # left column screen col  (col 3)
+        RC   = BX + 40    # right column screen col (col 41)
 
-        rows = [
-            hb + t['border'] + "  MOVEMENT" + " " * 28 + "EDITING" + "  " + _reset(),
-            kv("Arrow keys",   "Move cursor") + "  " + kv("Enter",     "New line"),
-            kv("Home / End",   "Line start/end") + "  " + kv("Backspace",  "Delete left"),
-            kv("PgUp / PgDn", "Scroll 17 rows") + "  " + kv("Del",        "Delete right"),
-            kv("Ctrl+Home/End","Doc start/end") + "  " + kv("Ctrl+Y",     "Delete line"),
-            kv("Ctrl+Left/Rt", "Word left/right") + "  " + kv("Ctrl+K",     "Kill to EOL"),
-            kv("Ins",          "Toggle INS/OVR") + "  " + kv("Ctrl+T",     "Delete word"),
-            kv("Tab",          "Indent 4 spaces") + "  " + kv("Ctrl+N",     "New line below"),
-            "",
-            hb + t['border'] + "  CLIPBOARD" + " " * 25 + "FIND / REPLACE" + "  " + _reset(),
-            kv("F3 / Ctrl+B",  "Start/end mark") + "  " + kv("Ctrl+F",     "Find"),
-            kv("Ctrl+C",       "Copy selection") + "  " + kv("Ctrl+H",     "Find & Replace"),
-            kv("Ctrl+X",       "Cut selection") + "  " + kv("F9",          "Cycle color theme"),
-            kv("Ctrl+V",       "Paste") + "",
-            "",
-            hb + t['border'] + "  MESSAGE" + _reset(),
-            kv("Ctrl+W / F10", "Send message"),
-            kv("Ctrl+S",       "Save draft"),
-            kv("Ctrl+Z",       "Undo"),
-            kv("Ctrl+R",       "Redo"),
-            kv("Esc",          "Abort (will confirm)"),
-            "",
-            hb + "  " + t['info'] + "Press any key to close" + _reset(),
+        def _blank(r):
+            return _mv(r, BX) + b + "║" + rst + " " * inn + b + "║" + rst
+
+        def _head(r, txt):
+            pad = inn - 1 - len(txt)
+            return (_mv(r, BX) + b + "║" + rst
+                    + " " + hk + txt + rst + " " * max(pad, 0)
+                    + b + "║" + rst)
+
+        def _lc(r, k, v):
+            return _mv(r, LC) + hk + f"{k:<17}" + rst + " " + t['hint_bg'] + v + rst
+
+        def _rc(r, k, v):
+            return _mv(r, RC) + hk + f"{k:<14}" + rst + " " + t['hint_bg'] + v + rst
+
+        # ── Frame ──────────────────────────────────────────────────────────────
+        ttl = " ANEdit v1 - Key Reference "
+        lp  = "═" * ((inn - len(ttl)) // 2)
+        rp  = "═" * (inn - len(ttl) - len(lp))
+        o   = [rst, _hide(), _cls(),
+               _mv(r1, BX) + b + "╔" + lp + t['title'] + ttl + b + rp + "╗" + rst]
+        for r in range(r1 + 1, r1 + 22):
+            o.append(_blank(r))
+        o.append(_mv(r1 + 22, BX) + b + "╚" + "═" * inn + "╝" + rst)
+
+        # ── Section 1: MOVEMENT / EDITING (rows 2-10) ─────────────────────────
+        o.append(_head(r1 + 1, "MOVEMENT" + " " * 22 + "EDITING"))
+        mvmt = [
+            ("Arrow keys",     "Navigate",         "Enter",       "New line"),
+            ("Home / End",     "Line start/end",   "Backspace",   "Delete left"),
+            ("PgUp / PgDn",    "Scroll page",      "Del",         "Delete right"),
+            ("Ctrl+Home/End",  "Doc start/end",    "Ctrl+Y",      "Delete line"),
+            ("Ctrl+Left/Rt",   "Word jump",        "Ctrl+K",      "Kill to EOL"),
+            ("Ins",            "INS/OVR toggle",   "Ctrl+T",      "Delete word"),
+            ("Tab",            "Indent 4 spaces",  "Ctrl+N",      "New line below"),
         ]
+        for i, (lk, lv, rk, rv) in enumerate(mvmt):
+            o.append(_lc(r1 + 2 + i, lk, lv))
+            o.append(_rc(r1 + 2 + i, rk, rv))
 
-        w  = _W - 4
-        o  = [_reset(), _hide()]
-        r1 = 2
-        o.append(_mv(r1, 3) + b + "╔" + "═" * (w - 2) + "╗" + _reset())
-        ttl = " ANEdit v1 — Key Reference ".center(w - 2, "═")
-        o.append(_mv(r1 + 1, 3) + b + "║" + t['title'] + ttl + b + "║" + _reset())
+        # ── Section 2: CLIPBOARD / SLASH COMMANDS (rows 11-18) ────────────────
+        o.append(_head(r1 + 10, "CLIPBOARD" + " " * 20 + "SLASH COMMANDS"))
+        clip = [
+            ("/m  Ctrl+B",   "Block mark on/off",  "/?  /help",    "This help"),
+            ("Ctrl+C",       "Copy selection",      "/t  /theme",   "Cycle theme"),
+            ("Ctrl+X",       "Cut selection",       "/find",        "Find"),
+            ("Ctrl+V",       "Paste",               "/replace",     "Find & replace"),
+            ("Ctrl+F",       "Find",                "/undo  /redo", "Undo / redo"),
+            ("Ctrl+H",       "Find & replace",      "/cc",          "Color codes"),
+        ]
+        for i, (lk, lv, rk, rv) in enumerate(clip):
+            o.append(_lc(r1 + 11 + i, lk, lv))
+            o.append(_rc(r1 + 11 + i, rk, rv))
 
-        for i, row in enumerate(rows):
-            content = (row[:w - 4]).ljust(w - 4)
-            o.append(_mv(r1 + 2 + i, 3) + b + "║ " + _reset()
-                     + content + _reset() + b + " ║" + _reset())
+        # ── Section 3: SEND / ABORT (rows 18-21) ──────────────────────────────
+        o.append(_head(r1 + 18, "SEND / ABORT"))
+        send = [
+            ("Ctrl+W  /send",  "Send/post message",   "Ctrl+Z  /undo", "Undo"),
+            ("Ctrl+S  /save",  "Save draft",           "Ctrl+R  /redo", "Redo"),
+            ("Esc  /q",        "Abort (with confirm)", "/send",         "Also sends"),
+        ]
+        for i, (lk, lv, rk, rv) in enumerate(send):
+            o.append(_lc(r1 + 19 + i, lk, lv))
+            o.append(_rc(r1 + 19 + i, rk, rv))
 
-        bot = r1 + 2 + len(rows)
-        o.append(_mv(bot, 3) + b + "╚" + "═" * (w - 2) + "╝" + _reset())
+        # ── Tip / close hint (row 22) ──────────────────────────────────────────
+        pak = "  Type / at line start for commands (e.g. /?  /t  /m  /send)  --  Press any key to close"
+        pak = pak[:inn]
+        o.append(_mv(r1 + 21, BX) + b + "║" + rst + t['info'] + pak.ljust(inn) + rst + b + "║" + rst)
+
         await self._wr("".join(o))
 
         while True:
@@ -1079,6 +1116,89 @@ class ANEdit:
                 break
 
         self._df = self._dt = self._ds = True
+
+    # ── Slash command entry ────────────────────────────────────────────────────
+    # Triggered when '/' is typed at column 0.  Reads a short command word,
+    # then dispatches or (on no match) inserts the typed text normally.
+    _SLASH_HELP = (
+        " Commands: /? or /help=Help  /t=Theme  /m=Mark  /cc=Colors"
+        "  /find  /replace  /undo  /redo  /save  /send  /q=Abort"
+    )
+    _SLASH_MAP = {
+        '?':       'help',   'help':    'help',
+        't':       'theme',  'theme':   'theme',
+        'm':       'mark',   'mark':    'mark',
+        'cc':      'color',  'color':   'color',
+        'find':    'find',   'f':       'find',
+        'replace': 'replace','r':       'replace',
+        'undo':    'undo',   'u':       'undo',   'z': 'undo',
+        'redo':    'redo',
+        'save':    'save',   's':       'save',
+        'send':    'send',   'w':       'send',
+        'q':       'abort',  'quit':    'abort',  'abort': 'abort',
+    }
+
+    async def _slash_command(self):
+        """Read /command from status bar; dispatch or fall back to text insert."""
+        t    = self._scr.t
+        cmd  = ""
+        max_w = 20
+
+        while True:
+            disp = f"/{cmd}"
+            bar  = (t['stat_bg'] + t['stat_hi'] + " /"
+                    + _reset() + t['stat_bg']
+                    + cmd.ljust(max_w)[:max_w] + "  (ESC=cancel) " + _reset())
+            await self._wr(_mv(22, 2) + _hide() + bar
+                           + _mv(22, len(disp) + 2) + _show())
+            key = await self._read_key()
+            if key is None:
+                continue
+            if key == 'ESC':
+                self._ds = True
+                return
+            if key in ('ENTER', 'TAB', ' '):
+                break
+            if key == 'BACKSPACE':
+                if cmd:
+                    cmd = cmd[:-1]
+                else:
+                    self._ds = True
+                    return
+            elif len(key) == 1 and (key.isprintable() or key == '?'):
+                cmd += key.lower()
+                if len(cmd) > max_w:
+                    break
+
+        self._ds = True
+        action = self._SLASH_MAP.get(cmd.strip())
+        if action == 'help':
+            await self._show_help()
+        elif action == 'theme':
+            self._cycle_theme()
+        elif action == 'mark':
+            self._toggle_mark()
+        elif action == 'color':
+            await self._color_picker()
+        elif action == 'find':
+            await self._find_dialog()
+        elif action == 'replace':
+            await self._replace_dialog()
+        elif action == 'undo':
+            self._undo_action()
+        elif action == 'redo':
+            self._redo_action()
+        elif action == 'save':
+            self._save_draft()
+        elif action == 'send':
+            self.done = True
+        elif action == 'abort':
+            await self._confirm_abort()
+        else:
+            # Not a command — insert the typed characters as text
+            self._flash(f"Unknown command '/{cmd}' - type /? for help")
+            for ch in ('/' + cmd):
+                self._insert_char(ch)
 
     async def _input_line(self, prompt: str, prefill: str = "") -> Optional[str]:
         """Single-line input in the hint bar row (row 22)."""
@@ -1205,7 +1325,7 @@ class ANEdit:
             b  = t['border']
             o  = [_mv(r1, 4) + b + "╔" + "═"*(w-2) + "╗",
                   _mv(r1+1, 4) + b + "║" + t['title']
-                  + " Color Code Picker — 0-9,A-F=FG  Shift=BG  Esc=cancel ".center(w-2)
+                  + " Color Code Picker - 0-9,A-F=FG  Shift=BG  Esc=cancel ".center(w-2)
                   + b + "║"]
             # FG row
             fg_row = ""
@@ -1333,9 +1453,12 @@ class ANEdit:
             self._mark_modified(); self._dt = True
             self._ensure_visible(); return
 
-        # Printable character
+        # Printable character — intercept '/' at col 0 for slash commands
         if len(key) == 1 and (key.isprintable() or key == ' '):
-            self._insert_char(key)
+            if key == '/' and self.cx == 0:
+                await self._slash_command()
+            else:
+                self._insert_char(key)
 
 
 # ── Quote formatter ────────────────────────────────────────────────────────────

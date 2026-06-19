@@ -1,7 +1,18 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.131`** (June 2026). Previous: `v1.0a2.130`.
+separately. Current release: **`v1.0a2.132`** (June 2026). Previous: `v1.0a2.131`.
+
+## v1.0a2.132 — ANEdit: CP437 char fix (■/·); slash /commands replace F-keys (June 2026)
+
+- **CP437 fix** — title bar used `●`/`○` (not in CP437), displayed as `?` on
+  SSH/telnet terminals. Replaced with `■` (CP437 0xFE, modified) and `·` (clean).
+  Also fixed em-dash `—` in flash messages and box titles.
+- **Slash /commands** — F-keys are unreliable over SSH. ANEdit now intercepts `/`
+  typed at column 0 and reads a short command: `/?` or `/help` = help, `/t` = theme,
+  `/m` = mark, `/cc` = color picker, `/find`, `/replace`, `/undo`, `/redo`, `/save`,
+  `/send`, `/q` = abort. Unknown commands fall back to inserting the text. F-keys
+  retained as secondary bindings. Hint bar and help overlay updated.
 
 ## v1.0a2.131 — ANEdit wired into message boards, PMs, echomail; board/thread coloring (June 2026)
 
