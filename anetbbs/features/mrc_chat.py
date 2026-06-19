@@ -362,9 +362,20 @@ class MRCChat(BaseChatSystem):
 
         right_bits = []
         if self._scroll_offset:
-            right_bits.append(f'\x1b[1;7;93m PAUSED+{self._scroll_offset} \x1b[0m')
+            right_bits.append(f'\x1b[1;37;43m PAUSED+{self._scroll_offset} \x1b[0m')
         if self._mention_count:
             right_bits.append(f'\x1b[1;7;91m !{self._mention_count} \x1b[0m')
+        # Character count: show remaining chars out of 140 limit
+        typed = len(self._input_buf)
+        if typed > 0:
+            remaining = 140 - typed
+            if remaining < 0:
+                cc = f'\x1b[1;91m{remaining}\x1b[0m'   # red: over limit
+            elif remaining <= 15:
+                cc = f'\x1b[1;93m{remaining}\x1b[0m'   # yellow: close
+            else:
+                cc = f'\x1b[96m{remaining}\x1b[0m'     # cyan: fine
+            right_bits.append(cc)
         if self._latency_ms is not None:
             right_bits.append(f'\x1b[2;37m{self._latency_ms}ms\x1b[0m')
         if self._is_away:
@@ -779,11 +790,13 @@ class MRCChat(BaseChatSystem):
                     if self._input_buf:
                         self._input_buf.pop()
                         await self._draw_input_line()
+                        await self._draw_status_line()
                     continue
 
                 if ch == b'\x15':   # Ctrl-U: kill line
                     self._input_buf = []
                     await self._draw_input_line()
+                    await self._draw_status_line()
                     continue
 
                 if ch == b'\t':
@@ -801,6 +814,7 @@ class MRCChat(BaseChatSystem):
                 async with self._input_lock:
                     self._input_buf.append(c)
                     await self._draw_input_line()
+                    await self._draw_status_line()
 
         except (ConnectionError, OSError):
             return ''
@@ -863,14 +877,18 @@ class MRCChat(BaseChatSystem):
                 i += 1
             common = common[:i]
         if len(matches) == 1:
-            full = matches[0]
+            full   = matches[0]
             suffix = ': ' if start == 0 else ' '
-            for c in full[len(prefix):] + suffix:
+            # Replace the typed prefix (possibly wrong case) with canonical case
+            del self._input_buf[start:]
+            for c in full + suffix:
                 self._input_buf.append(c)
             await self._draw_input_line()
             return
         if len(common) > len(prefix):
-            for c in common[len(prefix):]:
+            # Partial completion — replace typed prefix with canonical common prefix
+            del self._input_buf[start:]
+            for c in common:
                 self._input_buf.append(c)
             await self._draw_input_line()
             return
@@ -1035,6 +1053,11 @@ class MRCChat(BaseChatSystem):
                     'to_user': target,
                     'message': chunk,
                 })
+            # Local echo so sender sees their own DM in the chat + scrollback
+            await self._emit(
+                f'\x1b[95m[DM \x1b[0m\x1b[1;95m-> {target}\x1b[0m\x1b[95m] '
+                f'\x1b[0m{body}\x1b[0m'
+            )
             return True
 
         if cmd == 'me':

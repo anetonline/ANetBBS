@@ -85,6 +85,39 @@
     </div>
 </form>
 
+{% if custom_fields_list %}
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="custom_fields">
+    <div class="card-header"><i class="bi bi-card-list"></i> Custom Profile Fields</div>
+    <div class="card-body">
+        <div class="row g-2">
+        {% for f in custom_fields_list %}
+            <div class="col-md-6 mb-2">
+                <label class="form-label small">{{ f.label }}{% if f.required %} <span class="text-danger">*</span>{% endif %}</label>
+                {% set val = custom_values.get(f.id, '') %}
+                {% if f.field_type == 'textarea' %}
+                    <textarea name="cf_{{ f.name }}" class="form-control form-control-sm" rows="3">{{ val }}</textarea>
+                {% elif f.field_type == 'select' %}
+                    {% set choices = f.choices | from_json if f.choices else [] %}
+                    <select name="cf_{{ f.name }}" class="form-select form-select-sm">
+                        <option value="">-- select --</option>
+                        {% for c in choices %}
+                        <option value="{{ c }}" {% if val == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                {% else %}
+                    <input type="{{ 'number' if f.field_type == 'number' else 'url' if f.field_type == 'url' else 'text' }}"
+                           name="cf_{{ f.name }}" class="form-control form-control-sm" value="{{ val }}">
+                {% endif %}
+            </div>
+        {% endfor %}
+        </div>
+        <button class="btn btn-primary btn-sm mt-2"><i class="bi bi-save"></i> Save Custom Fields</button>
+    </div>
+</form>
+{% endif %}
+
 <div class="card">
     <div class="card-header"><i class="bi bi-journal-text"></i> Sysop notes ({{ notes | length }})</div>
     <ul class="list-group list-group-flush">

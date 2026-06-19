@@ -14,7 +14,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS
+from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue
 from ..echomail.routing import parse_address
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
@@ -181,6 +181,12 @@ def view_user(username):
     except Exception:
         db.session.rollback()
 
+    custom_fields_list = (UserField.query
+                          .filter_by(show_in_profile=True)
+                          .order_by(UserField.sort_order, UserField.id).all())
+    custom_values = {ufv.field_id: ufv.value
+                     for ufv in UserFieldValue.query.filter_by(user_id=user.id).all()}
+
     return render_template('profile/view.html',
                          user=user,
                          recent_posts=recent_posts,
@@ -188,7 +194,9 @@ def view_user(username):
                          online=online,
                          avatar=avatar,
                          achievements=achievements,
-                         groups=groups)
+                         groups=groups,
+                         custom_fields_list=custom_fields_list,
+                         custom_values=custom_values)
 
 
 @profile_bp.route('/edit', methods=['GET', 'POST'])
@@ -233,6 +241,20 @@ def edit():
                 current_user.avatar_upload = None
             current_user.avatar_url = form.avatar_url.data
 
+        # Save custom field values
+        for cf in UserField.query.all():
+            val = (request.form.get(f'cf_{cf.name}') or '').strip()
+            ufv = (UserFieldValue.query
+                   .filter_by(user_id=current_user.id, field_id=cf.id).first())
+            if val:
+                if ufv:
+                    ufv.value = val[:2000]
+                else:
+                    db.session.add(UserFieldValue(
+                        user_id=current_user.id, field_id=cf.id, value=val[:2000]))
+            elif ufv:
+                db.session.delete(ufv)
+
         db.session.commit()
         flash('Profile updated successfully!', 'success')
         return redirect(url_for('profile.view_user', username=current_user.username))
@@ -251,7 +273,11 @@ def edit():
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)
-    return render_template('profile/edit.html', form=form, themes=themes, avatar=avatar)
+    custom_fields_list = UserField.query.order_by(UserField.sort_order, UserField.id).all()
+    custom_values = {ufv.field_id: ufv.value
+                     for ufv in UserFieldValue.query.filter_by(user_id=current_user.id).all()}
+    return render_template('profile/edit.html', form=form, themes=themes, avatar=avatar,
+                           custom_fields_list=custom_fields_list, custom_values=custom_values)
 
 
 @profile_bp.route('/avatar/remove', methods=['POST'])

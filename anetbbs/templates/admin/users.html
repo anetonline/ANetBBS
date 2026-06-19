@@ -23,6 +23,7 @@
                 <thead>
                     <tr>
                         <th><input type="checkbox" id="select-all"></th>
+                        <th>#</th>
                         <th>Username</th>
                         <th>Email</th>
                         <th>Status</th>
@@ -36,6 +37,7 @@
                     {% for user in users %}
                     <tr>
                         <td><input type="checkbox" name="user_ids" value="{{ user.id }}"></td>
+                        <td class="text-muted small">#{{ user.id }}</td>
                         <td>
                             {{ user.username }}
                             {% if user.is_admin %}<span class="badge bg-warning text-dark">Admin</span>{% endif %}

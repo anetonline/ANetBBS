@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Custom Field - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-card-list"></i> {{ action }} Custom Field</h1>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">{{ action }} Field</div>
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control", placeholder="e.g. location, website, real_name") }}
+                        <small class="text-muted">Lowercase letters, numbers, underscores only. Cannot be changed after creation.</small>
+                        {% if action == 'Edit' and field %}
+                            <div class="mt-1"><code>{{ field.name }}</code> <span class="text-muted small">(fixed)</span></div>
+                        {% endif %}
+                        {% for error in form.name.errors %}
+                            <div class="text-danger">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.label.label(class="form-label") }}
+                        {{ form.label(class="form-control", placeholder="e.g. Location, Website, Real Name") }}
+                        <small class="text-muted">Shown to users on their profile page.</small>
+                        {% for error in form.label.errors %}
+                            <div class="text-danger">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.field_type.label(class="form-label") }}
+                        <select name="field_type" class="form-select" id="field_type_sel" onchange="toggleChoices()">
+                            {% for t in ['text', 'textarea', 'url', 'number', 'select'] %}
+                            <option value="{{ t }}" {% if form.field_type.data == t %}selected{% endif %}>{{ t }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="choices_block" style="display:none">
+                        {{ form.choices.label(class="form-label") }}
+                        {{ form.choices(class="form-control", rows="5", placeholder="One choice per line") }}
+                        <small class="text-muted">One option per line. Only used when Type is <code>select</code>.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.sort_order.label(class="form-label") }}
+                        {{ form.sort_order(class="form-control", style="width:100px") }}
+                        <small class="text-muted">Lower numbers appear first.</small>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        {{ form.required(class="form-check-input") }}
+                        {{ form.required.label(class="form-check-label") }}
+                    </div>
+
+                    <div class="mb-4 form-check">
+                        {{ form.show_in_profile(class="form-check-input") }}
+                        {{ form.show_in_profile.label(class="form-check-label") }}
+                        <div class="form-text text-muted">When enabled, this field appears on public user profiles.</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        {{ form.submit(class="btn btn-primary") }}
+                        <a href="{{ url_for('admin.custom_fields') }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleChoices() {
+    var t = document.getElementById('field_type_sel').value;
+    document.getElementById('choices_block').style.display = (t === 'select') ? '' : 'none';
+}
+// Run on load
+toggleChoices();
+{% if action == 'Edit' %}
+// Lock name field on edit
+document.querySelector('[name="name"]').readOnly = true;
+document.querySelector('[name="name"]').style.color = '#6c757d';
+{% endif %}
+</script>
+{% endblock %}

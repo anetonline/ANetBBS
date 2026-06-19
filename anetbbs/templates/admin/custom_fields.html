@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Custom User Fields - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-card-list"></i> Custom User Fields</h1>
+</div>
+
+<div class="text-end mb-3">
+    <a href="{{ url_for('admin.add_custom_field') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Add Field
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if fields %}
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Name (slug)</th>
+                    <th>Label</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Public</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in fields %}
+                <tr>
+                    <td>{{ f.sort_order }}</td>
+                    <td><code>{{ f.name }}</code></td>
+                    <td>{{ f.label }}</td>
+                    <td>{{ f.field_type }}</td>
+                    <td>
+                        {% if f.required %}
+                            <i class="bi bi-check-circle text-success"></i>
+                        {% else %}
+                            <i class="bi bi-x-circle text-muted"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if f.show_in_profile %}
+                            <i class="bi bi-eye text-success"></i>
+                        {% else %}
+                            <i class="bi bi-eye-slash text-muted"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="{{ url_for('admin.move_custom_field', field_id=f.id, direction='up') }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Move up"><i class="bi bi-arrow-up"></i></button>
+                        </form>
+                        <form method="post" action="{{ url_for('admin.move_custom_field', field_id=f.id, direction='down') }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Move down"><i class="bi bi-arrow-down"></i></button>
+                        </form>
+                        <a href="{{ url_for('admin.edit_custom_field', field_id=f.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+                        <form method="post" action="{{ url_for('admin.delete_custom_field', field_id=f.id) }}" class="d-inline"
+                              onsubmit="return confirm('Delete field \'{{ f.label }}\'? All user values will also be deleted.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="p-4 text-muted text-center">
+            No custom fields defined yet. <a href="{{ url_for('admin.add_custom_field') }}">Add one</a>.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="mt-3 text-muted small">
+    <strong>Types:</strong> <code>text</code> — single-line text &nbsp;|&nbsp;
+    <code>textarea</code> — multi-line text &nbsp;|&nbsp;
+    <code>url</code> — URL with link &nbsp;|&nbsp;
+    <code>number</code> — numeric value &nbsp;|&nbsp;
+    <code>select</code> — dropdown (define choices below)
+</div>
+{% endblock %}

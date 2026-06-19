@@ -25,6 +25,7 @@
                 {% if user.is_admin %}
                     <div><span class="badge bg-warning text-dark mt-1">Admin</span></div>
                 {% endif %}
+                <div class="text-muted small mt-1">User #{{ user.id }}</div>
             </div>
         </div>
 
@@ -44,6 +45,19 @@
                 {% if user.last_login %}
                     <p><i class="bi bi-clock"></i> Last login {{ user.last_login.strftime('%Y-%m-%d') }}</p>
                 {% endif %}
+                {% for cf in custom_fields_list %}
+                    {% set val = custom_values.get(cf.id) %}
+                    {% if val %}
+                        <p>
+                        {% if cf.field_type == 'url' %}
+                            <i class="bi bi-link-45deg"></i> <strong>{{ cf.label }}:</strong>
+                            <a href="{{ val }}" target="_blank" rel="noopener noreferrer">{{ val }}</a>
+                        {% else %}
+                            <strong>{{ cf.label }}:</strong> {{ val }}
+                        {% endif %}
+                        </p>
+                    {% endif %}
+                {% endfor %}
             </div>
         </div>
 

@@ -2417,3 +2417,43 @@ class LoginModule(db.Model):
 
     def __repr__(self):
         return f'<LoginModule {self.id} {self.event_type}:{self.module_type} {self.name!r}>'
+
+
+class UserField(db.Model):
+    """Sysop-defined custom user profile fields.
+
+    field_type values: text | url | number | select | textarea
+    choices: JSON-encoded list of strings (select only), e.g. '["Option A","Option B"]'
+    """
+    __tablename__ = 'user_fields'
+
+    id              = db.Column(db.Integer, primary_key=True)
+    name            = db.Column(db.String(50), unique=True, nullable=False)   # internal slug
+    label           = db.Column(db.String(100), nullable=False)               # display label
+    field_type      = db.Column(db.String(20), default='text', nullable=False)
+    choices         = db.Column(db.Text)                                      # JSON for select
+    required        = db.Column(db.Boolean, default=False, nullable=False)
+    show_in_profile = db.Column(db.Boolean, default=True, nullable=False)
+    sort_order      = db.Column(db.Integer, default=0, nullable=False)
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    values = db.relationship('UserFieldValue', backref='field', lazy='dynamic',
+                              cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<UserField {self.name!r}>'
+
+
+class UserFieldValue(db.Model):
+    """A single user's value for a sysop-defined custom field."""
+    __tablename__ = 'user_field_values'
+
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    field_id = db.Column(db.Integer, db.ForeignKey('user_fields.id'), nullable=False, index=True)
+    value    = db.Column(db.Text)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'field_id', name='uq_user_field'),)
+
+    def __repr__(self):
+        return f'<UserFieldValue user={self.user_id} field={self.field_id}>'

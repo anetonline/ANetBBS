@@ -14,7 +14,8 @@ from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Board, Post, Message, Theme, UserSession,
-                       UserActivity, RegistrationAttempt, PasswordResetToken)
+                       UserActivity, RegistrationAttempt, PasswordResetToken,
+                       UserField, UserFieldValue)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -1667,10 +1668,31 @@ def manage_user(user_id):
                 flash(f'Password reset for {user.username}.', 'success')
             else:
                 flash('Password too short.', 'danger')
+        elif action == 'custom_fields':
+            fields = UserField.query.all()
+            for f in fields:
+                val = (request.form.get(f'cf_{f.name}') or '').strip()
+                ufv = (UserFieldValue.query
+                       .filter_by(user_id=user.id, field_id=f.id).first())
+                if val:
+                    if ufv:
+                        ufv.value = val[:2000]
+                    else:
+                        db.session.add(UserFieldValue(
+                            user_id=user.id, field_id=f.id, value=val[:2000]))
+                elif ufv:
+                    db.session.delete(ufv)
+            db.session.commit()
+            flash('Custom fields saved.', 'success')
         return redirect(url_for('admin.manage_user', user_id=user.id))
 
+    custom_fields_list = UserField.query.order_by(UserField.sort_order, UserField.id).all()
+    custom_values = {ufv.field_id: ufv.value
+                     for ufv in UserFieldValue.query.filter_by(user_id=user.id).all()}
     return render_template('admin/edit_user.html',
-                           user=user, budget=budget, ratio=ratio, notes=notes)
+                           user=user, budget=budget, ratio=ratio, notes=notes,
+                           custom_fields_list=custom_fields_list,
+                           custom_values=custom_values)
 
 
 @admin_bp.route('/pending-users')
@@ -2805,3 +2827,108 @@ def revoke_reset_token(token_id):
     db.session.commit()
     flash(f'Reset token for {rt.user.username} revoked.', 'success')
     return redirect(url_for('admin.password_resets'))
+
+
+# ── Custom User Fields ────────────────────────────────────────────────────────
+
+class UserFieldForm(FlaskForm):
+    name        = StringField('Field Name (slug)', validators=[DataRequired(), Length(min=1, max=50)])
+    label       = StringField('Display Label', validators=[DataRequired(), Length(min=1, max=100)])
+    field_type  = StringField('Type (text/url/number/select/textarea)',
+                               validators=[DataRequired(), Length(max=20)])
+    choices     = TextAreaField('Choices (one per line, for select type)', validators=[Optional()])
+    required    = BooleanField('Required field')
+    show_in_profile = BooleanField('Show on public profile', default=True)
+    sort_order  = IntegerField('Sort Order', default=0, validators=[Optional()])
+    submit      = SubmitField('Save')
+
+
+@admin_bp.route('/custom-fields')
+@login_required
+@admin_required
+def custom_fields():
+    fields = UserField.query.order_by(UserField.sort_order, UserField.id).all()
+    return render_template('admin/custom_fields.html', fields=fields)
+
+
+@admin_bp.route('/custom-fields/add', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def add_custom_field():
+    form = UserFieldForm()
+    if form.validate_on_submit():
+        # Slugify the name
+        import re
+        slug = re.sub(r'[^a-z0-9_]', '_', form.name.data.lower().strip())
+        if UserField.query.filter_by(name=slug).first():
+            flash('A field with that name already exists.', 'danger')
+            return render_template('admin/custom_field_form.html', form=form, action='Add')
+        choices_json = None
+        if form.field_type.data == 'select' and form.choices.data:
+            opts = [l.strip() for l in form.choices.data.splitlines() if l.strip()]
+            choices_json = json.dumps(opts)
+        f = UserField(
+            name=slug,
+            label=form.label.data.strip(),
+            field_type=form.field_type.data.strip(),
+            choices=choices_json,
+            required=form.required.data,
+            show_in_profile=form.show_in_profile.data,
+            sort_order=form.sort_order.data or 0,
+        )
+        db.session.add(f)
+        db.session.commit()
+        flash(f'Custom field "{f.label}" created.', 'success')
+        return redirect(url_for('admin.custom_fields'))
+    return render_template('admin/custom_field_form.html', form=form, action='Add')
+
+
+@admin_bp.route('/custom-fields/<int:field_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_custom_field(field_id):
+    f    = UserField.query.get_or_404(field_id)
+    form = UserFieldForm(obj=f)
+    if form.validate_on_submit():
+        f.label          = form.label.data.strip()
+        f.field_type     = form.field_type.data.strip()
+        f.required       = form.required.data
+        f.show_in_profile = form.show_in_profile.data
+        f.sort_order     = form.sort_order.data or 0
+        if form.field_type.data == 'select' and form.choices.data:
+            opts = [l.strip() for l in form.choices.data.splitlines() if l.strip()]
+            f.choices = json.dumps(opts)
+        else:
+            f.choices = None
+        db.session.commit()
+        flash(f'Custom field "{f.label}" updated.', 'success')
+        return redirect(url_for('admin.custom_fields'))
+    # Pre-fill choices textarea
+    if f.choices:
+        try:
+            form.choices.data = '\n'.join(json.loads(f.choices))
+        except Exception:
+            pass
+    return render_template('admin/custom_field_form.html', form=form, action='Edit', field=f)
+
+
+@admin_bp.route('/custom-fields/<int:field_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_custom_field(field_id):
+    f = UserField.query.get_or_404(field_id)
+    label = f.label
+    db.session.delete(f)
+    db.session.commit()
+    flash(f'Custom field "{label}" deleted.', 'success')
+    return redirect(url_for('admin.custom_fields'))
+
+
+@admin_bp.route('/custom-fields/<int:field_id>/move/<direction>', methods=['POST'])
+@login_required
+@admin_required
+def move_custom_field(field_id, direction):
+    f = UserField.query.get_or_404(field_id)
+    f.sort_order = (f.sort_order or 0) + (-1 if direction == 'up' else 1)
+    db.session.commit()
+    return redirect(url_for('admin.custom_fields'))

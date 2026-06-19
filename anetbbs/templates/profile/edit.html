@@ -170,6 +170,36 @@
         </div>
     </div>
 
+    {% if custom_fields_list %}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-card-list"></i> Additional Info</div>
+        <div class="card-body">
+            <div class="row g-2">
+            {% for cf in custom_fields_list %}
+                <div class="col-md-6 mb-2">
+                    <label class="form-label small">{{ cf.label }}{% if cf.required %} <span class="text-danger">*</span>{% endif %}</label>
+                    {% set val = custom_values.get(cf.id, '') %}
+                    {% if cf.field_type == 'textarea' %}
+                        <textarea name="cf_{{ cf.name }}" class="form-control form-control-sm" rows="3">{{ val }}</textarea>
+                    {% elif cf.field_type == 'select' %}
+                        {% set choices = cf.choices | from_json if cf.choices else [] %}
+                        <select name="cf_{{ cf.name }}" class="form-select form-select-sm">
+                            <option value="">-- select --</option>
+                            {% for c in choices %}
+                            <option value="{{ c }}" {% if val == c %}selected{% endif %}>{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                    {% else %}
+                        <input type="{{ 'number' if cf.field_type == 'number' else 'url' if cf.field_type == 'url' else 'text' }}"
+                               name="cf_{{ cf.name }}" class="form-control form-control-sm" value="{{ val }}">
+                    {% endif %}
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="d-flex gap-2 mb-3">
         {{ form.submit(class="btn btn-primary") }}
         <a href="{{ url_for('profile.index') }}" class="btn btn-secondary">Cancel</a>
