@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.126`** (June 2026). Previous: `v1.0a2.125`.
+separately. Current release: **`v1.0a2.127`** (June 2026). Previous: `v1.0a2.126`.
+
+## v1.0a2.127 — IRC ESC exit fix; docs sidebar; bulletins; chat.ans; read/write security (June 2026)
+
+- **IRC startup ESC exit** — ESC from startup screen now correctly exits IRC. Root
+  cause: `run()` loop condition checked `not self.bms` which is always False (list
+  always has ≥1 bookmark). Fixed by having `_startup_loop()` return a boolean and
+  `run()` breaking on `True`.
+- **Docs sidebar spacing** — increased padding to 12px/16px, font-size 0.92rem,
+  line-height 1.6, min-width 250px (prior fix landed in local files but was not
+  in the v1.0a2.125 tarball that was deployed).
 
 ## v1.0a2.126 — bug fixes: bulletins, docs sidebar, chat.ans, read/write security (June 2026)
 

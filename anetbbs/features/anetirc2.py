@@ -843,15 +843,16 @@ class ANetIRC:
         await self._wr(_alt_on() + _hide_cur() + _cls())
         try:
             while True:
-                await self._startup_loop()
-                if self._back is False and not self.bms:
-                    break   # user quit from startup
+                done = await self._startup_loop()
+                if done:
+                    break
         finally:
             await self._wr(_alt_off() + _show_cur() + _reset() + "\r\n")
 
     # ── Startup screen ─────────────────────────────────────────────────────────
 
-    async def _startup_loop(self):
+    async def _startup_loop(self) -> bool:
+        """Returns True when the user exits IRC, False when returning from chat."""
         self._back = False
         self.dirty_frame = True
         await self._wr(_cls())   # clear any leftover chat content on mode switch
@@ -871,16 +872,14 @@ class ANetIRC:
                 done = await self._startup_edit(key)
                 if done == "connect":
                     await self._chat_session()
-                    return
-                if done == "quit":
-                    return
+                    return False
             else:
                 action = await self._startup_nav(key)
                 if action == "connect":
                     await self._chat_session()
-                    return
+                    return False
                 if action == "quit":
-                    return
+                    return True
 
     async def _startup_nav(self, key: str) -> Optional[str]:
         bms = self.bms
