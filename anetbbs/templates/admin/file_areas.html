@@ -126,8 +126,12 @@
                     <div class="form-check"><input type="checkbox" name="is_sysop_only" {% if fa.is_sysop_only %}checked{% endif %} class="form-check-input"><label class="form-check-label small">Sysop-only</label></div>
                 </div>
                 <div class="col-md-1">
-                    <label class="form-label small mb-0">Min Level</label>
+                    <label class="form-label small mb-0">Read Level</label>
                     <input type="number" name="min_access_level" class="form-control form-control-sm" min="0" max="255" value="{{ fa.min_access_level if fa.min_access_level is not none else 10 }}" title="0=all, 10=registered, 50=VIP, 100=sysop">
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small mb-0">Write Level</label>
+                    <input type="number" name="min_write_level" class="form-control form-control-sm" min="0" max="255" value="{{ fa.min_write_level if fa.min_write_level is not none else '' }}" placeholder="=read" title="Leave blank to use read level for uploads too">
                 </div>
                 <div class="col-md-2 d-none"><!-- spacer -->
                 </div>

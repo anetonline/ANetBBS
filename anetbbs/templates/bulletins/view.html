@@ -14,10 +14,10 @@
 <div class="card">
     <div class="card-body">
         <button type="button" id="bToggleMd" class="btn btn-link btn-sm p-0 mb-2">
-            <i class="bi bi-markdown"></i> Toggle Markdown view
+            <i class="bi bi-code"></i> Toggle raw view
         </button>
-        <pre id="bPlain" style="white-space:pre-wrap;font-family:inherit;">{{ b.content }}</pre>
-        <div id="bMd" style="display:none;">{{ b.content | markdown }}</div>
+        <div id="bMd">{{ b.content | markdown }}</div>
+        <pre id="bPlain" style="white-space:pre-wrap;font-family:inherit;display:none;">{{ b.content }}</pre>
     </div>
 </div>
 <script>

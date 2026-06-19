@@ -784,8 +784,9 @@ class BBSMenuUI:
                             file_area_id=a.id, status='filed').count()
                         cnt = up_cnt + tic_cnt
                     perm = (a.upload_permission or 'users').lower()
-                    can_upload = (perm == 'users' or
-                                  (perm == 'sysop' and is_sysop))
+                    write_lvl = a.min_write_level if a.min_write_level is not None else a.min_access_level
+                    can_upload = ((perm == 'users' or (perm == 'sysop' and is_sysop))
+                                  and (is_sysop or user_level >= write_lvl))
                     inactive = not a.is_active
                     sysop_flag = a.is_sysop_only
                     # Strip FidoNet network-prefix artifacts like "0 ! " or "1 !"

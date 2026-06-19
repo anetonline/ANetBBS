@@ -116,9 +116,18 @@ def view_board(board_id):
 def new_post(board_id):
     """Create a new post in a board"""
     board = Board.query.get_or_404(board_id)
-    
+
     if not board.is_active:
         abort(404)
+
+    # Enforce write-level access: if min_write_level is set, the user must
+    # meet it to post.  Non-admins hitting this get a 403.
+    if not current_user.is_admin:
+        write_lvl = (board.min_write_level
+                     if board.min_write_level is not None
+                     else board.min_access_level)
+        if (current_user.access_level or 0) < write_lvl:
+            abort(403)
     
     form = PostForm()
     if form.validate_on_submit():

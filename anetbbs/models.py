@@ -105,6 +105,9 @@ class Board(db.Model):
     category = db.Column(db.String(80), default='', index=True)
     # Minimum user access_level required to read this board (0=public, 10=registered).
     min_access_level = db.Column(db.Integer, default=10)
+    # Minimum user access_level required to post to this board (0=all, 10=registered).
+    # NULL means "same as min_access_level".
+    min_write_level = db.Column(db.Integer, nullable=True, default=None)
 
     # Relationships
     posts = db.relationship('Post', backref='board', lazy='dynamic', cascade='all, delete-orphan')
@@ -1113,6 +1116,8 @@ class FileArea(db.Model):
     is_subscribed = db.Column(db.Boolean, default=True)   # receive from upstream
     is_sysop_only = db.Column(db.Boolean, default=False)
     min_access_level = db.Column(db.Integer, default=10)
+    # Minimum level to upload to this area. NULL means "same as min_access_level".
+    min_write_level = db.Column(db.Integer, nullable=True, default=None)
     upload_permission = db.Column(db.String(20), default='users')
     # upload_permission values: 'users' / 'sysop' / 'none'
     password = db.Column(db.String(80))           # optional area password

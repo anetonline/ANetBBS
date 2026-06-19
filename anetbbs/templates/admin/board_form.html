@@ -34,10 +34,17 @@
                         {{ form.order(class="form-control") }}
                     </div>
 
-                    <div class="mb-3">
-                        {{ form.min_access_level.label(class="form-label") }}
-                        {{ form.min_access_level(class="form-control", min=0, max=255) }}
-                        <small class="text-muted">0=everyone, 10=registered users (default), 50=VIP, 100=sysop</small>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            {{ form.min_access_level.label(class="form-label") }}
+                            {{ form.min_access_level(class="form-control", min=0, max=255) }}
+                            <small class="text-muted">0=everyone, 10=registered (default), 50=VIP, 100=sysop</small>
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.min_write_level.label(class="form-label") }}
+                            {{ form.min_write_level(class="form-control", min=0, max=255) }}
+                            <small class="text-muted">Leave blank to use the read level for posting too</small>
+                        </div>
                     </div>
 
                     <div class="mb-3 form-check">

@@ -1,69 +1,74 @@
-# ANetBBS v1.0a2.124 — eventlet Python 3.13 fix; ANetIRC F2/PgUp/PgDn fix
+# ANetBBS v1.0a2.126 — bug fixes: bulletins, docs, chat.ans, read/write security
 
 ## Changes
 
-### Fix: `/scroll` view drifting as new messages arrived
+### Bug fix: bulletins HTML line-feed conversion
 
-When the user scrolled up (`/scroll` or Up arrow), new messages kept arriving and
-`_redraw_chat_area` recalculated the visible window as `all_lines[end-rows:end]`
-where `end = total - offset`. As `total` grew with each new message, `end` grew
-too — the view silently drifted forward even though the offset was fixed.
+Bulletins written in the telnet/SSH client use `\r\n` line endings. The web view
+previously rendered them inside `<pre>`, which showed raw `\r\n` as blank lines on
+some browsers. Swapped the default view to the markdown renderer (which has the
+`nl2br` extension enabled), converting `\r\n` → `<br>`. The raw view is now a
+toggleable secondary view.
 
-**Fix**: `_emit` now increments `_scroll_offset` by the number of display lines
-the new message produces (accounting for word-wrap). The view is locked to a
-fixed historical position. New messages accumulate in the background; the
-`PAUSED+N` indicator in the status bar shows how many lines behind the live view
-the user is.
+### Bug fix: ANSI display codes not processed for chat.ans
 
-### New: Up/Down arrow keys scroll the chat
+`chat.py` was writing the raw bytes returned by `load_menu_ansi('chat')` directly
+to the session. Synchronet @-codes and Mystic |XX color codes embedded in
+`chat.ans` were sent as literal bytes instead of being rendered. Now runs
+`display_codes.apply()` on the decoded string before writing, matching the pattern
+used by `_show_ansi_screen()` and `menu_engine.py`.
 
-Up arrow (`ESC[A` / `ESCOA`) scrolls the chat up by 1 line.
-Down arrow (`ESC[B` / `ESCOB`) scrolls it down by 1 line.
-Left/Right arrows still cycle the outgoing text color as before.
+### Bug fix: docs sidebar too compact
 
-### Fix: `/scroll up N` argument parsing
+`templates/docs/view.html` sidebar list items had `py-1` padding,
+`font-size: 0.85rem`, and `line-height: 1.3` — too tight for longer page names.
+Increased to `py-2`, `0.875rem`, `line-height: 1.5`.
 
-`n_str.isdigit()` returned False for `' 10'` (a leading space from `'up 10'.replace('up', '')`).
-Fixed by calling `.strip().isdigit()` so `/scroll up 10` correctly scrolls 10 lines.
+### Feature: separate read/write access levels for boards and file areas
 
-### Fix: Multi-byte escape sequences polluting input buffer
+`Board` and `FileArea` models now have a `min_write_level` column (nullable
+integer; NULL = same as `min_access_level`). This lets sysops set one level to
+read posts/files and a higher level to post/upload, matching QuickBBS/RA-style
+security.
 
-PgUp/PgDn keys send `ESC [ 5 ~` / `ESC [ 6 ~` (4 bytes after ESC). The old
-`_read_escape_seq` only consumed `[ 5` and left the trailing `~` in the reader
-buffer. On the next `reader.read(1)` call, `~` would be appended to the input
-buffer and echoed as a literal character. Fixed: if the third byte is a digit,
-`_read_escape_seq` drains bytes until it hits a non-digit/non-semicolon (the
-terminating letter or `~`), discarding them.
+- Admin UI: board form shows side-by-side "Min Read Level" / "Min Write Level"
+  fields; file area table adds a "Write Level" column.
+- `web/boards.py` enforces write level on new posts; `bbs_ui.py` enforces it on
+  file uploads.
+- `_lightweight_migrate()` auto-adds the column on first startup — no manual
+  schema change needed.
 
-### Quality of life: scroll auto-snaps to live view on send
+### New: ANetIRC v7 — pure-Python asyncio IRC client
 
-When the user is scrolled up and sends a message (not a slash command), the
-scroll is automatically reset to 0 (live / bottom) so they can see their
-own message echo back from the server.
+Completely replaces the C binary door + PTY bridge with a pure-Python asyncio
+implementation that runs directly inside the BBS session.
 
-### New: `/scroll live` alias
+**What broke in the old client:**
+- TLS/SSL connections (e.g., Libera.chat port 6697) locked up entirely. The C
+  binary's blocking TLS handshake deadlocked against the PTY bridge.
+- The PTY bridge added timing/encoding indirection that caused escape sequence
+  truncation, F2 key misfires, and CP437 roundtrip issues.
+- The binary only ran on x86-64; Pi sysops had to compile from source.
 
-`/scroll 0`, `/scroll bottom`, `/scroll end`, `/scroll latest`, and
-`/scroll live` all return to the live (bottom) view.
+**What the new client does:**
+- Runs as native asyncio code — `await asyncio.open_connection(ssl=ssl_ctx)`.
+  TLS uses Python's `ssl.create_default_context()`. No blocking, no lockups.
+- Works on every arch (x86, ARM, anything Python supports) — no binary at all.
+- SASL PLAIN authentication via full CAP negotiation state machine.
+- Word-wrap with configurable column width (adapts to terminal size).
+- Scrollback (PgUp/PgDn, up to 800 rows visible / 2000 stored).
+- Tab-completion for nicks from the users panel.
+- Command history (Up/Down arrows).
+- Startup bookmark manager with inline field editing — same pipe-delimited
+  config format as v1 (backward-compatible: `label|server|port|nick|channel|tls|password`).
+- Three color themes (Cyan/Green/Amber), cycle with T in startup screen.
+- Graceful disconnect on ESC, shows "Disconnected" if server drops.
+- mIRC color codes stripped from incoming messages.
+- CTCP ACTION rendered as `* nick action`.
 
-## Files changed
-
-- `anetbbs/features/mrc_chat.py` — scrollback stability; arrow scroll; escape seq drain; auto-snap on send
-- `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md` — version bump
-
-## ANSI menu slot names (for sysop-created ANSI overrides)
-
-Place `.ans` files in `data/text/menus/` to override any stock terminal menu.
-See `docs/04-ansi-screens.md` for full details.
-
-| Slot name      | Menu                                          |
-| -------------- | --------------------------------------------- |
-| `chat`         | Chat Systems top menu (IRC / MRC / Local)     |
-| `irc_chat`     | IRC Chat — server connection options          |
-| `sysop_menu`   | Sysop Tools top-level menu                   |
-| `sysop_users`  | Sysop → Manage Users list header             |
-| `sysop_boards` | Sysop → Manage Boards list header            |
-| `sysop_status` | Sysop → Server Status header                 |
-| `game_center`  | Game Center                                   |
-| `door_games`   | Door Games list                               |
-| `dialout`      | Dial-Out Directory                            |
+**Backward compatibility:**
+- Entry point remains `launch_anetirc_telnet(user, session)` — `chat.py` only
+  changes the import line (`.anetirc_door` → `.anetirc2`).
+- Bookmark config file location and format unchanged.
+- C binary (`doors/anetirc/anetirc`) retained in tarball for sysops who prefer
+  the old client; to revert, change `chat.py` import back to `.anetirc_door`.

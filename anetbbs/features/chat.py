@@ -1,6 +1,6 @@
 # anetbbs/features/chat.py
 from .mrc_chat import MRCChat
-from .anetirc_door import launch_anetirc_telnet
+from .anetirc2 import launch_anetirc_telnet
 from ..core.protocols import SessionProtocol
 
 class ChatManager:
@@ -16,7 +16,26 @@ class ChatManager:
         while True:
             ansi = load_menu_ansi('chat')
             if ansi:
-                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+                # Process Synchronet @-codes / Mystic |XX display codes so
+                # @USER@ / |UN / etc. in chat.ans are substituted — matches
+                # the pattern in session._show_ansi_screen() and menu_engine.
+                try:
+                    from ..features.display_codes import apply as _apply_codes
+                    from ..features.bbs_ui import _app as _bbs_app
+                    import anetbbs as _anetbbs_pkg
+                    _cfg = _bbs_app().config
+                    body = _apply_codes(
+                        ansi.decode('latin-1'),
+                        user=self.session.user,
+                        bbs_name=_cfg.get('BBS_NAME', ''),
+                        sysop=_cfg.get('SYSOP_NAME', ''),
+                        node=(getattr(self.session, '_node_entry', None).slot
+                              if getattr(self.session, '_node_entry', None) else 1),
+                        version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
+                    )
+                    self.session.writer.write(b'\x1b[2J\x1b[H' + body.encode('latin-1'))
+                except Exception:
+                    self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
                 await self.session.writer.drain()
             else:
                 await self.session.write('\x1b[2J\x1b[H')

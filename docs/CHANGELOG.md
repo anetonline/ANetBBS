@@ -1,7 +1,46 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.124`** (June 2026). Previous: `v1.0a2.123`.
+separately. Current release: **`v1.0a2.126`** (June 2026). Previous: `v1.0a2.125`.
+
+## v1.0a2.126 — bug fixes: bulletins, docs sidebar, chat.ans, read/write security (June 2026)
+
+- **Bulletins HTML linefeed** — swapped bulletin view default from `<pre>` to
+  markdown (with `nl2br`); `\r\n` from telnet input now renders as `<br>` instead
+  of blank lines. Raw view still accessible via toggle button.
+- **chat.ans display codes** — `chat.py` now passes `chat.ans` through
+  `display_codes.apply()` before writing, so Synchronet @-codes and Mystic |XX
+  colors embedded in the ANSI screen are rendered correctly.
+- **Docs sidebar spacing** — `py-1` → `py-2`, `0.85rem` → `0.875rem`,
+  `line-height: 1.3` → `1.5`; sidebar page list no longer cramped on long names.
+- **Separate read/write access levels** — `Board` and `FileArea` now have a
+  `min_write_level` column (NULL = inherit read level). Admin UI updated with
+  side-by-side fields. `web/boards.py` and `bbs_ui.py` enforce write level on
+  post creation and file upload respectively. Auto-migrated on startup.
+
+## v1.0a2.125 — ANetIRC v7: pure-Python asyncio IRC client (June 2026)
+
+Complete rewrite of ANetIRC. Drops the C binary + PTY bridge entirely. The new
+`anetirc2.py` runs as a native asyncio coroutine inside the BBS session.
+
+- **TLS fixed** — `asyncio.open_connection(ssl=ssl_ctx)` is non-blocking; the
+  old C client's blocking TLS handshake caused hard lockups on SSL servers.
+- **Cross-arch** — no binary; works on x86-64, ARM, any Python 3.10+ platform.
+- **SASL PLAIN** — full `CAP LS 302` → `CAP REQ :sasl` → `AUTHENTICATE PLAIN`
+  state machine. Password field (7th pipe field) triggers SASL; no password = no
+  SASL (plain nick/user registration).
+- **Startup manager** — inline field editing per bookmark (Tab/Up/Down to move
+  between fields, Enter to confirm), TLS toggle (Space), theme cycle (T), save
+  (A), delete (D). Three color themes: Cyan/Green/Amber.
+- **Word-wrap** — lines break at word boundaries; continuation lines indent to
+  align with message text. Adapts to any terminal width.
+- **Scrollback** — PgUp/PgDn, 800 display rows, 2000 stored lines.
+- **Tab completion** — completes nick from users panel; cycles on repeated Tab.
+- **Command history** — Up/Down arrows recall previous input lines.
+- **mIRC color** — incoming color codes stripped; CTCP ACTION rendered as
+  `* nick action`.
+- **Backward-compatible** — same bookmark config format, same entry point
+  (`launch_anetirc_telnet`). C binary kept in tarball for reference/revert.
 
 ## v1.0a2.124 — eventlet Python 3.13 piwheels fix; ANetIRC F2/PgUp/PgDn (June 2026)
 

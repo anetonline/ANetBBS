@@ -64,8 +64,11 @@ class BoardForm(FlaskForm):
                            validators=[Length(max=80)])
     order = StringField('Order', validators=[DataRequired()])
     min_access_level = IntegerField(
-        'Min Access Level (0=all, 10=registered, 50=VIP, 100=sysop)',
+        'Min Read Level (0=all, 10=registered, 50=VIP, 100=sysop)',
         validators=[Optional(), NumberRange(min=0, max=255)], default=10)
+    min_write_level = IntegerField(
+        'Min Write Level (blank = same as read level)',
+        validators=[Optional(), NumberRange(min=0, max=255)], default=None)
     is_active = BooleanField('Active', default=True)
     submit = SubmitField('Save Board')
 
@@ -457,6 +460,7 @@ def add_board():
             category=(form.category.data or '').strip(),
             order=int(form.order.data),
             min_access_level=form.min_access_level.data or 10,
+            min_write_level=form.min_write_level.data,
             is_active=form.is_active.data
         )
         db.session.add(board)
@@ -480,6 +484,7 @@ def edit_board(board_id):
         board.category = (form.category.data or '').strip()
         board.order = int(form.order.data)
         board.min_access_level = form.min_access_level.data or 10
+        board.min_write_level = form.min_write_level.data
         board.is_active = form.is_active.data
         db.session.commit()
         flash(f'Board "{board.name}" updated!', 'success')
@@ -490,6 +495,7 @@ def edit_board(board_id):
         form.category.data = board.category or ''
         form.order.data = str(board.order)
         form.min_access_level.data = board.min_access_level if board.min_access_level is not None else 10
+        form.min_write_level.data = board.min_write_level
         form.is_active.data = board.is_active
 
     return render_template('admin/board_form.html', form=form, title='Edit Board', board=board)
@@ -1282,6 +1288,8 @@ def file_areas_admin():
             fa.nodelist_domain = (request.form.get('nodelist_domain')
                                   or '').strip().lower() or None
             fa.min_access_level = int(request.form.get('min_access_level') or 10)
+            raw_wl = request.form.get('min_write_level', '').strip()
+            fa.min_write_level = int(raw_wl) if raw_wl.isdigit() else None
             db.session.commit()
             flash(f'Updated {fa.tag}.', 'success')
         elif action == 'delete':
