@@ -1,7 +1,30 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.123`** (June 2026). Previous: `v1.0a2.122`.
+separately. Current release: **`v1.0a2.124`** (June 2026). Previous: `v1.0a2.123`.
+
+## v1.0a2.124 — eventlet Python 3.13 piwheels fix; ANetIRC F2/PgUp/PgDn (June 2026)
+
+Fix eventlet crash on Python 3.13 systems where piwheels ships eventlet 0.37.0
+without the `start_joinable_thread` attribute (the wheel was compiled before the
+patch merged). update.sh now greps the installed `eventlet/green/thread.py`
+source file directly and force-rebuilds from source (`--no-binary eventlet`) if
+the fix is absent. The rollback block no longer wipes application files for this
+class of failure — it instead auto-fixes eventlet, retries the web service, and
+prints a manual fix command if the retry still fails.
+
+Fix ANetIRC F2 key exiting the IRC client instead of toggling the user list:
+`ui_read_key()` only handled `\x1b[*` (CSI) sequences; F2 on xterm/SSH sends
+`\x1bOQ` (SS3), which fell through to `return KEY_ESC` → exiting in startup mode.
+Added `else if (s[0] == 'O')` branch: F1=`\x1bOP`, F2=`\x1bOQ`, F3=`\x1bOR`,
+F4=`\x1bOS`. F2 now correctly maps to KEY_F2 → toggles the users panel.
+
+Fix ANetIRC freeze/timing: PTY bridge `_input_pump` previously read one byte at
+a time from the SSH session and wrote one byte at a time to the PTY. The asyncio
+scheduler delay between bytes could exceed the C code's 100 ms VTIME, truncating
+escape sequences mid-read. Changed to `session.read_raw(64)` (chunk reads) so
+multi-byte sequences (`\x1bOQ`, `\x1b[5~`) arrive at the PTY in a single write.
+Also replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()`.
 
 ## v1.0a2.123 — MRC scrollback stability; arrow-key scroll; escape-seq drain (June 2026)
 

@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0a2.post123",
+    version="1.0a2.post124",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -20,11 +20,13 @@ setup(
         'Flask-Migrate>=4.0.0',
         # Async / WebSockets
         'python-socketio>=5.9.0',
-        # eventlet 0.35.2+ required for Python 3.12 (greenlet finalization crash).
-        # <0.38 because eventlet 0.38+ removed asyncio hub support and raises a
-        # hard error that breaks gunicorn's eventlet worker on startup.
-        # greenlet 3.0.0+ required for Python 3.12 threading compatibility.
-        'eventlet>=0.35.2,<0.38',
+        # eventlet 0.38.0+ required for Python 3.13 — the start_joinable_thread
+        # fix did not land in the 0.37.x series (confirmed: 0.37.0 from both
+        # piwheels and PyPI source still crashes on Python 3.13).
+        # The <0.38 pin was wrong: gunicorn's eventlet worker uses the default
+        # epoll hub, not the asyncio hub that 0.38 removed. 0.38+ is safe.
+        # greenlet 3.0.0+ required for Python 3.12/3.13 threading compatibility.
+        'eventlet>=0.38.0',
         'greenlet>=3.0.0',
         # SSH server
         'asyncssh>=2.14.0',

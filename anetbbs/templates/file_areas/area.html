@@ -26,7 +26,17 @@
     {% if files %}
         <table class="table table-sm table-hover mb-0">
             <thead><tr>
-                <th>Filename</th><th>Size</th><th>Date</th><th>Description</th>
+                {% macro sort_hdr(label, col, default_dir) %}
+                    {% set active = sort == col or sort == '-' ~ col %}
+                    {% if sort == col %}{% set next = '-' ~ col %}{% elif sort == '-' ~ col %}{% set next = col %}{% else %}{% set next = default_dir %}{% endif %}
+                    <th><a href="?sort={{ next }}" class="text-decoration-none {{ 'text-info fw-bold' if active else 'text-white-50' }}">
+                        {{ label }}{% if sort == col %} ▲{% elif sort == '-' ~ col %} ▼{% endif %}
+                    </a></th>
+                {% endmacro %}
+                {{ sort_hdr('Filename', 'name', 'name') }}
+                {{ sort_hdr('Size', 'size', '-size') }}
+                {{ sort_hdr('Date', 'date', '-date') }}
+                <th class="text-white-50">Description</th>
             </tr></thead>
             <tbody>
             {% for f in files %}

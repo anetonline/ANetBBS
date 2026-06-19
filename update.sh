@@ -357,6 +357,79 @@ else
         "$SOURCE_DIR/" "$INSTALL_DIR/"
     ok "Files synced (user data + configs preserved)"
 
+    # Sync bundled door subdirectories from the release tarball.
+    # /doors/ is excluded from the main rsync above to protect sysop-customized
+    # installs (DSR, BotWars, etc.) from being overwritten.  For doors that ARE
+    # bundled in the release (currently only anetirc), we do a file-by-file
+    # comparison and update anything that changed — so new binaries, build
+    # scripts, and config templates always arrive on update.
+    #
+    # Binary arch-mismatch (Pi running ARM, tarball ships x86-64): the binary
+    # is skipped and a recompile message is printed; build.sh is still updated.
+    if [[ -d "$SOURCE_DIR/doors" ]]; then
+        mkdir -p "$INSTALL_DIR/doors"
+        for src_door in "$SOURCE_DIR/doors"/*/; do
+            [[ -d "$src_door" ]] || continue
+            door_name=$(basename "$src_door")
+            dst_door="$INSTALL_DIR/doors/$door_name"
+
+            if [[ ! -d "$dst_door" ]]; then
+                # Brand-new door — install everything.
+                cp -a "$src_door" "$dst_door"
+                ok "Installed new door: doors/$door_name"
+                find "$dst_door" -maxdepth 1 -type f | while IFS= read -r f; do
+                    file "$f" 2>/dev/null | grep -qiE 'ELF|executable' && chmod 755 "$f" 2>/dev/null || true
+                done
+                find "$dst_door" -maxdepth 2 -name "*.sh" -exec chmod 755 {} \; 2>/dev/null || true
+            else
+                # Door already installed — check each bundled file for changes.
+                door_changed=0
+                needs_rebuild=0
+                while IFS= read -r src_file; do
+                    [[ -f "$src_file" ]] || continue
+                    fname=$(basename "$src_file")
+                    dst_file="$dst_door/$fname"
+
+                    # Skip files that are identical to what's installed.
+                    [[ -f "$dst_file" ]] && cmp -s "$src_file" "$dst_file" && continue
+
+                    if file "$src_file" 2>/dev/null | grep -qiE 'ELF|Mach-O|PE32'; then
+                        # Binary file — only overwrite if arch matches.
+                        src_arch=$(file "$src_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
+                        if [[ -f "$dst_file" ]]; then
+                            dst_arch=$(file "$dst_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
+                        else
+                            dst_arch="$src_arch"
+                        fi
+                        if [[ -z "$src_arch" || "$src_arch" == "$dst_arch" ]]; then
+                            cp "$src_file" "$dst_file"
+                            chmod 755 "$dst_file" 2>/dev/null || true
+                            ok "Updated doors/$door_name/$fname"
+                            door_changed=1
+                        else
+                            info "doors/$door_name/$fname: bundled binary is $src_arch, installed is $dst_arch — skipping binary"
+                            needs_rebuild=1
+                        fi
+                    else
+                        # Non-binary (scripts, configs, etc.) — always update.
+                        cp "$src_file" "$dst_file"
+                        [[ "$fname" == *.sh ]] && chmod 755 "$dst_file" 2>/dev/null || true
+                        ok "Updated doors/$door_name/$fname"
+                        door_changed=1
+                    fi
+                done < <(find "$src_door" -maxdepth 1 -type f)
+
+                if [[ $needs_rebuild -eq 1 ]]; then
+                    warn "doors/$door_name binary needs recompile for this CPU arch:"
+                    warn "  cd \"$dst_door\" && bash build.sh"
+                fi
+                if [[ $door_changed -eq 0 && $needs_rebuild -eq 0 ]]; then
+                    skip "doors/$door_name — no updates"
+                fi
+            fi
+        done
+    fi
+
     # Copy pre-bundled game ZIPs — these are static assets, not user data,
     # so they're safe to update alongside the code even though /data/ is
     # otherwise excluded.
@@ -381,6 +454,44 @@ else
     else
         warn "pip install failed — dependencies may be out of date"
     fi
+
+    # ── Python 3.13 eventlet safety fix ──────────────────────────────────────
+    # eventlet < 0.38.0 crashes on Python 3.13 with:
+    #   AttributeError: module 'eventlet.green.thread' has no attribute
+    #   'start_joinable_thread'
+    # Python 3.13's threading.py requires this attribute at import time.
+    #
+    # IMPORTANT: version number alone is NOT sufficient. Prebuilt wheels
+    # from piwheels (Raspberry Pi) ship eventlet 0.37.0 without this fix
+    # because the wheel was compiled before the patch merged.  We grep the
+    # installed file directly — if the attribute is absent we force a source
+    # rebuild (--no-binary eventlet) which always has the fix.
+    EVT_THREAD_PY=$(find "$VENV_DIR/lib" -maxdepth 5 -path "*/eventlet/green/thread.py" 2>/dev/null | head -1)
+    if [[ -z "$EVT_THREAD_PY" ]]; then
+        info "eventlet not yet installed (pip install above will pull in >=0.37.0)"
+    elif grep -q "start_joinable_thread" "$EVT_THREAD_PY"; then
+        ok "eventlet green/thread.py has start_joinable_thread — Python 3.13 compatible"
+    else
+        info "eventlet wheel missing start_joinable_thread (common piwheels aarch64 issue) — rebuilding from source..."
+        _evt_fixed=false
+        if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0" --quiet 2>/dev/null; then
+            _evt_fixed=true
+        elif "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0" --quiet 2>/dev/null; then
+            _evt_fixed=true
+        fi
+        if [[ "$_evt_fixed" == "true" ]]; then
+            ok "eventlet rebuilt from source — Python 3.13 compatible"
+        else
+            warn "eventlet source rebuild failed — trying relaxed version constraint..."
+            if "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0" --quiet 2>/dev/null; then
+                ok "eventlet rebuilt (newer version) — Python 3.13 compatible"
+            else
+                warn "eventlet fix failed — web service will crash on Python 3.13"
+                warn "Manual fix: sudo $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.38.0'"
+            fi
+        fi
+    fi
+    # ─────────────────────────────────────────────────────────────────────────
 
     # bcrypt / cryptography fast path: only nuke-and-reinstall if the
     # current install is ACTUALLY broken. The old logic ran the slow
@@ -1140,18 +1251,52 @@ fi
 
 if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
     echo ""
-    warn "Critical service failed to start. Rolling back from backup..."
-    cp "$BACKUP_DIR/.env.bak" "$ENV_FILE"
-    [[ -f "$BACKUP_DIR/anetbbs.db.bak" ]] && cp "$BACKUP_DIR/anetbbs.db.bak" "$DB_FILE"
-    for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
-        [[ -f "$BACKUP_DIR/${svc}.service.bak" ]] && \
-            cp "$BACKUP_DIR/${svc}.service.bak" "/etc/systemd/system/${svc}.service"
-    done
-    systemctl daemon-reload
-    for svc in "${SERVICES_TO_START[@]}"; do
-        systemctl restart "$svc" 2>/dev/null || true
-    done
-    fail "Rollback complete. Check logs with: journalctl -u anetbbs-web -n 50"
+    # Detect if the failure is the Python 3.13 eventlet wheel issue.
+    # Rolling back application files does not fix a pip package problem —
+    # it just reverts good code while leaving the broken venv in place.
+    # Instead: auto-fix eventlet, retry the web service, and skip the
+    # file rollback entirely for this class of failure.
+    WEB_JOURNAL=$(journalctl -u anetbbs-web -n 10 --no-pager 2>/dev/null || true)
+    if echo "$WEB_JOURNAL" | grep -q "start_joinable_thread"; then
+        warn "anetbbs-web crashed: eventlet wheel missing start_joinable_thread (piwheels aarch64 issue)"
+        info "Attempting auto-fix: rebuilding eventlet from source..."
+        _evt_retry=false
+        if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0" --quiet 2>/dev/null || \
+           "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0" --quiet 2>/dev/null; then
+            _evt_retry=true
+        fi
+        if [[ "$_evt_retry" == "true" ]]; then
+            info "eventlet rebuilt — retrying anetbbs-web..."
+            systemctl restart anetbbs-web 2>/dev/null || true
+            sleep 4
+            if systemctl is-active --quiet anetbbs-web; then
+                ok "anetbbs-web is now running after eventlet fix"
+                CRITICAL_FAILED=false
+            else
+                warn "anetbbs-web still failing after eventlet fix — check journalctl -u anetbbs-web -n 30"
+            fi
+        fi
+        if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
+            warn "Application files were updated successfully."
+            warn "Only anetbbs-web is affected. Fix manually:"
+            warn "  sudo $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.38.0'"
+            warn "  sudo systemctl restart anetbbs-web"
+            fail "Web service failed to start — see fix above (files NOT rolled back)"
+        fi
+    else
+        warn "Critical service failed to start. Rolling back from backup..."
+        cp "$BACKUP_DIR/.env.bak" "$ENV_FILE"
+        [[ -f "$BACKUP_DIR/anetbbs.db.bak" ]] && cp "$BACKUP_DIR/anetbbs.db.bak" "$DB_FILE"
+        for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+            [[ -f "$BACKUP_DIR/${svc}.service.bak" ]] && \
+                cp "$BACKUP_DIR/${svc}.service.bak" "/etc/systemd/system/${svc}.service"
+        done
+        systemctl daemon-reload
+        for svc in "${SERVICES_TO_START[@]}"; do
+            systemctl restart "$svc" 2>/dev/null || true
+        done
+        fail "Rollback complete. Check logs with: journalctl -u anetbbs-web -n 50"
+    fi
     exit 1
 fi
 

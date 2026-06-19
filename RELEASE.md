@@ -1,4 +1,4 @@
-# ANetBBS v1.0a2.123 — MRC scrollback stability; arrow-key scroll
+# ANetBBS v1.0a2.124 — eventlet Python 3.13 fix; ANetIRC F2/PgUp/PgDn fix
 
 ## Changes
 

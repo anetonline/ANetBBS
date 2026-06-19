@@ -177,7 +177,18 @@ def view_area(area_id):
     if not _visible_to(current_user, area):
         abort(403)
     files = _scan_area(area)
-    return render_template('file_areas/area.html', area=area, files=files)
+    sort = request.args.get('sort', '-date')
+    if sort not in ('name', '-name', 'date', '-date', 'size', '-size'):
+        sort = '-date'
+    reverse = sort.startswith('-')
+    key = sort.lstrip('-')
+    key_fns = {
+        'name': lambda f: f['name'].lower(),
+        'date': lambda f: f['mtime'],
+        'size': lambda f: f['size'],
+    }
+    files = sorted(files, key=key_fns.get(key, key_fns['date']), reverse=reverse)
+    return render_template('file_areas/area.html', area=area, files=files, sort=sort)
 
 
 @file_areas_bp.route('/<int:area_id>/rescan-descriptions', methods=['POST'])

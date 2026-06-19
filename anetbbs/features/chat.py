@@ -1,19 +1,17 @@
 # anetbbs/features/chat.py
-from .irc_chat import IRCChat
 from .mrc_chat import MRCChat
+from .anetirc_door import launch_anetirc_telnet
 from ..core.protocols import SessionProtocol
 
 class ChatManager:
     def __init__(self, session: SessionProtocol):
         self.session = session
         self.chat_systems = {
-            'irc': IRCChat(session),
             'mrc': MRCChat(session),
         }
 
     async def show_menu(self):
-        """Chat system selection — local, IRC, MRC (terminal MRC reuses
-        the local websocket bridge so web + terminal users share rooms)."""
+        """Chat system selection — local, IRC (ANetIRC door), MRC."""
         from .ansi_ui import banner, menu_item, footer, prompt as _p, load_menu_ansi
         while True:
             ansi = load_menu_ansi('chat')
@@ -24,7 +22,7 @@ class ChatManager:
                 await self.session.write('\x1b[2J\x1b[H')
                 await self.session.write(banner('Chat Systems'))
                 for hk, lbl in (('1', 'Local Chat'),
-                                ('2', 'IRC Chat (multi-server)'),
+                                ('2', 'IRC Chat (A-Net IRC)'),
                                 ('3', 'MRC Chat (Inter-BBS)'),
                                 ('Q', 'Return to Main Menu')):
                     await self.session.write(menu_item(hk, lbl) + '\r\n')
@@ -33,8 +31,7 @@ class ChatManager:
             if choice == "1":
                 await self.local_chat()
             elif choice == "2":
-                self.current_chat = self.chat_systems['irc']
-                await self.current_chat.show_menu()
+                await launch_anetirc_telnet(self.session.user, self.session)
             elif choice == "3":
                 self.current_chat = self.chat_systems['mrc']
                 await self.current_chat.show_menu()
