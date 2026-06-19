@@ -9,13 +9,14 @@
         <div class="px-3 pt-3 pb-1 small text-uppercase text-muted fw-bold">
             <i class="bi {{ cat.icon }} me-1"></i> {{ cat.name }}
         </div>
-        <ul class="list-group list-group-flush">
+        <ul class="list-unstyled mb-0">
         {% for d in cat.docs %}
-            <li class="list-group-item {% if d.slug == slug %}active{% endif %}"
-                style="padding: 12px 16px; white-space: normal; overflow-wrap: anywhere; font-size: 0.92rem; line-height: 1.6;">
+            <li>
                 <a href="{{ url_for('docs.view', slug=d.slug) }}"
-                   class="{% if d.slug == slug %}text-white{% endif %}"
-                   style="text-decoration:none; display:block;">
+                   style="display:block; padding:14px 20px; font-size:1rem; line-height:1.6;
+                          text-decoration:none; border-top:1px solid rgba(0,0,0,.1);
+                          word-break:break-word;
+                          {% if d.slug == slug %}background:rgba(0,0,0,.18); font-weight:600;{% endif %}">
                     {{ d.title }}
                 </a>
             </li>

@@ -1,9 +1,9 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.127`** (June 2026). Previous: `v1.0a2.126`.
+separately. Current release: **`v1.0a2.128`** (June 2026). Previous: `v1.0a2.127`.
 
-## v1.0a2.127 — IRC ESC exit fix; docs sidebar; bulletins; chat.ans; read/write security (June 2026)
+## v1.0a2.128 — IRC ESC exit fix; docs sidebar; bulletins; chat.ans; read/write security (June 2026)
 
 - **IRC startup ESC exit** — ESC from startup screen now correctly exits IRC. Root
   cause: `run()` loop condition checked `not self.bms` which is always False (list

@@ -1,4 +1,4 @@
-# ANetBBS v1.0a2.127 — bug fixes: bulletins, docs, chat.ans, read/write security
+# ANetBBS v1.0a2.128 — bug fixes: bulletins, docs, chat.ans, read/write security
 
 ## Changes
 
