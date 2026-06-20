@@ -753,12 +753,19 @@ class BBSSession:
                     "a letter or digit, and only use letters, digits, "
                     "spaces, dot, apostrophe, hyphen, or underscore.\r\n")
                 continue
+            if self.user_manager.username_exists(username):
+                await self.write("\r\nThat username is already taken.\r\n")
+                continue
             break
 
         while True:
             email = await self.read_line("Email address: ")
             if not email or '@' not in email:
                 await self.write("\r\nInvalid email address.\r\n")
+                continue
+            if self.user_manager.email_exists(email):
+                await self.write(
+                    "\r\nAn account with that email address already exists.\r\n")
                 continue
             break
 
@@ -774,7 +781,8 @@ class BBSSession:
                 continue
             break
 
-        if self.user_manager.create_user(username, password, email):
+        result = self.user_manager.create_user(username, password, email)
+        if result == 'ok':
             await self.write("\r\nRegistration successful!\r\n")
             await self._show_ansi_screen('newuser')
             self.user = self.user_manager.authenticate(username, password)
@@ -786,6 +794,9 @@ class BBSSession:
                 pass
             await asyncio.sleep(1)
             return True
+        elif result == 'email_taken':
+            await self.write("\r\nAn account with that email address already exists.\r\n")
+            return False
         else:
             await self.write("\r\nUsername already exists.\r\n")
             return False

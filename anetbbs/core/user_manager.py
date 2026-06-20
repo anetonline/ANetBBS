@@ -14,7 +14,8 @@ with `core/session.py`.
 import os
 from datetime import datetime
 from typing import Optional, Dict
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -67,18 +68,37 @@ class UserManager:
             "login_count": user.login_count or 0,
         }
 
-    def create_user(self, username: str, password: str, email: str) -> bool:
-        """Create a new user. Returns False if the username is already taken."""
-        # Lazy-import the model so this module doesn't blow up if anetbbs.models
-        # can't import in a non-Flask context (e.g. during a bare schema check).
+    def username_exists(self, username: str) -> bool:
+        """Case-insensitive check for an existing username."""
+        from anetbbs.models import User
+        with _Session() as s:
+            row = s.execute(
+                select(User).where(func.lower(User.username) == username.lower())
+            ).scalar_one_or_none()
+            return row is not None
+
+    def email_exists(self, email: str) -> bool:
+        """Case-insensitive check for an existing email."""
+        from anetbbs.models import User
+        with _Session() as s:
+            row = s.execute(
+                select(User).where(func.lower(User.email) == email.lower())
+            ).scalar_one_or_none()
+            return row is not None
+
+    def create_user(self, username: str, password: str, email: str) -> str:
+        """Create a new user. Returns 'ok', 'username_taken', or 'email_taken'."""
         from anetbbs.models import User
 
         with _Session() as s:
-            existing = s.execute(
-                select(User).where(User.username == username)
-            ).scalar_one_or_none()
-            if existing is not None:
-                return False
+            if s.execute(
+                select(User).where(func.lower(User.username) == username.lower())
+            ).scalar_one_or_none() is not None:
+                return 'username_taken'
+            if s.execute(
+                select(User).where(func.lower(User.email) == email.lower())
+            ).scalar_one_or_none() is not None:
+                return 'email_taken'
             user = User(
                 username=username,
                 email=email,
@@ -89,8 +109,12 @@ class UserManager:
                 login_count=0,
             )
             s.add(user)
-            s.commit()
-            return True
+            try:
+                s.commit()
+            except IntegrityError:
+                s.rollback()
+                return 'email_taken'
+            return 'ok'
 
     def authenticate(self, username: str, password: str) -> Optional[Dict]:
         """Return user dict on success, None on failure."""
@@ -98,7 +122,7 @@ class UserManager:
 
         with _Session() as s:
             user = s.execute(
-                select(User).where(User.username == username)
+                select(User).where(func.lower(User.username) == username.lower())
             ).scalar_one_or_none()
             if user is None:
                 return None
@@ -117,6 +141,6 @@ class UserManager:
         from anetbbs.models import User
         with _Session() as s:
             user = s.execute(
-                select(User).where(User.username == username)
+                select(User).where(func.lower(User.username) == username.lower())
             ).scalar_one_or_none()
             return self._user_to_dict(user) if user else None

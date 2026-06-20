@@ -118,11 +118,15 @@ class RegisterForm(FlaskForm):
         self.question_3.choices = choices
 
     def validate_username(self, field):
-        if User.query.filter_by(username=field.data).first():
+        if User.query.filter(
+            db.func.lower(User.username) == field.data.lower()
+        ).first():
             raise ValidationError('Username already taken. Please choose a different one.')
 
     def validate_email(self, field):
-        if User.query.filter_by(email=field.data).first():
+        if User.query.filter(
+            db.func.lower(User.email) == field.data.lower()
+        ).first():
             raise ValidationError('Email already registered. Please use a different one.')
 
     def validate_question_2(self, field):
@@ -149,7 +153,9 @@ def login():
 
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
+        user = User.query.filter(
+            db.func.lower(User.username) == form.username.data.lower()
+        ).first()
 
         if user is None or not user.check_password(form.password.data):
             flash('Invalid username or password', 'danger')

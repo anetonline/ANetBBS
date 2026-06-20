@@ -1,7 +1,28 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.132`** (June 2026). Previous: `v1.0a2.131`.
+separately. Current release: **`v1.0a2.135`** (June 2026). Previous: `v1.0a2.134`.
+
+## v1.0a2.135 — Duplicate email DoS fix; case-insensitive usernames (June 2026)
+
+- **DoS crash fix** — registering with a duplicate email caused an unhandled
+  `IntegrityError` that terminated the BBS session. Added `email_exists()` and
+  `username_exists()` pre-checks in the registration loop; user is re-prompted
+  with a clear message instead of crashing. `create_user()` now returns a result
+  code string and catches `IntegrityError` as defense-in-depth.
+- **Case-insensitive usernames** — all username lookups (registration, login,
+  `get_user`, web form validation) now use `func.lower()` so `StingRay` and
+  `stingray` are treated as the same account. Existing usernames unchanged.
+
+## v1.0a2.134 — MRC terminal fixes; Custom User Fields; User ID # (June 2026)
+
+- **MRC PAUSED indicator** — `\x1b[1;37;43m` bold white on orange (was invisible reverse-video in SyncTERM)
+- **MRC char count** — top-right of status bar shows remaining chars (140 - typed); cyan > 15, yellow ≤ 15, red if over
+- **MRC `/t` DM local echo** — after sending DM, client echoes `[DM -> target] message` in pink
+- **MRC tab autocomplete case fix** — old code doubled wrong-case prefix; now deletes from start and re-inserts full canonical-case name
+- **MRC status bar live update** — `_draw_status_line()` called after every keypress, backspace, and Ctrl+U
+- **Custom User Fields** — new `UserField` + `UserFieldValue` models; admin CRUD at `/admin/custom-fields`; field types: text/textarea/url/number/select; shown on public profile and admin user-manage page
+- **User ID #** — `user.id` (auto-increment PK) displayed in admin users list and public profile page
 
 ## v1.0a2.132 — ANEdit: CP437 char fix (■/·); slash /commands replace F-keys (June 2026)
 
