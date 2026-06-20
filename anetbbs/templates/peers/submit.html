@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Add Your BBS — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container my-4" style="max-width:640px;">
+  <h2><i class="bi bi-plus-circle"></i> Add Your BBS</h2>
+  <p class="text-muted">Submit your BBS to the local directory.
+    {% if not current_user.is_admin %}The sysop will review and approve it before it appears.{% endif %}
+  </p>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">BBS Name <span class="text-danger">*</span></label>
+          <input type="text" name="name" class="form-control" required maxlength="120"
+                 placeholder="e.g. The Rusty Mailbox">
+        </div>
+
+        <div class="row g-2 mb-3">
+          <div class="col-8">
+            <label class="form-label fw-semibold">Telnet Address <span class="text-danger">*</span></label>
+            <input type="text" name="hostname" class="form-control" required maxlength="160"
+                   placeholder="bbs.example.com">
+          </div>
+          <div class="col-4">
+            <label class="form-label fw-semibold">Port</label>
+            <input type="number" name="telnet_port" class="form-control" value="23"
+                   min="1" max="65535">
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Web Address</label>
+          <input type="url" name="web_url" class="form-control" maxlength="400"
+                 placeholder="https://bbs.example.com">
+          <div class="form-text">If your BBS has a web interface or info page.</div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Location</label>
+          <input type="text" name="location" class="form-control" maxlength="120"
+                 placeholder="City, State, Country">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">BBS Software</label>
+          <input type="text" name="software" class="form-control" maxlength="80"
+                 placeholder="e.g. ANetBBS, Synchronet, Mystic, …">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Description</label>
+          <textarea name="description" class="form-control" rows="3" maxlength="500"
+                    placeholder="A short description of your BBS — themes, focus areas, special features."></textarea>
+        </div>
+
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-send"></i> Submit
+          </button>
+          <a href="{{ url_for('peers.index') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

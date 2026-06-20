@@ -1,66 +1,200 @@
 {% extends "base.html" %}
-
-{% block title %}BBS Directory{% endblock %}
+{% block title %}BBS Directory — {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-globe2"></i> BBS Directory</h1>
-    <p>Known peer BBSes — click any to see who's currently online there.</p>
-</div>
+<div class="container my-4">
 
-<div class="card">
-    <div class="card-body p-0">
-    {% if peers %}
-        <table class="table table-hover mb-0">
-            <thead><tr>
-                <th>BBS</th><th>Host</th><th>FTN</th><th>Online</th><th>Updated</th>
-            </tr></thead>
-            <tbody>
-            {% for p in peers %}
-                <tr>
-                    <td>
-                        <a href="{{ url_for('peers.view', peer_id=p.id) }}">
-                            <strong>{{ p.name }}</strong>
-                        </a>
-                        {% if p.description %}
-                            <div class="text-muted small">{{ p.description }}</div>
-                        {% endif %}
-                    </td>
-                    <td><code>{{ p.hostname }}</code>{% if p.finger_port and p.finger_port != 79 %}:{{ p.finger_port }}{% endif %}</td>
-                    <td>{% if p.ftn_address %}<code>{{ p.ftn_address }}</code>{% endif %}</td>
-                    <td>
-                        {% if p.online_count %}
-                            <span class="badge bg-success">{{ p.online_count }}</span>
-                        {% elif p.last_error %}
-                            <span class="badge bg-danger" title="{{ p.last_error }}">err</span>
-                        {% else %}
-                            <span class="badge bg-secondary">0</span>
-                        {% endif %}
-                    </td>
-                    <td><small class="text-muted">
-                        {% if p.last_polled_at %}{{ p.last_polled_at.strftime('%H:%M:%S') }}{% else %}—{% endif %}
-                    </small></td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <div class="p-3 text-muted">No peer BBSes registered yet.
-            {% if current_user.is_admin %}
-                <a href="{{ url_for('peers.admin') }}">Add some</a>.
-            {% else %}
-                Ask the sysop to register some.
-            {% endif %}
-        </div>
-    {% endif %}
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+    <div>
+      <h2 class="mb-0"><i class="bi bi-globe2"></i> BBS Directory</h2>
+      <p class="text-muted small mb-0">Browse local and worldwide BBS listings</p>
     </div>
-</div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('peers.submit') }}" class="btn btn-success btn-sm">
+        <i class="bi bi-plus-circle"></i> Add Your BBS
+      </a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('peers.admin') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-gear"></i> Manage
+        {% if pending_count %}<span class="badge bg-warning text-dark ms-1">{{ pending_count }}</span>{% endif %}
+      </a>
+      {% endif %}
+    </div>
+  </div>
 
-{% if current_user.is_admin %}
-<div class="mt-3">
-    <a href="{{ url_for('peers.admin') }}" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-gear"></i> Manage BBS Directory
-    </a>
+  <!-- Search bar — applies to whichever tab is active -->
+  <form method="get" class="mb-3">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <div class="input-group input-group-sm" style="max-width:480px;">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input type="text" name="q" value="{{ q }}"
+             class="form-control" placeholder="Search BBS name, host, location, software…">
+      <button class="btn btn-outline-primary" type="submit">Search</button>
+      {% if q %}<a href="{{ url_for('peers.index', tab=tab) }}" class="btn btn-outline-secondary">Clear</a>{% endif %}
+    </div>
+  </form>
+
+  <!-- Tab nav -->
+  <ul class="nav nav-tabs mb-3" id="dirTabs">
+    <li class="nav-item">
+      <a class="nav-link {% if tab == 'local' %}active{% endif %}"
+         href="{{ url_for('peers.index', tab='local', q=q) }}">
+        <i class="bi bi-hdd-network"></i> Local
+        <span class="badge bg-secondary ms-1">{{ peers|length }}</span>
+      </a>
+    </li>
+    {% for src, d in ext_data.items() %}
+    <li class="nav-item">
+      <a class="nav-link {% if tab == src %}active{% endif %}"
+         href="{{ url_for('peers.index', tab=src, q=q) }}">
+        <i class="{{ d.icon }}"></i> {{ d.label }}
+        {% if d.count %}<span class="badge bg-secondary ms-1">{{ d.count }}</span>{% endif %}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <!-- ── LOCAL TAB ──────────────────────────────────────────────────── -->
+  {% if tab == 'local' %}
+    {% if peers %}
+      <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+        {% for p in peers %}
+        <div class="col">
+          <div class="card h-100 shadow-sm">
+            <div class="card-body pb-2">
+              <h6 class="card-title mb-1">
+                <a href="{{ url_for('peers.view', peer_id=p.id) }}" class="text-decoration-none">
+                  {{ p.name }}
+                </a>
+                {% if p.online_count %}
+                  <span class="badge bg-success ms-1" title="Users online">{{ p.online_count }} online</span>
+                {% elif p.last_error %}
+                  <span class="badge bg-danger ms-1" title="{{ p.last_error }}">offline</span>
+                {% endif %}
+              </h6>
+              <div class="text-muted small mb-1">
+                <i class="bi bi-terminal"></i>
+                <code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code>
+              </div>
+              {% if p.location %}
+              <div class="text-muted small"><i class="bi bi-geo-alt"></i> {{ p.location }}</div>
+              {% endif %}
+              {% if p.software %}
+              <div class="text-muted small"><i class="bi bi-cpu"></i> {{ p.software }}</div>
+              {% endif %}
+              {% if p.description %}
+              <p class="small mt-1 mb-0 text-muted" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">
+                {{ p.description }}
+              </p>
+              {% endif %}
+            </div>
+            <div class="card-footer bg-transparent border-top-0 pt-0 pb-2 d-flex gap-1 flex-wrap">
+              <a href="telnet://{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}"
+                 class="btn btn-primary btn-sm">
+                <i class="bi bi-terminal-fill"></i> Telnet
+              </a>
+              {% if p.web_url %}
+              <a href="{{ p.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
+                <i class="bi bi-box-arrow-up-right"></i> Web
+              </a>
+              {% endif %}
+              <a href="{{ url_for('peers.view', peer_id=p.id) }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-people"></i> Who's on
+              </a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="alert alert-secondary">
+        No local BBSes listed yet.
+        <a href="{{ url_for('peers.submit') }}">Be the first to add yours!</a>
+      </div>
+    {% endif %}
+
+  <!-- ── EXTERNAL SOURCE TABS ───────────────────────────────────────── -->
+  {% else %}
+    {% set src = tab %}
+    {% set d = ext_data.get(src) %}
+    {% if d %}
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <p class="text-muted small mb-0">
+          {% if d.last_updated %}
+            Last updated {{ d.last_updated.strftime('%Y-%m-%d %H:%M') }} UTC
+            (refreshes every {{ 6 }} hours)
+          {% else %}
+            Loading… check back in a moment.
+          {% endif %}
+        </p>
+        {% if current_user.is_admin %}
+        <form method="post" action="{{ url_for('peers.admin') }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="refresh_ext">
+          <input type="hidden" name="source" value="{{ src }}">
+          <button class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-arrow-clockwise"></i> Refresh now
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
+      {% if d.rows %}
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+          {% for e in d.rows %}
+          <div class="col">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body pb-2">
+                <h6 class="card-title mb-1">{{ e.name }}</h6>
+                {% if e.telnet_host %}
+                <div class="text-muted small mb-1">
+                  <i class="bi bi-terminal"></i>
+                  <code>{{ e.telnet_host }}{% if e.telnet_port and e.telnet_port != 23 %}:{{ e.telnet_port }}{% endif %}</code>
+                </div>
+                {% endif %}
+                {% if e.sysop %}
+                <div class="text-muted small"><i class="bi bi-person"></i> {{ e.sysop }}</div>
+                {% endif %}
+                {% if e.location %}
+                <div class="text-muted small"><i class="bi bi-geo-alt"></i> {{ e.location }}</div>
+                {% endif %}
+                {% if e.software %}
+                <div class="text-muted small"><i class="bi bi-cpu"></i> {{ e.software }}</div>
+                {% endif %}
+                {% if e.description %}
+                <p class="small mt-1 mb-0 text-muted" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">
+                  {{ e.description }}
+                </p>
+                {% endif %}
+              </div>
+              <div class="card-footer bg-transparent border-top-0 pt-0 pb-2 d-flex gap-1 flex-wrap">
+                {% if e.telnet_host %}
+                <a href="telnet://{{ e.telnet_host }}{% if e.telnet_port and e.telnet_port != 23 %}:{{ e.telnet_port }}{% endif %}"
+                   class="btn btn-primary btn-sm">
+                  <i class="bi bi-terminal-fill"></i> Telnet
+                </a>
+                {% endif %}
+                {% if e.web_url %}
+                <a href="{{ e.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
+                  <i class="bi bi-box-arrow-up-right"></i> Web
+                </a>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert alert-secondary">
+          {% if d.last_updated %}
+            No entries match your search.
+          {% else %}
+            Data is loading in the background — refresh the page in a moment.
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+
 </div>
-{% endif %}
 {% endblock %}

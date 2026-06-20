@@ -1341,17 +1341,47 @@ class PeerBbs(db.Model):
     name = db.Column(db.String(120), nullable=False)
     hostname = db.Column(db.String(160), nullable=False, unique=True, index=True)
     finger_port = db.Column(db.Integer, default=79)
-    ftn_address = db.Column(db.String(60))     # for telegram targeting
+    telnet_port = db.Column(db.Integer, default=23)
+    web_url = db.Column(db.String(400))
+    location = db.Column(db.String(120))
+    software = db.Column(db.String(80))
+    ftn_address = db.Column(db.String(60))
     description = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
+    is_approved = db.Column(db.Boolean, default=True)
+    submitted_by_user_id = db.Column(db.Integer)
     last_polled_at = db.Column(db.DateTime)
-    last_response = db.Column(db.Text)         # cached finger output
+    last_response = db.Column(db.Text)
     last_error = db.Column(db.Text)
     online_count = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
         return f'<PeerBbs {self.name} {self.hostname}>'
+
+
+class ExternalBbsCache(db.Model):
+    """Cached entries from external BBS directories (TelnetBBSGuide, IPTIA).
+
+    Refreshed in the background every 6 hours or on admin demand.
+    source values: 'telnetbbsguide', 'iptia'
+    """
+    __tablename__ = 'external_bbs_cache'
+
+    id           = db.Column(db.Integer, primary_key=True)
+    source       = db.Column(db.String(30), nullable=False, index=True)
+    name         = db.Column(db.String(200), nullable=False)
+    telnet_host  = db.Column(db.String(200))
+    telnet_port  = db.Column(db.Integer, default=23)
+    web_url      = db.Column(db.String(400))
+    location     = db.Column(db.String(200))
+    software     = db.Column(db.String(80))
+    sysop        = db.Column(db.String(120))
+    description  = db.Column(db.Text)
+    cached_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<ExternalBbsCache {self.source} {self.name}>'
 
 
 class UserNote(db.Model):

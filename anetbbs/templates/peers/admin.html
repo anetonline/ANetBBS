@@ -1,104 +1,150 @@
 {% extends "base.html" %}
-
-{% block title %}BBS Directory Admin{% endblock %}
+{% block title %}BBS Directory Admin — {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-gear-fill"></i> BBS Directory (Admin)</h1>
-</div>
+<div class="container my-4">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0"><i class="bi bi-gear-fill"></i> BBS Directory Admin</h2>
+    <a href="{{ url_for('peers.index') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left"></i> Back to Directory
+    </a>
+  </div>
 
-<div class="card mb-3">
-    <div class="card-header"><i class="bi bi-plus-square"></i> Add BBS</div>
-    <div class="card-body">
-        <form method="post" class="row g-2 align-items-end">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="action" value="add">
-            <div class="col-md-3">
-                <label class="form-label">Name</label>
-                <input type="text" name="name" class="form-control" required>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Hostname</label>
-                <input type="text" name="hostname" class="form-control" required
-                       placeholder="bbs.example.com">
-            </div>
-            <div class="col-md-1">
-                <label class="form-label">Port</label>
-                <input type="number" name="finger_port" class="form-control" value="79">
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">FTN (optional)</label>
-                <input type="text" name="ftn_address" class="form-control"
-                       placeholder="1:234/5">
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Description</label>
-                <input type="text" name="description" class="form-control">
-            </div>
-            <div class="col-md-1">
-                <button class="btn btn-primary w-100">Add</button>
-            </div>
-        </form>
+  <!-- Pending submissions -->
+  {% set pending = peers | selectattr('is_approved', 'equalto', False) | list %}
+  {% if pending %}
+  <div class="card border-warning mb-4 shadow-sm">
+    <div class="card-header bg-warning text-dark fw-semibold">
+      <i class="bi bi-hourglass-split"></i> Pending Submissions ({{ pending|length }})
     </div>
-</div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead><tr>
+          <th>Name</th><th>Telnet</th><th>Web</th><th>Location</th><th>Software</th><th>Description</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for p in pending %}
+        <tr>
+          <td><strong>{{ p.name }}</strong></td>
+          <td><code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code></td>
+          <td>{% if p.web_url %}<a href="{{ p.web_url }}" target="_blank" rel="noopener">{{ p.web_url[:40] }}</a>{% endif %}</td>
+          <td><small>{{ p.location or '—' }}</small></td>
+          <td><small>{{ p.software or '—' }}</small></td>
+          <td><small class="text-muted">{{ (p.description or '')[:60] }}</small></td>
+          <td class="text-end text-nowrap">
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="approve">
+              <input type="hidden" name="peer_id" value="{{ p.id }}">
+              <button class="btn btn-success btn-sm">Approve</button>
+            </form>
+            <form method="post" class="d-inline ms-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="peer_id" value="{{ p.id }}">
+              <button class="btn btn-outline-danger btn-sm"
+                      onclick="return confirm('Reject and delete {{ p.name }}?')">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 
-<div class="mb-2">
-    <form method="post" style="display:inline;">
+  <!-- Approved local entries -->
+  {% set approved = peers | selectattr('is_approved', 'equalto', True) | list %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span><i class="bi bi-hdd-network"></i> Local Entries ({{ approved|length }})</span>
+      <form method="post" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="refresh">
-        <button class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-arrow-clockwise"></i> Refresh All
+        <button class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-arrow-clockwise"></i> Finger Refresh All
         </button>
-    </form>
-</div>
-
-<div class="card">
+      </form>
+    </div>
     <div class="card-body p-0">
-    {% if peers %}
-        <table class="table table-sm mb-0">
-            <thead><tr>
-                <th>Active</th><th>Name</th><th>Hostname</th><th>FTN</th>
-                <th>Online</th><th>Last Polled</th><th>Error</th><th></th>
-            </tr></thead>
-            <tbody>
-            {% for p in peers %}
-                <tr {% if not p.is_active %}class="text-muted"{% endif %}>
-                    <td>
-                        {% if p.is_active %}<span class="badge bg-success">on</span>
-                        {% else %}<span class="badge bg-secondary">off</span>{% endif %}
-                    </td>
-                    <td>{{ p.name }}</td>
-                    <td><code>{{ p.hostname }}:{{ p.finger_port }}</code></td>
-                    <td>{% if p.ftn_address %}<code>{{ p.ftn_address }}</code>{% endif %}</td>
-                    <td>{{ p.online_count or 0 }}</td>
-                    <td>
-                        {% if p.last_polled_at %}
-                            <small>{{ p.last_polled_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
-                        {% else %}—{% endif %}
-                    </td>
-                    <td><small class="text-danger">{{ (p.last_error or '')[:60] }}</small></td>
-                    <td>
-                        <form method="post" style="display:inline;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="action" value="toggle">
-                            <input type="hidden" name="peer_id" value="{{ p.id }}">
-                            <button class="btn btn-link btn-sm p-0 me-2">{{ 'pause' if p.is_active else 'enable' }}</button>
-                        </form>
-                        <form method="post" style="display:inline;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="peer_id" value="{{ p.id }}">
-                            <button class="btn btn-link btn-sm text-danger p-0"
-                                    onclick="return confirm('Delete {{ p.name }}?')">delete</button>
-                        </form>
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+    {% if approved %}
+      <table class="table table-sm mb-0">
+        <thead><tr>
+          <th>Status</th><th>Name</th><th>Telnet</th><th>Web</th>
+          <th>Location</th><th>Online</th><th>Last Polled</th><th>Error</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for p in approved %}
+        <tr {% if not p.is_active %}class="text-muted"{% endif %}>
+          <td>
+            {% if p.is_active %}<span class="badge bg-success">on</span>
+            {% else %}<span class="badge bg-secondary">off</span>{% endif %}
+          </td>
+          <td><strong>{{ p.name }}</strong></td>
+          <td><code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code></td>
+          <td>{% if p.web_url %}<a href="{{ p.web_url }}" target="_blank" rel="noopener" class="small">link</a>{% endif %}</td>
+          <td><small>{{ p.location or '' }}</small></td>
+          <td>{{ p.online_count or 0 }}</td>
+          <td><small class="text-muted">
+            {% if p.last_polled_at %}{{ p.last_polled_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+          </small></td>
+          <td><small class="text-danger">{{ (p.last_error or '')[:50] }}</small></td>
+          <td class="text-nowrap">
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="toggle">
+              <input type="hidden" name="peer_id" value="{{ p.id }}">
+              <button class="btn btn-link btn-sm p-0 me-1">{{ 'disable' if p.is_active else 'enable' }}</button>
+            </form>
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="peer_id" value="{{ p.id }}">
+              <button class="btn btn-link btn-sm text-danger p-0"
+                      onclick="return confirm('Delete {{ p.name }}?')">delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
     {% else %}
-        <div class="p-3 text-muted">No peers registered. Add some above.</div>
+      <div class="p-3 text-muted">No local entries yet. <a href="{{ url_for('peers.submit') }}">Add one</a>.</div>
     {% endif %}
     </div>
+  </div>
+
+  <!-- External source stats + manual refresh -->
+  <div class="card shadow-sm">
+    <div class="card-header"><i class="bi bi-cloud-download"></i> External Sources</div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Source</th><th>Entries</th><th>Last Refreshed</th><th></th></tr></thead>
+        <tbody>
+        {% for src, s in ext_stats.items() %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td>{{ s.count }}</td>
+          <td><small class="text-muted">
+            {{ s.last_updated.strftime('%Y-%m-%d %H:%M') if s.last_updated else 'Never' }}
+          </small></td>
+          <td>
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="refresh_ext">
+              <input type="hidden" name="source" value="{{ src }}">
+              <button class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 {% endblock %}

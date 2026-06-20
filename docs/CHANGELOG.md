@@ -1,7 +1,25 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.137`** (June 2026). Previous: `v1.0a2.136`.
+separately. Current release: **`v1.0a2.139`** (June 2026). Previous: `v1.0a2.138`.
+
+## v1.0a2.139 — Fix 500 on BBS Directory (missing PeerBbs columns) (June 2026)
+
+- **Hotfix**: `PeerBbs` model was missing the new columns (`is_approved`,
+  `telnet_port`, `web_url`, `location`, `software`, `submitted_by_user_id`)
+  added in v1.0a2.138. SQLAlchemy raised `InvalidRequestError` on
+  `filter_by(is_approved=True)` because the attribute wasn't defined in
+  the model class. `_ensure_column` adds them to the DB but the ORM also
+  needs them in the model. Fixed in `models.py`.
+
+## v1.0a2.138 — Enhanced BBS Directory: TelnetBBSGuide + IPTIA tabs (June 2026)
+
+- **Three-tab BBS Directory** — Local (existing peers + user self-submission
+  with sysop approval), TelnetBBSGuide (CSV fetched + cached every 6h),
+  IPTIA (same pattern). Each entry shows name, sysop, location, software,
+  description, and Telnet/Web connect buttons. Admin panel handles pending
+  approvals and manual external refresh. New `external_bbs_cache` table;
+  new columns on `peer_bbses` via `_ensure_column`.
 
 ## v1.0a2.137 — Session crash fix; nginx MRC auto-repair (June 2026)
 

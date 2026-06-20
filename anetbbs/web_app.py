@@ -714,6 +714,13 @@ def _lightweight_migrate(app):
     # it up because we add it to the metadata via the import.
     # Echomail networks: QWK URL overrides for non-standard upstreams.
     _ensure_column('echomail_networks', 'qwk_download_url', 'VARCHAR(500)')
+    # PeerBbs — extended for richer local BBS directory
+    _ensure_column('peer_bbses', 'telnet_port', 'INTEGER DEFAULT 23')
+    _ensure_column('peer_bbses', 'web_url', 'VARCHAR(400)')
+    _ensure_column('peer_bbses', 'location', 'VARCHAR(120)')
+    _ensure_column('peer_bbses', 'software', 'VARCHAR(80)')
+    _ensure_column('peer_bbses', 'submitted_by_user_id', 'INTEGER')
+    _ensure_column('peer_bbses', 'is_approved', 'BOOLEAN NOT NULL DEFAULT 1')
     _ensure_column('echomail_networks', 'qwk_upload_url', 'VARCHAR(500)')
     _ensure_column('echomail_networks', 'qwk_hub_id', 'VARCHAR(16)')
     # SBBSecho parity (v132): default-recipient + auth/transport options
