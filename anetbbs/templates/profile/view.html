@@ -32,13 +32,13 @@
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
             <div class="card-body">
-                {% if user.location %}
+                {% if field_config.location and user.location %}
                     <p><i class="bi bi-geo-alt"></i> {{ user.location }}</p>
                 {% endif %}
-                {% if user.website %}
+                {% if field_config.website and user.website %}
                     <p><i class="bi bi-link-45deg"></i> <a href="{{ user.website }}" target="_blank" rel="noopener noreferrer">{{ user.website }}</a></p>
                 {% endif %}
-                {% if user.show_email %}
+                {% if field_config.show_email and user.show_email %}
                     <p><i class="bi bi-envelope"></i> {{ user.email }}</p>
                 {% endif %}
                 <p><i class="bi bi-calendar"></i> Joined {{ user.created_at.strftime('%Y-%m-%d') }}</p>
@@ -84,7 +84,7 @@
 
     <!-- Profile Content -->
     <div class="col-md-9">
-        {% if user.bio %}
+        {% if field_config.bio and user.bio %}
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-person"></i> About</div>
             <div class="card-body">
@@ -93,7 +93,7 @@
         </div>
         {% endif %}
 
-        {% if user.signature %}
+        {% if field_config.signature and user.signature %}
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-pen"></i> Signature</div>
             <div class="card-body">

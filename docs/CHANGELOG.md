@@ -3,7 +3,14 @@
 Versions are internal build numbers. Public releases are tagged
 separately. Current release: **`v1.0a2.136`** (June 2026). Previous: `v1.0a2.135`.
 
-## v1.0a2.136 — Security questions at terminal registration (June 2026)
+## v1.0a2.136 — Security questions at terminal registration; sysop profile field control (June 2026)
+
+- **Sysop profile field control** — new `BuiltinFieldConfig` model lets sysops
+  enable/disable each built-in profile field (Display Name, Bio, Location, Website,
+  Forum Signature, FTN Tagline, Date of Birth, Show Email Option) from
+  `/admin/custom-fields`. Disabled fields are hidden from both the profile edit
+  form and the public profile view. Defaults to all enabled. Custom fields
+  (add/edit/delete) remain on the same page.
 
 - **Security questions on terminal registration** — new users registering via
   telnet/SSH now complete the same 3 password-recovery security Q&A as web

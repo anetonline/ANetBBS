@@ -2457,3 +2457,33 @@ class UserFieldValue(db.Model):
 
     def __repr__(self):
         return f'<UserFieldValue user={self.user_id} field={self.field_id}>'
+
+
+BUILTIN_FIELDS = [
+    ('display_name', 'Display Name'),
+    ('bio',          'Bio / About Me'),
+    ('location',     'Location'),
+    ('website',      'Website'),
+    ('signature',    'Forum Signature'),
+    ('tagline',      'FTN Tagline'),
+    ('date_of_birth','Date of Birth'),
+    ('show_email',   'Show Email Option'),
+]
+
+
+class BuiltinFieldConfig(db.Model):
+    """Sysop-controlled enable/disable for each built-in profile field."""
+    __tablename__ = 'builtin_field_configs'
+
+    id         = db.Column(db.Integer, primary_key=True)
+    field_name = db.Column(db.String(50), unique=True, nullable=False)
+    enabled    = db.Column(db.Boolean, default=True, nullable=False)
+
+    def __repr__(self):
+        return f'<BuiltinFieldConfig {self.field_name!r} enabled={self.enabled}>'
+
+
+def get_builtin_field_config():
+    """Return {field_name: bool} for all built-in fields, defaulting to True."""
+    rows = {r.field_name: r.enabled for r in BuiltinFieldConfig.query.all()}
+    return {name: rows.get(name, True) for name, _label in BUILTIN_FIELDS}

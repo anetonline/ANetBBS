@@ -14,7 +14,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue
+from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue, get_builtin_field_config
 from ..echomail.routing import parse_address
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
@@ -196,7 +196,8 @@ def view_user(username):
                          achievements=achievements,
                          groups=groups,
                          custom_fields_list=custom_fields_list,
-                         custom_values=custom_values)
+                         custom_values=custom_values,
+                         field_config=get_builtin_field_config())
 
 
 @profile_bp.route('/edit', methods=['GET', 'POST'])
@@ -277,7 +278,8 @@ def edit():
     custom_values = {ufv.field_id: ufv.value
                      for ufv in UserFieldValue.query.filter_by(user_id=current_user.id).all()}
     return render_template('profile/edit.html', form=form, themes=themes, avatar=avatar,
-                           custom_fields_list=custom_fields_list, custom_values=custom_values)
+                           custom_fields_list=custom_fields_list, custom_values=custom_values,
+                           field_config=get_builtin_field_config())
 
 
 @profile_bp.route('/avatar/remove', methods=['POST'])

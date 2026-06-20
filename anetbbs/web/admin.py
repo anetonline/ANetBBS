@@ -15,7 +15,8 @@ from flask_wtf import FlaskForm
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Board, Post, Message, Theme, UserSession,
                        UserActivity, RegistrationAttempt, PasswordResetToken,
-                       UserField, UserFieldValue)
+                       UserField, UserFieldValue,
+                       BuiltinFieldConfig, BUILTIN_FIELDS, get_builtin_field_config)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -2848,7 +2849,28 @@ class UserFieldForm(FlaskForm):
 @admin_required
 def custom_fields():
     fields = UserField.query.order_by(UserField.sort_order, UserField.id).all()
-    return render_template('admin/custom_fields.html', fields=fields)
+    builtin_config = get_builtin_field_config()
+    return render_template('admin/custom_fields.html', fields=fields,
+                           builtin_fields=BUILTIN_FIELDS,
+                           builtin_config=builtin_config)
+
+
+@admin_bp.route('/custom-fields/toggle-builtin/<field_name>', methods=['POST'])
+@login_required
+@admin_required
+def toggle_builtin_field(field_name):
+    valid = {name for name, _ in BUILTIN_FIELDS}
+    if field_name not in valid:
+        flash('Unknown field.', 'danger')
+        return redirect(url_for('admin.custom_fields'))
+    row = BuiltinFieldConfig.query.filter_by(field_name=field_name).first()
+    if row is None:
+        row = BuiltinFieldConfig(field_name=field_name, enabled=False)
+        db.session.add(row)
+    else:
+        row.enabled = not row.enabled
+    db.session.commit()
+    return redirect(url_for('admin.custom_fields'))
 
 
 @admin_bp.route('/custom-fields/add', methods=['GET', 'POST'])
