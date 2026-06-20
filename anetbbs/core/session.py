@@ -1110,6 +1110,7 @@ class BBSSession:
     async def start(self):
         """Start the BBS session"""
         presence = None
+        _hb_task = None
         self._session_started_at = datetime.utcnow()
         # Idle timeout for terminal menus (seconds). IRC/MRC use a different
         # path so they are unaffected. Defaults to 0 (off) — sysop opts in
@@ -1183,7 +1184,6 @@ class BBSSession:
             wname = type(self.writer).__name__.lower()
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
-            _hb_task = None
 
             # Fast logon check — if the sysop has enabled it, offer the user
             # a chance to skip logon modules and jump straight to the menu.

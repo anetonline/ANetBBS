@@ -1139,6 +1139,44 @@ if idx != -1:
         warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
     fi
 
+    # Fix: Add /mrcws and /mrc-auth-check locations if entirely absent.
+    # Without them requests fall through to gunicorn (404) instead of the
+    # MRC bridge on port 8080.  Sysops who installed before MRC web was added
+    # (pre-v1.0a2.76) or whose config was generated from an old template never
+    # got these blocks.
+    if ! grep -q 'location /mrcws' "$NGINX_AVAIL" 2>/dev/null; then
+        info "Adding /mrcws location to nginx config (missing from this install)..."
+        MRC_BLOCK="
+    location = /mrc-auth-check {
+        internal;
+        proxy_pass http://127.0.0.1:5000/mrc/auth-check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length \"\";
+        proxy_set_header X-Original-URI \$request_uri;
+        proxy_set_header Cookie \$http_cookie;
+    }
+
+    location /mrcws {
+        auth_request /mrc-auth-check;
+        proxy_pass         http://127.0.0.1:8080/ws;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    \$http_upgrade;
+        proxy_set_header   Connection \"upgrade\";
+        proxy_read_timeout 86400s;
+    }"
+        python3 -c "
+import sys
+txt = open('$NGINX_AVAIL').read()
+idx = txt.rfind('}')
+if idx != -1:
+    txt = txt[:idx] + '''$MRC_BLOCK
+}'''
+    open('$NGINX_AVAIL', 'w').write(txt)
+    print('inserted')
+" 2>/dev/null && { NGINX_CHANGED=true; ok "nginx: /mrcws location added"; } || \
+        warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
+    fi
+
     if [[ "$NGINX_CHANGED" == "true" ]]; then
         if nginx -t 2>/dev/null; then
             if nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null; then

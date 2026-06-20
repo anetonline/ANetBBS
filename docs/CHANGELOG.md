@@ -1,7 +1,18 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.136`** (June 2026). Previous: `v1.0a2.135`.
+separately. Current release: **`v1.0a2.137`** (June 2026). Previous: `v1.0a2.136`.
+
+## v1.0a2.137 — Session crash fix; nginx MRC auto-repair (June 2026)
+
+- **Session crash on early disconnect** — `UnboundLocalError` in `session.start()`
+  `finally` block when a connection exited before completing login (bot gate, failed
+  login, all nodes full). `_hb_task = None` was inside the outer `try`; moved it
+  before the `try` alongside `presence = None`. `core/session.py`.
+
+- **nginx MRC auto-repair** — `update.sh` now detects and inserts the missing
+  `location /mrcws` + `location = /mrc-auth-check` nginx blocks if absent.
+  Without them web MRC WebSocket connections returned 404 from gunicorn.
 
 ## v1.0a2.136 — Security questions at terminal registration; sysop profile field control (June 2026)
 

@@ -1,39 +1,28 @@
-# ANetBBS v1.0a2.136 — Duplicate email/username crash fix; case-insensitive usernames
+# ANetBBS v1.0a2.137 — Session crash fix; nginx MRC auto-repair
 
 ## Changes
 
-### Security/Bug fix: Duplicate email address crashes session (DoS vector)
+### Bug fix: UnboundLocalError crash on early session termination
 
-Registering a new account with an email address already used by another account
-triggered a raw SQLite `IntegrityError` that propagated unhandled and terminated
-the entire BBS session — potentially disconnecting all connected users.
+Any connection that exited before completing login (bot gate rejection, failed
+login, all nodes full) triggered an `UnboundLocalError` in the `finally` block
+of `session.start()` when it tried to cancel the presence heartbeat task.
 
-Root cause: `create_user()` in `user_manager.py` checked for duplicate usernames
-before inserting but did not check for duplicate emails. The database unique
-constraint on `users.email` fired at commit time and was never caught.
+Root cause: `_hb_task = None` was initialised inside the outer `try` block, but
+the `finally` always runs — including when the try block exits before that line.
+Python sees the variable is assigned somewhere in the function and treats it as
+local, so referencing it before assignment raises `UnboundLocalError` rather
+than `NameError`.
 
-Fixes:
-- Added `email_exists()` pre-check in the terminal registration loop — user is
-  re-prompted for a different email with a clear message ("An account with that
-  email address already exists.")
-- Added `username_exists()` pre-check in the username loop — user is re-prompted
-  immediately instead of failing after collecting all input.
-- `create_user()` now catches `IntegrityError` as defense-in-depth and returns
-  a string result code (`'ok'` / `'username_taken'` / `'email_taken'`) instead
-  of a bool, so callers can display the right error.
-- Web registration form `validate_email` and `validate_username` validators now
-  use case-insensitive queries (SQLite `lower()`) — already showed user-friendly
-  errors but was technically case-sensitive before.
+Fix: moved `_hb_task = None` to the top of `start()`, alongside `presence = None`,
+before the `try` block. `core/session.py`.
 
-### New: Case-insensitive username uniqueness
+### Fix: `update.sh` now auto-adds missing `/mrcws` nginx location
 
-All username lookups (registration check, login, `get_user`) now use
-`func.lower(User.username) == username.lower()` so `StingRay` and `stingray`
-are treated as the same account. Existing usernames are not renamed — only the
-lookup and uniqueness check are case-folded.
+Installs that pre-date the MRC web feature (or whose nginx config was generated
+from an old template) were missing the `location /mrcws` block that proxies the
+WebSocket connection to the MRC bridge on port 8080. Without it, `/mrcws`
+requests fell through to gunicorn and returned 404, breaking web MRC entirely.
 
-This applies to:
-- Terminal registration (can't register a name that differs only in case)
-- Terminal login (login with any case variation of your username)
-- Web registration form duplicate check
-- Web login lookup
+`update.sh` now detects the absent block and inserts it (and the required
+`/mrc-auth-check` internal auth block) automatically, then reloads nginx.
