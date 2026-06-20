@@ -1,7 +1,16 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.135`** (June 2026). Previous: `v1.0a2.134`.
+separately. Current release: **`v1.0a2.136`** (June 2026). Previous: `v1.0a2.135`.
+
+## v1.0a2.136 — Security questions at terminal registration (June 2026)
+
+- **Security questions on terminal registration** — new users registering via
+  telnet/SSH now complete the same 3 password-recovery security Q&A as web
+  registration. Questions are presented numbered; user picks 3 different ones
+  and enters answers. Answers saved via `UserSecurityAnswer` (same table/hashing
+  as web). Implemented in `_collect_security_questions()` in `core/session.py`;
+  `save_security_answers()` added to `UserManager`.
 
 ## v1.0a2.135 — Duplicate email DoS fix; case-insensitive usernames (June 2026)
 

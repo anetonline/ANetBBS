@@ -1,4 +1,4 @@
-# ANetBBS v1.0a2.135 — Duplicate email/username crash fix; case-insensitive usernames
+# ANetBBS v1.0a2.136 — Duplicate email/username crash fix; case-insensitive usernames
 
 ## Changes
 

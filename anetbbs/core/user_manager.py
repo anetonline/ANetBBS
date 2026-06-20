@@ -136,6 +136,18 @@ class UserManager:
             s.commit()
             return self._user_to_dict(user)
 
+    def save_security_answers(self, user_id: int, qa_pairs: list) -> None:
+        """Persist password-recovery security Q&A. qa_pairs: list of (question, answer) tuples."""
+        from anetbbs.models import UserSecurityAnswer
+        with _Session() as s:
+            for question, answer in qa_pairs:
+                s.add(UserSecurityAnswer(
+                    user_id=user_id,
+                    question=question,
+                    answer_hash=UserSecurityAnswer.hash_answer(answer),
+                ))
+            s.commit()
+
     def get_user(self, username: str) -> Optional[Dict]:
         """Look up a user by username without authentication."""
         from anetbbs.models import User

@@ -378,6 +378,50 @@ class BBSSession:
                     continue
         self._kick_task = asyncio.create_task(_watch())
 
+    async def _collect_security_questions(self):
+        """Collect 3 password-recovery security Q&A during terminal registration."""
+        if not self.user:
+            return
+        from ..models import SECURITY_QUESTIONS
+
+        await self.write(
+            "\r\n\x1b[1;36m=== Password Recovery Security Questions ===\x1b[0m\r\n"
+            "These are used if you ever need to reset your password.\r\n\r\n"
+        )
+        for i, q in enumerate(SECURITY_QUESTIONS, 1):
+            await self.write(f"  \x1b[33m{i:2}.\x1b[0m {q}\r\n")
+
+        qa_pairs = []
+        used = set()
+        for slot in range(1, 4):
+            while True:
+                await self.write(f"\r\n\x1b[1mQuestion {slot} of 3\x1b[0m"
+                                 f" — enter a number (1-{len(SECURITY_QUESTIONS)}): ")
+                raw = await self.read_line("")
+                raw = raw.strip()
+                if not raw.isdigit():
+                    await self.write("\r\nPlease enter a number.\r\n")
+                    continue
+                idx = int(raw) - 1
+                if not (0 <= idx < len(SECURITY_QUESTIONS)):
+                    await self.write(f"\r\nChoose between 1 and {len(SECURITY_QUESTIONS)}.\r\n")
+                    continue
+                if idx in used:
+                    await self.write("\r\nYou already used that question — choose a different one.\r\n")
+                    continue
+                question = SECURITY_QUESTIONS[idx]
+                answer = await self.read_line(f"{question}\r\nYour answer: ")
+                answer = answer.strip()
+                if len(answer) < 2:
+                    await self.write("\r\nAnswer too short (minimum 2 characters).\r\n")
+                    continue
+                used.add(idx)
+                qa_pairs.append((question, answer))
+                break
+
+        self.user_manager.save_security_answers(self.user['id'], qa_pairs)
+        await self.write("\r\n\x1b[1;32mSecurity questions saved.\x1b[0m\r\n")
+
     async def _run_newuser_questionnaire(self):
         """Walk the sysop's NewUserQuestion list and store answers."""
         if not self.user:
@@ -786,6 +830,11 @@ class BBSSession:
             await self.write("\r\nRegistration successful!\r\n")
             await self._show_ansi_screen('newuser')
             self.user = self.user_manager.authenticate(username, password)
+            # Password-recovery security questions (same as web registration).
+            try:
+                await self._collect_security_questions()
+            except Exception:
+                pass
             # Newuser questionnaire — sysop-defined prompts, answers
             # stored per user. Best-effort, never blocks on errors.
             try:
