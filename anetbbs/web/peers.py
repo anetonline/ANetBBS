@@ -1,15 +1,16 @@
 # anetbbs/web/peers.py
 """
 BBS directory — three sections:
-  Local      : sysop-managed entries + user self-submissions (pending approval)
-  TelnetBBSGuide : fetched from their CSV, cached in DB every 6 hours
-  IPTIA      : same pattern (shown only if data is available)
+  Local         : sysop-managed entries + user self-submissions (pending approval)
+  TelnetBBSGuide: monthly ZIP (ibbs{MM}{YYYY}.zip) containing a pipe-delimited list
+  IPTIA         : XML from ipingthereforeiam.com
 """
-import csv
 import io
 import socket
 import threading
-from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
+import zipfile
+from datetime import date, datetime, timedelta
 
 import requests
 from flask import (Blueprint, current_app, flash, redirect, render_template,
@@ -27,13 +28,11 @@ peers_bp = Blueprint('peers', __name__, url_prefix='/bbses')
 EXTERNAL_SOURCES = {
     'telnetbbsguide': {
         'label': 'TelnetBBSGuide',
-        'url': 'https://www.telnetbbsguide.com/bbs/list/brief/csv/',
         'icon': 'bi-globe2',
         'badge_color': 'bg-info text-dark',
     },
     'iptia': {
         'label': 'IPTIA',
-        'url': 'https://iptia.bbsindex.com/bbs.csv',
         'icon': 'bi-broadcast',
         'badge_color': 'bg-warning text-dark',
     },
@@ -117,85 +116,238 @@ def _refresh_all_async():
 
 
 # ---------------------------------------------------------------------------
-# External CSV fetch + parse
+# TelnetBBSGuide — monthly ZIP, pipe-delimited text inside
 # ---------------------------------------------------------------------------
 
-def _parse_telnetbbsguide(text):
-    """Parse TelnetBBSGuide CSV. Returns list of dicts."""
+def _telnetbbsguide_urls():
+    """Return candidate URLs for this month then last month as fallback."""
+    today = date.today()
+    urls = [f'https://www.telnetbbsguide.com/bbslist/ibbs{today.month:02d}{today.year}.zip']
+    if today.month == 1:
+        prev = date(today.year - 1, 12, 1)
+    else:
+        prev = date(today.year, today.month - 1, 1)
+    urls.append(f'https://www.telnetbbsguide.com/bbslist/ibbs{prev.month:02d}{prev.year}.zip')
+    return urls
+
+
+def _parse_telnetbbsguide(data):
+    """Parse TelnetBBSGuide monthly ZIP. data is bytes. Returns list of dicts."""
+    # Extract text from ZIP
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        names = zf.namelist()
+        # Pick first .txt/.lst/.dat or just whatever is in there
+        txt_names = [n for n in names
+                     if n.lower().endswith(('.txt', '.lst', '.dat', '.bbs'))]
+        target = txt_names[0] if txt_names else (names[0] if names else None)
+        if target is None:
+            return []
+        raw = zf.read(target)
+    except Exception:
+        raw = data  # not a ZIP — try treating as raw text
+
+    text = raw.decode('latin-1', errors='replace')
     entries = []
-    reader = csv.DictReader(io.StringIO(text))
-    # Normalise header keys: strip whitespace, lower-case
-    for row in reader:
-        r = {k.strip().lower().replace(' ', '_'): (v or '').strip()
-             for k, v in row.items()}
-        name = r.get('bbs_name') or r.get('name') or r.get('bbsname') or ''
-        host = (r.get('telnet_address') or r.get('address') or
-                r.get('telnet') or r.get('hostname') or '')
-        port_raw = (r.get('telnet_port') or r.get('port') or '23').strip()
+
+    # The IBBS list is pipe-delimited. Common column orders seen:
+    # Name|Network|Telnet:Port|Location|Sysop|Software|Web|Notes
+    # or Name|Telnet|Port|Sysop|Location|Software|Web|Notes
+    # We sniff the header row if present, otherwise use positional guesses.
+    lines = [l for l in text.splitlines() if l.strip()]
+    if not lines:
+        return []
+
+    # Check if first line looks like a header
+    header_line = lines[0]
+    has_header = any(kw in header_line.lower()
+                     for kw in ('name', 'address', 'telnet', 'sysop', 'software'))
+
+    if '|' in (lines[1] if len(lines) > 1 else lines[0]):
+        # Pipe-delimited
+        if has_header:
+            # Normalise header keys
+            headers = [h.strip().lower().replace(' ', '_').replace('/', '_')
+                       for h in header_line.split('|')]
+            data_lines = lines[1:]
+        else:
+            headers = None
+            data_lines = lines
+
+        for line in data_lines:
+            if not line.strip() or line.startswith(';'):
+                continue
+            fields = [f.strip() for f in line.split('|')]
+            if len(fields) < 2:
+                continue
+
+            if headers:
+                r = dict(zip(headers, fields))
+            else:
+                # Positional fallback: Name|Telnet|Port|Sysop|Location|Software|Web|Notes
+                r = {}
+                _pos = ['name', 'telnet_host', 'telnet_port', 'sysop',
+                        'location', 'software', 'web_url', 'description']
+                for i, val in enumerate(fields):
+                    if i < len(_pos):
+                        r[_pos[i]] = val
+
+            name = (r.get('name') or r.get('bbs_name') or r.get('bbs') or '').strip()
+            # Telnet address may be host:port in one field
+            raw_addr = (r.get('telnet_host') or r.get('telnet') or
+                        r.get('address') or r.get('telnet_address') or '').strip()
+            port_raw = (r.get('telnet_port') or r.get('port') or '').strip()
+            if ':' in raw_addr and not port_raw:
+                host, _, port_raw = raw_addr.partition(':')
+            else:
+                host = raw_addr
+            try:
+                port = int(port_raw) if port_raw else 23
+            except ValueError:
+                port = 23
+            web = (r.get('web_url') or r.get('web') or r.get('url') or
+                   r.get('website') or r.get('http') or '').strip()
+            if web and not web.startswith('http'):
+                web = 'http://' + web
+            location = (r.get('location') or r.get('city') or '').strip()
+            software = (r.get('software') or r.get('bbs_software') or '').strip()
+            sysop = (r.get('sysop') or r.get('sysop_name') or '').strip()
+            desc = (r.get('description') or r.get('notes') or
+                    r.get('comment') or '').strip()
+
+            if not name and not host:
+                continue
+            entries.append({
+                'name': name, 'telnet_host': host, 'telnet_port': port,
+                'web_url': web or None, 'location': location or None,
+                'software': software or None, 'sysop': sysop or None,
+                'description': desc or None,
+            })
+    else:
+        # Labeled-field block format:
+        # BBS Name: ...
+        # Address: ...
+        # Port: ...
+        # Sysop: ...  etc.
+        current = {}
+        for line in lines:
+            if line.startswith(('-' * 5, '=' * 5, '*' * 5)):
+                if current:
+                    entries.append(_ibbs_block_to_entry(current))
+                    current = {}
+                continue
+            if ':' in line:
+                key, _, val = line.partition(':')
+                current[key.strip().lower()] = val.strip()
+        if current:
+            entries.append(_ibbs_block_to_entry(current))
+
+    return [e for e in entries if e]
+
+
+def _ibbs_block_to_entry(r):
+    name = (r.get('bbs name') or r.get('name') or '').strip()
+    host = (r.get('address') or r.get('telnet') or r.get('hostname') or '').strip()
+    port_raw = r.get('port', '23').strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 23
+    web = (r.get('web') or r.get('website') or r.get('url') or '').strip()
+    if web and not web.startswith('http'):
+        web = 'http://' + web
+    if not name and not host:
+        return None
+    return {
+        'name': name, 'telnet_host': host, 'telnet_port': port,
+        'web_url': web or None,
+        'location': (r.get('location') or r.get('city') or None),
+        'software': r.get('software') or None,
+        'sysop': r.get('sysop') or None,
+        'description': r.get('notes') or r.get('description') or None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# IPTIA — XML
+# ---------------------------------------------------------------------------
+
+def _parse_iptia(data):
+    """Parse IPTIA dialdirectory.xml. data is bytes. Returns list of dicts."""
+    entries = []
+    try:
+        root = ET.fromstring(data if isinstance(data, bytes)
+                             else data.encode('utf-8'))
+    except ET.ParseError:
+        return []
+
+    # Walk every element that might be a BBS record.
+    # Common tag names: bbs, system, entry, record, listing
+    _bbs_tags = {'bbs', 'system', 'entry', 'record', 'listing', 'bbsentry',
+                 'bbslisting'}
+
+    def _find_records(node):
+        # If this node itself looks like a record, yield it
+        if node.tag.lower().split('}')[-1] in _bbs_tags:
+            yield node
+        else:
+            for child in node:
+                yield from _find_records(child)
+
+    def _text(node, *tags):
+        """First non-empty text among tried tag names (case-insensitive search)."""
+        tag_lower = {t.lower() for t in tags}
+        for child in node:
+            if child.tag.lower().split('}')[-1] in tag_lower:
+                return (child.text or '').strip()
+        # Also check attributes
+        for t in tags:
+            val = node.get(t, '') or node.get(t.upper(), '') or node.get(t.lower(), '')
+            if val:
+                return val.strip()
+        return ''
+
+    for record in _find_records(root):
+        name = _text(record, 'name', 'bbsname', 'bbs_name', 'title', 'systemname')
+        host = _text(record, 'address', 'telnet', 'hostname', 'host',
+                     'telnetaddress', 'telnet_address', 'ip', 'ipaddress')
+        port_raw = _text(record, 'port', 'telnetport', 'telnet_port')
+        # address may be host:port
+        if ':' in host and not port_raw:
+            host, _, port_raw = host.partition(':')
         try:
             port = int(port_raw) if port_raw else 23
         except ValueError:
             port = 23
-        web = (r.get('http_address') or r.get('web') or r.get('url') or
-               r.get('http') or r.get('website') or '')
-        loc_parts = [r.get('city', ''), r.get('state', ''),
-                     r.get('country', '')]
-        location = ', '.join(p for p in loc_parts if p)
-        software = r.get('software') or r.get('bbs_software') or ''
-        sysop = r.get('sysop') or r.get('sysop_name') or ''
-        desc = r.get('notes') or r.get('description') or r.get('comment') or ''
-        if not name and not host:
-            continue
+        web = _text(record, 'web', 'website', 'url', 'http', 'www',
+                    'webaddress', 'web_address')
         if web and not web.startswith('http'):
             web = 'http://' + web
+        loc_parts = [
+            _text(record, 'city'), _text(record, 'state', 'province'),
+            _text(record, 'country'),
+        ]
+        location = ', '.join(p for p in loc_parts if p) or \
+                   _text(record, 'location', 'region')
+        software = _text(record, 'software', 'bbssoftware', 'bbs_software', 'type')
+        sysop = _text(record, 'sysop', 'sysopname', 'sysop_name', 'operator')
+        desc = _text(record, 'description', 'notes', 'comment', 'info', 'about')
+
+        if not name and not host:
+            continue
         entries.append({
             'name': name, 'telnet_host': host, 'telnet_port': port,
-            'web_url': web, 'location': location, 'software': software,
-            'sysop': sysop, 'description': desc,
+            'web_url': web or None, 'location': location or None,
+            'software': software or None, 'sysop': sysop or None,
+            'description': desc or None,
         })
+
     return entries
 
 
-def _parse_iptia(text):
-    """Parse IPTIA CSV. Field layout TBD — best-effort fallback."""
-    entries = []
-    reader = csv.DictReader(io.StringIO(text))
-    for row in reader:
-        r = {k.strip().lower().replace(' ', '_'): (v or '').strip()
-             for k, v in row.items()}
-        name = (r.get('bbs_name') or r.get('name') or r.get('bbsname') or '')
-        host = (r.get('telnet_address') or r.get('address') or
-                r.get('telnet') or r.get('hostname') or '')
-        port_raw = (r.get('telnet_port') or r.get('port') or '23').strip()
-        try:
-            port = int(port_raw) if port_raw else 23
-        except ValueError:
-            port = 23
-        web = (r.get('http_address') or r.get('web') or r.get('url') or
-               r.get('website') or '')
-        loc_parts = [r.get('city', ''), r.get('state', ''),
-                     r.get('country', '')]
-        location = ', '.join(p for p in loc_parts if p)
-        software = r.get('software') or r.get('bbs_software') or ''
-        sysop = r.get('sysop') or r.get('sysop_name') or ''
-        desc = r.get('notes') or r.get('description') or ''
-        if not name and not host:
-            continue
-        if web and not web.startswith('http'):
-            web = 'http://' + web
-        entries.append({
-            'name': name, 'telnet_host': host, 'telnet_port': port,
-            'web_url': web, 'location': location, 'software': software,
-            'sysop': sysop, 'description': desc,
-        })
-    return entries
-
-
-_PARSERS = {
-    'telnetbbsguide': _parse_telnetbbsguide,
-    'iptia': _parse_iptia,
-}
-
+# ---------------------------------------------------------------------------
+# Generic fetch + cache
+# ---------------------------------------------------------------------------
 
 def _cache_is_fresh(source):
     cutoff = datetime.utcnow() - timedelta(hours=_CACHE_TTL_HOURS)
@@ -205,41 +357,71 @@ def _cache_is_fresh(source):
             .first()) is not None
 
 
-def _refresh_source(app, source):
-    """Fetch CSV for source, wipe old rows, insert fresh ones."""
-    cfg = EXTERNAL_SOURCES.get(source)
-    if not cfg:
-        return 0
+def _fetch_telnetbbsguide():
+    """Try monthly URLs in order, return raw bytes or None."""
+    for url in _telnetbbsguide_urls():
+        try:
+            resp = requests.get(url, timeout=30,
+                                headers={'User-Agent': 'ANetBBS/1.0'})
+            if resp.status_code == 200:
+                return resp.content
+        except Exception:
+            pass
+    return None
+
+
+def _fetch_iptia():
+    """Fetch IPTIA XML, return bytes or None."""
+    url = 'https://www.ipingthereforeiam.com/bbs/dir/dialdirectory.xml'
     try:
-        resp = requests.get(cfg['url'], timeout=20,
+        resp = requests.get(url, timeout=30,
                             headers={'User-Agent': 'ANetBBS/1.0'})
         resp.raise_for_status()
-        text = resp.text
+        return resp.content
+    except Exception:
+        return None
+
+
+_FETCHERS = {
+    'telnetbbsguide': _fetch_telnetbbsguide,
+    'iptia': _fetch_iptia,
+}
+_PARSERS = {
+    'telnetbbsguide': _parse_telnetbbsguide,
+    'iptia': _parse_iptia,
+}
+
+
+def _refresh_source(app, source):
+    """Fetch + parse source, wipe old rows, insert fresh ones. Returns count."""
+    fetcher = _FETCHERS.get(source)
+    parser = _PARSERS.get(source)
+    if not fetcher or not parser:
+        return 0
+    data = fetcher()
+    if not data:
+        return 0
+    try:
+        entries = parser(data)
     except Exception:
         return 0
-    parser = _PARSERS.get(source)
-    if not parser:
-        return 0
-    entries = parser(text)
     if not entries:
         return 0
-    with app.app_context():
-        ExternalBbsCache.query.filter_by(source=source).delete()
-        now = datetime.utcnow()
-        for e in entries:
-            db.session.add(ExternalBbsCache(
-                source=source,
-                cached_at=now,
-                **e,
-            ))
-        db.session.commit()
+    try:
+        with app.app_context():
+            ExternalBbsCache.query.filter_by(source=source).delete()
+            now = datetime.utcnow()
+            for e in entries:
+                db.session.add(ExternalBbsCache(source=source, cached_at=now, **e))
+            db.session.commit()
+    except Exception:
+        return 0
     return len(entries)
 
 
 def _refresh_source_async(app, source):
-    """Fire-and-forget background refresh for one source."""
     if not _refresh_lock.acquire(blocking=False):
-        return  # another refresh already in flight
+        return
     def _runner():
         try:
             _refresh_source(app, source)
@@ -263,8 +445,7 @@ def index():
     tab = request.args.get('tab', 'local')
 
     # ── Local peers ──────────────────────────────────────────────────────────
-    local_q = (PeerBbs.query
-               .filter_by(is_active=True, is_approved=True))
+    local_q = PeerBbs.query.filter_by(is_active=True, is_approved=True)
     if q:
         ql = f'%{q.lower()}%'
         local_q = local_q.filter(db.or_(
@@ -321,7 +502,6 @@ def index():
 @peers_bp.route('/submit', methods=['GET', 'POST'])
 @login_required
 def submit():
-    """User self-submission form — adds a pending entry for sysop approval."""
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip()
         host = (request.form.get('hostname') or '').strip()
@@ -348,7 +528,7 @@ def submit():
             if is_admin:
                 flash(f'Added {name}.', 'success')
             else:
-                flash(f'Submitted! Your BBS will appear after sysop review.', 'success')
+                flash('Submitted! Your BBS will appear after sysop review.', 'success')
             return redirect(url_for('peers.index', tab='local'))
     return render_template('peers/submit.html')
 

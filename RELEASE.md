@@ -1,13 +1,26 @@
-# ANetBBS v1.0a2.139 — Fix 500 on BBS Directory
+# ANetBBS v1.0a2.141 — BBS Directory: correct TelnetBBSGuide + IPTIA formats
 
 ## Changes
 
-### Hotfix: BBS Directory 500 error
+### TelnetBBSGuide: ZIP + pipe-delimited text (not CSV)
 
-`PeerBbs` model was missing the new columns introduced in v1.0a2.138
-(`is_approved`, `telnet_port`, `web_url`, `location`, `software`,
-`submitted_by_user_id`). `_ensure_column` adds the columns to the SQLite
-DB on startup, but SQLAlchemy also requires them to be defined as
-`db.Column` attributes on the model class — otherwise `filter_by()` raises
-`InvalidRequestError: Entity namespace for "peer_bbses" has no property
-"is_approved"`. Fixed in `models.py`.
+The TelnetBBSGuide list is a monthly ZIP file (`ibbs{MM}{YYYY}.zip`), not a
+plain CSV. The URL is now constructed dynamically from the current month/year,
+with automatic fallback to the previous month if the current one returns 404.
+The ZIP is extracted in memory and the text file inside is parsed as
+pipe-delimited rows. Column detection is flexible — uses header row if
+present, positional fallback otherwise.
+
+### IPTIA: XML (not CSV)
+
+IPTIA publishes `dialdirectory.xml`. Parsed with `xml.etree.ElementTree`,
+trying a broad set of common tag names (name, address, telnet, port, sysop,
+city, state, country, software, web, description, etc.) so the parser works
+regardless of exact element naming. Host:port combined fields are split
+automatically.
+
+### Both sources: robust error handling
+
+All fetch, parse, and DB-insert steps are individually wrapped in try/except.
+Malformed files, network errors, or unknown formats silently return 0 entries
+and do not crash the background refresh thread.

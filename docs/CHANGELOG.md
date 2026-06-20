@@ -1,7 +1,30 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.139`** (June 2026). Previous: `v1.0a2.138`.
+separately. Current release: **`v1.0a2.141`** (June 2026). Previous: `v1.0a2.140`.
+
+## v1.0a2.141 — BBS Directory: correct TelnetBBSGuide + IPTIA formats (June 2026)
+
+- **TelnetBBSGuide**: rewritten from CSV to ZIP parser. Monthly file URL
+  constructed dynamically (`ibbs{MM}{YYYY}.zip`); falls back to previous
+  month if current month returns 404. Extracts the text file from inside
+  the ZIP and parses pipe-delimited rows with flexible column detection.
+- **IPTIA**: rewritten from CSV to XML parser. Fetches
+  `dialdirectory.xml` and parses with `xml.etree.ElementTree`, trying
+  common tag names for name/address/port/sysop/location/software/web/description.
+- Both parsers handle unknown field names gracefully; exceptions are caught
+  and return 0 instead of crashing the background thread.
+
+## v1.0a2.140 — BBS Directory CSV parser fixes (June 2026)
+
+- **IPTIA parser crash** — `csv.DictReader` produces a `None` key when a CSV
+  header row has a trailing comma. `k.strip()` on `None` raised `AttributeError`.
+  Both parsers now filter `if k is not None`. Fixed in `web/peers.py`.
+- **Parser exceptions no longer crash background thread** — `parser(text)` and
+  the DB insert block are now each wrapped in try/except so a malformed CSV
+  silently returns 0 instead of killing the refresh thread.
+- **TelnetBBSGuide URL updated** to `/bbs/list/full/csv/`; both external URLs
+  are now overridable via `TELNETBBSGUIDE_CSV_URL` and `IPTIA_CSV_URL` in `.env`.
 
 ## v1.0a2.139 — Fix 500 on BBS Directory (missing PeerBbs columns) (June 2026)
 
