@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.141`** (June 2026). Previous: `v1.0a2.140`.
+separately. Current release: **`v1.0a2.142`** (June 2026). Previous: `v1.0a2.141`.
+
+## v1.0a2.142 — BBS Directory: correct EtherTerm XML parser (June 2026)
+
+- Both TelnetBBSGuide and IPTIA use the same EtherTerm `dialdirectory.xml`
+  format: `<BBS name="..." ip="..." port="..." protocol="TELNET" />`.
+  Switched from ElementTree (fails on unescaped `&` in BBS names) and
+  failed CSV/pipe parsers to a single regex-based `_parse_etherterm_xml()`
+  shared by both sources. Parses 1,075 TelnetBBSGuide entries and 1,810
+  IPTIA entries correctly. TelnetBBSGuide is fetched as a monthly ZIP;
+  `dialdirectory.xml` is extracted from inside it.
 
 ## v1.0a2.141 — BBS Directory: correct TelnetBBSGuide + IPTIA formats (June 2026)
 

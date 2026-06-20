@@ -1,26 +1,16 @@
-# ANetBBS v1.0a2.141 — BBS Directory: correct TelnetBBSGuide + IPTIA formats
+# ANetBBS v1.0a2.142 — BBS Directory: correct EtherTerm XML parser
 
 ## Changes
 
-### TelnetBBSGuide: ZIP + pipe-delimited text (not CSV)
+Both TelnetBBSGuide and IPTIA use the identical EtherTerm phonebook format:
 
-The TelnetBBSGuide list is a monthly ZIP file (`ibbs{MM}{YYYY}.zip`), not a
-plain CSV. The URL is now constructed dynamically from the current month/year,
-with automatic fallback to the previous month if the current one returns 404.
-The ZIP is extracted in memory and the text file inside is parsed as
-pipe-delimited rows. Column detection is flexible — uses header row if
-present, positional fallback otherwise.
+    <BBS name="BBS Name" ip="host.example.com" port="23" protocol="TELNET" ... />
 
-### IPTIA: XML (not CSV)
+Previous parsers (CSV, pipe-delimited, ElementTree XML) were all wrong.
+ElementTree also fails on BBS names containing unescaped `&` (e.g. "Bits & Bytes BBS").
 
-IPTIA publishes `dialdirectory.xml`. Parsed with `xml.etree.ElementTree`,
-trying a broad set of common tag names (name, address, telnet, port, sysop,
-city, state, country, software, web, description, etc.) so the parser works
-regardless of exact element naming. Host:port combined fields are split
-automatically.
-
-### Both sources: robust error handling
-
-All fetch, parse, and DB-insert steps are individually wrapped in try/except.
-Malformed files, network errors, or unknown formats silently return 0 entries
-and do not crash the background refresh thread.
+New shared `_parse_etherterm_xml()` uses regex to extract attributes from
+`<BBS ... />` lines directly — immune to malformed XML. Tested against live data:
+- TelnetBBSGuide ZIP (`ibbs{MM}{YYYY}.zip`): extracts `dialdirectory.xml` from
+  inside the archive, parses 1,075 entries
+- IPTIA (`dialdirectory.xml`): fetched directly, parses 1,810 entries

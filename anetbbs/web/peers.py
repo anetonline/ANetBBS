@@ -2,13 +2,15 @@
 """
 BBS directory — three sections:
   Local         : sysop-managed entries + user self-submissions (pending approval)
-  TelnetBBSGuide: monthly ZIP (ibbs{MM}{YYYY}.zip) containing a pipe-delimited list
-  IPTIA         : XML from ipingthereforeiam.com
+  TelnetBBSGuide: monthly ZIP (ibbs{MM}{YYYY}.zip) → dialdirectory.xml inside
+  IPTIA         : dialdirectory.xml from ipingthereforeiam.com
+Both XML files use EtherTerm format: <BBS name="..." ip="..." port="..." />
+Parsed with regex because the XML contains unescaped & in BBS names.
 """
 import io
+import re
 import socket
 import threading
-import xml.etree.ElementTree as ET
 import zipfile
 from datetime import date, datetime, timedelta
 
@@ -116,11 +118,53 @@ def _refresh_all_async():
 
 
 # ---------------------------------------------------------------------------
-# TelnetBBSGuide — monthly ZIP, pipe-delimited text inside
+# Shared EtherTerm XML parser
+# Both TelnetBBSGuide (inside ZIP) and IPTIA use identical format:
+#   <BBS name="..." ip="..." port="..." protocol="TELNET" ... />
+# We use regex instead of ElementTree because BBS names contain unescaped &.
+# ---------------------------------------------------------------------------
+
+_BBS_RE = re.compile(r'<BBS\s+([^>]+?)\s*/>', re.IGNORECASE)
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+def _parse_etherterm_xml(data):
+    """Parse EtherTerm dialdirectory.xml (bytes or str). Returns list of dicts."""
+    if isinstance(data, bytes):
+        text = data.decode('latin-1', errors='replace')
+    else:
+        text = data
+    entries = []
+    for m in _BBS_RE.finditer(text):
+        attrs = dict(_ATTR_RE.findall(m.group(1)))
+        name = attrs.get('name', '').strip()
+        host = attrs.get('ip', '').strip()
+        port_raw = attrs.get('port', '23').strip()
+        try:
+            port = int(port_raw) if port_raw else 23
+        except ValueError:
+            port = 23
+        if not name and not host:
+            continue
+        entries.append({
+            'name': name,
+            'telnet_host': host,
+            'telnet_port': port,
+            'web_url': None,
+            'location': None,
+            'software': None,
+            'sysop': None,
+            'description': None,
+        })
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# TelnetBBSGuide — monthly ZIP containing dialdirectory.xml
 # ---------------------------------------------------------------------------
 
 def _telnetbbsguide_urls():
-    """Return candidate URLs for this month then last month as fallback."""
+    """Return candidate ZIP URLs: current month then previous as fallback."""
     today = date.today()
     urls = [f'https://www.telnetbbsguide.com/bbslist/ibbs{today.month:02d}{today.year}.zip']
     if today.month == 1:
@@ -132,217 +176,25 @@ def _telnetbbsguide_urls():
 
 
 def _parse_telnetbbsguide(data):
-    """Parse TelnetBBSGuide monthly ZIP. data is bytes. Returns list of dicts."""
-    # Extract text from ZIP
+    """Unzip the monthly archive and parse dialdirectory.xml inside."""
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
-        names = zf.namelist()
-        # Pick first .txt/.lst/.dat or just whatever is in there
-        txt_names = [n for n in names
-                     if n.lower().endswith(('.txt', '.lst', '.dat', '.bbs'))]
-        target = txt_names[0] if txt_names else (names[0] if names else None)
-        if target is None:
-            return []
-        raw = zf.read(target)
+        # Prefer dialdirectory.xml; fall back to first file
+        xml_names = [n for n in zf.namelist() if n.lower().endswith('.xml')]
+        target = next((n for n in xml_names if 'dial' in n.lower()),
+                      xml_names[0] if xml_names else zf.namelist()[0])
+        xml_data = zf.read(target)
     except Exception:
-        raw = data  # not a ZIP — try treating as raw text
-
-    text = raw.decode('latin-1', errors='replace')
-    entries = []
-
-    # The IBBS list is pipe-delimited. Common column orders seen:
-    # Name|Network|Telnet:Port|Location|Sysop|Software|Web|Notes
-    # or Name|Telnet|Port|Sysop|Location|Software|Web|Notes
-    # We sniff the header row if present, otherwise use positional guesses.
-    lines = [l for l in text.splitlines() if l.strip()]
-    if not lines:
-        return []
-
-    # Check if first line looks like a header
-    header_line = lines[0]
-    has_header = any(kw in header_line.lower()
-                     for kw in ('name', 'address', 'telnet', 'sysop', 'software'))
-
-    if '|' in (lines[1] if len(lines) > 1 else lines[0]):
-        # Pipe-delimited
-        if has_header:
-            # Normalise header keys
-            headers = [h.strip().lower().replace(' ', '_').replace('/', '_')
-                       for h in header_line.split('|')]
-            data_lines = lines[1:]
-        else:
-            headers = None
-            data_lines = lines
-
-        for line in data_lines:
-            if not line.strip() or line.startswith(';'):
-                continue
-            fields = [f.strip() for f in line.split('|')]
-            if len(fields) < 2:
-                continue
-
-            if headers:
-                r = dict(zip(headers, fields))
-            else:
-                # Positional fallback: Name|Telnet|Port|Sysop|Location|Software|Web|Notes
-                r = {}
-                _pos = ['name', 'telnet_host', 'telnet_port', 'sysop',
-                        'location', 'software', 'web_url', 'description']
-                for i, val in enumerate(fields):
-                    if i < len(_pos):
-                        r[_pos[i]] = val
-
-            name = (r.get('name') or r.get('bbs_name') or r.get('bbs') or '').strip()
-            # Telnet address may be host:port in one field
-            raw_addr = (r.get('telnet_host') or r.get('telnet') or
-                        r.get('address') or r.get('telnet_address') or '').strip()
-            port_raw = (r.get('telnet_port') or r.get('port') or '').strip()
-            if ':' in raw_addr and not port_raw:
-                host, _, port_raw = raw_addr.partition(':')
-            else:
-                host = raw_addr
-            try:
-                port = int(port_raw) if port_raw else 23
-            except ValueError:
-                port = 23
-            web = (r.get('web_url') or r.get('web') or r.get('url') or
-                   r.get('website') or r.get('http') or '').strip()
-            if web and not web.startswith('http'):
-                web = 'http://' + web
-            location = (r.get('location') or r.get('city') or '').strip()
-            software = (r.get('software') or r.get('bbs_software') or '').strip()
-            sysop = (r.get('sysop') or r.get('sysop_name') or '').strip()
-            desc = (r.get('description') or r.get('notes') or
-                    r.get('comment') or '').strip()
-
-            if not name and not host:
-                continue
-            entries.append({
-                'name': name, 'telnet_host': host, 'telnet_port': port,
-                'web_url': web or None, 'location': location or None,
-                'software': software or None, 'sysop': sysop or None,
-                'description': desc or None,
-            })
-    else:
-        # Labeled-field block format:
-        # BBS Name: ...
-        # Address: ...
-        # Port: ...
-        # Sysop: ...  etc.
-        current = {}
-        for line in lines:
-            if line.startswith(('-' * 5, '=' * 5, '*' * 5)):
-                if current:
-                    entries.append(_ibbs_block_to_entry(current))
-                    current = {}
-                continue
-            if ':' in line:
-                key, _, val = line.partition(':')
-                current[key.strip().lower()] = val.strip()
-        if current:
-            entries.append(_ibbs_block_to_entry(current))
-
-    return [e for e in entries if e]
-
-
-def _ibbs_block_to_entry(r):
-    name = (r.get('bbs name') or r.get('name') or '').strip()
-    host = (r.get('address') or r.get('telnet') or r.get('hostname') or '').strip()
-    port_raw = r.get('port', '23').strip()
-    try:
-        port = int(port_raw)
-    except ValueError:
-        port = 23
-    web = (r.get('web') or r.get('website') or r.get('url') or '').strip()
-    if web and not web.startswith('http'):
-        web = 'http://' + web
-    if not name and not host:
-        return None
-    return {
-        'name': name, 'telnet_host': host, 'telnet_port': port,
-        'web_url': web or None,
-        'location': (r.get('location') or r.get('city') or None),
-        'software': r.get('software') or None,
-        'sysop': r.get('sysop') or None,
-        'description': r.get('notes') or r.get('description') or None,
-    }
+        xml_data = data  # not a ZIP, try raw
+    return _parse_etherterm_xml(xml_data)
 
 
 # ---------------------------------------------------------------------------
-# IPTIA — XML
+# IPTIA — direct dialdirectory.xml download (same EtherTerm format)
 # ---------------------------------------------------------------------------
 
 def _parse_iptia(data):
-    """Parse IPTIA dialdirectory.xml. data is bytes. Returns list of dicts."""
-    entries = []
-    try:
-        root = ET.fromstring(data if isinstance(data, bytes)
-                             else data.encode('utf-8'))
-    except ET.ParseError:
-        return []
-
-    # Walk every element that might be a BBS record.
-    # Common tag names: bbs, system, entry, record, listing
-    _bbs_tags = {'bbs', 'system', 'entry', 'record', 'listing', 'bbsentry',
-                 'bbslisting'}
-
-    def _find_records(node):
-        # If this node itself looks like a record, yield it
-        if node.tag.lower().split('}')[-1] in _bbs_tags:
-            yield node
-        else:
-            for child in node:
-                yield from _find_records(child)
-
-    def _text(node, *tags):
-        """First non-empty text among tried tag names (case-insensitive search)."""
-        tag_lower = {t.lower() for t in tags}
-        for child in node:
-            if child.tag.lower().split('}')[-1] in tag_lower:
-                return (child.text or '').strip()
-        # Also check attributes
-        for t in tags:
-            val = node.get(t, '') or node.get(t.upper(), '') or node.get(t.lower(), '')
-            if val:
-                return val.strip()
-        return ''
-
-    for record in _find_records(root):
-        name = _text(record, 'name', 'bbsname', 'bbs_name', 'title', 'systemname')
-        host = _text(record, 'address', 'telnet', 'hostname', 'host',
-                     'telnetaddress', 'telnet_address', 'ip', 'ipaddress')
-        port_raw = _text(record, 'port', 'telnetport', 'telnet_port')
-        # address may be host:port
-        if ':' in host and not port_raw:
-            host, _, port_raw = host.partition(':')
-        try:
-            port = int(port_raw) if port_raw else 23
-        except ValueError:
-            port = 23
-        web = _text(record, 'web', 'website', 'url', 'http', 'www',
-                    'webaddress', 'web_address')
-        if web and not web.startswith('http'):
-            web = 'http://' + web
-        loc_parts = [
-            _text(record, 'city'), _text(record, 'state', 'province'),
-            _text(record, 'country'),
-        ]
-        location = ', '.join(p for p in loc_parts if p) or \
-                   _text(record, 'location', 'region')
-        software = _text(record, 'software', 'bbssoftware', 'bbs_software', 'type')
-        sysop = _text(record, 'sysop', 'sysopname', 'sysop_name', 'operator')
-        desc = _text(record, 'description', 'notes', 'comment', 'info', 'about')
-
-        if not name and not host:
-            continue
-        entries.append({
-            'name': name, 'telnet_host': host, 'telnet_port': port,
-            'web_url': web or None, 'location': location or None,
-            'software': software or None, 'sysop': sysop or None,
-            'description': desc or None,
-        })
-
-    return entries
+    return _parse_etherterm_xml(data)
 
 
 # ---------------------------------------------------------------------------
