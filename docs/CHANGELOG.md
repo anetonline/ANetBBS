@@ -1,7 +1,28 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.146`** (June 2026). Previous: `v1.0a2.145`.
+separately. Current release: **`v1.0a2.148`** (June 2026). Previous: `v1.0a2.146`.
+
+## v1.0a2.148 — Game bug fixes + Tetris + Breakout (June 2026)
+
+### Bug fixes
+- **Solitaire**: rewrote card click model — clicking a card while another is selected now attempts a move instead of re-selecting. Full ghost highlight on selected cards.
+- **Galaga**: initial shoot cooldown increased from 100–300 frames to 600–800 staggered by index. Dive interval 5 sec at level 1 (was 1.5 sec). Max simultaneous divers and on-screen bullet cap added.
+- **Slots**: fixed JavaScript strict-mode `ReferenceError` (`strips=` undeclared variable) that crashed slot machine init; Lucky and Retro tabs now work.
+
+### New web games
+- **Tetris** — full implementation with ghost piece, wall-kick SRS rotation, hard drop, soft drop, level scaling (speed increases per 10 lines), hi-score, next-piece preview, touch controls.
+- **Breakout** — Arkanoid-style brick breaker; 5 power-up types (wide paddle, slow ball, multi-ball, laser, +life), brick HP on upper rows at higher levels, glowing ball trail, level progression.
+- New templates: `auth/verify_sent.html`, `auth/verified.html`, `auth/resend_verification.html`.
+- Admin nav: new "SMTP / Email" link above Settings divider.
+
+### 6 new web games
+- **Klondike Solitaire** — full rules, undo, auto-foundation, win detection.
+- **Video Poker (Jacks or Better)** — 5-card draw, pay table, multi-bet, hold mechanic.
+- **Texas Hold'em vs CPU** — 4-player table, easy/medium/hard bluffing AI, full 7-card hand eval.
+- **Blackjack** — hit/stand/double/split, 4-deck shoe, chip-click bet UI, dealer to 17.
+- **Slot Machines** — 3 themed machines (Classic Bars, Lucky Fruits, Retro BBS) with animated reels.
+- **Galaga** — Canvas arcade: enemy formations, dive attacks, tractor-beam boss capture, particle FX, touch controls.
 
 ## v1.0a2.146 — Fix dial-out directory DB lookup in terminal context (June 2026)
 

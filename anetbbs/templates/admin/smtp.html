@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}SMTP Relay Settings{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-at"></i> SMTP Relay Settings</h1>
+    <p class="small text-muted">Configure an outbound SMTP relay for email verification and password resets. <strong>Disabled by default.</strong></p>
+</div>
+
+<div class="row">
+<div class="col-lg-7">
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+    <div class="card-header"><i class="bi bi-gear"></i> Configuration</div>
+    <div class="card-body">
+
+        <div class="d-flex gap-4 mb-3">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                       {% if cfg.enabled %}checked{% endif %}>
+                <label class="form-check-label fw-bold" for="enabled">Enable SMTP relay</label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="email_verify_enabled" id="email_verify_enabled"
+                       {% if cfg.email_verify_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="email_verify_enabled">Require email verification on registration</label>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+            <div class="col-md-8">
+                <label class="form-label small">SMTP Host</label>
+                <input name="host" class="form-control" placeholder="smtp.gmail.com" value="{{ cfg.host or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Port</label>
+                <input name="port" type="number" class="form-control" value="{{ cfg.port or 587 }}" min="1" max="65535">
+            </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+            <div class="col-md-6">
+                <label class="form-label small">Username / Login</label>
+                <input name="username" class="form-control" autocomplete="off"
+                       placeholder="you@gmail.com" value="{{ cfg.username or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small">Password <span class="text-muted">(leave blank to keep current)</span></label>
+                <input name="password" type="password" class="form-control" autocomplete="new-password"
+                       placeholder="{% if cfg.password %}••••••••{% else %}enter password{% endif %}">
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <label class="form-label small">From Address</label>
+                <input name="from_address" class="form-control" placeholder="bbs@yourdomain.com"
+                       value="{{ cfg.from_address or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small">From Name <span class="text-muted">(optional)</span></label>
+                <input name="from_name" class="form-control" placeholder="My BBS"
+                       value="{{ cfg.from_name or '' }}">
+            </div>
+        </div>
+
+        <div class="d-flex gap-4 mb-3">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="use_tls" id="use_tls"
+                       {% if cfg.use_tls %}checked{% endif %}>
+                <label class="form-check-label" for="use_tls">STARTTLS (port 587)</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="use_ssl" id="use_ssl"
+                       {% if cfg.use_ssl %}checked{% endif %}>
+                <label class="form-check-label" for="use_ssl">SSL/TLS (port 465)</label>
+            </div>
+        </div>
+
+        <button class="btn btn-primary"><i class="bi bi-save"></i> Save Settings</button>
+    </div>
+</form>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="test">
+    <div class="card-body d-flex align-items-center gap-3">
+        <div>
+            <strong>Send Test Email</strong><br>
+            <span class="text-muted small">Sends a test message to <strong>{{ current_user.email }}</strong> using the current settings.</span>
+        </div>
+        <button class="btn btn-outline-secondary ms-auto" {% if not cfg.enabled or not cfg.host %}disabled{% endif %}>
+            <i class="bi bi-send"></i> Send Test
+        </button>
+    </div>
+</form>
+
+</div>
+<div class="col-lg-5">
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-info-circle"></i> Setup Guide</div>
+    <div class="card-body small">
+        <p><strong>Gmail (App Password)</strong></p>
+        <ul>
+            <li>Host: <code>smtp.gmail.com</code>, Port: <code>587</code>, STARTTLS on</li>
+            <li>Enable 2FA on your Google account</li>
+            <li>Generate an <strong>App Password</strong> at <em>myaccount.google.com → Security → App passwords</em></li>
+            <li>Username: your full Gmail address<br>Password: the 16-char app password</li>
+        </ul>
+        <hr>
+        <p><strong>Own SMTP Server</strong></p>
+        <ul>
+            <li>Use your server's hostname, port 25/465/587</li>
+            <li>STARTTLS for port 587, SSL for port 465, neither for plain port 25</li>
+        </ul>
+        <hr>
+        <p><strong>Email Verification Flow</strong></p>
+        <p>When <em>Require email verification</em> is on, newly registered users get a verification email. Their account is inactive until they click the link. The link expires in <strong>24 hours</strong>.</p>
+        <p>Password reset emails are sent automatically when SMTP is enabled (no separate toggle).</p>
+    </div>
+</div>
+
+{% if cfg.enabled %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i>
+    SMTP relay is <strong>enabled</strong>.<br>
+    {% if cfg.email_verify_enabled %}
+    Email verification on registration is <strong>on</strong>.
+    {% else %}
+    Email verification on registration is <strong>off</strong>.
+    {% endif %}
+</div>
+{% else %}
+<div class="alert alert-secondary">
+    <i class="bi bi-dash-circle"></i>
+    SMTP relay is <strong>disabled</strong>. Password reset links are logged to the server journal only.
+</div>
+{% endif %}
+
+</div>
+</div>
+{% endblock %}

@@ -14,7 +14,8 @@ from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
-                      UserActivity, UserSecurityAnswer, SECURITY_QUESTIONS)
+                      UserActivity, UserSecurityAnswer, SECURITY_QUESTIONS,
+                      EmailVerifyToken)
 from ..features.rate_limit import rate_limit
 
 
@@ -169,12 +170,17 @@ def login():
             flash('This account is locked. Contact the sysop.', 'danger')
             return redirect(url_for('auth.login'))
 
-        # New User Verification — pending sysop approval.
-        if (current_app.config.get('NUV_ENABLED')
-                and not getattr(user, 'is_verified', True)
-                and not user.is_admin):
-            flash('Your account is awaiting sysop approval. '
-                  'Try again later.', 'warning')
+        # Block unverified accounts.
+        if not getattr(user, 'is_verified', True) and not user.is_admin:
+            from ..mailer import email_verify_enabled
+            if email_verify_enabled():
+                flash('Please verify your email address before logging in. '
+                      'Check your inbox for the verification link.', 'warning')
+            elif current_app.config.get('NUV_ENABLED'):
+                flash('Your account is awaiting sysop approval. '
+                      'Try again later.', 'warning')
+            else:
+                flash('Your account has not been verified. Contact the sysop.', 'warning')
             return redirect(url_for('auth.login'))
         
         # Update login information
@@ -272,13 +278,15 @@ def register():
             return render_template('auth/register.html', form=form)
 
     if form.validate_on_submit():
-        # Honor NUV — newly-registered users are pending until a sysop
-        # approves them.
+        # Determine whether the new account should start unverified.
+        from ..mailer import email_verify_enabled as _ev_enabled
         nuv_on = bool(current_app.config.get('NUV_ENABLED'))
+        ev_on = _ev_enabled()
+        start_unverified = nuv_on or ev_on
         user = User(
             username=form.username.data,
             email=form.email.data,
-            is_verified=(not nuv_on),
+            is_verified=(not start_unverified),
         )
         user.set_password(form.password.data)
         db.session.add(user)
@@ -306,10 +314,27 @@ def register():
                 ))
 
         db.session.commit()
+        _log_activity(user.id, 'register')
+
+        # Email verification path — send link and redirect to "check your email" page.
+        if ev_on:
+            from ..mailer import send_verification_email
+            token = secrets.token_urlsafe(32)
+            db.session.add(EmailVerifyToken(
+                user_id=user.id,
+                token=token,
+                expires_at=datetime.utcnow() + timedelta(hours=24),
+            ))
+            db.session.commit()
+            verify_url = url_for('auth.verify_email', token=token, _external=True)
+            ok, err = send_verification_email(user, verify_url)
+            if not ok:
+                current_app.logger.warning(
+                    'Verification email send failed for %s: %s', user.username, err)
+            return render_template('auth/verify_sent.html', email=user.email)
 
         flash(f'Account created successfully! Welcome, {user.username}!', 'success')
         login_user(user, remember=True)
-        _log_activity(user.id, 'register')
 
         # Welcome PM from the sysop. Best-effort, never blocks registration.
         try:
@@ -411,7 +436,7 @@ def forgot_password():
                 flask_session['sq_answer_id'] = chosen.id
                 return redirect(url_for('auth.security_question_verify'))
 
-            # No security questions — fall back to sysop-copy-link flow
+            # No security questions — send email or fall back to sysop-copy-link
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user.id,
@@ -422,14 +447,24 @@ def forgot_password():
             db.session.commit()
             reset_url = url_for('auth.reset_password', token=token,
                                 _external=True)
-            current_app.logger.info(
-                'Password reset requested for user %s — reset URL: %s',
-                user.username, reset_url)
+            # Try sending by email; fall back to journal log.
+            from ..mailer import smtp_enabled, send_password_reset_email
+            if smtp_enabled():
+                send_password_reset_email(user, reset_url)
+            else:
+                current_app.logger.info(
+                    'Password reset requested for user %s — reset URL: %s',
+                    user.username, reset_url)
             _log_activity(user.id, 'password_reset_requested')
 
-        flash('If that account exists, a password-reset link has been issued. '
-              'Contact the sysop to receive your reset link.',
-              'success')
+        from ..mailer import smtp_enabled as _se
+        if _se():
+            flash('If that account exists, a password-reset link has been sent to the registered email address.',
+                  'success')
+        else:
+            flash('If that account exists, a password-reset link has been issued. '
+                  'Contact the sysop to receive your reset link.',
+                  'success')
         return redirect(url_for('auth.login'))
 
     return render_template('auth/forgot_password.html', form=form)
@@ -504,3 +539,59 @@ def reset_password(token):
         return redirect(url_for('auth.login'))
 
     return render_template('auth/reset_password.html', form=form, token=token)
+
+
+# ---------------------------------------------------------------------------
+# Email verification
+# ---------------------------------------------------------------------------
+
+@auth_bp.route('/verify/<token>')
+def verify_email(token):
+    """Click-through email verification link."""
+    vt = EmailVerifyToken.query.filter_by(token=token).first()
+    if vt is None or not vt.is_valid:
+        flash('Verification link is invalid or has expired. '
+              'Contact the sysop or try registering again.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    user = vt.user
+    vt.used_at = datetime.utcnow()
+    user.is_verified = True
+    db.session.commit()
+    _log_activity(user.id, 'email_verified')
+    login_user(user, remember=True)
+    return render_template('auth/verified.html', username=user.username)
+
+
+@auth_bp.route('/verify/resend', methods=['GET', 'POST'])
+def resend_verification():
+    """Let an unverified user request a new verification email."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.index'))
+
+    error = None
+    if request.method == 'POST':
+        identifier = request.form.get('identifier', '').strip()
+        pw = request.form.get('password', '')
+        user = (User.query.filter(
+                    db.func.lower(User.username) == identifier.lower()).first()
+                or User.query.filter(
+                    db.func.lower(User.email) == identifier.lower()).first())
+        if user and user.check_password(pw) and not user.is_verified:
+            from ..mailer import send_verification_email, email_verify_enabled
+            if not email_verify_enabled():
+                flash('Email verification is not enabled. Contact the sysop.', 'warning')
+                return redirect(url_for('auth.login'))
+            token = secrets.token_urlsafe(32)
+            db.session.add(EmailVerifyToken(
+                user_id=user.id,
+                token=token,
+                expires_at=datetime.utcnow() + timedelta(hours=24),
+            ))
+            db.session.commit()
+            verify_url = url_for('auth.verify_email', token=token, _external=True)
+            send_verification_email(user, verify_url)
+            return render_template('auth/verify_sent.html', email=user.email)
+        error = 'Invalid credentials or account already verified.'
+
+    return render_template('auth/resend_verification.html', error=error)

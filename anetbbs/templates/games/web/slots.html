@@ -1,0 +1,318 @@
+<style>
+#slots-wrap { max-width:720px; margin:0 auto; font-family:sans-serif; user-select:none; }
+#slots-tab-bar { display:flex; gap:4px; margin-bottom:0; }
+.slots-tab { padding:8px 18px; background:#222; border:1px solid #444; border-bottom:none;
+    border-radius:6px 6px 0 0; cursor:pointer; color:#aaa; font-size:.9rem; }
+.slots-tab.active { background:#1a1a2e; color:#ffe000; border-color:#ffe000; }
+.slots-machine { background:#1a1a2e; border:2px solid #333; border-radius:0 12px 12px 12px; padding:20px; display:none; }
+.slots-machine.active { display:block; }
+.machine-title { text-align:center; font-size:1.4rem; font-weight:900; letter-spacing:3px; margin-bottom:12px; }
+.machine-title.classic { color:#ffe000; }
+.machine-title.fruit { color:#00cc44; }
+.machine-title.retro { color:#00cfff; }
+.slots-reels { display:flex; gap:8px; justify-content:center; margin-bottom:12px; }
+.reel-wrap { width:90px; height:220px; background:#000; border:3px solid #444; border-radius:8px; overflow:hidden; position:relative; }
+.reel-wrap::before,.reel-wrap::after { content:''; position:absolute; left:0; right:0; height:30px; z-index:10; pointer-events:none; }
+.reel-wrap::before { top:0; background:linear-gradient(to bottom,rgba(0,0,0,.8),transparent); }
+.reel-wrap::after { bottom:0; background:linear-gradient(to top,rgba(0,0,0,.8),transparent); }
+.reel-strip { position:absolute; width:100%; transition:none; display:flex; flex-direction:column; }
+.reel-strip.spinning { animation:reel-spin .08s linear infinite; }
+@keyframes reel-spin { 0%{transform:translateY(0)} 100%{transform:translateY(-90px)} }
+.reel-symbol { width:90px; height:90px; display:flex; align-items:center; justify-content:center;
+    font-size:2.5rem; border-bottom:1px solid #222; flex-shrink:0; }
+.win-line { position:absolute; top:50%; left:0; right:0; height:2px; background:#ffe000;
+    box-shadow:0 0 8px #ffe000; transform:translateY(-50%); z-index:5; pointer-events:none;
+    display:none; }
+.win-line.show { display:block; }
+.slots-win-label { text-align:center; font-size:1.1rem; font-weight:bold; min-height:1.8rem;
+    margin-bottom:8px; color:#ffe000; }
+.slots-controls { display:flex; justify-content:space-between; align-items:center; }
+.slots-info { color:#aaa; font-size:.85rem; }
+.slots-info strong { color:#ffe000; }
+.btn-spin { background:linear-gradient(135deg,#e94560,#c0392b); border:none; color:#fff;
+    padding:12px 40px; border-radius:8px; font-size:1.1rem; font-weight:bold; cursor:pointer;
+    box-shadow:0 4px 12px rgba(200,0,0,.4); letter-spacing:1px; }
+.btn-spin:hover { filter:brightness(1.15); }
+.btn-spin:disabled { opacity:.4; cursor:default; filter:none; }
+.slots-bet-row { display:flex; align-items:center; gap:8px; }
+.slots-bet-row button { background:#333; border:1px solid #555; color:#fff; padding:4px 12px; border-radius:5px; cursor:pointer; }
+.slots-paytable { margin-top:12px; background:#0a0a1a; border-radius:8px; padding:10px; font-size:.8rem; }
+.slots-paytable table { width:100%; border-collapse:collapse; }
+.slots-paytable td { padding:2px 6px; color:#ccc; }
+.slots-paytable td:last-child { text-align:right; color:#ffe000; font-weight:bold; }
+.slots-paytable tr.hit td { color:#ffe000; background:rgba(255,224,0,.1); }
+</style>
+
+<div id="slots-wrap">
+<div id="slots-tab-bar">
+    <div class="slots-tab active" data-machine="classic">Classic Bars</div>
+    <div class="slots-tab" data-machine="fruit">Lucky Fruits</div>
+    <div class="slots-tab" data-machine="retro">Retro BBS</div>
+</div>
+
+<!-- CLASSIC BARS -->
+<div class="slots-machine active" id="machine-classic">
+    <div class="machine-title classic">★ CLASSIC BARS ★</div>
+    <div class="slots-reels">
+        <div class="reel-wrap"><div class="win-line" id="cl-wl"></div><div class="reel-strip" id="cl-r0"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="cl-wl1"></div><div class="reel-strip" id="cl-r1"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="cl-wl2"></div><div class="reel-strip" id="cl-r2"></div></div>
+    </div>
+    <div class="slots-win-label" id="cl-msg"></div>
+    <div class="slots-controls">
+        <div class="slots-info">Balance: <strong id="cl-bal">200</strong> &nbsp; Bet: </div>
+        <div class="slots-bet-row">
+            <button id="cl-bet-m">-</button>
+            <strong id="cl-bet-v" style="color:#ffe000;min-width:2rem;text-align:center;">1</strong>
+            <button id="cl-bet-p">+</button>
+        </div>
+        <button class="btn-spin" id="cl-spin">SPIN</button>
+    </div>
+    <div class="slots-paytable">
+        <table id="cl-pay-table">
+            <tr><td>7️⃣ 7️⃣ 7️⃣</td><td>x200</td></tr>
+            <tr><td>🔔 🔔 🔔</td><td>x50</td></tr>
+            <tr><td>⭐ ⭐ ⭐</td><td>x25</td></tr>
+            <tr><td>BAR BAR BAR</td><td>x15</td></tr>
+            <tr><td>BAR BAR any</td><td>x5</td></tr>
+            <tr><td>Any 3 match</td><td>x5</td></tr>
+            <tr><td>Any 2 match</td><td>x2</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- FRUIT -->
+<div class="slots-machine" id="machine-fruit">
+    <div class="machine-title fruit">🍒 LUCKY FRUITS 🍒</div>
+    <div class="slots-reels">
+        <div class="reel-wrap"><div class="win-line" id="fr-wl"></div><div class="reel-strip" id="fr-r0"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="fr-wl1"></div><div class="reel-strip" id="fr-r1"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="fr-wl2"></div><div class="reel-strip" id="fr-r2"></div></div>
+    </div>
+    <div class="slots-win-label" id="fr-msg"></div>
+    <div class="slots-controls">
+        <div class="slots-info">Balance: <strong id="fr-bal">200</strong> &nbsp; Bet: </div>
+        <div class="slots-bet-row">
+            <button id="fr-bet-m">-</button>
+            <strong id="fr-bet-v" style="color:#ffe000;min-width:2rem;text-align:center;">1</strong>
+            <button id="fr-bet-p">+</button>
+        </div>
+        <button class="btn-spin" id="fr-spin">SPIN</button>
+    </div>
+    <div class="slots-paytable">
+        <table>
+            <tr><td>🍒 🍒 🍒</td><td>x150</td></tr>
+            <tr><td>💎 💎 💎</td><td>x100</td></tr>
+            <tr><td>🍋 🍋 🍋</td><td>x40</td></tr>
+            <tr><td>🍊 🍊 🍊</td><td>x30</td></tr>
+            <tr><td>🍇 🍇 🍇</td><td>x20</td></tr>
+            <tr><td>Any 3 match</td><td>x8</td></tr>
+            <tr><td>🍒 anywhere</td><td>x2</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- RETRO BBS -->
+<div class="slots-machine" id="machine-retro">
+    <div class="machine-title retro">💾 RETRO BBS 💾</div>
+    <div class="slots-reels">
+        <div class="reel-wrap"><div class="win-line" id="rt-wl"></div><div class="reel-strip" id="rt-r0"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="rt-wl1"></div><div class="reel-strip" id="rt-r1"></div></div>
+        <div class="reel-wrap"><div class="win-line" id="rt-wl2"></div><div class="reel-strip" id="rt-r2"></div></div>
+    </div>
+    <div class="slots-win-label" id="rt-msg"></div>
+    <div class="slots-controls">
+        <div class="slots-info">Balance: <strong id="rt-bal">200</strong> &nbsp; Bet: </div>
+        <div class="slots-bet-row">
+            <button id="rt-bet-m">-</button>
+            <strong id="rt-bet-v" style="color:#ffe000;min-width:2rem;text-align:center;">1</strong>
+            <button id="rt-bet-p">+</button>
+        </div>
+        <button class="btn-spin" id="rt-spin">SPIN</button>
+    </div>
+    <div class="slots-paytable">
+        <table>
+            <tr><td>👾 👾 👾</td><td>x300</td></tr>
+            <tr><td>💾 💾 💾</td><td>x100</td></tr>
+            <tr><td>📟 📟 📟</td><td>x50</td></tr>
+            <tr><td>⌨️ ⌨️ ⌨️</td><td>x25</td></tr>
+            <tr><td>🖥️ 🖥️ 🖥️</td><td>x15</td></tr>
+            <tr><td>Any 3 match</td><td>x5</td></tr>
+            <tr><td>👾 anywhere</td><td>x2</td></tr>
+        </table>
+    </div>
+</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const MACHINES = {
+    classic: {
+        symbols: ['🍀','⭐','🔔','BAR','7️⃣','BAR','🍀','⭐','BAR','🔔','BAR','7️⃣'],
+        weights: [15,12,10,8,3,8,15,12,8,10,8,3],
+        payouts: (r)=>{
+            if(r[0]===r[1]&&r[1]===r[2]){
+                if(r[0]==='7️⃣') return [200,'JACKPOT! Triple 7s!'];
+                if(r[0]==='🔔') return [50,'Triple Bells!'];
+                if(r[0]==='⭐') return [25,'Triple Stars!'];
+                if(r[0]==='BAR') return [15,'Triple BAR!'];
+                return [5,'Three of a Kind!'];
+            }
+            if(r[0]==='BAR'&&r[1]==='BAR') return [5,'Double BAR!'];
+            if(r[0]===r[1]||r[1]===r[2]||r[0]===r[2]) return [2,'Two of a Kind'];
+            return [0,''];
+        },
+        prefix:'cl'
+    },
+    fruit: {
+        symbols: ['🍒','🍋','🍊','🍇','💎','🍒','🍋','🍒','🍊','💎','🍒','🍋'],
+        weights: [20,15,12,10,5,20,15,20,12,5,20,15],
+        payouts: (r)=>{
+            if(r[0]===r[1]&&r[1]===r[2]){
+                if(r[0]==='🍒') return [150,'JACKPOT! Triple Cherries!'];
+                if(r[0]==='💎') return [100,'Triple Diamonds!'];
+                if(r[0]==='🍋') return [40,'Triple Lemons!'];
+                if(r[0]==='🍊') return [30,'Triple Oranges!'];
+                if(r[0]==='🍇') return [20,'Triple Grapes!'];
+                return [8,'Three of a Kind!'];
+            }
+            if(r.includes('🍒')) return [2,'Cherry!'];
+            return [0,''];
+        },
+        prefix:'fr'
+    },
+    retro: {
+        symbols: ['👾','💾','📟','⌨️','🖥️','👾','💾','🖥️','📟','👾','⌨️','💾'],
+        weights: [5,12,14,15,14,5,12,14,14,5,15,12],
+        payouts: (r)=>{
+            if(r[0]===r[1]&&r[1]===r[2]){
+                if(r[0]==='👾') return [300,'JACKPOT! Triple Aliens!'];
+                if(r[0]==='💾') return [100,'Triple Floppies!'];
+                if(r[0]==='📟') return [50,'Triple Pagers!'];
+                if(r[0]==='⌨️') return [25,'Triple Keyboards!'];
+                if(r[0]==='🖥️') return [15,'Triple Monitors!'];
+                return [5,'Three of a Kind!'];
+            }
+            if(r.includes('👾')) return [2,'Alien Bonus!'];
+            return [0,''];
+        },
+        prefix:'rt'
+    }
+};
+
+function weightedPick(symbols, weights){
+    const total=weights.reduce((a,b)=>a+b,0);
+    let r=Math.random()*total;
+    for(let i=0;i<weights.length;i++){
+        r-=weights[i];
+        if(r<=0) return symbols[i];
+    }
+    return symbols[0];
+}
+
+function initMachine(id, cfg){
+    const p=cfg.prefix;
+    let balance=200, bet=1, spinning=false;
+
+    function updateUI(){
+        document.getElementById(p+'-bal').textContent=balance;
+        document.getElementById(p+'-bet-v').textContent=bet;
+    }
+
+    function buildReel(reelId, symbols){
+        const strip=document.getElementById(reelId);
+        strip.innerHTML='';
+        // Show 5 symbols, center is the result
+        for(let i=0;i<7;i++){
+            const div=document.createElement('div');
+            div.className='reel-symbol';
+            div.textContent=symbols[i%symbols.length];
+            strip.appendChild(div);
+        }
+    }
+
+    function spin(){
+        if(spinning) return;
+        if(bet>balance){document.getElementById(p+'-msg').textContent='Not enough balance!';return;}
+        balance-=bet; updateUI();
+        spinning=true;
+        document.getElementById(p+'-spin').disabled=true;
+        document.getElementById(p+'-msg').textContent='';
+        [p+'-wl',p+'-wl1',p+'-wl2'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show');});
+
+        const results=[];
+        const delays=[800,1100,1400];
+        const strips=[p+'-r0',p+'-r1',p+'-r2'];
+
+        strips.forEach((sid,i)=>{
+            const strip=document.getElementById(sid);
+            strip.classList.add('spinning');
+        });
+
+        strips.forEach((sid,i)=>{
+            setTimeout(()=>{
+                const strip=document.getElementById(sid);
+                strip.classList.remove('spinning');
+                const sym=weightedPick(cfg.symbols,cfg.weights);
+                results.push(sym);
+                // Build visible window: 2 above, result, 2 below
+                const allSym=cfg.symbols;
+                const idx=allSym.indexOf(sym);
+                const window=[];
+                for(let k=-2;k<=2;k++) window.push(allSym[((idx+k)+allSym.length)%allSym.length]);
+                strip.innerHTML='';
+                window.forEach(s=>{const d=document.createElement('div');d.className='reel-symbol';d.textContent=s;strip.appendChild(d);});
+                strip.style.transform=`translateY(-180px)`;
+
+                if(i===2){
+                    spinning=false;
+                    document.getElementById(p+'-spin').disabled=false;
+                    const [mult,label]=cfg.payouts(results);
+                    if(mult>0){
+                        const win=mult*bet;
+                        balance+=win;
+                        updateUI();
+                        document.getElementById(p+'-msg').textContent=`${label} +${win} credits!`;
+                        [p+'-wl',p+'-wl1',p+'-wl2'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('show');});
+                    } else {
+                        document.getElementById(p+'-msg').textContent='Try again!';
+                    }
+                    if(balance<=0){balance=200;updateUI();document.getElementById(p+'-msg').textContent='Out of credits! Reloaded.';}
+                }
+            }, delays[i]);
+        });
+    }
+
+    document.getElementById(p+'-spin').onclick=spin;
+    document.getElementById(p+'-bet-m').onclick=()=>{if(bet>1){bet--;updateUI();}};
+    document.getElementById(p+'-bet-p').onclick=()=>{if(bet<20){bet++;updateUI();}};
+
+    // Initialize reel visuals
+    ['r0','r1','r2'].forEach(r=>{
+        const strip=document.getElementById(p+'-'+r);
+        strip.innerHTML='';
+        strip.style.transform='translateY(-180px)';
+        for(let i=0;i<5;i++){
+            const d=document.createElement('div');d.className='reel-symbol';
+            d.textContent=cfg.symbols[Math.floor(Math.random()*cfg.symbols.length)];
+            strip.appendChild(d);
+        }
+    });
+    updateUI();
+}
+
+// Init all three machines
+Object.entries(MACHINES).forEach(([id,cfg])=>initMachine(id,cfg));
+
+// Tab switching
+document.querySelectorAll('.slots-tab').forEach(tab=>{
+    tab.onclick=function(){
+        document.querySelectorAll('.slots-tab').forEach(t=>t.classList.remove('active'));
+        document.querySelectorAll('.slots-machine').forEach(m=>m.classList.remove('active'));
+        this.classList.add('active');
+        document.getElementById('machine-'+this.dataset.machine).classList.add('active');
+    };
+});
+})();
+</script>

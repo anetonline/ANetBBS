@@ -2977,3 +2977,55 @@ def move_custom_field(field_id, direction):
     f.sort_order = (f.sort_order or 0) + (-1 if direction == 'up' else 1)
     db.session.commit()
     return redirect(url_for('admin.custom_fields'))
+
+
+# ---------------------------------------------------------------------------
+# SMTP relay config
+# ---------------------------------------------------------------------------
+
+@admin_bp.route('/smtp', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def smtp_settings():
+    """Configure the outbound SMTP relay for email verification and password resets."""
+    from ..models import SmtpConfig
+    cfg = SmtpConfig.get()
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'save')
+
+        if action == 'test':
+            # Send a test email to the currently logged-in sysop.
+            from ..mailer import send_email
+            ok, err = send_email(
+                current_user.email,
+                'ANetBBS SMTP test',
+                'This is a test message from your ANetBBS SMTP relay configuration.\n\nIf you received this, SMTP is working correctly.',
+            )
+            if ok:
+                flash(f'Test email sent to {current_user.email}. Check your inbox!', 'success')
+            else:
+                flash(f'Test failed: {err}', 'danger')
+            return redirect(url_for('admin.smtp_settings'))
+
+        # Save settings
+        cfg.enabled = bool(request.form.get('enabled'))
+        cfg.email_verify_enabled = bool(request.form.get('email_verify_enabled'))
+        cfg.host = request.form.get('host', '').strip()
+        try:
+            cfg.port = int(request.form.get('port', 587))
+        except ValueError:
+            cfg.port = 587
+        cfg.username = request.form.get('username', '').strip()
+        new_pw = request.form.get('password', '')
+        if new_pw:
+            cfg.password = new_pw
+        cfg.from_address = request.form.get('from_address', '').strip()
+        cfg.from_name = request.form.get('from_name', '').strip()
+        cfg.use_tls = bool(request.form.get('use_tls'))
+        cfg.use_ssl = bool(request.form.get('use_ssl'))
+        db.session.commit()
+        flash('SMTP settings saved.', 'success')
+        return redirect(url_for('admin.smtp_settings'))
+
+    return render_template('admin/smtp.html', cfg=cfg)

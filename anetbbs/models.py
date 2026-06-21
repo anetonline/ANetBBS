@@ -847,6 +847,56 @@ class PasswordResetToken(db.Model):
         return f'<PasswordResetToken user={self.user_id} valid={self.is_valid}>'
 
 
+class EmailVerifyToken(db.Model):
+    """Single-use email address verification tokens, issued on registration."""
+    __tablename__ = 'email_verify_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    token = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('email_verify_tokens',
+                                                      lazy='dynamic',
+                                                      cascade='all, delete-orphan'))
+
+    @property
+    def is_valid(self):
+        return self.used_at is None and datetime.utcnow() < self.expires_at
+
+
+class SmtpConfig(db.Model):
+    """Single-row sysop SMTP relay config for outbound email (verification, resets)."""
+    __tablename__ = 'smtp_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=False, nullable=False)
+    email_verify_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    host = db.Column(db.String(255), default='')
+    port = db.Column(db.Integer, default=587)
+    username = db.Column(db.String(255), default='')
+    password = db.Column(db.String(255), default='')
+    from_address = db.Column(db.String(255), default='')
+    from_name = db.Column(db.String(255), default='')
+    use_tls = db.Column(db.Boolean, default=True, nullable=False)
+    use_ssl = db.Column(db.Boolean, default=False, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    @classmethod
+    def get(cls):
+        """Return the singleton config row, creating it (disabled) if absent."""
+        row = cls.query.first()
+        if row is None:
+            row = cls()
+            db.session.add(row)
+            db.session.commit()
+        return row
+
+
 SECURITY_QUESTIONS = [
     "What was the name of your first pet?",
     "What city were you born in?",

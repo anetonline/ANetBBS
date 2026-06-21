@@ -1,0 +1,330 @@
+<style>
+#tet-wrap { user-select:none; max-width:600px; margin:0 auto; font-family:'Courier New',monospace; }
+#tet-layout { display:flex; gap:20px; align-items:flex-start; justify-content:center; }
+#tet-canvas { border:3px solid #333; border-radius:4px; background:#0a0a0f; box-shadow:0 0 20px rgba(100,180,255,.2); display:block; }
+#tet-sidebar { width:130px; flex-shrink:0; }
+.tet-panel { background:rgba(255,255,255,.05); border:1px solid #333; border-radius:6px; padding:10px; margin-bottom:12px; text-align:center; }
+.tet-panel .label { font-size:.65rem; color:#888; letter-spacing:2px; text-transform:uppercase; margin-bottom:4px; }
+.tet-panel .val { font-size:1.4rem; color:#ffe000; font-weight:bold; }
+#tet-next-canvas { display:block; margin:6px auto 0; }
+#tet-btn-row { display:flex; gap:8px; justify-content:center; margin-top:10px; }
+#tet-overlay {
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    position:absolute; inset:0; background:rgba(0,0,0,.8); border-radius:4px;
+}
+#tet-overlay h2 { color:#ffe000; margin:0 0 8px; font-size:1.6rem; }
+#tet-overlay p { color:#ccc; margin:4px 0; font-size:.9rem; }
+#tet-container { position:relative; }
+.tet-touch-row { display:flex; gap:8px; justify-content:center; margin-top:8px; }
+.tet-touch-btn { background:rgba(255,255,255,.1); border:1px solid #555; border-radius:6px; color:#fff; font-size:1.3rem; padding:8px 16px; cursor:pointer; touch-action:manipulation; }
+.tet-touch-btn:active { background:rgba(255,255,255,.25); }
+</style>
+
+<div id="tet-wrap">
+    <div id="tet-layout">
+        <div id="tet-container">
+            <canvas id="tet-canvas" width="240" height="480"></canvas>
+            <div id="tet-overlay">
+                <h2>TETRIS</h2>
+                <p style="color:#aaa;font-size:.8rem;">Arrow keys / WASD</p>
+                <p style="color:#aaa;font-size:.8rem;">Space = hard drop &nbsp; P = pause</p>
+                <button id="tet-btn-start" class="btn btn-warning btn-sm mt-2">Start Game</button>
+            </div>
+        </div>
+        <div id="tet-sidebar">
+            <div class="tet-panel">
+                <div class="label">Score</div>
+                <div class="val" id="tet-score">0</div>
+            </div>
+            <div class="tet-panel">
+                <div class="label">Level</div>
+                <div class="val" id="tet-level">1</div>
+            </div>
+            <div class="tet-panel">
+                <div class="label">Lines</div>
+                <div class="val" id="tet-lines">0</div>
+            </div>
+            <div class="tet-panel">
+                <div class="label">Next</div>
+                <canvas id="tet-next-canvas" width="100" height="80"></canvas>
+            </div>
+            <div class="tet-panel" style="margin-top:auto;">
+                <div class="label">Hi-Score</div>
+                <div class="val" id="tet-hiscore">0</div>
+            </div>
+            <button id="tet-btn-pause" class="btn btn-sm btn-outline-secondary w-100 mt-2" style="display:none;">⏸ Pause</button>
+        </div>
+    </div>
+    <!-- Mobile controls -->
+    <div class="tet-touch-row">
+        <button class="tet-touch-btn" id="tc-left">◀</button>
+        <button class="tet-touch-btn" id="tc-rot">↻</button>
+        <button class="tet-touch-btn" id="tc-right">▶</button>
+    </div>
+    <div class="tet-touch-row">
+        <button class="tet-touch-btn" id="tc-down" style="flex:1;">▼ Soft Drop</button>
+        <button class="tet-touch-btn" id="tc-drop" style="flex:1;">⬇ Hard Drop</button>
+    </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const COLS=10, ROWS=20, BLK=24;
+const canvas=document.getElementById('tet-canvas');
+const ctx=canvas.getContext('2d');
+const nextCanvas=document.getElementById('tet-next-canvas');
+const nctx=nextCanvas.getContext('2d');
+
+// Piece definitions [shape rotations]
+const PIECES=[
+    // I — cyan
+    {color:'#00f5ff',shadow:'rgba(0,245,255,.25)',shapes:[[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],[[0,0,1,0],[0,0,1,0],[0,0,1,0],[0,0,1,0]]]},
+    // O — yellow
+    {color:'#ffe000',shadow:'rgba(255,224,0,.25)',shapes:[[[1,1],[1,1]]]},
+    // T — purple
+    {color:'#aa44ff',shadow:'rgba(170,68,255,.25)',shapes:[[[0,1,0],[1,1,1]],[[1,0],[1,1],[1,0]],[[1,1,1],[0,1,0]],[[0,1],[1,1],[0,1]]]},
+    // S — green
+    {color:'#44ff44',shadow:'rgba(68,255,68,.25)',shapes:[[[0,1,1],[1,1,0]],[[1,0],[1,1],[0,1]]]},
+    // Z — red
+    {color:'#ff4444',shadow:'rgba(255,68,68,.25)',shapes:[[[1,1,0],[0,1,1]],[[0,1],[1,1],[1,0]]]},
+    // J — blue
+    {color:'#4488ff',shadow:'rgba(68,136,255,.25)',shapes:[[[1,0,0],[1,1,1]],[[1,1],[1,0],[1,0]],[[1,1,1],[0,0,1]],[[0,1],[0,1],[1,1]]]},
+    // L — orange
+    {color:'#ff8800',shadow:'rgba(255,136,0,.25)',shapes:[[[0,0,1],[1,1,1]],[[1,0],[1,0],[1,1]],[[1,1,1],[1,0,0]],[[1,1],[0,1],[0,1]]]},
+];
+
+const SCORE_TABLE=[0,100,300,500,800]; // 0-4 lines
+const LEVEL_LINES=10; // lines per level
+let board, current, next, score, hiScore, level, lines, gameState, dropTimer, dropInterval, flashLines, flashTimer;
+let softDrop=false;
+
+function newBoard(){return Array.from({length:ROWS},()=>Array(COLS).fill(null));}
+
+function randPiece(){
+    const p=PIECES[Math.floor(Math.random()*PIECES.length)];
+    return {piece:p,rot:0,x:Math.floor(COLS/2)-Math.floor(p.shapes[0][0].length/2),y:-1};
+}
+
+function shape(t){return t.piece.shapes[t.rot%t.piece.shapes.length];}
+
+function fits(t,dx,dy,rot){
+    const s=t.piece.shapes[(rot!==undefined?rot:t.rot)%t.piece.shapes.length];
+    for(let r=0;r<s.length;r++) for(let c=0;c<s[r].length;c++){
+        if(!s[r][c]) continue;
+        const nx=t.x+(dx||0)+c, ny=t.y+(dy||0)+r;
+        if(nx<0||nx>=COLS||ny>=ROWS) return false;
+        if(ny>=0&&board[ny][nx]) return false;
+    }
+    return true;
+}
+
+function lock(){
+    const s=shape(current);
+    for(let r=0;r<s.length;r++) for(let c=0;c<s[r].length;c++){
+        if(!s[r][c]) continue;
+        const ny=current.y+r;
+        if(ny<0){endGame();return;}
+        board[ny][current.x+c]=current.piece.color;
+    }
+    clearLines();
+    current=next; next=randPiece();
+    if(!fits(current,0,0)){endGame();}
+}
+
+function clearLines(){
+    const full=[];
+    for(let r=0;r<ROWS;r++) if(board[r].every(c=>c)) full.push(r);
+    if(!full.length) return;
+    flashLines=full; flashTimer=8;
+    const pts=SCORE_TABLE[Math.min(full.length,4)]*level;
+    score+=pts; lines+=full.length;
+    level=Math.floor(lines/LEVEL_LINES)+1;
+    dropInterval=Math.max(50,600-level*55);
+    document.getElementById('tet-score').textContent=score.toLocaleString();
+    document.getElementById('tet-level').textContent=level;
+    document.getElementById('tet-lines').textContent=lines;
+    if(score>hiScore){hiScore=score;document.getElementById('tet-hiscore').textContent=hiScore.toLocaleString();}
+    setTimeout(()=>{
+        full.forEach(r=>board.splice(r,1));
+        while(board.length<ROWS) board.unshift(Array(COLS).fill(null));
+        flashLines=[];
+    }, 120);
+}
+
+function ghostY(){
+    let dy=0;
+    while(fits(current,0,dy+1)) dy++;
+    return current.y+dy;
+}
+
+function drawBlock(ctx2,x,y,color,alpha){
+    ctx2.globalAlpha=alpha||1;
+    ctx2.fillStyle=color;
+    ctx2.fillRect(x*BLK+1,y*BLK+1,BLK-2,BLK-2);
+    // Highlight
+    ctx2.fillStyle='rgba(255,255,255,.35)';
+    ctx2.fillRect(x*BLK+2,y*BLK+2,BLK-4,4);
+    ctx2.fillRect(x*BLK+2,y*BLK+2,4,BLK-4);
+    // Shadow
+    ctx2.fillStyle='rgba(0,0,0,.4)';
+    ctx2.fillRect(x*BLK+BLK-5,y*BLK+3,3,BLK-4);
+    ctx2.fillRect(x*BLK+3,y*BLK+BLK-5,BLK-4,3);
+    ctx2.globalAlpha=1;
+}
+
+function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Grid lines
+    ctx.strokeStyle='rgba(255,255,255,.04)';
+    ctx.lineWidth=1;
+    for(let c=1;c<COLS;c++){ctx.beginPath();ctx.moveTo(c*BLK,0);ctx.lineTo(c*BLK,canvas.height);ctx.stroke();}
+    for(let r=1;r<ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*BLK);ctx.lineTo(canvas.width,r*BLK);ctx.stroke();}
+
+    // Board
+    for(let r=0;r<ROWS;r++){
+        for(let c=0;c<COLS;c++){
+            if(board[r][c]){
+                if(flashLines&&flashLines.includes(r)){
+                    ctx.fillStyle='#fff';
+                    ctx.fillRect(c*BLK,r*BLK,BLK,BLK);
+                } else {
+                    drawBlock(ctx,c,r,board[r][c]);
+                }
+            }
+        }
+    }
+
+    if(gameState==='playing'||gameState==='paused'){
+        // Ghost piece
+        const gy=ghostY();
+        const s=shape(current);
+        for(let r=0;r<s.length;r++) for(let c=0;c<s[r].length;c++){
+            if(s[r][c]){
+                ctx.fillStyle=current.piece.color;
+                ctx.globalAlpha=0.15;
+                ctx.fillRect((current.x+c)*BLK+1,(gy+r)*BLK+1,BLK-2,BLK-2);
+                ctx.globalAlpha=1;
+            }
+        }
+        // Current piece
+        for(let r=0;r<s.length;r++) for(let c=0;c<s[r].length;c++){
+            if(s[r][c]) drawBlock(ctx,current.x+c,current.y+r,current.piece.color);
+        }
+        // Pause veil
+        if(gameState==='paused'){
+            ctx.fillStyle='rgba(0,0,0,.6)';
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+            ctx.fillStyle='#ffe000';
+            ctx.font='bold 28px monospace';
+            ctx.textAlign='center';
+            ctx.fillText('PAUSED',canvas.width/2,canvas.height/2);
+        }
+    }
+
+    // Next piece
+    nctx.clearRect(0,0,nextCanvas.width,nextCanvas.height);
+    if(next){
+        const ns=shape(next);
+        const NB=18;
+        const ox=Math.floor((nextCanvas.width-ns[0].length*NB)/2);
+        const oy=Math.floor((nextCanvas.height-ns.length*NB)/2);
+        for(let r=0;r<ns.length;r++) for(let c=0;c<ns[r].length;c++){
+            if(ns[r][c]){
+                nctx.fillStyle=next.piece.color;
+                nctx.fillRect(ox+c*NB+1,oy+r*NB+1,NB-2,NB-2);
+                nctx.fillStyle='rgba(255,255,255,.3)';
+                nctx.fillRect(ox+c*NB+2,oy+r*NB+2,NB-4,3);
+            }
+        }
+    }
+}
+
+let lastTime=0;
+function gameLoop(ts){
+    if(gameState!=='playing'){render();return;}
+    const dt=ts-lastTime; lastTime=ts;
+    dropTimer+=dt;
+    const interval=softDrop?Math.min(dropInterval,50):dropInterval;
+    if(dropTimer>=interval){
+        dropTimer=0;
+        if(fits(current,0,1)){current.y++;}
+        else{lock();}
+    }
+    render();
+    if(gameState==='playing') requestAnimationFrame(gameLoop);
+}
+
+function startGame(){
+    board=newBoard(); score=0; level=1; lines=0; dropInterval=600;
+    dropTimer=0; flashLines=[]; softDrop=false; gameState='playing';
+    current=randPiece(); next=randPiece();
+    document.getElementById('tet-score').textContent='0';
+    document.getElementById('tet-level').textContent='1';
+    document.getElementById('tet-lines').textContent='0';
+    document.getElementById('tet-overlay').style.display='none';
+    document.getElementById('tet-btn-pause').style.display='block';
+    lastTime=performance.now();
+    requestAnimationFrame(gameLoop);
+}
+
+function endGame(){
+    gameState='over';
+    const ov=document.getElementById('tet-overlay');
+    ov.innerHTML=`<h2 style="color:#ff4444;">GAME OVER</h2><p style="color:#ccc;">Score: <strong style="color:#ffe000;">${score.toLocaleString()}</strong></p><p style="color:#aaa;font-size:.8rem;">Hi-Score: ${hiScore.toLocaleString()}</p><button id="tet-btn-restart" class="btn btn-warning btn-sm mt-3">Play Again</button>`;
+    ov.style.display='flex';
+    document.getElementById('tet-btn-restart').onclick=startGame;
+    document.getElementById('tet-btn-pause').style.display='none';
+    render();
+}
+
+// Controls
+document.addEventListener('keydown',e=>{
+    if(gameState!=='playing'&&gameState!=='paused') return;
+    if(gameState==='paused'&&e.key!=='p'&&e.key!=='P') return;
+    switch(e.key){
+        case 'ArrowLeft': case 'a': case 'A': if(fits(current,-1,0)){current.x--;} break;
+        case 'ArrowRight': case 'd': case 'D': if(fits(current,1,0)){current.x++;} break;
+        case 'ArrowDown': case 's': case 'S': softDrop=true; break;
+        case 'ArrowUp': case 'w': case 'W': {
+            const nr=(current.rot+1)%current.piece.shapes.length;
+            if(fits(current,0,0,nr)) current.rot=nr;
+            else if(fits(current,1,0,nr)){current.x++;current.rot=nr;}
+            else if(fits(current,-1,0,nr)){current.x--;current.rot=nr;}
+        } break;
+        case ' ': {
+            let dy=0; while(fits(current,0,dy+1)) dy++;
+            current.y+=dy; lock();
+        } break;
+        case 'p': case 'P':
+            gameState=gameState==='paused'?'playing':'paused';
+            if(gameState==='playing'){lastTime=performance.now();requestAnimationFrame(gameLoop);}
+            render(); break;
+    }
+});
+document.addEventListener('keyup',e=>{if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') softDrop=false;});
+
+// Touch controls
+const tc=id=>document.getElementById(id);
+tc('tc-left').addEventListener('click',()=>{if(fits(current,-1,0))current.x--;});
+tc('tc-right').addEventListener('click',()=>{if(fits(current,1,0))current.x++;});
+tc('tc-rot').addEventListener('click',()=>{
+    const nr=(current.rot+1)%current.piece.shapes.length;
+    if(fits(current,0,0,nr))current.rot=nr;
+    else if(fits(current,1,0,nr)){current.x++;current.rot=nr;}
+    else if(fits(current,-1,0,nr)){current.x--;current.rot=nr;}
+});
+tc('tc-down').addEventListener('touchstart',()=>{softDrop=true;},{passive:true});
+tc('tc-down').addEventListener('touchend',()=>{softDrop=false;});
+tc('tc-drop').addEventListener('click',()=>{let dy=0;while(fits(current,0,dy+1))dy++;current.y+=dy;lock();});
+
+document.getElementById('tet-btn-start').onclick=startGame;
+document.getElementById('tet-btn-pause').onclick=()=>{
+    if(gameState==='paused'){gameState='playing';lastTime=performance.now();requestAnimationFrame(gameLoop);}
+    else if(gameState==='playing') gameState='paused';
+    render();
+};
+
+hiScore=0; gameState='idle'; render();
+})();
+</script>

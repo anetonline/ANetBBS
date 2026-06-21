@@ -105,6 +105,88 @@ WEB_GAMES = [
         'web_game_module': 'adventure',
         'sort_order': 100,
     },
+    {
+        'name': 'Klondike Solitaire',
+        'slug': 'solitaire',
+        'description': 'Classic Klondike solitaire with drag-and-drop cards. '
+                       'Build all four suits from Ace to King!',
+        'category': 'cards',
+        'icon': 'bi-suit-heart',
+        'web_game_module': 'solitaire',
+        'sort_order': 110,
+    },
+    {
+        'name': 'Video Poker',
+        'slug': 'videopoker',
+        'description': 'Jacks or Better video poker. Hold your cards, draw, '
+                       'and aim for the royal flush!',
+        'category': 'cards',
+        'icon': 'bi-suit-spade',
+        'web_game_module': 'videopoker',
+        'sort_order': 120,
+    },
+    {
+        'name': "Texas Hold'em",
+        'slug': 'holdem',
+        'description': "No-limit Texas Hold'em against up to 4 CPU opponents. "
+                       "Easy, Medium, or Hard AI — can you take their chips?",
+        'category': 'cards',
+        'icon': 'bi-suit-club',
+        'web_game_module': 'holdem',
+        'sort_order': 130,
+    },
+    {
+        'name': 'Blackjack',
+        'slug': 'blackjack',
+        'description': 'Classic casino blackjack vs. the dealer. Hit, stand, '
+                       'double down, or split your way to 21!',
+        'category': 'cards',
+        'icon': 'bi-suit-diamond',
+        'web_game_module': 'blackjack',
+        'sort_order': 140,
+    },
+    {
+        'name': 'Slot Machines',
+        'slug': 'slots',
+        'description': 'Three beautifully animated slot machines: Classic Bars, '
+                       'Lucky Fruits, and Retro BBS. Spin to win!',
+        'category': 'casino',
+        'icon': 'bi-dice-5',
+        'web_game_module': 'slots',
+        'sort_order': 150,
+    },
+    {
+        'name': 'Galaga',
+        'slug': 'galaga',
+        'description': 'Classic arcade shooter! Defend Earth from waves of '
+                       'alien formations. Watch out for dive-bombing bosses!',
+        'category': 'action',
+        'icon': 'bi-rocket-takeoff',
+        'web_game_module': 'galaga',
+        'sort_order': 160,
+    },
+    {
+        'name': 'Tetris',
+        'slug': 'tetris',
+        'description': 'The legendary falling-block puzzle game! Clear lines, '
+                       'level up, and chase the high score. Ghost piece, hard '
+                       'drop, and wall-kick rotation included.',
+        'category': 'puzzle',
+        'icon': 'bi-grid-1x2',
+        'web_game_module': 'tetris',
+        'sort_order': 170,
+    },
+    {
+        'name': 'Breakout',
+        'slug': 'breakout',
+        'description': 'Arkanoid-style brick breaker with power-ups! Wide paddle, '
+                       'multi-ball, laser cannon, and more. Clear all bricks to '
+                       'advance to the next level.',
+        'category': 'action',
+        'icon': 'bi-circle',
+        'web_game_module': 'breakout',
+        'sort_order': 180,
+    },
 ]
 
 

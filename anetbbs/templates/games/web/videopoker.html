@@ -1,0 +1,203 @@
+<style>
+#vp-wrap { max-width:640px; margin:0 auto; font-family:sans-serif; user-select:none; }
+#vp-machine { background:linear-gradient(160deg,#1a1a2e 0%,#16213e 60%,#0f3460 100%);
+    border:3px solid #e94560; border-radius:16px; padding:20px; }
+#vp-title { text-align:center; font-size:1.6rem; font-weight:900; color:#e94560; letter-spacing:3px; margin-bottom:4px; }
+#vp-subtitle { text-align:center; color:#aaa; font-size:.8rem; margin-bottom:14px; }
+#vp-paytable { display:grid; grid-template-columns:1fr auto; gap:2px 12px; background:#0a0a1a;
+    border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.78rem; }
+#vp-paytable .hand { color:#ccc; }
+#vp-paytable .pay { color:#ffe000; text-align:right; font-weight:bold; }
+#vp-paytable .active { color:#ffe000; font-weight:bold; }
+#vp-paytable .active-pay { color:#fff; background:#e94560; border-radius:3px; padding:0 4px; }
+#vp-cards { display:flex; gap:10px; justify-content:center; margin-bottom:10px; }
+.vp-card {
+    width:88px; height:128px; border-radius:10px; background:#fff;
+    border:2px solid #888; display:flex; flex-direction:column; align-items:center;
+    justify-content:space-between; padding:6px; cursor:default; position:relative;
+    box-shadow:2px 4px 10px rgba(0,0,0,.5); transition:transform .15s;
+}
+.vp-card.red { color:#cc0000; }
+.vp-card.black { color:#111; }
+.vp-card.held { border-color:#ffe000; box-shadow:0 0 10px #ffe000; transform:translateY(-8px); }
+.vp-card.held::after { content:'HOLD'; position:absolute; bottom:-22px; left:50%; transform:translateX(-50%);
+    color:#ffe000; font-size:.75rem; font-weight:900; letter-spacing:2px; }
+.vp-card.selectable { cursor:pointer; }
+.vp-card.selectable:hover { filter:brightness(1.05); }
+.vp-card.face-down { background:repeating-linear-gradient(45deg,#1a3580,#1a3580 6px,#2244aa 6px,#2244aa 12px); }
+.vp-card .corner { font-size:.8rem; font-weight:bold; line-height:1; align-self:flex-start; }
+.vp-card .corner.br { align-self:flex-end; transform:rotate(180deg); }
+.vp-card .suit-big { font-size:2.4rem; line-height:1; }
+#vp-credits { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+#vp-credits span { color:#aaa; font-size:.85rem; }
+#vp-credits strong { color:#ffe000; font-size:1.1rem; }
+#vp-status { text-align:center; min-height:1.8rem; font-size:1.1rem; font-weight:bold;
+    color:#fff; margin-bottom:8px; }
+#vp-status.win { color:#ffe000; animation:pulse .4s; }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+#vp-controls { display:flex; gap:10px; justify-content:center; }
+#vp-btn-deal { background:#e94560; border:none; color:#fff; padding:10px 36px;
+    border-radius:8px; font-size:1rem; font-weight:bold; cursor:pointer; letter-spacing:1px; }
+#vp-btn-deal:hover { background:#c73450; }
+#vp-btn-deal:disabled { opacity:.5; cursor:default; }
+#vp-bet { display:flex; align-items:center; gap:8px; }
+#vp-bet button { background:#333; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; }
+#vp-bet button:hover { background:#444; }
+</style>
+
+<div id="vp-wrap">
+<div id="vp-machine">
+    <div id="vp-title">VIDEO POKER</div>
+    <div id="vp-subtitle">Jacks or Better</div>
+
+    <div id="vp-paytable">
+        <span class="hand">Royal Flush</span><span class="pay" data-hand="royal">800</span>
+        <span class="hand">Straight Flush</span><span class="pay" data-hand="strflush">50</span>
+        <span class="hand">Four of a Kind</span><span class="pay" data-hand="quads">25</span>
+        <span class="hand">Full House</span><span class="pay" data-hand="fullhouse">9</span>
+        <span class="hand">Flush</span><span class="pay" data-hand="flush">6</span>
+        <span class="hand">Straight</span><span class="pay" data-hand="straight">4</span>
+        <span class="hand">Three of a Kind</span><span class="pay" data-hand="trips">3</span>
+        <span class="hand">Two Pair</span><span class="pay" data-hand="twopair">2</span>
+        <span class="hand">Jacks or Better</span><span class="pay" data-hand="jacks">1</span>
+    </div>
+
+    <div id="vp-credits">
+        <span>CREDITS: <strong id="vp-credit-val">100</strong></span>
+        <div id="vp-bet">
+            <button id="vp-bet-minus">-</button>
+            <span>BET: <strong id="vp-bet-val">1</strong></span>
+            <button id="vp-bet-plus">+</button>
+        </div>
+        <span>WIN: <strong id="vp-win-val">0</strong></span>
+    </div>
+
+    <div id="vp-cards">
+        <div class="vp-card face-down" id="vp-c0"></div>
+        <div class="vp-card face-down" id="vp-c1"></div>
+        <div class="vp-card face-down" id="vp-c2"></div>
+        <div class="vp-card face-down" id="vp-c3"></div>
+        <div class="vp-card face-down" id="vp-c4"></div>
+    </div>
+
+    <div id="vp-status">Press DEAL to start</div>
+    <div id="vp-controls">
+        <button id="vp-btn-deal">DEAL</button>
+    </div>
+</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const SUITS=['♠','♥','♦','♣'], VALS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+const RED=['♥','♦'];
+function isRed(s){return RED.includes(s);}
+function rankOf(v){return VALS.indexOf(v);}
+
+let credits=100, bet=1, held=[false,false,false,false,false], hand=[], phase='idle';
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
+function newDeck(){const d=[];for(const s of SUITS)for(const v of VALS)d.push({v,s});shuffle(d);return d;}
+
+let deck=[];
+
+function deal(){
+    if(phase==='idle'){
+        if(credits<bet){setStatus('Not enough credits!','');return;}
+        credits-=bet;
+        deck=newDeck();
+        hand=deck.splice(0,5);
+        held=[false,false,false,false,false];
+        phase='hold';
+        updateCredits();
+        renderCards(true);
+        setStatus('Select cards to HOLD, then press DRAW','');
+        document.getElementById('vp-btn-deal').textContent='DRAW';
+    } else if(phase==='hold'){
+        // Draw phase
+        for(let i=0;i<5;i++){
+            if(!held[i]) hand[i]=deck.pop();
+        }
+        phase='result';
+        renderCards(false);
+        const {name,mult}=evaluate(hand);
+        const won=mult*bet;
+        credits+=won;
+        document.getElementById('vp-win-val').textContent=won;
+        updateCredits();
+        highlightPay(name);
+        if(won>0) setStatus(`${name}! +${won} credits`,'win');
+        else setStatus('No win. Try again!','');
+        document.getElementById('vp-btn-deal').textContent='DEAL';
+        phase='idle';
+    }
+}
+
+function renderCards(selectable){
+    for(let i=0;i<5;i++){
+        const el=document.getElementById('vp-c'+i);
+        el.className='vp-card'+(selectable?' selectable':'');
+        const c=hand[i];
+        el.innerHTML='';
+        el.style.color=isRed(c.s)?'#cc0000':'#111';
+        if(held[i]) el.classList.add('held');
+        const tl=document.createElement('div'); tl.className='corner'; tl.textContent=c.v+'\n'+c.s; tl.style.whiteSpace='pre';
+        const big=document.createElement('div'); big.className='suit-big'; big.textContent=c.s;
+        const br=document.createElement('div'); br.className='corner br'; br.textContent=c.v+'\n'+c.s; br.style.whiteSpace='pre';
+        el.append(tl,big,br);
+        (function(idx){
+            el.onclick=selectable?function(){held[idx]=!held[idx];renderCards(true);}:null;
+        })(i);
+    }
+}
+
+function evaluate(h){
+    const ranks=h.map(c=>rankOf(c.v)).sort((a,b)=>a-b);
+    const suits=h.map(c=>c.s);
+    const isFlush=suits.every(s=>s===suits[0]);
+    const diffs=ranks.slice(1).map((r,i)=>r-ranks[i]);
+    const isStraight=diffs.every(d=>d===1)||(ranks.join(',')==='0,1,2,3,12');
+    const counts={};
+    ranks.forEach(r=>counts[r]=(counts[r]||0)+1);
+    const freq=Object.values(counts).sort((a,b)=>b-a);
+
+    if(isFlush&&isStraight&&ranks[4]===12&&ranks[0]===8) return {name:'Royal Flush',mult:800};
+    if(isFlush&&isStraight) return {name:'Straight Flush',mult:50};
+    if(freq[0]===4) return {name:'Four of a Kind',mult:25};
+    if(freq[0]===3&&freq[1]===2) return {name:'Full House',mult:9};
+    if(isFlush) return {name:'Flush',mult:6};
+    if(isStraight) return {name:'Straight',mult:4};
+    if(freq[0]===3) return {name:'Three of a Kind',mult:3};
+    if(freq[0]===2&&freq[1]===2){return {name:'Two Pair',mult:2};}
+    if(freq[0]===2){
+        // Pair — only pays for J+
+        const pairRank=parseInt(Object.keys(counts).find(k=>counts[k]===2));
+        if(pairRank>=rankOf('J')) return {name:'Jacks or Better',mult:1};
+    }
+    return {name:'No Win',mult:0};
+}
+
+function setStatus(msg,cls){
+    const el=document.getElementById('vp-status');
+    el.textContent=msg; el.className=cls;
+}
+function highlightPay(handName){
+    document.querySelectorAll('#vp-paytable .pay').forEach(el=>{
+        el.className='pay'; el.style.background='';
+    });
+    const map={'Royal Flush':'royal','Straight Flush':'strflush','Four of a Kind':'quads',
+        'Full House':'fullhouse','Flush':'flush','Straight':'straight',
+        'Three of a Kind':'trips','Two Pair':'twopair','Jacks or Better':'jacks'};
+    if(map[handName]){
+        const el=document.querySelector(`#vp-paytable [data-hand="${map[handName]}"]`);
+        if(el){el.style.background='#e94560';el.style.color='#fff';}
+    }
+}
+function updateCredits(){document.getElementById('vp-credit-val').textContent=credits;}
+
+document.getElementById('vp-btn-deal').onclick=deal;
+document.getElementById('vp-bet-minus').onclick=()=>{if(bet>1&&phase==='idle'){bet--;document.getElementById('vp-bet-val').textContent=bet;}};
+document.getElementById('vp-bet-plus').onclick=()=>{if(bet<5&&phase==='idle'){bet++;document.getElementById('vp-bet-val').textContent=bet;}};
+})();
+</script>
