@@ -569,7 +569,7 @@ class BBSSession:
             # Failsafe — don't lock real users out if anything goes wrong.
             return True
 
-    async def _show_ansi_screen(self, slot):
+    async def _show_ansi_screen(self, slot, *, force_pause=False):
         """Render a sysop-defined ANSI screen by slot name. Best-effort —
         silently no-ops if the slot doesn't exist or the DB is unavailable.
 
@@ -577,6 +577,11 @@ class BBSSession:
           1. {DATA_DIR}/text/{slot}.ans  — file drop-in (highest priority)
           2. BbsAnsiScreen DB row        — set via /admin/menus/screens
           3. nothing                     — silently skip
+
+        @PAUSE@ codes embedded in the ANSI body split the content into pages;
+        the user presses any key to advance. force_pause=True adds a final
+        pause after the last page (used by the 'ansi' menu action so the
+        screen isn't immediately cleared when the menu redraws).
 
         IMPORTANT: never import anetbbs.web_app here. That module calls
         eventlet.monkey_patch() at import time, which corrupts threading
@@ -589,7 +594,7 @@ class BBSSession:
             from ..features.bbs_ui import _app
 
             # 1. File-based override
-            pause = False
+            db_pause = False
             body = None
             try:
                 _data_dir = _app().config.get('DATA_DIR', '')
@@ -605,7 +610,7 @@ class BBSSession:
                 with _app().app_context():
                     row = BbsAnsiScreen.query.filter_by(
                         slot=slot, is_active=True).first()
-                    pause = bool(row.pause_after) if row else False
+                    db_pause = bool(row.pause_after) if row else False
                     body = row.body if row else None
 
             if not body:
@@ -613,6 +618,8 @@ class BBSSession:
             # Substitute Synchronet @-codes / Mystic |XX placeholders so
             # the sysop can drop @USER@ / |UN / etc into welcome screens.
             # extract_bps MUST run before apply() since apply() strips @BPS:NNNN@.
+            # @PAUSE@ is intentionally NOT in the resolver table — _apply_codes
+            # leaves it in place as a literal marker so we can split on it below.
             bps = None
             try:
                 from ..features.display_codes import apply as _apply_codes, extract_bps as _extract_bps
@@ -631,34 +638,51 @@ class BBSSession:
                 )
             except Exception:
                 pass
-            # ANSI screens are stored as Latin-1 mojibake of the original
-            # CP437 bytes (each input byte 0xNN is now codepoint U+00NN in
-            # the DB). encode('latin-1') recovers those original bytes,
-            # which the user's CP437 terminal renders correctly. Falls back
-            # to the regular text path if the body contains genuine Unicode
-            # codepoints above 0xFF (proper UTF-8 source content).
-            try:
-                raw = body.encode('latin-1')
-                data = b'\r\n' + raw + b'\r\n'
-                if bps:
-                    # Throttle output to simulate the requested baud rate.
-                    # 8N1 serial = 10 bits/byte → bytes_per_sec = bps / 10.
-                    # 20 chunks/sec gives smooth rendering at all speeds.
-                    _bps_sec = bps / 10
-                    _chunk = max(1, int(_bps_sec / 20))
-                    _delay = _chunk / _bps_sec
-                    for _i in range(0, len(data), _chunk):
-                        self.writer.write(data[_i:_i + _chunk])
+
+            # Split on @PAUSE@ for in-content pagination. _apply_codes leaves
+            # unknown codes in place, so @PAUSE@ survives as a literal marker.
+            _PAUSE_PROMPT = b'\r\n\x1b[33m[Press any key to continue]\x1b[0m'
+            parts = body.split('@PAUSE@')
+
+            async def _send_part(text, prefix=b'', suffix=b''):
+                # ANSI screens are stored as Latin-1 mojibake of the original
+                # CP437 bytes (each input byte 0xNN is now codepoint U+00NN in
+                # the DB). encode('latin-1') recovers those original bytes,
+                # which the user's CP437 terminal renders correctly.
+                try:
+                    data = prefix + text.encode('latin-1') + suffix
+                    if bps:
+                        # Throttle output to simulate the requested baud rate.
+                        # 8N1 serial = 10 bits/byte → bytes_per_sec = bps / 10.
+                        # 20 chunks/sec gives smooth rendering at all speeds.
+                        _bps_sec = bps / 10
+                        _chunk = max(1, int(_bps_sec / 20))
+                        _delay = _chunk / _bps_sec
+                        for _i in range(0, len(data), _chunk):
+                            self.writer.write(data[_i:_i + _chunk])
+                            await self.writer.drain()
+                            if _i + _chunk < len(data):
+                                await asyncio.sleep(_delay)
+                    else:
+                        self.writer.write(data)
                         await self.writer.drain()
-                        if _i + _chunk < len(data):
-                            await asyncio.sleep(_delay)
-                else:
-                    self.writer.write(data)
+                except UnicodeEncodeError:
+                    await self.write(text)
+
+            for i, part in enumerate(parts):
+                is_last = (i == len(parts) - 1)
+                prefix = b'\r\n' if i == 0 else b''
+                suffix = b'\r\n' if is_last else b''
+                await _send_part(part, prefix=prefix, suffix=suffix)
+                if not is_last:
+                    self.writer.write(_PAUSE_PROMPT)
                     await self.writer.drain()
-            except UnicodeEncodeError:
-                await self.write('\r\n' + body + '\r\n')
-            if pause:
-                await self.read_line('\r\nPress Enter to continue... ')
+                    await self.read_key('')
+
+            if force_pause or db_pause:
+                self.writer.write(_PAUSE_PROMPT)
+                await self.writer.drain()
+                await self.read_key('')
         except Exception:
             pass
 

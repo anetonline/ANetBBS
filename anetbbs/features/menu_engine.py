@@ -14,6 +14,26 @@ from .bbs_ui import BBSMenuUI, _app
 logger = logging.getLogger(__name__)
 
 
+def _get_flags(session):
+    """Return UserAccessFlags for the session user, or None (unrestricted)."""
+    try:
+        from anetbbs.models import UserAccessFlags
+        uid = (session.user or {}).get('id')
+        if not uid:
+            return None
+        with _app().app_context():
+            return UserAccessFlags.query.filter_by(user_id=uid).first()
+    except Exception:
+        return None
+
+
+async def _suspended(session, feature):
+    """Write a 'feature suspended' notice and wait for a keypress."""
+    await session.write(
+        f'\r\n\x1b[1;31mYour {feature} access has been suspended.\x1b[0m\r\n')
+    await session.read_key('\r\n\x1b[33m[Press any key]\x1b[0m')
+
+
 # Mapping from action_type -> async coroutine taking (BBSMenuUI, action_args)
 async def _act_goto(ui, args):
     # Returns the next menu name to load (the engine handles the loop)
@@ -32,6 +52,9 @@ async def _act_logoff(ui, args):
 
 async def _act_door(ui, args):
     """Launch a specific Game by id."""
+    f = _get_flags(ui.session)
+    if f and f.no_games:
+        return await _suspended(ui.session, 'games')
     from anetbbs.models import Game
     from anetbbs.games.door_runner import play_door_game_telnet
     try:
@@ -56,9 +79,25 @@ async def _act_pm_send(ui, args): await ui.session.write(_CLR); await ui.send_pm
 async def _act_imsg(ui, args):    await ui.session.write(_CLR); await ui.list_imsg_inbox();  return None
 async def _act_imsg_send(ui, args): await ui.session.write(_CLR); await ui.send_imsg();      return None
 async def _act_bulletins(ui, args): await ui.session.write(_CLR); await ui.list_bulletins(); return None
-async def _act_echo(ui, args):    await ui.session.write(_CLR); await ui.list_echo_areas();  return None
-async def _act_echo_post(ui, args): await ui.session.write(_CLR); await ui.compose_echomail(); return None
-async def _act_files(ui, args):   await ui.session.write(_CLR); await ui.list_files();       return None
+
+async def _act_echo(ui, args):
+    f = _get_flags(ui.session)
+    if f and f.no_echomail:
+        return await _suspended(ui.session, 'echomail')
+    await ui.session.write(_CLR); await ui.list_echo_areas(); return None
+
+async def _act_echo_post(ui, args):
+    f = _get_flags(ui.session)
+    if f and f.no_echomail:
+        return await _suspended(ui.session, 'echomail')
+    await ui.session.write(_CLR); await ui.compose_echomail(); return None
+
+async def _act_files(ui, args):
+    f = _get_flags(ui.session)
+    if f and f.no_files:
+        return await _suspended(ui.session, 'file downloads')
+    await ui.session.write(_CLR); await ui.list_files(); return None
+
 async def _act_who(ui, args):     await ui.session.write(_CLR); await ui.show_online();      return None
 async def _act_profile(ui, args): await ui.session.write(_CLR); await ui.show_profile();     return None
 async def _act_edit_prof(ui, args): await ui.session.write(_CLR); await ui.edit_profile();   return None
@@ -153,7 +192,11 @@ async def _act_multinode(ui, args):
         except (asyncio.CancelledError, Exception):
             pass
     return None
-async def _act_games(ui, args):   await ui.session.write(_CLR); await ui.session.games.show_menu(); return None
+async def _act_games(ui, args):
+    f = _get_flags(ui.session)
+    if f and f.no_games:
+        return await _suspended(ui.session, 'games')
+    await ui.session.write(_CLR); await ui.session.games.show_menu(); return None
 
 async def _act_dialout(ui, args):
     """Open the dial-out / BBS travel menu — telnet/SSH OUT to other BBSes."""
@@ -168,7 +211,7 @@ async def _act_ansi(ui, args):
         await ui.session.write("\r\nMenu config error: ansi action_args needed.\r\n")
         return None
     try:
-        await ui.session._show_ansi_screen(args.strip())
+        await ui.session._show_ansi_screen(args.strip(), force_pause=True)
     except Exception:
         logger.exception('ansi action failed for slot %r', args)
     return None

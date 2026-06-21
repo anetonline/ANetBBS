@@ -1,44 +1,59 @@
 {% extends "base.html" %}
-
-{% block title %}{{ peer.name }}{% endblock %}
+{% block title %}{{ peer.name }} — BBS Directory{% endblock %}
 
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-globe"></i> {{ peer.name }}</h1>
-    <p>
-        <code>{{ peer.hostname }}</code>{% if peer.finger_port and peer.finger_port != 79 %}:{{ peer.finger_port }}{% endif %}
-        {% if peer.ftn_address %} — <code>{{ peer.ftn_address }}</code>{% endif %}
-    </p>
-    {% if peer.description %}<p>{{ peer.description }}</p>{% endif %}
-</div>
+<div class="container my-4" style="max-width:640px;">
+  <a href="{{ url_for('peers.index', tab='local') }}" class="btn btn-link ps-0 mb-2">
+    <i class="bi bi-arrow-left"></i> Back to Directory
+  </a>
 
-<div class="card mb-3">
-    <div class="card-header py-1">
-        <i class="bi bi-people"></i> Online users
-        <small class="text-muted ms-2">
-            (last polled {{ peer.last_polled_at.strftime('%Y-%m-%d %H:%M:%S UTC') if peer.last_polled_at else 'never' }})
-        </small>
-    </div>
+  <div class="card shadow-sm">
     <div class="card-body">
-        {% if peer.last_error %}
-            <div class="alert alert-warning mb-0">
-                <strong>Polling error:</strong> {{ peer.last_error }}
-            </div>
-        {% elif peer.last_response %}
-            <pre style="white-space:pre-wrap;font-family:monospace;margin:0;">{{ peer.last_response }}</pre>
-        {% else %}
-            <div class="text-muted">No data yet — the system will poll on the next request.</div>
-        {% endif %}
-    </div>
-</div>
+      <h4 class="card-title mb-1">{{ peer.name }}</h4>
+      {% if peer.location %}
+      <p class="text-muted small mb-2"><i class="bi bi-geo-alt"></i> {{ peer.location }}</p>
+      {% endif %}
+      {% if peer.description %}
+      <p class="mb-3">{{ peer.description }}</p>
+      {% endif %}
 
-{% if peer.ftn_address %}
-<div class="mb-2">
-    <a href="{{ url_for('telegram.send') }}?to_address={{ peer.ftn_address|urlencode }}"
-       class="btn btn-warning btn-sm">
-        <i class="bi bi-lightning"></i> Send Telegram to {{ peer.name }}
-    </a>
+      <dl class="row mb-3">
+        <dt class="col-sm-4">Telnet</dt>
+        <dd class="col-sm-8">
+          <code>{{ peer.hostname }}{% if peer.telnet_port and peer.telnet_port != 23 %}:{{ peer.telnet_port }}{% endif %}</code>
+        </dd>
+        {% if peer.web_url %}
+        <dt class="col-sm-4">Web</dt>
+        <dd class="col-sm-8"><a href="{{ peer.web_url }}" target="_blank" rel="noopener">{{ peer.web_url }}</a></dd>
+        {% endif %}
+        {% if peer.software %}
+        <dt class="col-sm-4">Software</dt>
+        <dd class="col-sm-8">{{ peer.software }}</dd>
+        {% endif %}
+        {% if peer.ftn_address %}
+        <dt class="col-sm-4">FTN Address</dt>
+        <dd class="col-sm-8"><code>{{ peer.ftn_address }}</code></dd>
+        {% endif %}
+      </dl>
+
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="telnet://{{ peer.hostname }}{% if peer.telnet_port and peer.telnet_port != 23 %}:{{ peer.telnet_port }}{% endif %}"
+           class="btn btn-primary">
+          <i class="bi bi-terminal-fill"></i> Connect via Telnet
+        </a>
+        {% if peer.web_url %}
+        <a href="{{ peer.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info">
+          <i class="bi bi-box-arrow-up-right"></i> Visit Web
+        </a>
+        {% endif %}
+        {% if peer.ftn_address %}
+        <a href="{{ url_for('telegram.send') }}?to_address={{ peer.ftn_address|urlencode }}"
+           class="btn btn-outline-warning">
+          <i class="bi bi-lightning"></i> Send Telegram
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
-{% endif %}
-<a href="{{ url_for('peers.index') }}" class="btn btn-link">← All BBSes</a>
 {% endblock %}

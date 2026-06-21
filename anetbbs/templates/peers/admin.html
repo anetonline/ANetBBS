@@ -57,22 +57,15 @@
   <!-- Approved local entries -->
   {% set approved = peers | selectattr('is_approved', 'equalto', True) | list %}
   <div class="card shadow-sm mb-4">
-    <div class="card-header d-flex align-items-center justify-content-between">
+    <div class="card-header">
       <span><i class="bi bi-hdd-network"></i> Local Entries ({{ approved|length }})</span>
-      <form method="post" class="d-inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="action" value="refresh">
-        <button class="btn btn-outline-secondary btn-sm">
-          <i class="bi bi-arrow-clockwise"></i> Finger Refresh All
-        </button>
-      </form>
     </div>
     <div class="card-body p-0">
     {% if approved %}
       <table class="table table-sm mb-0">
         <thead><tr>
           <th>Status</th><th>Name</th><th>Telnet</th><th>Web</th>
-          <th>Location</th><th>Online</th><th>Last Polled</th><th>Error</th><th></th>
+          <th>Location</th><th>Software</th><th>FTN</th><th></th>
         </tr></thead>
         <tbody>
         {% for p in approved %}
@@ -81,16 +74,28 @@
             {% if p.is_active %}<span class="badge bg-success">on</span>
             {% else %}<span class="badge bg-secondary">off</span>{% endif %}
           </td>
-          <td><strong>{{ p.name }}</strong></td>
+          <td><strong>{{ p.name }}</strong>
+            {% if p.description %}<br><small class="text-muted">{{ p.description[:60] }}</small>{% endif %}
+          </td>
           <td><code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code></td>
           <td>{% if p.web_url %}<a href="{{ p.web_url }}" target="_blank" rel="noopener" class="small">link</a>{% endif %}</td>
           <td><small>{{ p.location or '' }}</small></td>
-          <td>{{ p.online_count or 0 }}</td>
-          <td><small class="text-muted">
-            {% if p.last_polled_at %}{{ p.last_polled_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
-          </small></td>
-          <td><small class="text-danger">{{ (p.last_error or '')[:50] }}</small></td>
+          <td><small>{{ p.software or '' }}</small></td>
+          <td><small class="text-muted">{{ p.ftn_address or '' }}</small></td>
           <td class="text-nowrap">
+            <button class="btn btn-link btn-sm p-0 me-1"
+                    data-bs-toggle="modal" data-bs-target="#editModal"
+                    data-peer-id="{{ p.id }}"
+                    data-name="{{ p.name | e }}"
+                    data-hostname="{{ p.hostname | e }}"
+                    data-telnet-port="{{ p.telnet_port or 23 }}"
+                    data-web-url="{{ p.web_url or '' | e }}"
+                    data-location="{{ p.location or '' | e }}"
+                    data-software="{{ p.software or '' | e }}"
+                    data-ftn-address="{{ p.ftn_address or '' | e }}"
+                    data-description="{{ p.description or '' | e }}"
+                    data-is-active="{{ '1' if p.is_active else '' }}"
+                    onclick="fillEditModal(this)">edit</button>
             <form method="post" class="d-inline">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="toggle">
@@ -147,4 +152,82 @@
   </div>
 
 </div>
+
+<!-- Edit modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('peers.admin') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="peer_id" id="editPeerId">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editModalLabel"><i class="bi bi-pencil-square"></i> Edit BBS Entry</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">Name</label>
+            <input type="text" name="name" id="editName" class="form-control" required maxlength="120">
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-8">
+              <label class="form-label">Hostname</label>
+              <input type="text" name="hostname" id="editHostname" class="form-control" required maxlength="160">
+            </div>
+            <div class="col-4">
+              <label class="form-label">Telnet Port</label>
+              <input type="number" name="telnet_port" id="editTelnetPort" class="form-control" value="23" min="1" max="65535">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Web URL</label>
+            <input type="url" name="web_url" id="editWebUrl" class="form-control" placeholder="https://...">
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label">Location</label>
+              <input type="text" name="location" id="editLocation" class="form-control" maxlength="120">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Software</label>
+              <input type="text" name="software" id="editSoftware" class="form-control" maxlength="80">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">FTN Address</label>
+            <input type="text" name="ftn_address" id="editFtnAddress" class="form-control" placeholder="1:1/1" maxlength="60">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Description</label>
+            <textarea name="description" id="editDescription" class="form-control" rows="2"></textarea>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" name="is_active" id="editIsActive" class="form-check-input" value="1">
+            <label class="form-check-label" for="editIsActive">Active (visible in directory)</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function fillEditModal(btn) {
+    document.getElementById('editPeerId').value      = btn.dataset.peerId;
+    document.getElementById('editName').value        = btn.dataset.name;
+    document.getElementById('editHostname').value    = btn.dataset.hostname;
+    document.getElementById('editTelnetPort').value  = btn.dataset.telnetPort;
+    document.getElementById('editWebUrl').value      = btn.dataset.webUrl;
+    document.getElementById('editLocation').value    = btn.dataset.location;
+    document.getElementById('editSoftware').value    = btn.dataset.software;
+    document.getElementById('editFtnAddress').value  = btn.dataset.ftnAddress;
+    document.getElementById('editDescription').value = btn.dataset.description;
+    document.getElementById('editIsActive').checked  = btn.dataset.isActive === '1';
+}
+</script>
 {% endblock %}

@@ -66,11 +66,6 @@
                 <a href="{{ url_for('peers.view', peer_id=p.id) }}" class="text-decoration-none">
                   {{ p.name }}
                 </a>
-                {% if p.online_count %}
-                  <span class="badge bg-success ms-1" title="Users online">{{ p.online_count }} online</span>
-                {% elif p.last_error %}
-                  <span class="badge bg-danger ms-1" title="{{ p.last_error }}">offline</span>
-                {% endif %}
               </h6>
               <div class="text-muted small mb-1">
                 <i class="bi bi-terminal"></i>
@@ -99,7 +94,7 @@
               </a>
               {% endif %}
               <a href="{{ url_for('peers.view', peer_id=p.id) }}" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-people"></i> Who's on
+                <i class="bi bi-info-circle"></i> Details
               </a>
             </div>
           </div>

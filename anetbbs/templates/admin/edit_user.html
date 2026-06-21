@@ -118,6 +118,38 @@
 </form>
 {% endif %}
 
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="access_flags">
+    <h6 class="mb-1"><i class="bi bi-shield-exclamation text-danger"></i> Feature Access Flags</h6>
+    <p class="small text-muted mb-2">Check a box to <strong>suspend</strong> that feature for this user.</p>
+    <div class="d-flex flex-wrap gap-3 mb-3">
+        {% for key, label in [
+            ('no_echomail', 'Echomail (read + post + QWK REP)'),
+            ('no_mrc',      'MRC Chat'),
+            ('no_irc',      'IRC'),
+            ('no_games',    'Games & Doors'),
+            ('no_qwk',      'QWK Downloads'),
+            ('no_files',    'File Downloads'),
+        ] %}
+        <div class="form-check">
+            <input class="form-check-input border-danger" type="checkbox"
+                   name="{{ key }}" id="flag_{{ key }}"
+                   {% if flags_dict.get(key) %}checked{% endif %}>
+            <label class="form-check-label {% if flags_dict.get(key) %}text-danger fw-bold{% endif %}"
+                   for="flag_{{ key }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+    </div>
+    {% if flags_dict.values() | list | select | list %}
+    <div class="alert alert-warning py-1 px-2 mb-2 small">
+        <i class="bi bi-exclamation-triangle"></i>
+        This user has one or more features suspended.
+    </div>
+    {% endif %}
+    <button class="btn btn-warning btn-sm"><i class="bi bi-save"></i> Save Flags</button>
+</form>
+
 <div class="card">
     <div class="card-header"><i class="bi bi-journal-text"></i> Sysop notes ({{ notes | length }})</div>
     <ul class="list-group list-group-flush">

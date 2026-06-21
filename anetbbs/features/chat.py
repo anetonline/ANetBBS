@@ -3,6 +3,21 @@ from .mrc_chat import MRCChat
 from .anetirc2 import launch_anetirc_telnet
 from ..core.protocols import SessionProtocol
 
+
+def _chat_flags(session):
+    """Return UserAccessFlags for this session, or None (unrestricted)."""
+    try:
+        from anetbbs.models import UserAccessFlags
+        from .bbs_ui import _app
+        uid = (session.user or {}).get('id')
+        if not uid:
+            return None
+        with _app().app_context():
+            return UserAccessFlags.query.filter_by(user_id=uid).first()
+    except Exception:
+        return None
+
+
 class ChatManager:
     def __init__(self, session: SessionProtocol):
         self.session = session
@@ -14,6 +29,7 @@ class ChatManager:
         """Chat system selection — local, IRC (ANetIRC door), MRC."""
         from .ansi_ui import banner, menu_item, footer, prompt as _p, load_menu_ansi
         while True:
+            flags = _chat_flags(self.session)
             ansi = load_menu_ansi('chat')
             if ansi:
                 # Process Synchronet @-codes / Mystic |XX display codes so
@@ -50,10 +66,18 @@ class ChatManager:
             if choice == "1":
                 await self.local_chat()
             elif choice == "2":
-                await launch_anetirc_telnet(self.session.user, self.session)
+                if flags and flags.no_irc:
+                    await self.session.write(
+                        '\r\n\x1b[1;31mYour IRC access has been suspended.\x1b[0m\r\n')
+                else:
+                    await launch_anetirc_telnet(self.session.user, self.session)
             elif choice == "3":
-                self.current_chat = self.chat_systems['mrc']
-                await self.current_chat.show_menu()
+                if flags and flags.no_mrc:
+                    await self.session.write(
+                        '\r\n\x1b[1;31mYour MRC access has been suspended.\x1b[0m\r\n')
+                else:
+                    self.current_chat = self.chat_systems['mrc']
+                    await self.current_chat.show_menu()
             elif choice in ('4', 'Q') or not choice:
                 break
             else:

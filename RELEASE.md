@@ -1,16 +1,16 @@
-# ANetBBS v1.0a2.142 — BBS Directory: correct EtherTerm XML parser
+# ANetBBS v1.0a2.146 — Fix dial-out directory: wrap DB query in app_context
 
 ## Changes
 
-Both TelnetBBSGuide and IPTIA use the identical EtherTerm phonebook format:
+Root cause: `_load_directory()` in `features/dialout.py` queried the database
+without a Flask `app_context()`. The terminal process (telnet/SSH) runs outside
+gunicorn and has no ambient Flask context, so SQLAlchemy raised an exception
+that was silently swallowed by `except Exception: pass`, causing the function
+to always fall back to `DEFAULT_DIRECTORY`.
 
-    <BBS name="BBS Name" ip="host.example.com" port="23" protocol="TELNET" ... />
+Both the original `DialoutDestination` query and the new `PeerBbs` query were
+broken for the same reason. Added `with _app().app_context():` wrapping both
+queries — the same pattern used everywhere else in terminal-side DB code
+(bbs_ui.py, menu_engine.py, session.py).
 
-Previous parsers (CSV, pipe-delimited, ElementTree XML) were all wrong.
-ElementTree also fails on BBS names containing unescaped `&` (e.g. "Bits & Bytes BBS").
-
-New shared `_parse_etherterm_xml()` uses regex to extract attributes from
-`<BBS ... />` lines directly — immune to malformed XML. Tested against live data:
-- TelnetBBSGuide ZIP (`ibbs{MM}{YYYY}.zip`): extracts `dialdirectory.xml` from
-  inside the archive, parses 1,075 entries
-- IPTIA (`dialdirectory.xml`): fetched directly, parses 1,810 entries
+Files changed: `features/dialout.py`

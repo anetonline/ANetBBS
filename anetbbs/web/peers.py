@@ -9,7 +9,6 @@ Parsed with regex because the XML contains unescaped & in BBS names.
 """
 import io
 import re
-import socket
 import threading
 import zipfile
 from datetime import date, datetime, timedelta
@@ -42,79 +41,6 @@ EXTERNAL_SOURCES = {
 
 _CACHE_TTL_HOURS = 6
 _refresh_lock = threading.Lock()
-
-
-# ---------------------------------------------------------------------------
-# Local peer helpers (finger)
-# ---------------------------------------------------------------------------
-
-def _do_finger(host, port=79, timeout=8):
-    try:
-        sock = socket.create_connection((host, port), timeout=timeout)
-    except (OSError, socket.gaierror) as exc:
-        return ('', f'connect failed: {exc}')
-    try:
-        sock.sendall(b'\r\n')
-        chunks = []
-        while True:
-            try:
-                data = sock.recv(4096)
-            except OSError as exc:
-                return ('', f'recv failed: {exc}')
-            if not data:
-                break
-            chunks.append(data)
-            if sum(len(c) for c in chunks) > 64 * 1024:
-                break
-        return (b''.join(chunks).decode('utf-8', errors='replace'), None)
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
-
-
-def _count_users_in_response(text):
-    if not text:
-        return 0
-    n = 0
-    for line in text.splitlines():
-        s = line.strip()
-        if not s or s.startswith(('=', '-')):
-            continue
-        if s.lower().startswith(('currently online', 'no users', 'login:',
-                                  'name:', 'last on:', 'plan:', 'tagline:',
-                                  'location:', 'calls:', 'status:')):
-            continue
-        if line.startswith('  '):
-            n += 1
-    return n
-
-
-def _refresh_peer(peer):
-    text, err = _do_finger(peer.hostname, peer.finger_port or 79)
-    peer.last_polled_at = datetime.utcnow()
-    peer.last_response = text or ''
-    peer.last_error = err or None
-    peer.online_count = _count_users_in_response(text) if not err else 0
-    db.session.commit()
-
-
-def _refresh_all_async():
-    def _runner():
-        try:
-            for peer in PeerBbs.query.filter_by(is_active=True, is_approved=True).all():
-                try:
-                    _refresh_peer(peer)
-                except Exception:
-                    db.session.rollback()
-        except Exception:
-            pass
-    try:
-        from ..web_app import socketio
-        socketio.start_background_task(_runner)
-    except Exception:
-        threading.Thread(target=_runner, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -305,13 +231,7 @@ def index():
             db.func.lower(PeerBbs.hostname).like(ql),
             db.func.lower(PeerBbs.location).like(ql),
         ))
-    peers = local_q.order_by(PeerBbs.online_count.desc(), PeerBbs.name).all()
-
-    cutoff = datetime.utcnow() - timedelta(minutes=5)
-    stale = [p for p in peers
-             if not p.last_polled_at or p.last_polled_at < cutoff]
-    if stale:
-        _refresh_all_async()
+    peers = local_q.order_by(PeerBbs.name).all()
 
     # ── External sources ─────────────────────────────────────────────────────
     ext_data = {}
@@ -393,12 +313,6 @@ def view(peer_id):
             not getattr(current_user, 'is_admin', False):
         from flask import abort
         abort(404)
-    cutoff = datetime.utcnow() - timedelta(minutes=2)
-    if not peer.last_polled_at or peer.last_polled_at < cutoff:
-        try:
-            _refresh_peer(peer)
-        except Exception:
-            db.session.rollback()
     return render_template('peers/view.html', peer=peer)
 
 
@@ -425,9 +339,26 @@ def admin():
             p.is_active = not bool(p.is_active)
             db.session.commit()
             flash('Toggled.', 'success')
-        elif action == 'refresh':
-            _refresh_all_async()
-            flash('Finger refresh queued — reload in a few seconds.', 'info')
+        elif action == 'edit':
+            p = PeerBbs.query.get_or_404(request.form.get('peer_id', type=int))
+            name = (request.form.get('name') or '').strip()[:120]
+            host = (request.form.get('hostname') or '').strip()[:160]
+            if name:
+                p.name = name
+            if host:
+                p.hostname = host
+            try:
+                p.telnet_port = int(request.form.get('telnet_port') or 23)
+            except ValueError:
+                pass
+            p.web_url     = (request.form.get('web_url') or '').strip()[:400] or None
+            p.location    = (request.form.get('location') or '').strip()[:120] or None
+            p.software    = (request.form.get('software') or '').strip()[:80] or None
+            p.ftn_address = (request.form.get('ftn_address') or '').strip()[:60] or None
+            p.description = (request.form.get('description') or '').strip() or None
+            p.is_active   = bool(request.form.get('is_active'))
+            db.session.commit()
+            flash(f'Updated {p.name}.', 'success')
         elif action == 'refresh_ext':
             source = request.form.get('source', '')
             if source in EXTERNAL_SOURCES:

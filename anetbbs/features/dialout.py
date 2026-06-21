@@ -31,20 +31,59 @@ class DialoutMenu:
         self.session = session
 
     def _load_directory(self):
-        """Pull directory from DialoutDestination rows; fall back to the
-        hardcoded DEFAULT_DIRECTORY if the table is empty."""
+        """Pull directory from both PeerBbs (web BBS directory, Local tab)
+        and DialoutDestination (legacy terminal-only entries), merged by
+        hostname. PeerBbs entries come first; DialoutDestination fills any
+        hostnames not already covered. Falls back to DEFAULT_DIRECTORY if
+        both tables are empty or unavailable.
+
+        All DB queries are wrapped in an explicit app_context() — the
+        terminal runs outside gunicorn so there is no ambient Flask context."""
         try:
             from .. import models
-            try:
-                rows = (models.DialoutDestination.query
-                        .filter_by(is_active=True)
-                        .order_by(models.DialoutDestination.sort_order,
-                                  models.DialoutDestination.name).all())
-                if rows:
-                    return [(r.name, r.hostname, r.port or 23,
-                             r.protocol or 'telnet') for r in rows]
-            except Exception:
-                pass
+            from ..models import db
+            from .bbs_ui import _app
+            results = []
+            seen = set()
+
+            with _app().app_context():
+                # Discard any cached session so we always read the latest data
+                # written by the web process — without this, scoped_session may
+                # return stale rows from a previous transaction.
+                db.session.remove()
+
+                # Primary: approved+active PeerBbs rows (web /bbses/ admin)
+                try:
+                    peers = (models.PeerBbs.query
+                             .filter_by(is_active=True, is_approved=True)
+                             .order_by(models.PeerBbs.name).all())
+                    for r in peers:
+                        h = r.hostname.lower()
+                        if h not in seen:
+                            seen.add(h)
+                            results.append((r.name, r.hostname,
+                                            r.telnet_port or 23, 'telnet'))
+                except Exception:
+                    pass
+
+                # Secondary: DialoutDestination for terminal-only entries
+                try:
+                    dests = (models.DialoutDestination.query
+                             .filter_by(is_active=True)
+                             .order_by(models.DialoutDestination.sort_order,
+                                       models.DialoutDestination.name).all())
+                    for r in dests:
+                        h = r.hostname.lower()
+                        if h not in seen:
+                            seen.add(h)
+                            results.append((r.name, r.hostname,
+                                            r.port or 23,
+                                            r.protocol or 'telnet'))
+                except Exception:
+                    pass
+
+            if results:
+                return results
         except Exception:
             pass
         return DEFAULT_DIRECTORY

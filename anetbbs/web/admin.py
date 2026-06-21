@@ -1611,10 +1611,11 @@ def ip_bans():
 def manage_user(user_id):
     """Detailed sysop user editor — access level, time budget, ratio,
     verification flag, lock state, plus private notes."""
-    from ..models import (UserTimeBudget, FileRatio, UserNote)
+    from ..models import (UserTimeBudget, FileRatio, UserNote, UserAccessFlags)
     user = User.query.get_or_404(user_id)
     budget = UserTimeBudget.query.filter_by(user_id=user.id).first()
     ratio = FileRatio.query.filter_by(user_id=user.id).first()
+    access_flags = UserAccessFlags.query.filter_by(user_id=user.id).first()
     notes = (UserNote.query.filter_by(user_id=user.id)
              .order_by(UserNote.created_at.desc()).all())
 
@@ -1685,15 +1686,37 @@ def manage_user(user_id):
                     db.session.delete(ufv)
             db.session.commit()
             flash('Custom fields saved.', 'success')
+        elif action == 'access_flags':
+            if access_flags is None:
+                access_flags = UserAccessFlags(user_id=user.id)
+                db.session.add(access_flags)
+            access_flags.no_echomail = bool(request.form.get('no_echomail'))
+            access_flags.no_mrc      = bool(request.form.get('no_mrc'))
+            access_flags.no_irc      = bool(request.form.get('no_irc'))
+            access_flags.no_games    = bool(request.form.get('no_games'))
+            access_flags.no_qwk      = bool(request.form.get('no_qwk'))
+            access_flags.no_files    = bool(request.form.get('no_files'))
+            access_flags.updated_by  = current_user.username
+            db.session.commit()
+            flash(f'Access flags updated for {user.username}.', 'success')
         return redirect(url_for('admin.manage_user', user_id=user.id))
 
     custom_fields_list = UserField.query.order_by(UserField.sort_order, UserField.id).all()
     custom_values = {ufv.field_id: ufv.value
                      for ufv in UserFieldValue.query.filter_by(user_id=user.id).all()}
+    flags_dict = {
+        'no_echomail': bool(access_flags.no_echomail) if access_flags else False,
+        'no_mrc':      bool(access_flags.no_mrc)      if access_flags else False,
+        'no_irc':      bool(access_flags.no_irc)      if access_flags else False,
+        'no_games':    bool(access_flags.no_games)    if access_flags else False,
+        'no_qwk':      bool(access_flags.no_qwk)      if access_flags else False,
+        'no_files':    bool(access_flags.no_files)    if access_flags else False,
+    }
     return render_template('admin/edit_user.html',
                            user=user, budget=budget, ratio=ratio, notes=notes,
                            custom_fields_list=custom_fields_list,
-                           custom_values=custom_values)
+                           custom_values=custom_values,
+                           flags_dict=flags_dict)
 
 
 @admin_bp.route('/pending-users')

@@ -129,6 +129,11 @@ def index():
 @login_required
 def download():
     """Stream a fresh .QWK packet for the user."""
+    from ..models import UserAccessFlags
+    flags = UserAccessFlags.query.filter_by(user_id=current_user.id).first()
+    if flags and flags.no_qwk:
+        flash('Your QWK download access has been suspended.', 'danger')
+        return redirect(url_for('qwk_user.index'))
     blob = _build_qwk_blob(current_user)
     fname = f'{(os.environ.get("BBS_NAME","ANETBBS")[:8] or "ANETBBS").upper()}.QWK'
     return send_file(blob, as_attachment=True, download_name=fname,

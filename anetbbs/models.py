@@ -1384,6 +1384,27 @@ class ExternalBbsCache(db.Model):
         return f'<ExternalBbsCache {self.source} {self.name}>'
 
 
+class UserAccessFlags(db.Model):
+    """Per-user feature suspension flags — sysop sets these to restrict access.
+
+    All flags default False (no restriction). Rows are created on first save,
+    so existing users without a row are treated as fully unrestricted.
+    New table — safe for db.create_all() on upgrade, no ALTER TABLE needed."""
+    __tablename__ = 'user_access_flags'
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    no_echomail = db.Column(db.Boolean, default=False, nullable=False)
+    no_mrc      = db.Column(db.Boolean, default=False, nullable=False)
+    no_irc      = db.Column(db.Boolean, default=False, nullable=False)
+    no_games    = db.Column(db.Boolean, default=False, nullable=False)
+    no_qwk      = db.Column(db.Boolean, default=False, nullable=False)
+    no_files    = db.Column(db.Boolean, default=False, nullable=False)
+    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by  = db.Column(db.String(80))
+
+    user = db.relationship('User', backref=db.backref('access_flags', uselist=False))
+
+
 class UserNote(db.Model):
     """Private sysop note attached to a user account.
 

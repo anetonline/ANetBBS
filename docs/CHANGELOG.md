@@ -1,7 +1,44 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.142`** (June 2026). Previous: `v1.0a2.141`.
+separately. Current release: **`v1.0a2.146`** (June 2026). Previous: `v1.0a2.145`.
+
+## v1.0a2.146 — Fix dial-out directory DB lookup in terminal context (June 2026)
+
+- Root cause of dial-out directory not syncing: `_load_directory()` in
+  `features/dialout.py` queried the DB without a Flask app_context. Terminal
+  processes have no ambient Flask context so the query raised silently
+  (except pass), always falling back to the hardcoded DEFAULT_DIRECTORY.
+  Added `with _app().app_context():` — same pattern as bbs_ui.py / menu_engine.py.
+  Both PeerBbs (web directory) and DialoutDestination entries now appear on
+  SSH/telnet.
+
+## v1.0a2.145 — BBS Directory: edit local entries + remove Who's Online (June 2026)
+
+- Local BBS entries in the web admin (`/bbses/admin`) can now be edited via a
+  modal form — all fields: name, hostname, port, web URL, location, software,
+  FTN address, description, active toggle. Previously delete/disable only.
+- Removed finger/who's-online polling entirely: `_do_finger`, `_refresh_peer`,
+  background refresh, online count badges, "Who's on" button, admin columns.
+  `view.html` is now a clean BBS detail/connect page.
+
+## v1.0a2.144 — Dial-out dir sync + User access flags (June 2026)
+
+- Terminal dial-out menu now reads from PeerBbs (web BBS Directory Local tab)
+  as primary source, with DialoutDestination as secondary. Entries added via
+  the web BBS Directory are now visible on SSH/telnet.
+- New `user_access_flags` table; sysop can suspend echomail, MRC, IRC, games,
+  QWK downloads, or file downloads per user from `/admin/users/<id>/manage`.
+  New table — upgrade-safe, no migration needed. Suspended users see a clear
+  message and are returned to the menu.
+
+## v1.0a2.143 — Fix ANSI menu action: @PAUSE@ pagination + end-of-screen hold (June 2026)
+
+- `@PAUSE@` in ANSI body now splits into pages; user presses any key to advance.
+  Previously the code passed through as literal text on screen.
+- `ansi` menu action now forces a final key-wait after the screen displays so
+  the menu doesn't immediately redraw and erase the content.
+- `_show_ansi_screen` gains `force_pause=False` param; `_act_ansi` passes `True`.
 
 ## v1.0a2.142 — BBS Directory: correct EtherTerm XML parser (June 2026)
 
