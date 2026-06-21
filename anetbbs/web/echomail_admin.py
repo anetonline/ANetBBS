@@ -96,8 +96,9 @@ class EchoAreaForm(FlaskForm):
     order = IntegerField('Sort Order', validators=[Optional()], default=0)
     is_active = BooleanField('Active', default=True)
     is_subscribed = BooleanField('Subscribed', default=True)
+    is_sysop_only = BooleanField('Sysop Only', default=False)
     min_access_level = IntegerField(
-        'Min Access Level (0=all users, 50=VIP, 100=sysop)',
+        'Min Access Level (0=all users, 10=registered, 50=VIP, 100=sysop)',
         validators=[Optional(), NumberRange(min=0, max=255)], default=10)
     submit = SubmitField('Save Area')
 
@@ -382,6 +383,8 @@ def new_area():
             order=form.order.data or 0,
             is_active=form.is_active.data,
             is_subscribed=form.is_subscribed.data,
+            is_sysop_only=form.is_sysop_only.data,
+            min_access_level=form.min_access_level.data if form.min_access_level.data is not None else 10,
         )
         db.session.add(area)
         db.session.commit()

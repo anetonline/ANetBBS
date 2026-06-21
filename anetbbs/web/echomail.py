@@ -15,6 +15,17 @@ from ..models import (db, EchoArea, EchomailMessage, EchomailReadStatus,
 echomail_bp = Blueprint('echomail', __name__, url_prefix='/echomail')
 
 
+def _check_area_access(echo_area):
+    """Abort 403 if the current user cannot access this echo area."""
+    if getattr(current_user, 'is_admin', False):
+        return
+    if echo_area.is_sysop_only:
+        abort(403)
+    user_lvl = getattr(current_user, 'access_level', 10) or 10
+    if (echo_area.min_access_level or 0) > user_lvl:
+        abort(403)
+
+
 class ComposeForm(FlaskForm):
     """Form for composing or replying to echomail messages."""
     area_id = SelectField('Echo Area', coerce=int)
@@ -48,9 +59,11 @@ def index():
     for network in networks:
         q = EchoArea.query.filter_by(
             network_id=network.id, is_active=True, is_subscribed=True)
-        # Hide sysop-only areas from non-admins.
+        # Filter areas by sysop_only flag and user access level.
         if not getattr(current_user, 'is_admin', False):
+            user_lvl = getattr(current_user, 'access_level', 10) or 10
             q = q.filter(EchoArea.is_sysop_only.is_(False))
+            q = q.filter(EchoArea.min_access_level <= user_lvl)
         areas = q.order_by(EchoArea.order, EchoArea.name).all()
 
         if not areas:
@@ -89,8 +102,7 @@ def area(area_id):
     echo_area = EchoArea.query.get_or_404(area_id)
     if not echo_area.is_active or not echo_area.is_subscribed:
         abort(404)
-    if echo_area.is_sysop_only and not getattr(current_user, 'is_admin', False):
-        abort(403)
+    _check_area_access(echo_area)
 
     page = request.args.get('page', 1, type=int)
     per_page = 25
@@ -120,8 +132,7 @@ def thread(area_id, message_id):
     echo_area = EchoArea.query.get_or_404(area_id)
     if not echo_area.is_active:
         abort(404)
-    if echo_area.is_sysop_only and not getattr(current_user, 'is_admin', False):
-        abort(403)
+    _check_area_access(echo_area)
 
     seed = EchomailMessage.query.get_or_404(message_id)
     # Walk up to find root.
@@ -210,13 +221,20 @@ def compose(area_id, reply_to_id=None):
     echo_area = EchoArea.query.get_or_404(area_id)
     if not echo_area.is_active or not echo_area.is_subscribed:
         abort(404)
+    _check_area_access(echo_area)
 
     original = None
     if reply_to_id:
         original = EchomailMessage.query.filter_by(id=reply_to_id, area_id=area_id).first_or_404()
 
-    # Build area choices for the select field
-    all_areas = EchoArea.query.filter_by(is_active=True, is_subscribed=True).all()
+    # Build area choices for the select field — filtered by user access level.
+    user_lvl = getattr(current_user, 'access_level', 10) or 10
+    is_admin = getattr(current_user, 'is_admin', False)
+    q = EchoArea.query.filter_by(is_active=True, is_subscribed=True)
+    if not is_admin:
+        q = q.filter(EchoArea.is_sysop_only.is_(False))
+        q = q.filter(EchoArea.min_access_level <= user_lvl)
+    all_areas = q.all()
     area_choices = [(a.id, f'[{a.network.name}] {a.name}') for a in all_areas]
 
     form = ComposeForm()
@@ -354,8 +372,7 @@ def next_unread(area_id):
     Uses EchomailLastRead as a fast pointer; if none, falls back to scanning
     EchomailReadStatus to find the first unseen message id."""
     echo_area = EchoArea.query.get_or_404(area_id)
-    if echo_area.is_sysop_only and not getattr(current_user, 'is_admin', False):
-        abort(403)
+    _check_area_access(echo_area)
 
     lr = (EchomailLastRead.query.filter_by(
         user_id=current_user.id, area_id=area_id).first())

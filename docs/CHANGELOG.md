@@ -1,18 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.148`** (June 2026). Previous: `v1.0a2.146`.
+separately. Current release: **`v1.0a2.149`** (June 2026). Previous: `v1.0a2.146`.
 
-## v1.0a2.148 — Game bug fixes + Tetris + Breakout (June 2026)
+## v1.0a2.149 — Echomail area sysop-only flag + security levels (June 2026)
 
-### Bug fixes
-- **Solitaire**: rewrote card click model — clicking a card while another is selected now attempts a move instead of re-selecting. Full ghost highlight on selected cards.
-- **Galaga**: initial shoot cooldown increased from 100–300 frames to 600–800 staggered by index. Dive interval 5 sec at level 1 (was 1.5 sec). Max simultaneous divers and on-screen bullet cap added.
-- **Slots**: fixed JavaScript strict-mode `ReferenceError` (`strips=` undeclared variable) that crashed slot machine init; Lucky and Retro tabs now work.
-
-### New web games
-- **Tetris** — full implementation with ghost piece, wall-kick SRS rotation, hard drop, soft drop, level scaling (speed increases per 10 lines), hi-score, next-piece preview, touch controls.
-- **Breakout** — Arkanoid-style brick breaker; 5 power-up types (wide paddle, slow ball, multi-ball, laser, +life), brick HP on upper rows at higher levels, glowing ball trail, level progression.
+- **Echomail `EchoAreaForm`**: added `is_sysop_only` BooleanField; `min_access_level` already existed in the form but wasn't exposed in the template.
+- **Area edit form** (`echomail/admin/area_form.html`): Active, Subscribed, Sysop Only checkboxes now shown together in a flags box; Min Access Level field alongside with hint text.
+- **Areas list** (`echomail/admin/areas.html`): Status column replaced with four separate columns — Active ✓/✗, Subscribed ✓/✗, Sysop Only 🔒/—, Level badge (color-coded by range).
+- **`new_area` route**: now saves `is_sysop_only` and `min_access_level` on area creation.
+- **`web/echomail.py`**: extracted `_check_area_access(area)` helper; applied to area view, thread, compose, and next-unread routes. Area index and compose dropdown filter by both `is_sysop_only` and `min_access_level <= user.access_level`.
 - New templates: `auth/verify_sent.html`, `auth/verified.html`, `auth/resend_verification.html`.
 - Admin nav: new "SMTP / Email" link above Settings divider.
 

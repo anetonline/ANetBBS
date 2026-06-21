@@ -1,40 +1,29 @@
-# ANetBBS v1.0a2.148 — Bug fixes + 2 new web games (Tetris, Breakout)
+# ANetBBS v1.0a2.149 — Echomail area sysop-only flag + security levels
 
 ## Changes
 
-### SMTP Relay + Email Verification + Password Reset by Email
+### Echomail Area Access Control
 
-New sysop-configurable outbound SMTP relay. **Off by default.** Configure at `/admin/smtp`.
+Each echo area now has three independent access controls visible directly in the areas list table:
 
-- **SmtpConfig** and **EmailVerifyToken** models added (new tables, `db.create_all()` safe)
-- **`anetbbs/mailer.py`** — stdlib `smtplib` sender; no new dependencies
-- **Email verification on registration**: when enabled, new users receive a verification link
-  and cannot log in until they click it. Link expires in 24 hours. Resend page at `/auth/verify/resend`
-- **Password reset by email**: if SMTP is configured, the reset link is emailed automatically
-  instead of only being logged to the server journal
-- **Admin UI**: `/admin/smtp` page with host/port/TLS/credentials form, test-send button, and setup guide
-- Supports Gmail App Passwords, any SMTP relay, or your own mail server
-- Existing stale email-server setup files left intact
+- **Active** ✓/✗ — area is enabled and visible (was already present)
+- **Subscribed** ✓/✗ — area receives messages from upstream hub (was already present)
+- **Sysop Only** 🔒 — hides the area from and blocks access by all non-admin users
+- **Min Level** badge — minimum `user.access_level` required to see and enter the area
+  (0 = all registered users, 10 = default registered, 50 = VIP, 100 = sysop-level)
 
-### Bug Fixes (v1.0a2.148)
+The area edit form now shows all four flags together in a clearly labelled flags box, with the access level field alongside.
 
-- **Solitaire** — Complete rewrite of click model. Cards now correctly attempt a move when another card is already selected, rather than always re-selecting. Ghost highlight on selected cards.
-- **Galaga** — Initial enemy shoot cooldown was far too short (1.7–5 sec); bumped to 10–15 sec at level 1, staggered by enemy index so no mass simultaneous fire. Dive interval increased from every 1.5 sec to every 5 sec at level 1, scales with level. Max simultaneous divers capped (1 at level 1). Enemy bullet count capped per level.
-- **Slots** — Tab switching (Lucky and Retro machines) was broken by a JavaScript strict-mode `ReferenceError`. Fixed.
-
-### 2 New Web Games
-
-| Game | Category | Highlights |
-|---|---|---|
-| Tetris | Puzzle | Full Tetris with ghost piece, hard drop, wall-kick rotation, level scaling, hi-score, touch controls |
-| Breakout | Action | Arkanoid-style brick breaker; 5 power-ups (wide paddle, slow ball, multi-ball, laser, +life), level progression, glowing ball trail |
+Access is enforced in:
+- Area list (index) — hidden from users who fail the level or sysop check
+- Area view, thread view, read, next-unread — 403 if access fails
+- Compose — area dropdown only shows areas the user can post to
+- All admin routes remain unrestricted for admins regardless of area settings
 
 ## Files changed
 
 `anetbbs/__init__.py`, `setup.py`, `VERSION`, `FILE_ID.DIZ`, `RELEASE.md`, `docs/CHANGELOG.md`, `README.md`,
-`anetbbs/games/web_games.py`,
-`anetbbs/templates/games/web/solitaire.html` (rewrite),
-`anetbbs/templates/games/web/galaga.html` (difficulty fix),
-`anetbbs/templates/games/web/slots.html` (tab fix),
-`anetbbs/templates/games/web/tetris.html` (new),
-`anetbbs/templates/games/web/breakout.html` (new)
+`anetbbs/web/echomail_admin.py` (form + new_area handler),
+`anetbbs/web/echomail.py` (_check_area_access helper; index, compose filtered),
+`anetbbs/templates/echomail/admin/areas.html` (new columns),
+`anetbbs/templates/echomail/admin/area_form.html` (new fields)

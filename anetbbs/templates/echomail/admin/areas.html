@@ -170,7 +170,7 @@
                 <tr>
                     <th>Network</th><th>Tag</th><th>Name</th>
                     <th>Messages</th><th>Last Activity</th>
-                    <th>Status</th><th>Actions</th>
+                    <th>Active</th><th>Subscribed</th><th>Sysop Only</th><th>Lvl</th><th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -183,10 +183,31 @@
                     <td style="font-size:0.85rem;">
                         {{ area.last_message_at.strftime('%Y-%m-%d') if area.last_message_at else '—' }}
                     </td>
-                    <td>
-                        {% if area.is_subscribed %}<span style="color:#00ff00;">✓ Subscribed</span>
-                        {% else %}<span style="color:#888;">— Unsubscribed</span>{% endif %}
-                    {% if not area.is_active %}<span style="color:#ff6600;" class="ms-1">Inactive</span>{% endif %}
+                    <td class="text-center">
+                        {% if area.is_active %}
+                            <span title="Active" style="color:#00ff00;font-size:1.1rem;">✓</span>
+                        {% else %}
+                            <span title="Inactive" style="color:#888;font-size:1.1rem;">✗</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if area.is_subscribed %}
+                            <span title="Subscribed" style="color:#44aaff;font-size:1.1rem;">✓</span>
+                        {% else %}
+                            <span title="Not subscribed" style="color:#888;font-size:1.1rem;">✗</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if area.is_sysop_only %}
+                            <span title="Sysop Only" style="color:#ff8800;font-size:1.1rem;">🔒</span>
+                        {% else %}
+                            <span title="Public" style="color:#555;font-size:.85rem;">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        <span class="badge" style="background:{% if area.min_access_level >= 100 %}#cc4400{% elif area.min_access_level >= 50 %}#886600{% else %}#224422{% endif %};">
+                            {{ area.min_access_level if area.min_access_level is not none else 10 }}
+                        </span>
                     </td>
                     <td>
                         <form method="post" action="{{ url_for('echomail_admin.toggle_subscribe', area_id=area.id) }}" class="d-inline">
