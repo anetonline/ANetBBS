@@ -1,7 +1,88 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.149`** (June 2026). Previous: `v1.0a2.146`.
+separately. Current release: **`v1.0a2.161`** (June 2026). Previous: `v1.0a2.160`.
+
+## v1.0a2.161 — Fix mixed-art \n stripping; 80-col viewer; ASCII status bar (June 2026)
+
+- **`features/anedit.py` `launch_aneview`**: Changed `\n` strip logic — only strips for **pure flat block art** (block chars present, no cursor-pos sequences). Cursor-pos art (including mixed flat+cursor-pos like ConstructiveChaos) keeps `\n` so that flat header sections (e.g. the CONSTRUCTION logo) aren't collapsed into a single overflowing row. Cursor-pos absolute positioning is unaffected by artifact `\n` between sequences.
+- **`features/anedit.py` `_ViewerScreen`**: Fixed all widths from `_W=79` to `80` — header bar, status bar, and `_ansi_trunc` limit. Prevents the rightmost art column from being clipped.
+- **`features/anedit.py` `_ViewerScreen.draw_status`**: Replaced `↑↓` Unicode arrows (rendered as `??` in SyncTERM) with `PgUp/PgDn` ASCII text.
+- **`web/render_msg.py`**: Same condition change as terminal — strip `\n` only for flat block art without cursor-pos. Fixes ConstructiveChaos logo being missing in web view.
+
+## v1.0a2.160 — VT renderer for terminal; flat-art \n fix; borderless ANView (June 2026)
+
+- **`features/ansi_html.py`**: Refactored VT engine into `_run_vt(text)` (returns cell grid). Added `to_ansi_lines(text, width=80)` — runs body through VT renderer and returns a list of terminal-ready ANSI-coloured strings. Added `_HEX_TO_FG` / `_HEX_TO_BG` reverse-palette maps. `_to_html_vt` now calls `_run_vt` internally.
+- **`features/anedit.py` `_ViewerScreen`**: Removed box-drawing border. Row 1 = dark header bar (subject), rows 2–23 = 22-line content area (up from 17), row 24 = status/hints bar. No side borders or separator lines.
+- **`features/anedit.py` `ANView`**: Overrides `_ensure_visible`, `_scroll_view`, `_pgup`, `_pgdn`, `_doc_start`, `_doc_end` to use the new 22-line viewport.
+- **`features/anedit.py` `launch_aneview`**: Now handles CP437 decode + pipe-code conversion + art detection internally. Strips `\n` for cursor-pos or block-art bodies before calling `to_ansi_lines()`. All message types (ANSI art, cursor-pos art, plain text) render in the scrollable ANView — the raw full-screen display path is gone.
+- **`features/bbs_ui.py`**: Removed cursor-pos detection and raw display path. All messages route to `launch_aneview()`.
+- **`web/render_msg.py`**: `render_msg_body` / `render_msg_body_rich` now also strip `\n` for flat block-art (CP437 block chars, no cursor-pos) before VT rendering. Fixes horizontal-bar scatter for flat art in web view.
+- **`echomail/qwk.py`**: At import time, if body contains ESC (`\x1b`), `\xe3` record-boundary bytes are stripped (not converted to `\n`). Real line structure in ANSI art comes from embedded `\r\n`. Plain-text bodies unchanged (`\xe3` → `\n`).
+
+## v1.0a2.159 — Fix QWK art scatter: strip record-boundary \\n; pipe colors in terminal (June 2026)
+
+- **Root cause**: QWK `0xE3` record separators are stored as `\n` in the DB. When the body has cursor-positioning sequences, those `\n` characters were inserting spurious line breaks between records, moving the cursor to the wrong row before the next `\x1b[r;cH` could reposition it. Each record's content landed on the wrong visual row, producing the scattered-fragment display.
+- **`web/render_msg.py` `render_msg_body` / `render_msg_body_rich`**: Now uses `to_html()` from `features/ansi_html.py` (VT renderer) instead of the local streaming `_ansi_to_html` that silently dropped cursor-pos sequences. When cursor-pos sequences are detected after CSI-fix and pipe-code conversion, `\n` chars are stripped before calling the VT renderer. Flat-art and plain-text messages continue to use the streaming path.
+- **`features/bbs_ui.py` `read_echo_area`**: (1) Removed `_BLOCK_ART` fallback — only messages with detected cursor-positioning sequences trigger full-screen raw display; flat art goes to scrollable ANView. (2) For cursor-pos art: `\n` stripped from `body_unicode` before streaming to terminal. (3) Added `|NN` pipe color → ANSI SGR conversion applied to `body_unicode` before display (handles Synchronet/Mystic pipe codes in message signatures and art).
+
+## v1.0a2.158 — Strip SAUCE record from ANSI art before rendering (June 2026)
+
+- **`echomail/qwk.py` `_parse_messages_dat`**: Strip the SAUCE metadata record at QWK import time. At the first `\x1a` (Ctrl+Z) byte in the decoded body, truncate — everything from `\x1a` onward is the binary SAUCE header (title, author, group, date, resolution fields) that, when passed to a renderer, appears as random ANSI sequences and scatters content across the display. Existing DB messages are handled at display time.
+- **`features/bbs_ui.py` `read_echo_area`**: Strip the SAUCE record from the body before CSI fix and CP437 decode. Applies to all messages already in the DB regardless of when they were imported.
+- **`features/ansi_html.py` `to_html`**: Strip the SAUCE record for string input. The bytes-input path already handled `\x1aSAUCE` stripping; this adds the same protection for the common string path used when rendering messages from the DB.
+
+## v1.0a2.157 — ANSI art full-width VT renderer + block-char detection (June 2026)
+
+- **`features/ansi_html.py` `_to_html_vt`**: VT renderer now renders every row to the full WIDTH (80 columns) instead of stopping at that row's `max_c`. Previously, rows with sparse content (art that writes only a few characters at specific columns) appeared as narrow bars in the browser; now all rows are consistently 80 chars wide, preserving the 2-D portrait shape.
+- **`features/ansi_html.py` `to_html`**: Added `_HAS_BLOCK_ART` detection. When the body contains CP437 block/half-block characters (█ ▄ ▀ ░ ▒ ▓ or latin-1 mojibake equivalents U+00B0-B2, U+00DB-DF) together with any ANSI escape, the VT renderer is used instead of the streaming renderer. Covers flat ANSI art (no cursor-positioning) that previously got the fast streaming path.
+- **`features/bbs_ui.py` `read_echo_area`**: (1) Added `f` to `_HAS_CPOS` regex (HP-style cursor-pos alias for `H`, was missing). (2) Added block-char detection as a fallback: CP437 block chars in latin-1 mojibake form trigger raw terminal display even when no cursor-pos sequences are detected. (3) Raw terminal output now converts `\n` to `\r\n` so flat-art rows return to column 0 on each new line.
+
+## v1.0a2.156 — ANSI art terminal raw display; web CSS fix; ANView colors (June 2026)
+
+- **`features/bbs_ui.py` `read_echo_area`**: Detect cursor-positioning sequences in the decoded body. If found (ANSI art), display raw to the terminal (`\x1b[2J` → stream body → `\x1b[25;1H` prompt) so full 2-D positioning and colors render exactly as the sender intended — matches Synchronet/SyncTERM behavior. Plain-text messages (no cursor positioning) still use the ANView scrollable frame.
+- **`features/anedit.py` `launch_aneview`**: Change ANSI strip from removing ALL escape sequences to removing only cursor-positioning sequences (`[H f A B C D G J K s u r]`). SGR color/attribute codes (`\x1b[...m`) are now preserved so plain-text colored messages display with colors inside the ANView frame.
+- **`features/anedit.py` `_ViewerScreen.draw_text`**: New ANSI-aware override. Uses `_ansi_trunc()` helper to truncate lines at `_TW` *visible* characters (ignoring escape sequences) and `\x1b[K` to erase trailing space rather than `.ljust()`. Prevents SGR sequences from being sliced mid-sequence and eliminates visible-width miscounts from ANSI bytes.
+- **`features/anedit.py` `_ansi_trunc`**: New helper — truncates a string with embedded ANSI sequences to a maximum of `maxlen` visible characters while preserving all escape sequences.
+- **`templates/echomail/read.html`**: Fix CSS for ANSI body display. Changed `white-space: pre-wrap` (allowed long art rows to wrap mid-row, scrambling the image) to `white-space: pre` with `overflow-x: auto`. Removed the per-span `white-space: pre-wrap` override. Fixed `line-height: 1.0` (was 1.5/1.2, adding unwanted gaps between art rows).
+
+## v1.0a2.155 — CP437 decode in ANView; VT ANSI renderer for web; scroll fix (June 2026)
+
+- **`features/anedit.py` `launch_aneview`**: Body was displayed as latin-1 mojibake (`Û` instead of `█`). Apply the same CP437 re-decode as the web path (encode latin-1 → bytes → decode cp437, keeping control chars 0x01–0x1F as-is) before stripping ANSI sequences. Block/line-drawing chars now render as proper Unicode in UTF-8 terminal sessions.
+- **`features/anedit.py` `ANView._handle` + `_scroll_view`**: UP/DOWN arrows now scroll the viewport by 1 line immediately (was: moved cy without visible text change until cy left viewport). Space scrolls down a page. PgUp/PgDn/Home/End/Ctrl+Home/End all work. Replaced non-ASCII `↑↓` hint chars with ASCII `Up/Dn` — SyncTERM displayed them as `??`.
+- **`features/ansi_html.py`**: Added virtual-terminal renderer `_to_html_vt`. When cursor-positioning sequences (`\x1b[H`, `\x1b[A/B/C/D`, `\x1b[2J`, etc.) are detected in the body, routes to the VT renderer which maintains an 80-column cell grid, processes all cursor moves, and outputs the correct 2-D layout. Streaming renderer kept for plain-text messages. Result: ANSI art on the web viewer displays with correct positioning instead of as a scrambled linear stream.
+
+## v1.0a2.154 — Terminal ANSI fix, no-pager reader, ANView message viewer (June 2026)
+
+- **`features/bbs_ui.py`**: Three improvements to the terminal echomail reader. (1) Apply the same CSI-split fix from v1.0a2.153 at view time so QWK `0xE3` artifacts (`[1;45m` etc.) don't appear in the terminal. (2) Remove the 18-line page-break (`-- more (Enter, Q=back to list) --`) — messages scroll freely. (3) Add `R=Reply` and `N=New Msg` options after reading; both launch ANEdit with the appropriate pre-fills in the current area.
+- **`features/anedit.py`**: Added `_ViewerScreen`, `ANView`, and `launch_aneview`. ANView is a read-only ANEdit-frame viewer: navigation keys scroll, R/N/Q exit with action codes, bottom border shows viewer hints, status bar shows `Read-only · Ln:X/Y`, cursor is hidden.
+
+## v1.0a2.153 — Fix ANSI sequences split anywhere by QWK line separator (June 2026)
+
+- **`echomail/qwk.py` `_parse_messages_dat`** + **`web/render_msg.py` `render_msg_body`/`render_msg_body_rich`**: v1.0a2.152 only fixed the case where QWK `0xE3` fell between ESC and `[`. The separator can fall anywhere in a CSI sequence — in the parameter string too (e.g. `\x1b[1;\n37m`). Replaced the narrow `\x1b\n`→`\x1b` string replace with `re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]', lambda m: m.group(0).replace('\n',''), ...)` which strips `\n` from any position within a matched escape sequence, covering all split positions in one pass.
+
+## v1.0a2.152 — Fix ANSI sequences split by QWK line separator (June 2026)
+
+- **`echomail/qwk.py` `_parse_messages_dat`**: QWK byte `0xE3` (line separator) can fall between ESC (`0x1B`) and `[` when an ANSI CSI sequence straddles a QWK line boundary. After `\xe3`→`\n` conversion the sequence became `\x1b\n[1;45m`, which `_ansi_to_html`'s regex couldn't match. Added `.replace('\x1b\n', '\x1b')` after the separator conversion to rejoin split sequences before storage.
+- **`web/render_msg.py` `render_msg_body` / `render_msg_body_rich`**: same `\x1b\n`→`\x1b` replacement at render time so all messages already in the database (imported before this fix) render correctly without a migration.
+
+## v1.0a2.151 — Fix ANSI rendering in web echomail viewer (June 2026)
+
+- **`web/render_msg.py` `_decode_charset`**: CP437 maps byte `0x1B` (ESC) to U+2190 (`←`), breaking `_ansi_to_html`'s `\x1b\[` regex so all ANSI color sequences leaked as visible text. Fix: after CP437 decode, restore bytes `0x01–0x1F` to their original control-char code points. CP437 is a single-byte codec so a `zip(raw, decoded)` rebuild is safe and exact.
+
+## v1.0a2.150 — QWK overhaul: nine bug fixes (June 2026)
+
+Full audit and repair of the QWK subsystem.
+
+- **`poller.py`**: stamp `_qwk_conf_num` on outbound messages before `QWKClient.poll()`. Without it, all outbound echomail went to conference 0 (netmail) — hub discarded it.
+- **`qwk_user.py` `upload()`**: REP body decode now uses `latin-1` + `replace('\xe3', '\n')` — CP437 decode turned 0xE3 into π instead of a newline.
+- **`qwk_user.py` `upload()`**: added `network_id=area.network_id` to `EchomailMessage` — `NOT NULL` column was unset; `IntegrityError` was silently swallowed and all REP replies lost.
+- **`qwk_user.py` `upload()`**: moved `EchoArea.query` outside the parse loop (was running one DB query per message).
+- **`qwk_user.py` `_build_qwk_blob`**: fixed body line separator `\r\n` → `\xe3`; encoding `cp437` → `latin-1`. QWK readers saw blank bodies.
+- **`qwk_user.py` `_last_read_map`**: `r.last_read_id` → `r.last_message_id`. AttributeError was swallowed; every download included all messages ever.
+- **`qwk.py` `_ftp_download`**: hub_id candidates now listed before packet_id — for DOVE-Net you download `VERT.qwk`, not `ANET.qwk`.
+- **`qwk.py` `_parse_messages_dat`**: skip killed messages (`active_flag == 0xE2`) after reading body bytes; also added defensive `\r\n`/`\r` normalization.
+- **`qwk.py` `_clean_body`**: extract `@CHRS:`/`@CHARSET:` value and return as `chrs` key — previously discarded, so UTF-8 messages from Synchronet displayed as garbled CP437. `_import_message` already accepted `msg_data.get('chrs')`, it just never received it.
 
 ## v1.0a2.149 — Echomail area sysop-only flag + security levels (June 2026)
 

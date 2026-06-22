@@ -286,6 +286,26 @@ def _run_client(network, outbound_messages, app):
 
     elif network.network_type == 'qwk':
         from .qwk import QWKClient
+        from ..models import EchoArea
+        # Stamp the hub conference number on each outbound message.
+        # QWK areas use tags like 'QWK_42' where 42 is the hub conf number.
+        # _build_rep_packet reads _qwk_conf_num; without this it defaults to 0
+        # (netmail) and the hub silently discards all outbound echomail.
+        _area_cache = {}
+        for _msg in outbound_messages:
+            _aid = getattr(_msg, 'area_id', None)
+            if not _aid:
+                continue
+            if _aid not in _area_cache:
+                _area_cache[_aid] = EchoArea.query.get(_aid)
+            _area = _area_cache.get(_aid)
+            if _area and (_area.tag or '').upper().startswith('QWK_'):
+                try:
+                    _msg._qwk_conf_num = int(_area.tag[4:])
+                except (ValueError, IndexError):
+                    _msg._qwk_conf_num = 0
+            else:
+                _msg._qwk_conf_num = 0
         client = QWKClient(
             host=network.qwk_host or '',
             port=network.qwk_port or 80,

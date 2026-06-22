@@ -26,7 +26,7 @@ def _last_read_map(user_id):
     out = {}
     try:
         for r in EchomailLastRead.query.filter_by(user_id=user_id).all():
-            out[r.area_id] = r.last_read_id or 0
+            out[r.area_id] = r.last_message_id or 0
     except Exception:
         db.session.rollback()
     return out
@@ -80,8 +80,8 @@ def _build_qwk_blob(user):
                 .filter(EchomailMessage.id > cutoff)
                 .order_by(EchomailMessage.created_at).all())
         for m in rows:
-            body = (m.body or '').replace('\n', '\r\n')
-            body_bytes = body.encode('cp437', errors='replace')
+            body = (m.body or '').replace('\n', '\xe3')
+            body_bytes = body.encode('latin-1', errors='replace')
             # Pad body to 128-byte blocks; minimum 1 block.
             block_count = max(1, (len(body_bytes) + 127) // 128 + 1)
             # Header is 128 bytes.
@@ -175,6 +175,9 @@ def upload():
 
     pos = 128
     imported = 0
+    # Load area list once outside the loop — conf_num is a 1-based index
+    # into the same ordered list _build_qwk_blob used when producing the packet.
+    areas = EchoArea.query.filter_by(is_active=True).all()
     while pos + 128 <= len(data):
         header = data[pos:pos + 128]
         pos += 128
@@ -189,18 +192,21 @@ def upload():
             conf_num = struct.unpack('<H', header[123:125])[0]
         except struct.error:
             conf_num = 0
-        # Look up the area by conference number — the user's same area
-        # listing as in download(); index 1 = first active area, etc.
-        areas = EchoArea.query.filter_by(is_active=True).all()
         area = areas[conf_num - 1] if 1 <= conf_num <= len(areas) else None
         if area is None:
             continue
         try:
             to_name = header[21:46].decode('cp437', errors='replace').rstrip()
             subject = header[71:96].decode('cp437', errors='replace').rstrip()
-            body_text = body.decode('cp437', errors='replace').rstrip(' \x00').replace('\r\n', '\n')
+            # QWK body uses 0xE3 as the line separator (latin-1 decode preserves
+            # the byte value; cp437 decode would turn it into π instead).
+            body_text = (body.decode('latin-1', errors='replace')
+                         .replace('\xe3', '\n')
+                         .replace('\r\n', '\n')
+                         .rstrip(' \x00\n'))
             msg = EchomailMessage(
                 area_id=area.id,
+                network_id=area.network_id,
                 from_name=current_user.username,
                 to_name=to_name or 'All',
                 subject=subject or '(no subject)',

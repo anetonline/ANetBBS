@@ -16,6 +16,7 @@ SQLAlchemy-mapped models without needing to be inside a Flask request.
 import asyncio
 import os
 import logging
+import re
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -642,7 +643,7 @@ class BBSMenuUI:
                 pass
 
     async def read_echo_area(self, area_id, tag):
-        from anetbbs.models import EchomailMessage
+        from anetbbs.models import EchomailMessage, EchoArea
         with _app().app_context():
             msgs = (EchomailMessage.query
                     .filter_by(area_id=area_id)
@@ -650,6 +651,9 @@ class BBSMenuUI:
                     .limit(30).all())
             m_list = [(m.id, m.subject, m.from_name, m.to_name,
                        m.created_at, m.body) for m in msgs]
+            aobj     = EchoArea.query.get(area_id)
+            net_id   = aobj.network_id if aobj else None
+            net_addr = (aobj.network.our_address or '1:1/1') if (aobj and aobj.network) else '1:1/1'
 
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
 
@@ -664,7 +668,6 @@ class BBSMenuUI:
             return
 
         LIST_PAGE = 18    # rows before --more-- on the index
-        BODY_PAGE = 18    # rows before --more-- inside a message body
         while True:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner(f'{tag} - latest 30'))
@@ -699,42 +702,69 @@ class BBSMenuUI:
                 continue
             _, subj, frm, to, when, body = m_list[idx]
             ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(subj or '(no subject)'))
-            await self.session.write(
-                f"  {FG['cyan']}From:{RESET} {FG['wht']}{frm}{RESET}\r\n"
-                f"  {FG['cyan']}To:  {RESET} {FG['wht']}{to}{RESET}\r\n"
-                f"  {FG['cyan']}Date:{RESET} {FG['wht']}{ts}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
-            lines = (body or '').splitlines() or ['(empty body)']
-            quit_body = False
-            for n, ln in enumerate(lines, 1):
-                # Echomail bodies often contain CP437 (line drawing,
-                # block chars, embedded ANSI escapes) stored as
-                # latin-1 mojibake — each original byte 0xNN became
-                # codepoint U+00NN. encode('latin-1') round-trips
-                # those bytes so a CP437 terminal renders them right.
-                # Falls back to cp437 encoding (with replacement) if
-                # the line has genuine unicode above 0xFF.
-                # Skip the extra FG wrapper so the message's own
-                # ANSI colors come through unmolested.
-                try:
-                    raw = ln.encode('latin-1')
-                except UnicodeEncodeError:
-                    raw = ln.encode('cp437', errors='replace')
-                self.session.writer.write(b'  ' + raw + b'\r\n')
-                await self.session.writer.drain()
-                if n % BODY_PAGE == 0 and n < len(lines):
-                    ans = (await self.session.read_line(
-                        f"  {FG['cyan']}-- more (Enter, "
-                        f"Q=back to list) --{RESET}") or '').strip().upper()
-                    if ans == 'Q':
-                        quit_body = True
-                        break
-            await self.session.write('\r\n' + footer() + '\r\n')
-            if not quit_body:
-                await self.session.read_line(
-                    f"{FG['cyan']}Press Enter to return to list...{RESET}")
+            # Strip SAUCE record: 0x1A (Ctrl+Z) marks end of art content;
+            # everything from 0x1A onward is binary metadata that must not
+            # be rendered (it looks like random ANSI sequences to renderers).
+            body = (body or '')
+            _sa = body.find('\x1a')
+            if _sa >= 0:
+                body = body[:_sa]
+            # Fix QWK 0xE3 separators that may have split CSI sequences.
+            body_fixed = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
+                                lambda m: m.group(0).replace('\n', ''),
+                                body or '')
+            from .anedit import launch_aneview, launch_anedit
+            # Route all messages through ANView (VT renderer inside).
+            # CP437, pipe codes, cursor-pos/block-art \n handling are all
+            # done in launch_aneview via to_ansi_lines().
+            view_result = await launch_aneview(
+                self.session, body_fixed,
+                subject=subj or '(no subject)',
+                from_name=frm or '?',
+                to_name=to or '?',
+                date_str=ts,
+            )
+            if view_result in ('reply', 'new'):
+                if view_result == 'reply':
+                    compose_to   = frm or 'All'
+                    compose_subj = ('Re: ' + subj) if subj else 'Re: (no subject)'
+                    quote        = body_fixed
+                else:
+                    compose_to   = 'All'
+                    compose_subj = ''
+                    quote        = ''
+                if not compose_subj:
+                    await self.session.write('\x1b[2J\x1b[H')
+                    await self.session.write(banner('Compose in ' + tag))
+                    compose_to = (await self.session.read_line(
+                        f"  {FG['cyan']}To:{RESET} ") or 'All').strip()
+                    compose_subj = (await self.session.read_line(
+                        f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+                    if not compose_subj:
+                        continue
+                username = self.session.user.get('username', 'guest')
+                body_out = await launch_anedit(
+                    self.session, quote=quote,
+                    subject=compose_subj, username=username)
+                if body_out and net_id:
+                    with _app().app_context():
+                        from anetbbs.models import db as _db2, EchomailMessage as _EM
+                        em = _EM(
+                            area_id=area_id,
+                            network_id=net_id,
+                            from_name=username[:100],
+                            from_address=net_addr,
+                            to_name=compose_to[:100],
+                            subject=compose_subj[:200],
+                            body=body_out,
+                            direction='outbound',
+                        )
+                        _db2.session.add(em)
+                        _db2.session.commit()
+                    await self.session.write(
+                        f"\r\n  {FG['grn']}{BOLD}[OK] Message queued for next poll.{RESET}\r\n")
+                    await self.session.read_line(
+                        f"\r\n{FG['cyan']}Press Enter...{RESET}")
 
     # ------------------------------------------------------------------
     # File library (list-only for now)

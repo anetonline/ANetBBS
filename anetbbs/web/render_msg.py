@@ -15,6 +15,9 @@ remains is genuine ANSI escape sequences and CP437 glyphs.
 """
 import re
 from markupsafe import Markup, escape
+from ..features.ansi_html import (to_html as _vt_to_html,
+                                   _HAS_CURSOR_POS as _HAS_CPOS,
+                                   _HAS_BLOCK_ART)
 
 
 # Standard 16-color VGA palette, matches the colors a DOS BBS would draw.
@@ -79,8 +82,15 @@ def _decode_charset(text: str, chrs: str = '') -> str:
         return raw.decode('utf-8', errors='replace')
     if chrs_upper.startswith('LATIN-1') or chrs_upper.startswith('ISO-8859'):
         return raw.decode('latin-1', errors='replace')
-    # Default: CP437 (FTN/QWK standard, also what Synchronet emits)
-    return raw.decode('cp437', errors='replace')
+    # Default: CP437 (FTN/QWK standard, also what Synchronet emits).
+    # CP437 maps bytes 0x01–0x1F to graphic Unicode points (smileys, arrows,
+    # etc.) — in particular 0x1B → U+2190 (←) instead of U+001B (ESC).
+    # That breaks _ansi_to_html's \x1b regex so every ANSI sequence leaks
+    # through as visible text.  Restore the original byte value for any
+    # control character; CP437 is a single-byte codec so len(raw)==len(decoded).
+    decoded = raw.decode('cp437', errors='replace')
+    return ''.join(chr(b) if 0x01 <= b <= 0x1F else c
+                   for b, c in zip(raw, decoded))
 
 
 def _ansi_to_html(text: str) -> str:
@@ -164,9 +174,20 @@ def render_msg_body(text, chrs: str = '') -> Markup:
     if not text:
         return Markup('')
     decoded = _decode_charset(str(text), chrs)
+    # QWK 0xE3 separators can land anywhere inside a CSI sequence (between
+    # ESC and '[', or anywhere in the parameter string).  Strip \n from any
+    # position within an escape sequence so the renderer's regex matches.
+    decoded = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
+                     lambda m: m.group(0).replace('\n', ''), decoded)
     decoded = _pipe_to_ansi(decoded)
-    html = _ansi_to_html(decoded)
-    return Markup(html)
+    # Strip \n only for pure flat block art (no cursor-pos sequences).
+    # Cursor-pos art keeps \n: stripping collapses flat header sections
+    # (e.g. full-screen logos) that use \n for row breaks, causing them to
+    # overflow past col 80 and disappear.  Cursor-pos sequences use absolute
+    # row/col so artifact \n between them have no visual effect on those rows.
+    if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
+        decoded = decoded.replace('\n', '')
+    return Markup(_vt_to_html(decoded))
 
 
 _IMG_URL_RE = re.compile(
@@ -183,15 +204,19 @@ def render_msg_body_rich(text, chrs: str = '') -> Markup:
     if not text:
         return Markup('')
     decoded = _decode_charset(str(text), chrs)
+    decoded = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
+                     lambda m: m.group(0).replace('\n', ''), decoded)
     decoded = _pipe_to_ansi(decoded)
+    if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
+        decoded = decoded.replace('\n', '')
     out = []
     last = 0
     for m in _IMG_URL_RE.finditer(decoded):
-        out.append(_ansi_to_html(decoded[last:m.start()]))
+        out.append(_vt_to_html(decoded[last:m.start()]))
         url = m.group(1)
         out.append('<br><img src="' + str(escape(url)) +
                    '" alt="" style="max-width:100%;max-height:600px;'
                    'border:1px solid var(--theme-border);"><br>')
         last = m.end()
-    out.append(_ansi_to_html(decoded[last:]))
+    out.append(_vt_to_html(decoded[last:]))
     return Markup(''.join(out))

@@ -47,6 +47,21 @@ def _fg(n):      return f"{_E}[38;5;{n}m"
 def _bg(n):      return f"{_E}[48;5;{n}m"
 def _clreol():   return f"{_E}[K"
 
+_CSI_FULL = re.compile(r'\x1b\[[^@-~]*[@-~]|\x1b.')
+
+def _ansi_trunc(line: str, maxlen: int) -> str:
+    """Truncate line to maxlen *visible* characters, preserving ANSI sequences."""
+    out = []; visible = 0; i = 0
+    while i < len(line):
+        m = _CSI_FULL.match(line, i)
+        if m:
+            out.append(m.group(0)); i = m.end()
+        else:
+            if visible < maxlen:
+                out.append(line[i]); visible += 1
+            i += 1
+    return ''.join(out)
+
 # ── Themes ─────────────────────────────────────────────────────────────────────
 _THEMES = [
     {   # Cyan
@@ -1532,3 +1547,210 @@ async def launch_anedit(session, quote: str = "", subject: str = "",
     editor.cx = 0
 
     return await editor.run()
+
+
+# ── Read-only viewer ───────────────────────────────────────────────────────────
+
+# Viewer-specific layout constants (independent of the ANEdit frame).
+_VTEXT_T = 2   # first content row (rows 2-23 = 22 lines)
+_VTEXT_B = 23
+_VTEXT_H = _VTEXT_B - _VTEXT_T + 1  # 22 visible lines
+
+
+class _ViewerScreen(_Screen):
+    """Borderless viewer frame — full-width content, no box-drawing."""
+
+    def draw_frame(self, subject: str, modified: bool) -> str:
+        t = self.t
+        o = [_reset(), _hide()]
+        tag  = "ANView"
+        subj = (subject or '')[:50]
+        bar  = f" {tag}  {subj} ".ljust(80)[:80]
+        o.append(_mv(1, 1) + t['stat_bg'] + t['vtitle'] + bar + _reset())
+        for r in range(_VTEXT_T, _VTEXT_B + 1):
+            o.append(_mv(r, 1) + _clreol())
+        return "".join(o)
+
+    def draw_status(self, cy: int, cx: int, total: int,
+                    words: int, chars: int,
+                    overwrite: bool, modified: bool,
+                    theme_name: str, flash: str) -> str:
+        t = self.t
+        if flash:
+            return _mv(24, 1) + t['stat_bg'] + t['info'] + flash.ljust(80)[:80] + _reset()
+        stat = f" Ln:{cy + 1}/{total}  PgUp/PgDn  R=Reply  N=New  Q=Back "
+        return _mv(24, 1) + t['stat_bg'] + t['hint_key'] + stat.ljust(80)[:80] + _reset()
+
+    def draw_text(self, lines: list, scroll: int,
+                  mark, cy: int, cx: int) -> str:
+        o = []
+        for i in range(_VTEXT_H):
+            ly  = scroll + i
+            row = _VTEXT_T + i
+            o.append(_mv(row, 1))
+            if ly >= len(lines):
+                o.append(_reset() + _clreol())
+            else:
+                o.append(_ansi_trunc(lines[ly], 80) + _reset() + _clreol())
+        return "".join(o)
+
+    def move_cursor(self, cy: int, cx: int, scroll: int) -> str:
+        return _hide()
+
+
+class ANView(ANEdit):
+    """Read-only borderless message viewer.  Returns 'reply', 'new', or 'back'."""
+
+    def __init__(self, session, lines: list, subject: str = ""):
+        super().__init__(session, lines, subject=subject, draft_path="")
+        self._scr        = _ViewerScreen(_THEMES[self._tidx])
+        self.view_result = 'back'
+
+    def _ensure_visible(self):
+        if self.cy < self.scroll:
+            self.scroll = self.cy
+            self._dt = True
+        elif self.cy >= self.scroll + _VTEXT_H:
+            self.scroll = self.cy - _VTEXT_H + 1
+            self._dt = True
+        self._dc = True
+
+    def _scroll_view(self, delta: int):
+        max_scroll = max(0, len(self.lines) - _VTEXT_H)
+        self.scroll = max(0, min(max_scroll, self.scroll + delta))
+        self.cy     = self.scroll
+        self._dt    = self._ds = True
+
+    def _pgup(self):
+        self.scroll = max(0, self.scroll - _VTEXT_H)
+        self.cy     = self.scroll
+        self._dt    = self._ds = True
+
+    def _pgdn(self):
+        max_scroll  = max(0, len(self.lines) - _VTEXT_H)
+        self.scroll = min(max_scroll, self.scroll + _VTEXT_H)
+        self.cy     = self.scroll
+        self._dt    = self._ds = True
+
+    def _doc_start(self):
+        self.cy = self.cx = self.scroll = 0
+        self._dt = self._dc = True
+
+    def _doc_end(self):
+        last        = max(0, len(self.lines) - 1)
+        self.cy     = last
+        self.scroll = max(0, last - _VTEXT_H + 1)
+        self._dt    = self._ds = True
+
+    async def run(self) -> str:
+        await self._wr(_alt_on() + _cls() + _hide())
+        self._df = self._dt = self._ds = True
+        self._dc = False
+        try:
+            while not self.done and not self.aborted:
+                await self._redraw()
+                key = await self._read_key()
+                if key:
+                    await self._handle(key)
+                if self._flash_msg and time.time() - self._flash_time > 2.5:
+                    self._flash_msg = ""
+                    self._ds = True
+        finally:
+            await self._wr(_alt_off() + _show() + _reset() + "\r\n")
+        return self.view_result
+
+    async def _handle(self, key: str):
+        # UP/DOWN scroll 1 line; PgUp/PgDn scroll a full page
+        if key == 'UP':
+            self._scroll_view(-1); return
+        if key in ('DOWN', 'RIGHT'):
+            self._scroll_view(1); return
+        if key == 'PGUP':
+            self._pgup(); self.cy = self.scroll; self._ds = True; return
+        if key == 'PGDN':
+            self._pgdn(); self.cy = self.scroll; self._ds = True; return
+        if key in ('HOME', 'CTRL_HOME'):
+            self._doc_start(); return
+        if key in ('END', 'CTRL_END'):
+            self._doc_end(); self.cy = self.scroll; self._ds = True; return
+        if key == 'CTRL_L':
+            self._df = self._dt = self._ds = True; return
+        k = key.upper() if len(key) == 1 else key
+        if k == ' ':                       # Space scrolls a page
+            self._pgdn(); self.cy = self.scroll; self._ds = True; return
+        if k in ('Q', 'ESC') or key == 'ENTER':
+            self.view_result = 'back';  self.done = True
+        elif k == 'R':
+            self.view_result = 'reply'; self.done = True
+        elif k == 'N':
+            self.view_result = 'new';   self.done = True
+
+
+async def launch_aneview(session, body: str, subject: str = "",
+                         from_name: str = "", to_name: str = "",
+                         date_str: str = "") -> str:
+    """Display a message body in a scrollable read-only ANView frame.
+
+    Runs the body through CP437 decode, pipe-code conversion, and the VT
+    renderer so ANSI art (cursor-pos and flat block) displays correctly.
+    Returns 'reply', 'new', or 'back'.
+    """
+    from .ansi_html import to_ansi_lines, _HAS_CURSOR_POS, _HAS_BLOCK_ART
+
+    # CP437 decode — body is stored as latin-1 mojibake from DB.
+    try:
+        raw = (body or '').encode('latin-1', errors='replace')
+    except Exception:
+        raw = b''
+    cp437_str    = raw.decode('cp437', errors='replace')
+    body_unicode = ''.join(chr(b) if 0x01 <= b <= 0x1F else c
+                           for b, c in zip(raw, cp437_str))
+
+    # Pipe codes (|NN Synchronet/Mystic format) → ANSI SGR.
+    if '|' in body_unicode:
+        _PIPE = {
+            '00':'30','01':'34','02':'32','03':'36',
+            '04':'31','05':'35','06':'33','07':'37',
+            '08':'90','09':'94','10':'92','11':'96',
+            '12':'91','13':'95','14':'93','15':'97',
+            '16':'40','17':'44','18':'42','19':'46',
+            '20':'41','21':'45','22':'43','23':'47',
+        }
+        body_unicode = re.sub(
+            r'\|(\d{2})',
+            lambda m: (f'\x1b[{_PIPE[m.group(1)]}m'
+                       if m.group(1) in _PIPE else m.group(0)),
+            body_unicode)
+
+    # Strip record-boundary \n ONLY for pure flat block art (no cursor-pos).
+    # Flat art has no absolute positioning — artifact \n from QWK \xe3 scatter
+    # blocks across rows, so stripping fixes the staircase.
+    # Cursor-pos art (including mixed flat+cursor-pos) must KEEP \n: stripping
+    # collapses flat header sections (like full-screen logos) by overflowing
+    # past col 80 where the VT renderer clips.  Cursor-pos sequences set
+    # absolute row/col so artifact \n between them have no visual effect.
+    has_cpos  = bool(_HAS_CURSOR_POS.search(body_unicode))
+    has_block = bool('\x1b' in body_unicode and _HAS_BLOCK_ART.search(body_unicode))
+    if has_block and not has_cpos:
+        body_for_vt = body_unicode.replace('\n', '')
+    else:
+        body_for_vt = body_unicode
+
+    # Render through VT renderer → list of 80-col ANSI-coloured terminal lines.
+    display_lines = to_ansi_lines(body_for_vt)
+
+    # Build a short message header above the body.
+    header = []
+    if from_name:
+        header.append(f'\x1b[36mFrom:\x1b[0m {from_name}')
+    if to_name:
+        header.append(f'\x1b[36mTo:  \x1b[0m {to_name}')
+    if date_str:
+        header.append(f'\x1b[36mDate:\x1b[0m {date_str}')
+    if header:
+        header.append('\x1b[36m' + '─' * 60 + '\x1b[0m')
+        header.append('')
+
+    viewer = ANView(session, header + display_lines,
+                    subject=subject or "(no subject)")
+    return await viewer.run()

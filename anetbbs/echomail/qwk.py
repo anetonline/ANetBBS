@@ -67,6 +67,7 @@ def _clean_body(text: str):
     """
     msg_id = None
     reply_id = None
+    chrs = None
     tear_line = None
     origin_line = None
 
@@ -76,7 +77,7 @@ def _clean_body(text: str):
     out_lines = []
     found_tear = False
     KLUDGE_KEYWORDS = {
-        'TZ', 'TZUTC', 'CHRS', 'CHARSET', 'PID', 'TID', 'NOTE', 'ENC',
+        'TZ', 'TZUTC', 'PID', 'TID', 'NOTE', 'ENC',
         'PATH', 'SEEN-BY', 'VIA', 'SOFT', 'INTL', 'FMPT', 'TOPT',
         'FLAGS', 'RFC-', 'X-',
     }
@@ -91,6 +92,10 @@ def _clean_body(text: str):
             if keyword in ('REPLY', 'REPLYID', 'REPLYTO'):
                 _, _, val = stripped.partition(':')
                 reply_id = val.strip()
+                continue
+            if keyword in ('CHRS', 'CHARSET'):
+                _, _, val = stripped.partition(':')
+                chrs = val.strip() or None
                 continue
             if keyword in KLUDGE_KEYWORDS or keyword.startswith('RFC-') or keyword.startswith('X-'):
                 continue
@@ -111,6 +116,7 @@ def _clean_body(text: str):
         'body': body,
         'msg_id': msg_id,
         'reply_id': reply_id,
+        'chrs': chrs,
         'tear_line': tear_line,
         'origin_line': origin_line,
     }
@@ -153,12 +159,14 @@ def _parse_messages_dat(data: bytes, conferences: dict):
             num_chunks = int(num_chunks_str) if num_chunks_str else 1
         except Exception:
             num_chunks = 1
-        # byte 122 — active flag (0xE1=active, 0xE2=killed)
         # bytes 123..124 — conference number (binary, little-endian uint16)
         try:
             conf_num = struct.unpack('<H', block[123:125])[0]
         except Exception:
             conf_num = 0
+
+        # byte 122 — active flag: 0xE1=active, 0xE2=killed/deleted
+        active_flag = block[122]
 
         # Sanity guard against malformed packets — never read >50k blocks
         if num_chunks < 1 or num_chunks > 50000:
@@ -170,9 +178,36 @@ def _parse_messages_dat(data: bytes, conferences: dict):
         body_raw = data[pos:pos + body_size]
         pos += body_size
 
-        body_text = (body_raw.decode('latin-1', errors='replace')
-                             .replace('\xe3', '\n')
-                             .rstrip('\x00 \r\n'))
+        if active_flag == 0xE2:
+            logger.debug("QWK: skipping killed message %s in conf %s", msg_num, conf_num)
+            continue
+
+        raw_str = body_raw.decode('latin-1', errors='replace')
+        if b'\x1b' in body_raw:
+            # ANSI art: \xe3 marks QWK record boundaries, not line breaks.
+            # Strip it; real line structure comes from \r\n sequences in the art.
+            body_text = (raw_str
+                         .replace('\xe3', '')
+                         .replace('\r\n', '\n')
+                         .replace('\r', '\n')
+                         .rstrip('\x00 \n'))
+        else:
+            # Plain text: \xe3 is the QWK paragraph/line separator.
+            body_text = (raw_str
+                         .replace('\xe3', '\n')
+                         .replace('\r\n', '\n')
+                         .replace('\r', '\n')
+                         .rstrip('\x00 \n'))
+        # Strip SAUCE record: 0x1A (Ctrl+Z) marks the end of art content.
+        # Everything from 0x1A onward is binary metadata that must not be stored.
+        _sauce = body_text.find('\x1a')
+        if _sauce >= 0:
+            body_text = body_text[:_sauce]
+        # QWK 0xE3 separators can land anywhere inside a CSI sequence.
+        # Strip \n from any position within an ANSI escape sequence so the
+        # regex in _ansi_to_html can match them.
+        body_text = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
+                           lambda m: m.group(0).replace('\n', ''), body_text)
         clean = _clean_body(body_text)
 
         # Drop messages from conferences not advertised in CONTROL.DAT —
@@ -199,6 +234,7 @@ def _parse_messages_dat(data: bytes, conferences: dict):
             'body': clean['body'],
             'msg_id': clean['msg_id'],
             'reply_id': clean['reply_id'],
+            'chrs': clean['chrs'],
             'tear_line': clean['tear_line'],
             'origin_line': clean['origin_line'],
             'area_tag': area_tag,
@@ -416,8 +452,10 @@ class QWKClient:
                 if c and c not in seen:
                     seen.add(c); candidates.append(c)
             _add(path)
-            for base in ((self.packet_id or '').strip(),
-                         (self.hub_id or '').strip()):
+            # hub_id first: for DOVE-Net you download <hub_id>.qwk (e.g. VERT.qwk),
+            # not your own <packet_id>.qwk (e.g. ANET.qwk).
+            for base in ((self.hub_id or '').strip(),
+                         (self.packet_id or '').strip()):
                 if not base:
                     continue
                 _add(f'{base}.qwk')
