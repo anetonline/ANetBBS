@@ -1,10 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.163`** (June 2026). Previous: `v1.0a2.161`.
+separately. Current release: **`v1.0a2.164`** (June 2026). Previous: `v1.0a2.161`.
 
-## v1.0a2.163 — RSS short-URL redirect + title word-wrap (June 2026)
+## v1.0a2.164 — Fix /imsg/directory crash + RSS short-URL + title word-wrap (June 2026)
 
+- **`templates/imsg/directory.html`**: Fixed 500 crash on `/imsg/directory` — `current_app` is not a Jinja2 global in Flask, causing `UndefinedError` for any admin visiting the page. Replaced with `url_for('admin.registry_self')`. Also corrected the endpoint name (`admin.registry_self_register` doesn't exist).
 - **`web/rss.py`**: Added `redirect_bp` with `GET /r/<item_id>` — unauthenticated 302 redirect to the original RSS article URL. No new DB model; uses `RssItem.id` as the short code.
 - **`features/bbs_ui.py` `_rss_view_item`**: Replaced truncated raw link with a short URL (`{web_base}/r/{item.id}`) that always fits in 80 columns. Title now word-wraps at 74 cols instead of hard-truncating.
 - **`web_app.py`**: Registered `redirect_bp`.
