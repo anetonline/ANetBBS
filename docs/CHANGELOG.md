@@ -1,12 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.165`** (June 2026). Previous: `v1.0a2.161`.
+separately. Current release: **`v1.0a2.170`** (June 2026). Previous: `v1.0a2.166`.
 
-## v1.0a2.165 — ZMODEM handshake fix; pre-transfer reader drain (June 2026)
+## v1.0a2.167–170 — ANetCRAFT game (June 2026)
 
-- **`features/xfer.py`**: Removed redundant `--binary` from ZMODEM send flags (ZMODEM is always binary; the flag was a no-op that could cause lrzsz option noise).
-- **`features/bbs_ui.py` `_download_file` + `_batch_download`**: Added 0.2 s reader drain before calling `send_file`. Residual bytes buffered in `session.reader` (trailing `\n` from Enter, ANSI escape sequences) were being fed into sz's stdin at startup, corrupting the ZRQINIT/ZRINIT handshake and causing sz to exit non-zero — requiring the user to retry 2-4 times before the transfer succeeded.
+Added **ANetCRAFT** — a Minecraft-inspired 2D survival game built into ANetBBS. Playable via SSH, telnet, and the web game terminal.
+
+## v1.0a2.166 — Fix ZMODEM first-attempt failures (June 2026)
+
+- **`features/xfer.py`**: Removed `--escape` from ZMODEM `send_flags`. With `--escape`, `sz` sends a ZSINIT frame to negotiate extended character escaping; SyncTERM (and many other terminal emulators) responds with ZRINIT instead of ZACK, stalling the handshake and causing sz to fail or retry. Without `--escape` the handshake is a clean ZRQINIT → ZRINIT → ZFILE sequence and transfers succeed on the first attempt. `sz` still escapes XON, XOFF, and DLE by default. `--binary` is kept to prevent newline translation of binary data.
+
+## v1.0a2.165 — (superseded — do not use)
 
 ## v1.0a2.164 — Fix /imsg/directory crash + RSS short-URL + title word-wrap (June 2026)
 

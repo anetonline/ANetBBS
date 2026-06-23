@@ -113,6 +113,9 @@ def play(slug):
     if game.game_type == 'door_dos_browser':
         return render_template('games/play_jsdos.html', game=game)
 
+    if game.game_type == 'builtin_python':
+        return render_template('games/play_terminal.html', game=game)
+
     # Terminal (door) games
     return render_template('games/play_terminal.html', game=game)
 

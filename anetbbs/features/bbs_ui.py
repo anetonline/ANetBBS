@@ -1200,15 +1200,6 @@ class BBSMenuUI:
                 f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
             await asyncio.sleep(1)
             try:
-                while True:
-                    chunk = await asyncio.wait_for(
-                        self.session.reader.read(4096), timeout=0.2)
-                    if not chunk:
-                        break
-            except (asyncio.TimeoutError, Exception):
-                pass
-
-            try:
                 ok = await send_file(self.session, fpath, protocol)
             except Exception as exc:
                 logger.exception('batch send_file failed for %s: %s', fpath, exc)
@@ -1310,19 +1301,6 @@ class BBSMenuUI:
             f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
             f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
         await asyncio.sleep(1)
-
-        # Drain any buffered input (leftover keystrokes, ANSI sequences)
-        # before handing stdin to sz.  Stale bytes fed into sz at startup
-        # corrupt the initial ZRQINIT/ZRINIT handshake and cause sz to exit
-        # non-zero, requiring the user to retry the transfer.
-        try:
-            while True:
-                chunk = await asyncio.wait_for(
-                    self.session.reader.read(4096), timeout=0.2)
-                if not chunk:
-                    break
-        except (asyncio.TimeoutError, Exception):
-            pass
 
         try:
             ok = await send_file(self.session, fpath, protocol)
@@ -2386,6 +2364,7 @@ async def _show_main_v2(self):
             "║  E. Echomail (read)                      ║\r\n"
             "║  C. Compose Echomail                     ║\r\n"
             "║  F. File Library                         ║\r\n"
+            "║  R. RSS News Reader                      ║\r\n"
             "║  U. Who's Online                         ║\r\n"
             "║  Y. Your Profile                         ║\r\n"
             "║  X. Edit Profile                         ║\r\n"
@@ -2413,6 +2392,8 @@ async def _show_main_v2(self):
             await self.compose_echomail()
         elif choice == 'F':
             await self.list_files()
+        elif choice == 'R':
+            await self.show_rss()
         elif choice == 'U':
             await self.show_online()
         elif choice == 'Y':

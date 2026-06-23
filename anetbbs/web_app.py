@@ -998,6 +998,26 @@ def _create_default_data():
             '_active_default': True,
         },
         {
+            # ANetCRAFT — built-in Python terminal game, ships with ANetBBS.
+            # No external binary needed; must_exist points at the module file.
+            'name': 'ANetCRAFT',
+            'slug': 'anetcraft',
+            'description': "ANetBBS's own Minecraft-inspired 2D survival game. "
+                           "Mine blocks, craft tools, explore a procedurally "
+                           "generated world with ores, caves, trees and water. "
+                           "Runs natively in the terminal — SSH, telnet, or "
+                           "the built-in web terminal. Each player gets their "
+                           "own persistent world.",
+            'category': 'adventure',
+            'icon': 'bi-layers',
+            'game_type': 'builtin_python',
+            'web_game_module': 'anetbbs.features.anetcraft:launch_anetcraft',
+            'sort_order': 1,
+            'must_exist': os.path.join(
+                _ca.root_path, 'features', 'anetcraft.py'),
+            '_active_default': True,
+        },
+        {
             # LORD — the canonical door game, Synchronet's JS port.
             # The game files ship inside the anetbbs package itself
             # (anetbbs/games/sbbs_doors/lord/), so this seed always runs.

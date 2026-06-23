@@ -62,6 +62,7 @@ class GameManager:
                 'id': g.id, 'name': g.name, 'description': g.description,
                 'category': g.category or 'other', 'game_type': g.game_type,
                 'min_access_level': g.min_access_level or 0,
+                'web_game_module': g.web_game_module or '',
             } for g in games if (g.min_access_level or 0) <= user_access]
 
             # Build slug->name map from DB categories
@@ -131,7 +132,30 @@ class GameManager:
     async def _launch(self, game_dict):
         """Launch a door game and bridge it to this session.
         DOS games use the TCP-nullmodem path (works with vanilla DOSBox).
+        builtin_python games are called directly (no subprocess).
         Other game types use the PTY path."""
+
+        # builtin_python — pure Python game, no subprocess or door runner needed.
+        if game_dict.get('game_type') == 'builtin_python':
+            module_path = game_dict.get('web_game_module', '')
+            if not module_path:
+                await self.session.write("\r\nGame has no module configured.\r\n")
+                return
+            try:
+                import importlib
+                mod_name, func_name = (module_path.rsplit(':', 1)
+                                       if ':' in module_path
+                                       else (module_path, 'launch'))
+                mod = importlib.import_module(mod_name)
+                fn  = getattr(mod, func_name)
+                username = (self.session.user or {}).get('username', 'player')
+                await fn(self.session, username)
+            except Exception as exc:
+                logger.exception('builtin_python game error: %s', exc)
+                await self.session.write(f"\r\nError launching game: {exc}\r\n")
+                await self.session.read_line("\r\nPress Enter...")
+            return
+
         from flask import Flask
         from anetbbs.config import get_config
         from anetbbs.models import db, Game

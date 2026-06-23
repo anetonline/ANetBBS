@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: alpha 2** (`v1.0a2.165`, June 2026)
+**Status: alpha 2** (`v1.0a2.170`, June 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;

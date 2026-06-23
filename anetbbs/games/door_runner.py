@@ -503,6 +503,15 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
         return [node_path, tmp.name], sn_cwd
 
+    if game.game_type == 'builtin_python':
+        import sys as _sys
+        _runner = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'builtin_runner.py')
+        _module = getattr(game, 'web_game_module', '') or ''
+        if not _module:
+            raise ValueError('builtin_python game has no web_game_module set')
+        return [_sys.executable, _runner, _module], '/tmp'
+
     raise ValueError(f'Unsupported door game_type: {game.game_type!r}')
 
 

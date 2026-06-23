@@ -7,9 +7,11 @@ Requires lrzsz on the server: apt install lrzsz
   sb / rb  — YMODEM (batch) send / receive
   sx / rx  — XMODEM send / receive
 
-All send commands use --escape so 0xFF bytes are encoded safely over
-8-bit-unsafe channels (telnet without binary mode). The client's ZMODEM
-implementation is expected to do the same.
+ZMODEM sends use --binary to prevent newline translation of binary data.
+--escape is intentionally omitted: it causes sz to send ZSINIT to negotiate
+extended escaping, but many terminal emulators (including SyncTERM) respond
+with ZRINIT instead of ZACK, breaking the handshake. XON/XOFF/DLE are still
+escaped by default without the flag.
 
 Reading from session.reader directly (not through handle_telnet_command)
 preserves the raw binary stream needed for protocol transfers.
@@ -28,7 +30,7 @@ _PROTOCOLS = {
         'name':       'ZMODEM',
         'send_bin':   'sz',
         'recv_bin':   'rz',
-        'send_flags': ['--escape', '--binary'],
+        'send_flags': ['--binary'],
         'recv_flags': ['--escape'],
     },
     'ymodem': {
