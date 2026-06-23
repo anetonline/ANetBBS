@@ -16,6 +16,7 @@ mrc/bridge/data/profiles.json
 mrc/bridge/data/*.db
 mrc/bridge/data/*.db-shm
 mrc/bridge/data/*.db-wal
+mrc/bridge/data-*/
 data/mrc/mrc.log
 data/mrc/mrcstats.dat
 
@@ -46,7 +47,7 @@ venv/
 *~
 services/mrc_bridge/data/
 services/mrc_bridge/logs/
-bbs.log
+bbs.log*
 *.log
 
 # Runtime data — DB, user uploads, gallery cache, personal pages,
