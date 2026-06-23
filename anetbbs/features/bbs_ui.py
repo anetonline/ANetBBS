@@ -1579,6 +1579,7 @@ class BBSMenuUI:
               else getattr(self.session.user, 'id', None)
 
         with _app().app_context():
+            app = _app()
             item = RssItem.query.get(item_id)
             if not item:
                 return
@@ -1589,6 +1590,12 @@ class BBSMenuUI:
                         if item.published_at else 'unknown'
             summary = item.summary or '(no summary)'
             feed_name = item.feed.name
+            # Build short URL for terminal display
+            domain = app.config.get('BBS_DOMAIN', '')
+            port = app.config.get('WEB_PORT', 5000)
+            web_base = (f"https://{domain}" if domain
+                        else f"http://localhost:{port}")
+            short_url = f"{web_base}/r/{item.id}" if link else ''
             # Mark as read
             if uid and not RssReadStatus.query.filter_by(
                     user_id=uid, item_id=item.id).first():
@@ -1599,16 +1606,17 @@ class BBSMenuUI:
                     db.session.rollback()
         await self.session.write('\x1b[2J\x1b[H')
         await self.session.write(banner(feed_name[:40]))
+        for title_line in self._wrap_text(title, 74):
+            await self.session.write(f"  {FG['cyan']}{title_line}{RESET}\r\n")
         await self.session.write(
-            f"  {FG['cyan']}{title[:74]}{RESET}\r\n"
             f"  {FG['gry']}{'─' * 74}{RESET}\r\n"
             f"  {FG['gry']}Date:{RESET} {published}\r\n")
         if author:
             await self.session.write(
                 f"  {FG['gry']}Author:{RESET} {author}\r\n")
-        if link:
+        if short_url:
             await self.session.write(
-                f"  {FG['gry']}Link:{RESET} {link[:70]}\r\n")
+                f"  {FG['gry']}Link:{RESET} {short_url}\r\n")
         await self.session.write(f"  {FG['gry']}{'─' * 74}{RESET}\r\n\r\n")
         # Word-wrap the summary to ~76 cols for readability on 80-col
         # terminals.

@@ -287,7 +287,7 @@ def create_app(config_name=None):
     from .web.games_admin import games_admin_bp
     from .web.gallery import gallery_bp
     from .web.gallery_admin import gallery_admin_bp
-    from .web.rss import rss_bp
+    from .web.rss import rss_bp, redirect_bp
     from .web.rss_admin import rss_admin_bp
     from .web.menu_admin import menu_admin_bp
     from .web.nodelist import nodelist_bp
@@ -354,6 +354,7 @@ def create_app(config_name=None):
     app.register_blueprint(gallery_admin_bp)
     app.register_blueprint(rss_bp)
     app.register_blueprint(rss_admin_bp)
+    app.register_blueprint(redirect_bp)
     app.register_blueprint(menu_admin_bp)
     app.register_blueprint(nodelist_bp)
     app.register_blueprint(registry_bp)

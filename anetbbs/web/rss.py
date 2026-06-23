@@ -11,14 +11,27 @@ Routes:
     GET  /rss/item/<item_id>  — single item, marks as read
     POST /rss/<feed_id>/mark_read   — mark all items in feed as read
     POST /rss/mark_all_read   — mark every item in every feed as read
+    GET  /r/<item_id>         — short-URL redirect to original article link
 """
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from ..models import db, RssFeed, RssItem, RssReadStatus
 
 rss_bp = Blueprint('rss', __name__, url_prefix='/rss')
+
+# Short-URL redirect blueprint — no login required so external browsers work.
+redirect_bp = Blueprint('redirect', __name__, url_prefix='/r')
+
+
+@redirect_bp.route('/<int:item_id>')
+def short_redirect(item_id):
+    """Redirect /r/<item_id> → the original RSS article URL."""
+    item = RssItem.query.get(item_id)
+    if not item or not item.link:
+        abort(404)
+    return redirect(item.link, code=302)
 
 
 def _unread_counts():

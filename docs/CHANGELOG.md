@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.161`** (June 2026). Previous: `v1.0a2.160`.
+separately. Current release: **`v1.0a2.163`** (June 2026). Previous: `v1.0a2.161`.
+
+## v1.0a2.163 — RSS short-URL redirect + title word-wrap (June 2026)
+
+- **`web/rss.py`**: Added `redirect_bp` with `GET /r/<item_id>` — unauthenticated 302 redirect to the original RSS article URL. No new DB model; uses `RssItem.id` as the short code.
+- **`features/bbs_ui.py` `_rss_view_item`**: Replaced truncated raw link with a short URL (`{web_base}/r/{item.id}`) that always fits in 80 columns. Title now word-wraps at 74 cols instead of hard-truncating.
+- **`web_app.py`**: Registered `redirect_bp`.
 
 ## v1.0a2.161 — Fix mixed-art \n stripping; 80-col viewer; ASCII status bar (June 2026)
 
