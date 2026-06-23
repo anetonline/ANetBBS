@@ -1199,6 +1199,14 @@ class BBSMenuUI:
                 f"\r\n{FG['grn']}[{idx}/{len(files)}] Sending {name} ...{RESET}\r\n"
                 f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
             await asyncio.sleep(1)
+            try:
+                while True:
+                    chunk = await asyncio.wait_for(
+                        self.session.reader.read(4096), timeout=0.2)
+                    if not chunk:
+                        break
+            except (asyncio.TimeoutError, Exception):
+                pass
 
             try:
                 ok = await send_file(self.session, fpath, protocol)
@@ -1302,6 +1310,19 @@ class BBSMenuUI:
             f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
             f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
         await asyncio.sleep(1)
+
+        # Drain any buffered input (leftover keystrokes, ANSI sequences)
+        # before handing stdin to sz.  Stale bytes fed into sz at startup
+        # corrupt the initial ZRQINIT/ZRINIT handshake and cause sz to exit
+        # non-zero, requiring the user to retry the transfer.
+        try:
+            while True:
+                chunk = await asyncio.wait_for(
+                    self.session.reader.read(4096), timeout=0.2)
+                if not chunk:
+                    break
+        except (asyncio.TimeoutError, Exception):
+            pass
 
         try:
             ok = await send_file(self.session, fpath, protocol)

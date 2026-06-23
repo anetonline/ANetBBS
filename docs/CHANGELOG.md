@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.164`** (June 2026). Previous: `v1.0a2.161`.
+separately. Current release: **`v1.0a2.165`** (June 2026). Previous: `v1.0a2.161`.
+
+## v1.0a2.165 — ZMODEM handshake fix; pre-transfer reader drain (June 2026)
+
+- **`features/xfer.py`**: Removed redundant `--binary` from ZMODEM send flags (ZMODEM is always binary; the flag was a no-op that could cause lrzsz option noise).
+- **`features/bbs_ui.py` `_download_file` + `_batch_download`**: Added 0.2 s reader drain before calling `send_file`. Residual bytes buffered in `session.reader` (trailing `\n` from Enter, ANSI escape sequences) were being fed into sz's stdin at startup, corrupting the ZRQINIT/ZRINIT handshake and causing sz to exit non-zero — requiring the user to retry 2-4 times before the transfer succeeded.
 
 ## v1.0a2.164 — Fix /imsg/directory crash + RSS short-URL + title word-wrap (June 2026)
 
