@@ -1,3 +1,3 @@
-# ANetBBS v1.0a2.169 — ANetCRAFT fixes + web play
+# ANetBBS v1.0a2.174 — ANetCRAFT: hunger, swords, crafting table
 
-ANetCRAFT health display fix, web terminal launch fix, and changelog cleanup.
+ANetCRAFT Phase 4: hunger bar, E to eat, apples from leaves, 4-tier swords, crafting table requirement for tools/swords.

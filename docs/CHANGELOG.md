@@ -1,7 +1,29 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.170`** (June 2026). Previous: `v1.0a2.166`.
+separately. Current release: **`v1.0a2.174`** (June 2026). Previous: `v1.0a2.166`.
+
+## v1.0a2.174 — ANetCRAFT: hunger, swords, crafting table (June 2026)
+
+**Hunger system** — an orange hunger bar sits next to the health bar. Hunger drains 1 point every ~32 seconds in survival mode. When hunger hits 0, health slowly drains (but not below 1 HP). Press **E** to eat the held food item. **Meat** (dropped by cows, +6 hunger) and **Apples** (15% chance from breaking leaves, +3 hunger) are the current food sources.
+
+**Swords** — four tiers: Wood (+3 dmg), Stone (+5), Iron (+7), Diamond (+11), stacked on top of the base 4-HP hit. All swords craft at a **Crafting Table**.
+
+**Crafting Table requirement** — tools and swords require a placed Crafting Table (block ID 17) within reach. Basic recipes (planks, sticks, torches, the crafting table itself) still work anywhere. The crafting menu now shows `[bench]` next to recipes that need one, and grays them out if no bench is nearby.
+
+**Creative mode** — hunger bar hidden; eating disabled; inventory now includes all swords and food items.
+
+## v1.0a2.173 — ANetCRAFT: multiplayer (June 2026)
+
+ANetCRAFT multiplayer mode. Select **M** from the lobby to join the shared server world. All players share one map; the first player to join becomes the host and runs mob AI. Other players are visible as colored avatars. Press **T** to open the chat prompt and send a message — the last chat line is displayed above the hotbar for 60 seconds. Per-user MP inventory saves separately from single-player saves. The world auto-saves when the last player leaves or every ~1 min while the host is online.
+
+## v1.0a2.172 — ANetCRAFT: mobs + fixes (June 2026)
+
+ANetCRAFT now has living mobs. **Cows** spawn on the surface and drop Meat when killed. **Zombies** and **Skeletons** emerge at night and attack in survival mode. **Creepers** stalk you and explode when they get close, destroying nearby blocks. Point the mining cursor (arrow keys) at a mob and press **F** to attack it. Creepers flash yellow when their fuse is lit. Day/night cycle slowed to half speed; inventory overlay no longer flickers. Periodic auto-save added (every ~1 min of play).
+
+## v1.0a2.171 — ANetCRAFT: lobby + game modes (June 2026)
+
+ANetCRAFT now has a pre-game lobby with **Survival** and **Creative** mode selection. Each user's map is saved per-account and can be loaded or replaced with a fresh world from the lobby. Creative mode gives all blocks, instant mining, no item consumption, and free flight with W/S.
 
 ## v1.0a2.167–170 — ANetCRAFT game (June 2026)
 
