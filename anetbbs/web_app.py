@@ -1079,13 +1079,18 @@ def _create_default_data():
             _ca.logger.info('Bundled door %s not found at %s — skipping',
                             d['slug'], d['must_exist'])
             continue
-        if Game.query.filter_by(slug=d['slug']).first():
-            continue
         kw = {k: v for k, v in d.items()
               if k not in ('must_exist', '_active_default')}
         kw['is_active'] = d.get('_active_default', True)
         kw['max_nodes'] = 1
-        db.session.add(Game(**kw))
+        existing = Game.query.filter_by(slug=d['slug']).first()
+        if existing:
+            # Keep key fields current so version upgrades self-correct
+            for field in ('game_type', 'web_game_module'):
+                if field in kw:
+                    setattr(existing, field, kw[field])
+        else:
+            db.session.add(Game(**kw))
     db.session.commit()
 
     # ─── Default RSS feeds ───────────────────────────────────────────
