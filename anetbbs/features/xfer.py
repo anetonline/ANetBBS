@@ -28,7 +28,7 @@ _PROTOCOLS = {
         'name':       'ZMODEM',
         'send_bin':   'sz',
         'recv_bin':   'rz',
-        'send_flags': ['--escape'],   # --binary is redundant for ZMODEM
+        'send_flags': ['--escape', '--binary'],
         'recv_flags': ['--escape'],
     },
     'ymodem': {
