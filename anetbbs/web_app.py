@@ -1086,7 +1086,7 @@ def _create_default_data():
         existing = Game.query.filter_by(slug=d['slug']).first()
         if existing:
             # Keep key fields current so version upgrades self-correct
-            for field in ('game_type', 'web_game_module'):
+            for field in ('game_type', 'web_game_module', 'web_game_url'):
                 if field in kw:
                     setattr(existing, field, kw[field])
         else:

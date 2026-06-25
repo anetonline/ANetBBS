@@ -1,7 +1,162 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.174`** (June 2026). Previous: `v1.0a2.166`.
+separately. Current release: **`v1.0a2.188`** (June 2026). Previous: `v1.0a2.179`.
+
+## v1.0a2.188 — QWK network form: hub_id field added; upload URL uses hub_id (June 2026)
+
+**Hub System ID field was missing from the network config form** — the
+`qwk_hub_id` field existed in the form class and was stored in the database,
+but was never rendered in `network_form.html`. Sysops had no way to set it,
+so it was always blank. The QWK client fell back to `packet_id` for all
+filename generation, which produced correct filenames only if the sysop
+happened to put the hub's ID in the packet ID field.
+
+Added the Hub System ID field to the form alongside explanatory text
+clarifying the two-ID model:
+- **Hub System ID** (`VERT`) — used in ALL filenames: `VERT.qwk` download,
+  `VERT.rep` upload, `VERT.MSG` inside the zip. The hub's `un_rep` looks for
+  `{hub_sys_id}.MSG`; if wrong the entire REP is silently rejected.
+- **Packet ID** (`ANETBBS`) — your node's registered ID. Used for FTP login
+  identity and auto-generated `@MSGID:` values. Does not appear in filenames.
+
+Also exposed the download URL and upload URL override fields in the form
+(both were hidden — also never rendered in the template).
+
+**Default upload URL changed** from `ftp://dove.synchro.net/{packet}.rep` to
+`ftp://dove.synchro.net/{hub_id}.rep` — the outer REP file should be named
+with the hub's ID (same convention as the download), not the node's ID. The
+node is identified by the FTP login credentials, not the filename.
+
+**After deploying**: go to `/admin/echomail` → DOVE-Net → set:
+- QWK Hub System ID = `VERT`
+- QWK Packet ID = your registered node ID (e.g. `ANETBBS`)
+
+## v1.0a2.187 — QWK area tags: plain numeric format per Dove-Net docs (June 2026)
+
+QWK conference areas are now tagged with the plain conference number (e.g.
+`2010`) instead of the `QWK_2010` prefix that ANetBBS was incorrectly
+prepending. The QWK spec and Dove-Net documentation identify conferences by
+number only; the prefix was an internal ANetBBS convention that wasn't needed.
+
+**Auto-migration**: on first inbound message for each conference, the importer
+now detects any existing `QWK_N` area and renames it to the plain numeric tag
+automatically — no manual database edits required.
+
+**Outbound conf_num extraction** now handles both plain numeric tags (`2010`)
+and legacy `QWK_N` tags (`QWK_2010`) so existing installations keep working
+until migration completes.
+
+**Quick-add** (`/admin/echomail` → QWK network → quick-add) also migrates old
+`QWK_N` entries to plain numeric tags when encountered.
+
+**Admin form hint** updated to clarify: FTN areas use `FIDO_GENERAL`-style
+tags; QWK areas use the plain conference number.
+
+## v1.0a2.186 — QWK outbound: inner MSG filename and header conf_num fix (June 2026)
+
+Two critical bugs found by researching Synchronet's `un_rep.cpp` source:
+
+**Inner MSG file named with node ID instead of hub ID** — Synchronet's REP
+processor (`un_rep.cpp`) extracts the REP zip and looks for
+`{hub.sys_id}.msg` (e.g. `DOVE.MSG` for Dove-Net). Our code was writing
+`{packet_id}.MSG` (e.g. `ANET.MSG` — the node's ID). The hub printed "MSG file
+not received" and silently rejected the entire REP packet. No FTP error is
+raised; messages were marked "sent" in ANetBBS but never processed by the hub.
+Fixed: `_build_rep_packet()` now takes a `hub_id` parameter and names the inner
+file `{hub_id}.MSG`. Sysops must set the **QWK Hub System ID** field in the
+network config (e.g. `DOVE` for Dove-Net, `VERT` for vert.synchro.net).
+
+**Bytes 1–7 in QWK header contained message sequence number, not conference**
+— Synchronet routes REP messages using `atol((char*)block+1)` on bytes 1–7.
+In REP mode the spec requires this field to hold the **conference number**. Our
+code stored the sequential packet index (1, 2, 3 …), so all outbound messages
+were silently routed to conference 1 (or whatever `atol("1")` landed on)
+regardless of the actual target conference. Fixed: bytes 1–7 now contain
+`conf_num`, consistent with how `pack_rep.cpp` handles REP-mode packets.
+
+## v1.0a2.185 — QWK outbound fixes: FTP path, MSGID, conf_num logging (June 2026)
+
+Three bugs fixed in the QWK outbound (REP packet) pipeline, diagnosed from
+alpha-tester report of replies not propagating on Dove-Net:
+
+**FTP STOR path leading slash** — `_ftp_upload()` was sending `STOR /ANET.rep`
+(absolute path) instead of `STOR ANET.rep` (relative to FTP home dir). The
+download path already stripped the leading slash with `lstrip('/')`; upload now
+does the same. On Synchronet's QNET-FTP server, the absolute path deposited the
+REP into the wrong directory and the hub's processor never picked it up — no FTP
+error, but the messages were silently lost. Also added passive-mode and login
+logging to make future FTP issues easier to diagnose.
+
+**MSGID injection** — outbound messages composed on the BBS had no `@MSGID:`
+kludge line in their body. Synchronet deduplicates by MSGID; messages without
+one may be mishandled on some hub configurations. `_build_rep_packet()` now
+prepends `@MSGID: <packet_id>_<hash> <timestamp>` to any outbound body that
+doesn't already carry one. The ID is derived from the message's DB id, subject,
+and from-name so re-polls don't create duplicate IDs.
+
+**conf_num=0 warning** — if a QWK area's tag is not in the required `QWK_<N>`
+format (e.g. sysop renamed `QWK_6` → `DOVE-HLP`), the poller was silently
+setting conference number to 0, causing replies to land in personal mail instead
+of the echomail feed on the hub. Both the poller and `_build_rep_packet()` now
+emit `WARNING` log lines when conf_num=0 is used for a non-private message, so
+the sysop can see and fix the area tag.
+
+## v1.0a2.180–184 — ANetCRAFT Enhanced: spawn, sky, NPCs, compass (June 2026)
+
+**Deterministic spawn grid** — replaced the 50-attempt random search (which
+could exhaust all attempts for unlucky seeds) with a 3-pass deterministic grid
+scan over the full 400×400 world. Pass 0 prefers PLAINS/DESERT/MOUNTAINS with
+no ocean or forest within 16 blocks; pass 1 relaxes the neighbour check; pass 2
+accepts any non-ocean open column. Each pass uses a seed-offset grid so the
+result is deterministic but varies per world. Labeled `break spawnSearch`
+terminates all three loops as soon as a valid spot is found.
+
+**groundY() skips LOG blocks** — the new `groundY()` method skips LEAVES,
+CACTUS, and LOG when searching from the top of the chunk downward, so spawn
+lands on actual terrain (grass/sand/snow) rather than a tree trunk or canopy.
+Spawn also checks that the two blocks above `groundY()` are non-solid before
+accepting the position, preventing spawning inside a trunk.
+
+**Sun disc, moon disc, 1200-star field** — actual Three.js mesh objects orbit
+the scene. The sun (warm cream `CircleGeometry`, radius 7) and moon (cool blue,
+radius 4) face the camera via `.lookAt()` and track the day/night angle. 1,200
+star `Points` are distributed on the upper hemisphere at radius 180; they fade
+out when `dayTime > 15%`. Sun and moon hide below the horizon automatically.
+
+**NPC legs and name tags** — NPCs now have two leg segments. A `SpriteMap`
+canvas badge with the NPC's name floats 2.3 units above the root, always
+facing the camera.
+
+**Compass HUD** — always-visible top-right overlay: cardinal direction (N/NE/E
+…), current biome name, and day percentage.
+
+**Terrain** — mountains use `n²` noise distribution for mostly gentle foothills
+with occasional sharp peaks (max height ~96). Plains are very flat (SEA+1 to
+SEA+5).
+
+## v1.0a2.179 — ANetCRAFT Enhanced night fix; sysop file manager (June 2026)
+
+**ANetCRAFT Enhanced — night startup fix** — the game was starting in
+pitch-black darkness because `dayTime` was initialised to `0.25`, which maps
+exactly to `cos(π/2) = 0` (midnight). Changed to `0` (high noon). Night sky
+colour raised from near-black (8,8,25) to dark-blue (15,20,55) and minimum
+ambient light raised from 0.08 to 0.18 so blocks remain visible at night.
+
+**Sysop file management** — new page at `/file-areas/<id>/manage` (admin-only).
+Lists every file in an area with: inline description editor (click pencil →
+textarea → Save), per-file delete with confirmation dialog, and a direct
+sysop upload form (bypasses moderation queue). Each area row in
+`/admin/file-areas` now has a **Manage Files** button linking to this page.
+
+## v1.0a2.177–178 — ANetCRAFT Enhanced (June 2026)
+
+Full 3D WebGL voxel game built into the ANetBBS game centre. Powered by
+Three.js r128. Features: procedurally generated world with six biomes (Ocean,
+Tundra, Desert, Mountains, Forest, Plains); WASD + mouse-look movement with
+AABB collision; day/night cycle (10-min day); 20 block types with a 256×256
+texture atlas; DDA raycast block targeting; NPC system (Villager, Sheep,
+Zombie, Trader) with wander AI and E-key dialog; F3 debug overlay; Q to quit.
 
 ## v1.0a2.174 — ANetCRAFT: hunger, swords, crafting table (June 2026)
 

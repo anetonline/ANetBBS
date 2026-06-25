@@ -65,12 +65,18 @@ class NetworkForm(FlaskForm):
     qwk_port = IntegerField('QWK Port', validators=[Optional(), NumberRange(1, 65535)], default=80)
     qwk_username = StringField('QWK Username', validators=[Optional(), Length(max=255)])
     qwk_password = PasswordField('QWK Password', validators=[Optional()])
-    qwk_packet_id = StringField('QWK Packet ID — your local BBS sys ID '
-                                 '(e.g. ANET)',
-                                 validators=[Optional(), Length(max=20)])
-    qwk_hub_id = StringField('QWK Hub System ID — the hub\'s sys ID '
-                              '(e.g. VERT for DOVE-Net)',
-                              validators=[Optional(), Length(max=16)])
+    qwk_packet_id = StringField(
+        'QWK Packet ID — YOUR registered node ID on the hub '
+        '(e.g. ANETBBS — this is the ID the hub assigned to YOUR BBS, '
+        'NOT the hub\'s own ID). Used to name the outer REP zip and '
+        'auto-generate message IDs.',
+        validators=[Optional(), Length(max=20)])
+    qwk_hub_id = StringField(
+        'QWK Hub System ID — the HUB\'s system ID '
+        '(e.g. VERT for vert.synchro.net / Dove-Net). '
+        'This controls the inner MSG filename inside the REP zip — '
+        'Synchronet looks for HUBID.MSG and rejects the packet if it\'s wrong.',
+        validators=[Optional(), Length(max=16)])
     qwk_download_url = StringField(
         'QWK Download URL (full URL — overrides the default. '
         'Placeholders: {host} {port} {user} {password} {packet} {hub_id}. '
@@ -78,7 +84,8 @@ class NetworkForm(FlaskForm):
         'ftp://dove.synchro.net/{hub_id}.qwk)',
         validators=[Optional(), Length(max=500)])
     qwk_upload_url = StringField(
-        'QWK Upload URL (full URL for the REP packet)',
+        'QWK Upload URL — for DOVE-Net leave blank (auto: ftp://dove.synchro.net/{packet}.rep). '
+        'The outer zip is named {packet}.rep (your node ID); inner file is {hub_id}.MSG.',
         validators=[Optional(), Length(max=500)])
 
     poll_interval_minutes = IntegerField('Poll Interval (minutes)',
@@ -90,7 +97,7 @@ class NetworkForm(FlaskForm):
 
 class EchoAreaForm(FlaskForm):
     network_id = SelectField('Network', coerce=int, validators=[DataRequired()])
-    tag = StringField('Area Tag (e.g. FIDO_GENERAL)', validators=[DataRequired(), Length(max=100)])
+    tag = StringField('Area Tag (FTN: FIDO_GENERAL — QWK: plain conference number e.g. 2010)', validators=[DataRequired(), Length(max=100)])
     name = StringField('Display Name', validators=[DataRequired(), Length(max=200)])
     description = TextAreaField('Description', validators=[Optional()])
     order = IntegerField('Sort Order', validators=[Optional()], default=0)
@@ -857,9 +864,17 @@ def qwk_quick_add(network_id):
             skipped += 1
             continue
         name = parts[1].strip() if len(parts) > 1 else f'Conference {conf_num}'
-        tag = f'QWK_{conf_num}'
+        # Tag is the plain conference number. Also check legacy 'QWK_N' format
+        # and migrate to plain numeric if found.
+        tag = str(conf_num)
         existing = EchoArea.query.filter_by(network_id=network.id,
                                              tag=tag).first()
+        if not existing:
+            old_tag = f'QWK_{conf_num}'
+            existing = EchoArea.query.filter_by(network_id=network.id,
+                                                 tag=old_tag).first()
+            if existing:
+                existing.tag = tag
         if existing:
             existing.name = name
             existing.is_subscribed = True

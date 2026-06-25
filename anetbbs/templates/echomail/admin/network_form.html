@@ -121,28 +121,54 @@
                     <i class="bi bi-envelope-paper"></i> QWK (Dove-Net) Settings
                 </div>
                 <div class="card-body">
+                    <div class="alert alert-info py-2 small mb-3">
+                        <strong>Two IDs, two different purposes:</strong>
+                        <ul class="mb-0 mt-1">
+                            <li><strong>Hub System ID</strong> = the hub's own ID (e.g. <code>VERT</code> for vert.synchro.net). Controls the download filename (<code>VERT.qwk</code>), upload filename (<code>VERT.rep</code>), and inner MSG file (<code>VERT.MSG</code>). The hub rejects the REP silently if this is wrong.</li>
+                            <li><strong>Packet ID</strong> = YOUR BBS's registered node ID on the hub (e.g. <code>ANETBBS</code>). Used for FTP login identity and message IDs. Does NOT go in the filenames.</li>
+                        </ul>
+                    </div>
                     <div class="row g-3">
-                        <div class="col-md-7">
+                        <div class="col-md-5">
                             {{ form.qwk_host.label(class="form-label") }}
-                            {{ form.qwk_host(class="form-control", placeholder="qwk.example.com") }}
+                            {{ form.qwk_host(class="form-control", placeholder="dove.synchro.net") }}
                         </div>
                         <div class="col-md-2">
                             {{ form.qwk_port.label(class="form-label") }}
                             {{ form.qwk_port(class="form-control") }}
                         </div>
+                        <div class="col-md-2">
+                            {{ form.qwk_hub_id.label(class="form-label") }}
+                            {{ form.qwk_hub_id(class="form-control", placeholder="VERT") }}
+                            <div class="form-text">Hub's ID — e.g. <code>VERT</code></div>
+                        </div>
                         <div class="col-md-3">
                             {{ form.qwk_packet_id.label(class="form-label") }}
                             {{ form.qwk_packet_id(class="form-control", placeholder="MYBBS") }}
+                            <div class="form-text">Your node ID — e.g. <code>ANETBBS</code></div>
                         </div>
                     </div>
                     <div class="row g-3 mt-1">
                         <div class="col-md-6">
                             {{ form.qwk_username.label(class="form-label") }}
                             {{ form.qwk_username(class="form-control") }}
+                            <div class="form-text">FTP login username assigned by the hub</div>
                         </div>
                         <div class="col-md-6">
                             {{ form.qwk_password.label(class="form-label") }}
                             {{ form.qwk_password(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-6">
+                            {{ form.qwk_download_url.label(class="form-label") }}
+                            {{ form.qwk_download_url(class="form-control", placeholder="Leave blank for Dove-Net auto-default") }}
+                            <div class="form-text">Leave blank — auto: <code>ftp://dove.synchro.net/{hub_id}.qwk</code></div>
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.qwk_upload_url.label(class="form-label") }}
+                            {{ form.qwk_upload_url(class="form-control", placeholder="Leave blank for Dove-Net auto-default") }}
+                            <div class="form-text">Leave blank — auto: <code>ftp://dove.synchro.net/{hub_id}.rep</code></div>
                         </div>
                     </div>
                 </div>

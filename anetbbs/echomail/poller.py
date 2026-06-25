@@ -288,9 +288,9 @@ def _run_client(network, outbound_messages, app):
         from .qwk import QWKClient
         from ..models import EchoArea
         # Stamp the hub conference number on each outbound message.
-        # QWK areas use tags like 'QWK_42' where 42 is the hub conf number.
-        # _build_rep_packet reads _qwk_conf_num; without this it defaults to 0
-        # (netmail) and the hub silently discards all outbound echomail.
+        # QWK area tags are plain numeric strings (e.g. '2010') matching the
+        # hub's conference number. Legacy installs may have 'QWK_N' tags —
+        # both formats are supported. _build_rep_packet reads _qwk_conf_num.
         _area_cache = {}
         for _msg in outbound_messages:
             _aid = getattr(_msg, 'area_id', None)
@@ -299,13 +299,22 @@ def _run_client(network, outbound_messages, app):
             if _aid not in _area_cache:
                 _area_cache[_aid] = EchoArea.query.get(_aid)
             _area = _area_cache.get(_aid)
-            if _area and (_area.tag or '').upper().startswith('QWK_'):
-                try:
-                    _msg._qwk_conf_num = int(_area.tag[4:])
-                except (ValueError, IndexError):
-                    _msg._qwk_conf_num = 0
-            else:
-                _msg._qwk_conf_num = 0
+            _tag = (_area.tag or '').strip() if _area else ''
+            _conf = 0
+            if _tag.isdigit():
+                # Current format: plain numeric tag (e.g. '2010')
+                _conf = int(_tag)
+            elif _tag.upper().startswith('QWK_') and _tag[4:].isdigit():
+                # Legacy format: 'QWK_2010' — still extract the number
+                _conf = int(_tag[4:])
+            _msg._qwk_conf_num = _conf
+            if _conf == 0 and getattr(_msg, 'direction', '') != 'netmail':
+                logger.warning(
+                    "QWK outbound: area tag %r on msg %r (area_id=%s) could "
+                    "not be parsed as a conference number — will send to conf 0 "
+                    "(personal mail, NOT broadcast). Area tag must be a plain "
+                    "number e.g. '2010'.",
+                    _tag or 'N/A', getattr(_msg, 'subject', '?'), _aid)
         client = QWKClient(
             host=network.qwk_host or '',
             port=network.qwk_port or 80,
@@ -359,6 +368,16 @@ def _import_message(network, msg_data: dict) -> int:
     # - BinkP/FTN: tags are arbitrary, so unknown ones go to BadAreaLog
     #        for sysop review (SBBSecho's BadAreaFile semantics).
     area = EchoArea.query.filter_by(network_id=network.id, tag=area_tag).first()
+    if not area and network.network_type == 'qwk' and area_tag.isdigit():
+        # Migration: older ANetBBS installs tagged QWK areas as 'QWK_N'.
+        # If an area with the old format exists, rename it to the plain
+        # numeric tag ('2010') so outbound conf_num extraction works correctly.
+        old_tag = f'QWK_{area_tag}'
+        area = EchoArea.query.filter_by(network_id=network.id, tag=old_tag).first()
+        if area:
+            logger.info("QWK: migrating area tag %r → %r", old_tag, area_tag)
+            area.tag = area_tag
+            db.session.flush()
     if not area:
         if network.network_type == 'qwk':
             area = EchoArea(

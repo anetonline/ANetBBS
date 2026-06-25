@@ -187,6 +187,16 @@ WEB_GAMES = [
         'web_game_module': 'breakout',
         'sort_order': 180,
     },
+    {
+        'name': 'ANetCRAFT Enhanced',
+        'slug': 'anetcraft-enhanced',
+        'description': 'Full 3D voxel survival game — mine, craft, and build in a '
+                       'procedurally generated world. Powered by Three.js WebGL.',
+        'category': 'action',
+        'icon': 'bi-box',
+        'web_game_module': 'anetcraft_enhanced',
+        'sort_order': 5,
+    },
 ]
 
 

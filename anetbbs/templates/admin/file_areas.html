@@ -153,6 +153,7 @@
                 <button class="btn btn-outline-danger btn-sm" name="action" value="delete"
                         onclick="return confirm('Delete area {{ fa.tag }}? Files on disk are NOT removed.')">Delete</button>
                 <a href="{{ url_for('file_areas.view_area', area_id=fa.id) }}" class="btn btn-outline-secondary btn-sm">Browse</a>
+                <a href="{{ url_for('file_areas.manage_files', area_id=fa.id) }}" class="btn btn-outline-info btn-sm"><i class="bi bi-folder-check"></i> Manage Files</a>
             </div>
         </form>
         {% endfor %}

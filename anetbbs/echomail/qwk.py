@@ -16,6 +16,8 @@ import zipfile
 import logging
 import urllib.request
 from datetime import datetime
+import hashlib
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +133,10 @@ def _parse_messages_dat(data: bytes, conferences: dict):
     if len(data) < QWK_HEADER_SIZE:
         return messages
 
-    # First 128 bytes is the "Welcoming" block — skip it
+    # First 128 bytes is the "Welcoming" block — log it for diagnostics
+    welcome_block = data[:QWK_HEADER_SIZE]
+    welcome_id = welcome_block.rstrip(b'\x00 ').decode('ascii', errors='replace')
+    logger.info('QWK hub sys_id from welcoming block: %r', welcome_id)
     pos = QWK_HEADER_SIZE
 
     while pos + QWK_HEADER_SIZE <= len(data):
@@ -223,9 +228,13 @@ def _parse_messages_dat(data: bytes, conferences: dict):
             area_tag = 'NETMAIL'
             area_name = 'Netmail (Private)'
         else:
-            area_tag = f'QWK_{conf_num}'
+            # Use plain numeric tag (e.g. '2010') — the QWK spec and Dove-Net
+            # docs identify conferences by number, not by a 'QWK_N' prefix.
+            area_tag = str(conf_num)
             area_name = conferences.get(conf_num, f'Conference {conf_num}')
 
+        logger.info('QWK inbound msg: conf=%d area_tag=%r from=%r subj=%r',
+                    conf_num, area_tag, from_name, subject)
         messages.append({
             'from_name': from_name,
             'to_name': to_name or 'All',
@@ -248,26 +257,33 @@ def _parse_messages_dat(data: bytes, conferences: dict):
     return messages
 
 
-def _build_rep_packet(messages, packet_id: str) -> bytes:
+def _build_rep_packet(messages, packet_id: str, hub_id: str = '') -> bytes:
     """
     Build a REP packet (zip file) containing MESSAGES.DAT with outbound messages.
     Returns the bytes of the .rep zip file.
+
+    hub_id: the hub's QWK system ID (e.g. 'DOVE' for Dove-Net). Synchronet's
+    un_rep.cpp extracts the zip and looks for '{hub.sys_id}.msg' — if the inner
+    file is named with the node's packet_id instead, the hub prints "MSG file
+    not received" and silently rejects the entire REP with no FTP error.
     """
+    # inner_id must be resolved first — it's used in both the welcoming block
+    # and the ZIP filename.
+    inner_id = (hub_id.strip() or packet_id).upper()
+
     buf = io.BytesIO()
     msg_dat = io.BytesIO()
 
-    # Welcoming block
-    msg_dat.write(b'\x00' * QWK_HEADER_SIZE)
+    # Welcoming block — Synchronet's un_rep.cpp checks that the first block
+    # starts with cfg.sys_id (the hub's BBS ID, e.g. "VERT").  All-zero bytes
+    # fail strnicmp and cause the entire REP to be silently rejected with
+    # "Incorrect QWK BBS ID" before any messages are processed.
+    welcome = bytearray(QWK_HEADER_SIZE)
+    _id_bytes = inner_id.encode('ascii', errors='replace')[:QWK_HEADER_SIZE]
+    welcome[:len(_id_bytes)] = _id_bytes
+    msg_dat.write(bytes(welcome))
 
     for i, msg in enumerate(messages, 1):
-        body_text = (msg.body or '').replace('\n', '\xe3')
-        body_encoded = body_text.encode('latin-1', errors='replace')
-        # Pad body to 128-byte block boundary
-        remainder = len(body_encoded) % QWK_BLOCK_SIZE
-        if remainder:
-            body_encoded += b'\x00' * (QWK_BLOCK_SIZE - remainder)
-        num_chunks = 1 + len(body_encoded) // QWK_BLOCK_SIZE
-
         # Private/netmail messages: status='*', conf_num=0 (network mail).
         # We mark netmail by direction='netmail' on the EchomailMessage row;
         # the recipient's username goes in to_name and (optionally) FTN
@@ -277,10 +293,53 @@ def _build_rep_packet(messages, packet_id: str) -> bytes:
             conf_num = 0
         else:
             conf_num = getattr(msg, '_qwk_conf_num', 0)
+            if conf_num == 0:
+                # If conf_num is 0 for a non-private message, the hub will treat
+                # it as personal mail and NOT broadcast it to the echomail feed.
+                # This usually means the area tag was renamed away from 'QWK_N'
+                # or area_id is missing. Log prominently so sysop can diagnose.
+                logger.warning(
+                    'QWK REP: msg #%d (%r) has conf_num=0 — will be sent as '
+                    'personal mail on hub, NOT broadcast. Check that the echo '
+                    "area tag is in 'QWK_<N>' format.",
+                    getattr(msg, 'id', i), msg.subject)
+
+        # Inject a MSGID into the body if the message doesn't already have one.
+        # Synchronet's QNET-FTP deduplicates by MSGID; missing MSGIDs can cause
+        # the hub to silently drop or misroute messages on some configurations.
+        body_raw = msg.body or ''
+        if '@MSGID:' not in body_raw:
+            existing_id = getattr(msg, 'msg_id', None) or getattr(msg, 'msgid', None)
+            if existing_id:
+                msgid_str = existing_id
+            else:
+                # Generate a stable unique ID from content so re-polls don't
+                # create duplicate MSGIDs.
+                digest = hashlib.md5(
+                    f'{packet_id}{getattr(msg,"id",i)}{msg.subject}{msg.from_name}'.encode()
+                ).hexdigest()[:8]
+                msgid_str = f'{packet_id.upper()}_{digest}_{int(time.time()):x}'
+            body_raw = f'@MSGID: {msgid_str}\n' + body_raw
+
+        body_text = body_raw.replace('\r\n', '\xe3').replace('\r', '\xe3').replace('\n', '\xe3')
+        body_encoded = body_text.encode('latin-1', errors='replace')
+        # Pad body to 128-byte block boundary (spaces, as Synchronet does)
+        remainder = len(body_encoded) % QWK_BLOCK_SIZE
+        if remainder:
+            body_encoded += b' ' * (QWK_BLOCK_SIZE - remainder)
+        num_chunks = 1 + len(body_encoded) // QWK_BLOCK_SIZE
+
+        logger.info('QWK REP msg #%d: to=%r subj=%r conf=%d blocks=%d',
+                    i, msg.to_name, msg.subject, conf_num, num_chunks)
+
         header = bytearray(b' ' * QWK_HEADER_SIZE)
         header[0] = ord('*' if is_private else ' ')
-        num_str = str(i).encode('ascii')[:7].ljust(7)
-        header[1:8] = num_str
+        # Bytes 1-7: conference number in REP mode (NOT sequential message index).
+        # Synchronet un_rep.cpp routes via: long confnum = atol((char*)block+1)
+        # Using the message counter here sends all messages to conference 1 (or
+        # whatever atol of the counter happens to be), silently misrouting them.
+        conf_num_str = str(conf_num).encode('ascii')[:7].ljust(7)
+        header[1:8] = conf_num_str
         date_str = datetime.utcnow().strftime('%m-%d-%y%H:%M').encode('ascii')[:13].ljust(13)
         header[8:21] = date_str
         to_b = (msg.to_name or 'All').encode('latin-1', errors='replace')[:25].ljust(25)
@@ -305,7 +364,12 @@ def _build_rep_packet(messages, packet_id: str) -> bytes:
     msg_bytes = msg_dat.read()
 
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f'{packet_id.upper()}.MSG', msg_bytes)
+        # Synchronet's pack_rep.cpp uses uppercase: SAFEPRINTF2(str, "%s%s.MSG", ...)
+        # un_rep.cpp's extract_files_from_archive rejects filenames containing chars
+        # outside SAFEST_FILENAME_CHARS and breaks (not continues) — meaning lowercase
+        # letters in 'VERT.msg' can cause total extraction failure, 0 files extracted,
+        # silent REP rejection ("MSG file not received").  Use uppercase to match native.
+        zf.writestr(f'{inner_id}.MSG', msg_bytes)
 
     return buf.getvalue()
 
@@ -325,9 +389,13 @@ class QWKClient:
         self.username = username
         self.password = password
         self.packet_id = packet_id or 'ANET'
-        # Hub system ID — used by Synchronet's qnet-ftp filename
-        # convention: download <hub_id>.qwk, upload <packet_id>.rep.
-        # If left blank we fall back to packet_id for both.
+        # Hub system ID — used for ALL Synchronet QNET-FTP filenames:
+        #   download: {hub_id}.qwk  (e.g. VERT.qwk)
+        #   upload:   {hub_id}.rep  (e.g. VERT.rep)
+        #   inner MSG: {hub_id}.MSG (e.g. VERT.MSG)
+        # packet_id is the node's own registered ID (e.g. ANETBBS) — used for
+        # FTP login identity and auto-generated MSGIDs, NOT for filenames.
+        # Fall back to packet_id only when hub_id is unconfigured (legacy).
         self.hub_id = hub_id or self.packet_id
         self.timeout = timeout
         self.download_url = download_url or ''
@@ -338,7 +406,11 @@ class QWKClient:
             if not self.download_url:
                 self.download_url = 'ftp://dove.synchro.net/{hub_id}.qwk'
             if not self.upload_url:
-                self.upload_url = 'ftp://dove.synchro.net/{packet}.rep'
+                # Synchronet's FTP server accepts STOR {hub_id}.rep at root
+                # (no subdirectory).  It stores the file to data_dir/file/{usernum}.rep
+                # and the event thread processes it via unpack_rep().  Uploading to
+                # /incoming/ goes to the BBS file area and is never QWK-processed.
+                self.upload_url = 'ftp://dove.synchro.net/{hub_id}.rep'
             if self.port == 80:
                 self.port = 21
 
@@ -396,7 +468,7 @@ class QWKClient:
         result['received'] = self._parse_qwk_packet(qwk_data)
 
         if outbound_messages:
-            rep_data = _build_rep_packet(outbound_messages, self.packet_id)
+            rep_data = _build_rep_packet(outbound_messages, self.packet_id, self.hub_id)
             rep_url = self._resolve_upload_url()
             logger.info("QWK: uploading REP packet to %s", rep_url)
             try:
@@ -508,17 +580,43 @@ class QWKClient:
         port = u.port or 21
         user = unquote(u.username) if u.username else (self.username or 'anonymous')
         pw = unquote(u.password) if u.password else (self.password or '')
-        path = u.path or '/'
+        # Strip leading slash so STOR is relative to the FTP home dir, not
+        # the filesystem root. Mirrors the lstrip in _ftp_download — without
+        # this, Synchronet's QNET-FTP puts the REP in the wrong directory and
+        # the hub's processor never sees it (no error, but silent drop).
+        path = (u.path or '/').lstrip('/')
         ftp_cls = ftplib.FTP_TLS if u.scheme == 'ftps' else ftplib.FTP
         with ftp_cls() as ftp:
             ftp.connect(host, port, timeout=self.timeout)
-            ftp.login(user, pw)
+            login_resp = ftp.login(user, pw)
+            logger.info('QWK FTP upload login as %s @ %s:%s -> %s',
+                        user, host, port, (login_resp or '').replace('\n', ' '))
             if u.scheme == 'ftps':
                 try:
                     ftp.prot_p()
                 except Exception:
                     pass
-            ftp.storbinary(f'STOR {path}', _io.BytesIO(data))
+            ftp.set_pasv(True)
+            resp = ftp.storbinary(f'STOR {path}', _io.BytesIO(data))
+            logger.info('QWK FTP uploaded %s (%d bytes) → %s', path, len(data), resp)
+            # Verify: Synchronet's FTP server does not expose data_dir/file/*.rep
+            # back via RETR, so a 550 error here is expected and normal — it means
+            # the REP was accepted and queued for unpack_rep() processing by the
+            # event thread.  A successful RETR (file still readable) would mean the
+            # file landed in the wrong place (e.g., a file-area directory) and will
+            # never be QWK-processed.
+            try:
+                verify_buf = _io.BytesIO()
+                ftp.retrbinary(f'RETR {path}', verify_buf.write)
+                logger.warning('QWK FTP verify: RETR %s succeeded (%d bytes) — '
+                               'file is in a BBS file area, NOT the QWK queue. '
+                               'Check that the upload URL has no path prefix '
+                               '(should be ftp://dove.synchro.net/{hub_id}.rep).',
+                               path, verify_buf.tell())
+            except Exception as ve:
+                logger.info('QWK FTP verify: RETR %s → %s (expected — '
+                            'Synchronet stores the REP internally; '
+                            'event thread will call unpack_rep())', path, ve)
 
     def _parse_qwk_packet(self, data: bytes):
         """Parse a QWK zip packet and return list of message dicts."""
@@ -539,6 +637,9 @@ class QWKClient:
                 messages_data = zf.read(messages_name)
 
             info = _parse_control_dat(control_data)
+            logger.info('QWK CONTROL.DAT bbs=%r conferences=%r',
+                        info.get('bbs_name', ''),
+                        sorted(info['conferences'].items()))
             messages = _parse_messages_dat(messages_data, info['conferences'])
             return messages
         except zipfile.BadZipFile as exc:

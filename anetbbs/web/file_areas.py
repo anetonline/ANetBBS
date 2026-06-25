@@ -507,6 +507,122 @@ def revoke_share(link_id):
 
 
 # ---------------------------------------------------------------------------
+# Sysop file management (list / delete / edit desc / upload inside an area)
+# ---------------------------------------------------------------------------
+
+@file_areas_bp.route('/<int:area_id>/manage')
+@login_required
+def manage_files(area_id):
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    area = FileArea.query.get_or_404(area_id)
+    files = _scan_area(area)
+    return render_template('file_areas/manage.html', area=area, files=files)
+
+
+@file_areas_bp.route('/<int:area_id>/manage/delete', methods=['POST'])
+@login_required
+def manage_delete(area_id):
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    area = FileArea.query.get_or_404(area_id)
+    filename = request.form.get('filename', '')
+    if not filename or filename.startswith('.') or os.sep in filename:
+        flash('Invalid filename.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    if not area.storage_path:
+        flash('No storage path set for this area.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
+        flash('Invalid path.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    if not os.path.isfile(full):
+        flash(f'{filename} not found.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    try:
+        os.remove(full)
+        cache = _load_desc_cache(area)
+        if filename in cache:
+            del cache[filename]
+            _save_desc_cache(area, cache)
+        flash(f'Deleted {filename}.', 'success')
+    except OSError as exc:
+        flash(f'Delete failed: {exc}', 'danger')
+    return redirect(url_for('file_areas.manage_files', area_id=area.id))
+
+
+@file_areas_bp.route('/<int:area_id>/manage/desc', methods=['POST'])
+@login_required
+def manage_desc(area_id):
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    area = FileArea.query.get_or_404(area_id)
+    filename = request.form.get('filename', '')
+    description = (request.form.get('description') or '').strip()
+    if not filename or filename.startswith('.') or os.sep in filename:
+        flash('Invalid filename.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    if not area.storage_path:
+        flash('No storage path set.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    full = os.path.join(area.storage_path, filename)
+    if not os.path.isfile(full):
+        flash(f'{filename} not found.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    try:
+        st = os.stat(full)
+        cache = _load_desc_cache(area)
+        cache[filename] = {
+            'mtime': int(st.st_mtime),
+            'size': st.st_size,
+            'description': description,
+        }
+        _save_desc_cache(area, cache)
+        flash(f'Description updated for {filename}.', 'success')
+    except OSError as exc:
+        flash(f'Failed: {exc}', 'danger')
+    return redirect(url_for('file_areas.manage_files', area_id=area.id))
+
+
+@file_areas_bp.route('/<int:area_id>/manage/upload', methods=['POST'])
+@login_required
+def manage_upload(area_id):
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    area = FileArea.query.get_or_404(area_id)
+    if not area.storage_path:
+        flash('No storage path configured for this area.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    f = request.files.get('file')
+    if not f or not f.filename:
+        flash('No file selected.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    safe_name = os.path.basename(f.filename)
+    if not safe_name or safe_name.startswith('.'):
+        flash('Invalid filename.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    description = (request.form.get('description') or '').strip()
+    try:
+        os.makedirs(area.storage_path, exist_ok=True)
+        dest = os.path.join(area.storage_path, safe_name)
+        f.save(dest)
+        if description:
+            st = os.stat(dest)
+            cache = _load_desc_cache(area)
+            cache[safe_name] = {
+                'mtime': int(st.st_mtime),
+                'size': st.st_size,
+                'description': description,
+            }
+            _save_desc_cache(area, cache)
+        flash(f'Uploaded {safe_name}.', 'success')
+    except OSError as exc:
+        flash(f'Upload failed: {exc}', 'danger')
+    return redirect(url_for('file_areas.manage_files', area_id=area.id))
+
+
+# ---------------------------------------------------------------------------
 # Smart upload — pick (or auto-detect) the target file area by tag
 # ---------------------------------------------------------------------------
 

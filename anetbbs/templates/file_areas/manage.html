@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Files — {{ area.tag }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-folder-check"></i> Manage Files: {{ area.name or area.tag }}</h1>
+    <p class="text-muted small">
+        <code>{{ area.tag }}</code>
+        {% if area.storage_path %} — <code>{{ area.storage_path }}</code>{% endif %}
+        — {{ files|length }} file(s)
+    </p>
+    <div class="d-flex gap-2 mt-1">
+        <a href="{{ url_for('file_areas.view_area', area_id=area.id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-eye"></i> User View
+        </a>
+        <a href="{{ url_for('admin.file_areas_admin') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Admin: File Areas
+        </a>
+    </div>
+</div>
+
+{# ── Upload ── #}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-cloud-upload"></i> Upload File (Sysop Direct)</div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('file_areas.manage_upload', area_id=area.id) }}"
+              enctype="multipart/form-data" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-5">
+                <label class="form-label mb-1">File</label>
+                <input type="file" name="file" class="form-control" required>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label mb-1">Description <span class="text-muted small">(optional)</span></label>
+                <input type="text" name="description" class="form-control" placeholder="Short description…" maxlength="512">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-success w-100"><i class="bi bi-upload"></i> Upload</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── File list ── #}
+<div class="card">
+    <div class="card-body p-0">
+    {% if files %}
+        <table class="table table-sm table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th style="width:90px">Size</th>
+                    <th style="width:100px">Date</th>
+                    <th>Description</th>
+                    <th style="width:80px" class="text-center">Delete</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for f in files %}
+            <tr id="row-{{ loop.index }}">
+                <td>
+                    {% if f.is_image %}
+                    <img src="{{ url_for('file_areas.thumbnail', area_id=area.id, filename=f.name) }}"
+                         alt="" style="max-height:40px;max-width:56px;vertical-align:middle;margin-right:6px;border:1px solid #444;">
+                    {% endif %}
+                    <a href="{{ url_for('file_areas.download', area_id=area.id, filename=f.name) }}"
+                       class="text-info">{{ f.name }}</a>
+                </td>
+                <td class="text-nowrap text-muted small">{{ '%.1f'|format(f.size / 1024) }} KB</td>
+                <td class="text-nowrap text-muted small">{{ f.mtime.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    {# Inline description editor — click Edit to expand #}
+                    <div class="d-flex align-items-start gap-1">
+                        <div class="flex-grow-1">
+                            <span class="desc-display-{{ loop.index }} text-muted small"
+                                  style="white-space:pre-wrap;display:block;max-height:3.5em;overflow:hidden;">{% if f.description %}{{ f.description.split('\n')[0][:120] }}{% else %}<em class="text-secondary">no description</em>{% endif %}</span>
+                            <form method="post" action="{{ url_for('file_areas.manage_desc', area_id=area.id) }}"
+                                  class="desc-form-{{ loop.index }} mt-1" style="display:none;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="filename" value="{{ f.name }}">
+                                <textarea name="description" rows="3"
+                                          class="form-control form-control-sm mb-1"
+                                          style="font-size:0.8rem;">{{ f.description or '' }}</textarea>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-primary btn-sm">Save</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                                            onclick="cancelDesc({{ loop.index }})">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                        <button type="button" class="btn btn-outline-info btn-sm flex-shrink-0"
+                                style="font-size:0.7rem;"
+                                onclick="editDesc({{ loop.index }})">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                    </div>
+                </td>
+                <td class="text-center">
+                    <form method="post" action="{{ url_for('file_areas.manage_delete', area_id=area.id) }}"
+                          onsubmit="return confirm('Delete {{ f.name }}? This cannot be undone.')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="filename" value="{{ f.name }}">
+                        <button class="btn btn-outline-danger btn-sm" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">
+            No files in this area yet. Use the upload form above to add files.
+        </div>
+    {% endif %}
+    </div>
+</div>
+
+<script>
+function editDesc(i) {
+    document.querySelector('.desc-display-' + i).style.display = 'none';
+    document.querySelector('.desc-form-' + i).style.display = 'block';
+}
+function cancelDesc(i) {
+    document.querySelector('.desc-display-' + i).style.display = 'block';
+    document.querySelector('.desc-form-' + i).style.display = 'none';
+}
+</script>
+{% endblock %}
