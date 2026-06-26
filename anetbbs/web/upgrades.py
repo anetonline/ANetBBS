@@ -216,6 +216,8 @@ def _upstream_url(cfg) -> str:
 def _fetch_upstream(cfg, force: bool = False):
     """Return (data_or_none, error_or_none). Caches briefly."""
     url = _upstream_url(cfg)
+    if not url.startswith(('http://', 'https://')):
+        return None, 'upstream not configured — set REGISTRY_URL in Admin → Settings'
     now = time.time()
     with _upstream_lock:
         if (not force

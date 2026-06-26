@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.207`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0a2.210`** (July 2026). Full release: August 1 2026.
+
+## v1.0a2.210 — Fix upgrade checker error when REGISTRY_URL is not configured (July 2026)
+
+Admin → Upgrades no longer shows a `MissingSchema` error when `REGISTRY_URL` is not set. It now shows "upstream not configured" instead.
+
+## v1.0a2.209 — Menu admin: add imsg / imsg_send / rss to action-type dropdown (July 2026)
 
 ## v1.0a2.207 — Terminal MRC fixes; QWK blank-body diagnostic (July 2026)
 

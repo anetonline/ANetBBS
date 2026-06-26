@@ -1,3 +1,13 @@
+# ANetBBS v1.0a2.210 — Fix upgrade checker error when REGISTRY_URL is not configured (July 2026)
+
+Admin → Upgrades no longer shows a `MissingSchema` error when `REGISTRY_URL` is not set.
+
+---
+
+# ANetBBS v1.0a2.209 — Menu admin: add imsg / imsg_send / rss to action-type dropdown (July 2026)
+
+---
+
 # ANetBBS v1.0a2.207 — Terminal MRC fixes; QWK blank-body diagnostic (July 2026)
 
 **Terminal MRC chat (`/mrc`):**

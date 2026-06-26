@@ -699,11 +699,14 @@ def seed_default_menus():
                     (it.action_type, it.action_args or '')
                     for it in existing_items
                 }
+                existing_labels  = {it.label for it in existing_items}
                 existing_hotkeys = {(it.hotkey or '').upper() for it in existing_items}
                 for idef in mdef['items']:
                     action_key = (idef['action_type'], idef.get('action_args') or '')
                     if action_key in existing_actions:
                         continue  # functionality already present; hotkey may differ — leave it alone
+                    if idef['label'] in existing_labels:
+                        continue  # same label exists under a legacy action_type — leave it alone
                     hotkey = idef['hotkey']
                     if hotkey.upper() in existing_hotkeys:
                         continue  # new feature but hotkey conflicts — skip rather than create duplicate
