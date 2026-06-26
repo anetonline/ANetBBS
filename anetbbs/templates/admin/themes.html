@@ -41,11 +41,20 @@
                     <td>
                         <form method="post" action="{{ url_for('admin.toggle_theme_active', theme_id=theme.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-primary">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Toggle active">
                                 <i class="bi bi-{{ 'toggle-on' if theme.is_active else 'toggle-off' }}"></i>
                             </button>
                         </form>
-                        <a href="{{ url_for('admin.edit_theme', theme_id=theme.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{{ url_for('admin.edit_theme', theme_id=theme.id) }}" class="btn btn-sm btn-primary" title="Edit"><i class="bi bi-pencil"></i></a>
+                        {% if not theme.is_default %}
+                        <form method="post" action="{{ url_for('admin.delete_theme', theme_id=theme.id) }}" class="d-inline"
+                              onsubmit="return confirm('Delete theme &quot;{{ theme.display_name }}&quot;? Users with this theme will revert to default.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                        </form>
+                        {% else %}
+                        <button class="btn btn-sm btn-danger" disabled title="Cannot delete default theme"><i class="bi bi-trash"></i></button>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

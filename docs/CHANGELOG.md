@@ -1,7 +1,65 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.188`** (June 2026). Previous: `v1.0a2.179`.
+separately. Current release: **`v1.0a2.201`** (June 2026). Beta target: July 1 2026. Full release: August 1 2026.
+
+## v1.0a2.201 — Theme edit/delete; MSP toggle in Admin Settings (June 25 2026)
+
+**Theme management is now fully self-service from the admin UI.**
+
+- Admin → Themes: Delete button added for each theme. The default theme's delete button is
+  disabled (can't remove the fallback). A browser confirm dialog guards against accidents.
+  Any users who had the deleted theme selected are automatically migrated to the system default.
+- Theme Builder: existing-themes table now has Edit and Delete action buttons alongside each
+  row — no need to navigate away to Admin → Themes just to fix a name or remove a test theme.
+- Admin → Settings: `MSP_ENABLED` and `MSP_PORT` are now listed under Editable Settings.
+  Sysops can toggle MSP (inter-BBS instant messaging, RFC 1312) on or off and change the port
+  without editing `.env` manually. Flagged as requires-restart so the UI reminds you.
+
+## v1.0a2.200 — File areas manage page; build-release.sh; echomail admin polish (June 25 2026)
+
+- File areas: new `manage.html` template for per-area file management.
+- `build-release.sh`: canonical tarball builder — correct top-level dir wrapper, comprehensive
+  exclusion list (`.env`, `.claude`, MRC live data, user databases), sanity-check that aborts
+  loudly if any sensitive file would be included. Replaces all manual `tar czf` usage.
+- Echomail admin `network_form.html`: UI improvements.
+- ANetCRAFT web game: `anetcraft_enhanced.html` template added.
+- QWK outbound diagnostics removed (verbose body hex dump + `/tmp` REP copy introduced in
+  v1.0a2.198 no longer needed after confirmed fix).
+
+## v1.0a2.199 — QWK outbound: fix \\r in body + MSGID space truncation (June 2026)
+
+Two bugs in `_build_rep_packet` confirmed by hex-dumping the REP file:
+
+1. **`\r` bytes left in body** — body encoding converted `\n` → `\xe3` but left `\r` from
+   Windows `\r\n` line endings, producing `\r\xe3` instead of bare `\xe3` throughout.
+   Fix: replace `\r\n` first, then lone `\r`, then `\n`.
+
+2. **MSGID space → Synchronet dupe truncation** — auto-generated MSGID was
+   `ANETBBS_<hash> <timestamp>`. Synchronet's `qwk_import_msg` calls `truncstr(p, " ")`
+   on the MSGID, storing only `ANETBBS_<hash>`. That truncated stub is identical on every
+   re-upload of the same message → dupe detection silently drops it.
+   Fix: use underscore separator → `ANETBBS_<hash>_<timestamp>`.
+
+Outbound messages to Dove-Net/vert.synchro.net confirmed working after this fix.
+
+## v1.0a2.198 — QWK diagnostics: REP saved to /tmp, body hex dump (June 2026)
+
+Temporary diagnostics to pinpoint outbound QWK failures:
+save REP to `/tmp/anetbbs_last.rep`; log first 64 bytes of body hex. Removed in v1.0a2.200.
+
+## v1.0a2.196–197 — QWK outbound: uppercase MSG filename, conf_num, space padding (June 2026)
+
+- Inner ZIP entry renamed `VERT.MSG` (uppercase) — Synchronet's `un_rep.cpp` filters on
+  `SAFEST_FILENAME_CHARS`; lowercase extension caused silent extraction failure.
+- Body block padding changed from null bytes to spaces (0x20) per QWK spec.
+- Conference number extraction handles both plain numeric tags and legacy `QWK_N` prefix.
+
+## v1.0a2.189–195 — QWK outbound investigation series (June 2026)
+
+Iterative fixes tracing why outbound messages weren't appearing on Dove-Net:
+REP packet structure, FTP upload auth, conference mapping, area-tag normalisation,
+hub_id vs packet_id distinction in filenames. See v1.0a2.186–188 for earlier steps.
 
 ## v1.0a2.188 — QWK network form: hub_id field added; upload URL uses hub_id (June 2026)
 

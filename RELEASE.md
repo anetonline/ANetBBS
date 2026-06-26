@@ -1,3 +1,17 @@
+# ANetBBS v1.0a2.201 — Theme edit/delete + MSP toggle in Admin Settings (June 2026)
+
+Theme management is now fully self-service from the admin UI:
+
+- **Theme edit**: Edit button was wired to the route but missing from the theme_builder listing.
+  Now shows in both Admin → Themes and the Theme Builder's existing-themes table.
+- **Theme delete**: New `DELETE /admin/themes/<id>/delete` route. Refuses to delete the
+  active default theme (the button is disabled with a tooltip). Users who had the deleted theme
+  selected fall back gracefully (their `theme_id` is nulled → system default applies).
+  Confirm dialog in browser prevents accidental deletion.
+- **MSP enable/disable**: `MSP_ENABLED` and `MSP_PORT` added to Admin → Settings
+  EDITABLE_SETTINGS list. Sysops can now toggle MSP on/off and change the port from the UI
+  without editing `.env` by hand. Requires service restart (flagged in the UI).
+
 # ANetBBS v1.0a2.200 — QWK outbound: remove diagnostic logging
 
 Remove verbose REP diagnostics added in v1.0a2.198 (body hex dump, /tmp REP copy).

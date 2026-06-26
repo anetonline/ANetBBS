@@ -903,6 +903,24 @@ def toggle_theme_active(theme_id):
     return redirect(url_for('admin.themes'))
 
 
+@admin_bp.route('/themes/<int:theme_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_theme(theme_id):
+    """Delete a theme — refuses if it is the default."""
+    from ..models import User as _User
+    theme = Theme.query.get_or_404(theme_id)
+    if theme.is_default:
+        flash('Cannot delete the default theme. Set another theme as default first.', 'danger')
+        return redirect(url_for('admin.themes'))
+    # Null out any user references so the FK doesn't block the delete
+    _User.query.filter_by(theme_id=theme_id).update({'theme_id': None}, synchronize_session='fetch')
+    db.session.delete(theme)
+    db.session.commit()
+    flash(f'Theme "{theme.display_name}" deleted.', 'success')
+    return redirect(url_for('admin.themes'))
+
+
 EDITABLE_SETTINGS = [
     # (key, label, type, requires_restart)
     ('BBS_NAME', 'BBS Name', 'text', False),
@@ -940,6 +958,8 @@ EDITABLE_SETTINGS = [
     ('MRC_BRIDGE_HOST', 'MRC Bridge Host', 'text', False),
     ('MRC_BRIDGE_PORT', 'MRC Bridge Port', 'text', False),
     ('MRC_BRIDGE_WS_PATH', 'MRC Bridge WS Path', 'text', False),
+    ('MSP_ENABLED', 'MSP Enabled — inter-BBS instant messages (true/false)', 'text', True),
+    ('MSP_PORT', 'MSP Port (default 18, needs CAP_NET_BIND_SERVICE)', 'text', True),
 ]
 
 

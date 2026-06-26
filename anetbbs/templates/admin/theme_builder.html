@@ -59,16 +59,28 @@
     <div class="card-header">Existing themes</div>
     <div class="card-body p-0">
         <table class="table table-sm mb-0">
-            <thead><tr><th>Slug</th><th>Display name</th><th>Active</th></tr></thead>
+            <thead><tr><th>Slug</th><th>Display name</th><th>Active</th><th>Actions</th></tr></thead>
             <tbody>
             {% for t in themes %}
                 <tr>
                     <td><code>{{ t.name }}</code></td>
                     <td>{{ t.display_name }}</td>
                     <td>{% if t.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
+                    <td>
+                        <a href="{{ url_for('admin.edit_theme', theme_id=t.id) }}" class="btn btn-sm btn-primary" title="Edit"><i class="bi bi-pencil"></i></a>
+                        {% if not t.is_default %}
+                        <form method="post" action="{{ url_for('admin.delete_theme', theme_id=t.id) }}" class="d-inline"
+                              onsubmit="return confirm('Delete theme &quot;{{ t.display_name }}&quot;?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                        </form>
+                        {% else %}
+                        <button class="btn btn-sm btn-danger" disabled title="Cannot delete default theme"><i class="bi bi-trash"></i></button>
+                        {% endif %}
+                    </td>
                 </tr>
             {% else %}
-                <tr><td colspan="3" class="text-muted text-center p-3">No themes saved.</td></tr>
+                <tr><td colspan="4" class="text-muted text-center p-3">No themes saved.</td></tr>
             {% endfor %}
             </tbody>
         </table>
