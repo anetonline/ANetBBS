@@ -42,12 +42,14 @@ def _check(name_key, limit, window):
         return True
 
 
-def rate_limit(name, limit, window, key_fn=None, on_block=None):
+def rate_limit(name, limit, window, key_fn=None, on_block=None, on_exceed=None):
     """Decorator. `name` is a unique identifier for the route. `limit`
     is the maximum allowed requests in `window` seconds. `key_fn` is
     a callable returning a string identifier (default: client IP).
     `on_block` is a callable returning a Flask response when blocked
     (default: 429 JSON for /api/* paths, plain abort(429) otherwise).
+    `on_exceed` is an optional no-arg side-effect callable fired before
+    the 429 response (e.g. to trigger an auto-ban); exceptions are swallowed.
     """
     def deco(fn):
         @wraps(fn)
@@ -58,6 +60,11 @@ def rate_limit(name, limit, window, key_fn=None, on_block=None):
                 key = str(key_fn())
             bucket_key = f'{name}:{key}'
             if not _check(bucket_key, limit, window):
+                if on_exceed is not None:
+                    try:
+                        on_exceed()
+                    except Exception:
+                        pass
                 if on_block is not None:
                     return on_block()
                 if request.path.startswith('/api/'):

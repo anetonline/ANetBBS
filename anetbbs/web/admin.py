@@ -960,6 +960,9 @@ EDITABLE_SETTINGS = [
     ('MRC_BRIDGE_WS_PATH', 'MRC Bridge WS Path', 'text', False),
     ('MSP_ENABLED', 'MSP Enabled — inter-BBS instant messages (true/false)', 'text', True),
     ('MSP_PORT', 'MSP Port (default 18, needs CAP_NET_BIND_SERVICE)', 'text', True),
+    ('BLOCKED_COUNTRIES', 'Blocked countries — comma-separated ISO codes (e.g. CN,RU,KP), blank = disabled (uses ip-api.com, no registration)', 'text', False),
+    ('WIKI_MIN_POSTS', 'Wiki edit gate — minimum post count (0 = no gate)', 'text', False),
+    ('WIKI_MIN_DAYS', 'Wiki edit gate — minimum account age in days (0 = no gate)', 'text', False),
 ]
 
 
@@ -1623,6 +1626,37 @@ def ip_bans():
         return redirect(url_for('admin.ip_bans'))
     rows = IpBan.query.order_by(IpBan.created_at.desc()).all()
     return render_template('admin/ip_bans.html', rows=rows)
+
+
+@admin_bp.route('/ip-whitelist', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def ip_whitelist():
+    from ..models import IpWhitelist
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'add':
+            cidr = (request.form.get('cidr') or '').strip()
+            note = (request.form.get('note') or '').strip() or None
+            if not cidr:
+                flash('IP / CIDR required.', 'danger')
+            elif IpWhitelist.query.filter_by(cidr=cidr).first():
+                flash('Already whitelisted.', 'info')
+            else:
+                db.session.add(IpWhitelist(cidr=cidr, note=note,
+                                           added_by_id=current_user.id))
+                db.session.commit()
+                flash(f'Whitelisted {cidr}.', 'success')
+        elif action == 'remove':
+            wid = request.form.get('whitelist_id', type=int)
+            row = IpWhitelist.query.get(wid)
+            if row:
+                db.session.delete(row)
+                db.session.commit()
+                flash('Entry removed.', 'success')
+        return redirect(url_for('admin.ip_whitelist'))
+    rows = IpWhitelist.query.order_by(IpWhitelist.created_at.desc()).all()
+    return render_template('admin/ip_whitelist.html', rows=rows)
 
 
 @admin_bp.route('/users/<int:user_id>/manage', methods=['GET', 'POST'])

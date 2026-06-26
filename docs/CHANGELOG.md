@@ -1,7 +1,32 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.201`** (June 2026). Beta target: July 1 2026. Full release: August 1 2026.
+separately. Current release: **`v1.0a2.202`** (June 2026). Beta target: July 1 2026. Full release: August 1 2026.
+
+## v1.0a2.202 — Auto-ban; IP whitelist; GeoIP country blocking; wiki edit gate (June 25 2026)
+
+**Security hardening and anti-spam protections.**
+
+- **Auto-ban**: When the login rate limiter trips (10 attempts in 5 min), the source IP is
+  permanently written to the IpBan table automatically — no sysop action needed. Visible and
+  removable from Admin → IP Bans like any manual ban. Auto-bans have no expiry by default.
+- **IP whitelist** (`Admin → IP Whitelist`): New table `ip_whitelist`. Entries bypass all
+  ban checks AND GeoIP country blocks. Use for sysop home IPs, trusted peers, and VPN exit
+  nodes. Supports single IPs and CIDR ranges.
+- **Country blocking**: Set `BLOCKED_COUNTRIES=CN,RU,KP` (comma-separated ISO codes) in
+  Admin → Settings. Blocks login and registration from listed countries. Uses
+  [ip-api.com](http://ip-api.com) — free, no registration, no download, no API key. Results
+  cached in-memory for 1 hour so repeated login attempts don't add latency. Fails open
+  (lookup error = allow) so a network hiccup never locks out users. Whitelisted IPs are exempt.
+- **fail2ban configs** (`deploy/fail2ban/`): Filter (`filter.d/anetbbs-web.conf`) matches
+  nginx 429 responses on `/auth/login`. Jail (`jail.d/anetbbs-web.conf`) bans after 3 hits
+  in 10 min for 24 h, covering ports 80, 443, 2233, 2234. Belt-and-suspenders on top of the
+  in-process auto-ban above.
+- **Wiki edit gate**: New users must have at least 5 posts and a 3-day-old account before
+  editing any wiki page. Configurable via `WIKI_MIN_POSTS` and `WIKI_MIN_DAYS` in Admin →
+  Settings (set to 0 to disable). Admins are always exempt. Message tells the user exactly
+  what requirement they don't yet meet.
+- New settings in Admin → Settings: `BLOCKED_COUNTRIES`, `WIKI_MIN_POSTS`, `WIKI_MIN_DAYS`.
 
 ## v1.0a2.201 — Theme edit/delete; MSP toggle in Admin Settings (June 25 2026)
 

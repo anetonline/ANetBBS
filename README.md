@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: alpha 2** (`v1.0a2.201`, June 2026) — Beta target: **July 1 2026** | Full release: **August 1 2026**
+**Status: alpha 2** (`v1.0a2.202`, June 2026) — Beta target: **July 1 2026** | Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0a2.201.tar.gz
-cd ANetBBS-v1.0a2.201
+tar xzf ANetBBS-v1.0a2.202.tar.gz
+cd ANetBBS-v1.0a2.202
 sudo bash install.sh
 ```
 
@@ -70,7 +70,7 @@ For details on individual services and post-install configuration see
 - 41 seeded pages cover connecting, every messaging subsystem, doors
   (including a LORD recipe + the DosBridge), echomail/BinkP setup,
   NodeSpy, backup, full architecture, sysop guide, glossary, FAQ
-- Anyone can read; logged-in users can edit; admins can lock/delete/rename
+- Anyone can read; logged-in users can edit (configurable minimum post count + account age); admins can lock/delete/rename
 
 ### RSS Reader
 - Built-in feed aggregator for BBS-scene news + anything else

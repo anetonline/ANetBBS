@@ -1,3 +1,12 @@
+# ANetBBS v1.0a2.202 — Security: auto-ban, IP whitelist, GeoIP country blocking, wiki edit gate (June 2026)
+
+Auto-ban permanently blocks IPs that trip the login rate limiter (10 attempts / 5 min).
+IP whitelist bypasses all ban and country checks. Country blocking via ip-api.com (free,
+no registration — just set BLOCKED_COUNTRIES=CN,RU,... in Admin Settings). Wiki edit gate
+requires 5 posts + 3-day account (configurable). fail2ban configs in deploy/fail2ban/.
+
+---
+
 # ANetBBS v1.0a2.201 — Theme edit/delete + MSP toggle in Admin Settings (June 2026)
 
 Theme management is now fully self-service from the admin UI:

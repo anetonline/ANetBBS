@@ -151,6 +151,16 @@ class Config:
         'DOWNLOADS_EXTENSIONS',
         'tar.gz,tgz,zip,7z,bz2,xz,rar,iso,img,asc,sig,sha256,md5,txt,nfo,diz')
 
+    # Security — country blocking via ip-api.com (free, no registration).
+    # Comma-separated ISO 3166-1 alpha-2 codes to block (e.g. CN,RU,KP).
+    # Leave blank to disable. Lookup results are cached in-memory for 1 hour.
+    BLOCKED_COUNTRIES = os.environ.get('BLOCKED_COUNTRIES', '')
+
+    # Wiki edit gate — minimum requirements to edit any wiki page.
+    # Set both to 0 to disable the gate entirely.
+    WIKI_MIN_POSTS = int(os.environ.get('WIKI_MIN_POSTS', '5'))
+    WIKI_MIN_DAYS = int(os.environ.get('WIKI_MIN_DAYS', '3'))
+
     # Inter-BBS Instant Messaging (MSP / RFC 1312)
     MSP_ENABLED = True
     MSP_BIND_HOST = '0.0.0.0'

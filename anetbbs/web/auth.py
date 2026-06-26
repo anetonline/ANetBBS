@@ -3,6 +3,8 @@
 Authentication blueprint for user login, registration, and logout
 """
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
@@ -19,6 +21,11 @@ from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
 from ..features.rate_limit import rate_limit
 
 
+# In-memory country-lookup cache: ip -> (country_code, expiry_timestamp)
+_geoip_cache: dict = {}
+_geoip_lock = threading.Lock()
+
+
 def _client_ip():
     """Best-effort client IP — honors X-Forwarded-For if behind a proxy."""
     fwd = request.headers.get('X-Forwarded-For', '')
@@ -27,33 +34,107 @@ def _client_ip():
     return request.remote_addr or ''
 
 
-def _ip_is_banned(ip):
-    """Return True if `ip` matches any active IpBan row (including CIDR
-    netmask). Best-effort — silently returns False on error."""
+def _cidr_match(ip_str, cidr_list):
+    """Return True if ip_str matches any entry in cidr_list (IP strings or CIDR strings)."""
+    import ipaddress as _ipa
+    try:
+        addr = _ipa.ip_address(ip_str)
+    except ValueError:
+        return False
+    for entry in cidr_list:
+        try:
+            if addr in _ipa.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            if entry == ip_str:
+                return True
+    return False
+
+
+def _ip_is_whitelisted(ip):
+    """Return True if ip matches any IpWhitelist row. Whitelisted IPs bypass all blocks."""
     if not ip:
+        return False
+    try:
+        from ..models import IpWhitelist
+        rows = IpWhitelist.query.with_entities(IpWhitelist.cidr).all()
+        return _cidr_match(ip, [r.cidr for r in rows])
+    except Exception:
+        return False
+
+
+def _ip_is_banned(ip):
+    """Return True if `ip` matches any active IpBan row. Whitelisted IPs always return False."""
+    if not ip:
+        return False
+    if _ip_is_whitelisted(ip):
         return False
     try:
         from ..models import IpBan
         from datetime import datetime as _dt
-        import ipaddress as _ipa
-        try:
-            addr = _ipa.ip_address(ip)
-        except ValueError:
-            return False
         rows = IpBan.query.all()
-        for r in rows:
-            if r.expires_at and r.expires_at < _dt.utcnow():
-                continue
-            try:
-                net = _ipa.ip_network(r.cidr, strict=False)
-                if addr in net:
-                    return True
-            except ValueError:
-                if r.cidr == ip:
-                    return True
+        active = [r.cidr for r in rows
+                  if not (r.expires_at and r.expires_at < _dt.utcnow())]
+        return _cidr_match(ip, active)
     except Exception:
         return False
-    return False
+
+
+def _auto_ban_ip(ip, reason='Auto-ban: login rate limit exceeded (10 attempts / 5 min)'):
+    """Write a permanent IpBan row for ip. No-op if already banned or whitelisted."""
+    if not ip or _ip_is_whitelisted(ip):
+        return
+    try:
+        from ..models import IpBan
+        if IpBan.query.filter_by(cidr=ip).first():
+            return
+        db.session.add(IpBan(cidr=ip, reason=reason, banned_by_id=None, expires_at=None))
+        db.session.commit()
+        try:
+            current_app.logger.warning('Auto-banned IP %s: %s', ip, reason)
+        except RuntimeError:
+            pass
+    except Exception:
+        db.session.rollback()
+
+
+def _ip_country_blocked(ip):
+    """Return True if ip's country is in BLOCKED_COUNTRIES.
+    Uses ip-api.com (free, no registration). Results cached in-memory for 1 hour.
+    Fails open — returns False on any network error so a downed lookup never locks out users."""
+    if not ip:
+        return False
+    try:
+        blocked = current_app.config.get('BLOCKED_COUNTRIES', '')
+        if not blocked:
+            return False
+        countries = {c.strip().upper() for c in blocked.split(',') if c.strip()}
+        if not countries:
+            return False
+
+        now = time.time()
+        with _geoip_lock:
+            entry = _geoip_cache.get(ip)
+            if entry and entry[1] > now:
+                return entry[0] in countries
+
+        import urllib.request, json as _json
+        url = f'http://ip-api.com/json/{ip}?fields=countryCode'
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            data = _json.loads(resp.read())
+        country = (data.get('countryCode') or '').upper()
+
+        with _geoip_lock:
+            _geoip_cache[ip] = (country, now + 3600)
+
+        return country in countries
+    except Exception:
+        return False
+
+
+def _login_rate_exceeded():
+    """Side-effect fired when the login rate limiter trips — permanently bans the source IP."""
+    _auto_ban_ip(_client_ip())
 
 
 def _log_activity(user_id, activity_type, details=None):
@@ -141,15 +222,20 @@ class RegisterForm(FlaskForm):
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
-@rate_limit('login', limit=10, window=300)
+@rate_limit('login', limit=10, window=300, on_exceed=_login_rate_exceeded)
 def login():
     """Login page"""
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
-    
+
+    ip = _client_ip()
     # IP ban check — refuse the login attempt entirely.
-    if _ip_is_banned(_client_ip()):
+    if _ip_is_banned(ip):
         flash('Your IP has been banned. Contact the sysop if you believe this is a mistake.', 'danger')
+        return redirect(url_for('auth.login'))
+    # Country block check.
+    if _ip_country_blocked(ip):
+        flash('Access from your region is not permitted.', 'danger')
         return redirect(url_for('auth.login'))
 
     form = LoginForm()
@@ -251,6 +337,9 @@ def register():
     ip = _client_ip()
     if _ip_is_banned(ip):
         flash('Registrations from your IP are not permitted.', 'danger')
+        return redirect(url_for('auth.login'))
+    if _ip_country_blocked(ip):
+        flash('Registrations from your region are not permitted.', 'danger')
         return redirect(url_for('auth.login'))
     form = RegisterForm()
 

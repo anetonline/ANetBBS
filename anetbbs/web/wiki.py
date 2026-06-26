@@ -27,11 +27,11 @@ from functools import wraps
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, abort, flash, jsonify)
+                   url_for, abort, flash, jsonify, current_app)
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func
 
-from ..models import db, WikiPage, WikiRevision, User
+from ..models import db, WikiPage, WikiRevision, User, Post
 from ..wiki.slug import slugify
 from ..wiki.render import render as render_wiki, extract_outgoing_links
 
@@ -279,6 +279,23 @@ def edit(slug):
             and not getattr(current_user, 'is_admin', False)):
         flash('This page is locked. Only sysops can edit it.', 'warning')
         return redirect(url_for('wiki.view', slug=canonical))
+
+    # Edit gate — minimum post count + account age (admins exempt).
+    if not getattr(current_user, 'is_admin', False):
+        min_posts = int(current_app.config.get('WIKI_MIN_POSTS', 5))
+        min_days = int(current_app.config.get('WIKI_MIN_DAYS', 3))
+        if min_posts or min_days:
+            post_count = Post.query.filter_by(author_id=current_user.id).count()
+            account_age = (datetime.utcnow() - current_user.created_at).days
+            blocked = (post_count < min_posts) or (account_age < min_days)
+            if blocked:
+                parts = []
+                if post_count < min_posts:
+                    parts.append(f'at least {min_posts} post{"s" if min_posts != 1 else ""}')
+                if account_age < min_days:
+                    parts.append(f'an account at least {min_days} day{"s" if min_days != 1 else ""} old')
+                flash(f'Wiki editing requires {" and ".join(parts)}.', 'warning')
+                return redirect(url_for('wiki.view', slug=canonical))
 
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()

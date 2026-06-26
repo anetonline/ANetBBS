@@ -1954,6 +1954,19 @@ class IpBan(db.Model):
     banned_by = db.relationship('User')
 
 
+class IpWhitelist(db.Model):
+    """IPs / CIDRs that bypass all ban and country-block checks."""
+    __tablename__ = 'ip_whitelist'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cidr = db.Column(db.String(45), nullable=False, unique=True, index=True)
+    note = db.Column(db.String(280))
+    added_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    added_by = db.relationship('User')
+
+
 class BoardLastRead(db.Model):
     """Per-user last-visit timestamp per board, for unread counts."""
     __tablename__ = 'board_last_read'
