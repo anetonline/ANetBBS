@@ -2397,7 +2397,9 @@ def setup_wizard_check_hub():
     """
     from flask import jsonify
     import requests
-    hub = (current_app.config.get('REGISTRY_URL') or 'https://bbs.a-net.fyi').rstrip('/')
+    hub = (current_app.config.get('REGISTRY_URL') or '').rstrip('/')
+    if not hub:
+        return jsonify({'hub': '', 'ok': False, 'detail': 'REGISTRY_URL not configured'})
     out = {'hub': hub, 'ok': False, 'detail': ''}
     try:
         r = requests.get(hub + '/anetbbs.lst', timeout=8,

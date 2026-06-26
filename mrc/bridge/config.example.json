@@ -2,7 +2,7 @@
   "mrc_host": "mrc.bottomlessabyss.net",
   "mrc_port": 5000,
   "use_ssl": false,
-  "bridge_bbs": "|12A-Net Online |15MRC Bridge",
+  "bridge_bbs": "|07My BBS |15MRC Bridge",
   "platform_info": "ANETBBS/Linux.x86_64/1.3.20",
   "capabilities": ["MCI", "MSGEXT", "CTCP"],
   "ctcp_echo_channel": "ctcp_echo_channel",

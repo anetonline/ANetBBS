@@ -1,4 +1,4 @@
-ANetBBS v1.0a2.202 - Modern BBS System
+ANetBBS v1.0a2.206 - Modern BBS System
 -----------------------------------------
 Web (Flask+SocketIO), telnet, SSH, rlogin,
 FTP front-ends sharing one user database.
@@ -13,6 +13,6 @@ terminal. Synchronet .js + Mystic .mps +
 DOSBox doors + door32. Sysop NodeSpy.
 CP437/ANSI throughout. Native Linux doors
 (RMDoor/DDPlus/FPC) work via STDIO mode.
-Linux + Python 3.10+ - ./install.sh
-Beta target: July 1 2026
+Linux + Raspberry Pi - ./install.sh
+Beta release: July 1 2026
 github.com/anetonline    By StingRay

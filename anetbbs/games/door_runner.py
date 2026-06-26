@@ -920,8 +920,11 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
     # pts COM1 config: dosemu2 creates an internal PTY pair, holds the master,
     # and symlinks the slave at pts_path.  ANetBBS polls for the symlink then
     # opens it as com1_slave_fd.  DCD=1 is automatic (pseudo=TRUE).
-    pts_path = f'/tmp/anetbbs_com1_n{node_number}_{os.getpid()}'
-    conf_path = f'/tmp/anetbbs_dosemu_n{node_number}_{os.getpid()}.conf'
+    from .node_paths import temp_root as _temp_root
+    _tr = _temp_root()
+    os.makedirs(_tr, exist_ok=True)
+    pts_path = os.path.join(_tr, f'anetbbs_com1_n{node_number}_{os.getpid()}')
+    conf_path = os.path.join(_tr, f'anetbbs_dosemu_n{node_number}_{os.getpid()}.conf')
     try:
         with open(conf_path, 'w') as _cf:
             _cf.write(f'$_com1 = "pts {pts_path}"\n')
@@ -1147,8 +1150,10 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     # _build_dosemu_command so we can retrieve them after _build_command
     # returns its standard 2-tuple.
     if game.game_type == 'door_dosemu':
-        _dosemu_pts_path = f'/tmp/anetbbs_com1_n{node}_{os.getpid()}'
-        _dosemu_conf_path = f'/tmp/anetbbs_dosemu_n{node}_{os.getpid()}.conf'
+        from .node_paths import temp_root as _temp_root
+        _tr = _temp_root()
+        _dosemu_pts_path = os.path.join(_tr, f'anetbbs_com1_n{node}_{os.getpid()}')
+        _dosemu_conf_path = os.path.join(_tr, f'anetbbs_dosemu_n{node}_{os.getpid()}.conf')
     else:
         _dosemu_pts_path = None
         _dosemu_conf_path = None

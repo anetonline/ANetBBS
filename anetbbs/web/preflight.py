@@ -279,7 +279,10 @@ def _check_sudoers():
 
 
 def _check_federation_reachable(cfg):
-    reg_url = cfg.get('REGISTRY_URL') or 'https://bbs.a-net.fyi'
+    reg_url = cfg.get('REGISTRY_URL') or ''
+    if not reg_url:
+        return _check('Federation hub reachable', 'warn', 'REGISTRY_URL not configured',
+                      'Set REGISTRY_URL in Admin → Settings to enable federation.')
     try:
         import requests
         r = requests.get(reg_url.rstrip('/') + '/anetbbs.lst',

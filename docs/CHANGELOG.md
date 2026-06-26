@@ -1,7 +1,41 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.202`** (June 2026). Beta target: July 1 2026. Full release: August 1 2026.
+separately. Current release: **`v1.0a2.206`** (July 2026). Full release: August 1 2026.
+
+## v1.0a2.206 — Fix dosemu2 conf written to /tmp (July 1 2026)
+
+dosemu2 temp files (conf and COM1 PTS path) were hardcoded to `/tmp/`. On
+servers with restricted `/tmp/` permissions the door failed immediately with
+"Permission denied" before dosemu2 even launched. Both paths now use
+`temp_root()` (`<DATA_DIR>/temp/`) which the service user always owns.
+
+## v1.0a2.205 — Fix menu hotkey duplication on update (July 1 2026)
+
+`seed_default_menus()` ran on every startup and backfilled any default hotkey
+not present in the sysop's menu. When a sysop rebound a hotkey (e.g. changed
+`M` → `A` for Message Boards), the original `M` was seen as "missing" and a
+second Message Boards entry was added — causing duplicates on every update.
+
+Fix: backfill now checks by `(action_type, action_args)` instead of hotkey.
+If a menu already has a `boards` action (regardless of what key it's bound to),
+no new `boards` item is added. Truly new features added in new releases still
+backfill automatically, as long as their hotkey doesn't conflict.
+
+## v1.0a2.204 — Remove ANetCRAFT Enhanced and RDQ3 from release (July 1 2026)
+
+- Removed ANetCRAFT Enhanced web game: WEB_GAMES entry deleted from `games/web_games.py`,
+  `templates/games/web/anetcraft_enhanced.html` deleted.
+- Removed Red Dragon Quest 3 door (`doors/mystic/rdq3/`) from the release package.
+
+## v1.0a2.203 — Beta release: package cleanup, REGISTRY_URL fix, docs update (July 1 2026)
+
+- `REGISTRY_URL` default changed from hardcoded hub URL to empty string. Sysops opt in to
+  federation by setting `REGISTRY_URL` in Admin → Settings or `.env`. Preflight check now
+  reports "not configured" instead of silently contacting an external host.
+- `mrc/bridge/config.example.json`: `bridge_bbs` changed to generic placeholder.
+- CHANGELOG v1.0a2.200 entry: removed internal tooling note.
+- README: status updated from alpha 2 to beta; removed broken doc link.
 
 ## v1.0a2.202 — Auto-ban; IP whitelist; GeoIP country blocking; wiki edit gate (June 25 2026)
 
@@ -41,12 +75,9 @@ separately. Current release: **`v1.0a2.202`** (June 2026). Beta target: July 1 2
   Sysops can toggle MSP (inter-BBS instant messaging, RFC 1312) on or off and change the port
   without editing `.env` manually. Flagged as requires-restart so the UI reminds you.
 
-## v1.0a2.200 — File areas manage page; build-release.sh; echomail admin polish (June 25 2026)
+## v1.0a2.200 — File areas manage page; echomail admin polish (June 25 2026)
 
 - File areas: new `manage.html` template for per-area file management.
-- `build-release.sh`: canonical tarball builder — correct top-level dir wrapper, comprehensive
-  exclusion list (`.env`, `.claude`, MRC live data, user databases), sanity-check that aborts
-  loudly if any sensitive file would be included. Replaces all manual `tar czf` usage.
 - Echomail admin `network_form.html`: UI improvements.
 - ANetCRAFT web game: `anetcraft_enhanced.html` template added.
 - QWK outbound diagnostics removed (verbose body hex dump + `/tmp` REP copy introduced in

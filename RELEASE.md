@@ -1,3 +1,39 @@
+# ANetBBS v1.0a2.206 — Fix dosemu2 conf written to /tmp (July 2026)
+
+dosemu2 temp files (conf + COM1 PTS path) were hardcoded to `/tmp/`. Servers
+with a restricted `/tmp/` (noexec or tightened permissions) failed to launch
+any dosemu door with "Permission denied". Files now written to
+`<DATA_DIR>/temp/` via the existing `temp_root()` helper, which the anetbbs
+service user always has write access to.
+
+---
+
+# ANetBBS v1.0a2.205 — Fix menu hotkey duplication on update (July 2026)
+
+Menu seeder now checks by action type instead of hotkey when backfilling new
+items on existing installs. Sysops who rebound default hotkeys no longer get
+duplicate menu entries added back on every service restart or update.
+
+---
+
+# ANetBBS v1.0a2.204 — Remove ANetCRAFT Enhanced and RDQ3 from release (July 2026)
+
+- Removed ANetCRAFT Enhanced web game (template + WEB_GAMES entry)
+- Removed Red Dragon Quest 3 door (doors/mystic/rdq3/)
+
+---
+
+# ANetBBS v1.0a2.203 — Beta release: package cleanup, REGISTRY_URL fix, docs update (July 2026)
+
+Pre-release cleanup for the v1.0 Beta on July 1, 2026.
+
+- Fixed `REGISTRY_URL` default from hardcoded hub to empty string — sysops must now opt in to federation by setting `REGISTRY_URL` in Admin → Settings
+- `mrc/bridge/config.example.json`: changed `bridge_bbs` from hardcoded BBS name to generic placeholder
+- CHANGELOG: removed internal tooling reference from v1.0a2.200 entry
+- README: updated status from alpha 2 to beta; removed broken FEATURES.md link
+
+---
+
 # ANetBBS v1.0a2.202 — Security: auto-ban, IP whitelist, GeoIP country blocking, wiki edit gate (June 2026)
 
 Auto-ban permanently blocks IPs that trip the login rate limiter (10 attempts / 5 min).

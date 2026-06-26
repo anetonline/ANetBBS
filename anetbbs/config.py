@@ -62,17 +62,17 @@ class Config:
     # ANetBBS federation registry —
     #   REGISTRY_MODE_ENABLED: this BBS doubles as the central hub for
     #     anetbbs.lst (the federation directory). Most installs leave it
-    #     false; one designated hub (bbs.a-net.fyi by default) runs it.
+    #     false; only the designated hub sysop enables it.
     #   REGISTRY_URL: where peer ANetBBS instances POST their registration
-    #     + heartbeat, and pull the latest anetbbs.lst from. Points at
-    #     the hub above. New installs ship with the canonical URL so
-    #     they get a populated list out of the box.
+    #     + heartbeat, and pull the latest anetbbs.lst from. Set this to
+    #     the URL of the hub you want to register with. Leave blank to
+    #     disable federation entirely.
     #   REGISTRY_SELF_REGISTER: if true, this BBS auto-registers itself
     #     against REGISTRY_URL on startup + heartbeats daily.
     REGISTRY_MODE_ENABLED = os.environ.get(
         'REGISTRY_MODE_ENABLED', 'false').lower() == 'true'
     REGISTRY_URL = os.environ.get(
-        'REGISTRY_URL', 'https://bbs.a-net.fyi')
+        'REGISTRY_URL', '')
     REGISTRY_SELF_REGISTER = os.environ.get(
         'REGISTRY_SELF_REGISTER', 'false').lower() == 'true'
     # How long an entry can go without a heartbeat before SYSTAT probes

@@ -690,16 +690,26 @@ def seed_default_menus():
                 m = BbsMenu.query.filter_by(name=mdef['name']).first()
                 if not m:
                     continue
-                existing_hotkeys = {
-                    (it.hotkey or '').upper()
-                    for it in BbsMenuItem.query.filter_by(menu_id=m.id).all()
+                existing_items = BbsMenuItem.query.filter_by(menu_id=m.id).all()
+                # Check by (action_type, action_args) — not by hotkey — so sysops
+                # who rebound or removed default hotkeys don't get duplicates added
+                # back on every startup. Only truly new action types (new features
+                # added in a new release) get backfilled.
+                existing_actions = {
+                    (it.action_type, it.action_args or '')
+                    for it in existing_items
                 }
+                existing_hotkeys = {(it.hotkey or '').upper() for it in existing_items}
                 for idef in mdef['items']:
-                    if idef['hotkey'].upper() in existing_hotkeys:
-                        continue
+                    action_key = (idef['action_type'], idef.get('action_args') or '')
+                    if action_key in existing_actions:
+                        continue  # functionality already present; hotkey may differ — leave it alone
+                    hotkey = idef['hotkey']
+                    if hotkey.upper() in existing_hotkeys:
+                        continue  # new feature but hotkey conflicts — skip rather than create duplicate
                     db.session.add(BbsMenuItem(
                         menu_id=m.id,
-                        hotkey=idef['hotkey'],
+                        hotkey=hotkey,
                         label=idef['label'],
                         action_type=idef['action_type'],
                         action_args=idef.get('action_args'),

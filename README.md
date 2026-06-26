@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: alpha 2** (`v1.0a2.202`, June 2026) — Beta target: **July 1 2026** | Full release: **August 1 2026**
+**Status: beta** (`v1.0a2.206`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0a2.202.tar.gz
-cd ANetBBS-v1.0a2.202
+tar xzf ANetBBS-v1.0a2.206.tar.gz
+cd ANetBBS-v1.0a2.206
 sudo bash install.sh
 ```
 
@@ -141,7 +141,6 @@ For details on individual services and post-install configuration see
 
 ## Documentation
 
-- [`FEATURES.md`](FEATURES.md) — full feature inventory for the alpha
 - [`docs/00-overview.md`](docs/00-overview.md) — architecture + table of contents
 - [`docs/INSTALL.md`](docs/INSTALL.md) — full install
 - [`docs/INSTALL-PI.md`](docs/INSTALL-PI.md) — Raspberry Pi install guide (hardware, DDNS, SSD, troubleshooting)
@@ -159,7 +158,7 @@ See [LICENSE](LICENSE).
 
 ## Status / Caveats
 
-This is an **alpha** release. Known rough edges:
+This is a **beta** release. Known rough edges:
 
 - MSP/SYSTAT need privileged ports (11/18) — see
   [`docs/INSTALL.md`](docs/INSTALL.md) for `setcap` / systemd /
@@ -170,6 +169,6 @@ This is an **alpha** release. Known rough edges:
   dies with a `ReferenceError` and the missing stub will get added.
 - Single-process rate limits — fine for one gunicorn worker; needs an
   external store for multi-worker setups.
-- Test coverage is light. Real-world testing is the alpha's purpose.
+- Test coverage is light. Real-world testing during beta is encouraged — file issues on GitHub.
 
 Issues and patches welcome.

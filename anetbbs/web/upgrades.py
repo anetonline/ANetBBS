@@ -5,8 +5,8 @@ Two halves living in the same module:
 * **Public-ish API** at ``/api/releases/latest`` — returns JSON describing
   the newest ``ANetBBS-vX.YaZ.NN.tar.gz`` in the configured downloads
   directory. Every install exposes this. The canonical "what's the latest
-  alpha?" answer comes from ``bbs.a-net.fyi`` (the federation hub default
-  for ``REGISTRY_URL``), but the endpoint runs everywhere so a private
+  alpha?" answer comes from whichever host is configured as ``REGISTRY_URL``,
+  but the endpoint runs everywhere so a private
   network of peers can serve their own line.
 * **Sysop UI** at ``/admin/upgrades/`` — admin-only. Shows current
   ``VERSION``, polls the configured upstream, compares, and offers a
@@ -186,7 +186,7 @@ def releases_latest():
     Body shape (200):
         {"version": "v1.0a2.42",
          "name": "ANetBBS-v1.0a2.42.tar.gz",
-         "url": "https://bbs.a-net.fyi/downloads/...",
+         "url": "https://your-registry-host/downloads/...",
          "sha256": "<hex>",
          "size": 7234574,
          "published_at": "2026-05-19T12:50:00Z"}
@@ -209,7 +209,7 @@ _upstream_cache = {'ts': 0.0, 'url': '', 'data': None, 'error': None}
 
 
 def _upstream_url(cfg) -> str:
-    base = (cfg.get('REGISTRY_URL') or 'https://bbs.a-net.fyi').rstrip('/')
+    base = (cfg.get('REGISTRY_URL') or '').rstrip('/')
     return base + '/api/releases/latest'
 
 
