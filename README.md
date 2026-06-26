@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0a2.206`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0a2.206`, July 1 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
