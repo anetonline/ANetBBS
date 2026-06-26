@@ -33,8 +33,9 @@
 </style>
 
 <div id="bj-wrap">
+<div id="bj-broke" style="display:none;background:#7b1c1c;color:#ffe0e0;padding:9px 14px;border-radius:8px;margin-bottom:8px;text-align:center;font-weight:bold;"></div>
 <div id="bj-chips">
-    <span>Balance: <strong id="bj-balance">500</strong></span>
+    <span>Balance: <strong id="bj-balance">—</strong> &nbsp;<small style="color:#888;">Peak: <span id="bj-peak">—</span></small></span>
     <div>
         <span class="bj-chip-btn" style="background:#c0392b;" data-val="5">5</span>
         <span class="bj-chip-btn" style="background:#1a5276;" data-val="10">10</span>
@@ -96,7 +97,12 @@ function handValueFull(hand){
     return total;
 }
 
-let deck=[], dealer=[], user=[], balance=500, bet=0, phase='bet';
+let deck=[], dealer=[], user=[], balance=0, bet=0, phase='bet';
+
+const _WS='{{ game.slug }}';
+function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);else{document.getElementById('bj-peak').textContent=w.peak;}}).catch(()=>{});}
+function _showBroke(d){document.getElementById('bj-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('bj-broke').style.display='';document.getElementById('bj-btn-deal').disabled=true;status('No balance — come back Monday!');}
 
 function makeCardEl(c){
     const d=document.createElement('div');
@@ -125,6 +131,15 @@ function status(t){document.getElementById('bj-status').textContent=t;}
 function updateBalance(){
     document.getElementById('bj-balance').textContent=balance;
     document.getElementById('bj-bet-display').textContent=bet;
+}
+function _loadWallet(){
+    document.getElementById('bj-btn-deal').disabled=true;
+    fetch('/games/'+_WS+'/wallet',{credentials:'same-origin'}).then(r=>r.json()).then(w=>{
+        document.getElementById('bj-peak').textContent=w.peak;
+        if(w.broke){_showBroke(w.resets);return;}
+        balance=w.balance; updateBalance();
+        document.getElementById('bj-btn-deal').disabled=false;
+    }).catch(()=>{balance=500;updateBalance();document.getElementById('bj-btn-deal').disabled=false;});
 }
 
 function deal(){
@@ -211,9 +226,9 @@ function endHand(msg, payout){
     if(payout>0) balance+=payout;
     updateBalance();
     status(msg+(payout>0?` (+${payout})`:(payout<0?` (-${Math.abs(payout)})`:'') ));
-    document.getElementById('bj-btn-deal').disabled=false;
     phase='bet';
-    if(balance<=0){status('Out of chips! Reloading...');setTimeout(()=>{balance=500;updateBalance();},2000);}
+    _wSave(balance);
+    if(balance>0) document.getElementById('bj-btn-deal').disabled=false;
 }
 
 document.getElementById('bj-btn-deal').onclick=deal;
@@ -235,6 +250,6 @@ document.getElementById('bj-clear-bet').onclick=function(e){
     bet=0; updateBalance();
 };
 ['hit','stand','double','split'].forEach(b=>document.getElementById('bj-btn-'+b).disabled=true);
-updateBalance();
+_loadWallet();
 })();
 </script>

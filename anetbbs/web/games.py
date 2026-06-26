@@ -7,11 +7,11 @@ import logging
 import os
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, current_app, send_from_directory, abort, make_response
+from flask import Blueprint, render_template, request, current_app, send_from_directory, abort, make_response, jsonify
 from flask_login import login_required, current_user
 from flask_socketio import join_room, emit
 
-from ..models import db, Game, GameSession, GameScore, GameCategory
+from ..models import db, Game, GameSession, GameScore, GameCategory, WebGameWallet
 from ..web_app import socketio
 
 logger = logging.getLogger(__name__)
@@ -350,6 +350,117 @@ def handle_game_resize(data):
 def game_disconnect():
     """Terminate the game session on WebSocket disconnect."""
     logger.debug('Game socket disconnected')
+
+
+# ---------------------------------------------------------------------------
+# Casino wallet API
+# ---------------------------------------------------------------------------
+
+_CASINO_DEFAULTS = {'blackjack': 500, 'slots': 200, 'videopoker': 200, 'holdem': 1000}
+CASINO_SLUGS = set(_CASINO_DEFAULTS)
+
+
+def _casino_start_bal(slug):
+    default = _CASINO_DEFAULTS.get(slug, 500)
+    try:
+        return int(current_app.config.get(f'CASINO_{slug.upper()}_START', default))
+    except (ValueError, TypeError):
+        return default
+
+
+def _week_start():
+    from datetime import date, timedelta
+    today = date.today()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+def _next_monday():
+    from datetime import date, timedelta
+    today = date.today()
+    return (today + timedelta(days=7 - today.weekday())).isoformat()
+
+
+def _wallet_json(w):
+    broke = w.balance <= 0
+    return jsonify({
+        'balance': w.balance,
+        'peak': w.peak_balance,
+        'starting_balance': w.starting_balance,
+        'broke': broke,
+        'resets': _next_monday() if broke else None,
+    })
+
+
+@games_bp.route('/<slug>/wallet')
+@login_required
+def get_wallet(slug):
+    if slug not in CASINO_SLUGS:
+        abort(404)
+    week = _week_start()
+    start = _casino_start_bal(slug)
+    wallet = WebGameWallet.query.filter_by(
+        user_id=current_user.id, game_slug=slug).first()
+    if wallet is None:
+        wallet = WebGameWallet(
+            user_id=current_user.id, game_slug=slug,
+            balance=start, peak_balance=start,
+            starting_balance=start, week_start=week,
+            last_active=datetime.utcnow(),
+        )
+        db.session.add(wallet)
+        db.session.commit()
+    elif wallet.week_start != week:
+        wallet.balance = start
+        wallet.starting_balance = start
+        wallet.week_start = week
+        wallet.last_active = datetime.utcnow()
+        db.session.commit()
+    return _wallet_json(wallet)
+
+
+@games_bp.route('/<slug>/wallet', methods=['POST'])
+@login_required
+def update_wallet(slug):
+    if slug not in CASINO_SLUGS:
+        abort(404)
+    game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    data = request.get_json(silent=True) or {}
+    new_bal = max(0, int(data.get('balance', 0)))
+    week = _week_start()
+    start = _casino_start_bal(slug)
+
+    wallet = WebGameWallet.query.filter_by(
+        user_id=current_user.id, game_slug=slug).first()
+    if wallet is None:
+        wallet = WebGameWallet(
+            user_id=current_user.id, game_slug=slug,
+            balance=new_bal, peak_balance=new_bal,
+            starting_balance=start, week_start=week,
+            last_active=datetime.utcnow(),
+        )
+        db.session.add(wallet)
+    else:
+        if wallet.week_start != week:
+            wallet.balance = start
+            wallet.starting_balance = start
+            wallet.week_start = week
+            wallet.last_active = datetime.utcnow()
+            db.session.commit()
+            return _wallet_json(wallet)
+        wallet.balance = new_bal
+        wallet.last_active = datetime.utcnow()
+        if new_bal > wallet.peak_balance:
+            wallet.peak_balance = new_bal
+            entry = GameScore(
+                game_id=game.id,
+                user_id=current_user.id,
+                score=wallet.peak_balance,
+                details=json.dumps({'type': 'peak_balance', 'week': week}),
+                achieved_at=datetime.utcnow(),
+            )
+            db.session.add(entry)
+    db.session.commit()
+    return _wallet_json(wallet)
 
 
 @games_bp.route('/scoreboard')

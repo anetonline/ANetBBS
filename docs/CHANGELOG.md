@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.210`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0a2.211`** (July 2026). Full release: August 1 2026.
+
+## v1.0a2.211 — Web casino games: persistent wallet + weekly reset + leaderboard (July 2026)
+
+Blackjack, Slots, Video Poker, and Hold'em now have a persistent wallet. Balance
+carries between sessions and resets every Monday. If you hit zero, play locks until
+the next weekly reset. Peak balance posts to the leaderboard. Starting amounts are
+configurable per-game in Admin → Settings (`CASINO_BLACKJACK_START`,
+`CASINO_SLOTS_START`, `CASINO_VIDEOPOKER_START`, `CASINO_HOLDEM_START`).
 
 ## v1.0a2.210 — Fix upgrade checker error when REGISTRY_URL is not configured (July 2026)
 

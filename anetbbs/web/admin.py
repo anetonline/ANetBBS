@@ -963,6 +963,10 @@ EDITABLE_SETTINGS = [
     ('BLOCKED_COUNTRIES', 'Blocked countries — comma-separated ISO codes (e.g. CN,RU,KP), blank = disabled (uses ip-api.com, no registration)', 'text', False),
     ('WIKI_MIN_POSTS', 'Wiki edit gate — minimum post count (0 = no gate)', 'text', False),
     ('WIKI_MIN_DAYS', 'Wiki edit gate — minimum account age in days (0 = no gate)', 'text', False),
+    ('CASINO_BLACKJACK_START', 'Casino Blackjack — weekly starting balance (default 500)', 'text', False),
+    ('CASINO_SLOTS_START', 'Casino Slots — weekly starting balance (default 200)', 'text', False),
+    ('CASINO_VIDEOPOKER_START', 'Casino Video Poker — weekly starting balance (default 200)', 'text', False),
+    ('CASINO_HOLDEM_START', "Casino Hold'em — weekly starting balance (default 1000)", 'text', False),
 ]
 
 

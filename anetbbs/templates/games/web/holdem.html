@@ -45,6 +45,7 @@
 </style>
 
 <div id="he-wrap">
+<div id="he-broke" style="display:none;background:#7b1c1c;color:#ffe0e0;padding:9px 14px;border-radius:8px;margin-bottom:8px;text-align:center;font-weight:bold;"></div>
 <div id="he-info">
     <span>Difficulty: <span id="he-diff-label">Medium</span></span>
     <span>Hand #<span id="he-hand-num">1</span></span>
@@ -87,7 +88,21 @@ let difficulty='medium'; // easy/medium/hard
 let players=[], userIdx=0, deck=[], community=[], pot=0, phase='idle', handNum=0;
 let currentBet=0, roundBets=[];
 
-const SMALL_BLIND=5, BIG_BLIND=10, START_CHIPS=500;
+const SMALL_BLIND=5, BIG_BLIND=10;
+let START_CHIPS=1000; // overwritten by wallet on load
+
+const _WS='{{ game.slug }}';
+function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);}).catch(()=>{});}
+function _showBroke(d){document.getElementById('he-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('he-broke').style.display='';disableActions();msg('No balance — come back Monday!');}
+function _loadWallet(){
+    disableActions();
+    fetch('/games/'+_WS+'/wallet',{credentials:'same-origin'}).then(r=>r.json()).then(w=>{
+        if(w.broke){_showBroke(w.resets);return;}
+        START_CHIPS=w.balance>0?w.balance:w.starting_balance;
+        initGame();
+    }).catch(()=>{initGame();});
+}
 
 function makePlayer(name,chips,isUser){
     return {name,chips,hand:[],folded:false,isUser,bet:0,allIn:false};
@@ -117,7 +132,10 @@ function newHand(){
     // Remove busted players (keep at least user and 1 opponent)
     players=players.filter(p=>p.chips>0);
     if(players.length<2){
-        msg(players[0]&&players[0].isUser?'🏆 You win! All opponents are out!':'Game over! You lost all chips.');
+        const user=players.find(p=>p.isUser);
+        const finalChips=user?user.chips:0;
+        _wSave(finalChips);
+        msg(user?'🏆 You win! All opponents are out!':'Game over! You lost all chips.');
         disableActions();
         return;
     }
@@ -217,6 +235,8 @@ function cpuTurn(delay){
             const winner=alive[0];
             msg(winner.isUser?`You win! Pot: ${pot}`:`${winner.name} wins ${pot}`);
             disableActions();
+            const userNow=players.find(p=>p.isUser);
+            if(userNow) _wSave(userNow.chips);
             setTimeout(newHand,2000);
             render(); return;
         }
@@ -254,6 +274,9 @@ function showdown(){
     disableActions();
     msg(winner.isUser?`🏆 You win! (${handDesc(winner.hand,community)}) Pot: ${pot}`
         :`${winner.name} wins ${pot} (${handDesc(winner.hand,community)})`);
+    // Save user chip count to wallet after each showdown
+    const userAfter=players.find(p=>p.isUser);
+    if(userAfter) _wSave(userAfter.chips);
     setTimeout(()=>{
         alive.forEach(p=>{p.showHand=false;});
         newHand();
@@ -379,6 +402,6 @@ function userAction(action){
     };
 });
 
-initGame();
+_loadWallet();
 })();
 </script>

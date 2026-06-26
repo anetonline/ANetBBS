@@ -46,6 +46,7 @@
 </style>
 
 <div id="vp-wrap">
+<div id="vp-broke" style="display:none;background:#7b1c1c;color:#ffe0e0;padding:9px 14px;border-radius:8px;margin-bottom:8px;text-align:center;font-weight:bold;"></div>
 <div id="vp-machine">
     <div id="vp-title">VIDEO POKER</div>
     <div id="vp-subtitle">Jacks or Better</div>
@@ -63,7 +64,7 @@
     </div>
 
     <div id="vp-credits">
-        <span>CREDITS: <strong id="vp-credit-val">100</strong></span>
+        <span>CREDITS: <strong id="vp-credit-val">—</strong> &nbsp;<small style="color:#888;">Peak: <span id="vp-peak">—</span></small></span>
         <div id="vp-bet">
             <button id="vp-bet-minus">-</button>
             <span>BET: <strong id="vp-bet-val">1</strong></span>
@@ -95,7 +96,21 @@ const RED=['♥','♦'];
 function isRed(s){return RED.includes(s);}
 function rankOf(v){return VALS.indexOf(v);}
 
-let credits=100, bet=1, held=[false,false,false,false,false], hand=[], phase='idle';
+let credits=0, bet=1, held=[false,false,false,false,false], hand=[], phase='idle';
+
+const _WS='{{ game.slug }}';
+function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);else{document.getElementById('vp-peak').textContent=w.peak;}}).catch(()=>{});}
+function _showBroke(d){document.getElementById('vp-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('vp-broke').style.display='';document.getElementById('vp-btn-deal').disabled=true;setStatus('No balance — come back Monday!','');}
+function _loadWallet(){
+    document.getElementById('vp-btn-deal').disabled=true;
+    fetch('/games/'+_WS+'/wallet',{credentials:'same-origin'}).then(r=>r.json()).then(w=>{
+        document.getElementById('vp-peak').textContent=w.peak;
+        if(w.broke){_showBroke(w.resets);return;}
+        credits=w.balance; updateCredits();
+        document.getElementById('vp-btn-deal').disabled=false;
+    }).catch(()=>{credits=200;updateCredits();document.getElementById('vp-btn-deal').disabled=false;});
+}
 
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
 function newDeck(){const d=[];for(const s of SUITS)for(const v of VALS)d.push({v,s});shuffle(d);return d;}
@@ -131,6 +146,8 @@ function deal(){
         else setStatus('No win. Try again!','');
         document.getElementById('vp-btn-deal').textContent='DEAL';
         phase='idle';
+        _wSave(credits);
+        if(credits>0) document.getElementById('vp-btn-deal').disabled=false;
     }
 }
 
@@ -194,10 +211,11 @@ function highlightPay(handName){
         if(el){el.style.background='#e94560';el.style.color='#fff';}
     }
 }
-function updateCredits(){document.getElementById('vp-credit-val').textContent=credits;}
+function updateCredits(){document.getElementById('vp-credit-val').textContent=credits||0;}
 
 document.getElementById('vp-btn-deal').onclick=deal;
 document.getElementById('vp-bet-minus').onclick=()=>{if(bet>1&&phase==='idle'){bet--;document.getElementById('vp-bet-val').textContent=bet;}};
 document.getElementById('vp-bet-plus').onclick=()=>{if(bet<5&&phase==='idle'){bet++;document.getElementById('vp-bet-val').textContent=bet;}};
+_loadWallet();
 })();
 </script>

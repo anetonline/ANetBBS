@@ -44,6 +44,7 @@
 </style>
 
 <div id="slots-wrap">
+<div id="slots-broke" style="display:none;background:#7b1c1c;color:#ffe0e0;padding:9px 14px;border-radius:8px;margin-bottom:8px;text-align:center;font-weight:bold;"></div>
 <div id="slots-tab-bar">
     <div class="slots-tab active" data-machine="classic">Classic Bars</div>
     <div class="slots-tab" data-machine="fruit">Lucky Fruits</div>
@@ -147,6 +148,23 @@
 <script>
 (function(){
 'use strict';
+
+// Shared wallet balance across all three slot machines
+let sharedBal = 0;
+const _WS='{{ game.slug }}';
+function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);}).catch(()=>{});}
+function _showBroke(d){document.getElementById('slots-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('slots-broke').style.display='';document.querySelectorAll('.btn-spin').forEach(b=>b.disabled=true);}
+function _refreshBals(){['cl','fr','rt'].forEach(p=>{const el=document.getElementById(p+'-bal');if(el)el.textContent=sharedBal;});}
+function _loadWallet(){
+    document.querySelectorAll('.btn-spin').forEach(b=>b.disabled=true);
+    fetch('/games/'+_WS+'/wallet',{credentials:'same-origin'}).then(r=>r.json()).then(w=>{
+        if(w.broke){_showBroke(w.resets);return;}
+        sharedBal=w.balance; _refreshBals();
+        document.querySelectorAll('.btn-spin').forEach(b=>b.disabled=false);
+    }).catch(()=>{sharedBal=200;_refreshBals();document.querySelectorAll('.btn-spin').forEach(b=>b.disabled=false);});
+}
+
 const MACHINES = {
     classic: {
         symbols: ['🍀','⭐','🔔','BAR','7️⃣','BAR','🍀','⭐','BAR','🔔','BAR','7️⃣'],
@@ -213,10 +231,10 @@ function weightedPick(symbols, weights){
 
 function initMachine(id, cfg){
     const p=cfg.prefix;
-    let balance=200, bet=1, spinning=false;
+    let bet=1, spinning=false;
 
     function updateUI(){
-        document.getElementById(p+'-bal').textContent=balance;
+        document.getElementById(p+'-bal').textContent=sharedBal;
         document.getElementById(p+'-bet-v').textContent=bet;
     }
 
@@ -234,8 +252,8 @@ function initMachine(id, cfg){
 
     function spin(){
         if(spinning) return;
-        if(bet>balance){document.getElementById(p+'-msg').textContent='Not enough balance!';return;}
-        balance-=bet; updateUI();
+        if(bet>sharedBal){document.getElementById(p+'-msg').textContent='Not enough balance!';return;}
+        sharedBal-=bet; updateUI();
         spinning=true;
         document.getElementById(p+'-spin').disabled=true;
         document.getElementById(p+'-msg').textContent='';
@@ -267,18 +285,18 @@ function initMachine(id, cfg){
 
                 if(i===2){
                     spinning=false;
-                    document.getElementById(p+'-spin').disabled=false;
                     const [mult,label]=cfg.payouts(results);
                     if(mult>0){
                         const win=mult*bet;
-                        balance+=win;
+                        sharedBal+=win;
                         updateUI();
                         document.getElementById(p+'-msg').textContent=`${label} +${win} credits!`;
                         [p+'-wl',p+'-wl1',p+'-wl2'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('show');});
                     } else {
                         document.getElementById(p+'-msg').textContent='Try again!';
                     }
-                    if(balance<=0){balance=200;updateUI();document.getElementById(p+'-msg').textContent='Out of credits! Reloaded.';}
+                    _wSave(sharedBal);
+                    if(sharedBal>0) document.getElementById(p+'-spin').disabled=false;
                 }
             }, delays[i]);
         });
@@ -305,14 +323,16 @@ function initMachine(id, cfg){
 // Init all three machines
 Object.entries(MACHINES).forEach(([id,cfg])=>initMachine(id,cfg));
 
-// Tab switching
+// Tab switching — refresh balance display for the newly active machine
 document.querySelectorAll('.slots-tab').forEach(tab=>{
     tab.onclick=function(){
         document.querySelectorAll('.slots-tab').forEach(t=>t.classList.remove('active'));
         document.querySelectorAll('.slots-machine').forEach(m=>m.classList.remove('active'));
         this.classList.add('active');
         document.getElementById('machine-'+this.dataset.machine).classList.add('active');
+        _refreshBals();
     };
 });
+_loadWallet();
 })();
 </script>

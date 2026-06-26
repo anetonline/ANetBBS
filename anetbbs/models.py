@@ -274,6 +274,26 @@ class GameScore(db.Model):
         return f'<GameScore {self.score} game={self.game_id} user={self.user_id}>'
 
 
+class WebGameWallet(db.Model):
+    """Persistent casino wallet — balance persists across sessions, resets each ISO week (Monday)."""
+    __tablename__ = 'web_game_wallets'
+    __table_args__ = (db.UniqueConstraint('user_id', 'game_slug', name='uq_wgw_user_slug'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    game_slug = db.Column(db.String(50), nullable=False)
+    balance = db.Column(db.Integer, nullable=False, default=0)
+    peak_balance = db.Column(db.Integer, nullable=False, default=0)
+    starting_balance = db.Column(db.Integer, nullable=False, default=500)
+    week_start = db.Column(db.String(10), nullable=False)  # 'YYYY-MM-DD' of ISO week Monday
+    last_active = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='game_wallets')
+
+    def __repr__(self):
+        return f'<WebGameWallet {self.game_slug} user={self.user_id} balance={self.balance}>'
+
+
 class UserSession(db.Model):
     """Active user session tracking for online presence"""
     __tablename__ = 'user_sessions'

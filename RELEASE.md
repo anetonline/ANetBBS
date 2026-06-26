@@ -1,3 +1,12 @@
+# ANetBBS v1.0a2.211 — Web casino games: persistent wallet + weekly reset + leaderboard (July 2026)
+
+Blackjack, Slots, Video Poker, and Hold'em now remember your balance between sessions.
+Balance resets every Monday to the configured starting amount. If you hit zero, play
+is locked until the weekly reset. Peak balance is tracked on the leaderboard.
+Starting amounts are configurable per-game in Admin → Settings (`CASINO_*_START` keys).
+
+---
+
 # ANetBBS v1.0a2.210 — Fix upgrade checker error when REGISTRY_URL is not configured (July 2026)
 
 Admin → Upgrades no longer shows a `MissingSchema` error when `REGISTRY_URL` is not set.
