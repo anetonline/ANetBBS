@@ -585,8 +585,40 @@ class MRCChat(BaseChatSystem):
                     await self._emit(f'\x1b[96m*** Now in #{room}\x1b[0m')
                 return
 
-            if head.startswith(('USERLIST:', 'USEROUT:', 'USERIN:', 'USERNICK:',
-                                  'USERIP:', 'TYPING:', 'CAPABILITIES:',
+            if head.startswith('USERIN:'):
+                raw_nick = body_raw.split(':', 1)[1].strip()
+                nick = re.split(r'[\s@]', raw_nick, 1)[0]
+                if nick:
+                    self._known_users.add(nick)
+                return
+
+            if head.startswith('USEROUT:'):
+                raw_nick = body_raw.split(':', 1)[1].strip()
+                nick = re.split(r'[\s@]', raw_nick, 1)[0]
+                if nick:
+                    self._known_users.discard(nick)
+                return
+
+            if head.startswith('USERLIST:'):
+                raw_list = body_raw.split(':', 1)[1].strip()
+                for entry in raw_list.split():
+                    nick = re.split(r'[@]', entry, 1)[0]
+                    if nick:
+                        self._known_users.add(nick)
+                return
+
+            if head.startswith('USERNICK:'):
+                raw = body_raw.split(':', 1)[1].strip()
+                parts = raw.split(None, 1)
+                old_nick = re.split(r'[@]', parts[0], 1)[0] if parts else ''
+                new_nick = parts[1].strip() if len(parts) > 1 else ''
+                if old_nick:
+                    self._known_users.discard(old_nick)
+                if new_nick:
+                    self._known_users.add(new_nick)
+                return
+
+            if head.startswith(('USERIP:', 'TYPING:', 'CAPABILITIES:',
                                   'NEWROOM:', 'NEWTOPIC:', 'KEEPALIVE:',
                                   'BANNER:')):
                 return
@@ -618,8 +650,8 @@ class MRCChat(BaseChatSystem):
                    'server_text', 'info'):
             body = (data.get('body') or data.get('message')
                     or data.get('text') or '')
-            # Track sender for tab-complete
-            uname = data.get('user') or ''
+            # Track sender for tab-complete (bridge sends from_user, not user)
+            uname = data.get('from_user') or data.get('user') or ''
             if uname and uname not in ('?', 'SERVER', 'CLIENT', 'NOTME'):
                 self._known_users.add(uname)
             # Format CTCP lines
@@ -729,11 +761,13 @@ class MRCChat(BaseChatSystem):
             line = (line or '').strip()
             if not line:
                 continue
-            # Any keypress resets AFK timer and clears away state
+            # Any keypress resets AFK timer and clears away state locally.
+            # Do NOT send STATUS AFK here — sending two rate-limited packets
+            # back-to-back (this + the message) trips the bridge rate limiter.
+            # The hub auto-clears AFK when the user sends a message; for an
+            # explicit hub-side clear use /back.
             self._last_input_time = time.time()
-            if self._is_away:
-                self._is_away = False
-                await self._send_json({'type': 'server_cmd', 'command': 'STATUS AFK'})
+            self._is_away = False
 
             if line.startswith('/'):
                 if not await self._handle_slash(line):
@@ -1007,7 +1041,8 @@ class MRCChat(BaseChatSystem):
                 '  /roomconfig [p v]   sysop room flags',
                 '',
                 '\x1b[1mPeople\x1b[0m',
-                '  /who  /chatters     who is online',
+                '  /who  /whoon        who is in this room',
+                '  /chatters           who is online across all rooms',
                 '  /users /userlist    user listing',
                 '  /bbses /connected   connected BBSes',
                 '  /lastseen [user]    last-seen lookup',
@@ -1125,8 +1160,12 @@ class MRCChat(BaseChatSystem):
                 })
                 return True
 
-        if cmd in ('who', 'whoon', 'chatters'):
+        if cmd in ('who', 'whoon'):
             await self._send_json({'type': 'server_cmd', 'command': 'WHOON'})
+            return True
+
+        if cmd == 'chatters':
+            await self._send_json({'type': 'server_cmd', 'command': 'CHATTERS'})
             return True
 
         if cmd == 'motd':
@@ -1152,7 +1191,7 @@ class MRCChat(BaseChatSystem):
             return True
 
         if cmd == 'afk':
-            cmd_str = f'STATUS AFK {rest}' if rest else 'STATUS AFK'
+            cmd_str = f'AFK {rest}' if rest else 'AFK'
             await self._send_json({'type': 'server_cmd', 'command': cmd_str})
             self._is_away = True
             await self._emit(
@@ -1160,7 +1199,7 @@ class MRCChat(BaseChatSystem):
             return True
 
         if cmd == 'back':
-            await self._send_json({'type': 'server_cmd', 'command': 'STATUS AFK'})
+            await self._send_json({'type': 'server_cmd', 'command': 'BACK'})
             self._is_away = False
             self._last_input_time = time.time()
             await self._emit('\x1b[96m(back)\x1b[0m')

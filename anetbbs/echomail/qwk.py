@@ -215,6 +215,12 @@ def _parse_messages_dat(data: bytes, conferences: dict):
                            lambda m: m.group(0).replace('\n', ''), body_text)
         clean = _clean_body(body_text)
 
+        if not clean['body']:
+            logger.warning(
+                'QWK inbound blank body: conf=%d from=%r subj=%r raw_head=%r',
+                conf_num, from_name, subject, body_raw[:256],
+            )
+
         # Drop messages from conferences not advertised in CONTROL.DAT —
         # these are almost always the result of a misaligned read.
         # Exception: conf_num=0 is the netmail/personal-mail conference and

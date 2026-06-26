@@ -1,3 +1,34 @@
+# ANetBBS v1.0a2.207 — Terminal MRC fixes; QWK blank-body diagnostic (July 2026)
+
+**Terminal MRC chat (`/mrc`):**
+
+- `/afk [msg]` now sends the correct `AFK` command (was `STATUS AFK`), so the
+  away message set with `/afk BRB` is now visible to other chatters
+- `/back` now sends `BACK` instead of `STATUS AFK`
+- Fixed "Rate limit: please slow down" error when sending the first message
+  after returning from AFK — the client no longer fires an extra `STATUS AFK`
+  packet immediately before the chat message
+- Tab-complete now tracks users who join after you: `USERIN:`, `USEROUT:`,
+  `USERLIST:`, and `USERNICK:` packets are parsed to keep the nick pool current
+  instead of being silently dropped. The `from_user` field (what the bridge
+  actually sends) is also used for nick tracking on chat messages.
+- `/chatters` now sends `CHATTERS` (all rooms); `/who` and `/whoon` send
+  `WHOON` (current room only). Previously both sent `WHOON`.
+- Help text updated to reflect the `/who` vs `/chatters` distinction.
+
+**QWK inbound:**
+
+- Added `WARNING` log line when an inbound Dove-Net message arrives with a
+  blank body. Logs the first 256 raw bytes so we can tell whether the hub is
+  sending empty blocks or whether `_clean_body` is over-stripping.
+
+**Admin UI:**
+
+- QWK password field now has `autocomplete="new-password"` to prevent browsers
+  from auto-filling it with the admin login password.
+
+---
+
 # ANetBBS v1.0a2.206 — Fix dosemu2 conf written to /tmp (July 2026)
 
 dosemu2 temp files (conf + COM1 PTS path) were hardcoded to `/tmp/`. Servers

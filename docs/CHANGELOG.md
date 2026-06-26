@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.206`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0a2.207`** (July 2026). Full release: August 1 2026.
+
+## v1.0a2.207 — Terminal MRC fixes; QWK blank-body diagnostic (July 2026)
+
+- Terminal `/afk [msg]` now sends `AFK` (not `STATUS AFK`), so the away message is visible to other chatters
+- Terminal `/back` now sends `BACK` instead of `STATUS AFK`
+- Fixed rate-limit error when sending first message after returning from AFK
+- Tab-complete now tracks users who join after you (`USERIN`/`USEROUT`/`USERLIST`/`USERNICK` parsed); `from_user` field used for nick tracking on chat messages
+- `/chatters` now sends `CHATTERS` (all rooms); `/who`/`/whoon` send `WHOON` (current room)
+- QWK inbound: warning log when body is blank (first 256 raw bytes logged for diagnosis)
+- Admin: `autocomplete="new-password"` on QWK password field
 
 ## v1.0a2.206 — Fix dosemu2 conf written to /tmp (July 1 2026)
 
