@@ -1730,12 +1730,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
 
         # Validate the command BEFORE launching so we can show a clear error.
         try:
-            cmd, cwd = _build_command(live_game, 1, bbs_name, user=user)
-            await session.write(
-                f"\r\nLaunching {game.name}\r\n"
-                f"  cmd: {' '.join(cmd)}\r\n"
-                f"  cwd: {cwd}\r\n\r\n"
-            )
+            _build_command(live_game, 1, bbs_name, user=user)
         except Exception as exc:
             await session.write(f"\r\nLaunch failed:\r\n  {exc}\r\n")
             await session.read_line("\r\nPress Enter...")
