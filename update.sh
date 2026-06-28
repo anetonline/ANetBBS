@@ -997,6 +997,20 @@ SVCEOF
     ok "anetbbs-mrc-bridge.service installed"
 fi
 
+# Migrate the old manually-installed unit name → the canonical one.
+# Some installs have anetbbs-binkp-listener.service (the original hand-crafted
+# name). The canonical unit is anetbbs-binkp.service. Stop and remove the old
+# one so the new install block below can take over without a port conflict.
+if [[ -f /etc/systemd/system/anetbbs-binkp-listener.service ]]; then
+    info "Migrating anetbbs-binkp-listener → anetbbs-binkp ..."
+    systemctl stop anetbbs-binkp-listener 2>/dev/null || true
+    systemctl disable anetbbs-binkp-listener 2>/dev/null || true
+    rm -f /etc/systemd/system/anetbbs-binkp-listener.service \
+          /etc/systemd/system/multi-user.target.wants/anetbbs-binkp-listener.service
+    systemctl daemon-reload 2>/dev/null || true
+    ok "anetbbs-binkp-listener removed (replaced by anetbbs-binkp)"
+fi
+
 if [[ ! -f /etc/systemd/system/anetbbs-binkp.service ]]; then
     info "Installing anetbbs-binkp.service ..."
     cat > /etc/systemd/system/anetbbs-binkp.service << SVCEOF
