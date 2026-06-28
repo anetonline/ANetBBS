@@ -329,54 +329,11 @@ def themes():
     return render_template('profile/themes.html', themes=all_themes)
 
 
-@profile_bp.route('/akas', methods=['GET', 'POST'])
+@profile_bp.route('/akas')
 @login_required
 def akas():
-    """Manage the FidoNet addresses (AKAs) this user can send mail FROM.
-
-    A sysop running multiple nodes (e.g. 1:234/5 in fidonet AND 21:1/100 in
-    fsxnet) needs to pick which AKA to use per-message. This page lets them
-    add, remove, and mark a primary."""
-    if request.method == 'POST':
-        action = request.form.get('action')
-        if action == 'add':
-            addr = (request.form.get('address') or '').strip()
-            domain = (request.form.get('domain') or 'fidonet').strip().lower()
-            if not parse_address(addr):
-                flash(f'Bad FTN address: {addr!r} (use zone:net/node[.point])', 'danger')
-                return redirect(url_for('profile.akas'))
-            existing = UserAka.query.filter_by(
-                user_id=current_user.id, address=addr).first()
-            if existing:
-                flash('That AKA already exists.', 'warning')
-                return redirect(url_for('profile.akas'))
-            aka = UserAka(user_id=current_user.id, address=addr, domain=domain)
-            # First AKA is automatically the primary
-            if not UserAka.query.filter_by(user_id=current_user.id).first():
-                aka.is_primary = True
-            db.session.add(aka)
-            db.session.commit()
-            flash(f'Added AKA {addr} ({domain}).', 'success')
-        elif action == 'delete':
-            aka = UserAka.query.get_or_404(int(request.form.get('aka_id')))
-            if aka.user_id != current_user.id:
-                abort(403)
-            db.session.delete(aka)
-            db.session.commit()
-            flash(f'Deleted {aka.address}.', 'success')
-        elif action == 'set_primary':
-            aka = UserAka.query.get_or_404(int(request.form.get('aka_id')))
-            if aka.user_id != current_user.id:
-                abort(403)
-            UserAka.query.filter_by(user_id=current_user.id).update({UserAka.is_primary: False})
-            aka.is_primary = True
-            db.session.commit()
-            flash(f'Primary AKA is now {aka.address}.', 'success')
-        return redirect(url_for('profile.akas'))
-
-    user_akas = UserAka.query.filter_by(user_id=current_user.id).order_by(
-        UserAka.is_primary.desc(), UserAka.address).all()
-    return render_template('profile/akas.html', akas=user_akas)
+    """Redirect to the new location under Echomail Admin."""
+    return redirect(url_for('echomail_admin.akas'))
 
 
 @profile_bp.route('/security-questions', methods=['GET', 'POST'])

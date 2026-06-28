@@ -152,7 +152,7 @@
 // Shared wallet balance across all three slot machines
 let sharedBal = 0;
 const _WS='{{ game.slug }}';
-function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _csrf(){var m=document.querySelector('meta[name="csrf-token"]');return m?m.getAttribute('content'):'';}
 function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);}).catch(()=>{});}
 function _showBroke(d){document.getElementById('slots-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('slots-broke').style.display='';document.querySelectorAll('.btn-spin').forEach(b=>b.disabled=true);}
 function _refreshBals(){['cl','fr','rt'].forEach(p=>{const el=document.getElementById(p+'-bal');if(el)el.textContent=sharedBal;});}

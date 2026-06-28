@@ -1,7 +1,48 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.211`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0a2.215`** (June 2026). Full release: August 1 2026.
+
+## v1.0a2.215 — BinkP service + AKA admin move (June 2026)
+
+- FR: BinkP inbound listener (`anetbbs.echomail.binkp_server`) now installed as a
+  separate systemd service (`anetbbs-binkp`), visible in the Service Control Center
+  with port probe on 24554, restart/stop/start buttons, and journal log access.
+- FR: FTN AKA management moved from the profile dropdown to Admin → Echomail config.
+  Accessible via the "FTN AKAs" button on the Echomail Admin dashboard. The old
+  `/profile/akas` URL redirects to the new location.
+
+## v1.0a2.214 — HACKERS theme: secret "Hack the Planet" easter egg modal (July 2026)
+
+- HACKERS (1995) theme: "HACK THE PLANET" in the navbar is now a clickable secret link.
+  Opens a tribute modal with the full crew roster (Zero Cool, Acid Burn, Crash Override,
+  Cereal Killer, Lord Nikon, Phantom Phreak, The Plague), iconic movie quotes, a heartfelt
+  tribute paragraph, and a typewriter terminal that types "HACK THE PLANET / ACCESS GRANTED".
+  Rainbow-animated title, lime-green crew handles, blinking cursor. Closes with [ LATER, HACKER ].
+
+## v1.0a2.213 — Two epic themes: VOID SIGNAL + HACKERS (1995) (July 2026)
+
+- New built-in theme: **VOID SIGNAL ◈** — Triple neon (electric green + cyan + magenta) on
+  pure black. Full-page CRT scanlines, moving phosphor beam sweep, animated brand glitch,
+  cycling card border stripe, neon glow buttons, animated rainbow footer sweep line.
+- New built-in theme: **HACKERS (1995) ◈** — Neon violet + lime + cyan on black. For those
+  who ride the information superhighway. Rainbow cycling navbar border, full rainbow brand
+  glitch animation, rainbow card top stripe, rotating footer sweep, "HACK THE PLANET"
+  navbar watermark. Orbitron font, all-caps labels throughout.
+- Both themes seeded automatically on first run / upgrade — no manual step needed.
+- Base template now supports an extended stylesheet marker (`--theme-stylesheet`) in any
+  theme's CSS variables, enabling full layout/animation overrides beyond color vars.
+
+## v1.0a2.212 — Fix casino wallet saves; fix stale door game sessions (July 2026)
+
+- Casino wallet saves now work: CSRF token was being read from a cookie that doesn't
+  exist (token lives in `<meta name="csrf-token">`). Every POST was silently rejected with
+  400. All 4 casino templates fixed.
+- Door game WebSocket disconnect now calls `terminate_session()` so sessions end when
+  the browser tab closes or disconnects.
+- On startup, any game sessions still marked `active` from before the previous restart are
+  automatically marked `stale` (in-memory PTY state is gone after restart).
+- Admin → Game Sessions now has a "Terminate All" button for bulk cleanup.
 
 ## v1.0a2.211 — Web casino games: persistent wallet + weekly reset + leaderboard (July 2026)
 

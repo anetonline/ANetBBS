@@ -319,6 +319,14 @@
       {% endfor %}
     }
     </style>
+    {# Extended themes: load a full override stylesheet when the theme marks itself #}
+    {% if current_user.theme.css_variables and '"--theme-stylesheet"' in current_user.theme.css_variables %}
+      {% if '"enhanced"' in current_user.theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/enhanced_theme.css') }}">
+      {% elif '"hackers"' in current_user.theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/hackers_theme.css') }}">
+      {% endif %}
+    {% endif %}
     {% endif %}
 
     {% block extra_css %}{% endblock %}
@@ -557,7 +565,6 @@
                             <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
                                 <li><a class="dropdown-item" href="{{ url_for('profile.index') }}" style="color:var(--theme-primary);"><i class="bi bi-person"></i> View Profile</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('profile.edit') }}" style="color:var(--theme-primary);"><i class="bi bi-pencil"></i> Edit Profile</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('profile.akas') }}" style="color:var(--theme-primary);"><i class="bi bi-mailbox"></i> FTN AKAs</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('profile.themes') }}" style="color:var(--theme-primary);"><i class="bi bi-palette"></i> Themes</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('profile.change_password') }}" style="color:var(--theme-primary);"><i class="bi bi-key"></i> Change Password</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('blocks.index') }}" style="color:var(--theme-primary);"><i class="bi bi-slash-circle"></i> Block List</a></li>
@@ -578,6 +585,12 @@
                                 <i class="bi bi-person-plus"></i> Register
                             </a>
                         </li>
+                    {% endif %}
+                    {# Hackers (1995) secret easter egg — only visible with the Hackers theme #}
+                    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active and current_user.theme.css_variables and '"hackers"' in current_user.theme.css_variables %}
+                    <li class="nav-item">
+                        <a class="nav-link htp-trigger" href="#" data-bs-toggle="modal" data-bs-target="#hackThePlanetModal" title="...">HACK THE PLANET</a>
+                    </li>
                     {% endif %}
                 </ul>
             </div>
@@ -629,6 +642,93 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active and current_user.theme.css_variables and '"hackers"' in current_user.theme.css_variables %}
+    <!-- HACKERS (1995) tribute modal -->
+    <div class="modal fade" id="hackThePlanetModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content htp-modal">
+          <div class="modal-header htp-header">
+            <span class="htp-modal-title">💀 &nbsp; H A C K &nbsp; T H E &nbsp; P L A N E T &nbsp; 💀</span>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body htp-body">
+
+            <p class="htp-meta">Released August 9, 1995 &nbsp;·&nbsp; Directed by Iain Softley</p>
+
+            <p class="htp-tribute">
+              Before Wi-Fi. Before smartphones. Before the world even knew what a firewall was —
+              a film showed us something electric. A world where the keyboard was a weapon,
+              information was power, and the most dangerous people alive were teenagers
+              in rollerblades who could make machines sing. We were never the same.
+              BBSes were the underground. The scene. The place where Zero Cool and Acid Burn
+              would have actually hung out. ANetBBS exists because of that spirit.
+            </p>
+
+            <div class="htp-section-label">// THE ELITE //</div>
+            <div class="htp-crew">
+              <div class="htp-row"><span class="htp-handle">Zero Cool</span><span class="htp-sep">···</span><span class="htp-name">Dade Murphy</span></div>
+              <div class="htp-row"><span class="htp-handle">Acid Burn</span><span class="htp-sep">···</span><span class="htp-name">Kate Libby</span></div>
+              <div class="htp-row"><span class="htp-handle">Crash Override</span><span class="htp-sep">···</span><span class="htp-name">Dade Murphy (new handle)</span></div>
+              <div class="htp-row"><span class="htp-handle">Cereal Killer</span><span class="htp-sep">···</span><span class="htp-name">Emmanuel Goldstein</span></div>
+              <div class="htp-row"><span class="htp-handle">Lord Nikon</span><span class="htp-sep">···</span><span class="htp-name">Paul Cook</span></div>
+              <div class="htp-row"><span class="htp-handle">Phantom Phreak</span><span class="htp-sep">···</span><span class="htp-name">Richard Gill</span></div>
+              <div class="htp-row"><span class="htp-handle">The Plague</span><span class="htp-sep">···</span><span class="htp-name">Eugene Belford (the villain)</span></div>
+            </div>
+
+            <div class="htp-section-label">// QUOTES //</div>
+            <div class="htp-quotes">
+              <div class="htp-quote">"Mess with the best, die like the rest."</div>
+              <div class="htp-quote">"Hack the planet!"</div>
+              <div class="htp-quote">"There is no right or wrong, only fun and boring."</div>
+              <div class="htp-quote">"Never send a boy to do a woman's job."</div>
+              <div class="htp-quote">"I speak COBOL." &nbsp;—&nbsp; "...God."</div>
+              <div class="htp-quote">"You wanted to know who I am, Zero Cool?"</div>
+            </div>
+
+            <div class="htp-terminal">
+              <span class="htp-prompt">C:\HACKERS\1995&gt;</span>
+              <span id="htpTyped"></span><span class="htp-cursor">█</span>
+            </div>
+
+          </div>
+          <div class="modal-footer htp-footer">
+            <button type="button" class="btn htp-close-btn" data-bs-dismiss="modal">[ LATER, HACKER ]</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+    (function() {
+      var modal = document.getElementById('hackThePlanetModal');
+      if (!modal) return;
+      modal.addEventListener('shown.bs.modal', function() {
+        var el = document.getElementById('htpTyped');
+        if (!el) return;
+        var lines = ['HACK THE PLANET', '', 'ACCESS GRANTED'];
+        var lineIdx = 0, charIdx = 0;
+        el.textContent = '';
+        var iv = setInterval(function() {
+          if (lineIdx >= lines.length) { clearInterval(iv); return; }
+          var line = lines[lineIdx];
+          if (charIdx < line.length) {
+            el.textContent += line[charIdx++];
+          } else {
+            if (lineIdx < lines.length - 1) {
+              el.textContent += '\n';
+            }
+            lineIdx++;
+            charIdx = 0;
+          }
+        }, 75);
+      });
+      modal.addEventListener('hidden.bs.modal', function() {
+        var el = document.getElementById('htpTyped');
+        if (el) el.textContent = '';
+      });
+    })();
+    </script>
+    {% endif %}
 
     <!-- Site-wide sysop-broadcast listener. Pops a Bootstrap toast on
          any incoming /sysop_broadcast event so all logged-in browser

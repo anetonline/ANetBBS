@@ -1,0 +1,16 @@
+[Unit]
+Description=ANetBBS BinkP Inbound Listener
+After=network.target
+
+[Service]
+Type=simple
+User=stingray
+Group=stingray
+WorkingDirectory=/home/stingray/anetbbs
+EnvironmentFile=/home/stingray/anetbbs/.env
+ExecStart=/home/stingray/anetbbs/venv/bin/python -m anetbbs.echomail.binkp_server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -75,7 +75,7 @@ fi
 # running before the update — this prevents force-starting a service that the
 # sysop had stopped or that never successfully ran on this install.
 SERVICES_PREVIOUSLY_ACTIVE=()
-for svc in anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     if [[ -f "/etc/systemd/system/${svc}.service" ]] && \
        systemctl is-active --quiet "$svc" 2>/dev/null; then
         SERVICES_PREVIOUSLY_ACTIVE+=("$svc")
@@ -150,7 +150,7 @@ backup_sqlite "$INSTALL_DIR/data/anetbbs_dev.db" "$BACKUP_DIR/anetbbs_dev.db.bak
 
 DB_FILE="$INSTALL_DIR/data/anetbbs.db"  # kept for the failure-rollback block at end-of-script
 
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && \
         cp "/etc/systemd/system/${svc}.service" "$BACKUP_DIR/${svc}.service.bak"
 done
@@ -186,7 +186,7 @@ step "Step 3/8: Stopping services"
 # anetbbs-telnet / anetbbs-ssh services were merged into anetbbs.service
 # during v1.0a2.10; iterating over them on a current install just prints
 # "was not running" lines that look like errors in screenshots.
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     if [[ ! -f "/etc/systemd/system/${svc}.service" ]]; then
         continue
     fi
@@ -997,6 +997,29 @@ SVCEOF
     ok "anetbbs-mrc-bridge.service installed"
 fi
 
+if [[ ! -f /etc/systemd/system/anetbbs-binkp.service ]]; then
+    info "Installing anetbbs-binkp.service ..."
+    cat > /etc/systemd/system/anetbbs-binkp.service << SVCEOF
+[Unit]
+Description=ANetBBS BinkP Inbound Listener
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$VENV_DIR/bin/python -m anetbbs.echomail.binkp_server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    ok "anetbbs-binkp.service installed"
+fi
+
 # Ensure MRC bridge config.json exists
 if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     info "Generating MRC bridge config.json ..."
@@ -1201,7 +1224,7 @@ step "Step 8/8: Restarting services"
 
 # Build the restart list:
 #   anetbbs-web and anetbbs are always restarted (core services).
-#   anetbbs-mrc-bridge and anetbbs-finger are optional: only restart them
+#   anetbbs-mrc-bridge, anetbbs-finger, and anetbbs-binkp are optional: only restart them
 #   if they were already running before the update. Sysops who don't use
 #   MRC (or who have it in a failed/stopped state) should not have it
 #   force-started during an update — that would create a loud failure
@@ -1210,7 +1233,7 @@ SERVICES_TO_START=()
 for svc in anetbbs-web anetbbs; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && SERVICES_TO_START+=("$svc")
 done
-for svc in anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
         if printf '%s\n' "${SERVICES_PREVIOUSLY_ACTIVE[@]}" | grep -qx "$svc" 2>/dev/null; then
             SERVICES_TO_START+=("$svc")
@@ -1325,7 +1348,7 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
         warn "Critical service failed to start. Rolling back from backup..."
         cp "$BACKUP_DIR/.env.bak" "$ENV_FILE"
         [[ -f "$BACKUP_DIR/anetbbs.db.bak" ]] && cp "$BACKUP_DIR/anetbbs.db.bak" "$DB_FILE"
-        for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+        for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
             [[ -f "$BACKUP_DIR/${svc}.service.bak" ]] && \
                 cp "$BACKUP_DIR/${svc}.service.bak" "/etc/systemd/system/${svc}.service"
         done

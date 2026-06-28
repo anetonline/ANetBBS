@@ -27,6 +27,7 @@
 #   anetbbs             unified terminal protocols (telnet/SSH/rlogin/FTP/LMTP)
 #   anetbbs-mrc-bridge  MRC chat bridge
 #   anetbbs-finger      RFC 1288 finger daemon
+#   anetbbs-binkp       BinkP/1.1 inbound echomail listener
 #
 # In-place upgrade wrapper. Strictly arg-validated inside the script
 # (version regex, sha256 regex, URL pattern). The path varies by
@@ -65,6 +66,9 @@ Cmnd_Alias ANETBBS_SYSCTL = \
     /usr/bin/systemctl start  anetbbs-finger, \
     /usr/bin/systemctl stop   anetbbs-finger, \
     /usr/bin/systemctl restart anetbbs-finger, \
+    /usr/bin/systemctl start  anetbbs-binkp, \
+    /usr/bin/systemctl stop   anetbbs-binkp, \
+    /usr/bin/systemctl restart anetbbs-binkp, \
     /bin/systemctl start  anetbbs, \
     /bin/systemctl stop   anetbbs, \
     /bin/systemctl restart anetbbs, \
@@ -77,7 +81,10 @@ Cmnd_Alias ANETBBS_SYSCTL = \
     /bin/systemctl restart anetbbs-mrc-bridge, \
     /bin/systemctl start  anetbbs-finger, \
     /bin/systemctl stop   anetbbs-finger, \
-    /bin/systemctl restart anetbbs-finger
+    /bin/systemctl restart anetbbs-finger, \
+    /bin/systemctl start  anetbbs-binkp, \
+    /bin/systemctl stop   anetbbs-binkp, \
+    /bin/systemctl restart anetbbs-binkp
 
 # Disable the sudoers_audit plugin for anetbbs commands. On some VPS /
 # container hosts (LXC, OpenVZ) the Linux audit subsystem is unavailable

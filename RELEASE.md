@@ -1,3 +1,50 @@
+# ANetBBS v1.0a2.215 — BinkP service + AKA admin move (June 2026)
+
+BinkP inbound listener now has its own systemd service (`anetbbs-binkp`) and appears
+in the Service Control Center alongside all other services. FTN AKA management moved
+from the profile dropdown to Admin → Echomail.
+
+---
+
+# ANetBBS v1.0a2.214 — HACKERS theme easter egg: Hack the Planet modal (July 2026)
+
+The "HACK THE PLANET" text in the navbar (HACKERS theme only) is now a secret clickable
+link. Clicking it opens a tribute modal: crew roster with rainbow-animated handles
+(Zero Cool · Acid Burn · Crash Override · Cereal Killer · Lord Nikon · Phantom Phreak ·
+The Plague), iconic quotes, a heartfelt BBS tribute paragraph, and a typewriter terminal
+that types "HACK THE PLANET" then "ACCESS GRANTED". Closes with [ LATER, HACKER ].
+
+---
+
+# ANetBBS v1.0a2.213 — Two epic themes: VOID SIGNAL + HACKERS (1995) (July 2026)
+
+Two new built-in themes, both wildly different from the standard color-swap options.
+Select either in **Profile → Themes** (auto-seeded on startup, nothing to configure).
+
+**VOID SIGNAL ◈**: Triple neon — electric green + cyan + magenta on pure black.
+Full-page CRT scanlines, moving phosphor beam sweep, brand glitch animation,
+cycling 3-color card border stripe, neon glow buttons, custom green scrollbar.
+
+**HACKERS (1995) ◈**: For those who ride the information superhighway.
+Neon violet + lime + cyan on black with rainbow cycling navbar border, 6-stage
+rainbow brand glitch, animated multicolor card top stripe, rainbow footer sweep,
+and a "HACK THE PLANET" watermark in the navbar. Hack the planet.
+
+---
+
+# ANetBBS v1.0a2.212 — Fix casino wallet saves; fix stale door game sessions (July 2026)
+
+- **Casino wallet CSRF fix**: wallet balance now saves correctly after each hand/spin.
+  The `_csrf()` helper in all 4 casino templates was reading from a cookie that doesn't
+  exist — token is in `<meta name="csrf-token">`. Every wallet POST was silently rejected.
+- **Door game sessions**: WebSocket disconnect now terminates the game session.
+  A socket→session map is maintained so `game_disconnect` can call `terminate_session`.
+- **Startup session cleanup**: any sessions still marked `active` from before a server
+  restart are marked `stale` on startup (PTY state is gone after restart anyway).
+- **Admin → Game Sessions**: "Terminate All" button bulk-clears all active sessions at once.
+
+---
+
 # ANetBBS v1.0a2.211 — Web casino games: persistent wallet + weekly reset + leaderboard (July 2026)
 
 Blackjack, Slots, Video Poker, and Hold'em now remember your balance between sessions.

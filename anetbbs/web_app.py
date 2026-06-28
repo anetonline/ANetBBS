@@ -497,6 +497,19 @@ def create_app(config_name=None):
             ensure_node_dirs(app.config.get('BBS_NODES'))
         except Exception:
             app.logger.exception('Failed to create per-node temp dirs')
+        # Mark any 'active' game sessions from before this restart as stale.
+        # After a restart the in-memory PTY state is gone — those sessions
+        # will never self-terminate, so clean them out now.
+        try:
+            from .models import GameSession as _GS
+            stale_count = _GS.query.filter_by(status='active').update(
+                {'status': 'stale', 'ended_at': datetime.utcnow()})
+            db.session.commit()
+            if stale_count:
+                app.logger.info('Marked %d stale game session(s) from previous run', stale_count)
+        except Exception:
+            db.session.rollback()
+            app.logger.warning('Could not clean up stale game sessions on startup')
     
     # Configure logging
     _configure_logging(app)
@@ -901,6 +914,34 @@ def _create_default_data():
                 ' "--theme-text": "#202124", "--theme-text-muted": "#5f6368",'
                 ' "--theme-card-bg": "#ffffff", "--theme-input-bg": "#ffffff",'
                 ' "--theme-input-focus": "#f0f7ff", "--theme-border": "#dadce0"}'
+            ),
+        },
+        {
+            'name': 'enhanced',
+            'display_name': 'VOID SIGNAL ◈',
+            'description': 'Triple neon (green + cyan + magenta) on pure black — scanlines, brand glitch, animated card borders',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#000000", "--theme-bg-dark": "#000000",'
+                ' "--theme-primary": "#00ff88", "--theme-primary-dark": "#00cc66",'
+                ' "--theme-text": "#d8ffe8", "--theme-text-muted": "#60aa80",'
+                ' "--theme-card-bg": "#020a05", "--theme-input-bg": "#000a03",'
+                ' "--theme-input-focus": "#01120a", "--theme-border": "#00ff88",'
+                ' "--theme-stylesheet": "enhanced"}'
+            ),
+        },
+        {
+            'name': 'hackers',
+            'display_name': 'HACKERS (1995) ◈',
+            'description': 'Hack the Planet — neon violet + lime + cyan rave cyberpunk. For those who ride the information superhighway.',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#000000", "--theme-bg-dark": "#000000",'
+                ' "--theme-primary": "#cc00ff", "--theme-primary-dark": "#9900cc",'
+                ' "--theme-text": "#ffffff", "--theme-text-muted": "#bb88ff",'
+                ' "--theme-card-bg": "#05000a", "--theme-input-bg": "#000000",'
+                ' "--theme-input-focus": "#080010", "--theme-border": "#cc00ff",'
+                ' "--theme-stylesheet": "hackers"}'
             ),
         },
     ]

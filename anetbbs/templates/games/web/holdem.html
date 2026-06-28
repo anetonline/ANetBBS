@@ -92,7 +92,7 @@ const SMALL_BLIND=5, BIG_BLIND=10;
 let START_CHIPS=1000; // overwritten by wallet on load
 
 const _WS='{{ game.slug }}';
-function _csrf(){var m=document.cookie.match(/csrf_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';}
+function _csrf(){var m=document.querySelector('meta[name="csrf-token"]');return m?m.getAttribute('content'):'';}
 function _wSave(b){fetch('/games/'+_WS+'/wallet',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':_csrf()},body:JSON.stringify({balance:Math.max(0,b)})}).then(r=>r.json()).then(w=>{if(w&&w.broke)_showBroke(w.resets);}).catch(()=>{});}
 function _showBroke(d){document.getElementById('he-broke').textContent='Out of funds! Balance resets Monday '+d+'.';document.getElementById('he-broke').style.display='';disableActions();msg('No balance — come back Monday!');}
 function _loadWallet(){

@@ -110,6 +110,17 @@ KNOWN_UNITS = [
             {'name': 'Finger', 'key': None, 'default': 79, 'proto': 'tcp'},
         ],
     },
+    {
+        'unit': 'anetbbs-binkp',
+        'label': 'BinkP Inbound',
+        'desc': ('BinkP/1.1 inbound listener — accepts incoming sessions '
+                 'from remote echomail nodes that want to deliver mail to '
+                 'or pull mail from this BBS.'),
+        'icon': 'bi-envelope-arrow-down',
+        'ports': [
+            {'name': 'BinkP', 'key': 'BINKP_LISTEN_PORT', 'default': 24554, 'proto': 'tcp'},
+        ],
+    },
 ]
 
 

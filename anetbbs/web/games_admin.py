@@ -245,6 +245,18 @@ def disconnect_session(session_id):
     return redirect(url_for('games_admin.sessions'))
 
 
+@games_admin_bp.route('/sessions/clear-stale', methods=['POST'])
+@login_required
+@_admin_required
+def clear_stale_sessions():
+    """Mark all active sessions as stale (bulk cleanup after restart / runaway sessions)."""
+    count = GameSession.query.filter_by(status='active').update(
+        {'status': 'stale', 'ended_at': datetime.utcnow()})
+    db.session.commit()
+    flash(f'Marked {count} session(s) as stale.', 'success')
+    return redirect(url_for('games_admin.sessions'))
+
+
 # ---------------------------------------------------------------------------
 # TW2 — universe reset
 # ---------------------------------------------------------------------------

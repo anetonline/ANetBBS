@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}FTN AKAs — Echomail Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-mailbox"></i> FTN AKAs</h1>
+    <p>Alternate FidoNet addresses you can send netmail FROM.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-list"></i> Your AKAs</div>
+    <div class="card-body p-0">
+    {% if akas %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Address</th><th>Domain</th><th>Primary</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for a in akas %}
+                <tr>
+                    <td><code>{{ a.address }}</code></td>
+                    <td>{{ a.domain }}</td>
+                    <td>
+                        {% if a.is_primary %}
+                            <span class="badge bg-success">primary</span>
+                        {% else %}
+                            <form method="post" style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="action" value="set_primary">
+                                <input type="hidden" name="aka_id" value="{{ a.id }}">
+                                <button class="btn btn-link btn-sm p-0">make primary</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="aka_id" value="{{ a.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Delete {{ a.address }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No AKAs configured yet. Outgoing netmail will use the network's default <code>our_address</code>.</div>
+    {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Add AKA</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-5">
+                <label class="form-label">FTN Address</label>
+                <input type="text" name="address" class="form-control"
+                       placeholder="1:234/5 or 21:1/100"
+                       pattern="^\d+:\d+/\d+(\.\d+)?$" required>
+                <div class="form-text">Format: <code>zone:net/node[.point]</code></div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Domain</label>
+                <input type="text" name="domain" class="form-control" value="fidonet"
+                       pattern="[a-z0-9_-]+">
+                <div class="form-text">Network identifier (fidonet, fsxnet, retronet, ...)</div>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100">Add AKA</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-link">← Back to Echomail Admin</a>
+</div>
+{% endblock %}

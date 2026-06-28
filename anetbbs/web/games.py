@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 games_bp = Blueprint('games', __name__, url_prefix='/games')
 
+# Maps SocketIO socket-id → GameSession.id so disconnect can terminate the right session
+_socket_to_session: dict = {}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -290,6 +293,7 @@ def handle_start_game(data):
             return
         sid_box[0] = session_id
         join_room(str(session_id))
+        _socket_to_session[request.sid] = session_id
         emit('game_started', {'session_id': session_id,
                               'cmd': f'rlogin {game.executable_path}'})
         _flush_pre_join_buffer()
@@ -317,6 +321,7 @@ def handle_start_game(data):
         return
 
     join_room(str(session_id))
+    _socket_to_session[request.sid] = session_id
     emit('game_started', {'session_id': session_id, 'cmd': ' '.join(cmd[:5])})
     _flush_pre_join_buffer()
 
@@ -349,7 +354,16 @@ def handle_game_resize(data):
 @socketio.on('disconnect', namespace='/game')
 def game_disconnect():
     """Terminate the game session on WebSocket disconnect."""
-    logger.debug('Game socket disconnected')
+    session_id = _socket_to_session.pop(request.sid, None)
+    if session_id:
+        logger.debug('Game socket disconnected: sid=%s session=%s — terminating', request.sid, session_id)
+        try:
+            from ..games.door_runner import terminate_session
+            terminate_session(session_id)
+        except Exception:
+            logger.exception('Error terminating session %s on disconnect', session_id)
+    else:
+        logger.debug('Game socket disconnected: sid=%s (no session)', request.sid)
 
 
 # ---------------------------------------------------------------------------
