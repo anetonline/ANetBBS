@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.215`** (June 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0a2.216`** (June 2026). Full release: August 1 2026.
+
+## v1.0a2.216 — Clean shutdown fix + socket.send() suppression (June 2026)
+
+- FIX: `anetbbs` service no longer gets SIGKILLed by systemd on restart. SSH keepalive
+  was awaiting `create_future()` (never resolves) so SIGTERM could not stop it. It now
+  waits on a proper `asyncio.Event` that the signal handler sets — process exits cleanly
+  within ~1 second of SIGTERM.
+- FIX: `socket.send() raised exception` journal spam suppressed. pyftpdlib uses asyncore;
+  its WARNING-level log fires on every SCC health-check probe (connect-and-close to port 21).
+  `asyncore` logger now set to ERROR in main.py alongside the existing asyncssh suppression.
 
 ## v1.0a2.215 — BinkP service + AKA admin move (June 2026)
 

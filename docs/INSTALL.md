@@ -1,4 +1,4 @@
-# Installing ANetBBS
+# Full Install Guide
 
 Tested on Debian 12 / Ubuntu 22.04+. Should work on any Linux with Python ≥3.10.
 

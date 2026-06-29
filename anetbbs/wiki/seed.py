@@ -554,7 +554,7 @@ networks today are:
 
 - **FidoNet** (`zone 1-6`) — the original
 - **fsxNet** — modern, friendly, smaller
-- **MicroNet**, **AmigaNet**, **AgoraNet**, …
+- **tqwNet**, **zer0net**, …
 
 Each network has its own uplink, addressing scheme (`zone:net/node`),
 and area policies. See [[BinkP Setup]] to join one.

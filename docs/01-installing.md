@@ -1,4 +1,4 @@
-# Installing ANetBBS
+# Quick Start
 
 ## Requirements
 
@@ -11,13 +11,13 @@
 
 ## Fresh install
 
-```
-# extract the release tarball somewhere temporary
-tar xzf anetbbs-rebuilt-v120.tar.gz
-cd anetbbs-rebuilt
+```bash
+# extract the release tarball
+tar xzf ANetBBS-v1.0a2.NNN.tar.gz
+cd ANetBBS-v1.0a2.NNN
 
-# kick off the wizard
-sudo python3 -m anetbbs.installer.wizard
+# run the installer
+sudo bash install.sh
 ```
 
 The wizard asks every question it needs:
@@ -68,7 +68,7 @@ symlink it to `sites-enabled/`, and reload nginx. The template handles:
 
 | Path                         | Purpose                       |
 | ---------------------------- | ----------------------------- |
-| `/home/stingray/anetbbs/`    | code (default)                |
+| `/opt/anetbbs/`              | code (default)                |
 | `data/`                      | uploads, avatars, SQLite DB   |
 | `data/personal_pages/`       | sysop + per-user web pages    |
 | `data/file-queue/`           | pending file uploads          |

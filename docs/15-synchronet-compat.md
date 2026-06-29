@@ -32,10 +32,12 @@ These door categories are confirmed running through the shim:
 | `system`         | ~14            | ~50            | ~28%     |
 | `user`           | ~30            | ~50            | ~60%     |
 | `js`             | ~10            | ~12            | ~85%     |
-| `server`         | stub           | rich           | minimal (enough for dorkit's `sbbs` mode) |
-| `client`         | stub           | rich           | minimal (enough for dorkit's `sbbs` mode) |
-| `File` class     | read/write/seek/lock/unlock/flush/truncate/iniGet*/iniSet*/readBin/writeBin/readStr/writeStr/position | full | ~85% |
-| `Queue` class    | full (name-cached so two `new Queue("foo")` calls share state, matching real Synchronet IPC) | full | done |
+| `server`         | stub           | rich           | minimal† |
+| `client`         | stub           | rich           | minimal† |
+| `File` class     | ~15 methods (seek/lock/flush/truncate, binary+string I/O, iniGet/iniSet) | full | ~85% |
+| `Queue` class    | full (name-cached IPC) | full | done |
+
+† Enough for dorkit's `sbbs` mode.
 
 ### Notable v287 additions for LORD
 
@@ -64,12 +66,8 @@ These door categories are confirmed running through the shim:
 The shim also exposes vendored Synchronet `.js` libraries from
 `anetbbs/games/sbbs_stubs/` (174 files) when a door does
 `load("dd_lightbar_menu.js")` etc. The upstream `xtrn/dorkit/` subtree
-ships under `sbbs_stubs/dorkit/`.
-
-The shim also exposes vendored Synchronet `.js` libraries from
-`anetbbs/games/sbbs_stubs/` (174 files) when a door does
-`load("dd_lightbar_menu.js")` etc. So heavy lifting is sometimes done
-by the libraries themselves.
+ships under `sbbs_stubs/dorkit/`. Heavy lifting is often done by these
+libraries rather than the shim itself.
 
 ## What's missing — and what it blocks
 

@@ -1,8 +1,8 @@
-# ANetBBS v1.0a2.215 — BinkP service + AKA admin move (June 2026)
+# ANetBBS v1.0a2.216 — Clean shutdown fix + socket.send() warning suppression (June 2026)
 
-BinkP inbound listener now has its own systemd service (`anetbbs-binkp`) and appears
-in the Service Control Center alongside all other services. FTN AKA management moved
-from the profile dropdown to Admin → Echomail.
+Fixed `anetbbs` service being SIGKILLed on restart: SSH keepalive now waits on a
+proper shutdown event instead of an unresolvable Future. `asyncore` logger suppressed
+to silence FTP health-check socket warnings in the journal.
 
 ---
 

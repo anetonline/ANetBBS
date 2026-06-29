@@ -590,8 +590,11 @@ async def _serve():
     async def _wrapper(reader, writer):
         try:
             await _handle_connection(reader, writer, our_address, system_name)
+        except (ConnectionResetError, BrokenPipeError):
+            pass  # health probe or client disconnect — not a crash
         except Exception:
             logger.exception('BinkP session crashed')
+        finally:
             try:
                 writer.close()
             except Exception:

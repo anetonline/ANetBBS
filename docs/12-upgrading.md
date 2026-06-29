@@ -34,8 +34,8 @@ commands:
 
 ```
 sudo systemctl stop anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-rlogin
-sudo cp -a /home/stingray/anetbbs.backup-YYYYMMDD-HHMMSS/.env /home/stingray/anetbbs/.env
-sudo rsync -a --delete /home/stingray/anetbbs.backup-YYYYMMDD-HHMMSS/data/ /home/stingray/anetbbs/data/
+sudo cp -a /opt/anetbbs.backup-YYYYMMDD-HHMMSS/.env /opt/anetbbs/.env
+sudo rsync -a --delete /opt/anetbbs.backup-YYYYMMDD-HHMMSS/data/ /opt/anetbbs/data/
 sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-rlogin
 ```
 
@@ -53,8 +53,8 @@ mv anetbbs-rebuilt anetbbs-vNNN
 sudo rsync -a \
     --exclude='data/' --exclude='.env' --exclude='venv/' \
     --exclude='*.db' --exclude='logs/' \
-    /tmp/anetbbs-vNNN/ /home/stingray/anetbbs/
-sudo -u stingray /home/stingray/anetbbs/venv/bin/pip install -e /home/stingray/anetbbs --quiet
+    /tmp/anetbbs-vNNN/ /opt/anetbbs/
+sudo -u anetbbs /opt/anetbbs/venv/bin/pip install -e /opt/anetbbs --quiet
 sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-rlogin
 ```
 

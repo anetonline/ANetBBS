@@ -371,8 +371,8 @@ The web service runs as `anetbbs` (uid 998). SCP to `/tmp/` first,
 then move with sudo:
 
 ```bash
-scp data/dos-games/myslug.zip stingray@bbs.a-net.fyi:/tmp/
-ssh stingray@bbs.a-net.fyi \
+scp data/dos-games/myslug.zip user@your-bbs-host:/tmp/
+ssh user@your-bbs-host \
   "sudo mv /tmp/myslug.zip /opt/anetbbs/data/dos-games/ && \
    sudo chown anetbbs:anetbbs /opt/anetbbs/data/dos-games/myslug.zip"
 ```

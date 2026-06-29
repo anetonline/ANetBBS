@@ -230,15 +230,22 @@ def main():
         }
     }
 
+    # pyftpdlib uses asyncore; suppress its "socket.send() raised exception"
+    # warnings that fire on every SCC health-check probe (connect-and-close).
+    logging.getLogger('asyncore').setLevel(logging.ERROR)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     servers_to_stop = []
+    _ssh_stop = []  # holds the asyncio.Event used to shut down the SSH keepalive
 
     def signal_handler(sig, frame):
         logger.info("Received shutdown signal")
         if not loop.is_closed():
             for s in servers_to_stop:
                 loop.call_soon_threadsafe(s.stop)
+            for ev in _ssh_stop:
+                loop.call_soon_threadsafe(ev.set)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -264,9 +271,11 @@ def main():
                     config_class.SSH_HOST_KEY_FILE,
                     bbs_config,
                 )
+                _stop = asyncio.Event()
+                _ssh_stop.append(_stop)
                 async def _ssh_keepalive():
                     async with ssh_srv:
-                        await asyncio.get_event_loop().create_future()
+                        await _stop.wait()
                 tasks.append(asyncio.ensure_future(_ssh_keepalive()))
             except ImportError:
                 logger.warning("asyncssh not installed — SSH server disabled. "

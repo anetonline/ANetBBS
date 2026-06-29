@@ -1,6 +1,6 @@
 # ANetBBS on Raspberry Pi — Full Install Guide
 
-ANetBBS runs well on Raspberry Pi 4 and Pi 5. This guide covers everything
+ANetBBS runs well on Raspberry Pi 3 and later. This guide covers everything
 from hardware selection through a running BBS reachable from the internet.
 
 ---
@@ -8,11 +8,12 @@ from hardware selection through a running BBS reachable from the internet.
 ## Hardware Recommendations
 
 ### Minimum
-- **Raspberry Pi 4** with **4 GB RAM**
+- **Raspberry Pi 3B/3B+** with **1 GB RAM** — BBS runs great; in-browser DOS games (Doom, Duke Nukem) not recommended (browser emulation is CPU-heavy)
 - A2-rated microSD card (SanDisk Extreme Pro 32 GB+ or Samsung Pro Endurance)
 
 ### Recommended
-- **Raspberry Pi 5** with **8 GB RAM**
+- **Raspberry Pi 4** with **4 GB RAM** or better
+- **Raspberry Pi 5** with **8 GB RAM** (best performance)
 - **USB SSD** for the install dir (see [Moving data/ to a USB SSD](#moving-data-to-a-usb-ssd))
 - A2-rated microSD for the OS; USB SSD for data
 
@@ -394,9 +395,10 @@ sudo dphys-swapfile swapon
 
 ## Door Games on Pi
 
-- **In-browser DOS games** (DOOM, Duke3D via EmulatorJS): work perfectly — runs
-  in the user's browser, no server-side binary needed.
-- **LORD** (Synchronet JS via Node.js): works on Pi 4/5 ARM64.
+- **In-browser DOS games** (DOOM, Duke3D via EmulatorJS): run in the user's browser —
+  no server-side binary needed. On Pi 3, these may not run well in a browser on the Pi
+  itself; users connecting from a PC browser will have no issues.
+- **LORD** (Synchronet JS via Node.js): works on Pi 3+ ARM.
 - **DOSBox doors**: DOSBox-X has ARM builds — install from the DOSBox-X releases
   page and set `DOSBOX_PATH` in `.env`.
 - **Wine + door32 .exe doors**: possible with box86/box64, but a project for
@@ -413,4 +415,5 @@ sudo dphys-swapfile swapon
 | Pi 4 8 GB | Ubuntu 22.04 Server 64-bit | 3.10 | ✅ Confirmed |
 | Pi 4 4 GB | Raspberry Pi OS Lite 64-bit (Bookworm) | 3.11 | ✅ Works, tight on RAM |
 | Pi 4 4 GB | Ubuntu 24.04 Server 64-bit | 3.12 | ✅ Confirmed |
-| Pi 3 / earlier | any | — | ⚠ Not tested, likely too slow |
+| Pi 3B / 3B+ | Raspberry Pi OS Lite 32/64-bit | 3.11 | ✅ Works great — BBS runs fast; in-browser DOS games not confirmed |
+| Pi 2 / earlier | any | — | ⚠ Not tested |

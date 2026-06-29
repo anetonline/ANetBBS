@@ -7,11 +7,11 @@
     <h1><i class="bi bi-folder-fill"></i> {{ area.name or area.tag }}</h1>
     <p><code>{{ area.tag }}</code>{% if area.description %} — {{ area.description }}{% endif %}</p>
     <p class="text-muted small">
-        Storage: <code>{{ area.storage_path or '(not set)' }}</code>
-        — Upload: <code>{{ area.upload_permission }}</code>
+        Upload: <code>{{ area.upload_permission }}</code>
         {% if area.password %} — password-protected{% endif %}
     </p>
     {% if current_user.is_admin %}
+    <p class="text-muted small">Storage: <code>{{ area.storage_path or '(not set)' }}</code></p>
     <form method="post" action="{{ url_for('file_areas.rescan_descriptions', area_id=area.id) }}" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-sm btn-outline-secondary" title="Drop the cached FILE_ID.DIZ descriptions and re-extract from each archive">

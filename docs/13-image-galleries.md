@@ -5,10 +5,6 @@ A sysop can publish any directory of images on the host as a labelled
 collection; users browse a paginated thumbnail grid and click for a
 full-screen modal viewer.
 
-This replaces the older sixel-based DSR door for web users — `/gallery/`
-displays images at full quality natively in the browser, with no
-terminal-art middleman or DOSBox-style chain.
-
 ## How users see it
 
 - Top-bar **Tools → Image Galleries** opens `/gallery/`.
@@ -23,8 +19,7 @@ Login required (any authenticated user can browse).
 
 Galleries are configured in `gallery-config.json` at the BBS install
 root (`/path/to/anetbbs/gallery-config.json`). The file is auto-seeded
-on first run with the legacy DSR collections (`gifs`, `swim`) if they
-exist, but you can edit it freely or use the admin UI.
+on first run if it doesn't already exist, but you can edit it freely or use the admin UI.
 
 Schema:
 
@@ -33,7 +28,7 @@ Schema:
   {
     "slug": "gifs",
     "label": "90s GIFs Galore",
-    "path": "/home/stingray/anetbbs/doors/sbbs/dsr/gifs",
+    "path": "/opt/anetbbs/data/galleries/gifs",
     "description": "6,500+ classic 90s GIFs.",
     "is_active": true,
     "sort_order": 10

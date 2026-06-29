@@ -62,14 +62,14 @@ Running a nightly TW2002 external-events script via dosemu2:
 
 **Params (JSON object):**
 ```json
-{"command": "/home/stingray/anetbbs/doors/dos/tw/event.sh", "timeout": 120}
+{"command": "/opt/anetbbs/doors/dos/tw/event.sh", "timeout": 120}
 ```
 
 **`event.sh`:**
 ```bash
 #!/bin/bash
 export TERM=linux
-cd /home/stingray/anetbbs/doors/dos/tw
+cd /opt/anetbbs/doors/dos/tw
 /usr/libexec/dosemu2/dosemu2.bin -td EXTERN.EXE
 ```
 

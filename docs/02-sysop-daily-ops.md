@@ -26,13 +26,12 @@ user `anetbbs-web` runs as needs sudoers permission for the units.
 Install the supplied template:
 
 ```
-sudo cp /home/stingray/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+sudo cp /opt/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
 sudo chmod 0440 /etc/sudoers.d/anetbbs
 sudo visudo -cf /etc/sudoers.d/anetbbs    # syntax check
 ```
 
-(Edit the `stingray` username in the template if your install runs
-under a different account.)
+(The template uses the `anetbbs` service account. Edit it if your install runs under a different username.)
 
 ## /admin/checklist — first-launch checklist
 
