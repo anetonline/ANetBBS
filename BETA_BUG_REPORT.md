@@ -37,4 +37,4 @@
 **Resolution:**
 
 ---
-*Submit via GitHub Issues at https://github.com/anetonline/ANetBBS/issues or email stingray@bbs.a-net.fyi*
+*Submit via GitHub Issues at https://github.com/anetonline/ANetBBS/issues or email a-net-online@proton.me*
