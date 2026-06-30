@@ -1376,11 +1376,8 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
 fi
 
 echo ""
-echo -e "${BOLD}${CYAN}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║              Update Complete!                                ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+echo -e "${BOLD}${CYAN}  Update Complete!${NC}"
+echo ""
 echo -e "  Backup stored at: ${DIM}$BACKUP_DIR${NC}"
 echo -e "  ${BOLD}Useful Commands:${NC}"
 echo -e "  ${DIM}sudo systemctl status anetbbs-web anetbbs anetbbs-mrc-bridge${NC}"

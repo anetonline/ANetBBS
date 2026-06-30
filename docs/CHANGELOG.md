@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b1.3`** (June 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b1.4`** (June 2026). Full release: August 1 2026.
+
+## v1.0b1.4 — Terminal MRC /me fix (June 2026)
+
+- FIX: Terminal MRC `/me` was sending IRC CTCP format (`\x01ACTION ...\x01`), which the MRC bridge doesn't recognise — it displayed as `ACTION andwhatyoutyped` instead of `* Nick action`. Changed to `* text` (matching the web client) so the bridge formats it correctly.
 
 ## v1.0b1.3 — Auto-update beta version fix (June 2026)
 

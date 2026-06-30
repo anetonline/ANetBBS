@@ -1,3 +1,9 @@
+# ANetBBS v1.0b1.4 — Terminal MRC /me fix (June 2026)
+
+- FIX: Terminal MRC `/me` action was sending IRC CTCP format (`\x01ACTION ...\x01`) which the MRC bridge does not recognise. Changed to `* text` format (matching the web client), so the bridge now correctly formats it as `* Nick action` for all users.
+
+---
+
 # ANetBBS v1.0b1.3 — Auto-update beta version fix (June 2026)
 
 - FIX: `deploy/run_upgrade.sh` had an alpha-only version regex (`vX.YaZ.NN`) that rejected beta version strings, causing auto-update to fail with "does not match expected form". Now accepts both `a` and `b` phase markers.

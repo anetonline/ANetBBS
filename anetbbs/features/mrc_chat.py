@@ -1112,7 +1112,7 @@ class MRCChat(BaseChatSystem):
                 await self._send_json({
                     'type': 'send_message',
                     'room': self._room,
-                    'message': f'\x01ACTION {chunk}\x01',
+                    'message': f'* {chunk}',
                 })
             return True
 
