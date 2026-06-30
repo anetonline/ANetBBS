@@ -306,6 +306,22 @@ _INSTALL_LOCK = threading.Lock()
 _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
 
 
+def _patch_wrapper_if_needed(wrapper: str) -> None:
+    """Patch run_upgrade.sh in-place if it still has the alpha-only version
+    regex that rejects beta (b) version strings.  Silently no-ops on any
+    error so a failed patch never blocks the upgrade attempt."""
+    try:
+        with open(wrapper, 'r', encoding='utf-8') as f:
+            src = f.read()
+        old = r'^v[0-9]+\.[0-9]+a[0-9]+\.[0-9]+$'
+        new = r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$'
+        if old in src:
+            with open(wrapper, 'w', encoding='utf-8') as f:
+                f.write(src.replace(old, new))
+    except Exception:
+        pass
+
+
 def _wrapper_path(cfg) -> str:
     """Resolve deploy/run_upgrade.sh relative to the install root.
     INSTALL_DIR config wins; otherwise derive from this file's location."""
@@ -363,6 +379,7 @@ def install():
     except OSError:
         pass
 
+    _patch_wrapper_if_needed(wrapper)
     _spawn_upgrade(wrapper, target, url, sha256, label='upgrade')
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})

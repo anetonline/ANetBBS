@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b1.2`** (June 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b1.3`** (June 2026). Full release: August 1 2026.
+
+## v1.0b1.3 — Auto-update beta version fix (June 2026)
+
+- FIX: `deploy/run_upgrade.sh` rejected beta version strings (`v1.0b1.N`) with "does not match expected vX.YaZ.NN form" — the validation regex only accepted alpha (`a`) phase markers. Updated to accept `[ab]`.
+- FIX: `admin.py` release-notes parser had the same alpha-only pattern for finding section boundaries in RELEASE.md.
 
 ## v1.0b1.2 — Message viewer position indicator fix (June 2026)
 

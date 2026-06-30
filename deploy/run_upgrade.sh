@@ -31,10 +31,9 @@ VERSION="$1"
 URL="$2"
 SHA="$3"
 
-# Version: vX.YaZ.NN. POSIX classes are enough since digits and letters
-# are all we accept. Validate via a regex that doesn't contain `&`.
-if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+a[0-9]+\.[0-9]+$ ]]; then
-    fail "version $VERSION does not match expected vX.YaZ.NN form"
+# Version: vX.Y[ab]Z.NN. Accept both alpha (a) and beta (b) phase markers.
+if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$ ]]; then
+    fail "version $VERSION does not match expected vX.Y[ab]Z.NN form"
 fi
 
 # URL: must be http(s) and end with .tar.gz. Block shell metacharacters
@@ -107,7 +106,7 @@ mkdir -p "$EXTRACT"
 log "extracting"
 tar -xzf "$TARBALL" -C "$EXTRACT" --no-same-owner || fail "tar extract failed"
 
-# The tarball contains a single top-level dir named ANetBBS-vX.YaZ.NN/
+# The tarball contains a single top-level dir named ANetBBS-vX.Y[ab]Z.NN/
 INNER=$(find "$EXTRACT" -maxdepth 1 -mindepth 1 -type d | head -n 1)
 [ -d "$INNER" ] || fail "tarball had no top-level directory"
 log "extracted to $INNER"

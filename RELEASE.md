@@ -1,3 +1,10 @@
+# ANetBBS v1.0b1.3 — Auto-update beta version fix (June 2026)
+
+- FIX: `deploy/run_upgrade.sh` had an alpha-only version regex (`vX.YaZ.NN`) that rejected beta version strings, causing auto-update to fail with "does not match expected form". Now accepts both `a` and `b` phase markers.
+- FIX: `admin.py` release-notes boundary regex also updated to match beta versions.
+
+---
+
 # ANetBBS v1.0b1.2 — Message viewer position indicator fix (June 2026)
 
 - TERMINAL: ANView message viewer status bar now shows the **last visible line** number instead of the first visible line. At the bottom of a 29-line message you now see `Ln:29/29  END` instead of `Ln:8/29`, making it obvious when you have reached the end of the message. The `END` tag appears only when the bottom of the content is on screen.

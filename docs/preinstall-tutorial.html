@@ -213,8 +213,10 @@ sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
 <section class="slide">
     <span class="step">10 / 10</span>
     <h2>Upgrades are one command</h2>
-    <pre>sudo anetbbs-upgrade /tmp/anetbbs-rebuilt-vNNN.tar.gz</pre>
-    <p>The wizard:</p>
+    <pre>tar xzf ANetBBS-vX.Y.Z.tar.gz
+cd ANetBBS-vX.Y.Z
+sudo bash update.sh</pre>
+    <p>The script:</p>
     <ul>
         <li>Snapshots <code>data/</code>, <code>.env</code>,
             <code>logs/</code> to a timestamped backup</li>
