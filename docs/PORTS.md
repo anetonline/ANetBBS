@@ -29,12 +29,12 @@ of the BBS keeps running.
 
 For the FTP server specifically, the cleanest fix is a systemd drop-in:
 ```bash
-sudo systemctl edit anetbbs.service
+sudo systemctl edit anetbbs-web.service
 # Add:
 # [Service]
 # AmbientCapabilities=CAP_NET_BIND_SERVICE
 # CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-sudo systemctl daemon-reload && sudo systemctl restart anetbbs.service
+sudo systemctl daemon-reload && sudo systemctl restart anetbbs-web.service
 ```
 
 Or run FTP on `FTP_PORT=2121` and put an iptables redirect / nginx-stream

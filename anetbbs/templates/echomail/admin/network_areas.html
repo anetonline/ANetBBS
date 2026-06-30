@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}{{ network.name }} Areas — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-chat-square-text"></i>
+        {% if network.network_type == 'binkp' %}
+          <span class="badge fs-6 align-middle" style="background:#0dcaf0!important;color:#000!important">BinkP</span>
+        {% else %}
+          <span class="badge fs-6 align-middle" style="background:#fd7e14!important;color:#000!important">QWK</span>
+        {% endif %}
+        {{ network.name }}
+    </h1>
+</div>
+
+{# Breadcrumb + top toolbar #}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <a href="{{ url_for('echomail_admin.areas') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Networks
+    </a>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('echomail_admin.bad_areas') }}" class="btn btn-warning btn-sm">
+            <i class="bi bi-exclamation-triangle"></i> Bad Areas
+        </a>
+        <a href="{{ url_for('echomail_admin.bulk_import') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-upload"></i> Bulk Import
+        </a>
+        <a href="{{ url_for('echomail_admin.new_area') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-circle"></i> Add Area
+        </a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">
+      {{ msg }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+  {% endfor %}
+{% endwith %}
+
+{# ── AreaFix quick panel (BinkP only) ─────────────────────────────────── #}
+{% if network.network_type == 'binkp' %}
+<details class="mb-3">
+  <summary class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-wrench"></i> AreaFix / Network Tools
+  </summary>
+  <div class="card mt-2">
+    <div class="card-body row g-3">
+
+      {# Custom AreaFix body #}
+      <div class="col-md-6">
+        <form method="POST" action="{{ url_for('echomail_admin.custom_areafix', network_id=network.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label fw-bold">Custom AreaFix Request</label>
+          <textarea name="body" rows="4" class="form-control form-control-sm font-monospace"
+            placeholder="+TAG1&#10;-TAG2&#10;%RESCAN SOME.TAG&#10;%QUERY"></textarea>
+          <div class="mt-2 d-flex gap-2">
+            <button class="btn btn-sm btn-secondary">Send to AreaFix</button>
+            <input type="text" name="robot" value="AreaFix" class="form-control form-control-sm w-auto"
+              title="Robot name (AreaFix or FileFix)">
+          </div>
+        </form>
+      </div>
+
+      {# Bulk network actions #}
+      <div class="col-md-6">
+        <label class="form-label fw-bold">Network-Wide Actions</label>
+        <div class="d-flex flex-column gap-2">
+          <form method="POST" action="{{ url_for('echomail_admin.subscribe_all', network_id=network.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-success w-100">
+              <i class="bi bi-check2-all"></i> Subscribe All (+ send AreaFix)
+            </button>
+          </form>
+          <form method="POST" action="{{ url_for('echomail_admin.unsubscribe_all', network_id=network.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger w-100"
+              onclick="return confirm('Unsubscribe from ALL areas on this network?')">
+              <i class="bi bi-x-circle"></i> Unsubscribe All (+ send AreaFix)
+            </button>
+          </form>
+          <form method="POST" action="{{ url_for('echomail_admin.rescan_all', network_id=network.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary w-100">
+              <i class="bi bi-arrow-repeat"></i> %RESCAN All Subscribed
+            </button>
+          </form>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</details>
+{% endif %}
+
+{# ── QWK Quick-Add panel ────────────────────────────────────────────────── #}
+{% if network.network_type == 'qwk' %}
+<details class="mb-3">
+  <summary class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-plus-square"></i> QWK Quick-Add Conferences
+  </summary>
+  <div class="card mt-2">
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('echomail_admin.qwk_quick_add', network_id=network.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label">Paste lines as <code>confnum Name</code> (one per line)</label>
+        <textarea name="entries" rows="5" class="form-control form-control-sm font-monospace"
+          placeholder="2001 General Discussion&#10;2002 Technology&#10;2003 BBS Scene"></textarea>
+        <button class="btn btn-sm btn-primary mt-2">
+          <i class="bi bi-plus-circle"></i> Add / Update Conferences
+        </button>
+      </form>
+    </div>
+  </div>
+</details>
+{% endif %}
+
+{# ── Bulk action bar ────────────────────────────────────────────────────── #}
+{% if area_list %}
+<form method="POST" action="{{ url_for('echomail_admin.bulk_area_action') }}" id="bulkForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="network_id" value="{{ network.id }}">
+
+  <div class="card mb-3 border-primary">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+      <span class="fw-bold me-1">Bulk:</span>
+      <span id="selCount" class="badge bg-secondary">0 selected</span>
+
+      {# Quick-select buttons #}
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="selAll">All</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="selNone">None</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="selActive">Active</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="selSub">Subscribed</button>
+
+      <div class="vr"></div>
+
+      {# Action selector #}
+      <select name="action" id="bulkAction" class="form-select form-select-sm w-auto">
+        <option value="">— choose action —</option>
+        <optgroup label="Active">
+          <option value="set_active">Set Active</option>
+          <option value="set_inactive">Set Inactive</option>
+        </optgroup>
+        <optgroup label="Subscribed">
+          <option value="set_subscribed">Set Subscribed</option>
+          <option value="set_unsubscribed">Set Unsubscribed</option>
+          <option value="set_active_subscribed">Set Active + Subscribed</option>
+        </optgroup>
+        <optgroup label="Sysop-Only">
+          <option value="set_sysop_only">Set Sysop-Only</option>
+          <option value="clear_sysop_only">Clear Sysop-Only</option>
+        </optgroup>
+        <optgroup label="Access Level">
+          <option value="set_access_level">Set Access Level →</option>
+        </optgroup>
+        <optgroup label="Danger">
+          <option value="delete">Delete Selected</option>
+        </optgroup>
+      </select>
+
+      {# Access level input (shown only when set_access_level selected) #}
+      <input type="number" name="access_level" id="accessLevelInput"
+        class="form-control form-control-sm w-auto d-none"
+        min="0" max="255" placeholder="level">
+
+      <button type="button" class="btn btn-primary btn-sm" id="applyBulk">
+        <i class="bi bi-check2"></i> Apply
+      </button>
+    </div>
+  </div>
+
+  {# ── Areas table, grouped by category ───────────────────────────────── #}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th style="width:1%"><input type="checkbox" id="checkAll" title="Select all"></th>
+          <th>Tag</th>
+          <th>Name</th>
+          <th class="text-center">Active</th>
+          <th class="text-center">Sub'd</th>
+          <th class="text-center">SysOp</th>
+          <th class="text-center">Lvl</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for category, cat_areas in groups.items() %}
+        <tr class="table-secondary">
+          <td colspan="8" class="py-1 ps-3">
+            <strong class="small text-uppercase text-muted">{{ category }}</strong>
+            <span class="badge bg-dark ms-1">{{ cat_areas|length }}</span>
+          </td>
+        </tr>
+        {% for area in cat_areas %}
+        <tr data-active="{{ '1' if area.is_active else '0' }}"
+            data-subscribed="{{ '1' if area.is_subscribed else '0' }}">
+          <td>
+            <input type="checkbox" name="area_ids" value="{{ area.id }}"
+              class="area-check" title="{{ area.tag }}">
+          </td>
+          <td class="font-monospace small">{{ area.tag }}</td>
+          <td class="small">{{ area.name }}</td>
+          <td class="text-center">
+            {% if area.is_active %}
+              <i class="bi bi-check-circle-fill text-success" title="Active"></i>
+            {% else %}
+              <i class="bi bi-dash-circle text-secondary" title="Inactive"></i>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if area.is_subscribed %}
+              <i class="bi bi-rss-fill text-info" title="Subscribed"></i>
+            {% else %}
+              <i class="bi bi-rss text-secondary" title="Not subscribed"></i>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if area.is_sysop_only %}
+              <i class="bi bi-lock-fill text-warning" title="Sysop-only"></i>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if area.min_access_level and area.min_access_level != 10 %}
+              <span class="badge bg-secondary">{{ area.min_access_level }}</span>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {# Toggle subscribe #}
+            <form method="POST" action="{{ url_for('echomail_admin.toggle_subscribe', area_id=area.id) }}"
+                  class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-xs btn-outline-{% if area.is_subscribed %}warning{% else %}success{% endif %}"
+                title="{% if area.is_subscribed %}Unsubscribe{% else %}Subscribe{% endif %}">
+                <i class="bi bi-{% if area.is_subscribed %}dash{% else %}plus{% endif %}-circle"></i>
+              </button>
+            </form>
+            {# Edit #}
+            <a href="{{ url_for('echomail_admin.edit_area', area_id=area.id) }}"
+               class="btn btn-xs btn-outline-primary" title="Edit">
+              <i class="bi bi-pencil"></i>
+            </a>
+            {# Rescan (BinkP only) #}
+            {% if network.network_type == 'binkp' %}
+            <form method="POST" action="{{ url_for('echomail_admin.rescan_area', area_id=area.id) }}"
+                  class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-xs btn-outline-secondary" title="%RESCAN">
+                <i class="bi bi-arrow-repeat"></i>
+              </button>
+            </form>
+            {% endif %}
+            {# Delete #}
+            <form method="POST" action="{{ url_for('echomail_admin.delete_area', area_id=area.id) }}"
+                  class="d-inline"
+                  onsubmit="return confirm('Delete area {{ area.tag }}?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-xs btn-outline-danger" title="Delete">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="text-muted small mb-3">
+    {{ area_list|length }} area{% if area_list|length != 1 %}s{% endif %} in {{ groups|length }} group{% if groups|length != 1 %}s{% endif %}
+  </div>
+</form>
+{% else %}
+<div class="alert alert-info">
+  No areas configured for this network yet.
+  <a href="{{ url_for('echomail_admin.new_area') }}">Add an area</a> or
+  <a href="{{ url_for('echomail_admin.bulk_import') }}">bulk import</a> from a backbone file.
+</div>
+{% endif %}
+
+<style>
+.btn-xs { padding: .1rem .35rem; font-size: .75rem; line-height: 1.4; }
+</style>
+
+<script>
+(function () {
+  const checks  = () => [...document.querySelectorAll('.area-check')];
+  const countEl = document.getElementById('selCount');
+  const actionSel = document.getElementById('bulkAction');
+  const lvlInput  = document.getElementById('accessLevelInput');
+
+  function updateCount() {
+    const n = checks().filter(c => c.checked).length;
+    countEl.textContent = n + ' selected';
+    countEl.className = n ? 'badge bg-primary' : 'badge bg-secondary';
+  }
+
+  document.getElementById('checkAll').addEventListener('change', function() {
+    checks().forEach(c => c.checked = this.checked);
+    updateCount();
+  });
+
+  document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('area-check')) {
+      updateCount();
+      const all = checks();
+      document.getElementById('checkAll').checked = all.every(c => c.checked);
+    }
+  });
+
+  document.getElementById('selAll').addEventListener('click', function() {
+    checks().forEach(c => c.checked = true);
+    document.getElementById('checkAll').checked = true;
+    updateCount();
+  });
+  document.getElementById('selNone').addEventListener('click', function() {
+    checks().forEach(c => c.checked = false);
+    document.getElementById('checkAll').checked = false;
+    updateCount();
+  });
+  document.getElementById('selActive').addEventListener('click', function() {
+    checks().forEach(c => {
+      c.checked = c.closest('tr').dataset.active === '1';
+    });
+    updateCount();
+  });
+  document.getElementById('selSub').addEventListener('click', function() {
+    checks().forEach(c => {
+      c.checked = c.closest('tr').dataset.subscribed === '1';
+    });
+    updateCount();
+  });
+
+  actionSel.addEventListener('change', function() {
+    lvlInput.classList.toggle('d-none', this.value !== 'set_access_level');
+    if (this.value === 'set_access_level') lvlInput.focus();
+  });
+
+  document.getElementById('applyBulk').addEventListener('click', function() {
+    const action = actionSel.value;
+    if (!action) { alert('Choose an action first.'); return; }
+    const sel = checks().filter(c => c.checked);
+    if (!sel.length) { alert('Select at least one area first.'); return; }
+    if (action === 'set_access_level' && !lvlInput.value) {
+      alert('Enter an access level.'); lvlInput.focus(); return;
+    }
+    if (action === 'delete') {
+      if (!confirm('Delete ' + sel.length + ' area(s)? This cannot be undone.')) return;
+    }
+    document.getElementById('bulkForm').submit();
+  });
+})();
+</script>
+{% endblock %}

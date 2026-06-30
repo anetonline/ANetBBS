@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Hub Management — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-broadcast"></i> Hub Management</h1>
+    <p>Manage downstream BinkP nodes and QWK nodes connected to this BBS as a hub.</p>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#00ff00;">{{ binkp_nodes|length }}</div>
+                <div>BinkP Nodes</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#00ffff;">{{ qwk_nodes|length }}</div>
+                <div>QWK Nodes</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#ffff00;">{{ pending_hold }}</div>
+                <div>Hold Queue (pending)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div style="font-size:2rem; color:#aaaaaa;"><i class="bi bi-diagram-3"></i></div>
+                <div>Hub Mode</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-lightning-charge"></i> Quick Actions</div>
+            <div class="card-body d-flex gap-2 flex-wrap">
+                <a href="{{ url_for('hub_admin.binkp_nodes') }}" class="btn btn-primary">
+                    <i class="bi bi-hdd-network"></i> BinkP Nodes
+                </a>
+                <a href="{{ url_for('hub_admin.new_binkp_node') }}" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Add BinkP Node
+                </a>
+                <a href="{{ url_for('hub_admin.qwk_nodes') }}" class="btn btn-primary">
+                    <i class="bi bi-archive"></i> QWK Nodes
+                </a>
+                <a href="{{ url_for('hub_admin.new_qwk_node') }}" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Add QWK Node
+                </a>
+                <a href="{{ url_for('hub_admin.hold_queue') }}" class="btn btn-warning">
+                    <i class="bi bi-clock-history"></i> Hold Queue
+                    {% if pending_hold %}<span class="badge bg-danger">{{ pending_hold }}</span>{% endif %}
+                </a>
+                <a href="{{ url_for('hub_admin.qwk_node_requests') }}" class="btn btn-{% if pending_requests %}danger{% else %}secondary{% endif %}">
+                    <i class="bi bi-person-plus"></i> Node Requests
+                    {% if pending_requests %}<span class="badge bg-light text-dark">{{ pending_requests }}</span>{% endif %}
+                </a>
+                <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-secondary">
+                    <i class="bi bi-arrow-left"></i> Echomail Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-hdd-network"></i> BinkP Nodes</div>
+            <div class="card-body p-0">
+                {% if binkp_nodes %}
+                <table class="table table-striped mb-0">
+                    <thead><tr><th>Address</th><th>Name</th><th>Status</th><th>Last Seen</th></tr></thead>
+                    <tbody>
+                        {% for node in binkp_nodes %}
+                        <tr>
+                            <td><a href="{{ url_for('hub_admin.binkp_node_detail', node_id=node.id) }}">{{ node.ftn_address }}</a></td>
+                            <td>{{ node.name }}</td>
+                            <td>
+                                {% if node.is_active %}<span class="badge bg-success">active</span>
+                                {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                            </td>
+                            <td style="font-size:0.8rem;">
+                                {% if node.last_seen_at %}{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center p-4 text-muted">No BinkP nodes registered yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-archive"></i> QWK Nodes</div>
+            <div class="card-body p-0">
+                {% if qwk_nodes %}
+                <table class="table table-striped mb-0">
+                    <thead><tr><th>Packet ID</th><th>Name</th><th>Status</th><th>Last Poll</th></tr></thead>
+                    <tbody>
+                        {% for node in qwk_nodes %}
+                        <tr>
+                            <td><a href="{{ url_for('hub_admin.qwk_node_detail', node_id=node.id) }}">{{ node.packet_id }}</a></td>
+                            <td>{{ node.name }}</td>
+                            <td>
+                                {% if node.is_active %}<span class="badge bg-success">active</span>
+                                {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                            </td>
+                            <td style="font-size:0.8rem;">
+                                {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center p-4 text-muted">No QWK nodes registered yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

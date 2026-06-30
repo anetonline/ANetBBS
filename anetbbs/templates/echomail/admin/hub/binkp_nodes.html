@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}BinkP Hub Nodes — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-hdd-network"></i> BinkP Hub Nodes</h1>
+        <p>Downstream FidoNet/BinkP nodes that receive echomail from this hub.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('hub_admin.new_binkp_node') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add Node
+        </a>
+        <a href="{{ url_for('hub_admin.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Hub Overview
+        </a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if nodes %}
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>FTN Address</th>
+                    <th>Name</th>
+                    <th>Sysop</th>
+                    <th>Areas</th>
+                    <th>Pending</th>
+                    <th>Status</th>
+                    <th>Last Seen</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for node in nodes %}
+                <tr>
+                    <td><a href="{{ url_for('hub_admin.binkp_node_detail', node_id=node.id) }}">{{ node.ftn_address }}</a></td>
+                    <td>{{ node.name }}</td>
+                    <td>{{ node.sysop or '—' }}</td>
+                    <td>{{ node.subscriptions.count() }}</td>
+                    <td>{{ node.hold_queue.filter_by(status='pending').count() }}</td>
+                    <td>
+                        {% if node.is_active %}<span class="badge bg-success">active</span>
+                        {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.8rem;">
+                        {% if node.last_seen_at %}{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}<span class="text-muted">never</span>{% endif %}
+                    </td>
+                    <td class="text-end">
+                        <a href="{{ url_for('hub_admin.edit_binkp_node', node_id=node.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center p-5">
+            <p class="text-muted">No BinkP downstream nodes registered yet.</p>
+            <a href="{{ url_for('hub_admin.new_binkp_node') }}" class="btn btn-primary">Add the first node</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

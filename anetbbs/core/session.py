@@ -218,6 +218,92 @@ class BBSSession:
             await self.write(key + '\r\n')
             return key
 
+    async def read_key_arrow(self) -> str:
+        """Read a single keystroke including arrow/navigation keys. No echo.
+
+        Returns one of: 'UP' 'DOWN' 'LEFT' 'RIGHT' 'PGUP' 'PGDN' 'HOME'
+        'END' 'ENTER' 'ESC' 'CTRL_C' or an uppercase printable character.
+        Raises CarrierLost if the connection drops.
+
+        CSI sequences (PgUp = ESC [ 5 ~, PgDn = ESC [ 6 ~, etc.) are read
+        byte-by-byte until the VT final byte (0x40–0x7E) so they are never
+        fragmented by a partial stream.read() return."""
+        while True:
+            try:
+                ch = await self.reader.read(1)
+            except (ConnectionError, BrokenPipeError, EOFError) as e:
+                raise CarrierLost(str(e)) from e
+            if not ch:
+                raise CarrierLost('client disconnected')
+            if ch == b'\r':
+                return 'ENTER'
+            if ch == b'\n':
+                continue  # discard trailing LF from CR+LF Telnet pairs
+            if ch == b'\x03':
+                return 'CTRL_C'
+            if ch == b'\x1b':
+                try:
+                    nxt = await asyncio.wait_for(self.reader.read(1), timeout=0.12)
+                except (asyncio.TimeoutError, Exception):
+                    return 'ESC'
+                if nxt == b'[':
+                    # CSI: read one byte at a time until the VT final byte
+                    # (any byte in 0x40–0x7E, which includes A-Z a-z @-~ and ~).
+                    seq = b''
+                    try:
+                        while len(seq) < 16:
+                            b = await asyncio.wait_for(
+                                self.reader.read(1), timeout=0.12)
+                            if not b:
+                                break
+                            seq += b
+                            if 0x40 <= b[0] <= 0x7E:   # final byte
+                                break
+                    except (asyncio.TimeoutError, Exception):
+                        pass
+                    if seq == b'A': return 'UP'
+                    if seq == b'B': return 'DOWN'
+                    if seq == b'C': return 'RIGHT'
+                    if seq == b'D': return 'LEFT'
+                    if seq == b'H': return 'HOME'
+                    if seq == b'F': return 'END'
+                    if seq == b'5~': return 'PGUP'
+                    if seq == b'6~': return 'PGDN'
+                    if seq == b'V':  return 'PGUP'   # SyncTERM ANSI mode
+                    if seq == b'U':  return 'PGDN'   # SyncTERM ANSI mode
+                    if seq == b'1~': return 'HOME'
+                    if seq == b'4~': return 'END'
+                    if seq == b'7~': return 'HOME'
+                    if seq == b'8~': return 'END'
+                    if seq == b'3~': return 'DEL'
+                    if seq == b'2~': return 'INS'
+                    # Modifier variants like 1;5A (Ctrl+Arrow) → treat as arrow
+                    if seq.endswith(b'A'): return 'UP'
+                    if seq.endswith(b'B'): return 'DOWN'
+                    if seq.endswith(b'C'): return 'RIGHT'
+                    if seq.endswith(b'D'): return 'LEFT'
+                    return 'ESC'
+                if nxt == b'O':
+                    # SS3 sequences (common in SyncTERM's xterm mode)
+                    try:
+                        fin = await asyncio.wait_for(
+                            self.reader.read(1), timeout=0.12)
+                    except (asyncio.TimeoutError, Exception):
+                        fin = b''
+                    if fin == b'A': return 'UP'
+                    if fin == b'B': return 'DOWN'
+                    if fin == b'C': return 'RIGHT'
+                    if fin == b'D': return 'LEFT'
+                    if fin == b'H': return 'HOME'
+                    if fin == b'F': return 'END'
+                return 'ESC'
+            if ch[0] < 32:
+                continue
+            try:
+                return ch.decode('latin-1', errors='replace').upper()
+            except Exception:
+                return '?'
+
     async def read_password(self, prompt: str = 'Password: ') -> str:
         """Read a password char-by-char, echoing '*' for each one. Standard
         terminals echo locally; we send a backspace+'*' to overwrite each char

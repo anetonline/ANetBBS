@@ -7,6 +7,19 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
 
+/* IBM VGA 9×16 — authentic CP437 bitmap font for BBS content
+   Source : https://int10h.org/oldschool-pc-fonts/fontlist/
+   Author : VileR / Screwtape (int10h.org)
+   License: CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/
+   File converted from TTF to WOFF; see anetbbs/static/fonts/LICENSE.txt */
+@font-face {
+  font-family: 'VGA437';
+  src: url('../fonts/Ac437_IBM_VGA_9x16.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 
 /* ─────────────────────────────────────────
    ROOT
@@ -29,8 +42,19 @@
 body {
   background: #000000 !important;
   color: #ffffff !important;
-  font-family: 'Share Tech Mono', 'Courier New', 'Consolas', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', 'Courier New', monospace;
   animation: body-hue-shift 20s linear infinite;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: auto;
+  font-smooth: never;
+}
+
+/* Orbitron headings look better with smoothing restored */
+h1, h2, h3, h4, h5, h6, .navbar-brand,
+.bbs-header h1, .bbs-header h2 {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: always;
 }
 
 /* Very subtle background hue shift */
@@ -186,7 +210,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
 /* Nav links */
 .navbar-nav .nav-link {
   color: rgba(204, 0, 255, 0.65) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   letter-spacing: 0.8px;
   text-transform: uppercase;
@@ -373,7 +397,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   border: 1px solid rgba(204, 0, 255, 0.3) !important;
   color: #ffffff !important;
   border-radius: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   caret-color: var(--hk-lime);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -413,7 +437,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   border-color: rgba(204, 0, 255, 0.3) !important;
   color: var(--hk-violet) !important;
   border-radius: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -428,7 +452,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
 
 .dropdown-item {
   color: rgba(204, 0, 255, 0.8) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   transition: all 0.1s;
   padding: 0.3rem 1rem;
@@ -456,7 +480,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
 ═══════════════════════════════════════════════════════════ */
 .table {
   color: #ffffff;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.88rem;
   --bs-table-bg: transparent;
 }
@@ -495,6 +519,11 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   font-size: 0.6rem;
   letter-spacing: 1px;
   text-transform: uppercase;
+  /* Break out of h1 gradient-text: h1 sets -webkit-text-fill-color:transparent
+     which is inherited and overrides any color: rule on children. Reset it. */
+  -webkit-text-fill-color: initial !important;
+  -webkit-background-clip: initial !important;
+  background-clip: initial !important;
 }
 
 .bg-primary, .badge.bg-primary { background: linear-gradient(135deg, var(--hk-violet), var(--hk-cyan)) !important; color: #fff !important; }
@@ -512,7 +541,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   border-top-width: 0 !important;
   border-right-width: 0 !important;
   border-bottom-width: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 .alert-success { background: rgba(170,255,0,0.06) !important; border-color: var(--hk-lime) !important; color: #ccff88; }
@@ -527,7 +556,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   background: transparent;
   border: 1px solid rgba(204,0,255,0.25);
   color: var(--hk-cyan);
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   border-radius: 0 !important;
   transition: all 0.15s;
 }
@@ -665,7 +694,7 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
   border-top: none !important;
   margin-top: 2rem;
   padding-top: 0;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.78rem;
   color: rgba(204, 0, 255, 0.5);
   position: relative;
@@ -701,14 +730,14 @@ hr { border-color: rgba(204, 0, 255, 0.25); opacity: 1; }
 /* ═══════════════════════════════════════════════════════════
    CODE
 ═══════════════════════════════════════════════════════════ */
-code { color: var(--hk-lime); background: rgba(170,255,0,0.06); padding: 0.1em 0.3em; font-family: 'Share Tech Mono', monospace; }
+code { color: var(--hk-lime); background: rgba(170,255,0,0.06); padding: 0.1em 0.3em; font-family: 'VGA437', 'Share Tech Mono', monospace; }
 pre { background: #030005 !important; border: 1px solid rgba(204,0,255,0.2); border-radius: 0; padding: 1rem; }
 pre code { background: transparent; color: var(--hk-cyan); }
 
 /* ═══════════════════════════════════════════════════════════
    TOASTS
 ═══════════════════════════════════════════════════════════ */
-.toast { border-radius: 0 !important; border: 1px solid rgba(204,0,255,0.5) !important; font-family: 'Share Tech Mono', monospace; }
+.toast { border-radius: 0 !important; border: 1px solid rgba(204,0,255,0.5) !important; font-family: 'VGA437', 'Share Tech Mono', monospace; }
 .text-bg-warning { background: rgba(20,8,0,0.97) !important; color: var(--hk-orange) !important; border-color: rgba(255,102,0,0.5) !important; }
 .text-bg-danger  { background: rgba(15,0,10,0.97) !important; color: var(--hk-pink) !important; border-color: rgba(255,0,170,0.5) !important; }
 
@@ -829,11 +858,11 @@ img.img-thumbnail { background: #030005 !important; border-color: rgba(204,0,255
   color: rgba(204, 0, 255, 0.55);
   letter-spacing: 2px;
   margin-bottom: 1.2rem;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 .htp-tribute {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.75);
   line-height: 1.7;
@@ -854,7 +883,7 @@ img.img-thumbnail { background: #030005 !important; border-color: rgba(204,0,255
 
 .htp-crew {
   margin-bottom: 1.4rem;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 .htp-row {
@@ -887,7 +916,7 @@ img.img-thumbnail { background: #030005 !important; border-color: rgba(204,0,255
 }
 
 .htp-quote {
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.8rem;
   color: rgba(204, 0, 255, 0.8);
   border-left: 2px solid rgba(170, 255, 0, 0.35);
@@ -906,7 +935,7 @@ img.img-thumbnail { background: #030005 !important; border-color: rgba(204,0,255
   background: #000000;
   border: 1px solid rgba(170, 255, 0, 0.3);
   padding: 0.75rem 1rem;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   color: var(--hk-lime);
   white-space: pre;

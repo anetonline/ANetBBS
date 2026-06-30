@@ -1534,7 +1534,14 @@
       const verb  = (parts[0] || '').toUpperCase();
       const rest  = t.slice((parts[0] || '').length).trim();
       if (!rest) return '/' + t;
-      if (verb === 'IDENTIFY' || verb === 'REGISTER' || verb === 'UPDATE' || verb === 'ROOMPASS')
+      if (verb === 'REGISTER') {
+        // Mask only the password word; leave the email address visible.
+        const rparts = rest.split(/\s+/, 2);
+        const pw = rparts[0] || '';
+        const email = rparts[1] || '';
+        return '/REGISTER ' + '*'.repeat(pw.length) + (email ? ' ' + email : '');
+      }
+      if (verb === 'IDENTIFY' || verb === 'UPDATE' || verb === 'ROOMPASS')
         return '/' + verb + ' ' + '*'.repeat(rest.length);
       return '/' + t;
     }
@@ -1542,17 +1549,32 @@
     // -----------------------------------------------------------------------
     // Secure mode (password masking)
     // -----------------------------------------------------------------------
+    // secureMode shapes:
+    //   Non-REGISTER: { verb, realRest, separatorEntered }
+    //   REGISTER:     { verb:'REGISTER', separatorEntered,
+    //                   realPassword, passwordDone, realEmail }
     let secureMode = null;
+
+    const REGISTER_PW_MAX = 20;
 
     function _isSecureVerb(verb) {
       const v = (verb || '').toUpperCase();
       return v === 'IDENTIFY' || v === 'REGISTER' || v === 'UPDATE' || v === 'ROOMPASS';
     }
 
-    function _secureVisibleValue(verb, realRest, separatorEntered) {
-      const rest = realRest || '';
-      const hasSep = !!separatorEntered || !!rest;
-      return '/' + verb.toUpperCase() + (hasSep ? ' ' : '') + '*'.repeat(rest.length);
+    function _secureVisibleValue(sm) {
+      if (!sm) return '';
+      const verb = sm.verb;
+      if (verb === 'REGISTER') {
+        const pw = sm.realPassword || '';
+        if (!sm.separatorEntered && !pw) return '/REGISTER';
+        let v = '/REGISTER ' + '*'.repeat(pw.length);
+        if (sm.passwordDone) v += ' ' + (sm.realEmail || '');
+        return v;
+      }
+      const rest   = sm.realRest || '';
+      const hasSep = sm.separatorEntered || !!rest;
+      return '/' + verb + (hasSep ? ' ' : '') + '*'.repeat(rest.length);
     }
 
     function _maybeEnterSecureModeFromVisible() {
@@ -1566,8 +1588,21 @@
       const tail = m[2] || '';
       const separatorEntered = /^\s/.test(tail);
       const rest = separatorEntered ? tail.replace(/^\s+/, '') : '';
-      secureMode = { verb, realRest: rest, separatorEntered };
-      messageInput.value = _secureVisibleValue(verb, rest, separatorEntered);
+      if (verb === 'REGISTER') {
+        const spIdx = rest.indexOf(' ');
+        let realPassword = '', passwordDone = false, realEmail = '';
+        if (spIdx >= 0) {
+          realPassword = rest.slice(0, Math.min(spIdx, REGISTER_PW_MAX));
+          passwordDone = true;
+          realEmail    = rest.slice(spIdx + 1);
+        } else {
+          realPassword = rest.slice(0, REGISTER_PW_MAX);
+        }
+        secureMode = { verb, separatorEntered, realPassword, passwordDone, realEmail };
+      } else {
+        secureMode = { verb, realRest: rest, separatorEntered };
+      }
+      messageInput.value = _secureVisibleValue(secureMode);
       const len = messageInput.value.length;
       messageInput.setSelectionRange(len, len);
     }
@@ -1586,7 +1621,17 @@
     // -----------------------------------------------------------------------
     function doSend() {
       let rawLine = messageInput.value || '';
-      if (secureMode) rawLine = '/' + secureMode.verb + ((secureMode.separatorEntered || secureMode.realRest) ? ' ' : '') + (secureMode.realRest || '');
+      if (secureMode) {
+        if (secureMode.verb === 'REGISTER') {
+          const pw    = secureMode.realPassword || '';
+          const email = secureMode.realEmail    || '';
+          rawLine = '/REGISTER ' + pw + (secureMode.passwordDone && email ? ' ' + email : '');
+        } else {
+          rawLine = '/' + secureMode.verb +
+            ((secureMode.separatorEntered || secureMode.realRest) ? ' ' : '') +
+            (secureMode.realRest || '');
+        }
+      }
 
       const parsed = parseUserInput(rawLine);
       if (!parsed) return;
@@ -2175,13 +2220,29 @@
       if (!secureMode) return;
       if (e.inputType === 'insertText' && typeof e.data === 'string') {
         e.preventDefault();
-        if (!secureMode.separatorEntered && e.data === ' ') {
-          secureMode.separatorEntered = true;
+        if (secureMode.verb === 'REGISTER') {
+          if (!secureMode.separatorEntered) {
+            secureMode.separatorEntered = true;
+          } else if (!secureMode.passwordDone) {
+            if (e.data === ' ') {
+              secureMode.passwordDone = true;
+            } else if ((secureMode.realPassword || '').length < REGISTER_PW_MAX) {
+              secureMode.realPassword = (secureMode.realPassword || '') + e.data;
+            }
+            // silently drop chars beyond REGISTER_PW_MAX while still in password field
+          } else {
+            // email field — visible, no length cap here
+            secureMode.realEmail = (secureMode.realEmail || '') + e.data;
+          }
         } else {
-          if (!secureMode.separatorEntered) secureMode.separatorEntered = true;
-          secureMode.realRest = (secureMode.realRest || '') + e.data;
+          if (!secureMode.separatorEntered && e.data === ' ') {
+            secureMode.separatorEntered = true;
+          } else {
+            if (!secureMode.separatorEntered) secureMode.separatorEntered = true;
+            secureMode.realRest = (secureMode.realRest || '') + e.data;
+          }
         }
-        messageInput.value  = _secureVisibleValue(secureMode.verb, secureMode.realRest, secureMode.separatorEntered);
+        messageInput.value = _secureVisibleValue(secureMode);
         const len = messageInput.value.length;
         messageInput.setSelectionRange(len, len);
         enforceTypingLimitInInput();
@@ -2189,12 +2250,24 @@
       }
       if (e.inputType === 'deleteContentBackward') {
         e.preventDefault();
-        if (secureMode.realRest) {
-          secureMode.realRest = (secureMode.realRest || '').slice(0, -1);
-        } else if (secureMode.separatorEntered) {
-          secureMode.separatorEntered = false;
+        if (secureMode.verb === 'REGISTER') {
+          if (secureMode.realEmail) {
+            secureMode.realEmail = secureMode.realEmail.slice(0, -1);
+          } else if (secureMode.passwordDone) {
+            secureMode.passwordDone = false;
+          } else if (secureMode.realPassword) {
+            secureMode.realPassword = secureMode.realPassword.slice(0, -1);
+          } else if (secureMode.separatorEntered) {
+            secureMode.separatorEntered = false;
+          }
+        } else {
+          if (secureMode.realRest) {
+            secureMode.realRest = secureMode.realRest.slice(0, -1);
+          } else if (secureMode.separatorEntered) {
+            secureMode.separatorEntered = false;
+          }
         }
-        messageInput.value  = _secureVisibleValue(secureMode.verb, secureMode.realRest, secureMode.separatorEntered);
+        messageInput.value = _secureVisibleValue(secureMode);
         const len = messageInput.value.length;
         messageInput.setSelectionRange(len, len);
         enforceTypingLimitInInput();

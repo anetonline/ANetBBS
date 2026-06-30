@@ -1,8 +1,137 @@
-# ANetBBS v1.0a2.216 — Clean shutdown fix + socket.send() warning suppression (June 2026)
+# ANetBBS v1.0b1.2 — Message viewer position indicator fix (June 2026)
 
-Fixed `anetbbs` service being SIGKILLed on restart: SSH keepalive now waits on a
-proper shutdown event instead of an unresolvable Future. `asyncore` logger suppressed
-to silence FTP health-check socket warnings in the journal.
+- TERMINAL: ANView message viewer status bar now shows the **last visible line** number instead of the first visible line. At the bottom of a 29-line message you now see `Ln:29/29  END` instead of `Ln:8/29`, making it obvious when you have reached the end of the message. The `END` tag appears only when the bottom of the content is on screen.
+
+---
+
+# ANetBBS v1.0b1.1 — Beta 1 Release (June 2026)
+
+The public-facing echomail browser is now network-first, matching the admin "Manage Areas" UX added in v1.0a2.221.
+
+**Web (`/echomail/`)**
+- Landing page is now a network chooser: one card per network with type badge (BinkP/QWK), area count, and total unread badge
+- Clicking a card goes to `/echomail/network/<id>` — a per-network area list grouped by category (General, Technology, BBS Scene, …)
+- Each area card shows unread count, message count, last-message date, tag, and quick buttons: Enter / Next Unread / Compose
+- "All Areas" back button on area pages now reads "← [Network Name]" and returns to the correct network view
+
+**Terminal (telnet/SSH)**
+- Echomail menu option now shows a network selector first (number / Q)
+- After choosing a network, shows areas for that network grouped by category with `── Group ──` headers
+- Per-network area list: `B=back` returns to network list, `Q` exits entirely
+- Both levels use the standard `banner()` / `footer()` / `prompt()` ANSI chrome
+
+---
+
+# ANetBBS v1.0a2.221 — Echomail bulk area management; network-first UI (June 2026)
+
+Echomail "Manage Areas" is now a network-first experience. The page opens with a card grid
+showing every configured network — name, type (BinkP / QWK), hub address, and live counts
+of total / active / subscribed areas. Click **Manage Areas** on any card to drill into that
+network's areas.
+
+**Per-network area view**
+- Areas grouped by category (General, Technology, BBS Scene, …) with collapsible sections
+- Bulk-select toolbar: All / None / Active / Subscribed quick-select buttons + selected count
+- Bulk actions: Set Active, Set Inactive, Set Subscribed, Set Unsubscribed, Set Active+Subscribed,
+  Set Sysop-Only, Clear Sysop-Only, Set Access Level, Delete Selected
+- All per-row actions (toggle subscribe, edit, %RESCAN, delete) now return to the correct
+  network's area list instead of the top-level chooser
+- AreaFix quick panel and QWK quick-add panel moved into the per-network view
+- Bulk import and bad-area actions also redirect back to the relevant network
+
+---
+
+# ANetBBS v1.0a2.220 — ANotherNetwork QWK/FTP seeded; 26 conference areas (June 2026)
+
+ANotherNetwork now ships with full QWK support over FTP alongside the existing BinkP path,
+and with 26 pre-organized conference areas across 8 named groups.
+
+**ANotherNetwork QWK/FTP**
+- New `ANotherNetwork (QWK)` network seeded: FTP transport, hub ID `ANET`
+- Download: `ftp://bbs.a-net.fyi/ANET.qwk` — Upload: `ftp://bbs.a-net.fyi/<YOURID>.rep`
+- FTP server now authenticates QWK nodes by packet_id + password (from Hub Management → QWK Nodes)
+- Packet generated fresh on login; `.rep` processed and fanned out to BinkP subscribers automatically
+- Node home dir: `data/qwk-hub/<PACKET_ID>/`
+- New `echomail/qwk_hub_ftp.py`: packet builder + REP importer + tosser integration
+
+**26 conference areas in 8 groups**
+- General: General, Introductions, Humor & Jokes, Friendly Debate, Network Feedback
+- Technology: Technology, Linux & Open Source, Security & Privacy, Networking & Internet
+- BBS Scene: BBS News, BBS Dev, ANetBBS Support, Door Games, ANSI/ASCII Art
+- Retro: Retro Computing, Games & Gaming, Music
+- Hobby: Movies & TV, Books & Reading, Food & Cooking, Sports
+- Trading: For Sale / Wanted / Trades
+- Data: Data & File Discussion
+- SysOp (sysop-only): SysOp Discussion, SysOp Help & Tips
+- Test: Test Messages
+
+**`EchoArea` model**
+- New `category` field (VARCHAR 80, nullable) — auto-migrated on upgrade
+
+---
+
+# ANetBBS v1.0a2.219 — ANotherNetwork Zone 1200 seeded; nodelist endpoint (June 2026)
+
+ANotherNetwork (Zone 1200) is now seeded on every fresh install — the same way
+Dove-Net ships pre-configured with Synchronet.
+
+**ANotherNetwork (Zone 1200)**
+- BinkP hub: `bbs.a-net.fyi` at FTN address `1200:1/1`
+- Five echo areas pre-created: ANN.GENERAL, ANN.SYSOP, ANN.TEST, ANN.BBSDEV, ANN.RETRO
+- Network is seeded but inactive — sysop must enter their assigned node address and
+  session password in Admin → Echomail to activate. Apply at bbs.a-net.fyi.
+
+**Nodelist endpoint**
+- Public URL: `/admin/echomail/hub/nodelist` — serves the current ANotherNetwork NODELIST
+  (FTS-5000 format) as a downloadable text file named `NODELIST.NNN` (day of year).
+  No login required. Includes all active registered BinkP downstream nodes.
+
+---
+
+# ANetBBS v1.0a2.218 — Hub mode: BinkP hub + QWK hub (June 2026)
+
+ANetBBS can now act as an echomail hub — not just a leaf node.
+
+**BinkP Hub**
+- Register downstream BinkP nodes via Admin → Echomail → Hub Management
+- Per-node echo area subscriptions managed via the admin UI or by areafix netmail from the node
+- Outbound hold queue: new messages are fanned out to all subscribed nodes; they pick up mail on their next BinkP connection
+- Areafix robot now distinguishes upstream hubs from downstream nodes — subscription changes for downstream peers affect per-node `EchoAreaNode` records, not the global `EchoArea.is_subscribed` flag
+- Catchup: queue the full backlog of an area for a newly-subscribed node with one click
+- Hold queue viewer at Admin → Echomail → Hub Management → Hold Queue
+
+**QWK Hub**
+- Register QWK nodes via Admin → Echomail → Hub Management → QWK Nodes
+- HTTP endpoints: `GET /qwkhub/<nodeid>.qwk` (download) and `POST /qwkhub/<nodeid>.rep` (upload)
+- Per-node conference subscriptions with high-water mark tracking — nodes receive only new messages since last poll
+- Inbound REP packets are imported and fanned out to BinkP downstream nodes automatically
+- Hub system ID configurable via `QWK_HUB_ID` setting in Admin → Settings
+
+**Hub tosser**
+- New `echomail/tosser.py` handles message fan-out: when a message arrives (BinkP listener, QWK hub upload, or upstream poll), it's automatically queued for all subscribed downstream BinkP nodes
+- SEEN-BY aware: nodes already listed in a message's SEEN-BY are skipped
+
+**Nodelist generator**
+- `echomail/nodelist.py` now includes `generate_nodelist()` — produces a standard FidoNet-format NODELIST for hub operators to publish
+
+**Navigation**
+- New "Hub Management" link in Admin dropdown (under Echomail)
+- Hub Management button added to Echomail Admin dashboard
+
+---
+
+# ANetBBS v1.0a2.217 — Pre-beta audit: bug fixes + doc corrections (June 2026)
+
+- FIX: Private message bodies were always blank — template used wrong field name.
+  PM read view, thread sidebar previews, and Quote Reply all affected. Fixed.
+- FIX: File area storage path no longer shown to regular users (admin-only).
+- FIX: Synchronet compat doc table overflow — wide tables now scroll horizontally.
+- DOC: Install commands updated to current format throughout.
+- DOC: Version references corrected; stale draft notes removed.
+- DOC: Pi 3 confirmed working; table and hardware recommendations updated.
+- DOC: DSR references removed from Image Galleries doc.
+- DOC: Network list updated (tqwNet + zer0net replace outdated entries).
+- DOC: Incorrect systemd service name in PORTS.md corrected.
 
 ---
 

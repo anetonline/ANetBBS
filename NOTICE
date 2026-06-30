@@ -1,0 +1,24 @@
+ANetBBS Third-Party Notices
+===========================
+
+ANetBBS (MIT License) incorporates the following third-party components.
+Each component's license is reproduced below or referenced by path.
+
+
+IBM VGA 9x16 Bitmap Font (Ac437_IBM_VGA_9x16.woff)
+----------------------------------------------------
+Original author : VileR / Screwtape
+Source          : https://int10h.org/oldschool-pc-fonts/fontlist/
+License         : Creative Commons Attribution-ShareAlike 4.0 International
+                  https://creativecommons.org/licenses/by-sa/4.0/
+
+The font file distributed with ANetBBS was converted from TTF to WOFF format.
+As a derivative work it is redistributed under the same CC BY-SA 4.0 license.
+A copy of the license is included at:
+  anetbbs/static/fonts/LICENSE.txt
+
+The font is served as a static web asset at:
+  /static/fonts/Ac437_IBM_VGA_9x16.woff
+
+The TTF originals and full font pack are available free of charge at:
+  https://int10h.org/oldschool-pc-fonts/

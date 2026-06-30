@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Echomail Areas — {{ config.BBS_NAME }}{% endblock %}
+{% block title %}Echomail Networks — {{ config.BBS_NAME }}{% endblock %}
 
 {% block extra_css %}
 <style>
-.unread-badge { background-color: #00ff00; color: #000; font-size: 0.75rem; padding: 2px 6px; border-radius: 10px; }
-.network-header { color: #00ff00; font-size: 1.1rem; font-weight: bold; border-bottom: 1px solid #00ff00; padding-bottom: 4px; margin-top: 20px; }
+.net-card { transition: border-color .15s; }
+.net-card:hover { border-color: #00ff00 !important; }
+.unread-badge { background-color: #00ff00; color: #000; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
 </style>
 {% endblock %}
 
@@ -12,9 +13,9 @@
 <div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1 class="mb-1"><i class="bi bi-envelope-paper"></i> Echomail Networks</h1>
-        <p class="mb-0">FidoNet / QWK networked message areas</p>
+        <p class="mb-0 text-muted small">FidoNet / QWK networked message areas — choose a network</p>
     </div>
-    <div>
+    <div class="d-flex gap-2 flex-wrap">
         <a href="{{ url_for('echomail.netmail_inbox') }}" class="btn btn-outline-success btn-sm">
             <i class="bi bi-mailbox"></i> QWK Netmail
         </a>
@@ -24,52 +25,70 @@
     </div>
 </div>
 
-{% if areas_by_network %}
-    {% for network, area_list in areas_by_network.items() %}
-    <div class="network-header">
-        <i class="bi bi-diagram-3"></i> {{ network.name }}
-        <small class="ms-2" style="color:#00cc00; font-size:0.85rem;">{{ network.network_type|upper }}</small>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">
+      {{ msg }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
-    <div class="row g-3 mb-4">
-        {% for area, unread in area_list %}
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-chat-square-text"></i> {{ area.name }}</span>
-                    {% if unread > 0 %}
-                    <span class="unread-badge">{{ unread }} new</span>
-                    {% endif %}
-                </div>
-                <div class="card-body">
-                    {% if area.description %}
-                    <p class="card-text" style="font-size:0.85rem;">{{ area.description }}</p>
-                    {% endif %}
-                    <p class="card-text" style="font-size:0.8rem;">
-                        <i class="bi bi-envelope"></i> {{ area.total_messages or 0 }} messages
-                        {% if area.last_message_at %}
-                        &nbsp;|&nbsp;Last: {{ area.last_message_at.strftime('%Y-%m-%d') }}
-                        {% endif %}
-                    </p>
-                    <code style="font-size:0.75rem; color:#00cc00;">{{ area.tag }}</code>
-                </div>
-                <div class="card-footer">
-                    <a href="{{ url_for('echomail.area', area_id=area.id) }}" class="btn btn-primary btn-sm">
-                        <i class="bi bi-folder2-open"></i> Enter Area
-                    </a>
-                    <a href="{{ url_for('echomail.compose', area_id=area.id) }}" class="btn btn-primary btn-sm ms-1">
-                        <i class="bi bi-pencil-square"></i> Compose
-                    </a>
-                </div>
-            </div>
+  {% endfor %}
+{% endwith %}
+
+{% if network_list %}
+<div class="row g-3 mt-1">
+  {% for item in network_list %}
+  {% set net = item.network %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="card h-100 net-card border-secondary">
+      <div class="card-header d-flex align-items-center gap-2">
+        {% if net.network_type == 'binkp' %}
+          <span class="badge" style="background:#0dcaf0!important;color:#000!important">BinkP</span>
+        {% else %}
+          <span class="badge" style="background:#fd7e14!important;color:#000!important">QWK</span>
+        {% endif %}
+        <span class="fw-bold flex-grow-1">{{ net.name }}</span>
+        {% if item.total_unread %}
+          <span class="unread-badge">{{ item.total_unread }} new</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if net.description %}
+        <p class="small text-muted mb-2">{{ net.description|truncate(100) }}</p>
+        {% endif %}
+        <div class="d-flex align-items-center gap-3">
+          <div class="text-center">
+            <div class="fw-bold fs-5">{{ item.area_count }}</div>
+            <div class="small text-muted">area{% if item.area_count != 1 %}s{% endif %}</div>
+          </div>
+          {% if net.network_type == 'binkp' and net.hub_address %}
+          <div class="small text-muted">
+            <i class="bi bi-diagram-3"></i> {{ net.hub_address }}
+          </div>
+          {% elif net.network_type == 'qwk' and net.qwk_hub_id %}
+          <div class="small text-muted">
+            <i class="bi bi-hdd-network"></i> Hub: {{ net.qwk_hub_id }}
+          </div>
+          {% endif %}
         </div>
-        {% endfor %}
+      </div>
+      <div class="card-footer">
+        <a href="{{ url_for('echomail.network', network_id=net.id) }}"
+           class="btn btn-primary btn-sm w-100">
+          <i class="bi bi-folder2-open"></i> Enter Network
+          {% if item.total_unread %}
+            <span class="ms-1 badge bg-success text-dark">{{ item.total_unread }} unread</span>
+          {% endif %}
+        </a>
+      </div>
     </div>
-    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
 {% else %}
-<div class="card">
+<div class="card mt-3">
     <div class="card-body text-center" style="padding: 40px;">
         <i class="bi bi-inbox" style="font-size: 3rem;"></i>
-        <p class="mt-3">No echo areas are currently available.</p>
+        <p class="mt-3">No echomail networks are currently available.</p>
         {% if current_user.is_admin %}
         <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-primary">
             <i class="bi bi-gear"></i> Configure Echomail

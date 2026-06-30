@@ -6,6 +6,19 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
 
+/* IBM VGA 9×16 — authentic CP437 bitmap font for BBS content
+   Source : https://int10h.org/oldschool-pc-fonts/fontlist/
+   Author : VileR / Screwtape (int10h.org)
+   License: CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/
+   File converted from TTF to WOFF; see anetbbs/static/fonts/LICENSE.txt */
+@font-face {
+  font-family: 'VGA437';
+  src: url('../fonts/Ac437_IBM_VGA_9x16.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 
 /* ─────────────────────────────────────────
    ROOT / GLOBAL
@@ -26,7 +39,18 @@
 body {
   background: #000000 !important;
   color: #d8ffe8 !important;
-  font-family: 'Share Tech Mono', 'Courier New', 'Consolas', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', 'Courier New', monospace;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: auto;
+  font-smooth: never;
+}
+
+/* Orbitron headings look better with smoothing restored */
+h1, h2, h3, h4, h5, h6, .navbar-brand,
+.bbs-header h1, .bbs-header h2 {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: always;
 }
 
 /* ─────────────────────────────────────────
@@ -170,7 +194,7 @@ hr {
 /* Nav links */
 .navbar-nav .nav-link {
   color: rgba(0, 255, 136, 0.7) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -358,7 +382,7 @@ hr {
   border: 1px solid rgba(0, 255, 136, 0.3) !important;
   color: var(--vs-text) !important;
   border-radius: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   transition: border-color 0.15s, box-shadow 0.15s;
   caret-color: var(--vs-green);
 }
@@ -399,7 +423,7 @@ hr {
   border-color: rgba(0, 255, 136, 0.3) !important;
   color: rgba(0, 255, 136, 0.8) !important;
   border-radius: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -417,7 +441,7 @@ hr {
 
 .dropdown-item {
   color: rgba(0, 255, 136, 0.75) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.82rem;
   letter-spacing: 0.5px;
   transition: all 0.1s;
@@ -446,7 +470,7 @@ hr {
 ═══════════════════════════════════════════════════════════ */
 .table {
   color: var(--vs-text);
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.88rem;
   --bs-table-bg: transparent;
 }
@@ -503,7 +527,7 @@ hr {
   border-top-width: 0 !important;
   border-right-width: 0 !important;
   border-bottom-width: 0 !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 .alert-success { background: rgba(0,255,136,0.07) !important; border-color: var(--vs-green) !important; color: #a0ffcc; }
@@ -518,7 +542,7 @@ hr {
   background: transparent;
   border: 1px solid rgba(0,255,136,0.25);
   color: var(--vs-cyan);
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   border-radius: 0 !important;
   transition: all 0.15s;
 }
@@ -674,7 +698,7 @@ hr {
   border-top: none !important;
   margin-top: 2rem;
   padding-top: 0;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
   font-size: 0.78rem;
   color: rgba(0, 255, 136, 0.5);
   position: relative;
@@ -711,7 +735,7 @@ code {
   color: var(--vs-cyan);
   background: rgba(0,229,255,0.07);
   padding: 0.1em 0.3em;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 pre {
@@ -729,7 +753,7 @@ pre code { background: transparent; color: var(--vs-green); }
 .toast {
   border-radius: 0 !important;
   border: 1px solid rgba(0,255,136,0.5) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 .text-bg-warning {
@@ -756,7 +780,7 @@ pre code { background: transparent; color: var(--vs-green); }
 
 #mentionPopup .list-group-item {
   color: rgba(0,255,136,0.8) !important;
-  font-family: 'Share Tech Mono', monospace;
+  font-family: 'VGA437', 'Share Tech Mono', monospace;
 }
 
 #mentionPopup .list-group-item:hover {

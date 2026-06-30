@@ -178,10 +178,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         elif cmd == CMD_NUL:
             logger.debug('BinkP %s NUL: %s', peer, body)
 
-    # 3. Look up the network by hub_address
+    # 3. Look up the caller — may be an upstream hub (EchomailNetwork) or a
+    #    downstream node that registered with us as hub (BinkPNode).
     from flask import Flask
     from anetbbs.config import get_config
-    from anetbbs.models import db, EchomailNetwork
+    from anetbbs.models import db, EchomailNetwork, BinkPNode
 
     app = Flask(__name__)
     app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
@@ -189,7 +190,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
 
     # Build the set of address candidates to check. Each AKA the peer
     # sent — and its bare 5D form without the @domain suffix — is a valid
-    # match against EchomailNetwork.hub_address.
+    # match against hub_address (upstream) or ftn_address (downstream).
     candidates = []
     for a in (remote_akas or [remote_addr]) if remote_addr else []:
         if not a:
@@ -200,25 +201,47 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         if bare and bare not in candidates:
             candidates.append(bare)
 
+    net_id = None
+    net_name = None
+    downstream_node_id = None   # set when caller is a downstream BinkPNode
+
     with app.app_context():
+        # 3a. Check upstream networks first.
         network = (EchomailNetwork.query
                    .filter(EchomailNetwork.hub_address.in_(candidates))
                    .first()) if candidates else None
-        if not network or network.network_type != 'binkp':
-            logger.warning('BinkP %s: unknown remote address %s '
-                           '(tried: %s)',
-                           peer, remote_addr, ', '.join(candidates))
-            await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}')
-            writer.close()
-            return
-        if (network.binkp_password or '') != (remote_pwd or ''):
-            logger.warning('BinkP %s: bad password for %s', peer, remote_addr)
-            await _send_cmd(writer, CMD_ERR, 'bad password')
-            writer.close()
-            return
-        net_id = network.id
-        net_name = network.name
-        net_password = network.binkp_password
+        if network and network.network_type == 'binkp':
+            if (network.binkp_password or '') != (remote_pwd or ''):
+                logger.warning('BinkP %s: bad password for upstream %s', peer, remote_addr)
+                await _send_cmd(writer, CMD_ERR, 'bad password')
+                writer.close()
+                return
+            net_id = network.id
+            net_name = network.name
+        else:
+            # 3b. Check downstream nodes registered with us as hub.
+            node = (BinkPNode.query
+                    .filter(BinkPNode.ftn_address.in_(candidates))
+                    .filter_by(is_active=True)
+                    .first()) if candidates else None
+            if node:
+                if (node.password or '') != (remote_pwd or ''):
+                    logger.warning('BinkP %s: bad password for downstream node %s',
+                                   peer, remote_addr)
+                    await _send_cmd(writer, CMD_ERR, 'bad password')
+                    writer.close()
+                    return
+                downstream_node_id = node.id
+                net_name = node.name
+                # Update last-seen timestamp.
+                node.last_seen_at = datetime.utcnow()
+                db.session.commit()
+            else:
+                logger.warning('BinkP %s: unknown remote address %s (tried: %s)',
+                               peer, remote_addr, ', '.join(candidates))
+                await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}')
+                writer.close()
+                return
 
     logger.info('BinkP %s: authenticated as %s (%s)', peer, remote_addr, net_name)
 
@@ -356,27 +379,45 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 except Exception:
                     logger.exception('TIC scan failed')
 
-    # 7. Send queued outbound messages for this network
+    # 7. Send queued outbound messages.
+    #    For upstream hub sessions: flush outbound EchomailMessages for that network.
+    #    For downstream node sessions: flush the BinkPHoldQueue for that node.
     sent_count = 0
     with app.app_context():
-        from ..models import EchomailMessage
-        outbound = EchomailMessage.query.filter_by(
-            network_id=net_id,
-            direction='outbound',
-            sent_at=None,
-        ).all()
-        if outbound:
-            pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
-            fname = f'{datetime.utcnow().strftime("%H%M%S")}.pkt'
-            accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
-            if accepted:
-                now = datetime.utcnow()
-                for m in outbound:
-                    m.sent_at = now
-                db.session.commit()
-                sent_count = len(outbound)
-            else:
-                logger.warning('Outbound .pkt was not accepted by %s — leaving in queue for retry', remote_addr)
+        if downstream_node_id is not None:
+            from .tosser import get_pending_for_node, mark_sent_for_node
+            outbound = get_pending_for_node(downstream_node_id)
+            if outbound:
+                pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
+                fname = f'{datetime.utcnow().strftime("%H%M%S")}.pkt'
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                if accepted:
+                    mark_sent_for_node(downstream_node_id,
+                                       [m.id for m in outbound])
+                    sent_count = len(outbound)
+                else:
+                    logger.warning('Hold-queue .pkt not accepted by %s — '
+                                   'leaving pending for retry', remote_addr)
+        elif net_id is not None:
+            from ..models import EchomailMessage
+            outbound = EchomailMessage.query.filter_by(
+                network_id=net_id,
+                direction='outbound',
+                sent_at=None,
+            ).all()
+            if outbound:
+                pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
+                fname = f'{datetime.utcnow().strftime("%H%M%S")}.pkt'
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                if accepted:
+                    now = datetime.utcnow()
+                    for m in outbound:
+                        m.sent_at = now
+                    db.session.commit()
+                    sent_count = len(outbound)
+                else:
+                    logger.warning('Outbound .pkt was not accepted by %s — '
+                                   'leaving in queue for retry', remote_addr)
 
     # 8. End of batch
     await _send_cmd(writer, CMD_EOB)
@@ -479,6 +520,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
 
     messages = _parse_ftn_packet(pkt_bytes)
     imported = 0
+    echomail_objects = []       # EchomailMessage ORM objects for post-commit toss
     netmails_to_process = []   # ids of newly-inserted netmails for post-processing
 
     for m in messages:
@@ -515,6 +557,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                 imported_at=datetime.utcnow(),
             )
             db.session.add(em)
+            echomail_objects.append(em)
             # Bump the area counters so the admin index and area list show
             # accurate "Messages" and "Last Activity" columns. The QWK
             # poller does this in poller.py — the listener path was missing
@@ -562,6 +605,17 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
     db.session.commit()
     logger.info('Imported %d messages from %s into network %d',
                 imported, filename, network_id)
+
+    # Hub tosser — fan out each newly imported echomail to downstream nodes.
+    # After commit the ORM objects have their .id populated.
+    if echomail_objects:
+        try:
+            from .tosser import toss_message
+            for em_obj in echomail_objects:
+                if em_obj.id:
+                    toss_message(em_obj.id)
+        except Exception:
+            logger.exception('Hub tosser failed for %s', filename)
 
     # Areafix bot — trigger reply for any netmail addressed to 'areafix'
     # (or any Synchronet-style robot name we recognize). Done AFTER the

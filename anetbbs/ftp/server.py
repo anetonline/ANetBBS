@@ -140,18 +140,21 @@ def _build_symlink_tree(root_dir, areas, mode='user'):
 
 
 class AnetbbsAuthorizer(DummyAuthorizer):
-    """Authorizer backed by the User table. The DummyAuthorizer's in-memory
-    user dict is repurposed as a cache for the anonymous user plus admin
-    overrides; real authentication delegates to `User.check_password`.
+    """Authorizer backed by the User table *and* the QWKNode table.
+
+    BBS users authenticate as before.  QWK nodes (packet_id / password)
+    get a per-node home dir under `<data_dir>/qwk-hub/<PACKET_ID>/` where
+    they can download their ANET.qwk and upload their <ID>.rep.
     """
 
     def __init__(self, app, anon_root, user_root, admin_root,
-                 anon_enabled=True):
+                 anon_enabled=True, qwk_root=''):
         super().__init__()
         self.app = app
         self.anon_root = anon_root
         self.user_root = user_root
         self.admin_root = admin_root
+        self.qwk_root = qwk_root  # data/qwk-hub
         if anon_enabled:
             # pyftpdlib quirk: the anonymous user is registered as
             # username 'anonymous' with an empty password.
@@ -160,25 +163,40 @@ class AnetbbsAuthorizer(DummyAuthorizer):
     def validate_authentication(self, username, password, handler):
         if username == 'anonymous':
             return super().validate_authentication(username, password, handler)
-        from ..models import User
+        from ..models import User, QWKNode
         with self.app.app_context():
+            # 1. Try BBS user.
             user = User.query.filter(
                 User.username.ilike(username),
                 User.is_active.is_(True),
             ).first()
-            if user is None or not user.check_password(password):
-                raise AuthenticationFailed('Invalid credentials.')
-            # Pick the right home dir based on role. Admins see sysop-only
-            # areas; everyone else sees the non-sysop tree.
-            home = self.admin_root if user.is_admin else self.user_root
-            # Permission `elradfmwM` = read + write + delete + rename + mkdir
-            # + change-dir + append + chmod. Per-area upload-permission
-            # enforcement still happens via on_file_received post-hoc.
-            perm = 'elradfmwM' if user.is_admin else 'elradfmw'
-            if self.has_user(user.username):
-                self.remove_user(user.username)
-            self.add_user(user.username, password=password,
-                          homedir=home, perm=perm)
+            if user is not None and user.check_password(password):
+                home = self.admin_root if user.is_admin else self.user_root
+                perm = 'elradfmwM' if user.is_admin else 'elradfmw'
+                if self.has_user(user.username):
+                    self.remove_user(user.username)
+                self.add_user(user.username, password=password,
+                              homedir=home, perm=perm)
+                return
+
+            # 2. Try QWK node (packet_id as username, plaintext password).
+            node = (QWKNode.query
+                    .filter_by(is_active=True)
+                    .filter(QWKNode.packet_id.ilike(username))
+                    .first())
+            if node is not None and node.password == password:
+                from ..echomail.qwk_hub_ftp import ensure_node_dir
+                node_home = ensure_node_dir(node.packet_id, self.qwk_root)
+                handler._qwk_node_id = node.id
+                handler._qwk_packet_id = node.packet_id.upper()
+                reg_name = node.packet_id.upper()
+                if self.has_user(reg_name):
+                    self.remove_user(reg_name)
+                self.add_user(reg_name, password=password,
+                              homedir=node_home, perm='elradfmw')
+                return
+
+            raise AuthenticationFailed('Invalid credentials.')
 
     def get_home_dir(self, username):
         # DummyAuthorizer raises KeyError on unknown users — for real users
@@ -188,31 +206,63 @@ class AnetbbsAuthorizer(DummyAuthorizer):
 
 
 class AnetbbsFTPHandler(FTPHandler):
-    """Adds upload-tracking + presence integration on top of the stock
+    """Adds upload-tracking + QWK-hub integration on top of the stock
     FTPHandler. Uploaded files get a `FileUpload` row whose `file_area_id`
     is resolved from the parent directory's tag (which matches the
-    symlink name in the FTP root tree).
+    symlink name in the FTP root tree).  QWK node sessions additionally
+    get their packet generated on login and their .rep processed on upload.
     """
 
     # Wired by `run()` at startup.
     app = None
+
+    # Set by the authorizer during validate_authentication for QWK sessions.
+    _qwk_node_id = None
+    _qwk_packet_id = None
 
     def on_connect(self):
         logger.info('FTP: connect from %s', self.remote_ip)
 
     def on_login(self, username):
         logger.info('FTP: login %s from %s', username, self.remote_ip)
+        if self._qwk_node_id is None or self.app is None:
+            return
+        # QWK node logged in — generate their packet now so it's ready for RETR.
+        try:
+            with self.app.app_context():
+                from ..models import QWKNode
+                from ..echomail.qwk_hub_ftp import generate_node_packet
+                node = QWKNode.query.get(self._qwk_node_id)
+                if node:
+                    cfg = self.app.config
+                    data_dir = cfg.get('DATA_DIR', 'data')
+                    hub_id = (os.environ.get('QWK_HUB_ID', '')
+                              or cfg.get('QWK_HUB_ID', 'ANET'))
+                    generate_node_packet(node, data_dir, hub_id)
+        except Exception:
+            logger.exception('FTP: QWK packet generation failed for %s',
+                             self._qwk_packet_id)
 
     def on_login_failed(self, username, password):
         logger.info('FTP: login failed for %r from %s',
                     username, self.remote_ip)
 
     def on_file_received(self, file):
-        """Called after a successful STOR. Walk the parent directory back
-        through the FTP virtual root to find the FileArea tag, then create
-        a FileUpload row."""
+        """Called after a successful STOR."""
         if self.app is None:
             return
+
+        # QWK node uploaded a .rep file — process it.
+        if self._qwk_node_id is not None:
+            if file.upper().endswith('.REP'):
+                try:
+                    from ..echomail.qwk_hub_ftp import process_rep_upload
+                    process_rep_upload(self._qwk_node_id, file, self.app)
+                except Exception:
+                    logger.exception('FTP: REP processing failed for %s', file)
+            return
+
+        # Regular BBS user upload — track in FileUpload.
         try:
             with self.app.app_context():
                 from ..models import db, User, FileArea, FileUpload
@@ -378,8 +428,11 @@ def build_server(app, host, port, anon_enabled=True,
     logger.info('FTP: linked %d anon / %d user / %d admin visible areas',
                 n_anon, n_user, n_admin)
 
+    qwk_root = os.path.join(app.config.get('DATA_DIR', 'data'), 'qwk-hub')
+    os.makedirs(qwk_root, exist_ok=True)
     authorizer = AnetbbsAuthorizer(app, anon_root, user_root, admin_root,
-                                   anon_enabled=anon_enabled)
+                                   anon_enabled=anon_enabled,
+                                   qwk_root=qwk_root)
     handler_cls.authorizer = authorizer
     handler_cls.abstracted_fs = SymlinkAwareFS
     handler_cls.app = app

@@ -196,6 +196,12 @@ def _do_poll(app, network):
 
         result = _run_client(network, outbound, app)
 
+        # Snapshot the current max message id so the tosser can find new ones.
+        from ..models import EchomailMessage as _EM_PRE
+        pre_import_max = (db.session.query(db.func.max(_EM_PRE.id))
+                          .filter_by(network_id=network.id, direction='inbound')
+                          .scalar() or 0)
+
         # Import inbound messages. _import_message returns 1=imported,
         # 0=duplicate, -1=dropped (loop/unknown-area/unsubscribed).
         imported = 0
@@ -234,6 +240,21 @@ def _do_poll(app, network):
         db.session.commit()
         logger.info("Poller: %s — sent=%d received=%d",
                     network.name, log.messages_sent, log.messages_received)
+
+        # Hub tosser — fan out newly imported messages to downstream nodes.
+        if imported:
+            try:
+                from .tosser import toss_message
+                from ..models import EchomailMessage as _EM
+                new_msgs = (_EM.query
+                            .filter(_EM.network_id == network.id,
+                                    _EM.direction == 'inbound',
+                                    _EM.id > pre_import_max)
+                            .all())
+                for em in new_msgs:
+                    toss_message(em.id)
+            except Exception:
+                logger.exception('Hub tosser failed after poll of %s', network.name)
 
     except Exception as exc:
         log.status = 'error'

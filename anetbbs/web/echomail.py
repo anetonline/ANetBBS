@@ -46,53 +46,85 @@ class NetmailForm(FlaskForm):
     submit = SubmitField('Send Netmail')
 
 
+def _accessible_areas_query(network_id):
+    """Return a filtered EchoArea query for the current user on one network."""
+    q = EchoArea.query.filter_by(
+        network_id=network_id, is_active=True, is_subscribed=True)
+    if not getattr(current_user, 'is_admin', False):
+        user_lvl = getattr(current_user, 'access_level', 10) or 10
+        q = q.filter(EchoArea.is_sysop_only.is_(False))
+        q = q.filter(EchoArea.min_access_level <= user_lvl)
+    return q
+
+
+def _unread_counts(area_ids):
+    """Return {area_id: unread_count} for the given area IDs."""
+    from sqlalchemy import func
+    if not area_ids:
+        return {}
+    read_msg_ids = {
+        rs.message_id
+        for rs in EchomailReadStatus.query.filter_by(user_id=current_user.id).all()
+    }
+    return dict(
+        db.session.query(
+            EchomailMessage.area_id,
+            func.count(EchomailMessage.id)
+        ).filter(
+            EchomailMessage.area_id.in_(area_ids),
+            ~EchomailMessage.id.in_(read_msg_ids) if read_msg_ids else db.true()
+        ).group_by(EchomailMessage.area_id).all()
+    )
+
+
 @echomail_bp.route('/')
 @login_required
 def index():
-    """List all subscribed echo areas."""
+    """Network chooser — list networks that have accessible areas."""
     try:
         networks = EchomailNetwork.query.filter_by(is_active=True).all()
     except OperationalError:
         flash('Echomail is not configured yet.', 'info')
-        return render_template('echomail/index.html', areas_by_network={})
-    areas_by_network = {}
-    for network in networks:
-        q = EchoArea.query.filter_by(
-            network_id=network.id, is_active=True, is_subscribed=True)
-        # Filter areas by sysop_only flag and user access level.
-        if not getattr(current_user, 'is_admin', False):
-            user_lvl = getattr(current_user, 'access_level', 10) or 10
-            q = q.filter(EchoArea.is_sysop_only.is_(False))
-            q = q.filter(EchoArea.min_access_level <= user_lvl)
-        areas = q.order_by(EchoArea.order, EchoArea.name).all()
+        return render_template('echomail/index.html', network_list=[])
 
+    network_list = []
+    for net in networks:
+        areas = _accessible_areas_query(net.id).all()
         if not areas:
             continue
-
         area_ids = [a.id for a in areas]
+        uc = _unread_counts(area_ids)
+        total_unread = sum(uc.values())
+        network_list.append({
+            'network':      net,
+            'area_count':   len(areas),
+            'total_unread': total_unread,
+        })
 
-        # Fetch all read message IDs for this user across these areas in one query
-        read_msg_ids = {
-            rs.message_id
-            for rs in EchomailReadStatus.query.filter_by(user_id=current_user.id).all()
-        }
+    return render_template('echomail/index.html', network_list=network_list)
 
-        # Count unread per area with a single GROUP BY query
-        from sqlalchemy import func
-        unread_counts = dict(
-            db.session.query(
-                EchomailMessage.area_id,
-                func.count(EchomailMessage.id)
-            ).filter(
-                EchomailMessage.area_id.in_(area_ids),
-                ~EchomailMessage.id.in_(read_msg_ids) if read_msg_ids else db.true()
-            ).group_by(EchomailMessage.area_id).all()
-        )
 
-        areas_with_unread = [(area, unread_counts.get(area.id, 0)) for area in areas]
-        areas_by_network[network] = areas_with_unread
+@echomail_bp.route('/network/<int:network_id>')
+@login_required
+def network(network_id):
+    """List areas in one network, grouped by category."""
+    from collections import OrderedDict
+    net = EchomailNetwork.query.get_or_404(network_id)
+    areas = (_accessible_areas_query(network_id)
+             .order_by(EchoArea.category, EchoArea.order, EchoArea.name)
+             .all())
 
-    return render_template('echomail/index.html', areas_by_network=areas_by_network)
+    area_ids = [a.id for a in areas]
+    uc = _unread_counts(area_ids)
+
+    groups = OrderedDict()
+    for area in areas:
+        cat = area.category or 'General'
+        groups.setdefault(cat, []).append((area, uc.get(area.id, 0)))
+
+    return render_template('echomail/network.html',
+                           net=net, groups=groups, area_ids=area_ids,
+                           total_unread=sum(uc.values()))
 
 
 @echomail_bp.route('/<int:area_id>')

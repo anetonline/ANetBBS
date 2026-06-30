@@ -967,6 +967,8 @@ EDITABLE_SETTINGS = [
     ('CASINO_SLOTS_START', 'Casino Slots — weekly starting balance (default 200)', 'text', False),
     ('CASINO_VIDEOPOKER_START', 'Casino Video Poker — weekly starting balance (default 200)', 'text', False),
     ('CASINO_HOLDEM_START', "Casino Hold'em — weekly starting balance (default 1000)", 'text', False),
+    ('QWK_HUB_ID', 'QWK Hub ID — short ID for this BBS as a QWK hub (e.g. ANET, max 8 chars). Nodes download <HUB_ID>.QWK.', 'text', False),
+    ('QWK_HUB_NAME', 'QWK Hub Network Name — name of the QWK network this hub serves (e.g. ANetBBS Network)', 'text', False),
 ]
 
 

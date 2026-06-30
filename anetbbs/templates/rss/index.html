@@ -1,75 +1,109 @@
 {% extends "base.html" %}
 {% block title %}RSS Reader{% endblock %}
 {% block content %}
+<style>
+.rss-feed-card { transition: box-shadow .15s; }
+.rss-feed-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.rss-unread-pill { font-size: .75rem; min-width: 2.5rem; }
+.rss-category-label { font-size: .7rem; text-transform: uppercase;
+  letter-spacing: .08em; font-weight: 700; opacity: .7; }
+</style>
+
 <div class="bbs-header">
-    <h1><i class="bi bi-rss-fill"></i> RSS Reader</h1>
-    <p>
-        {% if total_unread %}
-            <strong>{{ total_unread }}</strong> unread item{{ '' if total_unread == 1 else 's' }} across {{ feeds|length }} feed{{ '' if feeds|length == 1 else 's' }}.
-        {% else %}
-            All caught up — {{ feeds|length }} feed{{ '' if feeds|length == 1 else 's' }} subscribed.
-        {% endif %}
-    </p>
+  <h1><i class="bi bi-rss-fill"></i> RSS Reader</h1>
+  <p class="mb-0">
+    {% if total_unread %}
+      <strong>{{ total_unread }}</strong> unread item{{ '' if total_unread == 1 else 's' }}
+      across {{ feeds|length }} feed{{ '' if feeds|length == 1 else 's' }}.
+    {% else %}
+      All caught up &mdash; {{ feeds|length }} feed{{ '' if feeds|length == 1 else 's' }} subscribed.
+    {% endif %}
+  </p>
 </div>
 
-<div class="d-flex gap-2 mb-3">
-    <a href="{{ url_for('rss.river') }}" class="btn btn-primary">
-        <i class="bi bi-water"></i> All Feeds (River)
-    </a>
-    {% if current_user.is_admin %}
-    <a href="{{ url_for('rss_admin.index') }}" class="btn btn-secondary">
-        <i class="bi bi-gear"></i> Manage Feeds
-    </a>
-    {% endif %}
-    {% if total_unread %}
-    <form method="post" action="{{ url_for('rss.mark_all_read') }}" class="d-inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-outline-secondary">
-            <i class="bi bi-check2-all"></i> Mark all read
-        </button>
-    </form>
-    {% endif %}
+<div class="d-flex flex-wrap gap-2 mb-4">
+  <a href="{{ url_for('rss.river') }}" class="btn btn-primary">
+    <i class="bi bi-water"></i> River (all feeds)
+  </a>
+  {% if current_user.is_admin %}
+  <a href="{{ url_for('rss_admin.index') }}" class="btn btn-secondary">
+    <i class="bi bi-gear"></i> Manage Feeds
+  </a>
+  {% endif %}
+  {% if total_unread %}
+  <form method="post" action="{{ url_for('rss.mark_all_read') }}" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-outline-secondary">
+      <i class="bi bi-check2-all"></i> Mark all read
+    </button>
+  </form>
+  {% endif %}
 </div>
 
 {% if feeds %}
-<div class="list-group">
-    {% for feed in feeds %}
-    <a href="{{ url_for('rss.view_feed', feed_id=feed.id) }}"
-       class="list-group-item list-group-item-action d-flex justify-content-between align-items-start">
-        <div>
-            <h5 class="mb-1">
-                <i class="bi bi-rss"></i> {{ feed.name }}
-                {% if feed_unread.get(feed.id, 0) %}
-                <span class="badge bg-primary">{{ feed_unread[feed.id] }} new</span>
-                {% endif %}
-            </h5>
+  {# Group by category #}
+  {% set ns = namespace(cur_cat=None) %}
+  {% set cats = feeds | map(attribute='category') | list | unique | sort %}
+
+  {% for cat in cats %}
+    {% set cat_feeds = feeds | selectattr('category', 'equalto', cat) | list %}
+    <div class="rss-category-label text-muted mb-2 mt-3">
+      <i class="bi bi-folder2"></i> {{ cat or 'general' }}
+    </div>
+    <div class="row g-3 mb-2">
+      {% for feed in cat_feeds %}
+      {% set unread = feed_unread.get(feed.id, 0) %}
+      <div class="col-12 col-md-6 col-xl-4">
+        <a href="{{ url_for('rss.view_feed', feed_id=feed.id) }}"
+           class="card h-100 text-decoration-none rss-feed-card">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h6 class="card-title mb-0 me-2">
+                <i class="bi bi-rss text-warning"></i>
+                {{ feed.name }}
+              </h6>
+              {% if unread %}
+              <span class="badge bg-primary rss-unread-pill flex-shrink-0">{{ unread }} new</span>
+              {% else %}
+              <span class="badge bg-secondary rss-unread-pill flex-shrink-0 opacity-50">✓</span>
+              {% endif %}
+            </div>
             {% if feed.description %}
-            <p class="mb-1 small text-muted">{{ feed.description }}</p>
+            <p class="card-text small text-muted mb-2 flex-grow-1">{{ feed.description }}</p>
+            {% else %}
+            <div class="flex-grow-1"></div>
             {% endif %}
-            <small class="text-muted">
-                <code>{{ feed.url }}</code>
+            <div class="d-flex justify-content-between align-items-center mt-1">
+              <small class="text-muted">
                 {% if feed.last_fetched_at %}
-                · last fetched {{ feed.last_fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                  <i class="bi bi-clock"></i>
+                  {{ feed.last_fetched_at.strftime('%m-%d %H:%M') }}
                 {% endif %}
                 {% if feed.last_error %}
-                · <span class="text-danger" title="{{ feed.last_error }}">⚠ error</span>
+                  <span class="text-danger ms-1" title="{{ feed.last_error }}">
+                    <i class="bi bi-exclamation-triangle"></i>
+                  </span>
                 {% endif %}
-            </small>
-        </div>
-        <span class="badge bg-secondary rounded-pill align-self-center">
-            {{ feed.items|length }} total
-        </span>
-    </a>
-    {% endfor %}
-</div>
+              </small>
+              <small class="badge bg-light text-dark border">
+                {{ feed.items|length }} items
+              </small>
+            </div>
+          </div>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+
 {% else %}
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> No RSS feeds configured yet.
-    {% if current_user.is_admin %}
-    <a href="{{ url_for('rss_admin.add') }}">Add one →</a>
-    {% else %}
-    Ask the sysop to add one.
-    {% endif %}
+  <i class="bi bi-info-circle"></i> No RSS feeds configured yet.
+  {% if current_user.is_admin %}
+  <a href="{{ url_for('rss_admin.add') }}" class="alert-link">Add one →</a>
+  {% else %}
+  Ask the sysop to add one.
+  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

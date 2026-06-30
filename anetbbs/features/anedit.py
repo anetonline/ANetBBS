@@ -1578,7 +1578,9 @@ class _ViewerScreen(_Screen):
         t = self.t
         if flash:
             return _mv(24, 1) + t['stat_bg'] + t['info'] + flash.ljust(80)[:80] + _reset()
-        stat = f" Ln:{cy + 1}/{total}  PgUp/PgDn  R=Reply  N=New  Q=Back "
+        last_vis = min(cy + _VTEXT_H, total)
+        end_tag  = '  END' if last_vis >= total else ''
+        stat = f" Ln:{last_vis}/{total}{end_tag}  Up/Dn  R=Reply  N=New  Q=Back "
         return _mv(24, 1) + t['stat_bg'] + t['hint_key'] + stat.ljust(80)[:80] + _reset()
 
     def draw_text(self, lines: list, scroll: int,
@@ -1724,15 +1726,23 @@ async def launch_aneview(session, body: str, subject: str = "",
 
     # Strip record-boundary \n ONLY for pure flat block art (no cursor-pos).
     # Flat art has no absolute positioning — artifact \n from QWK \xe3 scatter
-    # blocks across rows, so stripping fixes the staircase.
+    # blocks across rows, so stripping fixes the staircase (each art row is
+    # exactly 80 cols; the VT renderer wraps at 80, so the subsequent \n would
+    # double-advance to produce a blank row between every art line).
     # Cursor-pos art (including mixed flat+cursor-pos) must KEEP \n: stripping
     # collapses flat header sections (like full-screen logos) by overflowing
     # past col 80 where the VT renderer clips.  Cursor-pos sequences set
     # absolute row/col so artifact \n between them have no visual effect.
+    # IMPORTANT: only strip when the body is DENSE flat art (avg line > 70 chars).
+    # Text messages with colored ANSI signatures have block chars too but short
+    # lines — stripping their \n would collapse the entire message onto far fewer
+    # rows, cutting off visible content.
     has_cpos  = bool(_HAS_CURSOR_POS.search(body_unicode))
     has_block = bool('\x1b' in body_unicode and _HAS_BLOCK_ART.search(body_unicode))
     if has_block and not has_cpos:
-        body_for_vt = body_unicode.replace('\n', '')
+        _nl = body_unicode.count('\n')
+        _avg_line = len(body_unicode) / max(_nl, 1)
+        body_for_vt = body_unicode.replace('\n', '') if _avg_line > 70 else body_unicode
     else:
         body_for_vt = body_unicode
 

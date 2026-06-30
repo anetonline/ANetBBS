@@ -31,6 +31,10 @@ sudo systemctl enable --now clamav-freshclam clamav-daemon
 
 # LHA archive description extraction
 sudo apt install -y lhasa
+
+# Sixel images in terminal RSS reader (SyncTERM, IcyTERM, foot, mlterm, etc.)
+# Provides img2sixel — without it the terminal RSS reader is text-only.
+sudo apt install -y libsixel-bin
 ```
 
 ## 2. Get the code + Python deps

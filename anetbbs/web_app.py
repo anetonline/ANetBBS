@@ -335,6 +335,8 @@ def create_app(config_name=None):
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
+    from .web.hub_admin import hub_admin_bp
+    from .web.qwk_hub import qwk_hub_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -348,6 +350,9 @@ def create_app(config_name=None):
     app.register_blueprint(votes_bp)
     app.register_blueprint(imsg_bp)
     app.register_blueprint(echomail_admin_bp)
+    app.register_blueprint(hub_admin_bp)
+    app.register_blueprint(qwk_hub_bp)
+    csrf.exempt(qwk_hub_bp)   # QWK nodes use HTTP Basic Auth, not CSRF tokens
     app.register_blueprint(games_bp)
     app.register_blueprint(games_admin_bp)
     app.register_blueprint(gallery_bp)
@@ -951,6 +956,164 @@ def _create_default_data():
             theme = Theme(**theme_data)
             db.session.add(theme)
 
+    db.session.commit()
+
+    # Seed ANotherNetwork (Zone 1200) — ships with ANetBBS like Dove-Net
+    # ships with Synchronet.  Two entries: BinkP + QWK (FTP).  Both start
+    # inactive; sysop fills in their node address/packet-id and password to
+    # activate.  All areas are shared between the two network entries via
+    # the hub tosser.
+    from .models import EchomailNetwork, EchoArea
+    if not EchomailNetwork.query.filter_by(name='ANotherNetwork').first():
+        ann_binkp = EchomailNetwork(
+            name='ANotherNetwork',
+            network_type='binkp',
+            description=(
+                'ANetBBS echomail network — BinkP transport (Zone 1200). '
+                'Apply for a node number at bbs.a-net.fyi.'
+            ),
+            binkp_host='bbs.a-net.fyi',
+            binkp_port=24554,
+            hub_address='1200:1/1',
+            is_active=False,
+        )
+        db.session.add(ann_binkp)
+
+    if not EchomailNetwork.query.filter_by(name='ANotherNetwork (QWK)').first():
+        ann_qwk = EchomailNetwork(
+            name='ANotherNetwork (QWK)',
+            network_type='qwk',
+            description=(
+                'ANetBBS echomail network — QWK/FTP transport. '
+                'FTP to bbs.a-net.fyi with your assigned packet ID and password. '
+                'Download ANET.qwk, upload <YOURID>.rep. '
+                'Apply at bbs.a-net.fyi.'
+            ),
+            qwk_host='bbs.a-net.fyi',
+            qwk_port=21,
+            qwk_hub_id='ANET',
+            qwk_download_url='ftp://bbs.a-net.fyi/{hub_id}.qwk',
+            qwk_upload_url='ftp://bbs.a-net.fyi/{packet}.rep',
+            is_active=False,
+        )
+        db.session.add(ann_qwk)
+
+    db.session.flush()
+
+    # 26 echo areas across 8 groups.  Seeded once; shared between BinkP and
+    # QWK network entries via the hub tosser on bbs.a-net.fyi.  All start
+    # is_subscribed=False so nothing polls until the sysop activates.
+    _ANN_AREAS = [
+        # (tag, name, description, category, sysop_only, order)
+        ('ANN.GENERAL',   'General Discussion',
+         'General topics for ANotherNetwork members',
+         'General',   False,  0),
+        ('ANN.INTRO',     'Introductions',
+         'New to the network? Introduce yourself here',
+         'General',   False,  1),
+        ('ANN.HUMOR',     'Humor & Jokes',
+         "Jokes, memes, and things that made you snort-laugh",
+         'General',   False,  2),
+        ('ANN.DEBATE',    'Friendly Debate',
+         'Disagree? Do it civilly here — all topics welcome',
+         'General',   False,  3),
+        ('ANN.FEEDBACK',  'Network Feedback',
+         'Suggestions, complaints, and kudos for ANotherNetwork',
+         'General',   False,  4),
+
+        ('ANN.TECH',      'Technology',
+         'Gadgets, hardware, software — anything tech',
+         'Technology', False, 10),
+        ('ANN.LINUX',     'Linux & Open Source',
+         'Linux, BSD, Unix, and the open-source world',
+         'Technology', False, 11),
+        ('ANN.SECURITY',  'Security & Privacy',
+         'InfoSec, hacking, privacy tools, and CTFs',
+         'Technology', False, 12),
+        ('ANN.NET',       'Networking & Internet',
+         'TCP/IP, protocols, ISPs, and internet history',
+         'Technology', False, 13),
+
+        ('ANN.BBS',       'BBS News & Discussion',
+         'General BBS scene discussion, news, and nostalgia',
+         'BBS Scene',  False, 20),
+        ('ANN.BBSDEV',    'BBS Software Development',
+         'Writing BBS software? Share code, ask questions',
+         'BBS Scene',  False, 21),
+        ('ANN.ANETBBS',   'ANetBBS Support',
+         'Help, tips, and discussion specific to ANetBBS',
+         'BBS Scene',  False, 22),
+        ('ANN.DOORS',     'Door Games',
+         'LORD, TradeWars, Barren Realms, and all the classics',
+         'BBS Scene',  False, 23),
+        ('ANN.ANSIART',   'ANSI / ASCII Art',
+         'Share, critique, and discuss ANSI and ASCII art',
+         'BBS Scene',  False, 24),
+
+        ('ANN.RETRO',     'Retro Computing',
+         'C64, Amiga, Apple II, DOS, and vintage hardware',
+         'Retro',      False, 30),
+        ('ANN.GAMES',     'Games & Gaming',
+         'Video games, tabletop, arcade — past and present',
+         'Retro',      False, 31),
+        ('ANN.MUSIC',     'Music',
+         'MODs, chiptunes, any genre — share what you\'re listening to',
+         'Retro',      False, 32),
+
+        ('ANN.MOVIES',    'Movies & TV',
+         'Reviews, recommendations, and discussion',
+         'Hobby',      False, 40),
+        ('ANN.BOOKS',     'Books & Reading',
+         'Fiction, non-fiction, technical books, zines',
+         'Hobby',      False, 41),
+        ('ANN.FOOD',      'Food & Cooking',
+         'Recipes, restaurants, and food talk',
+         'Hobby',      False, 42),
+        ('ANN.SPORTS',    'Sports',
+         'Sports, fitness, and outdoor activities',
+         'Hobby',      False, 43),
+
+        ('ANN.ADS',       'For Sale / Wanted / Trades',
+         'Buy, sell, or trade — old hardware welcome',
+         'Trading',    False, 50),
+
+        ('ANN.DATA',      'Data & File Discussion',
+         'Datasets, file requests, sharing links',
+         'Data',       False, 60),
+
+        ('ANN.SYSOP',     'SysOp Discussion',
+         'Sysop-to-sysop — running a BBS, best practices',
+         'SysOp',      True,  70),
+        ('ANN.SYSOP.HELP','SysOp Help & Tips',
+         'Questions and answers for BBS operators',
+         'SysOp',      True,  71),
+
+        ('ANN.TEST',      'Test Messages',
+         'Post a test, get a reply — no real content required',
+         'Test',       False, 80),
+    ]
+
+    existing_tags = {
+        a.tag for a in EchoArea.query.filter(
+            EchoArea.tag.like('ANN.%')).all()
+    }
+    # Find the network IDs to attach to (may have just been created above).
+    _ann_binkp_row = EchomailNetwork.query.filter_by(name='ANotherNetwork').first()
+    _ann_qwk_row   = EchomailNetwork.query.filter_by(name='ANotherNetwork (QWK)').first()
+    for (_tag, _name, _desc, _cat, _sop, _ord) in _ANN_AREAS:
+        if _tag not in existing_tags:
+            for _net in filter(None, [_ann_binkp_row, _ann_qwk_row]):
+                db.session.add(EchoArea(
+                    network_id=_net.id,
+                    tag=_tag,
+                    name=_name,
+                    description=_desc,
+                    category=_cat,
+                    is_active=True,
+                    is_subscribed=False,
+                    is_sysop_only=_sop,
+                    order=_ord,
+                ))
     db.session.commit()
 
     # Create default built-in web games

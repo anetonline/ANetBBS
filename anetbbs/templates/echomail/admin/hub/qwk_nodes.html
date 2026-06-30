@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}QWK Hub Nodes — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-archive"></i> QWK Hub Nodes</h1>
+        <p>Downstream QWK nodes that download packets from this hub.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('hub_admin.new_qwk_node') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add Node
+        </a>
+        <a href="{{ url_for('hub_admin.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Hub Overview
+        </a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if nodes %}
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Packet ID</th>
+                    <th>BBS Name</th>
+                    <th>Sysop</th>
+                    <th>Confs</th>
+                    <th>Status</th>
+                    <th>Last Poll</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for node in nodes %}
+                <tr>
+                    <td><a href="{{ url_for('hub_admin.qwk_node_detail', node_id=node.id) }}"><code>{{ node.packet_id }}</code></a></td>
+                    <td>{{ node.name }}</td>
+                    <td>{{ node.sysop or '—' }}</td>
+                    <td>{{ node.last_sent.count() }}</td>
+                    <td>
+                        {% if node.is_active %}<span class="badge bg-success">active</span>
+                        {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.8rem;">
+                        {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}<span class="text-muted">never</span>{% endif %}
+                    </td>
+                    <td class="text-end">
+                        <a href="{{ url_for('hub_admin.edit_qwk_node', node_id=node.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center p-5">
+            <p class="text-muted">No QWK nodes registered yet.</p>
+            <a href="{{ url_for('hub_admin.new_qwk_node') }}" class="btn btn-primary">Register the first node</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header">QWK Hub Endpoints</div>
+    <div class="card-body">
+        <p>Nodes poll the following endpoints. Replace <code>NODEID</code> with the node's assigned Packet ID (lowercase for the URL).</p>
+        <table class="table table-sm">
+            <tr>
+                <th>Download (HTTP)</th>
+                <td><code>GET /qwkhub/&lt;NODEID&gt;.qwk</code> — authenticate with packet_id + password via HTTP Basic Auth</td>
+            </tr>
+            <tr>
+                <th>Upload (HTTP)</th>
+                <td><code>POST /qwkhub/&lt;NODEID&gt;.rep</code> — multipart upload of REP packet</td>
+            </tr>
+            <tr>
+                <th>Download (FTP)</th>
+                <td>FTP to port 21, log in as packet_id / password, download <code>&lt;HUBID&gt;.QWK</code></td>
+            </tr>
+        </table>
+        <p class="text-muted mb-0" style="font-size:0.85rem;">
+            The hub system ID (the QWK filename the node downloads) is set by the <code>QWK_HUB_ID</code>
+            setting in Admin → Settings. Set it to something short like <code>ANET</code>.
+        </p>
+    </div>
+</div>
+{% endblock %}

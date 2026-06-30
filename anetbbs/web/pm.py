@@ -61,7 +61,7 @@ def compose(username=None):
                 if src and (src.recipient_id == current_user.id
                             or src.sender_id == current_user.id):
                     quoted = '\n'.join('> ' + ln
-                                       for ln in (src.content or '').splitlines())
+                                       for ln in (src.body or '').splitlines())
                     form.subject.data = ('Re: ' + (src.subject or '')).strip()
                     form.content.data = (
                         f'{src.sender.username if src.sender else "?"} wrote:\n'

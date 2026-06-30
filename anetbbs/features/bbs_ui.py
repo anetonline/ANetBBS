@@ -584,187 +584,449 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_echo_areas(self):
+        """Network chooser → per-network area list → read area."""
         from anetbbs.models import EchoArea, EchomailNetwork, EchomailMessage
-        with _app().app_context():
-            _user_level = int((self.session.user or {}).get('access_level', 10))
-            _is_admin = bool((self.session.user or {}).get('is_admin'))
-            _eq = EchoArea.query.join(EchomailNetwork)
-            if not _is_admin:
-                _eq = _eq.filter(
-                    EchoArea.is_sysop_only == False,
-                    EchoArea.min_access_level <= _user_level,
-                )
-            areas = _eq.order_by(EchomailNetwork.name, EchoArea.name).all()
-            a_list = [(a.id, a.tag, a.name, a.network.name,
-                       EchomailMessage.query.filter_by(area_id=a.id).count()) for a in areas]
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
 
-        if not a_list:
+        _user_level = int((self.session.user or {}).get('access_level', 10))
+        _is_admin   = bool((self.session.user or {}).get('is_admin'))
+
+        with _app().app_context():
+            nets = EchomailNetwork.query.filter_by(is_active=True)\
+                .order_by(EchomailNetwork.name).all()
+            net_rows = []
+            for net in nets:
+                _eq = EchoArea.query.filter_by(
+                    network_id=net.id, is_active=True, is_subscribed=True)
+                if not _is_admin:
+                    _eq = _eq.filter(
+                        EchoArea.is_sysop_only == False,
+                        EchoArea.min_access_level <= _user_level,
+                    )
+                count = _eq.count()
+                if count:
+                    net_rows.append((net.id, net.name, net.network_type, count))
+
+        if not net_rows:
             await self.session.write("\r\nNo echomail areas configured.\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
-        # Page so the area list doesn't scroll past on a 24-row terminal —
-        # mirrors the paging used by compose_echomail (C).
-        PAGE = 18
         while True:
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Echomail Areas'))
+            await self.session.write(banner('Echomail Networks'))
             await self.session.write(
-                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Tag':<18} "
-                f"{'Name':<25} {'Net':<10} {'Msgs':>6}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
-            for i, (_, tag, name, net, n) in enumerate(a_list, 1):
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<30} "
+                f"{'Type':<6} {'Areas':>5}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 50}{RESET}\r\n")
+            for i, (_, name, ntype, count) in enumerate(net_rows, 1):
+                type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
-                    f"{FG['grn']}{tag[:18]:<18}{RESET} "
-                    f"{FG['wht']}{name[:25]:<25}{RESET} "
-                    f"{FG['mag']}{net[:10]:<10}{RESET} "
-                    f"{FG['cyan']}{n:6d}{RESET}\r\n")
-                if i % PAGE == 0 and i < len(a_list):
-                    ans = (await self.session.read_line(
-                        f"  {FG['cyan']}-- more (Enter, "
-                        f"Q=stop listing) --{RESET}") or '').strip().upper()
-                    if ans == 'Q':
-                        # User saw what they wanted — skip the rest of
-                        # the listing and go straight to the picker.
-                        await self.session.write('\r\n')
-                        break
+                    f"{FG['wht']}{name[:30]:<30}{RESET}  "
+                    f"{type_col}{ntype[:5]:<5}{RESET}  "
+                    f"{FG['grn']}{count:5d}{RESET}\r\n")
+            await self.session.write(
+                f"\r\n  {FG['gry']}A = Apply for ANotherNetwork QWK node{RESET}\r\n")
             await self.session.write('\r\n' + footer() + '\r\n')
             choice = (await self.session.read_line(
-                _prompt('Pick area (number / Q): ')) or '').strip()
-            if choice.upper() == 'Q' or not choice:
+                _prompt('Choose network (number / A=apply / Q): ')) or '').strip().upper()
+            if choice == 'Q' or not choice:
                 return
+            if choice == 'A':
+                await self._apply_qwk_node()
+                continue
             try:
                 idx = int(choice) - 1
-                if 0 <= idx < len(a_list):
-                    await self.read_echo_area(a_list[idx][0], a_list[idx][1])
+                if 0 <= idx < len(net_rows):
+                    await self._list_network_areas(
+                        net_rows[idx][0], net_rows[idx][1],
+                        _user_level, _is_admin)
             except ValueError:
                 pass
 
+    async def _list_network_areas(self, network_id, net_name,
+                                   user_level, is_admin):
+        """Show areas for one network as a scrollable lightbar."""
+        from anetbbs.models import EchoArea, EchomailMessage
+        from .ansi_ui import banner, FG, RESET, BOLD
+
+        with _app().app_context():
+            _eq = (EchoArea.query
+                   .filter_by(network_id=network_id,
+                               is_active=True, is_subscribed=True))
+            if not is_admin:
+                _eq = _eq.filter(
+                    EchoArea.is_sysop_only == False,
+                    EchoArea.min_access_level <= user_level,
+                )
+            areas = _eq.order_by(EchoArea.category, EchoArea.order,
+                                  EchoArea.name).all()
+            a_list = []
+            for area in areas:
+                cat = area.category or 'General'
+                msg_count = EchomailMessage.query.filter_by(
+                    area_id=area.id).count()
+                a_list.append((area.id, area.tag, area.name, msg_count, cat))
+
+        if not a_list:
+            await self.session.write(
+                f"\r\n  {FG['gry']}No areas in this network.{RESET}\r\n")
+            await self.session.read_line(
+                f"  {FG['cyan']}Press Enter...{RESET}")
+            return
+
+        COL_TAG  = 16
+        COL_NAME = 24
+        COL_CAT  = 10
+
+        async def render_header_areas():
+            await self.session.write(banner(net_name))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}"
+                f"{'#':>3}  {'Tag':<{COL_TAG}} {'Name':<{COL_NAME}} "
+                f"{'Category':<{COL_CAT}} {'Msgs':>5}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 72}{RESET}\r\n")
+
+        def render_row_area(idx, row, selected):
+            _, tag, name, n, cat = row
+            n_col = FG['wht'] if not selected else ''
+            return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
+                    f"{n_col}{tag[:COL_TAG]:<{COL_TAG}}{RESET} "
+                    f"{FG['wht']}{name[:COL_NAME]:<{COL_NAME}}{RESET} "
+                    f"{FG['gry']}{cat[:COL_CAT]:<{COL_CAT}}{RESET} "
+                    f"{FG['grn']}{n:>5}{RESET}")
+
+        def render_hint_area(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                    f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Enter{RESET}=open  "
+                    f"{FG['cyan']}Q{RESET}=back")
+
+        last_sel = 0
+        while True:
+            result = await self._rss_lightbar(
+                a_list, render_header_areas, render_row_area, render_hint_area,
+                initial_sel=last_sel)
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                aid, tag, _, _, _ = a_list[last_sel]
+                await self.read_echo_area(aid, tag)
+
+    # ------------------------------------------------------------------
+    # ANotherNetwork QWK node self-registration
+    # ------------------------------------------------------------------
+
+    async def _apply_qwk_node(self):
+        """Walk the sysop through a QWK node application wizard."""
+        import re, secrets, string as _str
+        from anetbbs.models import db, QWKNode, QWKNodeRequest
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+
+        user     = self.session.user or {}
+        user_id  = user.get('id')
+        username = user.get('username', 'Guest')
+
+        # Check for an existing request from this user.
+        with _app().app_context():
+            existing = None
+            if user_id:
+                existing = (QWKNodeRequest.query
+                            .filter_by(applied_by_user_id=user_id)
+                            .order_by(QWKNodeRequest.created_at.desc())
+                            .first())
+        if existing:
+            await self._show_qwk_request_status(existing)
+            return
+
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('ANotherNetwork — QWK Node Application'))
+        await self.session.write(
+            f"\r\n"
+            f"  {FG['wht']}ANotherNetwork (Zone 1200) connects BBS systems via QWK echomail.{RESET}\r\n"
+            f"  {FG['wht']}Register as a QWK node to exchange messages with other systems.{RESET}\r\n"
+            f"\r\n"
+            f"  {FG['cyan']}Hub  : bbs.a-net.fyi  (FTP port 21){RESET}\r\n"
+            f"  {FG['cyan']}Poll : download ANET.qwk  /  upload <YOURID>.rep{RESET}\r\n"
+            f"\r\n"
+            f"  {FG['gry']}Fill in the details below. The hub sysop will review your{RESET}\r\n"
+            f"  {FG['gry']}application and post your credentials here when approved.{RESET}\r\n"
+            f"\r\n"
+        )
+        go = (await self.session.read_line(
+            _prompt('Press Enter to continue or Q to cancel: ')
+        ) or '').strip().upper()
+        if go == 'Q':
+            return
+
+        # ── collect fields ────────────────────────────────────────────
+        bbs_name = ''
+        while not bbs_name:
+            bbs_name = (await self.session.read_line(
+                f"  {FG['yel']}BBS Name: {RESET}") or '').strip()[:100]
+            if not bbs_name:
+                await self.session.write(
+                    f"  {FG['red']}BBS name is required.{RESET}\r\n")
+
+        packet_id = ''
+        while not packet_id:
+            pid = (await self.session.read_line(
+                f"  {FG['yel']}Desired Packet ID (2-8 chars, A-Z / 0-9): {RESET}"
+            ) or '').strip().upper()
+            if not pid:
+                await self.session.write(
+                    f"  {FG['red']}Packet ID is required.{RESET}\r\n")
+                continue
+            if not re.match(r'^[A-Z0-9]{2,8}$', pid):
+                await self.session.write(
+                    f"  {FG['red']}Use 2-8 characters: A-Z and 0-9 only.{RESET}\r\n")
+                continue
+            with _app().app_context():
+                taken = (QWKNode.query.filter_by(packet_id=pid).first() or
+                         QWKNodeRequest.query.filter_by(
+                             packet_id=pid, status='pending').first())
+            if taken:
+                await self.session.write(
+                    f"  {FG['red']}That packet ID is taken — please choose another.{RESET}\r\n")
+                continue
+            packet_id = pid
+
+        sysop_in = (await self.session.read_line(
+            f"  {FG['yel']}Your name [{username}]: {RESET}") or '').strip()
+        sysop_name = (sysop_in or username)[:100]
+
+        email = (await self.session.read_line(
+            f"  {FG['yel']}Contact email (Enter to skip): {RESET}") or '').strip()[:200] or None
+
+        bbs_addr = (await self.session.read_line(
+            f"  {FG['yel']}BBS address (e.g. mybbs.net:23, or Enter to skip): {RESET}"
+        ) or '').strip()[:200] or None
+
+        notes = (await self.session.read_line(
+            f"  {FG['yel']}Notes / BBS software (Enter to skip): {RESET}"
+        ) or '').strip()[:500] or None
+
+        # ── review & confirm ──────────────────────────────────────────
+        await self.session.write(
+            f"\r\n{FG['cyan']}{BOLD}  ── Application Summary ──{RESET}\r\n"
+            f"  BBS Name  : {FG['wht']}{bbs_name}{RESET}\r\n"
+            f"  Packet ID : {FG['grn']}{BOLD}{packet_id}{RESET}\r\n"
+            f"  Sysop     : {FG['wht']}{sysop_name}{RESET}\r\n"
+            f"  Email     : {FG['wht']}{email or '(not provided)'}{RESET}\r\n"
+            f"  BBS Addr  : {FG['wht']}{bbs_addr or '(not provided)'}{RESET}\r\n"
+            f"\r\n"
+        )
+        confirm = (await self.session.read_line(
+            _prompt('Submit? (Y / N): ')
+        ) or '').strip().upper()
+        if confirm != 'Y':
+            await self.session.write(
+                f"  {FG['gry']}Application cancelled.{RESET}\r\n")
+            await self.session.read_line(
+                _prompt('Press Enter to continue...'))
+            return
+
+        with _app().app_context():
+            req = QWKNodeRequest(
+                bbs_name=bbs_name,
+                packet_id=packet_id,
+                sysop_name=sysop_name,
+                email=email,
+                bbs_address=bbs_addr,
+                notes=notes,
+                applied_via='terminal',
+                applied_by_user_id=user_id,
+                applied_by_username=username,
+            )
+            db.session.add(req)
+            db.session.commit()
+
+        await self.session.write(
+            f"\r\n  {FG['grn']}{BOLD}Application submitted!{RESET}\r\n"
+            f"  {FG['wht']}The hub sysop will review your request.{RESET}\r\n"
+            f"  {FG['wht']}Return to this menu to check your status.{RESET}\r\n\r\n"
+        )
+        await self.session.read_line(_prompt('Press Enter to continue...'))
+
+    async def _show_qwk_request_status(self, req):
+        """Show the applicant their application status (pending/approved/denied)."""
+        from anetbbs.models import db, QWKNodeRequest as _QNR
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('ANotherNetwork — Node Application Status'))
+
+        date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
+
+        if req.status == 'pending':
+            await self.session.write(
+                f"\r\n  {FG['yel']}{BOLD}Status : PENDING REVIEW{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['wht']}Packet ID requested : {FG['grn']}{req.packet_id}{RESET}\r\n"
+                f"  {FG['wht']}BBS Name            : {FG['wht']}{req.bbs_name}{RESET}\r\n"
+                f"  {FG['wht']}Applied             : {FG['gry']}{date_str}{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['gry']}Your application is under review. Check back soon.{RESET}\r\n"
+            )
+
+        elif req.status == 'approved':
+            await self.session.write(
+                f"\r\n  {FG['grn']}{BOLD}Status : APPROVED{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['wht']}Configure your BBS with these credentials:{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['cyan']}Packet ID : {FG['grn']}{BOLD}{req.packet_id}{RESET}\r\n"
+                f"  {FG['cyan']}Password  : {FG['grn']}{BOLD}{req.generated_password or '(contact hub sysop)'}{RESET}\r\n"
+                f"  {FG['cyan']}Hub FTP   : {FG['wht']}bbs.a-net.fyi  port 21{RESET}\r\n"
+                f"  {FG['cyan']}Download  : {FG['wht']}ANET.qwk{RESET}\r\n"
+                f"  {FG['cyan']}Upload    : {FG['wht']}{req.packet_id}.rep{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['gry']}Login to FTP with your Packet ID as the username.{RESET}\r\n"
+            )
+            if not req.seen_by_applicant:
+                with _app().app_context():
+                    r = _QNR.query.get(req.id)
+                    if r:
+                        r.seen_by_applicant = True
+                        db.session.commit()
+
+        elif req.status == 'denied':
+            await self.session.write(
+                f"\r\n  {FG['red']}{BOLD}Status : NOT APPROVED{RESET}\r\n"
+                f"\r\n"
+                f"  {FG['wht']}Your application for {FG['grn']}{req.packet_id}{FG['wht']} was not approved.{RESET}\r\n"
+            )
+            if req.deny_reason:
+                await self.session.write(
+                    f"  {FG['yel']}Reason : {FG['wht']}{req.deny_reason}{RESET}\r\n"
+                )
+            await self.session.write(
+                f"\r\n  {FG['gry']}You may apply again with a different packet ID.{RESET}\r\n"
+            )
+
+        await self.session.read_line(_prompt('\r\nPress Enter to continue...'))
+
     async def read_echo_area(self, area_id, tag):
         from anetbbs.models import EchomailMessage, EchoArea
+        from .ansi_ui import banner, FG, RESET, BOLD
+
         with _app().app_context():
             msgs = (EchomailMessage.query
                     .filter_by(area_id=area_id)
                     .order_by(EchomailMessage.created_at.desc())
-                    .limit(30).all())
+                    .limit(300).all())
             m_list = [(m.id, m.subject, m.from_name, m.to_name,
                        m.created_at, m.body) for m in msgs]
             aobj     = EchoArea.query.get(area_id)
             net_id   = aobj.network_id if aobj else None
             net_addr = (aobj.network.our_address or '1:1/1') if (aobj and aobj.network) else '1:1/1'
 
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
-
         if not m_list:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner(tag))
             await self.session.write(
                 f"  {FG['gry']}(no messages in this area yet){RESET}\r\n")
-            await self.session.write('\r\n' + footer() + '\r\n')
-            await self.session.read_line(
-                f"{FG['cyan']}Press Enter...{RESET}")
+            await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
             return
 
-        LIST_PAGE = 18    # rows before --more-- on the index
-        while True:
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(f'{tag} - latest 30'))
+        COL_SUBJ = 36
+        COL_FROM = 14
+
+        async def render_header_msgs():
+            await self.session.write(banner(tag))
             await self.session.write(
-                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Subject':<38} "
-                f"{'From':<12} {'Date':<6}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 64}{RESET}\r\n")
-            for i, (_, subj, who, _, when, _) in enumerate(m_list, 1):
-                ts = when.strftime('%m-%d') if when else '?'
-                await self.session.write(
-                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
-                    f"{FG['wht']}{(subj or '(no subject)')[:38]:<38}{RESET} "
-                    f"{FG['grn']}{(who or '?')[:12]:<12}{RESET} "
-                    f"{FG['cyan']}{ts:<6}{RESET}\r\n")
-                if i % LIST_PAGE == 0 and i < len(m_list):
-                    ans = (await self.session.read_line(
-                        f"  {FG['cyan']}-- more (Enter, "
-                        f"Q=stop listing) --{RESET}") or '').strip().upper()
-                    if ans == 'Q':
-                        await self.session.write('\r\n')
-                        break
-            await self.session.write('\r\n' + footer() + '\r\n')
-            choice = (await self.session.read_line(
-                _prompt('Pick message (number / Q): ')) or '').strip()
-            if choice.upper() == 'Q' or not choice:
+                f"  {FG['cyan']}{BOLD}"
+                f"{'#':>3}  {'Subject':<{COL_SUBJ}} "
+                f"{'From':<{COL_FROM}} {'Date':<5}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+
+        def render_row_msg(idx, row, selected):
+            _, subj, who, _, when, _ = row
+            ts = when.strftime('%m-%d') if when else '  ?  '
+            s_col = FG['wht'] if not selected else ''
+            return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
+                    f"{s_col}{(subj or '(no subject)')[:COL_SUBJ]:<{COL_SUBJ}}{RESET} "
+                    f"{FG['grn']}{(who or '?')[:COL_FROM]:<{COL_FROM}}{RESET} "
+                    f"{FG['cyan']}{ts:<5}{RESET}")
+
+        def render_hint_msgs(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                    f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Enter{RESET}=read  "
+                    f"{FG['cyan']}Q{RESET}=back")
+
+        last_sel = 0
+        while True:
+            result = await self._rss_lightbar(
+                m_list, render_header_msgs, render_row_msg, render_hint_msgs,
+                initial_sel=last_sel)
+
+            if result[0] == 'quit':
                 return
-            try:
-                idx = int(choice) - 1
-            except ValueError:
-                continue
-            if not (0 <= idx < len(m_list)):
-                continue
-            _, subj, frm, to, when, body = m_list[idx]
-            ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
-            # Strip SAUCE record: 0x1A (Ctrl+Z) marks end of art content;
-            # everything from 0x1A onward is binary metadata that must not
-            # be rendered (it looks like random ANSI sequences to renderers).
-            body = (body or '')
-            _sa = body.find('\x1a')
-            if _sa >= 0:
-                body = body[:_sa]
-            # Fix QWK 0xE3 separators that may have split CSI sequences.
-            body_fixed = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
-                                lambda m: m.group(0).replace('\n', ''),
-                                body or '')
-            from .anedit import launch_aneview, launch_anedit
-            # Route all messages through ANView (VT renderer inside).
-            # CP437, pipe codes, cursor-pos/block-art \n handling are all
-            # done in launch_aneview via to_ansi_lines().
-            view_result = await launch_aneview(
-                self.session, body_fixed,
-                subject=subj or '(no subject)',
-                from_name=frm or '?',
-                to_name=to or '?',
-                date_str=ts,
-            )
-            if view_result in ('reply', 'new'):
-                if view_result == 'reply':
-                    compose_to   = frm or 'All'
-                    compose_subj = ('Re: ' + subj) if subj else 'Re: (no subject)'
-                    quote        = body_fixed
-                else:
-                    compose_to   = 'All'
-                    compose_subj = ''
-                    quote        = ''
-                if not compose_subj:
-                    await self.session.write('\x1b[2J\x1b[H')
-                    await self.session.write(banner('Compose in ' + tag))
-                    compose_to = (await self.session.read_line(
-                        f"  {FG['cyan']}To:{RESET} ") or 'All').strip()
-                    compose_subj = (await self.session.read_line(
-                        f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                _, subj, frm, to, when, body = m_list[last_sel]
+                ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                # Strip SAUCE record: 0x1A marks end of ANSI art content.
+                body = (body or '')
+                _sa = body.find('\x1a')
+                if _sa >= 0:
+                    body = body[:_sa]
+                # Fix QWK 0xE3 separators that may have split CSI sequences.
+                body_fixed = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
+                                    lambda m: m.group(0).replace('\n', ''),
+                                    body or '')
+                from .anedit import launch_aneview, launch_anedit
+                view_result = await launch_aneview(
+                    self.session, body_fixed,
+                    subject=subj or '(no subject)',
+                    from_name=frm or '?',
+                    to_name=to or '?',
+                    date_str=ts,
+                )
+                if view_result in ('reply', 'new'):
+                    if view_result == 'reply':
+                        compose_to   = frm or 'All'
+                        compose_subj = ('Re: ' + subj) if subj else 'Re: (no subject)'
+                        quote        = body_fixed
+                    else:
+                        compose_to   = 'All'
+                        compose_subj = ''
+                        quote        = ''
                     if not compose_subj:
-                        continue
-                username = self.session.user.get('username', 'guest')
-                body_out = await launch_anedit(
-                    self.session, quote=quote,
-                    subject=compose_subj, username=username)
-                if body_out and net_id:
-                    with _app().app_context():
-                        from anetbbs.models import db as _db2, EchomailMessage as _EM
-                        em = _EM(
-                            area_id=area_id,
-                            network_id=net_id,
-                            from_name=username[:100],
-                            from_address=net_addr,
-                            to_name=compose_to[:100],
-                            subject=compose_subj[:200],
-                            body=body_out,
-                            direction='outbound',
-                        )
-                        _db2.session.add(em)
-                        _db2.session.commit()
-                    await self.session.write(
-                        f"\r\n  {FG['grn']}{BOLD}[OK] Message queued for next poll.{RESET}\r\n")
-                    await self.session.read_line(
-                        f"\r\n{FG['cyan']}Press Enter...{RESET}")
+                        await self.session.write('\x1b[2J\x1b[H')
+                        await self.session.write(banner('Compose in ' + tag))
+                        compose_to = (await self.session.read_line(
+                            f"  {FG['cyan']}To:{RESET} ") or 'All').strip()
+                        compose_subj = (await self.session.read_line(
+                            f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+                        if not compose_subj:
+                            continue
+                    username = self.session.user.get('username', 'guest')
+                    body_out = await launch_anedit(
+                        self.session, quote=quote,
+                        subject=compose_subj, username=username)
+                    if body_out and net_id:
+                        with _app().app_context():
+                            from anetbbs.models import db as _db2, EchomailMessage as _EM
+                            em = _EM(
+                                area_id=area_id,
+                                network_id=net_id,
+                                from_name=username[:100],
+                                from_address=net_addr,
+                                to_name=compose_to[:100],
+                                subject=compose_subj[:200],
+                                body=body_out,
+                                direction='outbound',
+                            )
+                            _db2.session.add(em)
+                            _db2.session.commit()
+                        await self.session.write(
+                            f"\r\n  {FG['grn']}{BOLD}[OK] Message queued for next poll.{RESET}\r\n")
+                        await self.session.read_line(
+                            f"\r\n{FG['cyan']}Press Enter...{RESET}")
 
     # ------------------------------------------------------------------
     # File library (list-only for now)
@@ -1428,173 +1690,573 @@ class BBSMenuUI:
     # RSS News Reader
     # ------------------------------------------------------------------
 
-    async def show_rss(self):
-        """Browse RSS feeds + items the sysop has subscribed."""
-        from anetbbs.models import RssFeed, RssItem, RssReadStatus
-        from .ansi_ui import banner, footer, FG, RESET
+    # ── RSS lightbar helper ──────────────────────────────────────────
+    # Layout on a 24-row × 80-col terminal:
+    #   Row 1     : blank (before banner)
+    #   Rows 2-4  : banner (3 rows)
+    #   Row 5     : column header
+    #   Row 6     : separator
+    #   Rows 7-21 : up to 15 list items (lightbar scrolls inside this window)
+    #   Row 22    : separator
+    #   Row 23    : status + key hints
+    #   Row 24    : cursor (kept blank)
+    _LB_START   = 7    # first item row
+    _LB_VISIBLE = 15   # item rows
+    _LB_SEP_ROW = 22
+    _LB_HINT_ROW= 23
 
-        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
-              else getattr(self.session.user, 'id', None)
+    async def _rss_lightbar(self, rows, render_header, render_row, render_hint,
+                             initial_sel=0):
+        """Generic arrow-key lightbar selector for RSS lists.
+
+        render_header()          — async: writes banner + column-header lines
+                                   (cursor ends at row _LB_START after call)
+        render_row(idx, row, sel)— sync: returns a ≤78-char formatted string
+        render_hint(sel, total)  — sync: returns the status+hints string
+        Returns ('enter', idx) | ('key', char) | ('quit',)
+        """
+        from .ansi_ui import FG, RESET, BOLD, footer
+
+        if not rows:
+            return ('quit',)
+
+        SEL   = '\x1b[7m\x1b[1m'   # reverse + bold
+        NORM  = '\x1b[0m'
+        EOL   = '\x1b[K'
+
+        def _at(r):
+            return f'\x1b[{r};1H'
+
+        def _render(idx, row, selected):
+            base = render_row(idx, row, selected)
+            return (f'{SEL}{base}{NORM}{EOL}' if selected
+                    else f'{NORM}{base}{EOL}')
+
+        sel    = min(initial_sel, len(rows) - 1)
+        scroll = max(0, sel - self._LB_VISIBLE + 1)
+
+        async def _draw_full():
+            await self.session.write('\x1b[2J\x1b[H')
+            await render_header()
+            # Items
+            for i in range(self._LB_VISIBLE):
+                idx = scroll + i
+                row_txt = (_render(idx, rows[idx], idx == sel)
+                           if idx < len(rows) else EOL)
+                await self.session.write(f'{_at(self._LB_START + i)}{row_txt}')
+            # Separator + hint
+            await self.session.write(
+                f'{_at(self._LB_SEP_ROW)}{FG["gry"]}{"─" * 76}{NORM}{EOL}')
+            hint = render_hint(sel, len(rows))
+            await self.session.write(f'{_at(self._LB_HINT_ROW)}{hint}{EOL}')
+            # Hide cursor at a safe spot
+            await self.session.write(f'\x1b[24;1H')
+
+        async def _draw_row(idx):
+            if scroll <= idx < scroll + self._LB_VISIBLE:
+                row_num = self._LB_START + (idx - scroll)
+                await self.session.write(
+                    f'{_at(row_num)}{_render(idx, rows[idx], idx == sel)}')
+
+        async def _refresh_hint():
+            hint = render_hint(sel, len(rows))
+            await self.session.write(
+                f'{_at(self._LB_HINT_ROW)}{hint}{EOL}\x1b[24;1H')
+
+        await _draw_full()
 
         while True:
+            key = await self.session.read_key_arrow()
+
+            if key == 'UP':
+                if sel > 0:
+                    old, sel = sel, sel - 1
+                    if sel < scroll:
+                        scroll = sel
+                        await _draw_full()
+                    else:
+                        await _draw_row(old)
+                        await _draw_row(sel)
+                        await _refresh_hint()
+
+            elif key == 'DOWN':
+                if sel < len(rows) - 1:
+                    old, sel = sel, sel + 1
+                    if sel >= scroll + self._LB_VISIBLE:
+                        scroll = sel - self._LB_VISIBLE + 1
+                        await _draw_full()
+                    else:
+                        await _draw_row(old)
+                        await _draw_row(sel)
+                        await _refresh_hint()
+
+            elif key == 'PGUP':
+                _max_scroll = max(0, len(rows) - self._LB_VISIBLE)
+                if scroll > 0:
+                    scroll = max(0, scroll - self._LB_VISIBLE)
+                    sel = scroll
+                    await _draw_full()
+
+            elif key == 'PGDN':
+                _max_scroll = max(0, len(rows) - self._LB_VISIBLE)
+                if scroll < _max_scroll:
+                    scroll = min(_max_scroll, scroll + self._LB_VISIBLE)
+                    sel = scroll
+                    await _draw_full()
+
+            elif key == 'HOME':
+                if sel != 0:
+                    sel, scroll = 0, 0
+                    await _draw_full()
+
+            elif key == 'END':
+                if sel != len(rows) - 1:
+                    sel = len(rows) - 1
+                    scroll = max(0, len(rows) - self._LB_VISIBLE)
+                    await _draw_full()
+
+            elif key == 'ENTER':
+                return ('enter', sel)
+
+            elif key in ('Q', 'ESC', 'CTRL_C'):
+                return ('quit',)
+
+            else:
+                return ('key', key)
+
+    # ── RSS article pager ────────────────────────────────────────────
+    async def _rss_pager(self, lines, header_lines, hint_str):
+        """Scrollable text pager. header_lines are fixed; lines scrolls.
+
+        header_lines : list of already-formatted strings for the fixed header
+        lines        : list of body text strings (plain, pre-wrapped)
+        hint_str     : key-hint footer string
+        """
+        from .ansi_ui import FG, RESET, BOLD, footer
+
+        EOL      = '\x1b[K'
+        NORM     = '\x1b[0m'
+        hdr_rows = len(header_lines)          # rows consumed by header
+        # how many terminal rows remain for body:
+        # 24 total − 1 blank − hdr_rows − 1 sep − 1 hint = 21 − hdr_rows
+        body_visible = max(4, 21 - hdr_rows)
+        body_start   = 2 + hdr_rows           # row 2 = first content row
+        body_end_row = body_start + body_visible - 1
+        sep_row      = body_end_row + 1
+        hint_row     = sep_row + 1
+
+        offset = 0   # index of first visible body line
+
+        async def _draw():
+            await self.session.write('\x1b[2J\x1b[H')
+            # Fixed header
+            for r, hl in enumerate(header_lines, 2):
+                await self.session.write(f'\x1b[{r};1H{hl}{EOL}')
+            # Body lines
+            for i in range(body_visible):
+                li = offset + i
+                txt = lines[li] if li < len(lines) else ''
+                await self.session.write(f'\x1b[{body_start + i};1H  {txt}{EOL}')
+            # Separator + hint
+            pct = ''
+            if lines:
+                pct_val = min(100, int((offset + body_visible) * 100 / len(lines)))
+                pct = f'{FG["gry"]} {pct_val}%{NORM}'
+            await self.session.write(
+                f'\x1b[{sep_row};1H{FG["gry"]}{"─" * 76}{NORM}{EOL}')
+            await self.session.write(
+                f'\x1b[{hint_row};1H{hint_str}{pct}{EOL}')
+            await self.session.write(f'\x1b[24;1H')
+
+        await _draw()
+
+        while True:
+            key = await self.session.read_key_arrow()
+            max_offset = max(0, len(lines) - body_visible)
+
+            if key == 'UP':
+                if offset > 0:
+                    offset -= 1
+                    await _draw()
+            elif key == 'DOWN':
+                if offset < max_offset:
+                    offset += 1
+                    await _draw()
+            elif key == 'PGUP':
+                if offset > 0:
+                    offset = max(0, offset - body_visible)
+                    await _draw()
+            elif key == 'PGDN':
+                if offset < max_offset:
+                    offset = min(max_offset, offset + body_visible)
+                    await _draw()
+            elif key == 'HOME':
+                if offset != 0:
+                    offset = 0
+                    await _draw()
+            elif key == 'END':
+                if offset != max_offset:
+                    offset = max_offset
+                    await _draw()
+            elif key in ('Q', 'ENTER', 'CTRL_C'):
+                return
+
+    # ── Sixel image rendering ────────────────────────────────────────
+    async def _rss_detect_sixel(self):
+        """Detect sixel support via DA1 primary device attributes. Cached.
+
+        Sends ESC [ 0 c and reads the response, which looks like:
+          ESC [ ? 65 ; 1 ; 2 ; 4 ; 9 c
+        The flag 4 in the parameter list means sixel is supported.
+        We also need img2sixel on PATH — if it's missing, report False."""
+        if hasattr(self.session, '_sixel_ok'):
+            return self.session._sixel_ok
+        import asyncio as _aio
+        import re as _re
+        import shutil as _sh
+        # Cheap fast-path: if the tool isn't installed, skip the DA1 round-trip.
+        if not _sh.which('img2sixel'):
+            self.session._sixel_ok = False
+            return False
+        # Send DA1 query and read until 'c' or timeout.
+        await self.session.write('\x1b[0c')
+        buf = b''
+        try:
+            # Allow up to 1.5 s — covers high-latency links
+            deadline = _aio.get_event_loop().time() + 1.5
+            while _aio.get_event_loop().time() < deadline:
+                remaining = deadline - _aio.get_event_loop().time()
+                ch = await _aio.wait_for(
+                    self.session.reader.read(1), timeout=min(0.3, remaining))
+                if not ch:
+                    break
+                buf += ch
+                if ch == b'c':   # final byte of DA1 response
+                    break
+        except Exception:
+            pass
+        resp = buf.decode('latin-1', errors='replace')
+        # Flag 4 = sixel: appears as ;4; or ;4c in the CSI response
+        self.session._sixel_ok = bool(_re.search(r'[;?]4[;c]', resp))
+        return self.session._sixel_ok
+
+    async def _rss_render_sixel(self, image_url, width_px=280):
+        """Download image_url and emit sixel to terminal. Returns True if OK."""
+        import shutil, subprocess, tempfile, os, urllib.request as _ur
+        if not shutil.which('img2sixel'):
+            return False
+        tmp = None
+        try:
+            ext = image_url.split('?')[0].rsplit('.', 1)[-1].lower()
+            if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'):
+                ext = 'jpg'
+            fd, tmp = tempfile.mkstemp(suffix=f'.{ext}')
+            os.close(fd)
+            req = _ur.Request(image_url, headers={'User-Agent': 'ANetBBS/1.0'})
+            with _ur.urlopen(req, timeout=6) as resp:
+                with open(tmp, 'wb') as f:
+                    f.write(resp.read(1024 * 512))
+            result = subprocess.run(
+                ['img2sixel', '-w', str(width_px), tmp],
+                capture_output=True, timeout=10)
+            if result.returncode == 0:
+                await self.session.write(
+                    result.stdout.decode('latin-1', errors='replace'))
+                return True
+        except Exception:
+            pass
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+        return False
+
+    # ── HTML → plain text for terminal ──────────────────────────────
+    @staticmethod
+    def _html_to_text(html):
+        """Convert HTML to readable plain text (for terminal pager)."""
+        from html.parser import HTMLParser
+        from html import unescape as _ue
+        import re as _re
+
+        BLOCK = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                  'blockquote', 'li', 'tr', 'br', 'hr', 'pre', 'article',
+                  'section', 'header', 'footer', 'figure', 'figcaption'}
+        SKIP  = {'script', 'style', 'nav', 'head', 'noscript', 'svg',
+                  'iframe', 'form', 'button', 'input'}
+
+        class _P(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.parts = []
+                self._skip = 0
+            def handle_starttag(self, tag, attrs):
+                if tag in SKIP:
+                    self._skip += 1
+                elif not self._skip and tag in BLOCK:
+                    self.parts.append('\n')
+            def handle_endtag(self, tag):
+                if tag in SKIP:
+                    self._skip = max(0, self._skip - 1)
+                elif not self._skip and tag in BLOCK:
+                    self.parts.append('\n')
+            def handle_data(self, data):
+                if not self._skip:
+                    self.parts.append(data)
+
+        p = _P()
+        p.feed(html)
+        text = ''.join(p.parts)
+        text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+        return text
+
+    # ── RSS main screens ─────────────────────────────────────────────
+    async def show_rss(self):
+        """RSS feed list with arrow-key lightbar."""
+        from anetbbs.models import RssFeed, RssItem, RssReadStatus, db
+        from .ansi_ui import banner, footer, FG, RESET, BOLD
+        from sqlalchemy import func
+
+        uid        = (self.session.user or {}).get('id')
+        user_level = int((self.session.user or {}).get('access_level', 10))
+        is_admin   = bool((self.session.user or {}).get('is_admin'))
+
+        # Ask once per session whether sixel is supported.
+        # Skips auto-detection entirely — no DA1 round-trip needed.
+        if not hasattr(self.session, '_sixel_ok'):
+            import shutil as _sh
+            await self.session.write(
+                '\x1b[2J\x1b[H'
+                f"\r\n  {FG['cyan']}ANetBBS RSS Reader{RESET}\r\n\r\n"
+                f"  Does your terminal support sixel graphics? [{FG['wht']}Y{RESET}/{FG['wht']}N{RESET}] "
+            )
+            ans = await self.session.read_line()
+            self.session._sixel_ok = (
+                ans.strip().upper() == 'Y' and bool(_sh.which('img2sixel'))
+            )
+
+        last_sel = 0
+        while True:
             with _app().app_context():
-                _user_level_rss = int((self.session.user or {}).get('access_level', 10))
-                _is_admin_rss = bool((self.session.user or {}).get('is_admin'))
-                _rq = RssFeed.query.filter_by(is_active=True)
-                if not _is_admin_rss:
-                    _rq = _rq.filter(RssFeed.min_access_level <= _user_level_rss)
-                feeds = _rq.order_by(RssFeed.sort_order, RssFeed.name).all()
-                # Snapshot the data we need so the rest of the loop can
-                # touch session.write/read_line without a stale session.
+                rq = RssFeed.query.filter_by(is_active=True)
+                if not is_admin:
+                    rq = rq.filter(RssFeed.min_access_level <= user_level)
+                feeds = rq.order_by(RssFeed.sort_order, RssFeed.name).all()
+
+                # Aggregated unread counts — two queries instead of N+1
+                total_by = dict(db.session.query(
+                    RssItem.feed_id, func.count(RssItem.id)
+                ).group_by(RssItem.feed_id).all())
+                read_by = {}
+                if uid:
+                    read_by = dict(db.session.query(
+                        RssItem.feed_id, func.count(RssReadStatus.id)
+                    ).join(RssReadStatus, RssReadStatus.item_id == RssItem.id)
+                     .filter(RssReadStatus.user_id == uid)
+                     .group_by(RssItem.feed_id).all())
+
                 feed_rows = []
                 for f in feeds:
-                    total = RssItem.query.filter_by(feed_id=f.id).count()
-                    if uid:
-                        read = (RssReadStatus.query
-                                .join(RssItem,
-                                      RssReadStatus.item_id == RssItem.id)
-                                .filter(RssItem.feed_id == f.id,
-                                        RssReadStatus.user_id == uid).count())
-                    else:
-                        read = 0
-                    feed_rows.append((f.id, f.name, total, total - read))
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('RSS News Reader'))
+                    tot = total_by.get(f.id, 0)
+                    unread = tot - read_by.get(f.id, 0)
+                    feed_rows.append((f.id, f.name, f.category or 'general',
+                                      tot, unread))
+
             if not feed_rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('RSS Reader'))
                 await self.session.write(
-                    f"  {FG['gry']}No RSS feeds configured. Ask the sysop "
-                    f"to add some at /admin/rss/.{RESET}\r\n")
-                await self.session.write('\r\n' + footer() + '\r\n')
-                await self.session.read_line("Press Enter... ")
+                    f"  {FG['gry']}No feeds configured. Add one at /admin/rss/.{RESET}\r\n")
+                await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
                 return
-            await self.session.write(
-                f"  {FG['cyan']}#  Feed                                 "
-                f"Items  Unread{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
-            for i, (_, name, total, unread) in enumerate(feed_rows, 1):
-                unread_marker = (f"{FG['yel']}{unread:>4}{RESET}"
-                                  if unread else f"{FG['gry']}{'-':>4}{RESET}")
+
+            COL_W = 32  # feed name truncation
+
+            async def render_header_rss():
+                await self.session.write(banner('RSS Reader'))
                 await self.session.write(
-                    f"  {FG['grn']}{i:<3}{RESET}{name[:35]:<37} "
-                    f"{total:>5}  {unread_marker}\r\n")
-            await self.session.write('\r\n' + footer() + '\r\n')
-            await self.session.write(
-                f"  {FG['cyan']}A{RESET}=All Feeds (river)   "
-                f"{FG['cyan']}#{RESET}=View feed   "
-                f"{FG['cyan']}Q{RESET}=Back\r\n")
-            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
-            if choice == 'Q' or choice == '':
+                    f"  {FG['cyan']}{BOLD}"
+                    f"{'#':>2}  {'Feed':<{COL_W}}  {'Category':<10}  "
+                    f"{'Items':>5}  {'Unread':>6}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * 72}{RESET}\r\n")
+
+            def render_row_rss(idx, row, selected):
+                fid, name, cat, tot, unread = row
+                u_str = (f"{FG['yel']}{BOLD}{unread:>6}{RESET}"
+                         if unread else f"{FG['gry']}{'─':>6}{RESET}")
+                n_col = FG['wht'] if not selected else ''
+                return (f"  {FG['grn']}{idx+1:>2}{RESET}  "
+                        f"{n_col}{name[:COL_W]:<{COL_W}}{RESET}  "
+                        f"{FG['gry']}{cat[:10]:<10}{RESET}  "
+                        f"{tot:>5}  {u_str}")
+
+            def render_hint_rss(sel, total):
+                row = feed_rows[sel]
+                n = f"{FG['cyan']}{sel+1}/{total}{RESET} "
+                return (f"  {n}"
+                        f"{FG['cyan']}Up/Dn{RESET}=move  "
+                        f"{FG['cyan']}Enter{RESET}=open  "
+                        f"{FG['cyan']}A{RESET}=River  "
+                        f"{FG['cyan']}M{RESET}=mark all read  "
+                        f"{FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(
+                feed_rows, render_header_rss, render_row_rss, render_hint_rss,
+                initial_sel=last_sel)
+
+            if result[0] == 'quit':
                 return
-            if choice == 'A':
-                await self._rss_river()
-                continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(feed_rows):
-                    await self._rss_feed_items(feed_rows[idx][0],
-                                                feed_rows[idx][1])
-            except ValueError:
-                pass
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                fid, fname = feed_rows[last_sel][0], feed_rows[last_sel][1]
+                await self._rss_feed_items(fid, fname)
+            elif result[0] == 'key':
+                k = result[1]
+                if k == 'A':
+                    await self._rss_river()
+                elif k == 'M':
+                    with _app().app_context():
+                        unread_ids = [
+                            r[0] for r in
+                            db.session.query(RssItem.id)
+                            .outerjoin(RssReadStatus,
+                                       (RssReadStatus.item_id == RssItem.id) &
+                                       (RssReadStatus.user_id == uid))
+                            .filter(RssReadStatus.id.is_(None)).all()
+                        ] if uid else []
+                        for iid in unread_ids:
+                            db.session.add(
+                                RssReadStatus(user_id=uid, item_id=iid))
+                        if unread_ids:
+                            db.session.commit()
+                # loop to refresh counts
 
     async def _rss_feed_items(self, feed_id, feed_name):
-        """List items in one feed, paginated."""
-        from anetbbs.models import RssItem, RssReadStatus
-        from .ansi_ui import banner, footer, FG, RESET
+        """Item list for one feed — arrow-key lightbar."""
+        from anetbbs.models import RssItem, RssReadStatus, db
+        from .ansi_ui import banner, FG, RESET, BOLD
 
-        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
-              else getattr(self.session.user, 'id', None)
-        page = 0
-        per_page = 15
+        uid = (self.session.user or {}).get('id')
 
+        last_sel = 0
         while True:
             with _app().app_context():
                 q = (RssItem.query.filter_by(feed_id=feed_id)
                      .order_by(RssItem.published_at.desc().nullslast()))
-                total_count = q.count()
-                items = q.offset(page * per_page).limit(per_page).all()
-                rows = []
+                all_items = q.limit(300).all()
+                if not all_items:
+                    await self.session.write('\x1b[2J\x1b[H')
+                    await self.session.write(banner(feed_name[:36]))
+                    await self.session.write(
+                        f"  {FG['gry']}No items yet. Poller runs every ~30 min.{RESET}\r\n")
+                    await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+                    return
                 read_ids = set()
-                if uid and items:
-                    item_ids = [i.id for i in items]
+                if uid and all_items:
+                    iids = [i.id for i in all_items]
                     read_ids = set(
-                        r[0] for r in RssReadStatus.query
-                        .with_entities(RssReadStatus.item_id)
+                        r[0] for r in db.session.query(RssReadStatus.item_id)
                         .filter(RssReadStatus.user_id == uid,
-                                RssReadStatus.item_id.in_(item_ids)).all())
-                for i in items:
-                    rows.append((i.id, i.title or '(no title)',
-                                  i.published_at, i.id in read_ids))
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(f'{feed_name}'))
-            if not rows:
+                                RssReadStatus.item_id.in_(iids)).all())
+                rows = [(i.id, i.title or '(no title)',
+                         i.published_at, i.id not in read_ids)
+                        for i in all_items]
+
+            async def render_header_items():
+                await self.session.write(banner(feed_name[:36]))
                 await self.session.write(
-                    f"  {FG['gry']}No items yet. The poller fetches every "
-                    f"30 minutes; if this is fresh, give it a moment.{RESET}\r\n")
-                await self.session.write('\r\n' + footer() + '\r\n')
-                await self.session.read_line("Press Enter... ")
+                    f"  {FG['cyan']}{BOLD}"
+                    f"{'':>4}{'Date':>5}  {'Title':<62}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+
+            def render_row_items(idx, row, selected):
+                iid, title, ts, is_unread = row
+                ts_s  = ts.strftime('%m-%d') if ts else '  ?  '
+                mark  = f"{FG['yel']}*{RESET}" if is_unread else ' '
+                tcol  = FG['wht'] if is_unread else FG['gry']
+                n_col = f"{FG['grn']}{idx+1:>3}{RESET}"
+                t_safe = BBSMenuUI._sanitize_cp437(title)
+                return (f"  {n_col} {mark}{ts_s}  "
+                        f"{tcol}{t_safe[:62]:<62}{RESET}")
+
+            def render_hint_items(sel, total):
+                _, _, _, is_unread = rows[sel]
+                n = f"{FG['cyan']}{sel+1}/{total}{RESET} "
+                new_lbl = (f" {FG['yel']}[NEW]{RESET}" if is_unread else '')
+                return (f"  {n}"
+                        f"{FG['cyan']}Up/Dn{RESET}=move  "
+                        f"{FG['cyan']}Enter{RESET}=read{new_lbl}  "
+                        f"{FG['cyan']}M{RESET}=mark feed read  "
+                        f"{FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(
+                rows, render_header_items, render_row_items, render_hint_items,
+                initial_sel=last_sel)
+
+            if result[0] == 'quit':
                 return
-            await self.session.write(
-                f"  {FG['cyan']}#   Date    Title{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 70}{RESET}\r\n")
-            for i, (_, title, ts, was_read) in enumerate(rows, 1):
-                ts_str = ts.strftime('%m-%d') if ts else '  ?  '
-                title_color = FG['gry'] if was_read else FG['wht']
-                marker = ' ' if was_read else '*'
-                await self.session.write(
-                    f"  {FG['grn']}{i:<3}{RESET}{marker}{ts_str}  "
-                    f"{title_color}{title[:60]:<60}{RESET}\r\n")
-            total_pages = (total_count + per_page - 1) // per_page
-            await self.session.write('\r\n' + footer() + '\r\n')
-            await self.session.write(
-                f"  Page {page + 1}/{total_pages or 1}   "
-                f"{FG['cyan']}#{RESET}=read item   "
-                f"{FG['cyan']}N{RESET}=next page   "
-                f"{FG['cyan']}P{RESET}=prev   "
-                f"{FG['cyan']}Q{RESET}=back\r\n")
-            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
-            if choice == 'Q' or choice == '':
-                return
-            if choice == 'N':
-                if (page + 1) * per_page < total_count:
-                    page += 1
-                continue
-            if choice == 'P':
-                if page > 0:
-                    page -= 1
-                continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(rows):
-                    await self._rss_view_item(rows[idx][0])
-            except ValueError:
-                pass
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                await self._rss_view_item(rows[last_sel][0])
+                # Refresh read state after returning
+                with _app().app_context():
+                    if uid:
+                        iids = [r[0] for r in rows]
+                        read_ids = set(
+                            r[0] for r in db.session.query(RssReadStatus.item_id)
+                            .filter(RssReadStatus.user_id == uid,
+                                    RssReadStatus.item_id.in_(iids)).all())
+                        rows = [(iid, t, ts, iid not in read_ids)
+                                for iid, t, ts, _ in rows]
+            elif result[0] == 'key' and result[1] == 'M':
+                with _app().app_context():
+                    if uid:
+                        unread_ids = [r[0] for r in rows if r[3]]
+                        for iid in unread_ids:
+                            try:
+                                db.session.add(
+                                    RssReadStatus(user_id=uid, item_id=iid))
+                            except Exception:
+                                pass
+                        if unread_ids:
+                            db.session.commit()
+                rows = [(iid, t, ts, False) for iid, t, ts, _ in rows]
 
     async def _rss_view_item(self, item_id):
-        """Display a single RSS item full-screen and mark as read."""
+        """Display a single article in a scrollable pager. Marks as read."""
         from anetbbs.models import db, RssItem, RssReadStatus
-        from .ansi_ui import banner, footer, FG, RESET
+        from .ansi_ui import banner, FG, RESET, BOLD
 
-        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
-              else getattr(self.session.user, 'id', None)
+        uid = (self.session.user or {}).get('id')
 
         with _app().app_context():
             app = _app()
             item = RssItem.query.get(item_id)
             if not item:
                 return
-            title = item.title or '(no title)'
-            link = item.link or ''
-            author = item.author or ''
-            published = item.published_at.strftime('%Y-%m-%d %H:%M UTC') \
-                        if item.published_at else 'unknown'
-            summary = item.summary or '(no summary)'
-            feed_name = item.feed.name
-            # Build short URL for terminal display
-            domain = app.config.get('BBS_DOMAIN', '')
-            port = app.config.get('WEB_PORT', 5000)
-            web_base = (f"https://{domain}" if domain
-                        else f"http://localhost:{port}")
+            title     = self._sanitize_cp437(item.title or '(no title)')
+            link      = item.link or ''
+            author    = self._sanitize_cp437(item.author or '')
+            pub_str   = (item.published_at.strftime('%Y-%m-%d %H:%M UTC')
+                         if item.published_at else '')
+            image_url = item.image_url or ''
+            feed_name = self._sanitize_cp437(item.feed.name)
+            domain    = app.config.get('BBS_DOMAIN', '')
+            port      = app.config.get('WEB_PORT', 5000)
+            web_base  = (f"https://{domain}" if domain
+                         else f"http://localhost:{port}")
             short_url = f"{web_base}/r/{item.id}" if link else ''
+
+            # Build body text from HTML (preferred) or plain summary
+            if item.content_html:
+                raw_body = self._sanitize_cp437(self._html_to_text(item.content_html))
+            elif item.summary:
+                raw_body = self._sanitize_cp437(item.summary)
+            else:
+                raw_body = '(no content — open the link to read on the source site)'
+
             # Mark as read
             if uid and not RssReadStatus.query.filter_by(
                     user_id=uid, item_id=item.id).first():
@@ -1603,26 +2265,71 @@ class BBSMenuUI:
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
-        await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner(feed_name[:40]))
-        for title_line in self._wrap_text(title, 74):
-            await self.session.write(f"  {FG['cyan']}{title_line}{RESET}\r\n")
-        await self.session.write(
-            f"  {FG['gry']}{'─' * 74}{RESET}\r\n"
-            f"  {FG['gry']}Date:{RESET} {published}\r\n")
+
+        # Detect sixel support once per session
+        sixel_ok = await self._rss_detect_sixel() if image_url else False
+
+        # Build fixed header lines for the pager
+        hdr = []
+        hdr.append(f"\x1b[2J\x1b[H")  # written by pager via draw(), not here
+        # We build them as plain strings; _rss_pager starts at row 2.
+        hdr_lines = []
+        hdr_lines.append(
+            f"  {FG['gry']}{feed_name[:40]}{RESET}"
+            f"{'  ' + pub_str if pub_str else ''}")
+        for tl in self._wrap_text(title, 72):
+            hdr_lines.append(f"  {FG['cyan']}{BOLD}{tl}{RESET}")
         if author:
-            await self.session.write(
-                f"  {FG['gry']}Author:{RESET} {author}\r\n")
+            hdr_lines.append(f"  {FG['gry']}by {author}{RESET}")
         if short_url:
-            await self.session.write(
-                f"  {FG['gry']}Link:{RESET} {short_url}\r\n")
-        await self.session.write(f"  {FG['gry']}{'─' * 74}{RESET}\r\n\r\n")
-        # Word-wrap the summary to ~76 cols for readability on 80-col
-        # terminals.
-        for line in self._wrap_text(summary, 76):
-            await self.session.write('  ' + line + '\r\n')
-        await self.session.write('\r\n' + footer() + '\r\n')
-        await self.session.read_line('\r\nPress Enter to return... ')
+            hdr_lines.append(f"  {FG['gry']}web:{RESET} {short_url}")
+        hdr_lines.append(f"  {FG['gry']}{'─' * 72}{RESET}")
+
+        # If sixel capable, show image in its own "pane" first
+        if sixel_ok and image_url:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(feed_name[:36]))
+            for hl in hdr_lines[:-1]:   # all but the separator
+                await self.session.write(hl + '\r\n')
+            await self.session.write(f"  {FG['gry']}(loading image…){RESET}\r\n")
+            shown = await self._rss_render_sixel(image_url, width_px=300)
+            if not shown:
+                await self.session.write(f"\r\n  {FG['gry']}(image unavailable){RESET}\r\n")
+            await self.session.read_line(
+                f"\r\n  {FG['cyan']}Press Enter for article…{RESET}")
+
+        # Word-wrap body into lines
+        body_lines = []
+        for para in raw_body.split('\n'):
+            if not para.strip():
+                body_lines.append('')
+            else:
+                body_lines.extend(self._wrap_text(para, 74))
+
+        hint_str = (f"  {FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Home/End{RESET}=jump  "
+                    f"{FG['cyan']}Q/Enter{RESET}=back")
+
+        # Build the pager header (banner + article header)
+        async def _show_pager():
+            # The pager renders a banner itself as its first header rows.
+            # We inline the banner into hdr_lines by prepending it.
+            from .ansi_ui import banner as _bn, BG
+            full_hdr = []
+            # banner outputs rows 2-4; row 1 is blank (before banner \r\n)
+            # We pass the banner rows as the first header lines.
+            full_hdr.append(f"  {FG['gry']}{feed_name[:40]}{RESET}"
+                             f"{'  ' + pub_str if pub_str else ''}")
+            for tl in self._wrap_text(title, 72):
+                full_hdr.append(f"  {FG['cyan']}{BOLD}{tl}{RESET}")
+            if author:
+                full_hdr.append(f"  {FG['gry']}by {author}{RESET}")
+            if short_url:
+                full_hdr.append(f"  {FG['gry']}web:{RESET} {short_url}")
+            full_hdr.append(f"  {FG['gry']}{'─' * 72}{RESET}")
+            await self._rss_pager(body_lines, full_hdr, hint_str)
+
+        await _show_pager()
 
     @staticmethod
     def _wrap_text(text, width):
@@ -1644,78 +2351,131 @@ class BBSMenuUI:
                 out.append(line)
         return out
 
+    @staticmethod
+    def _sanitize_cp437(text):
+        """Replace common Unicode chars with CP437-safe equivalents."""
+        _sub = {
+            '–': '-', '—': '-', '―': '-',
+            '‘': "'", '’': "'", '‚': "'",
+            '“': '"', '”': '"', '„': '"',
+            '…': '...',
+            '•': '*', '‣': '>', '⁃': '-',
+            ' ': ' ', '­': '', '​': '', '‌': '',
+            '·': '.', '∙': '.',
+            '©': '(c)', '®': '(R)', '™': '(tm)',
+            '×': 'x', '÷': '/',
+            '←': '<-', '→': '->', '↑': '^', '↓': 'v',
+            '≤': '<=', '≥': '>=', '≠': '!=',
+            '«': '<<', '»': '>>',
+        }
+        out = []
+        for ch in text:
+            repl = _sub.get(ch, ch)
+            for c in repl:
+                try:
+                    c.encode('cp437')
+                    out.append(c)
+                except (UnicodeEncodeError, LookupError):
+                    out.append('?')
+        return ''.join(out)
+
     async def _rss_river(self):
-        """Combined river of newest items from all feeds, paginated."""
-        from anetbbs.models import RssItem, RssFeed, RssReadStatus
-        from .ansi_ui import banner, footer, FG, RESET
+        """Combined all-feeds river — arrow-key lightbar."""
+        from anetbbs.models import RssItem, RssFeed, RssReadStatus, db
+        from .ansi_ui import banner, FG, RESET, BOLD
 
-        uid = self.session.user.get('id') if isinstance(self.session.user, dict) \
-              else getattr(self.session.user, 'id', None)
-        page = 0
-        per_page = 15
+        uid        = (self.session.user or {}).get('id')
+        user_level = int((self.session.user or {}).get('access_level', 10))
+        is_admin   = bool((self.session.user or {}).get('is_admin'))
 
+        last_sel = 0
         while True:
             with _app().app_context():
                 q = (RssItem.query.join(RssFeed)
                      .filter(RssFeed.is_active.is_(True))
+                     .filter(RssFeed.min_access_level <= user_level
+                             if not is_admin else True)
                      .order_by(RssItem.published_at.desc().nullslast()))
-                total_count = q.count()
-                items = q.offset(page * per_page).limit(per_page).all()
-                rows = []
+                all_items = q.limit(300).all()
+                if not all_items:
+                    await self.session.write('\x1b[2J\x1b[H')
+                    await self.session.write(banner('RSS River'))
+                    await self.session.write(
+                        f"  {FG['gry']}No items across any feed yet.{RESET}\r\n")
+                    await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+                    return
                 read_ids = set()
-                if uid and items:
-                    item_ids = [i.id for i in items]
+                if uid and all_items:
+                    iids = [i.id for i in all_items]
                     read_ids = set(
-                        r[0] for r in RssReadStatus.query
-                        .with_entities(RssReadStatus.item_id)
+                        r[0] for r in db.session.query(RssReadStatus.item_id)
                         .filter(RssReadStatus.user_id == uid,
-                                RssReadStatus.item_id.in_(item_ids)).all())
-                for i in items:
-                    rows.append((i.id, i.title or '(no title)',
-                                  i.feed.name, i.published_at,
-                                  i.id in read_ids))
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('RSS - All Feeds'))
-            if not rows:
+                                RssReadStatus.item_id.in_(iids)).all())
+                rows = [(i.id, i.title or '(no title)',
+                         i.feed.name, i.published_at,
+                         i.id not in read_ids)
+                        for i in all_items]
+
+            async def render_header_river():
+                await self.session.write(banner('RSS River — All Feeds'))
                 await self.session.write(
-                    f"  {FG['gry']}No items across any feed yet.{RESET}\r\n")
-                await self.session.write('\r\n' + footer() + '\r\n')
-                await self.session.read_line("Press Enter... ")
+                    f"  {FG['cyan']}{BOLD}"
+                    f"{'':>4}{'Date':>5}  {'Feed':<14}  {'Title':<46}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+
+            def render_row_river(idx, row, selected):
+                iid, title, feed_name, ts, is_unread = row
+                ts_s  = ts.strftime('%m-%d') if ts else '  ?  '
+                mark  = f"{FG['yel']}*{RESET}" if is_unread else ' '
+                tcol  = FG['wht'] if is_unread else FG['gry']
+                n_col = f"{FG['grn']}{idx+1:>3}{RESET}"
+                t_safe = BBSMenuUI._sanitize_cp437(title)
+                return (f"  {n_col} {mark}{ts_s}  "
+                        f"{FG['cyan']}{feed_name[:14]:<14}{RESET}  "
+                        f"{tcol}{t_safe[:46]:<46}{RESET}")
+
+            def render_hint_river(sel, total):
+                _, _, _, _, is_unread = rows[sel]
+                n = f"{FG['cyan']}{sel+1}/{total}{RESET} "
+                new_lbl = (f" {FG['yel']}[NEW]{RESET}" if is_unread else '')
+                return (f"  {n}"
+                        f"{FG['cyan']}Up/Dn{RESET}=move  "
+                        f"{FG['cyan']}Enter{RESET}=read{new_lbl}  "
+                        f"{FG['cyan']}M{RESET}=mark all read  "
+                        f"{FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(
+                rows, render_header_river, render_row_river, render_hint_river,
+                initial_sel=last_sel)
+
+            if result[0] == 'quit':
                 return
-            await self.session.write(
-                f"  {FG['cyan']}#   Date   Feed             Title{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
-            for i, (_, title, feed_name, ts, was_read) in enumerate(rows, 1):
-                ts_str = ts.strftime('%m-%d') if ts else '  ?  '
-                title_color = FG['gry'] if was_read else FG['wht']
-                marker = ' ' if was_read else '*'
-                await self.session.write(
-                    f"  {FG['grn']}{i:<3}{RESET}{marker}{ts_str}  "
-                    f"{FG['cyan']}{feed_name[:14]:<16}{RESET}"
-                    f"{title_color}{title[:42]:<42}{RESET}\r\n")
-            total_pages = (total_count + per_page - 1) // per_page
-            await self.session.write('\r\n' + footer() + '\r\n')
-            await self.session.write(
-                f"  Page {page + 1}/{total_pages or 1}   "
-                f"{FG['cyan']}#{RESET}=read   {FG['cyan']}N{RESET}=next   "
-                f"{FG['cyan']}P{RESET}=prev   {FG['cyan']}Q{RESET}=back\r\n")
-            choice = (await self.session.read_line('\r\nChoice: ') or '').strip().upper()
-            if choice == 'Q' or choice == '':
-                return
-            if choice == 'N':
-                if (page + 1) * per_page < total_count:
-                    page += 1
-                continue
-            if choice == 'P':
-                if page > 0:
-                    page -= 1
-                continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(rows):
-                    await self._rss_view_item(rows[idx][0])
-            except ValueError:
-                pass
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                await self._rss_view_item(rows[last_sel][0])
+                # Refresh read state
+                with _app().app_context():
+                    if uid:
+                        iids = [r[0] for r in rows]
+                        read_ids = set(
+                            r[0] for r in db.session.query(RssReadStatus.item_id)
+                            .filter(RssReadStatus.user_id == uid,
+                                    RssReadStatus.item_id.in_(iids)).all())
+                        rows = [(iid, t, fn, ts, iid not in read_ids)
+                                for iid, t, fn, ts, _ in rows]
+            elif result[0] == 'key' and result[1] == 'M':
+                with _app().app_context():
+                    if uid:
+                        unread_ids = [r[0] for r in rows if r[4]]
+                        for iid in unread_ids:
+                            try:
+                                db.session.add(
+                                    RssReadStatus(user_id=uid, item_id=iid))
+                            except Exception:
+                                pass
+                        if unread_ids:
+                            db.session.commit()
+                rows = [(iid, t, fn, ts, False) for iid, t, fn, ts, _ in rows]
 
     async def show_profile(self):
         from anetbbs.models import User
@@ -1879,67 +2639,168 @@ BBSMenuUI.send_pm = _send_pm
 
 
 async def _compose_echomail(self):
+    """Compose an echomail — network-first, then area, then message."""
     from anetbbs.models import db, EchoArea, EchomailMessage, EchomailNetwork
     from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    from collections import OrderedDict
+
+    user_level = int((self.session.user or {}).get('access_level', 10))
+    is_admin   = bool((self.session.user or {}).get('is_admin'))
+    username   = (self.session.user or {}).get('username', 'guest')
+
+    # ── Step 1: choose network ────────────────────────────────────────
     with _app().app_context():
-        areas = EchoArea.query.join(EchomailNetwork).order_by(EchomailNetwork.name, EchoArea.name).all()
-        a_list = [(a.id, a.tag, a.name, a.network.name, a.network.our_address or '1:1/1') for a in areas]
-    if not a_list:
+        nets = EchomailNetwork.query.filter_by(is_active=True)\
+            .order_by(EchomailNetwork.name).all()
+        net_rows = []
+        for net in nets:
+            q = EchoArea.query.filter_by(
+                network_id=net.id, is_active=True, is_subscribed=True)
+            if not is_admin:
+                q = q.filter(EchoArea.is_sysop_only == False,
+                             EchoArea.min_access_level <= user_level)
+            cnt = q.count()
+            if cnt:
+                net_rows.append((net.id, net.name, net.network_type, cnt))
+
+    if not net_rows:
         await self.session.write('\x1b[2J\x1b[H')
         await self.session.write(banner('Compose Echomail'))
         await self.session.write(
-            f"  {FG['gry']}(no echomail areas configured){RESET}\r\n")
+            f"  {FG['gry']}No echomail areas configured.{RESET}\r\n")
         await self.session.write('\r\n' + footer() + '\r\n')
-        await self.session.read_line(
-            f"{FG['cyan']}Press Enter...{RESET}")
+        await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
         return
+
+    selected_area = None
+    while selected_area is None:
+        # Network chooser
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Compose Echomail — Choose Network'))
+        await self.session.write(
+            f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<30} {'Type':<6} {'Areas':>5}{RESET}\r\n"
+            f"  {FG['gry']}{'─' * 50}{RESET}\r\n")
+        for i, (_, name, ntype, cnt) in enumerate(net_rows, 1):
+            type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
+            await self.session.write(
+                f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
+                f"{FG['wht']}{name[:30]:<30}{RESET}  "
+                f"{type_col}{ntype[:5]:<5}{RESET}  "
+                f"{FG['grn']}{cnt:5d}{RESET}\r\n")
+        await self.session.write('\r\n' + footer() + '\r\n')
+        net_choice = (await self.session.read_line(
+            _prompt('Choose network (number / Q): ')) or '').strip().upper()
+        if net_choice == 'Q' or not net_choice:
+            return
+        try:
+            nidx = int(net_choice) - 1
+            if not (0 <= nidx < len(net_rows)):
+                continue
+        except ValueError:
+            continue
+
+        net_id, net_name, _, _ = net_rows[nidx]
+
+        # ── Step 2: choose area within network ────────────────────────
+        with _app().app_context():
+            q = EchoArea.query.filter_by(
+                network_id=net_id, is_active=True, is_subscribed=True)
+            if not is_admin:
+                q = q.filter(EchoArea.is_sysop_only == False,
+                             EchoArea.min_access_level <= user_level)
+            areas = q.order_by(EchoArea.category, EchoArea.order,
+                               EchoArea.name).all()
+            # Build grouped list
+            a_list   = []
+            cat_rows = []
+            cur_cat  = None
+            for area in areas:
+                cat = area.category or 'General'
+                if cat != cur_cat:
+                    cat_rows.append((len(a_list), cat))
+                    cur_cat = cat
+                a_list.append((area.id, area.tag, area.name,
+                               area.network_id,
+                               area.network.our_address or '1:1/1'))
+
+        while True:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(f'Compose — {net_name}'))
+
+            cat_idx, next_cat_at, next_cat_lbl = 0, (cat_rows[0][0] if cat_rows else len(a_list)), (cat_rows[0][1] if cat_rows else '')
+            row_count = 0
+            PAGE = 17
+            for i, (_, tag, name, _, _) in enumerate(a_list):
+                if i == next_cat_at:
+                    await self.session.write(
+                        f"  {FG['grn']}{BOLD}── {next_cat_lbl} ──{RESET}\r\n")
+                    cat_idx += 1
+                    if cat_idx < len(cat_rows):
+                        next_cat_at  = cat_rows[cat_idx][0]
+                        next_cat_lbl = cat_rows[cat_idx][1]
+                    row_count += 1
+                await self.session.write(
+                    f"  {FG['yel']}{BOLD}{i+1:2d}{RESET}  "
+                    f"{FG['cyan']}{tag[:18]:<18}{RESET} "
+                    f"{FG['wht']}{name[:28]:<28}{RESET}\r\n")
+                row_count += 1
+                if row_count % PAGE == 0 and (i + 1) < len(a_list):
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}-- more (Enter / Q) --{RESET}"
+                    ) or '').strip().upper()
+                    if ans == 'Q':
+                        break
+
+            await self.session.write('\r\n' + footer() + '\r\n')
+            pick = (await self.session.read_line(
+                _prompt('Pick area (number / B=back / Q): ')
+            ) or '').strip().upper()
+            if pick == 'Q':
+                return
+            if pick == 'B' or not pick:
+                break   # back to network chooser
+            try:
+                aidx = int(pick) - 1
+                if 0 <= aidx < len(a_list):
+                    selected_area = a_list[aidx]
+                    break
+            except ValueError:
+                pass
+
+    if selected_area is None:
+        return
+
+    area_id, area_tag, area_name, network_id, our_addr = selected_area
+
+    # ── Step 3: compose the message ──────────────────────────────────
     await self.session.write('\x1b[2J\x1b[H')
-    await self.session.write(banner('Compose Echomail'))
-    # Page through long area lists so the user can see them all on a 24-row term.
-    PAGE = 18
-    for i, (_, tag, name, net, _) in enumerate(a_list, 1):
-        await self.session.write(
-            f"  {FG['yel']}{BOLD}{i:3d}{RESET}{FG['gry']}.{RESET} "
-            f"{FG['grn']}{tag[:18]:<18}{RESET} "
-            f"{FG['wht']}{name[:25]:<25}{RESET} "
-            f"{FG['mag']}({net}){RESET}\r\n")
-        if i % PAGE == 0 and i < len(a_list):
-            ans = (await self.session.read_line(
-                f"  {FG['cyan']}-- more (Enter, "
-                f"Q=stop listing) --{RESET}") or '').strip().upper()
-            if ans == 'Q':
-                await self.session.write('\r\n')
-                break
-    await self.session.write('\r\n' + footer() + '\r\n')
-    pick = (await self.session.read_line(
-        _prompt('Pick area (number / Q): ')) or '').strip()
-    if pick.upper() == 'Q':
-        return
-    try:
-        idx = int(pick) - 1
-        area = a_list[idx]
-    except (ValueError, IndexError):
-        return
+    await self.session.write(banner(f'Compose — {area_tag}'))
+    await self.session.write(
+        f"  {FG['gry']}Area: {FG['wht']}{area_name}{RESET}\r\n\r\n")
+
     to_name = (await self.session.read_line(
-        f"  {FG['cyan']}To (name, e.g. 'All'):{RESET} ") or 'All').strip()
+        f"  {FG['cyan']}To{RESET} (e.g. All): ") or 'All').strip()
     subject = (await self.session.read_line(
-        f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+        f"  {FG['cyan']}Subject{RESET}: ") or '').strip()
     if not subject:
-        return
-    from .anedit import launch_anedit
-    username = self.session.user.get('username', 'guest')
-    body = await launch_anedit(self.session, subject=subject, username=username)
-    if body is None:
         await self.session.write(
-            f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+            f"  {FG['gry']}No subject — cancelled.{RESET}\r\n")
         await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
         return
+
+    from .anedit import launch_anedit
+    body = await launch_anedit(self.session, subject=subject, username=username)
+    if body is None:
+        await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+        await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
+        return
+
     with _app().app_context():
         em = EchomailMessage(
-            area_id=area[0],
-            network_id=EchomailNetwork.query.filter_by(name=area[3]).first().id,
+            area_id=area_id,
+            network_id=network_id,
             from_name=username[:100],
-            from_address=area[4],
+            from_address=our_addr,
             to_name=to_name[:100],
             subject=subject[:200],
             body=body,
@@ -1947,11 +2808,13 @@ async def _compose_echomail(self):
         )
         db.session.add(em)
         db.session.commit()
+        saved_id = em.id
+
     await self.session.write(
-        f"\r\n  {FG['grn']}{BOLD}[OK] Queued for next BinkP poll.{RESET}"
-        f"  {FG['gry']}(msg id={em.id}){RESET}\r\n")
-    await self.session.read_line(
-        f"\r\n{FG['cyan']}Press Enter...{RESET}")
+        f"\r\n  {FG['grn']}{BOLD}Message queued (#{saved_id}).{RESET}"
+        f"  {FG['gry']}Goes out on next poll.{RESET}\r\n")
+    await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
+
 BBSMenuUI.compose_echomail = _compose_echomail
 
 

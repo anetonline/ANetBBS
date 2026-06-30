@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}QWK Node Requests — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-person-plus"></i> QWK Node Requests</h1>
+    <p>Applications submitted by sysops via the BBS terminal to join ANotherNetwork.</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('hub_admin.index') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Hub Admin
+    </a>
+    <a href="{{ url_for('hub_admin.qwk_nodes') }}" class="btn btn-secondary btn-sm ms-1">
+        <i class="bi bi-archive"></i> Active Nodes
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="alert alert-{{ cat }} alert-dismissible fade show">
+      {{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+  {% endfor %}
+{% endwith %}
+
+{# ── Pending ─────────────────────────────────────────────────── #}
+<h5 class="mt-3">
+  Pending
+  {% if pending %}
+    <span class="badge bg-danger ms-1">{{ pending|length }}</span>
+  {% endif %}
+</h5>
+
+{% if pending %}
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+  <thead class="table-dark">
+    <tr>
+      <th>BBS Name</th>
+      <th>Packet ID</th>
+      <th>Sysop</th>
+      <th>Email</th>
+      <th>BBS Address</th>
+      <th>Notes</th>
+      <th>Applied</th>
+      <th class="text-end">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in pending %}
+    <tr>
+      <td class="fw-bold">{{ r.bbs_name }}</td>
+      <td><code class="text-success">{{ r.packet_id }}</code></td>
+      <td>{{ r.sysop_name or '—' }}</td>
+      <td class="small">{{ r.email or '—' }}</td>
+      <td class="small font-monospace">{{ r.bbs_address or '—' }}</td>
+      <td class="small text-muted">{{ (r.notes or '')[:60] }}</td>
+      <td class="small text-muted text-nowrap">
+        {{ r.created_at.strftime('%Y-%m-%d') if r.created_at else '?' }}<br>
+        <span class="badge bg-secondary">{{ r.applied_by_username or '?' }}</span>
+      </td>
+      <td class="text-end text-nowrap">
+        <form method="POST"
+              action="{{ url_for('hub_admin.approve_qwk_request', req_id=r.id) }}"
+              class="d-inline"
+              onsubmit="return confirm('Approve {{ r.bbs_name }} ({{ r.packet_id }}) and create their node account?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-success">
+            <i class="bi bi-check-circle"></i> Approve
+          </button>
+        </form>
+
+        <button class="btn btn-sm btn-outline-danger ms-1"
+                data-bs-toggle="modal"
+                data-bs-target="#denyModal{{ r.id }}">
+          <i class="bi bi-x-circle"></i> Deny
+        </button>
+
+        {# Deny modal #}
+        <div class="modal fade" id="denyModal{{ r.id }}" tabindex="-1">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <form method="POST"
+                    action="{{ url_for('hub_admin.deny_qwk_request', req_id=r.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                  <h5 class="modal-title">Deny {{ r.bbs_name }} ({{ r.packet_id }})</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                  <label class="form-label">Reason (shown to applicant, optional)</label>
+                  <input type="text" name="reason" class="form-control"
+                    placeholder="e.g. Packet ID already taken, try MYBBS2">
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="submit" class="btn btn-danger">Deny Request</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="text-muted">No pending requests.</p>
+{% endif %}
+
+{# ── Recently reviewed ────────────────────────────────────────── #}
+{% if reviewed %}
+<h5 class="mt-4">Recently Reviewed</h5>
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+  <thead class="table-secondary">
+    <tr>
+      <th>BBS Name</th>
+      <th>Packet ID</th>
+      <th>Status</th>
+      <th>Reviewed</th>
+      <th>Reviewed by</th>
+      <th>Reason / Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reviewed %}
+    <tr>
+      <td>{{ r.bbs_name }}</td>
+      <td><code>{{ r.packet_id }}</code></td>
+      <td>
+        {% if r.status == 'approved' %}
+          <span class="badge bg-success">Approved</span>
+          {% if not r.seen_by_applicant %}
+            <span class="badge bg-warning text-dark ms-1">Not seen</span>
+          {% endif %}
+        {% else %}
+          <span class="badge bg-danger">Denied</span>
+        {% endif %}
+      </td>
+      <td class="small text-muted">
+        {{ r.reviewed_at.strftime('%Y-%m-%d') if r.reviewed_at else '?' }}
+      </td>
+      <td class="small">{{ r.reviewed_by or '—' }}</td>
+      <td class="small text-muted">
+        {% if r.status == 'approved' %}
+          Password: <code>{{ r.generated_password or '(none)' }}</code>
+          {% if r.node_id %}
+            · <a href="{{ url_for('hub_admin.qwk_node_detail', node_id=r.node_id) }}">view node</a>
+          {% endif %}
+        {% else %}
+          {{ r.deny_reason or '—' }}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

@@ -367,6 +367,7 @@ echo -e "${BOLD}  ── Optional Components ──${NC}"
 ask_yn INSTALL_DOSBOX "Install DOSBox-staging for DOS door games? (y/n)"      "n"
 ask_yn INSTALL_CLAMAV "Install ClamAV for upload virus scanning? (y/n)"        "n"
 ask_yn INSTALL_LHASA  "Install lhasa for .lzh archive description extraction? (y/n)" "n"
+ask_yn INSTALL_SIXEL  "Install libsixel-bin for sixel images in terminal RSS reader? (y/n)" "n"
 ask_yn INSTALL_MYSTIC "Install Mystic BBS runtime + mplc compiler (.mps door support)? (y/n)" "n"
 # UFW: only meaningful in production mode (test mode is local-only)
 if [[ "$INSTALL_MODE" == "production" ]]; then
@@ -468,6 +469,7 @@ pkg_name() {
                 dosbox)          echo "dosbox" ;;
                 openssh-client)  echo "openssh-client" ;;
                 libffi-dev)      echo "libffi-dev" ;;
+                libsixel-bin)    echo "libsixel-bin" ;;
                 *)               echo "$generic" ;;
             esac
             ;;
@@ -489,6 +491,7 @@ pkg_name() {
                 dosbox)          echo "dosbox" ;;
                 openssh-client)  echo "openssh-clients" ;;
                 libffi-dev)      echo "libffi-devel" ;;
+                libsixel-bin)    echo "libsixel" ;;
                 *)               echo "$generic" ;;
             esac
             ;;
@@ -510,6 +513,7 @@ pkg_name() {
                 dosbox)          echo "dosbox" ;;
                 openssh-client)  echo "openssh" ;;
                 libffi-dev)      echo "libffi" ;;
+                libsixel-bin)    echo "libsixel" ;;
                 *)               echo "$generic" ;;
             esac
             ;;
@@ -694,6 +698,15 @@ if [[ "$INSTALL_LHASA" == "y" ]]; then
         ok "lhasa (.lzh archive support)"
     else
         skip "lhasa — FILE_ID.DIZ extraction from .lzh archives won't work"
+    fi
+fi
+
+if [[ "$INSTALL_SIXEL" == "y" ]]; then
+    actual=$(pkg_name "libsixel-bin")
+    if install_one_pkg "$actual"; then
+        ok "$actual (img2sixel — sixel images in terminal RSS reader)"
+    else
+        skip "libsixel — terminal RSS images will be skipped (text-only mode)"
     fi
 fi
 

@@ -24,7 +24,7 @@ Reference: FTS-0024 (areafix-style commands).
 """
 import re
 import datetime
-from ..models import db, EchoArea, EchomailNetwork, NetmailMessage, AreafixLog
+from ..models import db, EchoArea, EchomailNetwork, NetmailMessage, AreafixLog, BinkPNode, EchoAreaNode
 
 
 _CMD_RE = re.compile(r'^\s*([+\-*%])\s*([A-Z0-9._\-]+)\b', re.IGNORECASE)
@@ -168,24 +168,166 @@ def process_request(network, from_address, body):
     })
 
 
+def _process_node_request(node, from_address, body):
+    """Areafix for a downstream BinkPNode — modifies EchoAreaNode rows.
+
+    Subscribing adds a row; unsubscribing removes it.  Returns
+    (response_text, log_kwargs) same as process_request().
+    """
+    cmds = parse_request(body)
+    if not cmds:
+        return (_help_text(), {
+            'from_address': from_address, 'request_type': 'help',
+            'area_tags': '', 'response': 'help text returned', 'success': True,
+        })
+
+    # All areas available for hub distribution (active areas from any network).
+    all_areas = EchoArea.query.filter_by(is_active=True).all()
+    area_map = {a.tag.upper(): a for a in all_areas}
+
+    out_lines = [f'Areafix robot (hub) for node {node.ftn_address}',
+                 f'Request from: {from_address}', '=' * 40]
+    affected = []
+
+    def _node_sub(tag):
+        area = area_map.get(tag)
+        if area is None:
+            return None
+        existing = EchoAreaNode.query.filter_by(
+            node_id=node.id, echo_area_id=area.id).first()
+        if existing:
+            return area.tag
+        db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+        return area.tag
+
+    def _node_unsub(tag):
+        area = area_map.get(tag)
+        if area is None:
+            return None
+        row = EchoAreaNode.query.filter_by(
+            node_id=node.id, echo_area_id=area.id).first()
+        if row is None:
+            return None
+        db.session.delete(row)
+        return area.tag
+
+    def _node_list():
+        subs = (EchoAreaNode.query
+                .join(EchoArea, EchoAreaNode.echo_area_id == EchoArea.id)
+                .filter(EchoAreaNode.node_id == node.id)
+                .with_entities(EchoArea.tag)
+                .all())
+        return [row.tag for row in subs]
+
+    for verb, target in cmds:
+        if verb == '+' and target == 'ALL':
+            tags = [_node_sub(a.tag.upper()) for a in all_areas]
+            tags = [t for t in tags if t]
+            affected += tags
+            out_lines.append(f'+ALL : subscribed to {len(tags)} areas')
+        elif verb == '-' and target == 'ALL':
+            rows = EchoAreaNode.query.filter_by(node_id=node.id).all()
+            tags = []
+            for row in rows:
+                a = EchoArea.query.get(row.echo_area_id)
+                if a:
+                    tags.append(a.tag)
+                db.session.delete(row)
+            affected += tags
+            out_lines.append(f'-ALL : unsubscribed from {len(tags)} areas')
+        elif verb == '+':
+            r = _node_sub(target)
+            if r:
+                affected.append(r)
+                out_lines.append(f'+{target} : subscribed')
+            else:
+                out_lines.append(f'+{target} : ERROR — area not available')
+        elif verb == '-':
+            r = _node_unsub(target)
+            if r:
+                affected.append(r)
+                out_lines.append(f'-{target} : unsubscribed')
+            else:
+                out_lines.append(f'-{target} : not subscribed or not found')
+        elif verb == '%':
+            if target in ('LIST', 'QUERY'):
+                tags = _node_list()
+                out_lines.append(f'%LIST : {len(tags)} subscriptions')
+                for t in tags:
+                    out_lines.append(f'  {t}')
+            elif target == 'HELP':
+                out_lines.append(_help_text())
+            else:
+                out_lines.append(f'%{target} : ignored')
+
+    db.session.commit()
+    response = '\n'.join(out_lines) + '\n'
+    return (response, {
+        'from_address': from_address,
+        'request_type': 'subscribe' if any(v == '+' for v, _ in cmds) else 'unsubscribe',
+        'area_tags': ','.join(affected),
+        'response': response[:1000],
+        'success': True,
+    })
+
+
 def handle_areafix_netmail(netmail_id):
     """Process an inbound areafix netmail by id and queue a reply.
 
     Looks up the NetmailMessage, parses the body, runs process_request,
     creates a reply NetmailMessage queued for outbound delivery, and writes
     an AreafixLog row.
+
+    If the sender's FTN address matches a BinkPNode (downstream peer), the
+    subscription changes affect that node's EchoAreaNode rows rather than
+    the global EchoArea.is_subscribed flag.
     """
     nm = NetmailMessage.query.get(netmail_id)
     if nm is None:
         return None
-    network = (EchomailNetwork.query.get(nm.network_id)
-               if nm.network_id else None)
-    response, log_kwargs = process_request(network, nm.from_address, nm.body)
 
+    # Check if sender is a downstream node managed by hub.
+    downstream_node = None
+    if nm.from_address:
+        bare = nm.from_address.split('@', 1)[0].strip()
+        candidates = [nm.from_address, bare] if bare != nm.from_address else [nm.from_address]
+        downstream_node = (BinkPNode.query
+                           .filter(BinkPNode.ftn_address.in_(candidates))
+                           .filter_by(is_active=True)
+                           .first())
+
+    network = None
+    if downstream_node:
+        response, log_kwargs = _process_node_request(
+            downstream_node, nm.from_address, nm.body)
+    else:
+        network = (EchomailNetwork.query.get(nm.network_id)
+                   if nm.network_id else None)
+        response, log_kwargs = process_request(network, nm.from_address, nm.body)
+
+    # Build a reply netmail back to the requester.
     if network is not None:
         reply = NetmailMessage(
             network_id=network.id,
             from_address=network.our_address,
+            to_address=nm.from_address,
+            from_name='Areafix',
+            to_name=nm.from_name,
+            subject=f'Re: {nm.subject or "areafix"}',
+            body=response,
+            direction='outbound',
+            status='queued',
+            chrs='UTF-8 4',
+            is_local=True,
+            created_at=datetime.datetime.utcnow(),
+        )
+        db.session.add(reply)
+    elif downstream_node:
+        # Reply via the same network the node originally sent from, if any.
+        reply_network_id = nm.network_id
+        reply = NetmailMessage(
+            network_id=reply_network_id,
+            from_address=None,
             to_address=nm.from_address,
             from_name='Areafix',
             to_name=nm.from_name,

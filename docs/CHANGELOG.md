@@ -1,7 +1,220 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0a2.216`** (June 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b1.2`** (June 2026). Full release: August 1 2026.
+
+## v1.0b1.2 — Message viewer position indicator fix (June 2026)
+
+- TERMINAL: ANView message viewer status bar now shows the **last visible line** instead of the first. `Ln:29/29  END` at the bottom of a 29-line message makes it clear you have reached the end; previously `Ln:8/29` looked like line 8 of 29 with more to scroll.
+
+## v1.0b1.1 — Beta 1 Release (June 2026)
+
+**Milestone: first public Beta.** Version scheme changes from `v1.0a2.NNN` (alpha) to `v1.0b1.NNN` (beta). The auto-update scanner now recognises both `a` and `b` phase markers; beta is ranked higher than any alpha of the same major/minor release so existing installs will detect this as a newer version.
+
+Includes all features and fixes through v1.0a2.232:
+- Echomail area list and message list: arrow-key lightbar (no more `-- more --`; 300-message load)
+- RSS terminal: CP437 sanitiser; pager exit keys corrected; PgUp/PgDn SyncTERM CSI fix (`ESC[V`/`ESC[U`)
+- Message viewer status bar: `Up/Dn` label matches actual key behaviour
+- QWK inbound: blank messages (header-only records, kludge-only bodies) are skipped instead of stored
+
+## v1.0a2.232 — Message viewer hint bar: Up/Dn label (June 2026)
+
+- TERMINAL: ANView message viewer status bar now shows `Up/Dn` instead of `PgUp/PgDn` — arrow keys are what scroll the message; label now matches reality
+
+## v1.0a2.231 — PgUp/PgDn SyncTERM CSI sequence fix (June 2026)
+
+- TERMINAL: Fixed PgUp/PgDn keys in all arrow-key lightbars and the RSS pager — SyncTERM ANSI mode sends `ESC[V` (PgUp) and `ESC[U` (PgDn) which were not in the CSI lookup table in `read_key_arrow()`; they fell through to `return 'ESC'` which quit the lightbar. Added `b'V'` → `PGUP` and `b'U'` → `PGDN` to the lookup table in `session.py`.
+
+## v1.0a2.230 — Echomail lightbar + RSS CP437/PgKey fixes (June 2026)
+
+- TERMINAL: Echomail area list replaced with smooth arrow-key lightbar (Up/Dn/PgUp/PgDn/Home/End); no more `-- more --` page breaks
+- TERMINAL: Echomail message list replaced with arrow-key lightbar; removed 30-message hard limit (now loads up to 300)
+- TERMINAL: RSS article pager no longer exits on ESC (only Q/Enter/Ctrl-C); eliminates spurious exits from unrecognized key sequences
+- TERMINAL: Fixed root cause of PgUp/PgDn "exits RSS" bug — trailing `\n` from CR+LF Telnet Enter was being consumed by the pager as an ENTER keystroke (added `\n` discard in `read_key_arrow`)
+- TERMINAL: RSS article body, title, author, and feed name are now passed through `_sanitize_cp437()` before display — common Unicode typographic chars (smart quotes, em-dash, ellipsis, bullet, etc.) map to CP437-safe equivalents instead of showing as `?`
+- TERMINAL: RSS item-list and river lightbar rows also sanitize titles through `_sanitize_cp437()` for consistent display
+
+## v1.0a2.229 — Font licensing: NOTICE file + CSS attribution comments (June 2026)
+
+- LICENSE: Added `NOTICE` file at project root documenting the IBM VGA font as a
+  CC BY-SA 4.0 third-party component with full attribution to VileR / int10h.org.
+- LICENSE: Added `anetbbs/static/fonts/LICENSE.txt` co-located with the font file,
+  including attribution, source URL, license URL, and derivative-work note.
+- CSS: Both theme stylesheets now carry an inline attribution comment above the
+  `@font-face` rule (author, source, license, conversion note).
+- The font file is served as a static asset at `/static/fonts/Ac437_IBM_VGA_9x16.woff`
+  satisfying the CC BY-SA requirement that derivative distributions make the file
+  available; the original pack and TTFs remain free at https://int10h.org/oldschool-pc-fonts/.
+
+## v1.0a2.228 — IBM VGA CP437 font in VOID SIGNAL and HACKERS themes (June 2026)
+
+- FEATURE: Authentic IBM VGA 9×16 font (`Ac437_IBM_VGA_9x16.woff`) bundled in
+  `anetbbs/static/fonts/` and wired into both the VOID SIGNAL (enhanced) and
+  HACKERS (1995) web themes.
+- The font (`VGA437`) is declared via `@font-face` and placed first in the
+  `font-family` stack everywhere `Share Tech Mono` was previously used — body text,
+  nav items, card content, form fields, message bodies, RSS articles, etc.
+- `Share Tech Mono` and `Courier New` remain as fallbacks so the theme degrades
+  gracefully if the font file can't load.
+- Bitmap font rendering is sharpened with `-webkit-font-smoothing: none; font-smooth: never`
+  on `body` so the VGA pixels stay crisp rather than blurry.
+- Orbitron headings (`h1–h6`, `.navbar-brand`, `.bbs-header h1/h2`) are exempted from
+  the no-smoothing rule so the vector heading font still anti-aliases correctly.
+- Font requested by Firehawke. Font file from the Ultimate Oldschool PC Font Pack
+  (int10h.org).
+
+## v1.0a2.227 — install.sh: libsixel-bin optional package (June 2026)
+
+- INSTALL: Added `libsixel-bin` as an optional install component (provides `img2sixel`).
+  The installer now asks "Install libsixel-bin for sixel images in terminal RSS reader?"
+  and installs the correctly-named package for apt (`libsixel-bin`), dnf/yum (`libsixel`),
+  and pacman (`libsixel`). Without it the terminal RSS reader falls back to text-only.
+- DOCS: `docs/INSTALL.md` updated with the `sudo apt install -y libsixel-bin` note under
+  optional packages.
+
+## v1.0a2.226 — RSS terminal fixes: PgUp/PgDn, arrow char encoding, sixel detection (June 2026)
+
+- FIX: PgUp / PgDn keys not working in lightbar and pager — root cause: `reader.read(6)`
+  returns fewer bytes than requested on a live stream, so the `5~` / `6~` suffix of the
+  VT sequence was fragmented. Rewrote `read_key_arrow()` to consume CSI sequences one
+  byte at a time until the VT final byte (0x40–0x7E), which handles any fragmentation.
+- FIX: `??` appearing in hint lines — Unicode ↑↓ arrows (U+2191/U+2193) don't survive
+  the session's CP437/latin-1 encoding. Replaced with plain ASCII `Up/Dn`.
+- FIX: Sixel detection now checks `img2sixel` presence first (fast-path false if missing),
+  and increases the DA1 response read timeout from 250 ms to 1500 ms to cover higher-
+  latency links. The sixel path is still silently skipped if the tool is absent.
+- NOTE: Sixel images in terminal require `img2sixel` installed on the BBS server
+  (`sudo apt install libsixel-bin`). SyncTERM does support sixel; detection reads
+  the DA1 primary device attributes response for the sixel capability flag.
+
+## v1.0a2.225 — RSS Reader overhaul: web images + lightbar terminal (June 2026)
+
+**Web:**
+- FEATURE: Feed item lists (`/rss/<id>` and `/rss/all`) now show thumbnail images
+  extracted from feed enclosures, media:thumbnail, or the first `<img>` in the article body.
+- FEATURE: Item titles are proper hyperlinks to the article detail page; "Original" button
+  opens the source URL in a new tab.
+- FEATURE: Article reader (`/rss/item/<id>`) shows a full-width hero image, sanitized HTML
+  body (via bleach), and Newer / Older navigation within the same feed.
+- FEATURE: Feed index groups feeds by category in a card grid.
+- FEATURE: Paginator on feed and river pages shows page numbers instead of just «/».
+- FIX: `bleach` now sanitizes `content_html` before rendering (raw HTML injection removed).
+- FIX: River (`/rss/all`) now filters by `min_access_level` (previously skipped the check).
+
+**Terminal:**
+- FEATURE: Feed list and item list both use an arrow-key lightbar scroller (↑↓ PgUp PgDn
+  Home End — no Enter needed to navigate).
+- FEATURE: Article body is now a scrollable pager (↑↓ PgUp PgDn Home End Q). Full HTML
+  body is rendered as plain text via an inline HTML→text converter; previously only the
+  `summary` field was shown.
+- FEATURE: Sixel image rendering in article view — if the terminal reports sixel support
+  (DA1 response) and `img2sixel` is on PATH, the article hero image is displayed before
+  the body. Gracefully skipped for non-sixel terminals or missing tool.
+- FEATURE: `M` in both feed list and item list marks all items read without leaving the
+  lightbar.
+- FEATURE: Unread counts on the feed list now use two aggregated SQL queries instead of
+  an N+1 per-feed count loop.
+- FIX: River now applies `min_access_level` filter (previously showed all active feeds).
+- MODEL: `RssItem.image_url` (VARCHAR 1000, nullable) — auto-migrated; populated by poller
+  from media:thumbnail, media:content, enclosures, or first `<img>` in HTML body.
+
+## v1.0a2.224 — Terminal compose echomail: network-first selection (June 2026)
+
+- UX: Terminal echomail compose (`E → C`) now mirrors the reading flow — choose a network,
+  then choose an area within that network, then compose. Previously showed a flat list of
+  all areas across all networks.
+- Areas in the compose picker are grouped by category with `── Group ──` headers, same as
+  the read flow. `B=back` returns to the network chooser; `Q` cancels at any point.
+- Access controls (sysop-only, min_access_level) applied to both the network area-count
+  display and the per-network area list.
+
+## v1.0a2.223 — ANotherNetwork QWK node self-registration; terminal echomail crash fix (June 2026)
+
+- FIX: Terminal echomail crash "Menu action failed" — `FG['cyn']` key does not exist;
+  corrected to `FG['cyan']` in both the network chooser and per-network area list.
+- FEATURE: QWK node self-registration via BBS terminal (Option B).
+  From E → Echomail Networks, sysops type A to apply for an ANotherNetwork QWK node.
+  Wizard collects BBS name, desired packet ID (validated unique), sysop name, email,
+  BBS address, and notes. Saves as a pending `QWKNodeRequest`.
+- FEATURE: Hub admin review queue at Admin → Hub → Node Requests.
+  Approve creates a `QWKNode` with a 16-char auto-generated password.
+  Deny with optional reason. Hub dashboard shows pending count badge.
+- FEATURE: Approved/denied status shown to applicant on their next visit to the
+  echomail networks terminal screen, including credentials for approved nodes.
+- MODEL: New `QWKNodeRequest` table (auto-migrated).
+
+## v1.0a2.222 — Echomail network-first browsing; web + terminal (June 2026)
+
+- UX: `/echomail/` is now a network chooser — one card per network with type, area count, unread badge.
+- NEW: `/echomail/network/<id>` — per-network area list grouped by category; area cards with
+  unread count, message count, quick Enter / Next Unread / Compose buttons.
+- FIX: "All Areas" back button on area pages replaced with "← [Network Name]" to the network view.
+- TERMINAL: Echomail menu now shows network list first; selecting a network shows areas grouped by
+  category with `── Group ──` headers; `B=back` returns to network list.
+
+## v1.0a2.221 — Echomail bulk area management; network-first UI (June 2026)
+
+- UX: Echomail "Manage Areas" now shows a network chooser first (card grid with area stats).
+- NEW: Per-network area view — areas grouped by category, individual toggles and edit/delete.
+- NEW: Bulk action toolbar — select All/None/Active/Subscribed, then apply one action to all:
+  Set Active/Inactive, Subscribe/Unsubscribe, Set Active+Subscribed, Set/Clear Sysop-Only,
+  Set Access Level, Delete Selected.
+- FIX: All per-row and per-network actions (toggle, rescan, AreaFix, QWK quick-add, bulk import)
+  now redirect back to the correct network's area list rather than the global chooser.
+- MOVED: AreaFix quick panel and QWK quick-add panel now live in the per-network view.
+
+## v1.0a2.220 — ANotherNetwork QWK/FTP seeded; 26 conference areas (June 2026)
+
+- FEATURE: ANotherNetwork (QWK) seeded alongside BinkP — FTP transport, hub ID `ANET`.
+  FTP to bbs.a-net.fyi with your packet ID: download ANET.qwk, upload <YOURID>.rep.
+- NEW: FTP server authenticates QWK nodes by packet_id/password (Hub Management → QWK Nodes).
+  QWK packet generated fresh on login; .rep processed + fanned out to BinkP nodes on upload.
+- NEW: `echomail/qwk_hub_ftp.py` — packet builder, REP importer, tosser integration.
+- EXPANDED: ANotherNetwork areas grown from 5 to 26 across 8 named groups (General, Technology,
+  BBS Scene, Retro, Hobby, Trading, Data, SysOp, Test).
+- MODEL: `EchoArea.category` field added (VARCHAR 80, nullable); auto-migrated.
+
+## v1.0a2.219 — ANotherNetwork Zone 1200 seeded; nodelist endpoint (June 2026)
+
+- FEATURE: ANotherNetwork (Zone 1200) seeded on every fresh install.
+  Five echo areas pre-created: ANN.GENERAL, ANN.SYSOP, ANN.TEST, ANN.BBSDEV, ANN.RETRO.
+  Network is inactive by default; sysop enters their assigned address and password
+  to activate. Hub: `bbs.a-net.fyi` at `1200:1/1`.
+- NEW: Public nodelist endpoint at `/admin/echomail/hub/nodelist` — serves the
+  current ANotherNetwork NODELIST (FTS-5000 format, plain text) without requiring login.
+  Filename: `NODELIST.NNN` (day of year). Includes all active registered BinkP nodes.
+
+## v1.0a2.218 — Hub mode: BinkP hub + QWK hub (June 2026)
+
+- FEATURE: ANetBBS can now act as an echomail hub (not just a leaf node).
+- NEW: BinkP hub — register downstream nodes; per-node echo area subscriptions;
+  outbound hold queue fanned out to subscribers on every BinkP connection.
+- NEW: Areafix robot now handles per-node subscriptions for downstream peers
+  separately from the global `EchoArea.is_subscribed` flag.
+- NEW: QWK hub — HTTP endpoints for node download (`/qwkhub/<id>.qwk`) and
+  upload (`/qwkhub/<id>.rep`); per-node conference subscriptions with
+  high-water mark tracking; configurable hub system ID via `QWK_HUB_ID` setting.
+- NEW: Hub tosser (`echomail/tosser.py`) — automatic fan-out to downstream
+  BinkP nodes for all inbound messages (BinkP listener, QWK hub, upstream poll).
+- NEW: Admin → Echomail → Hub Management — full CRUD for BinkP and QWK nodes,
+  area subscriptions, catchup, hold queue viewer.
+- NEW: `generate_nodelist()` in `echomail/nodelist.py` for hub operators.
+- Admin navbar: new "Hub Management" link under Echomail.
+
+## v1.0a2.217 — Pre-beta audit: bug fixes + doc corrections (June 2026)
+
+- FIX: Private message bodies were always blank — template referenced wrong model
+  field name. PM read view, thread sidebar previews, and Quote Reply pre-fill all
+  affected. Fixed in template and compose view.
+- FIX: File area storage path no longer visible to regular users; shown to admins only.
+- FIX: Synchronet compat doc table now scrolls horizontally on narrow screens instead
+  of overflowing the page container.
+- DOC: Install commands corrected to current format throughout all doc pages.
+- DOC: Stale draft notes and outdated version references corrected.
+- DOC: Raspberry Pi 3 confirmed working; hardware table and recommendations updated.
+- DOC: DSR references removed from Image Galleries doc.
+- DOC: Network list updated (tqwNet + zer0net).
+- DOC: Incorrect systemd service name corrected in PORTS.md.
 
 ## v1.0a2.216 — Clean shutdown fix + socket.send() suppression (June 2026)
 

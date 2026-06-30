@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}QWK Node: {{ node.packet_id }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-archive"></i> QWK Node: {{ node.packet_id }}</h1>
+        <p>{{ node.name }}{% if node.sysop %} — Sysop: {{ node.sysop }}{% endif %}</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('hub_admin.edit_qwk_node', node_id=node.id) }}" class="btn btn-secondary">Edit</a>
+        <a href="{{ url_for('hub_admin.qwk_nodes') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back
+        </a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">Node Info</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr><th>Packet ID</th><td><code>{{ node.packet_id }}</code></td></tr>
+                    <tr><th>BBS Name</th><td>{{ node.name }}</td></tr>
+                    <tr><th>Sysop</th><td>{{ node.sysop or '—' }}</td></tr>
+                    <tr><th>Email</th><td>{{ node.email or '—' }}</td></tr>
+                    <tr><th>Status</th><td>
+                        {% if node.is_active %}<span class="badge bg-success">active</span>
+                        {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                    </td></tr>
+                    <tr><th>Last Poll</th><td>
+                        {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                        {% else %}<span class="text-muted">never polled</span>{% endif %}
+                    </td></tr>
+                    <tr><th>Conferences</th><td>{{ subscriptions|length }}</td></tr>
+                </table>
+                <div class="mt-3 p-2 rounded" style="background:rgba(0,0,0,0.2); font-size:0.8rem;">
+                    <strong>Download URL:</strong><br>
+                    <code>GET /qwkhub/{{ node.packet_id.lower() }}.qwk</code>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-chat-square-text"></i> Conference Subscriptions</span>
+                <span class="badge bg-primary">{{ subscriptions|length }} subscribed</span>
+            </div>
+            <div class="card-body p-0" style="max-height:360px; overflow-y:auto;">
+                {% if subscriptions %}
+                <table class="table table-striped table-sm mb-0">
+                    <thead><tr><th>Conf#</th><th>Area Tag</th><th>Network</th><th>High-Water Mark</th><th>Actions</th></tr></thead>
+                    <tbody>
+                        {% for sub in subscriptions %}
+                        <tr>
+                            <td><code>{{ sub.conf_number or '—' }}</code></td>
+                            <td><code>{{ sub.echo_area.tag }}</code></td>
+                            <td>{{ sub.echo_area.network.name }}</td>
+                            <td style="font-size:0.8rem;">
+                                {% if sub.last_message_id %}msg #{{ sub.last_message_id }}
+                                {% else %}<span class="text-muted">all (no HWM)</span>{% endif %}
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('hub_admin.qwk_subscribe', node_id=node.id) }}" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="area_id" value="{{ sub.echo_area_id }}">
+                                    <input type="hidden" name="action" value="unsubscribe">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Unsubscribe">−</button>
+                                </form>
+                                <form method="POST" action="{{ url_for('hub_admin.qwk_reset_hwm', node_id=node.id) }}" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="area_id" value="{{ sub.echo_area_id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning" title="Reset high-water mark (node will re-receive all messages)">Reset HWM</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center p-3 text-muted">No conference subscriptions yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add subscription -->
+<div class="card mb-4">
+    <div class="card-header">Add Conference Subscription</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('hub_admin.qwk_subscribe', node_id=node.id) }}" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="subscribe">
+            <div class="col-md-8">
+                <label class="form-label">Echo Area</label>
+                <select name="area_id" class="form-select">
+                    <option value="">— choose area —</option>
+                    {% for area in all_areas %}
+                    {% if area.id not in subscribed_area_ids %}
+                    <option value="{{ area.id }}">{{ area.tag }} ({{ area.network.name }})</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Add Conference</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

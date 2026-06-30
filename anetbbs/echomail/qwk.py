@@ -217,9 +217,10 @@ def _parse_messages_dat(data: bytes, conferences: dict):
 
         if not clean['body']:
             logger.warning(
-                'QWK inbound blank body: conf=%d from=%r subj=%r raw_head=%r',
+                'QWK inbound blank body skipped: conf=%d from=%r subj=%r raw_head=%r',
                 conf_num, from_name, subject, body_raw[:256],
             )
+            continue
 
         # Drop messages from conferences not advertised in CONTROL.DAT —
         # these are almost always the result of a misaligned read.

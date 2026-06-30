@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{% if node %}Edit{% else %}Add{% endif %} BinkP Node — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1><i class="bi bi-hdd-network"></i> {% if node %}Edit BinkP Node — {{ node.ftn_address }}{% else %}Add BinkP Node{% endif %}</h1>
+    <a href="{{ url_for('hub_admin.binkp_nodes') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Nodes
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="card" style="max-width:640px;">
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.name.label(class="form-label") }}
+                {{ form.name(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.ftn_address.label(class="form-label") }}
+                {{ form.ftn_address(class="form-control", placeholder="1:337/100") }}
+                <div class="form-text">Full FTN address in zone:net/node format. Must match what the remote BBS sends in M_ADR.</div>
+            </div>
+            <div class="mb-3">
+                {{ form.password.label(class="form-label") }}
+                {{ form.password(class="form-control", autocomplete="new-password") }}
+                {% if node %}<div class="form-text">Leave blank to keep current password.</div>{% endif %}
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.sysop.label(class="form-label") }}
+                    {{ form.sysop(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.system_name.label(class="form-label") }}
+                    {{ form.system_name(class="form-control") }}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.location.label(class="form-label") }}
+                    {{ form.location(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.email.label(class="form-label") }}
+                    {{ form.email(class="form-control") }}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.phone.label(class="form-label") }}
+                    {{ form.phone(class="form-control", placeholder="-Unpublished-") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.baud.label(class="form-label") }}
+                    {{ form.baud(class="form-control") }}
+                </div>
+            </div>
+            <div class="mb-3">
+                {{ form.notes.label(class="form-label") }}
+                {{ form.notes(class="form-control", rows=3) }}
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    {{ form.is_active(class="form-check-input") }}
+                    {{ form.is_active.label(class="form-check-label") }}
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('hub_admin.binkp_nodes') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if node %}
+<div class="card mt-4 border-danger" style="max-width:640px;">
+    <div class="card-header text-danger">Danger Zone</div>
+    <div class="card-body">
+        <p>Deleting this node will remove all subscriptions and pending hold-queue entries.</p>
+        <form method="POST" action="{{ url_for('hub_admin.delete_binkp_node', node_id=node.id) }}"
+              onsubmit="return confirm('Delete node {{ node.ftn_address }}?');">
+            {{ form.hidden_tag() }}
+            <button type="submit" class="btn btn-danger btn-sm">Delete Node</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

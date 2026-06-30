@@ -63,7 +63,7 @@ Two acceptance gates before you appear on the public list:
 1. **Email verification.** The hub returns a `verify_url`. Open
    `https://yourbbs/admin/registry/self` to see it — click through.
    Future plan: the hub will email this URL to `SYSOP_EMAIL` directly
-   once mail is wired up next week.
+   once outbound mail support is added.
 2. **Sysop approval.** After you verify, the hub sysop reviews the
    entry at `https://bbs.a-net.fyi/admin/registry/` and approves it.
 
@@ -120,7 +120,7 @@ Approve / reject / edit / delete via the admin UI at
       "sysop": "StingRay",
       "location": "Woodstock, GA",
       "software": "ANetBBS",
-      "software_version": "v1.0a2.24",
+      "software_version": "v1.0a2.216",
       "notes": "",
       "since": "2026-05-15",
       "last_seen": "2026-05-15T14:00:00Z"

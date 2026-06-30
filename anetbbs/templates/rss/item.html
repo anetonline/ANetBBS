@@ -1,40 +1,117 @@
 {% extends "base.html" %}
 {% block title %}{{ item.title or 'RSS item' }}{% endblock %}
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-rss"></i> {{ item.title or '(no title)' }}</h1>
-    <p class="small text-muted mb-1">
-        from <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}">{{ item.feed.name }}</a>
-        {% if item.author %}· by {{ item.author }}{% endif %}
-        {% if item.published_at %}· {{ item.published_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
-    </p>
-    {% if item.link %}
-    <p class="mb-0">
-        <a href="{{ item.link }}" target="_blank" rel="noopener">
-            <i class="bi bi-box-arrow-up-right"></i> Read original on {{ item.feed.name }}
-        </a>
-    </p>
-    {% endif %}
-</div>
+<style>
+.rss-article-wrap { max-width: 780px; margin: 0 auto; }
+.rss-hero-img { width: 100%; max-height: 380px; object-fit: cover;
+                border-radius: .5rem; margin-bottom: 1.5rem; }
+.rss-body { font-size: 1.05rem; line-height: 1.75; }
+.rss-body h1, .rss-body h2, .rss-body h3 {
+  margin-top: 1.5rem; margin-bottom: .75rem; font-size: 1.25rem; }
+.rss-body h1 { font-size: 1.5rem; }
+.rss-body p { margin-bottom: 1rem; }
+.rss-body img { max-width: 100%; height: auto; border-radius: .375rem; }
+.rss-body pre, .rss-body code { font-size: .875rem; }
+.rss-body blockquote {
+  border-left: 4px solid var(--bs-primary); padding-left: 1rem;
+  margin-left: 0; color: var(--bs-secondary-color); }
+.rss-body a { word-break: break-word; }
+.rss-body table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+.rss-body th, .rss-body td {
+  border: 1px solid var(--bs-border-color);
+  padding: .4rem .65rem; text-align: left; }
+.rss-nav-prev-next .btn { min-width: 130px; }
+</style>
 
-<div class="d-flex gap-2 mb-3">
-    <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}" class="btn btn-secondary">
-        <i class="bi bi-arrow-left"></i> Back to {{ item.feed.name }}
+<div class="rss-article-wrap">
+
+  {# Navigation bar #}
+  <div class="d-flex flex-wrap gap-2 mb-4 align-items-center">
+    <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}"
+       class="btn btn-secondary">
+      <i class="bi bi-arrow-left"></i> {{ item.feed.name }}
     </a>
     <a href="{{ url_for('rss.river') }}" class="btn btn-outline-secondary">
-        <i class="bi bi-water"></i> River
+      <i class="bi bi-water"></i> River
     </a>
-</div>
+    {% if item.link %}
+    <a href="{{ item.link }}" target="_blank" rel="noopener"
+       class="btn btn-outline-primary ms-auto">
+      <i class="bi bi-box-arrow-up-right"></i> Original article
+    </a>
+    {% endif %}
+  </div>
 
-<div class="card">
-    <div class="card-body">
-        {% if item.content_html %}
-            {{ item.content_html|safe }}
-        {% elif item.summary %}
-            {{ item.summary|safe }}
+  {# Hero image if available #}
+  {% if item.image_url %}
+  <img src="{{ item.image_url }}" class="rss-hero-img"
+       alt="" loading="lazy" onerror="this.style.display='none'">
+  {% endif %}
+
+  {# Title + meta #}
+  <h2 class="mb-2">{{ item.title or '(no title)' }}</h2>
+  <div class="text-muted small mb-3 d-flex flex-wrap gap-2 align-items-center">
+    <span>
+      <i class="bi bi-rss text-warning"></i>
+      <a href="{{ url_for('rss.view_feed', feed_id=item.feed.id) }}"
+         class="text-muted text-decoration-none">{{ item.feed.name }}</a>
+    </span>
+    {% if item.author %}
+    <span><i class="bi bi-person"></i> {{ item.author }}</span>
+    {% endif %}
+    {% if item.published_at %}
+    <span><i class="bi bi-calendar3"></i>
+      {{ item.published_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+    {% endif %}
+    {% if item.link %}
+    <a href="{{ item.link }}" target="_blank" rel="noopener"
+       class="text-muted small">
+      <i class="bi bi-link-45deg"></i> source
+    </a>
+    {% endif %}
+  </div>
+
+  <hr class="mb-4">
+
+  {# Article body #}
+  <div class="rss-body">
+    {% if content_safe %}
+      {{ content_safe }}
+    {% else %}
+      <p class="text-muted fst-italic">
+        No article body &mdash;
+        {% if item.link %}
+        <a href="{{ item.link }}" target="_blank" rel="noopener">read it on the source site</a>.
         {% else %}
-            <em>No content — open the original link to read on the source site.</em>
+        no link available.
         {% endif %}
-    </div>
+      </p>
+    {% endif %}
+  </div>
+
+  <hr class="mt-4 mb-3">
+
+  {# Prev / Next within feed #}
+  <div class="d-flex justify-content-between gap-2 rss-nav-prev-next">
+    {% if prev_item %}
+    <a href="{{ url_for('rss.view_item', item_id=prev_item.id) }}"
+       class="btn btn-outline-secondary text-start" style="max-width:48%">
+      <div class="small text-muted"><i class="bi bi-chevron-left"></i> Newer</div>
+      <div class="small text-truncate">{{ prev_item.title or '(no title)' }}</div>
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    {% if next_item %}
+    <a href="{{ url_for('rss.view_item', item_id=next_item.id) }}"
+       class="btn btn-outline-secondary text-end" style="max-width:48%">
+      <div class="small text-muted">Older <i class="bi bi-chevron-right"></i></div>
+      <div class="small text-truncate">{{ next_item.title or '(no title)' }}</div>
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+  </div>
+
 </div>
 {% endblock %}

@@ -16,8 +16,42 @@ Routes:
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
 from flask_login import login_required, current_user
 from sqlalchemy import func
+import bleach
+from markupsafe import Markup
 
 from ..models import db, RssFeed, RssItem, RssReadStatus
+
+# Tags and attributes we allow through when rendering feed HTML bodies.
+_ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + [
+    'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'img', 'figure', 'figcaption', 'picture', 'source',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+    'blockquote', 'pre', 'code',
+    'div', 'span', 'section', 'article', 'header', 'footer',
+    'hr', 'sub', 'sup', 'small', 'strong', 'em', 'b', 'i',
+    'del', 's', 'u', 'abbr', 'cite', 'q', 'mark',
+]
+_ALLOWED_ATTRS = {
+    **bleach.sanitizer.ALLOWED_ATTRIBUTES,
+    'a':      ['href', 'title', 'rel', 'target'],
+    'img':    ['src', 'alt', 'title', 'width', 'height', 'loading', 'class', 'style'],
+    'source': ['src', 'srcset', 'type', 'media'],
+    'td':     ['colspan', 'rowspan', 'align'],
+    'th':     ['colspan', 'rowspan', 'align', 'scope'],
+    '*':      ['class'],
+}
+
+
+def _sanitize_html(html):
+    """Sanitize feed HTML for safe browser rendering. Returns a Markup string."""
+    if not html:
+        return Markup('')
+    clean = bleach.clean(html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS,
+                         strip=True, strip_comments=True)
+    # Make bare links clickable
+    clean = bleach.linkify(clean, skip_tags=['pre', 'code'])
+    return Markup(clean)
 
 rss_bp = Blueprint('rss', __name__, url_prefix='/rss')
 
@@ -75,7 +109,8 @@ def river():
     per_page = 30
     pagination = (RssItem.query
                   .join(RssFeed)
-                  .filter(RssFeed.is_active.is_(True))
+                  .filter(RssFeed.is_active.is_(True),
+                          RssFeed.min_access_level <= current_user.access_level)
                   .order_by(RssItem.published_at.desc().nullslast())
                   .paginate(page=page, per_page=per_page, error_out=False))
     # Read-state lookup
@@ -120,7 +155,16 @@ def view_item(item_id):
             db.session.commit()
         except Exception:
             db.session.rollback()
-    return render_template('rss/item.html', item=item)
+    content_safe = _sanitize_html(item.content_html or item.summary or '')
+    # Prev/next items within the same feed for navigation
+    prev_item = (RssItem.query.filter(RssItem.feed_id == item.feed_id,
+                                      RssItem.published_at > item.published_at)
+                 .order_by(RssItem.published_at.asc()).first())
+    next_item = (RssItem.query.filter(RssItem.feed_id == item.feed_id,
+                                      RssItem.published_at < item.published_at)
+                 .order_by(RssItem.published_at.desc()).first())
+    return render_template('rss/item.html', item=item, content_safe=content_safe,
+                           prev_item=prev_item, next_item=next_item)
 
 
 @rss_bp.route('/<int:feed_id>/mark_read', methods=['POST'])

@@ -3,7 +3,7 @@
 Two halves living in the same module:
 
 * **Public-ish API** at ``/api/releases/latest`` — returns JSON describing
-  the newest ``ANetBBS-vX.YaZ.NN.tar.gz`` in the configured downloads
+  the newest ``ANetBBS-vX.Y[ab]Z.NN.tar.gz`` in the configured downloads
   directory. Every install exposes this. The canonical "what's the latest
   alpha?" answer comes from whichever host is configured as ``REGISTRY_URL``,
   but the endpoint runs everywhere so a private
@@ -56,19 +56,22 @@ upgrades_admin_bp = Blueprint('upgrades_admin', __name__,
 
 # === Version handling ========================================================
 
-# Public alpha versions look like: v1.0a2.36
-# Major.Minor + 'a' + AlphaPhase + '.' + Point.
-_VERSION_RE = re.compile(r'^v(\d+)\.(\d+)a(\d+)\.(\d+)$')
+# Versions look like: v1.0a2.36 (alpha) or v1.0b1.1 (beta).
+# Major.Minor + 'a'/'b' + Phase + '.' + Point.
+_VERSION_RE = re.compile(r'^v(\d+)\.(\d+)([ab])(\d+)\.(\d+)$')
 
 
 def _parse_version(s: str):
-    """Return a 4-tuple (major, minor, alpha, point) or None for unparseable."""
+    """Return a 5-tuple (major, minor, phase_order, phase_num, point) or None.
+    phase_order: 0=alpha, 1=beta — so beta > alpha of the same release."""
     if not s:
         return None
     m = _VERSION_RE.match(s.strip())
     if not m:
         return None
-    return tuple(int(g) for g in m.groups())
+    major, minor, phase_char, phase_num, point = m.groups()
+    phase_order = 0 if phase_char == 'a' else 1
+    return (int(major), int(minor), phase_order, int(phase_num), int(point))
 
 
 def _version_newer(remote: str, local: str) -> bool:
@@ -84,7 +87,7 @@ def _version_newer(remote: str, local: str) -> bool:
 # === Tarball scan ============================================================
 
 _TARBALL_RE = re.compile(
-    r'^ANetBBS-(v\d+\.\d+a\d+\.\d+)\.tar\.gz$'
+    r'^ANetBBS-(v\d+\.\d+[ab]\d+\.\d+)\.tar\.gz$'
 )
 
 

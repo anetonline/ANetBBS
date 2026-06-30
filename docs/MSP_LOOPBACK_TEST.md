@@ -15,8 +15,8 @@ nothing regressed.
 ## Run it
 
 ```bash
-cd /mnt/hdd2/AIANETBBS/anetbbs-rebuilt
-python3 /tmp/msp_loopback_test.py
+cd /opt/anetbbs
+python3 tests/msp_loopback_test.py
 ```
 
 The test:

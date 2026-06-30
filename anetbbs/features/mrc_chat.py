@@ -406,11 +406,20 @@ class MRCChat(BaseChatSystem):
         if not self._split_screen:
             return
         text = ''.join(self._input_buf)
-        # Mask password fields
-        if self._should_mask(text):
-            for pfx in ('/identify ', '/register ', '/update password ',
-                        '/trust identify '):
-                if text.lower().startswith(pfx):
+        # Mask password fields.  For /register mask only the password word
+        # and leave the email visible; for other secure commands mask all.
+        low = text.lower()
+        if low.startswith('/register '):
+            pfx_len = len('/register ')
+            rest = text[pfx_len:]
+            sp = rest.find(' ')
+            if sp >= 0:
+                text = '/register ' + '*' * min(sp, 20) + rest[sp:]
+            else:
+                text = '/register ' + '*' * min(len(rest), 20)
+        elif self._should_mask(text):
+            for pfx in ('/identify ', '/update password ', '/trust identify '):
+                if low.startswith(pfx):
                     text = pfx + '*' * (len(text) - len(pfx))
                     break
 
@@ -1271,8 +1280,11 @@ class MRCChat(BaseChatSystem):
             if not rest:
                 await self._emit('Usage: /register <password> [email]')
                 return True
-            await self._send_json({
-                'type': 'server_cmd', 'command': f'REGISTER {rest}'})
+            parts = rest.split(None, 1)
+            pw    = parts[0][:20]
+            email = parts[1] if len(parts) > 1 else ''
+            cmd_str = f'REGISTER {pw}' + (f' {email}' if email else '')
+            await self._send_json({'type': 'server_cmd', 'command': cmd_str})
             return True
 
         if cmd == 'update':

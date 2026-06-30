@@ -94,6 +94,7 @@ def _import_one_feed(app, feed_id):
                 continue
             if RssItem.query.filter_by(feed_id=feed.id, guid=guid).first():
                 continue
+            html = _get_content_html(entry)
             item = RssItem(
                 feed_id=feed.id,
                 guid=guid,
@@ -101,7 +102,8 @@ def _import_one_feed(app, feed_id):
                 link=(entry.get('link') or '')[:1000],
                 author=(entry.get('author') or '')[:200] or None,
                 summary=_strip_html(entry.get('summary') or '')[:4000] or None,
-                content_html=_get_content_html(entry),
+                content_html=html,
+                image_url=_extract_image_url(entry, html),
                 published_at=_parse_published(entry),
             )
             db.session.add(item)
@@ -122,17 +124,48 @@ def _import_one_feed(app, feed_id):
 
 def _get_content_html(entry):
     """Extract the best-available HTML body from a feedparser entry."""
-    # atom:content (full content) is preferred over summary
     contents = entry.get('content') or []
     if contents and isinstance(contents, list):
         for c in contents:
             value = c.get('value') if hasattr(c, 'get') else None
             if value:
-                return value[:32000]   # cap at 32k
-    # Fall back to summary if it's HTML-formatted (i.e., contains tags)
+                return value[:32000]
     summary = entry.get('summary') or ''
     if '<' in summary:
         return summary[:32000]
+    return None
+
+
+def _extract_image_url(entry, content_html):
+    """Return the first image URL associated with this feed entry, or None."""
+    # 1. media:thumbnail (e.g. YouTube, Flickr)
+    thumbs = getattr(entry, 'media_thumbnail', None) or []
+    for t in thumbs:
+        url = (t.get('url') if hasattr(t, 'get') else None) or ''
+        if url:
+            return url[:1000]
+    # 2. media:content with image/* type
+    media = getattr(entry, 'media_content', None) or []
+    for m in media:
+        if not hasattr(m, 'get'):
+            continue
+        if m.get('type', '').startswith('image/'):
+            url = m.get('url', '') or ''
+            if url:
+                return url[:1000]
+    # 3. enclosures
+    for enc in getattr(entry, 'enclosures', []):
+        if not hasattr(enc, 'get'):
+            continue
+        if enc.get('type', '').startswith('image/'):
+            url = enc.get('href', '') or enc.get('url', '') or ''
+            if url:
+                return url[:1000]
+    # 4. first <img src> in HTML body
+    if content_html:
+        m = re.search(r'<img[^>]+src=["\']([^"\']{8,})', content_html, re.IGNORECASE)
+        if m:
+            return m.group(1)[:1000]
     return None
 
 

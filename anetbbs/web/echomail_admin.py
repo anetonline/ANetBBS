@@ -364,15 +364,116 @@ def test_connection(network_id):
 # Echo area management
 # ---------------------------------------------------------------------------
 
+def _back_to_areas(network_id=None):
+    """Redirect helper — return to network areas page or the network chooser."""
+    if network_id:
+        return redirect(url_for('echomail_admin.network_areas',
+                                network_id=network_id))
+    return redirect(url_for('echomail_admin.areas'))
+
+
 @echomail_admin_bp.route('/areas')
 @login_required
 @_admin_required
 def areas():
-    all_areas = EchoArea.query.join(EchomailNetwork)\
-        .order_by(EchomailNetwork.name, EchoArea.order, EchoArea.name).all()
-    all_networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+    """Network chooser — shows each network as a card with area stats."""
+    networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+    stats = {}
+    for net in networks:
+        net_areas = EchoArea.query.filter_by(network_id=net.id).all()
+        stats[net.id] = {
+            'total':      len(net_areas),
+            'active':     sum(1 for a in net_areas if a.is_active),
+            'subscribed': sum(1 for a in net_areas if a.is_subscribed),
+            'sysop_only': sum(1 for a in net_areas if a.is_sysop_only),
+        }
     return render_template('echomail/admin/areas.html',
-                           areas=all_areas, all_networks=all_networks)
+                           networks=networks, stats=stats)
+
+
+@echomail_admin_bp.route('/areas/network/<int:network_id>')
+@login_required
+@_admin_required
+def network_areas(network_id):
+    """Per-network area management with bulk-select and bulk actions."""
+    from collections import OrderedDict
+    network = EchomailNetwork.query.get_or_404(network_id)
+    area_list = (EchoArea.query
+                 .filter_by(network_id=network_id)
+                 .order_by(EchoArea.category, EchoArea.order, EchoArea.name)
+                 .all())
+    groups = OrderedDict()
+    for area in area_list:
+        cat = area.category or 'Uncategorized'
+        groups.setdefault(cat, []).append(area)
+    all_networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+    return render_template('echomail/admin/network_areas.html',
+                           network=network, groups=groups,
+                           area_list=area_list,
+                           all_networks=all_networks)
+
+
+@echomail_admin_bp.route('/areas/bulk', methods=['POST'])
+@login_required
+@_admin_required
+def bulk_area_action():
+    """Apply one action to a set of checked area IDs."""
+    area_ids   = request.form.getlist('area_ids', type=int)
+    action     = request.form.get('action', '').strip()
+    network_id = request.form.get('network_id', type=int)
+    lvl        = request.form.get('access_level', type=int)
+
+    if not area_ids:
+        flash('No areas selected.', 'warning')
+        return _back_to_areas(network_id)
+
+    target = EchoArea.query.filter(EchoArea.id.in_(area_ids)).all()
+    n = len(target)
+
+    if action == 'set_active':
+        for a in target: a.is_active = True
+        db.session.commit()
+        flash(f'Set {n} area(s) active.', 'success')
+    elif action == 'set_inactive':
+        for a in target: a.is_active = False
+        db.session.commit()
+        flash(f'Set {n} area(s) inactive.', 'success')
+    elif action == 'set_subscribed':
+        for a in target: a.is_subscribed = True
+        db.session.commit()
+        flash(f'Subscribed {n} area(s).', 'success')
+    elif action == 'set_unsubscribed':
+        for a in target: a.is_subscribed = False
+        db.session.commit()
+        flash(f'Unsubscribed {n} area(s).', 'success')
+    elif action == 'set_active_subscribed':
+        for a in target:
+            a.is_active     = True
+            a.is_subscribed = True
+        db.session.commit()
+        flash(f'Set {n} area(s) active + subscribed.', 'success')
+    elif action == 'set_sysop_only':
+        for a in target: a.is_sysop_only = True
+        db.session.commit()
+        flash(f'Set {n} area(s) sysop-only.', 'success')
+    elif action == 'clear_sysop_only':
+        for a in target: a.is_sysop_only = False
+        db.session.commit()
+        flash(f'Cleared sysop-only on {n} area(s).', 'success')
+    elif action == 'set_access_level' and lvl is not None:
+        for a in target: a.min_access_level = lvl
+        db.session.commit()
+        flash(f'Set access level to {lvl} on {n} area(s).', 'success')
+    elif action == 'delete':
+        tags = [a.tag for a in target]
+        for a in target: db.session.delete(a)
+        db.session.commit()
+        preview = ', '.join(tags[:5]) + ('…' if n > 5 else '')
+        flash(f'Deleted {n} area(s): {preview}.', 'success')
+    else:
+        flash('Unknown or incomplete action — nothing changed.', 'warning')
+
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/areas/new', methods=['GET', 'POST'])
@@ -405,13 +506,14 @@ def new_area():
 @_admin_required
 def edit_area(area_id):
     area = EchoArea.query.get_or_404(area_id)
+    net_id = area.network_id
     form = EchoAreaForm(obj=area)
     form.network_id.choices = [(n.id, n.name) for n in EchomailNetwork.query.all()]
     if form.validate_on_submit():
         form.populate_obj(area)
         db.session.commit()
         flash(f'Echo area "{area.name}" updated.', 'success')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(net_id)
     return render_template('echomail/admin/area_form.html', form=form, area=area)
 
 
@@ -421,10 +523,11 @@ def edit_area(area_id):
 def delete_area(area_id):
     area = EchoArea.query.get_or_404(area_id)
     name = area.name
+    net_id = area.network_id
     db.session.delete(area)
     db.session.commit()
     flash(f'Echo area "{name}" deleted.', 'success')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(net_id)
 
 
 @echomail_admin_bp.route('/areas/<int:area_id>/toggle_subscribe', methods=['POST'])
@@ -436,7 +539,7 @@ def toggle_subscribe(area_id):
     db.session.commit()
     state = 'subscribed' if area.is_subscribed else 'unsubscribed'
     flash(f'Area "{area.name}" {state}.', 'success')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(area.network_id)
 
 
 @echomail_admin_bp.route('/areas/<int:area_id>/rescan', methods=['POST'])
@@ -453,7 +556,7 @@ def rescan_area(area_id):
     network = area.network
     if not network or network.network_type != 'binkp':
         flash('%RESCAN is only supported on BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(area.network_id)
     from ..echomail.areafix import send_areafix_request
     nm_id = send_areafix_request(
         network,
@@ -471,7 +574,7 @@ def rescan_area(area_id):
             'Could not queue %RESCAN — check the network has a hub_address '
             'and binkp_password configured.',
             'danger')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(area.network_id)
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/subscribe_all', methods=['POST'])
@@ -488,7 +591,7 @@ def subscribe_all(network_id):
     network = EchomailNetwork.query.get_or_404(network_id)
     if network.network_type != 'binkp':
         flash('Subscribe-all only applies to BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     tags = [a.tag for a in
             EchoArea.query.filter_by(network_id=network.id).all()]
     n_local = EchoArea.query.filter_by(network_id=network.id).update(
@@ -497,7 +600,7 @@ def subscribe_all(network_id):
     if not tags:
         flash('No local areas configured for this network. Run '
               '"Bulk Import" first to load a backbone file.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     from ..echomail.areafix import send_areafix_request
     nm_id = send_areafix_request(network, plus_tags=tags,
                                   subject='AreaFix request')
@@ -509,7 +612,7 @@ def subscribe_all(network_id):
         flash(f'Marked {n_local} local areas subscribed, but could not queue '
               f'AreaFix request (no hub address or no password configured).',
               'warning')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/custom_areafix', methods=['POST'])
@@ -528,15 +631,15 @@ def custom_areafix(network_id):
     network = EchomailNetwork.query.get_or_404(network_id)
     if network.network_type != 'binkp':
         flash('Custom AreaFix only applies to BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     body = (request.form.get('body') or '').strip()
     if not body:
         flash('Type one or more AreaFix command lines into the body field.',
               'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     if not network.hub_address:
         flash('Network has no hub_address configured.', 'danger')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     af_pw = (getattr(network, 'areafix_password', None) or '').strip()
     if not af_pw:
         af_pw = (getattr(network, 'binkp_password', None) or '').strip()
@@ -559,7 +662,7 @@ def custom_areafix(network_id):
     db.session.commit()
     flash(f'Queued custom {robot} netmail (#{nm.id}) to {network.hub_address}. '
           f'{len(body.splitlines())} body line(s).', 'success')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/rescan_all', methods=['POST'])
@@ -572,14 +675,14 @@ def rescan_all(network_id):
     network = EchomailNetwork.query.get_or_404(network_id)
     if network.network_type != 'binkp':
         flash('Rescan-all only applies to BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     tags = [a.tag for a in
             EchoArea.query.filter_by(
                 network_id=network.id, is_subscribed=True).all()]
     if not tags:
         flash('No subscribed areas on this network — nothing to rescan.',
               'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     from ..echomail.areafix import send_areafix_request
     nm_id = send_areafix_request(network, rescan_tags=tags,
                                   subject='AreaFix request')
@@ -589,7 +692,7 @@ def rescan_all(network_id):
     else:
         flash('Could not queue rescan AreaFix request (no hub address or '
               'no password configured).', 'warning')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/unsubscribe_all', methods=['POST'])
@@ -604,7 +707,7 @@ def unsubscribe_all(network_id):
     network = EchomailNetwork.query.get_or_404(network_id)
     if network.network_type != 'binkp':
         flash('Unsubscribe-all only applies to BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     tags = [a.tag for a in
             EchoArea.query.filter_by(network_id=network.id).all()]
     n_local = EchoArea.query.filter_by(network_id=network.id).update(
@@ -612,14 +715,14 @@ def unsubscribe_all(network_id):
     db.session.commit()
     if not tags:
         flash('No local areas to unsubscribe from.', 'info')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
     from ..echomail.areafix import send_areafix_request
     nm_id = send_areafix_request(network, minus_tags=tags,
                                   subject='AreaFix request')
     flash(f'Marked {n_local} local areas unsubscribed; queued AreaFix '
           f'request with {len(tags)} -TAG entries (netmail #{nm_id or "n/a"}).',
           'success')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/areas/bulk_import', methods=['GET', 'POST'])
@@ -666,7 +769,7 @@ def bulk_import():
         db.session.commit()
         flash(f'Imported {imported} areas, skipped {skipped} duplicates.',
               'success')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(form.network_id.data)
     return render_template('echomail/admin/bulk_import.html', form=form)
 
 
@@ -794,11 +897,11 @@ def network_areafix(network_id):
     minus_tags = [t for t in minus_raw.replace(',', ' ').split() if t]
     if not plus_tags and not minus_tags:
         flash('Enter at least one + or - tag.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
 
     if network.network_type != 'binkp':
         flash('AreaFix requests are only supported on BinkP networks.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
 
     from ..echomail.areafix import send_areafix_request
     nm_id = send_areafix_request(network,
@@ -829,7 +932,7 @@ def network_areafix(network_id):
     else:
         flash('Could not queue AreaFix request — check hub address and password.',
               'danger')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/qwk_quick_add',
@@ -846,7 +949,7 @@ def qwk_quick_add(network_id):
     network = EchomailNetwork.query.get_or_404(network_id)
     if network.network_type != 'qwk':
         flash('Quick-add is for QWK networks only.', 'warning')
-        return redirect(url_for('echomail_admin.areas'))
+        return _back_to_areas(network_id)
 
     text = request.form.get('entries', '') or ''
     added = 0
@@ -889,7 +992,7 @@ def qwk_quick_add(network_id):
     db.session.commit()
     flash(f'QWK areas: added {added}, updated {updated}, skipped {skipped}.',
           'success')
-    return redirect(url_for('echomail_admin.areas'))
+    return _back_to_areas(network_id)
 
 
 @echomail_admin_bp.route('/areafix_log')

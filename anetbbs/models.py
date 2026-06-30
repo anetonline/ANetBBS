@@ -434,6 +434,7 @@ class EchoArea(db.Model):
     is_subscribed = db.Column(db.Boolean, default=True)
     is_sysop_only = db.Column(db.Boolean, default=False, index=True)
     min_access_level = db.Column(db.Integer, default=10)
+    category = db.Column(db.String(80))
     order = db.Column(db.Integer, default=0)
     total_messages = db.Column(db.Integer, default=0)
     last_message_at = db.Column(db.DateTime)
@@ -2335,6 +2336,7 @@ class RssItem(db.Model):
     author = db.Column(db.String(200))
     summary = db.Column(db.Text)         # plain-text or limited-HTML summary
     content_html = db.Column(db.Text)    # full HTML if available (atom:content)
+    image_url = db.Column(db.String(1000))  # first image found in content/enclosure
     published_at = db.Column(db.DateTime, index=True)
     fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -2621,3 +2623,190 @@ def get_builtin_field_config():
     """Return {field_name: bool} for all built-in fields, defaulting to True."""
     rows = {r.field_name: r.enabled for r in BuiltinFieldConfig.query.all()}
     return {name: rows.get(name, True) for name, _label in BUILTIN_FIELDS}
+
+
+# ---------------------------------------------------------------------------
+# Hub functionality: downstream BinkP nodes, per-node echo subscriptions,
+# outbound hold queue, and QWK node registry.
+# ---------------------------------------------------------------------------
+
+class BinkPNode(db.Model):
+    """A downstream BinkP node that polls us as a hub.
+
+    Unlike EchomailNetwork (which represents an *upstream* hub we connect to),
+    a BinkPNode is a *downstream* peer: they authenticate to our listener,
+    pick up mail we've tossed to them, and deliver their own outbound mail.
+    """
+    __tablename__ = 'binkp_nodes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    ftn_address = db.Column(db.String(60), nullable=False, unique=True, index=True)
+    password = db.Column(db.String(255), nullable=False)
+    sysop = db.Column(db.String(100))
+    system_name = db.Column(db.String(100))
+    location = db.Column(db.String(100))
+    email = db.Column(db.String(200))
+    phone = db.Column(db.String(50))
+    baud = db.Column(db.Integer, default=115200)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    last_seen_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text)
+
+    subscriptions = db.relationship('EchoAreaNode', backref='node',
+                                    lazy='dynamic', cascade='all, delete-orphan')
+    hold_queue = db.relationship('BinkPHoldQueue', backref='node',
+                                 lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<BinkPNode {self.ftn_address}>'
+
+
+class EchoAreaNode(db.Model):
+    """Per-node echo area subscription for hub fan-out.
+
+    A row here means: toss new messages in `echo_area_id` to `node_id` when
+    they arrive or are locally composed. The tosser reads these to build the
+    BinkPHoldQueue entries.
+    """
+    __tablename__ = 'echo_area_nodes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    node_id = db.Column(db.Integer, db.ForeignKey('binkp_nodes.id'),
+                        nullable=False, index=True)
+    echo_area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'),
+                             nullable=False, index=True)
+    subscribed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    echo_area = db.relationship('EchoArea',
+                                backref=db.backref('node_subscriptions', lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('node_id', 'echo_area_id',
+                                          name='uq_echo_area_node'),)
+
+    def __repr__(self):
+        return f'<EchoAreaNode node={self.node_id} area={self.echo_area_id}>'
+
+
+class BinkPHoldQueue(db.Model):
+    """Outbound echomail message held for delivery to a downstream BinkP node.
+
+    The BinkP listener checks these when a node connects and flushes all
+    pending entries for that node's FTN address into one .pkt file.
+    """
+    __tablename__ = 'binkp_hold_queue'
+
+    id = db.Column(db.Integer, primary_key=True)
+    node_id = db.Column(db.Integer, db.ForeignKey('binkp_nodes.id'),
+                        nullable=False, index=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('echomail_messages.id'),
+                           nullable=False, index=True)
+    status = db.Column(db.String(16), default='pending', index=True)
+    queued_at = db.Column(db.DateTime, default=datetime.utcnow,
+                          nullable=False, index=True)
+    sent_at = db.Column(db.DateTime)
+    retry_count = db.Column(db.Integer, default=0)
+
+    message = db.relationship('EchomailMessage',
+                               backref=db.backref('hold_entries', lazy='dynamic'))
+
+    __table_args__ = (db.UniqueConstraint('node_id', 'message_id',
+                                           name='uq_binkp_hold'),)
+
+    def __repr__(self):
+        return f'<BinkPHoldQueue node={self.node_id} msg={self.message_id} {self.status}>'
+
+
+class QWKNode(db.Model):
+    """A downstream QWK node registered with our hub.
+
+    Nodes poll via HTTP GET /qwkhub/<packet_id>.qwk (or FTP) to download a
+    per-node QWK packet and POST their REP packets to upload new messages.
+    The packet_id is their unique identifier on this hub (e.g. "MYSYS").
+    """
+    __tablename__ = 'qwk_nodes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    packet_id = db.Column(db.String(8), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    sysop = db.Column(db.String(100))
+    email = db.Column(db.String(200))
+    password = db.Column(db.String(255), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    last_poll_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text)
+
+    last_sent = db.relationship('QWKNodeLastSent', backref='node',
+                                lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<QWKNode {self.packet_id}>'
+
+
+class QWKNodeLastSent(db.Model):
+    """Per-node, per-area high-water mark for QWK hub delivery.
+
+    A row here means the node is subscribed to that echo area for QWK
+    delivery. last_message_id is the id of the last EchomailMessage that
+    was included in a packet for this node — NULL means subscribed but
+    nothing sent yet. The QWK hub builder queries messages with id >
+    last_message_id to build incremental packets.
+    """
+    __tablename__ = 'qwk_node_last_sent'
+
+    id = db.Column(db.Integer, primary_key=True)
+    node_id = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'),
+                        nullable=False, index=True)
+    echo_area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'),
+                             nullable=False, index=True)
+    last_message_id = db.Column(db.Integer, db.ForeignKey('echomail_messages.id'),
+                                nullable=True)
+    conf_number = db.Column(db.Integer)
+
+    echo_area = db.relationship('EchoArea',
+                                backref=db.backref('qwk_subscriptions', lazy='dynamic'))
+    last_message = db.relationship('EchomailMessage')
+
+    __table_args__ = (db.UniqueConstraint('node_id', 'echo_area_id',
+                                           name='uq_qwk_node_last_sent'),)
+
+    def __repr__(self):
+        return f'<QWKNodeLastSent node={self.node_id} area={self.echo_area_id}>'
+
+
+class QWKNodeRequest(db.Model):
+    """Self-service application from a BBS sysop to join as a QWK node.
+
+    Submitted via BBS terminal (Option B flow). Hub sysop approves/denies
+    through the web admin; on approval a QWKNode record is auto-created and
+    credentials are shown to the applicant on their next terminal visit.
+    """
+    __tablename__ = 'qwk_node_requests'
+
+    id                  = db.Column(db.Integer, primary_key=True)
+    # Applicant-supplied
+    bbs_name            = db.Column(db.String(100), nullable=False)
+    packet_id           = db.Column(db.String(8),   nullable=False, index=True)
+    sysop_name          = db.Column(db.String(100))
+    email               = db.Column(db.String(200))
+    bbs_address         = db.Column(db.String(200))
+    notes               = db.Column(db.Text)
+    # Submission meta
+    status              = db.Column(db.String(20), default='pending', index=True)
+    applied_via         = db.Column(db.String(20), default='terminal')
+    applied_by_user_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    applied_by_username = db.Column(db.String(100))
+    created_at          = db.Column(db.DateTime, default=datetime.utcnow)
+    # Review
+    reviewed_at         = db.Column(db.DateTime)
+    reviewed_by         = db.Column(db.String(100))
+    deny_reason         = db.Column(db.Text)
+    # Approval output
+    generated_password  = db.Column(db.String(50))
+    seen_by_applicant   = db.Column(db.Boolean, default=False)
+    node_id             = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'), nullable=True)
+
+    def __repr__(self):
+        return f'<QWKNodeRequest {self.packet_id} [{self.status}]>'
