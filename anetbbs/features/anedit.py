@@ -117,8 +117,9 @@ _THEMES = [
 
 # ── Key parser ─────────────────────────────────────────────────────────────────
 class _Keys:
-    def __init__(self):
+    def __init__(self, encoding: str = 'cp437'):
         self._buf = b""
+        self._enc = encoding
 
     def feed(self, data: bytes):
         self._buf += data
@@ -177,9 +178,38 @@ class _Keys:
                 amap = {'s':'ALT_S','x':'ALT_X','z':'ALT_Z'}
                 return amap.get(c.lower(), f'ALT_{c.upper()}')
 
-        # Single byte
-        c = b[0:1].decode('latin-1')
-        self._buf = b[1:]
+        # Single character — encoding-aware
+        enc = self._enc
+        if enc in ('utf-8', 'utf8'):
+            # Determine UTF-8 sequence length from the leading byte
+            fb = b[0]
+            if fb < 0x80:
+                n = 1
+            elif fb < 0xC0:
+                # Stray continuation byte — skip it
+                self._buf = b[1:]
+                return None
+            elif fb < 0xE0:
+                n = 2
+            elif fb < 0xF0:
+                n = 3
+            else:
+                n = 4
+            if len(b) < n:
+                return None  # Wait for the rest of the sequence
+            try:
+                c = b[:n].decode('utf-8')
+            except UnicodeDecodeError:
+                self._buf = b[1:]
+                return None
+            self._buf = b[n:]
+        else:
+            # CP437 or latin-1: each byte is one character
+            try:
+                c = b[0:1].decode(enc, errors='replace')
+            except LookupError:
+                c = b[0:1].decode('latin-1', errors='replace')
+            self._buf = b[1:]
         ctrl = {
             '\r':'ENTER', '\n':'ENTER',
             '\x7f':'BACKSPACE', '\x08':'BACKSPACE',
@@ -469,7 +499,7 @@ class ANEdit:
         self._mark:  Optional[tuple] = None   # (y, x) anchor, or None
         self._clip:  list            = []     # clipboard lines
         self._undo   = _UndoStack(self.lines)
-        self._keys   = _Keys()
+        self._keys   = _Keys(getattr(session, 'encoding', 'cp437'))
 
         self._find_q    = ""
         self._repl_q    = ""
@@ -1560,12 +1590,16 @@ _VTEXT_H = _VTEXT_B - _VTEXT_T + 1  # 22 visible lines
 class _ViewerScreen(_Screen):
     """Borderless viewer frame — full-width content, no box-drawing."""
 
+    def __init__(self, theme: dict, width: int = 80):
+        super().__init__(theme)
+        self._vw = width
+
     def draw_frame(self, subject: str, modified: bool) -> str:
         t = self.t
         o = [_reset(), _hide()]
         tag  = "ANView"
         subj = (subject or '')[:50]
-        bar  = f" {tag}  {subj} ".ljust(80)[:80]
+        bar  = f" {tag}  {subj} ".ljust(self._vw)[:self._vw]
         o.append(_mv(1, 1) + t['stat_bg'] + t['vtitle'] + bar + _reset())
         for r in range(_VTEXT_T, _VTEXT_B + 1):
             o.append(_mv(r, 1) + _clreol())
@@ -1577,11 +1611,11 @@ class _ViewerScreen(_Screen):
                     theme_name: str, flash: str) -> str:
         t = self.t
         if flash:
-            return _mv(24, 1) + t['stat_bg'] + t['info'] + flash.ljust(80)[:80] + _reset()
+            return _mv(24, 1) + t['stat_bg'] + t['info'] + flash.ljust(self._vw)[:self._vw] + _reset()
         last_vis = min(cy + _VTEXT_H, total)
         end_tag  = '  END' if last_vis >= total else ''
         stat = f" Ln:{last_vis}/{total}{end_tag}  Up/Dn  R=Reply  N=New  Q=Back "
-        return _mv(24, 1) + t['stat_bg'] + t['hint_key'] + stat.ljust(80)[:80] + _reset()
+        return _mv(24, 1) + t['stat_bg'] + t['hint_key'] + stat.ljust(self._vw)[:self._vw] + _reset()
 
     def draw_text(self, lines: list, scroll: int,
                   mark, cy: int, cx: int) -> str:
@@ -1593,7 +1627,7 @@ class _ViewerScreen(_Screen):
             if ly >= len(lines):
                 o.append(_reset() + _clreol())
             else:
-                o.append(_ansi_trunc(lines[ly], 80) + _reset() + _clreol())
+                o.append(_ansi_trunc(lines[ly], self._vw) + _reset() + _clreol())
         return "".join(o)
 
     def move_cursor(self, cy: int, cx: int, scroll: int) -> str:
@@ -1605,7 +1639,8 @@ class ANView(ANEdit):
 
     def __init__(self, session, lines: list, subject: str = ""):
         super().__init__(session, lines, subject=subject, draft_path="")
-        self._scr        = _ViewerScreen(_THEMES[self._tidx])
+        from .ansi_ui import ui_width
+        self._scr        = _ViewerScreen(_THEMES[self._tidx], width=ui_width(session))
         self.view_result = 'back'
 
     def _ensure_visible(self):
@@ -1758,7 +1793,8 @@ async def launch_aneview(session, body: str, subject: str = "",
     if date_str:
         header.append(f'\x1b[36mDate:\x1b[0m {date_str}')
     if header:
-        header.append('\x1b[36m' + '─' * 60 + '\x1b[0m')
+        from .ansi_ui import ui_width as _ui_width
+        header.append('\x1b[36m' + '─' * _ui_width(session) + '\x1b[0m')
         header.append('')
 
     viewer = ANView(session, header + display_lines,

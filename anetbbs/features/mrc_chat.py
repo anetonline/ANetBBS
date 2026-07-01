@@ -326,7 +326,35 @@ class MRCChat(BaseChatSystem):
             cols, lines = int(ws[0]), int(ws[1])
         except (TypeError, ValueError):
             cols, lines = 80, 24
-        self._term_columns  = max(40, min(240, cols))
+
+        # If session reports a suspiciously small size (NAWS not negotiated yet,
+        # or telnet path that skips NAWS), actively query the terminal using the
+        # ANSI CPR trick: move cursor to 999,999 then request position — the
+        # terminal clamps to its actual size and reports back ESC[rows;colsR.
+        if cols < 100:
+            try:
+                await self.session.write('\x1b[s\x1b[999;999H\x1b[6n\x1b[u')
+                resp = b''
+                deadline = asyncio.get_event_loop().time() + 1.5
+                while asyncio.get_event_loop().time() < deadline:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            self.session.read_raw(32), timeout=0.2)
+                        if chunk:
+                            resp += chunk
+                        if b'R' in resp:
+                            break
+                    except Exception:
+                        break
+                import re as _re
+                m = _re.search(rb'\x1b\[(\d+);(\d+)R', resp)
+                if m:
+                    lines = max(lines, int(m.group(1)))
+                    cols  = max(cols,  int(m.group(2)))
+            except Exception:
+                pass
+
+        self._term_columns  = max(64, min(240, cols))
         self._term_lines    = max(10, min(120, lines))
         self._status_row    = 1
         self._scroll_top    = 2
@@ -384,21 +412,25 @@ class MRCChat(BaseChatSystem):
 
         left_v  = _visible_len(room_s) + _visible_len(topic_s)
         right_v = _visible_len(right)
-        gap = max(1, self._term_columns - left_v - right_v - 1)
+        gap = max(0, self._term_columns - left_v - right_v)
 
-        overflow = (left_v + right_v + 1) - self._term_columns
+        overflow = (left_v + right_v) - self._term_columns
         if overflow > 0 and self._topic:
             cut = max(1, len(self._topic) - overflow - 1)
             topic_s = f' \x1b[96m{self._topic[:cut]}>\x1b[0m'
-            gap = 1
+            gap = 0
 
+        # room_s, topic_s, and right all contain \x1b[0m resets which kill the
+        # background color.  Re-assert \x1b[44m before the gap and before the
+        # final \x1b[K so those cells get blue background.
         await self.session.write(
             '\x1b[1;1H'
-            '\x1b[2K'
             '\x1b[44m'
             + room_s + topic_s
+            + '\x1b[44m'        # restore blue bg after \x1b[0m inside room_s/topic_s
             + ' ' * gap
             + right
+            + '\x1b[44m\x1b[K'  # restore blue bg, then erase to EOL fills the rest blue
             + '\x1b[0m'
         )
 

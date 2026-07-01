@@ -203,7 +203,10 @@ def render_msg_body_rich(text, chrs: str = '') -> Markup:
     """
     if not text:
         return Markup('')
-    decoded = _decode_charset(str(text), chrs)
+    # Local board posts are stored as proper Unicode (no latin-1/CP437 round-trip
+    # needed). Only apply charset decoding when an explicit charset is declared
+    # (echomail/netmail carries one via the CHRS kludge line).
+    decoded = _decode_charset(str(text), chrs) if chrs else str(text)
     decoded = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
                      lambda m: m.group(0).replace('\n', ''), decoded)
     decoded = _pipe_to_ansi(decoded)

@@ -76,22 +76,75 @@ def prompt(text='Choice: '):
     return f"\r\n{FG['cyan']}{BOLD}{text}{RESET}"
 
 
-def load_menu_ansi(slot: str):
-    """Return raw bytes from data/text/menus/<slot>.ans, or None if absent.
+def ui_width(session) -> int:
+    """Return usable display width for the session (terminal cols - 1).
 
-    Call at the top of each menu loop. If bytes are returned, write them
-    directly via session.writer.write()/drain() instead of banner() so the
-    original CP437 block characters reach the terminal unmodified.
+    Clamped to [64, 131] so callers never need to guard against tiny or
+    absurdly wide terminals.  Use this instead of hardcoding 64 so every
+    screen automatically expands on 132-col (and other wide) terminals.
+    """
+    cols = getattr(session, 'window_size', (80, 24))[0]
+    return max(64, min(131, cols - 1))
+
+
+def load_menu_ansi(slot: str, mode: str = 'ansi'):
+    """Return raw bytes for a menu art file, or None if nothing is found.
+
+    Lookup order (mode-aware):
+      wide : data/text/menus/{slot}132.ans → {slot}.ans
+      ansi : data/text/menus/{slot}.ans
+      ascii: data/text/menus/{slot}.asc   → {slot}.ans
+    Each candidate is also tried under anetbbs/screens/menus/ as a bundled
+    stock fallback before giving up.
     """
     from pathlib import Path
-    # DATA_DIR is never written to .env — derive it from __file__ the same
-    # way config.py does: BASE_DIR = Path(__file__).parent.parent (install root).
-    # ansi_ui.py lives at <install>/anetbbs/features/ansi_ui.py so go up 3 levels.
-    data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
-    path = data_dir / 'text' / 'menus' / f'{slot}.ans'
-    try:
-        if path.is_file():
-            return path.read_bytes()
-    except OSError:
-        pass
+    data_dir   = Path(__file__).resolve().parent.parent.parent / 'data'
+    menus_dir  = data_dir / 'text' / 'menus'
+    stock_dir  = Path(__file__).resolve().parent.parent / 'screens' / 'menus'
+
+    if mode == 'wide':
+        candidates = [f'{slot}132.ans', f'{slot}.ans']
+    elif mode == 'ascii':
+        candidates = [f'{slot}.asc', f'{slot}.ans']
+    else:
+        candidates = [f'{slot}.ans']
+
+    for fname in candidates:
+        for directory in (menus_dir, stock_dir):
+            f = directory / fname
+            try:
+                if f.is_file():
+                    return f.read_bytes()
+            except OSError:
+                pass
     return None
+
+
+async def write_menu_art(session, slot: str) -> bool:
+    """Load menu art, apply display @-codes, and write it to the session.
+
+    Returns True if art was found and written; callers fall back to their
+    inline banner/menu_item code when False is returned.
+    """
+    ansi = load_menu_ansi(slot, session.term_mode)
+    if ansi is None:
+        return False
+    try:
+        from .display_codes import apply as _apply_codes
+        from .bbs_ui import _app as _bbs_app
+        import anetbbs as _anetbbs_pkg
+        _cfg = _bbs_app().config
+        body = _apply_codes(
+            ansi.decode('latin-1'),
+            user=session.user,
+            bbs_name=_cfg.get('BBS_NAME', ''),
+            sysop=_cfg.get('SYSOP_NAME', ''),
+            node=(getattr(session, '_node_entry', None).slot
+                  if getattr(session, '_node_entry', None) else 1),
+            version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
+        )
+        session.writer.write(b'\x1b[2J\x1b[H' + body.encode('latin-1'))
+    except Exception:
+        session.writer.write(b'\x1b[2J\x1b[H' + ansi)
+    await session.writer.drain()
+    return True

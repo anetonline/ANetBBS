@@ -479,24 +479,45 @@ async def run_menu(session, start='main'):
                      .order_by(BbsMenuItem.sort_order, BbsMenuItem.id)
                      .all())
             # Detach into plain tuples for use outside the app context
-            screen = menu.ansi_screen or ''
             title = menu.title
             prompt = menu.prompt or 'Choice: '
             item_list = [(it.hotkey.upper(), it.label, it.action_type, it.action_args)
                          for it in items]
-            # File-based ANSI override: data/text/menus/<name>.ans takes
-            # priority over the DB field, so sysops can drop a file in place.
+            # Mode-aware screen content lookup.
+            # wide : data/text/menus/{name}132.ans → {name}.ans → DB ANSI field
+            # ansi : data/text/menus/{name}.ans → DB ANSI field
+            # ascii: data/text/menus/{name}.asc  → (no DB — it has ANSI content)
             import os as _os
             from flask import current_app as _ca
-            _ans_path = _os.path.join(
-                _ca.config.get('DATA_DIR', ''), 'text', 'menus',
-                f'{menu.name}.ans')
-            if _os.path.exists(_ans_path):
-                try:
-                    with open(_ans_path, 'rb') as _fh:
-                        screen = _fh.read().decode('latin-1')
-                except Exception:
-                    pass
+            _mode = getattr(session, 'term_mode', 'ansi')
+            _menus_dir = _os.path.join(_ca.config.get('DATA_DIR', ''), 'text', 'menus')
+            is_plain_text = False
+            screen = ''
+            if _mode == 'ascii':
+                _asc = _os.path.join(_menus_dir, f'{menu.name}.asc')
+                if _os.path.exists(_asc):
+                    try:
+                        with open(_asc, 'rb') as _fh:
+                            screen = _fh.read().decode('latin-1')
+                            is_plain_text = True
+                    except Exception:
+                        pass
+            else:
+                _candidates = (
+                    [f'{menu.name}132.ans', f'{menu.name}.ans']
+                    if _mode == 'wide' else [f'{menu.name}.ans']
+                )
+                for _fname in _candidates:
+                    _fpath = _os.path.join(_menus_dir, _fname)
+                    if _os.path.exists(_fpath):
+                        try:
+                            with open(_fpath, 'rb') as _fh:
+                                screen = _fh.read().decode('latin-1')
+                        except Exception:
+                            pass
+                        break
+                if not screen:
+                    screen = menu.ansi_screen or ''
 
         # ANSI palette
         RESET = '\x1b[0m'
@@ -512,13 +533,15 @@ async def run_menu(session, start='main'):
             'blk': '\x1b[40m',
         }
 
-        # Clear screen + cursor home so menus don't stack on top of each
-        # other when navigating between them.
-        await session.write('\x1b[2J\x1b[H')
+        # Clear screen.  ASCII terminals get newlines; ANSI/wide get ESC[2J.
+        if _mode == 'ascii':
+            await session.write('\r\n' * 4)
+        else:
+            await session.write('\x1b[2J\x1b[H')
+
         if screen.strip():
-            # Raw ANSI passthrough — exact bytes the sysop drew in the editor.
-            # First substitute Synchronet @CODE@ and Mystic |XX placeholders
-            # so screens can be themed with user/system info.
+            # Custom screen passthrough (ANSI art or plain .asc file).
+            # Substitute Synchronet @CODE@ / Mystic |XX placeholders first.
             try:
                 from .display_codes import apply as _apply_codes
                 from .bbs_ui import _app as _bbs_app
@@ -535,23 +558,37 @@ async def run_menu(session, start='main'):
                 )
             except Exception:
                 rendered = screen
-            # Write as raw bytes to preserve CP437 high-byte characters.
-            # session.write() re-encodes strings as CP437, which corrupts
-            # content decoded from latin-1: e.g. U+00DC (from byte 0xDC ▄)
-            # re-encodes to CP437 byte 0x9A (Ü) — wrong glyph on terminal.
-            # Mirrors the pattern in session._show_ansi_screen().
-            try:
-                session.writer.write(rendered.encode('latin-1'))
-                await session.writer.drain()
-            except (UnicodeEncodeError, AttributeError):
+            if is_plain_text:
                 await session.write(rendered)
+            else:
+                # Write as raw bytes to preserve CP437 high-byte characters.
+                # session.write() re-encodes strings as CP437, which corrupts
+                # content decoded from latin-1: e.g. U+00DC (from byte 0xDC ▄)
+                # re-encodes to CP437 byte 0x9A (Ü) — wrong glyph on terminal.
+                try:
+                    session.writer.write(rendered.encode('latin-1'))
+                    await session.writer.drain()
+                except (UnicodeEncodeError, AttributeError):
+                    await session.write(rendered)
             await session.write("\r\n")
-        else:
-            # Auto-render — a more polished default screen than before.
-            # Top banner (gradient)
+        elif _mode == 'ascii':
+            # ASCII auto-render: plain text, no escape codes, ASCII box chars.
             inner_w = 64
-            top_bar  = '▄' * inner_w
-            bot_bar  = '▀' * inner_w
+            bar = '+' + '-' * (inner_w - 2) + '+'
+            cell = f'| {title.upper()}'.ljust(inner_w - 1) + '|'
+            await session.write(f"{bar}\r\n{cell}\r\n{bar}\r\n")
+
+            # Single-column item list for ASCII readability
+            for hk, lbl, _, _ in item_list:
+                line = f"  [{hk}] {lbl}"
+                await session.write(line + '\r\n')
+
+            await session.write('-' * inner_w + '\r\n')
+        else:
+            # ANSI/wide auto-render.
+            inner_w = 128 if _mode == 'wide' else 64
+            top_bar = '▄' * inner_w
+            bot_bar = '▀' * inner_w
             await session.write(f"{FG['cyan']}{BG['blk']}{top_bar}{RESET}\r\n")
             cell = f"╣ {title.upper()} ╠".center(inner_w)
             await session.write(
@@ -562,7 +599,6 @@ async def run_menu(session, start='main'):
             cols = 2
             col_w = (inner_w // cols) - 2
             items_padded = list(item_list)
-            # Pad to even count
             if len(items_padded) % cols:
                 items_padded += [None] * (cols - len(items_padded) % cols)
             for i in range(0, len(items_padded), cols):
@@ -577,14 +613,12 @@ async def run_menu(session, start='main'):
                     if len(text) > col_w:
                         text = text[:col_w - 1] + '>'
                     text = text.ljust(col_w)
-                    # Colour the hotkey letter
                     text = text.replace(
                         f"[{hk}]",
                         f"{FG['yel']}{BOLD}[{hk}]{RESET}{FG['grn']}", 1)
                     pieces.append(f"{FG['grn']}{text}{RESET}")
                 await session.write(''.join(pieces) + '\r\n')
 
-            # Footer accent
             await session.write(f"{FG['gry']}{'─' * inner_w}{RESET}\r\n")
 
         # NodeSpy heartbeat — log current menu so sysop's web panel can see.

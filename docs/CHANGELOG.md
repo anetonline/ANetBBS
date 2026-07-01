@@ -1,7 +1,98 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b1.4`** (June 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b1.6`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.11 — Graffiti Wall: widescreen + ASCII mode support (July 2026)
+
+- FEATURE: Wall box scales with terminal width (131 cols max on widescreen sessions).
+- FEATURE: ASCII mode substitutes `+/-/|` for CP437 box chars; pipe colors stripped in post content.
+
+## v1.0b2.10 — MRC: send TERMSIZE to server at connect time (July 2026)
+
+- FEATURE: MRC client sends `TERMSIZE <cols>,<rows>` to the remote MRC server immediately after joining. On a 132-col session this sends `TERMSIZE 132,37`.
+- NOTE: WHOON `/who` list format is set by the remote server (mrc.bottomlessabyss.net) for 80-col. Chat word-wrap already uses the full local terminal width.
+
+## v1.0b2.9 — MRC: status bar blue fill now spans full terminal width (July 2026)
+
+- FIX: Root cause of narrow MRC status bar: `room_s`/`topic_s` both embed `\x1b[0m]` which reset the blue background before the gap spaces were written. Added `\x1b[44m]` re-assertion before gap and before `\x1b[K]`. Status bar now fills the full 131-col width on widescreen sessions.
+
+## v1.0b2.8 — MRC: active terminal size detection + status bar fill fix (July 2026)
+
+- FIX: MRC detects actual terminal size via ANSI CPR query when session `window_size` is small (<100 cols). Fixes 40-col MRC status bar on telnet sessions where NAWS was not negotiated at connect time.
+- FIX: MRC status bar uses `\x1b[K]` after writing content to fill the rest of the row with blue — no longer depends on `\x1b[2K]` behavior.
+- FIX: `_term_columns` floor raised from 40 → 64.
+
+## v1.0b2.7 — Widescreen: MRC chat fixes (July 2026)
+
+- FIX: MRC status bar blue fill stopped at content end — `\x1b[44m` now set before `\x1b[2K` so erase fills blue.
+- FIX: Chat Systems menu `banner`/`footer`/`menu_item` not width-aware — now pass `_w`.
+- FIX: MRC `_enter_split_screen` checks `session.cols`/`.rows` as fallback for `_term_columns`.
+
+## v1.0b2.6 — Widescreen fixes: RSS pager/lightbar, file browser, ANetIRC (July 2026)
+
+- FIX: RSS lightbar and pager separator lines hardcoded to 76 — now `ui_width(session)`.
+- FIX: RSS item list title column capped at 62 — now expands with terminal width.
+- FIX: RSS article pager divider hardcoded to 72 — now expands.
+- FIX: File area list/detail dividers hardcoded to 44 — now terminal width; name + desc columns expand.
+- FIX: InterBBS IM inbox banner not width-aware — now full width with wider message preview.
+- FIX: ANetIRC capped terminal width at 79 — now 131 so two-panel TUI fills 132-col sessions.
+
+## v1.0b2.5 — Full widescreen support for all terminal screens (July 2026)
+
+- FEATURE: `ui_width(session)` added to `ansi_ui.py`. Every `banner()`, `footer()`, table header, and content column across all 20+ screens now passes the terminal width. All screens expand to fill wide (132-col) terminals automatically.
+- FEATURE: Content column widths (board name, thread subject, bulletin title, RSS feed/item title, echomail area name, file area name, message body) scale proportionally with `ui_width`.
+
+## v1.0b2.4 — Game Center: Q and 3 both exit (July 2026)
+
+- FIX: `Q` did not exit Game Center — only `3` did. Both now accepted (case-insensitive), matching Chat and Door Games behavior.
+
+## v1.0b2.3 — Display @-codes applied in all sub-menu art files (July 2026)
+
+- FIX: `@SYSOP@`, `@BBS@`, `@VERSION@`, `@NODE@`, `@TIME@` not substituted in sub-menu art. Added `write_menu_art(session, slot)` to `ansi_ui.py` — shared helper that applies display codes before writing. All feature sub-menus converted to use it.
+- FIX: `game_center` art had `[Q]` for back but code checked `'3'`. Art files corrected.
+
+## v1.0b2.2 — Mode-aware sub-menu art + stock chat/game_center files (July 2026)
+
+- FEATURE: `load_menu_ansi(slot, mode)` is now mode-aware. Wide terminals check `{slot}132.ans`; ASCII terminals check `{slot}.asc`. Both fall back to `anetbbs/screens/menus/` bundled stock art before returning None.
+- FEATURE: `chat` and `game_center` menus now ship with stock CP437/ANSI art for all three modes (`.ans`, `.asc`, `132.ans`).
+- FIX: All `load_menu_ansi()` callers pass `self.session.term_mode`.
+
+## v1.0b2.1 — Seed stock screens to data/text/ on install/update (July 2026)
+
+- FIX: `update.sh` now seeds `anetbbs/screens/` → `data/text/` and `anetbbs/screens/menus/` → `data/text/menus/` using `cp -n` (no-overwrite). Sysop files are never touched; missing files are filled in on every update.
+- FEATURE: `anetbbs/screens/menus/` ships `main.ans`, `main.asc`, `main132.ans` as stock main menu art.
+
+## v1.0b2.0 — Stock slot screens as real files (July 2026)
+
+- FEATURE: `welcome`, `newuser`, `goodbye` now ship as `.ans` / `.asc` / `132.ans` in `anetbbs/screens/`. All three terminal modes get a proper stock screen. `_show_ansi_screen` falls back to these before returning nothing.
+- REMOVE: Inline `_stock_ascii_screen()` replaced by the file-based system.
+
+## v1.0b1.9 — ASCII mode: strip ANSI from all writes (July 2026)
+
+- FIX: `write()` now strips ANSI escape sequences when `term_mode == 'ascii'`, covering all hardcoded color strings (bot-gate, security questions, new-user questionnaire, post-login notifications, sysop broadcasts, etc.) without needing per-call changes.
+
+## v1.0b1.8 — ASCII mode login screen fix (July 2026)
+
+- FIX: `login_screen()` rendered the 1/2/3 login menu with hardcoded ANSI escape codes regardless of terminal mode. ASCII-mode connections now get a plain `+---+` box-draw login menu with no escape codes.
+
+## v1.0b1.7 — Telnet TTYPE second-round fix (July 2026)
+
+- FIX: Telnet TTYPE detection was missing the second round of the RFC 1091 handshake. After the client sends `WILL TTYPE`, the server must send `IAC SB TTYPE SEND IAC SE` before the client reports its type string. `init_session()` now sends that request and reads the response, so `TERM=dumb` (and other dumb-terminal types) correctly trigger ASCII mode.
+
+## v1.0b1.6 — Terminal detection fixes: SSH PTY size + telnet NAWS drain (July 2026)
+
+- FIX: SSH sessions now read `process.term_type` and `process.term_size` from asyncssh immediately after session creation so `term_mode` is correct for SSH logins.
+- FIX: Telnet NAWS/TTYPE responses are now drained and parsed after the negotiation settle period instead of being discarded by `_buffer.clear()`.
+- FIX: Negotiation settle time increased 100ms → 300ms.
+
+## v1.0b1.5 — Multi-terminal mode: ASCII + widescreen detection (July 2026)
+
+- TERMINAL: Telnet NAWS and TTYPE subnegotiation responses are now parsed (previously negotiated but discarded). Window size and terminal type are stored on the session.
+- TERMINAL: New `term_mode` property: `wide` (cols ≥ 132), `ansi` (default), `ascii` (dumb/TTY).
+- TERMINAL: `_show_ansi_screen` picks `{slot}132.ans` for wide, `{slot}.asc` for ASCII (each falling back gracefully). DB ANSI content is skipped in ASCII mode; stock plain-text fallbacks cover welcome/newuser/goodbye.
+- TERMINAL: Menu engine uses `{name}132.ans` / `{name}.asc` / `{name}.ans` in `data/text/menus/`. Auto-render: ASCII gets plain-text layout (no escape codes), wide gets 128-column ANSI layout.
+- TERMINAL: Pause prompt strips ANSI color for plain-text screens.
 
 ## v1.0b1.4 — Terminal MRC /me fix (June 2026)
 

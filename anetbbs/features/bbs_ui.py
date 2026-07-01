@@ -143,17 +143,21 @@ class BBSMenuUI:
                     where = page or '-'
                 rows.append((u.username, proto, where, s.last_seen))
 
-        from .ansi_ui import banner, footer, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, FG, RESET, BOLD, ui_width
+        _w = ui_width(self.session)
+        # Fixed columns: indent(2)+user(16)+sp(1)+proto(8)+sp(1)+last(12)+margins(6) = 46
+        _where_w = max(22, _w - 46)
+        _sep_w   = max(60, _w - 4)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner("Who's Online"))
+        await self.session.write(banner("Who's Online", _w))
         if not rows:
             await self.session.write(
                 f"  {FG['gry']}(no one is online right now){RESET}\r\n")
         else:
             await self.session.write(
                 f"  {FG['cyan']}{BOLD}{'User':<16} {'Proto':<8} "
-                f"{'Where':<22} {'Last seen':<12}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
+                f"{'Where':<{_where_w}} {'Last seen':<12}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * _sep_w}{RESET}\r\n")
             for u, proto, where, ts in rows:
                 tstr = ts.strftime('%H:%M:%S') if ts else '?'
                 proto_color = (FG['grn'] if proto == 'telnet'
@@ -163,9 +167,9 @@ class BBSMenuUI:
                 await self.session.write(
                     f"  {FG['wht']}{u[:16]:<16}{RESET} "
                     f"{proto_color}{proto[:8]:<8}{RESET} "
-                    f"{FG['dim']}{where[:22]:<22}{RESET} "
+                    f"{FG['dim']}{where[:_where_w]:<{_where_w}}{RESET} "
                     f"{FG['cyan']}{tstr:<12}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         await self.session.read_line(
             f"{FG['cyan']}Press Enter to continue...{RESET}")
 
@@ -175,7 +179,7 @@ class BBSMenuUI:
 
     async def list_boards(self):
         from anetbbs.models import Board
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
         with _app().app_context():
             _user_level = int((self.session.user or {}).get('access_level', 10))
             _is_admin = bool((self.session.user or {}).get('is_admin'))
@@ -191,20 +195,24 @@ class BBSMenuUI:
             return
 
         while True:
+            _w = ui_width(self.session)
+            # indent(2)+num(3)+sp(1) = 6 prefix; threads col = 16; spacing = 4
+            _name_w = max(28, _w - 6 - 16 - 4)
+            _desc_w = max(62, _w - 8)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Message Boards'))
+            await self.session.write(banner('Message Boards', _w))
             for i, (_, name, desc, count) in enumerate(board_list, 1):
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET} "
-                    f"{FG['grn']}{name:<28}{RESET} "
+                    f"{FG['grn']}{name:<{_name_w}}{RESET} "
                     f"{FG['cyan']}({count:4d} threads){RESET}\r\n")
                 if desc:
                     await self.session.write(
-                        f"      {FG['dim']}{desc[:62]}{RESET}\r\n")
+                        f"      {FG['dim']}{desc[:_desc_w]}{RESET}\r\n")
             await self.session.write(
                 f"\r\n  {FG['yel']}{BOLD}Q{RESET}{FG['gry']}.{RESET} "
                 f"{FG['red']}Return{RESET}\r\n")
-            await self.session.write(footer() + '\r\n')
+            await self.session.write(footer(_w) + '\r\n')
             choice = (await self.session.read_line(
                 _prompt('Pick board (number / Q): ')) or '').strip()
             if choice.upper() == 'Q' or not choice:
@@ -303,19 +311,21 @@ class BBSMenuUI:
             await self.session.read_line("\r\nPress Enter...")
             return
 
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
         while True:
+            _w = ui_width(self.session)
+            _title_w = max(40, _w - 34)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Bulletins'))
+            await self.session.write(banner('Bulletins', _w))
             for i, (_, title, who, when, pinned, _) in enumerate(b_list, 1):
                 ts = when.strftime('%m-%d') if when else '?'
                 pin = (FG['yel'] + '*' + RESET) if pinned else ' '
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET}{pin} "
-                    f"{FG['wht']}{title[:40]:<40}{RESET} "
+                    f"{FG['wht']}{title[:_title_w]:<{_title_w}}{RESET} "
                     f"{FG['gry']}by{RESET} {FG['grn']}{who[:12]:<12}{RESET} "
                     f"{FG['cyan']}{ts}{RESET}\r\n")
-            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write('\r\n' + footer(_w) + '\r\n')
             choice = (await self.session.read_line(
                 _prompt('Pick bulletin (number / Q): ')) or '').strip()
             if choice.upper() == 'Q' or not choice:
@@ -404,22 +414,25 @@ class BBSMenuUI:
                                m.created_at, m.read_at is not None, m.body))
 
         if not i_list:
-            from .ansi_ui import banner, FG, RESET
+            from .ansi_ui import banner, FG, RESET, ui_width
+            _w = ui_width(self.session)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('PM Inbox'))
+            await self.session.write(banner('PM Inbox', _w))
             await self.session.write(
                 f"  {FG['gry']}Your inbox is empty.{RESET}\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
         while True:
-            from .ansi_ui import banner as _bnr
+            from .ansi_ui import banner as _bnr, ui_width as _uw, FG, RESET
+            _w = _uw(self.session)
+            _subj_w = max(38, _w - 36)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr('PM Inbox'))
+            await self.session.write(_bnr('PM Inbox', _w))
             for i, (_, subj, who, when, was_read, _) in enumerate(i_list, 1):
                 ts = when.strftime('%m-%d %H:%M') if when else '?'
                 mark = ' ' if was_read else '*'
-                await self.session.write(f"  {i:2d}.{mark} {subj[:38]:<38} from {who[:12]:<12} {ts}\r\n")
+                await self.session.write(f"  {i:2d}.{mark} {subj[:_subj_w]:<{_subj_w}} from {who[:12]:<12} {ts}\r\n")
             choice = (await self.session.read_line("\r\nPick message (number) or Q: ") or '').strip()
             if choice.upper() == 'Q' or not choice:
                 return
@@ -428,9 +441,9 @@ class BBSMenuUI:
                 if 0 <= idx < len(i_list):
                     pm_id, subj, who, when, _, body = i_list[idx]
                     ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
-                    await self.session.write("\r\n" + "═" * 64 + "\r\n")
+                    await self.session.write("\r\n" + "═" * _w + "\r\n")
                     await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
-                    await self.session.write("─" * 64 + "\r\n")
+                    await self.session.write("─" * _w + "\r\n")
                     for line in (body or '').splitlines():
                         await self.session.write(line[:78] + "\r\n")
                     # Mark as read
@@ -462,23 +475,26 @@ class BBSMenuUI:
             rows = [(m.id, m.sender_label or '?', m.sender_host or '?',
                      m.received_at, m.is_read, m.body or '') for m in ims]
 
+        from .ansi_ui import banner as _bnr, footer as _ftr, FG as _F, RESET as _R, ui_width as _uw
+        _w = _uw(self.session)
+        _prev_w = max(30, _w - 36)
         if not rows:
-            from .ansi_ui import banner as _bnr, FG as _F, RESET as _R
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr('Inter-BBS Instant Messages'))
+            await self.session.write(_bnr('Inter-BBS Instant Messages', _w))
             await self.session.write(
                 f"  {_F['gry']}No InterBBS instant messages.{_R}\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
         while True:
-            from .ansi_ui import banner as _bnr2
+            _w = _uw(self.session)
+            _prev_w = max(30, _w - 36)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr2('Inter-BBS Instant Messages'))
+            await self.session.write(_bnr('Inter-BBS Instant Messages', _w))
             for i, (_, who, host, when, was_read, body) in enumerate(rows, 1):
                 ts = when.strftime('%m-%d %H:%M') if when else '?'
                 mark = ' ' if was_read else '*'
-                preview = body.replace('\r', ' ').replace('\n', ' ')[:30]
+                preview = body.replace('\r', ' ').replace('\n', ' ')[:_prev_w]
                 await self.session.write(
                     f"  {i:2d}.{mark} {who[:18]:<18} {ts}  {preview}\r\n")
             choice = (await self.session.read_line(
@@ -550,9 +566,10 @@ class BBSMenuUI:
         """Compose a fresh InterBBS IM from the terminal."""
         from anetbbs.msp.client import send_msp
         from anetbbs.msp.protocol import MSP_DEFAULT_PORT
-        from .ansi_ui import banner, FG, RESET
+        from .ansi_ui import banner, FG, RESET, ui_width
+        _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Send Inter-BBS Instant Message'))
+        await self.session.write(banner('Send Inter-BBS Instant Message', _w))
         dest = (await self.session.read_line(
             f"  {FG['cyan']}Destination (user@host):{RESET} ") or '').strip()
         if '@' not in dest:
@@ -586,7 +603,7 @@ class BBSMenuUI:
     async def list_echo_areas(self):
         """Network chooser → per-network area list → read area."""
         from anetbbs.models import EchoArea, EchomailNetwork, EchomailMessage
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         _user_level = int((self.session.user or {}).get('access_level', 10))
         _is_admin   = bool((self.session.user or {}).get('is_admin'))
@@ -613,22 +630,24 @@ class BBSMenuUI:
             return
 
         while True:
+            _w = ui_width(self.session)
+            _net_w = max(30, _w - 22)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Echomail Networks'))
+            await self.session.write(banner('Echomail Networks', _w))
             await self.session.write(
-                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<30} "
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<{_net_w}} "
                 f"{'Type':<6} {'Areas':>5}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 50}{RESET}\r\n")
+                f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
             for i, (_, name, ntype, count) in enumerate(net_rows, 1):
                 type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
-                    f"{FG['wht']}{name[:30]:<30}{RESET}  "
+                    f"{FG['wht']}{name[:_net_w]:<{_net_w}}{RESET}  "
                     f"{type_col}{ntype[:5]:<5}{RESET}  "
                     f"{FG['grn']}{count:5d}{RESET}\r\n")
             await self.session.write(
                 f"\r\n  {FG['gry']}A = Apply for ANotherNetwork QWK node{RESET}\r\n")
-            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write('\r\n' + footer(_w) + '\r\n')
             choice = (await self.session.read_line(
                 _prompt('Choose network (number / A=apply / Q): ')) or '').strip().upper()
             if choice == 'Q' or not choice:
@@ -649,7 +668,7 @@ class BBSMenuUI:
                                    user_level, is_admin):
         """Show areas for one network as a scrollable lightbar."""
         from anetbbs.models import EchoArea, EchomailMessage
-        from .ansi_ui import banner, FG, RESET, BOLD
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         with _app().app_context():
             _eq = (EchoArea.query
@@ -677,16 +696,19 @@ class BBSMenuUI:
             return
 
         COL_TAG  = 16
-        COL_NAME = 24
         COL_CAT  = 10
+        # Name column expands: fixed = indent(2)+num(5)+tag(17)+cat(11)+msgs(7) = 42
+        COL_NAME = max(24, ui_width(self.session) - 42)
 
         async def render_header_areas():
-            await self.session.write(banner(net_name))
+            _w = ui_width(self.session)
+            _cn = max(24, _w - 42)
+            await self.session.write(banner(net_name, _w))
             await self.session.write(
                 f"  {FG['cyan']}{BOLD}"
-                f"{'#':>3}  {'Tag':<{COL_TAG}} {'Name':<{COL_NAME}} "
+                f"{'#':>3}  {'Tag':<{COL_TAG}} {'Name':<{_cn}} "
                 f"{'Category':<{COL_CAT}} {'Msgs':>5}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 72}{RESET}\r\n")
+                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
 
         def render_row_area(idx, row, selected):
             _, tag, name, n, cat = row
@@ -723,7 +745,7 @@ class BBSMenuUI:
         """Walk the sysop through a QWK node application wizard."""
         import re, secrets, string as _str
         from anetbbs.models import db, QWKNode, QWKNodeRequest
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         user     = self.session.user or {}
         user_id  = user.get('id')
@@ -741,8 +763,9 @@ class BBSMenuUI:
             await self._show_qwk_request_status(existing)
             return
 
+        _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('ANotherNetwork — QWK Node Application'))
+        await self.session.write(banner('ANotherNetwork — QWK Node Application', _w))
         await self.session.write(
             f"\r\n"
             f"  {FG['wht']}ANotherNetwork (Zone 1200) connects BBS systems via QWK echomail.{RESET}\r\n"
@@ -853,10 +876,11 @@ class BBSMenuUI:
     async def _show_qwk_request_status(self, req):
         """Show the applicant their application status (pending/approved/denied)."""
         from anetbbs.models import db, QWKNodeRequest as _QNR
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
+        _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('ANotherNetwork — Node Application Status'))
+        await self.session.write(banner('ANotherNetwork — Node Application Status', _w))
 
         date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
 
@@ -910,7 +934,7 @@ class BBSMenuUI:
 
     async def read_echo_area(self, area_id, tag):
         from anetbbs.models import EchomailMessage, EchoArea
-        from .ansi_ui import banner, FG, RESET, BOLD
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         with _app().app_context():
             msgs = (EchomailMessage.query
@@ -925,22 +949,25 @@ class BBSMenuUI:
 
         if not m_list:
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(tag))
+            await self.session.write(banner(tag, ui_width(self.session)))
             await self.session.write(
                 f"  {FG['gry']}(no messages in this area yet){RESET}\r\n")
             await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
             return
 
-        COL_SUBJ = 36
         COL_FROM = 14
+        # Subject col expands: fixed = indent(2)+num(5)+from(15)+date(7) = 29
+        COL_SUBJ = max(36, ui_width(self.session) - 29)
 
         async def render_header_msgs():
-            await self.session.write(banner(tag))
+            _w = ui_width(self.session)
+            _cs = max(36, _w - 29)
+            await self.session.write(banner(tag, _w))
             await self.session.write(
                 f"  {FG['cyan']}{BOLD}"
-                f"{'#':>3}  {'Subject':<{COL_SUBJ}} "
+                f"{'#':>3}  {'Subject':<{_cs}} "
                 f"{'From':<{COL_FROM}} {'Date':<5}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+                f"  {FG['gry']}{'─' * max(74, _w - 4)}{RESET}\r\n")
 
         def render_row_msg(idx, row, selected):
             _, subj, who, _, when, _ = row
@@ -997,7 +1024,7 @@ class BBSMenuUI:
                         quote        = ''
                     if not compose_subj:
                         await self.session.write('\x1b[2J\x1b[H')
-                        await self.session.write(banner('Compose in ' + tag))
+                        await self.session.write(banner('Compose in ' + tag, ui_width(self.session)))
                         compose_to = (await self.session.read_line(
                             f"  {FG['cyan']}To:{RESET} ") or 'All').strip()
                         compose_subj = (await self.session.read_line(
@@ -1110,17 +1137,20 @@ class BBSMenuUI:
             protos = available_protocols()
 
             # ---- Draw area list ----
+            from .ansi_ui import ui_width as _ui_width
+            _w = _ui_width(self.session)
+            _name_w = max(38, _w - 40)   # leave room for (xxxx files) + [inactive] [sysop]
             await self.session.write('\x1b[2J\x1b[H')
             hdr = (f"{FG['cyan']}{BOLD}"
-                   f"{'─'*44}\r\n"
+                   f"{'─'*_w}\r\n"
                    f" File Library - Areas\r\n"
-                   f"{'─'*44}{RESET}\r\n\r\n")
+                   f"{'─'*_w}{RESET}\r\n\r\n")
             await self.session.write(hdr)
 
             if top_cnt or is_sysop:
                 await self.session.write(
                     f"  {FG['yel']} 0.{RESET} "
-                    f"{FG['wht']}{'General / Top-level':<38}{RESET}"
+                    f"{FG['wht']}{'General / Top-level':<{_name_w}}{RESET}"
                     f"  {FG['gry']}({top_cnt} files){RESET}\r\n")
 
             for i, ar in enumerate(area_rows, 1):
@@ -1132,7 +1162,7 @@ class BBSMenuUI:
                     flags += f" {FG['mag']}[sysop]{RESET}"
                 await self.session.write(
                     f"  {FG['yel']}{i:2d}.{RESET} "
-                    f"{FG['wht']}{ar['name'][:38]:<38}{RESET}"
+                    f"{FG['wht']}{ar['name'][:_name_w]:<{_name_w}}{RESET}"
                     f"  {FG['gry']}{cnt_str}{RESET}"
                     f"{flags}\r\n")
 
@@ -1190,12 +1220,15 @@ class BBSMenuUI:
         """Paginated file browser. Reads disk (storage_path) when available,
         falls back to FileUpload+TicFile DB tables otherwise."""
         from anetbbs.models import FileUpload, TicFile, User, FileArea
-        from .ansi_ui import FG, RESET, BOLD
+        from .ansi_ui import FG, RESET, BOLD, ui_width
         app = _app()
         PAGE = 9   # 9 × 2-line entries + 4 header + 2 nav = 24 lines, fits 80×25
         page = 0
 
         while True:
+            _w = ui_width(self.session)
+            _name_w = max(32, _w - 56)
+            _desc_w = max(60, _w - 12)
             with app.app_context():
                 f_list = []
 
@@ -1279,11 +1312,11 @@ class BBSMenuUI:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(
                 f"{FG['cyan']}{BOLD}"
-                f"{'─'*44}\r\n"
+                f"{'─'*_w}\r\n"
                 f" {area_name}  "
                 f"{FG['gry']}(page {page+1}/{pages}, {total} files){RESET}"
                 f"{FG['cyan']}{BOLD}\r\n"
-                f"{'─'*44}{RESET}\r\n\r\n")
+                f"{'─'*_w}{RESET}\r\n\r\n")
 
             if not page_files:
                 await self.session.write(
@@ -1295,11 +1328,11 @@ class BBSMenuUI:
                 src = ('FTN' if f['tic_id'] else f['who'][:10])
                 await self.session.write(
                     f"  {FG['yel']}{i:3d}.{RESET} "
-                    f"{FG['wht']}{f['name'][:32]:<32}{RESET} "
+                    f"{FG['wht']}{f['name'][:_name_w]:<{_name_w}}{RESET} "
                     f"{FG['gry']}{sz}  {src:<12}{RESET}\r\n")
                 if f['desc']:
                     await self.session.write(
-                        f"        {FG['dim']}{f['desc'][:60]}{RESET}\r\n")
+                        f"        {FG['dim']}{f['desc'][:_desc_w]}{RESET}\r\n")
 
             nav = []
             if page > 0:     nav.append("P=Prev")
@@ -1367,18 +1400,19 @@ class BBSMenuUI:
 
     async def _view_file_desc(self, f):
         """Show extended description for a file, with word-wrap."""
-        from .ansi_ui import FG, RESET, BOLD
+        from .ansi_ui import FG, RESET, BOLD, ui_width
         name  = f['name']
         size  = f['size']
         desc  = f.get('desc_full') or f.get('desc') or ''
         date  = f.get('date')
+        _w    = ui_width(self.session)
 
         await self.session.write('\x1b[2J\x1b[H')
         await self.session.write(
             f"{FG['cyan']}{BOLD}"
-            f"{'─'*44}\r\n"
-            f" {name[:40]}\r\n"
-            f"{'─'*44}{RESET}\r\n\r\n")
+            f"{'─'*_w}\r\n"
+            f" {name[:max(40, _w - 2)]}\r\n"
+            f"{'─'*_w}{RESET}\r\n\r\n")
 
         sz_str = f"{size:,}" if isinstance(size, int) else str(size)
         await self.session.write(
@@ -1711,11 +1745,11 @@ class BBSMenuUI:
 
         render_header()          — async: writes banner + column-header lines
                                    (cursor ends at row _LB_START after call)
-        render_row(idx, row, sel)— sync: returns a ≤78-char formatted string
+        render_row(idx, row, sel)— sync: returns a formatted string
         render_hint(sel, total)  — sync: returns the status+hints string
         Returns ('enter', idx) | ('key', char) | ('quit',)
         """
-        from .ansi_ui import FG, RESET, BOLD, footer
+        from .ansi_ui import FG, RESET, BOLD, footer, ui_width
 
         if not rows:
             return ('quit',)
@@ -1745,8 +1779,9 @@ class BBSMenuUI:
                            if idx < len(rows) else EOL)
                 await self.session.write(f'{_at(self._LB_START + i)}{row_txt}')
             # Separator + hint
+            _sw = ui_width(self.session)
             await self.session.write(
-                f'{_at(self._LB_SEP_ROW)}{FG["gry"]}{"─" * 76}{NORM}{EOL}')
+                f'{_at(self._LB_SEP_ROW)}{FG["gry"]}{"─" * _sw}{NORM}{EOL}')
             hint = render_hint(sel, len(rows))
             await self.session.write(f'{_at(self._LB_HINT_ROW)}{hint}{EOL}')
             # Hide cursor at a safe spot
@@ -1832,7 +1867,7 @@ class BBSMenuUI:
         lines        : list of body text strings (plain, pre-wrapped)
         hint_str     : key-hint footer string
         """
-        from .ansi_ui import FG, RESET, BOLD, footer
+        from .ansi_ui import FG, RESET, BOLD, footer, ui_width
 
         EOL      = '\x1b[K'
         NORM     = '\x1b[0m'
@@ -1863,7 +1898,7 @@ class BBSMenuUI:
                 pct_val = min(100, int((offset + body_visible) * 100 / len(lines)))
                 pct = f'{FG["gry"]} {pct_val}%{NORM}'
             await self.session.write(
-                f'\x1b[{sep_row};1H{FG["gry"]}{"─" * 76}{NORM}{EOL}')
+                f'\x1b[{sep_row};1H{FG["gry"]}{"─" * ui_width(self.session)}{NORM}{EOL}')
             await self.session.write(
                 f'\x1b[{hint_row};1H{hint_str}{pct}{EOL}')
             await self.session.write(f'\x1b[24;1H')
@@ -2016,7 +2051,7 @@ class BBSMenuUI:
     async def show_rss(self):
         """RSS feed list with arrow-key lightbar."""
         from anetbbs.models import RssFeed, RssItem, RssReadStatus, db
-        from .ansi_ui import banner, footer, FG, RESET, BOLD
+        from .ansi_ui import banner, footer, FG, RESET, BOLD, ui_width
         from sqlalchemy import func
 
         uid        = (self.session.user or {}).get('id')
@@ -2066,21 +2101,27 @@ class BBSMenuUI:
 
             if not feed_rows:
                 await self.session.write('\x1b[2J\x1b[H')
-                await self.session.write(banner('RSS Reader'))
+                _w0 = ui_width(self.session)
+                await self.session.write(banner('RSS Reader', _w0))
                 await self.session.write(
                     f"  {FG['gry']}No feeds configured. Add one at /admin/rss/.{RESET}\r\n")
                 await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
                 return
 
-            COL_W = 32  # feed name truncation
+            # Feed name column expands with terminal width.
+            # Fixed cols: indent(2)+num(3)+sp(2)+cat(12)+sp(2)+items(7)+sp(2)+unread(8) = 38
+            _rss_w   = ui_width(self.session)
+            COL_W    = max(32, _rss_w - 38)
 
             async def render_header_rss():
-                await self.session.write(banner('RSS Reader'))
+                _w = ui_width(self.session)
+                _cw = max(32, _w - 38)
+                await self.session.write(banner('RSS Reader', _w))
                 await self.session.write(
                     f"  {FG['cyan']}{BOLD}"
-                    f"{'#':>2}  {'Feed':<{COL_W}}  {'Category':<10}  "
+                    f"{'#':>2}  {'Feed':<{_cw}}  {'Category':<10}  "
                     f"{'Items':>5}  {'Unread':>6}{RESET}\r\n"
-                    f"  {FG['gry']}{'─' * 72}{RESET}\r\n")
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
 
             def render_row_rss(idx, row, selected):
                 fid, name, cat, tot, unread = row
@@ -2136,7 +2177,7 @@ class BBSMenuUI:
     async def _rss_feed_items(self, feed_id, feed_name):
         """Item list for one feed — arrow-key lightbar."""
         from anetbbs.models import RssItem, RssReadStatus, db
-        from .ansi_ui import banner, FG, RESET, BOLD
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         uid = (self.session.user or {}).get('id')
 
@@ -2148,7 +2189,7 @@ class BBSMenuUI:
                 all_items = q.limit(300).all()
                 if not all_items:
                     await self.session.write('\x1b[2J\x1b[H')
-                    await self.session.write(banner(feed_name[:36]))
+                    await self.session.write(banner(feed_name[:36], ui_width(self.session)))
                     await self.session.write(
                         f"  {FG['gry']}No items yet. Poller runs every ~30 min.{RESET}\r\n")
                     await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
@@ -2164,12 +2205,16 @@ class BBSMenuUI:
                          i.published_at, i.id not in read_ids)
                         for i in all_items]
 
+            _title_w = max(62, ui_width(self.session) - 14)
+
             async def render_header_items():
-                await self.session.write(banner(feed_name[:36]))
+                _w = ui_width(self.session)
+                _tw = max(62, _w - 14)
+                await self.session.write(banner(feed_name[:36], _w))
                 await self.session.write(
                     f"  {FG['cyan']}{BOLD}"
-                    f"{'':>4}{'Date':>5}  {'Title':<62}{RESET}\r\n"
-                    f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+                    f"{'':>4}{'Date':>5}  {'Title':<{_tw}}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(74, _w - 4)}{RESET}\r\n")
 
             def render_row_items(idx, row, selected):
                 iid, title, ts, is_unread = row
@@ -2179,7 +2224,7 @@ class BBSMenuUI:
                 n_col = f"{FG['grn']}{idx+1:>3}{RESET}"
                 t_safe = BBSMenuUI._sanitize_cp437(title)
                 return (f"  {n_col} {mark}{ts_s}  "
-                        f"{tcol}{t_safe[:62]:<62}{RESET}")
+                        f"{tcol}{t_safe[:_title_w]:<{_title_w}}{RESET}")
 
             def render_hint_items(sel, total):
                 _, _, _, is_unread = rows[sel]
@@ -2227,7 +2272,7 @@ class BBSMenuUI:
     async def _rss_view_item(self, item_id):
         """Display a single article in a scrollable pager. Marks as read."""
         from anetbbs.models import db, RssItem, RssReadStatus
-        from .ansi_ui import banner, FG, RESET, BOLD
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         uid = (self.session.user or {}).get('id')
 
@@ -2270,6 +2315,8 @@ class BBSMenuUI:
         sixel_ok = await self._rss_detect_sixel() if image_url else False
 
         # Build fixed header lines for the pager
+        _w = ui_width(self.session)
+        _art_w = max(72, _w - 4)
         hdr = []
         hdr.append(f"\x1b[2J\x1b[H")  # written by pager via draw(), not here
         # We build them as plain strings; _rss_pager starts at row 2.
@@ -2277,18 +2324,18 @@ class BBSMenuUI:
         hdr_lines.append(
             f"  {FG['gry']}{feed_name[:40]}{RESET}"
             f"{'  ' + pub_str if pub_str else ''}")
-        for tl in self._wrap_text(title, 72):
+        for tl in self._wrap_text(title, _art_w):
             hdr_lines.append(f"  {FG['cyan']}{BOLD}{tl}{RESET}")
         if author:
             hdr_lines.append(f"  {FG['gry']}by {author}{RESET}")
         if short_url:
             hdr_lines.append(f"  {FG['gry']}web:{RESET} {short_url}")
-        hdr_lines.append(f"  {FG['gry']}{'─' * 72}{RESET}")
+        hdr_lines.append(f"  {FG['gry']}{'─' * _art_w}{RESET}")
 
         # If sixel capable, show image in its own "pane" first
         if sixel_ok and image_url:
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(feed_name[:36]))
+            await self.session.write(banner(feed_name[:36], _w))
             for hl in hdr_lines[:-1]:   # all but the separator
                 await self.session.write(hl + '\r\n')
             await self.session.write(f"  {FG['gry']}(loading image…){RESET}\r\n")
@@ -2304,7 +2351,7 @@ class BBSMenuUI:
             if not para.strip():
                 body_lines.append('')
             else:
-                body_lines.extend(self._wrap_text(para, 74))
+                body_lines.extend(self._wrap_text(para, _art_w))
 
         hint_str = (f"  {FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
                     f"{FG['cyan']}Home/End{RESET}=jump  "
@@ -2314,19 +2361,20 @@ class BBSMenuUI:
         async def _show_pager():
             # The pager renders a banner itself as its first header rows.
             # We inline the banner into hdr_lines by prepending it.
-            from .ansi_ui import banner as _bn, BG
+            from .ansi_ui import banner as _bn, BG, ui_width as _uw
+            _pw = _uw(self.session)
             full_hdr = []
             # banner outputs rows 2-4; row 1 is blank (before banner \r\n)
             # We pass the banner rows as the first header lines.
             full_hdr.append(f"  {FG['gry']}{feed_name[:40]}{RESET}"
                              f"{'  ' + pub_str if pub_str else ''}")
-            for tl in self._wrap_text(title, 72):
+            for tl in self._wrap_text(title, max(72, _pw - 4)):
                 full_hdr.append(f"  {FG['cyan']}{BOLD}{tl}{RESET}")
             if author:
                 full_hdr.append(f"  {FG['gry']}by {author}{RESET}")
             if short_url:
                 full_hdr.append(f"  {FG['gry']}web:{RESET} {short_url}")
-            full_hdr.append(f"  {FG['gry']}{'─' * 72}{RESET}")
+            full_hdr.append(f"  {FG['gry']}{'─' * max(72, _pw - 4)}{RESET}")
             await self._rss_pager(body_lines, full_hdr, hint_str)
 
         await _show_pager()
@@ -2382,7 +2430,7 @@ class BBSMenuUI:
     async def _rss_river(self):
         """Combined all-feeds river — arrow-key lightbar."""
         from anetbbs.models import RssItem, RssFeed, RssReadStatus, db
-        from .ansi_ui import banner, FG, RESET, BOLD
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         uid        = (self.session.user or {}).get('id')
         user_level = int((self.session.user or {}).get('access_level', 10))
@@ -2399,7 +2447,7 @@ class BBSMenuUI:
                 all_items = q.limit(300).all()
                 if not all_items:
                     await self.session.write('\x1b[2J\x1b[H')
-                    await self.session.write(banner('RSS River'))
+                    await self.session.write(banner('RSS River', ui_width(self.session)))
                     await self.session.write(
                         f"  {FG['gry']}No items across any feed yet.{RESET}\r\n")
                     await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
@@ -2417,11 +2465,13 @@ class BBSMenuUI:
                         for i in all_items]
 
             async def render_header_river():
-                await self.session.write(banner('RSS River — All Feeds'))
+                _w = ui_width(self.session)
+                _title_w = max(46, _w - 30)
+                await self.session.write(banner('RSS River — All Feeds', _w))
                 await self.session.write(
                     f"  {FG['cyan']}{BOLD}"
-                    f"{'':>4}{'Date':>5}  {'Feed':<14}  {'Title':<46}{RESET}\r\n"
-                    f"  {FG['gry']}{'─' * 74}{RESET}\r\n")
+                    f"{'':>4}{'Date':>5}  {'Feed':<14}  {'Title':<{_title_w}}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(74, _w - 4)}{RESET}\r\n")
 
             def render_row_river(idx, row, selected):
                 iid, title, feed_name, ts, is_unread = row
@@ -2487,9 +2537,10 @@ class BBSMenuUI:
                     await self.session.read_line("\r\nPress Enter...")
                     return
 
-            from .ansi_ui import banner, footer, FG, RESET
+            from .ansi_ui import banner, footer, FG, RESET, ui_width
+            _w = ui_width(self.session)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Your Profile'))
+            await self.session.write(banner('Your Profile', _w))
             for label, value in [
                 ('Username', u.username),
                 ('Display name', u.display_name or '-'),
@@ -2499,13 +2550,13 @@ class BBSMenuUI:
                 ('Login count', str(u.login_count or 0)),
                 ('Admin', 'yes' if u.is_admin else 'no'),
                 ('Location', u.location or '-'),
-                ('Bio', (u.bio or '-')[:60]),
+                ('Bio', (u.bio or '-')[:max(60, _w - 20)]),
             ]:
                 await self.session.write(
                     f"  {FG['cyan']}{label:<14}{RESET} "
                     f"{FG['gry']}:{RESET} "
                     f"{FG['grn']}{value}{RESET}\r\n")
-            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write('\r\n' + footer(_w) + '\r\n')
             choice = (await self.session.read_line(
                 f"\r\n{FG['cyan']}E{RESET}=Edit Profile  "
                 f"{FG['cyan']}W{RESET}=Change Password  "
@@ -2551,7 +2602,7 @@ class _ComposeMixin:
 
 async def _post_compose(self, board_id, board_name, parent_id=None):
     from anetbbs.models import db, Post
-    from .ansi_ui import banner, FG, RESET, BOLD
+    from .ansi_ui import banner, FG, RESET, BOLD, ui_width
     from .anedit import launch_anedit
 
     # Gather quote text when replying
@@ -2566,11 +2617,12 @@ async def _post_compose(self, board_id, board_name, parent_id=None):
                 if not subject_default.lower().startswith('re:'):
                     subject_default = f"Re: {subject_default}"
 
+    _w = ui_width(self.session)
     await self.session.write('\x1b[2J\x1b[H')
     if parent_id:
-        await self.session.write(banner(f'Reply — {board_name}'))
+        await self.session.write(banner(f'Reply — {board_name}', _w))
     else:
-        await self.session.write(banner(f'New Thread — {board_name}'))
+        await self.session.write(banner(f'New Thread — {board_name}', _w))
 
     prompt_subj = (f"  {FG['cyan']}Subject{RESET}"
                    + (f" [{subject_default[:40]}]" if subject_default else "")
@@ -2604,9 +2656,10 @@ BBSMenuUI._post_compose = _post_compose
 
 async def _send_pm(self):
     from anetbbs.models import db, User, PrivateMessage
-    from .ansi_ui import banner, FG, RESET
+    from .ansi_ui import banner, FG, RESET, ui_width
+    _w = ui_width(self.session)
     await self.session.write('\x1b[2J\x1b[H')
-    await self.session.write(banner('Send Private Message'))
+    await self.session.write(banner('Send Private Message', _w))
     to_username = (await self.session.read_line(
         f"  {FG['cyan']}To (username):{RESET} ") or '').strip()
     if not to_username:
@@ -2641,7 +2694,7 @@ BBSMenuUI.send_pm = _send_pm
 async def _compose_echomail(self):
     """Compose an echomail — network-first, then area, then message."""
     from anetbbs.models import db, EchoArea, EchomailMessage, EchomailNetwork
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
     from collections import OrderedDict
 
     user_level = int((self.session.user or {}).get('access_level', 10))
@@ -2664,30 +2717,33 @@ async def _compose_echomail(self):
                 net_rows.append((net.id, net.name, net.network_type, cnt))
 
     if not net_rows:
+        _w0 = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Compose Echomail'))
+        await self.session.write(banner('Compose Echomail', _w0))
         await self.session.write(
             f"  {FG['gry']}No echomail areas configured.{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w0) + '\r\n')
         await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
         return
 
     selected_area = None
     while selected_area is None:
         # Network chooser
+        _w = ui_width(self.session)
+        _net_w = max(30, _w - 22)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Compose Echomail — Choose Network'))
+        await self.session.write(banner('Compose Echomail — Choose Network', _w))
         await self.session.write(
-            f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<30} {'Type':<6} {'Areas':>5}{RESET}\r\n"
-            f"  {FG['gry']}{'─' * 50}{RESET}\r\n")
+            f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<{_net_w}} {'Type':<6} {'Areas':>5}{RESET}\r\n"
+            f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
         for i, (_, name, ntype, cnt) in enumerate(net_rows, 1):
             type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
             await self.session.write(
                 f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
-                f"{FG['wht']}{name[:30]:<30}{RESET}  "
+                f"{FG['wht']}{name[:_net_w]:<{_net_w}}{RESET}  "
                 f"{type_col}{ntype[:5]:<5}{RESET}  "
                 f"{FG['grn']}{cnt:5d}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         net_choice = (await self.session.read_line(
             _prompt('Choose network (number / Q): ')) or '').strip().upper()
         if net_choice == 'Q' or not net_choice:
@@ -2724,8 +2780,10 @@ async def _compose_echomail(self):
                                area.network.our_address or '1:1/1'))
 
         while True:
+            _w = ui_width(self.session)
+            _name_w = max(28, _w - 28)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner(f'Compose — {net_name}'))
+            await self.session.write(banner(f'Compose — {net_name}', _w))
 
             cat_idx, next_cat_at, next_cat_lbl = 0, (cat_rows[0][0] if cat_rows else len(a_list)), (cat_rows[0][1] if cat_rows else '')
             row_count = 0
@@ -2742,7 +2800,7 @@ async def _compose_echomail(self):
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i+1:2d}{RESET}  "
                     f"{FG['cyan']}{tag[:18]:<18}{RESET} "
-                    f"{FG['wht']}{name[:28]:<28}{RESET}\r\n")
+                    f"{FG['wht']}{name[:_name_w]:<{_name_w}}{RESET}\r\n")
                 row_count += 1
                 if row_count % PAGE == 0 and (i + 1) < len(a_list):
                     ans = (await self.session.read_line(
@@ -2751,7 +2809,7 @@ async def _compose_echomail(self):
                     if ans == 'Q':
                         break
 
-            await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write('\r\n' + footer(_w) + '\r\n')
             pick = (await self.session.read_line(
                 _prompt('Pick area (number / B=back / Q): ')
             ) or '').strip().upper()
@@ -2774,7 +2832,7 @@ async def _compose_echomail(self):
 
     # ── Step 3: compose the message ──────────────────────────────────
     await self.session.write('\x1b[2J\x1b[H')
-    await self.session.write(banner(f'Compose — {area_tag}'))
+    await self.session.write(banner(f'Compose — {area_tag}', ui_width(self.session)))
     await self.session.write(
         f"  {FG['gry']}Area: {FG['wht']}{area_name}{RESET}\r\n\r\n")
 
@@ -2870,7 +2928,7 @@ BBSMenuUI.change_password = _change_password
 # Override list_threads to add 'N' for new thread + 'R' from inside read_thread
 async def _list_threads_v2(self, board_id, board_name):
     from anetbbs.models import Post, User
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
     while True:
         with _app().app_context():
             threads = (Post.query
@@ -2883,8 +2941,10 @@ async def _list_threads_v2(self, board_id, board_name):
                 t_list.append((t.id, t.subject, author.username if author else '?',
                                t.created_at, t.replies.count()))
 
+        _w = ui_width(self.session)
+        _subj_w = max(35, _w - 40)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner(board_name))
+        await self.session.write(banner(board_name, _w))
         if not t_list:
             await self.session.write(f"  {FG['gry']}(no threads yet){RESET}\r\n")
         for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
@@ -2894,10 +2954,10 @@ async def _list_threads_v2(self, board_id, board_name):
                 f"  {FG['yel']}{BOLD}{i:2d}{RESET}"
                 f"{FG['gry']}.{RESET} "
                 f"{FG['cyan']}{rep:<5}{RESET}"
-                f"{FG['wht']}{subj[:35]:<35}{RESET}  "
+                f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
                 f"{FG['grn']}{who[:14]:<14}{RESET}"
                 f"{FG['gry']}{ts}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         choice = (await self.session.read_line(
             _prompt('Number / N=new / Q=back: ')) or '').strip()
         u = choice.upper()
@@ -2917,7 +2977,7 @@ BBSMenuUI.list_threads = _list_threads_v2
 
 async def _read_thread_v2(self, post_id, board_id, board_name):
     from anetbbs.models import Post, User
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD
+    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
     with _app().app_context():
         root = Post.query.get(post_id)
         if not root:
@@ -2931,8 +2991,10 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
                 'when': p.created_at, 'content': p.content,
                 'pid': p.id,
             })
+    _w = ui_width(self.session)
+    _line_w = max(76, _w - 4)
     await self.session.write('\x1b[2J\x1b[H')
-    await self.session.write(banner(f'{board_name} — {rendered[0]["subject"][:40]}'))
+    await self.session.write(banner(f'{board_name} — {rendered[0]["subject"][:40]}', _w))
     for i, p in enumerate(rendered):
         ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
         tag = f"{FG['yel']}{BOLD}[OP]{RESET}" if i == 0 else f"{FG['gry']}[Reply {i}]{RESET}"
@@ -2941,13 +3003,13 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
             f"{FG['cyan']}{BOLD}{p['subject']}{RESET}\r\n"
             f"  {FG['grn']}From:{RESET} {p['author']:<16}"
             f"  {FG['gry']}Date:{RESET} {ts}\r\n"
-            f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
+            f"  {FG['gry']}{'─' * max(60, _w - 4)}{RESET}\r\n")
         for line in (p['content'] or '').splitlines():
             if line.lstrip().startswith('>'):
-                await self.session.write(f"  {FG['gry']}{line[:76]}{RESET}\r\n")
+                await self.session.write(f"  {FG['gry']}{line[:_line_w]}{RESET}\r\n")
             else:
-                await self.session.write(f"  {line[:76]}\r\n")
-    await self.session.write('\r\n' + footer() + '\r\n')
+                await self.session.write(f"  {line[:_line_w]}\r\n")
+    await self.session.write('\r\n' + footer(_w) + '\r\n')
     choice = (await self.session.read_line(
         _prompt('R=reply  Enter=back: ')) or '').strip().upper()
     if choice == 'R':
@@ -2965,22 +3027,19 @@ async def _sysop_menu(self):
         await self.session.write("\r\nSysop access required.\r\n")
         await self.session.read_line("Press Enter...")
         return
-    from .ansi_ui import (load_menu_ansi, banner, menu_item, footer,
-                          prompt as _prompt, FG, RESET)
+    from .ansi_ui import (write_menu_art, banner, menu_item, footer,
+                          prompt as _prompt, FG, RESET, ui_width)
     while True:
-        ansi = load_menu_ansi('sysop_menu')
-        if ansi:
-            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-            await self.session.writer.drain()
-        else:
+        if not await write_menu_art(self.session, 'sysop_menu'):
+            _w = ui_width(self.session)
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Sysop Tools'))
+            await self.session.write(banner('Sysop Tools', _w))
             for hk, lbl in (('U', 'Manage users'),
                             ('B', 'Manage boards'),
                             ('S', 'Server status'),
                             ('Q', 'Return')):
-                await self.session.write(menu_item(hk, lbl) + '\r\n')
-            await self.session.write('\r\n' + footer() + '\r\n')
+                await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
+            await self.session.write('\r\n' + footer(_w) + '\r\n')
         choice = (await self.session.read_line(_prompt('Choice: ')) or '').upper()
         if choice == 'Q' or not choice:
             return
@@ -2995,24 +3054,21 @@ BBSMenuUI.sysop_menu = _sysop_menu
 
 async def _sysop_users(self):
     from anetbbs.models import User
-    from .ansi_ui import load_menu_ansi, banner, footer, FG, RESET, BOLD, prompt as _p
+    from .ansi_ui import write_menu_art, banner, footer, FG, RESET, BOLD, prompt as _p, ui_width
     while True:
         with _app().app_context():
             users = User.query.order_by(User.id).all()
             u_list = [(u.id, u.username, u.email or '-', u.is_active, u.is_admin,
                        u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never',
                        u.login_count or 0) for u in users]
-        ansi = load_menu_ansi('sysop_users')
-        if ansi:
-            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-            await self.session.writer.drain()
-        else:
+        _w = ui_width(self.session)
+        if not await write_menu_art(self.session, 'sysop_users'):
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Manage Users'))
+            await self.session.write(banner('Manage Users', _w))
         await self.session.write(
             f"  {FG['cyan']}{BOLD}{'ID':<4}{'Username':<18}{'Active':<8}"
             f"{'Admin':<8}{'Last login':<14}Logins{RESET}\r\n"
-            f"  {FG['gry']}{'─' * 60}{RESET}\r\n")
+            f"  {FG['gry']}{'─' * max(60, _w - 4)}{RESET}\r\n")
         for uid, name, _, active, admin, lastl, n in u_list:
             active_s = f"{FG['grn']}yes{RESET}" if active else f"{FG['red']} no{RESET}"
             admin_s  = f"{FG['yel']}yes{RESET}" if admin  else f"{FG['dim']} no{RESET}"
@@ -3022,7 +3078,7 @@ async def _sysop_users(self):
                 f"{active_s:<20}{admin_s:<20}"
                 f"{FG['dim']}{lastl:<14}{RESET}"
                 f"{FG['cyan']}{n}{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         choice = (await self.session.read_line(_p('User ID to edit (or Q): ')) or '').strip()
         if choice.upper() == 'Q' or not choice:
             return
@@ -3037,7 +3093,7 @@ BBSMenuUI.sysop_users = _sysop_users
 async def _sysop_edit_user(self, uid):
     from anetbbs.models import db, User
     from werkzeug.security import generate_password_hash
-    from .ansi_ui import banner, menu_item, footer, FG, RESET, prompt as _p
+    from .ansi_ui import banner, menu_item, footer, FG, RESET, prompt as _p, ui_width
     with _app().app_context():
         u = User.query.get(uid)
         if not u:
@@ -3046,8 +3102,9 @@ async def _sysop_edit_user(self, uid):
             return
         info = (u.username, u.email, u.is_active, u.is_admin)
     while True:
+        _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner(f'Edit User #{uid}'))
+        await self.session.write(banner(f'Edit User #{uid}', _w))
         active_s = f"{FG['grn']}yes{RESET}" if info[2] else f"{FG['red']}no{RESET}"
         admin_s  = f"{FG['yel']}yes{RESET}" if info[3] else f"{FG['dim']}no{RESET}"
         await self.session.write(
@@ -3060,8 +3117,8 @@ async def _sysop_edit_user(self, uid):
                         ('P', 'Reset password'),
                         ('D', 'Delete user (PERMANENT)'),
                         ('Q', 'Back')):
-            await self.session.write(menu_item(hk, lbl) + '\r\n')
-        await self.session.write('\r\n' + footer() + '\r\n')
+            await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
         if choice == 'Q' or not choice:
             return
@@ -3099,31 +3156,30 @@ BBSMenuUI._sysop_edit_user = _sysop_edit_user
 
 async def _sysop_boards(self):
     from anetbbs.models import db, Board
-    from .ansi_ui import load_menu_ansi, banner, menu_item, footer, FG, RESET, BOLD, prompt as _p
+    from .ansi_ui import write_menu_art, banner, menu_item, footer, FG, RESET, BOLD, prompt as _p, ui_width
     while True:
         with _app().app_context():
             boards = Board.query.order_by(Board.order, Board.name).all()
             b_list = [(b.id, b.name, b.description or '', b.is_active, b.posts.count()) for b in boards]
-        ansi = load_menu_ansi('sysop_boards')
-        if ansi:
-            self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-            await self.session.writer.drain()
-        else:
+        _w = ui_width(self.session)
+        _name_w = max(25, _w - 26)
+        _desc_w = max(60, _w - 12)
+        if not await write_menu_art(self.session, 'sysop_boards'):
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Manage Boards'))
+            await self.session.write(banner('Manage Boards', _w))
         for bid, name, desc, active, count in b_list:
             mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
             await self.session.write(
                 f"  [{mark}] {FG['wht']}{bid:<3}{RESET} "
-                f"{FG['grn']}{name[:25]:<25}{RESET} "
+                f"{FG['grn']}{name[:_name_w]:<{_name_w}}{RESET} "
                 f"{FG['cyan']}({count:4d} threads){RESET}\r\n")
             if desc:
-                await self.session.write(f"          {FG['dim']}{desc[:60]}{RESET}\r\n")
+                await self.session.write(f"          {FG['dim']}{desc[:_desc_w]}{RESET}\r\n")
         await self.session.write('\r\n')
-        await self.session.write(menu_item('N', 'New board') + '\r\n')
-        await self.session.write(menu_item('Q', 'Back') + '\r\n')
+        await self.session.write(menu_item('N', 'New board', _w) + '\r\n')
+        await self.session.write(menu_item('Q', 'Back', _w) + '\r\n')
         await self.session.write(f"  {FG['dim']}Or enter a board ID to edit{RESET}\r\n")
-        await self.session.write('\r\n' + footer() + '\r\n')
+        await self.session.write('\r\n' + footer(_w) + '\r\n')
         choice = (await self.session.read_line(_p('Choice: ')) or '').strip()
         u = choice.upper()
         if u == 'Q' or not choice:
@@ -3176,7 +3232,7 @@ async def _sysop_status(self):
     """Quick server-status snapshot for sysops (counts + recent activity)."""
     from anetbbs.models import (User, UserSession, Post, Message as Bulletin,
                                 PrivateMessage, EchomailMessage)
-    from .ansi_ui import load_menu_ansi, banner, footer, FG, RESET, BOLD, prompt as _p
+    from .ansi_ui import write_menu_art, banner, footer, FG, RESET, BOLD, prompt as _p, ui_width
     with _app().app_context():
         five = datetime.utcnow() - timedelta(minutes=5)
         stats = {
@@ -3190,18 +3246,15 @@ async def _sysop_status(self):
             'Echo out (queue)': EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count(),
             'Echo out (sent)':  EchomailMessage.query.filter(EchomailMessage.sent_at != None).count(),
         }
-    ansi = load_menu_ansi('sysop_status')
-    if ansi:
-        self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-        await self.session.writer.drain()
-    else:
+    _w = ui_width(self.session)
+    if not await write_menu_art(self.session, 'sysop_status'):
         await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Server Status'))
+        await self.session.write(banner('Server Status', _w))
     for k, v in stats.items():
         await self.session.write(
             f"  {FG['cyan']}{k:<18}{RESET} "
             f"{FG['wht']}{BOLD}{v}{RESET}\r\n")
-    await self.session.write('\r\n' + footer() + '\r\n')
+    await self.session.write('\r\n' + footer(_w) + '\r\n')
     await self.session.read_line(_p('Press Enter...'))
 BBSMenuUI.sysop_status = _sysop_status
 

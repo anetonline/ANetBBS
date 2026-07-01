@@ -1066,6 +1066,32 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/mrc" 2>/dev/null || 
 
 # Ensure data/text/ and data/text/menus/ exist for file-based ANSI overrides
 mkdir -p "$INSTALL_DIR/data/text/menus"
+
+# Seed stock slot screens (welcome/newuser/goodbye) and menu art from the
+# bundled anetbbs/screens/ directory.  Uses cp -n (no-overwrite) so any
+# sysop-customised files already in data/text/ are never touched.
+_SCREENS_SRC="$SOURCE_DIR/anetbbs/screens"
+if [[ -d "$_SCREENS_SRC" ]]; then
+    for _f in "$_SCREENS_SRC"/*.ans "$_SCREENS_SRC"/*.asc; do
+        [[ -f "$_f" ]] || continue
+        _dest="$INSTALL_DIR/data/text/$(basename "$_f")"
+        if [[ ! -f "$_dest" ]]; then
+            cp "$_f" "$_dest"
+            info "  seeded data/text/$(basename "$_f")"
+        fi
+    done
+    if [[ -d "$_SCREENS_SRC/menus" ]]; then
+        for _f in "$_SCREENS_SRC/menus"/*.ans "$_SCREENS_SRC/menus"/*.asc; do
+            [[ -f "$_f" ]] || continue
+            _dest="$INSTALL_DIR/data/text/menus/$(basename "$_f")"
+            if [[ ! -f "$_dest" ]]; then
+                cp "$_f" "$_dest"
+                info "  seeded data/text/menus/$(basename "$_f")"
+            fi
+        done
+    fi
+fi
+
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/text" 2>/dev/null || true
 
 # Refresh /etc/sudoers.d/anetbbs so the Service Control Center can run

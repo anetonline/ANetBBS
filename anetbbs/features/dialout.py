@@ -11,7 +11,7 @@ Synchronet has the same idea — they call it 'dial-out' or 'gateway'.
 import asyncio
 import logging
 
-from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, load_menu_ansi
+from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, write_menu_art
 
 
 logger = logging.getLogger(__name__)
@@ -91,11 +91,8 @@ class DialoutMenu:
     async def show_menu(self):
         while True:
             destinations = self._load_directory()
-            ansi = load_menu_ansi('dialout')
-            if ansi:
-                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-                await self.session.writer.drain()
-            else:
+            if not await write_menu_art(self.session, 'dialout'):
+
                 await self.session.write(banner('Dial Out - Visit Another BBS'))
                 for i, (name, host, port, proto) in enumerate(destinations, 1):
                     line = f"  [{i:2d}] {name:<22} {host}:{port}  ({proto})"

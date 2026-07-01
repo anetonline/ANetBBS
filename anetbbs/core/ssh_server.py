@@ -137,6 +137,20 @@ def _make_process_handler(bbs_config):
         session = BBSSession(reader, writer, bbs_config,
                              prefill_username=ssh_user,
                              prefill_password=ssh_pass)
+        # Populate terminal info from the SSH PTY request so term_mode works.
+        # SSH uses its own pty-req channel; telnet NAWS/TTYPE don't apply here.
+        try:
+            ttype = process.term_type  # e.g. 'xterm-256color', 'SyncTERM', etc.
+            if ttype:
+                session.terminal_type = ttype
+        except Exception:
+            pass
+        try:
+            ts = process.term_size   # (cols, rows, px_w, px_h)
+            if ts and ts[0] > 0 and ts[1] > 0:
+                session.window_size = (ts[0], ts[1])
+        except Exception:
+            pass
         try:
             await session.start()
         except Exception as exc:

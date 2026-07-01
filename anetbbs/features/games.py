@@ -16,22 +16,19 @@ class GameManager:
         self.session = session
 
     async def show_menu(self):
-        from .ansi_ui import banner, menu_item, footer, prompt as _p, load_menu_ansi
+        from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
-            ansi = load_menu_ansi('game_center')
-            if ansi:
-                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-                await self.session.writer.drain()
-            else:
-                await self.session.write(banner('Game Center'))
+            _w = ui_width(self.session)
+            if not await write_menu_art(self.session, 'game_center'):
+                await self.session.write(banner('Game Center', _w))
                 for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
                                 ('2', 'Number Guessing (built-in)'),
                                 ('3', 'Return to Main Menu')):
-                    await self.session.write(menu_item(hk, lbl) + '\r\n')
-                await self.session.write(footer() + '\r\n')
-            choice = (await self.session.read_line(_p('Choice: ')) or '').strip()
+                    await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
+                await self.session.write(footer(_w) + '\r\n')
+            choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
 
-            if choice == '3':
+            if choice in ('3', 'Q') or not choice:
                 break
             elif choice == '1':
                 await self.show_door_menu()
@@ -87,35 +84,36 @@ class GameManager:
         # Build a flat numbered list (for input parsing) alongside grouped display
         flat_list = [g for slug in ordered_slugs for g in grouped[slug]]
 
-        from .ansi_ui import load_menu_ansi
+        from .ansi_ui import write_menu_art, ui_width
         CYAN = '\x1b[96m'; WHT = '\x1b[97m'; YEL = '\x1b[93m'
         GRN = '\x1b[92m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         while True:
-            ansi = load_menu_ansi('door_games')
-            if ansi:
-                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-                await self.session.writer.drain()
-            else:
-                await self.session.write(f"\r\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════╗{RESET}\r\n")
-                await self.session.write(f"{BOLD}{CYAN}║                    {WHT}Door Games{CYAN}                        ║{RESET}\r\n")
-                await self.session.write(f"{BOLD}{CYAN}╠══════════════════════════════════════════════════════╣{RESET}\r\n")
-                # Inner width = 54 chars between the two ║ pillars.
+            _iw = ui_width(self.session)
+            _name_w  = max(25, _iw - 28)       # game name column
+            _type_w  = 15
+            # Row: (2){num:2}(2).(1) (1){name:_name_w}(1)[{type:_type_w}](1){pad}
+            # = 9 + _name_w + _type_w + _pad → _pad = _iw - 7 - _name_w - _type_w
+            _pad     = max(0, _iw - 7 - _name_w - _type_w)
+            if not await write_menu_art(self.session, 'door_games'):
+                hbar = '═' * _iw
+                title = "Door Games".center(_iw)
+                await self.session.write(f"\r\n{BOLD}{CYAN}{hbar}{RESET}\r\n")
+                await self.session.write(f"{WHT}{title}{RESET}\r\n")
+                await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n")
                 num = 1
                 for slug in ordered_slugs:
                     cat_name = cat_names.get(slug, slug.capitalize())
-                    # Category header: "  ─── Name ─────...─ " filling 54 chars
                     label = f"  ─── {cat_name} "
-                    fill = '─' * max(0, 54 - len(label))
-                    inner = label + fill
-                    await self.session.write(
-                        f"{BOLD}{CYAN}║{DIM}{inner}{BOLD}{CYAN}║{RESET}\r\n")
+                    fill = '─' * max(0, _iw - len(label))
+                    await self.session.write(f"{BOLD}{CYAN}{label}{fill}{RESET}\r\n")
                     for g in grouped[slug]:
-                        line = (f"{BOLD}{CYAN}║  {YEL}{num:2d}{DIM}. {GRN}{g['name']:<25}{DIM} "
-                                f"[{g['game_type']:<15}]     {CYAN}║{RESET}\r\n")
+                        name_col = g['name'][:_name_w]
+                        line = (f"  {YEL}{num:2d}{DIM}. {GRN}{name_col:<{_name_w}}{DIM} "
+                                f"[{g['game_type']:<{_type_w}}]{' ' * _pad}{RESET}\r\n")
                         await self.session.write(line)
                         num += 1
-                await self.session.write(f"{BOLD}{CYAN}║   {YEL}Q{DIM}. {GRN}Return{' ' * 42}{CYAN}║{RESET}\r\n")
-                await self.session.write(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════╝{RESET}\r\n\r\n")
+                await self.session.write(f"  {YEL}Q{DIM}. {GRN}Return{RESET}\r\n")
+                await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
 
             choice = await self.session.read_line("Pick a game (number or Q): ")
             if not choice or choice.lower() == 'q':

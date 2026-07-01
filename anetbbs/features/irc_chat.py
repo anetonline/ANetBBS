@@ -77,7 +77,7 @@ class IRCChat(BaseChatSystem):
             return []
 
     async def show_menu(self):
-        from .ansi_ui import (load_menu_ansi, banner, menu_item, footer,
+        from .ansi_ui import (write_menu_art, banner, menu_item, footer,
                               prompt as _p, FG, RESET)
         while True:
             # Build preset map regardless of ANSI mode so numbered choices
@@ -85,11 +85,7 @@ class IRCChat(BaseChatSystem):
             presets = self._load_presets()
             preset_map = {str(i + 1): p for i, p in enumerate(presets)}
 
-            ansi = load_menu_ansi('irc_chat')
-            if ansi:
-                self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-                await self.session.writer.drain()
-            else:
+            if not await write_menu_art(self.session, 'irc_chat'):
                 await self.session.write('\x1b[2J\x1b[H')
                 await self.session.write(banner('IRC Chat'))
                 for key, p in preset_map.items():
