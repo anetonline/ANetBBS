@@ -27,41 +27,19 @@ class ChatManager:
 
     async def show_menu(self):
         """Chat system selection — local, IRC (ANetIRC door), MRC."""
-        from .ansi_ui import banner, menu_item, footer, prompt as _p, load_menu_ansi
+        from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
             flags = _chat_flags(self.session)
-            ansi = load_menu_ansi('chat')
-            if ansi:
-                # Process Synchronet @-codes / Mystic |XX display codes so
-                # @USER@ / |UN / etc. in chat.ans are substituted — matches
-                # the pattern in session._show_ansi_screen() and menu_engine.
-                try:
-                    from ..features.display_codes import apply as _apply_codes
-                    from ..features.bbs_ui import _app as _bbs_app
-                    import anetbbs as _anetbbs_pkg
-                    _cfg = _bbs_app().config
-                    body = _apply_codes(
-                        ansi.decode('latin-1'),
-                        user=self.session.user,
-                        bbs_name=_cfg.get('BBS_NAME', ''),
-                        sysop=_cfg.get('SYSOP_NAME', ''),
-                        node=(getattr(self.session, '_node_entry', None).slot
-                              if getattr(self.session, '_node_entry', None) else 1),
-                        version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
-                    )
-                    self.session.writer.write(b'\x1b[2J\x1b[H' + body.encode('latin-1'))
-                except Exception:
-                    self.session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-                await self.session.writer.drain()
-            else:
+            _w = ui_width(self.session)
+            if not await write_menu_art(self.session, 'chat'):
                 await self.session.write('\x1b[2J\x1b[H')
-                await self.session.write(banner('Chat Systems'))
+                await self.session.write(banner('Chat Systems', _w))
                 for hk, lbl in (('1', 'Local Chat'),
                                 ('2', 'IRC Chat (A-Net IRC)'),
                                 ('3', 'MRC Chat (Inter-BBS)'),
                                 ('Q', 'Return to Main Menu')):
-                    await self.session.write(menu_item(hk, lbl) + '\r\n')
-                await self.session.write('\r\n' + footer() + '\r\n')
+                    await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
+                await self.session.write('\r\n' + footer(_w) + '\r\n')
             choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
             if choice == "1":
                 await self.local_chat()

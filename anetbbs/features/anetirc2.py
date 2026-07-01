@@ -770,11 +770,11 @@ class ANetIRC:
             pass
 
     async def _detect_size(self) -> tuple[int, int]:
-        # Use session attrs if available; cap width at 79 to avoid terminal wrap
-        cols = getattr(self.session, 'cols', None)
-        rows = getattr(self.session, 'rows', None)
+        # Use session attrs if available; cap width at 131 (132-col wide terminal)
+        cols = getattr(self.session, 'cols', None) or getattr(self.session, 'window_size', (80, 24))[0]
+        rows = getattr(self.session, 'rows', None) or getattr(self.session, 'window_size', (80, 24))[1]
         if cols and rows and int(cols) > 20 and int(rows) > 5:
-            return min(int(cols), 79), min(int(rows), 23)
+            return min(int(cols), 131), min(int(rows), 55)
         # ANSI terminal size query
         try:
             await self._wr("\x1b[s\x1b[999;999H\x1b[6n\x1b[u")
@@ -792,7 +792,7 @@ class ANetIRC:
                     break
             m = re.search(rb'\x1b\[(\d+);(\d+)R', resp)
             if m:
-                return min(int(m.group(2)), 79), min(int(m.group(1)), 23)
+                return min(int(m.group(2)), 131), min(int(m.group(1)), 55)
         except Exception:
             pass
         return 79, 23

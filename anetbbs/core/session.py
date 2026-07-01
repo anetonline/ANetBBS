@@ -2,8 +2,12 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Dict, Optional, Any
+
+_ANSI_ESC_RE   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+_ANSI_ESC_RE_B = re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
 
 logger = logging.getLogger(__name__)
 from .protocols import SessionProtocol  # noqa: F401  load-bearing import: telnet/SSH service crash without it (see CHANGELOG v152)
@@ -16,6 +20,30 @@ class CarrierLost(ConnectionError):
     """The transport has gone away mid-read. Raised by read_raw/read_key/
     read_line/read_password so menu loops can unwind instead of spinning
     on a stream that will only ever return EOF from here on."""
+
+
+def _stock_screen(slot, mode):
+    """Load a bundled stock screen from anetbbs/screens/.
+
+    Priority by mode:
+      wide : {slot}132.ans → {slot}.ans → {slot}.asc
+      ansi : {slot}.ans    → {slot}.asc
+      ascii: {slot}.asc    → {slot}.ans
+    Returns decoded string or None.
+    """
+    import pathlib as _pl
+    _screens_dir = _pl.Path(__file__).parent.parent / 'screens'
+    if mode == 'wide':
+        candidates = [f'{slot}132.ans', f'{slot}.ans', f'{slot}.asc']
+    elif mode == 'ascii':
+        candidates = [f'{slot}.asc', f'{slot}.ans']
+    else:
+        candidates = [f'{slot}.ans', f'{slot}.asc']
+    for fname in candidates:
+        f = _screens_dir / fname
+        if f.exists():
+            return f.read_bytes().decode('latin-1'), fname.endswith('.asc')
+    return None, False
 
 
 # Telnet commands
@@ -127,6 +155,25 @@ class BBSSession:
     @echo.setter
     def echo(self, value):
         self._echo_on = value
+
+    @property
+    def term_mode(self):
+        """Detected terminal capability: 'wide', 'ansi', or 'ascii'.
+
+        wide  — 132+ column ANSI terminal (SyncTERM 132x37, etc.)
+        ansi  — standard 80-col ANSI/CP437 (default when unknown)
+        ascii — plain-text terminal (dumb, TTY, etc.)
+
+        Defaults to 'ansi' when TTYPE is absent so existing behaviour is
+        preserved for terminals that don't answer the negotiation.
+        """
+        if self.window_size[0] >= 132:
+            return 'wide'
+        ttype = (self.terminal_type or '').upper()
+        _ASCII_TERMS = {'DUMB', 'TTY', 'UNKNOWN', 'PLAIN', 'ASCII', 'GLASS-TTY'}
+        if ttype in _ASCII_TERMS:
+            return 'ascii'
+        return 'ansi'
 
     def get_box_chars(self):
         """Get the box drawing characters in CP437 encoding"""
@@ -679,25 +726,47 @@ class BBSSession:
             import pathlib as _pl
             from ..features.bbs_ui import _app
 
-            # 1. File-based override
+            mode = self.term_mode
+            is_plain_text = False
+
+            # 1. File-based override (mode-aware priority)
+            #    wide : {slot}132.ans → {slot}.ans
+            #    ansi : {slot}.ans
+            #    ascii: {slot}.asc
             db_pause = False
             body = None
             try:
                 _data_dir = _app().config.get('DATA_DIR', '')
-                _ans_file = _pl.Path(_data_dir) / 'text' / f'{slot}.ans'
-                if _ans_file.exists():
-                    body = _ans_file.read_bytes().decode('latin-1')
+                _text_dir = _pl.Path(_data_dir) / 'text'
+                if mode == 'wide':
+                    _candidates = [f'{slot}132.ans', f'{slot}.ans']
+                elif mode == 'ascii':
+                    _candidates = [f'{slot}.asc']
+                else:
+                    _candidates = [f'{slot}.ans']
+                for _fname in _candidates:
+                    _f = _text_dir / _fname
+                    if _f.exists():
+                        body = _f.read_bytes().decode('latin-1')
+                        is_plain_text = _fname.endswith('.asc')
+                        break
             except Exception:
                 pass
 
-            # 2. DB lookup if no file found
-            if body is None:
+            # 2. DB lookup (ANSI content — skip for ascii mode)
+            if body is None and mode != 'ascii':
                 from ..models import BbsAnsiScreen
                 with _app().app_context():
                     row = BbsAnsiScreen.query.filter_by(
                         slot=slot, is_active=True).first()
                     db_pause = bool(row.pause_after) if row else False
                     body = row.body if row else None
+
+            # 3. Bundled stock screen (anetbbs/screens/) — all modes
+            if body is None:
+                body, _plain = _stock_screen(slot, mode)
+                if body is not None:
+                    is_plain_text = _plain
 
             if not body:
                 return
@@ -727,7 +796,10 @@ class BBSSession:
 
             # Split on @PAUSE@ for in-content pagination. _apply_codes leaves
             # unknown codes in place, so @PAUSE@ survives as a literal marker.
-            _PAUSE_PROMPT = b'\r\n\x1b[33m[Press any key to continue]\x1b[0m'
+            _PAUSE_PROMPT = (
+                b'\r\n[Press any key to continue]' if is_plain_text
+                else b'\r\n\x1b[33m[Press any key to continue]\x1b[0m'
+            )
             parts = body.split('@PAUSE@')
 
             async def _send_part(text, prefix=b'', suffix=b''):
@@ -825,23 +897,36 @@ class BBSSession:
 
         while True:
             await self.clear_screen()
-            # Colorful ANSI banner — cyan border, white title, yellow hotkeys.
-            B = '\x1b[1m'; R = '\x1b[0m'
-            CY = '\x1b[96m'; YE = '\x1b[93m'; GR = '\x1b[92m'; WH = '\x1b[97m'; DI = '\x1b[37m'
             _title = f'Welcome to {_bbs_name}'[:38].center(38)
-            menu = (
-                "\r\n"
-                f"{B}{CY}╔════════════════════════════════════════╗{R}\r\n"
-                f"{B}{CY}║ {WH}{_title}{CY} ║{R}\r\n"
-                f"{B}{CY}╠════════════════════════════════════════╣{R}\r\n"
-                f"{B}{CY}║  {YE}1{DI}. {GR}Login{' ' * 30}{CY}║{R}\r\n"
-                f"{B}{CY}║  {YE}2{DI}. {GR}New User Registration{' ' * 14}{CY}║{R}\r\n"
-                f"{B}{CY}║  {YE}3{DI}. {GR}Exit{' ' * 31}{CY}║{R}\r\n"
-                f"{B}{CY}╚════════════════════════════════════════╝{R}\r\n"
-                "\r\n"
-                f"{B}{YE}Choice:{R} "
-            )
-            
+            if self.term_mode == 'ascii':
+                menu = (
+                    "\r\n"
+                    f"+----------------------------------------+\r\n"
+                    f"| {_title} |\r\n"
+                    f"+----------------------------------------+\r\n"
+                    f"|  1. Login                              |\r\n"
+                    f"|  2. New User Registration              |\r\n"
+                    f"|  3. Exit                               |\r\n"
+                    f"+----------------------------------------+\r\n"
+                    "\r\n"
+                    "Choice: "
+                )
+            else:
+                B = '\x1b[1m'; R = '\x1b[0m'
+                CY = '\x1b[96m'; YE = '\x1b[93m'; GR = '\x1b[92m'; WH = '\x1b[97m'; DI = '\x1b[37m'
+                menu = (
+                    "\r\n"
+                    f"{B}{CY}╔════════════════════════════════════════╗{R}\r\n"
+                    f"{B}{CY}║ {WH}{_title}{CY} ║{R}\r\n"
+                    f"{B}{CY}╠════════════════════════════════════════╣{R}\r\n"
+                    f"{B}{CY}║  {YE}1{DI}. {GR}Login{' ' * 30}{CY}║{R}\r\n"
+                    f"{B}{CY}║  {YE}2{DI}. {GR}New User Registration{' ' * 14}{CY}║{R}\r\n"
+                    f"{B}{CY}║  {YE}3{DI}. {GR}Exit{' ' * 31}{CY}║{R}\r\n"
+                    f"{B}{CY}╚════════════════════════════════════════╝{R}\r\n"
+                    "\r\n"
+                    f"{B}{YE}Choice:{R} "
+                )
+
             choice = await self.read_line(menu)
             
             if choice == '1':
@@ -968,11 +1053,31 @@ class BBSSession:
         await self.send_telnet_command(DONT + LINEMODE)
         await self.send_telnet_command(DO + NAWS)
         await self.send_telnet_command(DO + TTYPE)
-        
-        # Wait for negotiation to complete
-        await asyncio.sleep(0.1)
-        
-        # Clear any pending input
+
+        # TTYPE is a two-round exchange:
+        #   round 1: server sends DO TTYPE → client responds WILL TTYPE
+        #   round 2: server sends SB TTYPE SEND IAC SE → client responds
+        #            SB TTYPE IS <type> IAC SE
+        # NAWS subnegotiation arrives in round 1 on its own.
+        await asyncio.sleep(0.3)
+        try:
+            pending = await asyncio.wait_for(self.reader.read(512), timeout=0.05)
+            if pending:
+                await self.handle_telnet_command(pending)
+                # If client agreed to TTYPE, request the actual type string
+                if IAC + WILL + TTYPE in pending:
+                    self.writer.write(IAC + SB + TTYPE + bytes([1]) + IAC + SE)
+                    await self.writer.drain()
+                    await asyncio.sleep(0.1)
+                    try:
+                        pending2 = await asyncio.wait_for(
+                            self.reader.read(512), timeout=0.05)
+                        if pending2:
+                            await self.handle_telnet_command(pending2)
+                    except (asyncio.TimeoutError, Exception):
+                        pass
+        except (asyncio.TimeoutError, Exception):
+            pass
         self._buffer.clear()
 
     async def send_telnet_command(self, command):
@@ -1010,11 +1115,30 @@ class BBSSession:
                     continue
                     
                 elif command == SB:
-                    # Skip until SE
-                    i += 2
-                    while i < len(data) and data[i:i+1] != SE:
-                        i += 1
+                    i += 2  # past IAC SB
+                    if i >= len(data):
+                        break
+                    option = data[i]
                     i += 1
+                    # Collect payload bytes until IAC SE
+                    payload = bytearray()
+                    while i < len(data):
+                        if data[i:i+1] == IAC and i + 1 < len(data) and data[i+1:i+2] == SE:
+                            i += 2
+                            break
+                        payload.append(data[i])
+                        i += 1
+                    # NAWS: cols-hi cols-lo rows-hi rows-lo
+                    if option == NAWS[0] and len(payload) >= 4:
+                        cols = (payload[0] << 8) | payload[1]
+                        rows = (payload[2] << 8) | payload[3]
+                        if cols > 0 and rows > 0:
+                            self.window_size = (cols, rows)
+                    # TTYPE IS: qualifier \x00 + type string
+                    elif option == TTYPE[0] and len(payload) >= 2 and payload[0] == 0:
+                        ttype = payload[1:].decode('ascii', errors='replace').strip()
+                        if ttype:
+                            self.terminal_type = ttype
                     continue
                 
                 i += 2
@@ -1067,7 +1191,11 @@ class BBSSession:
         still have IAC negotiation in flight. Don't spam the journal."""
         try:
             if isinstance(text, str):
+                if self.term_mode == 'ascii':
+                    text = _ANSI_ESC_RE.sub('', text)
                 text = text.encode(self.encoding, errors='replace')
+            elif self.term_mode == 'ascii':
+                text = _ANSI_ESC_RE_B.sub(b'', text)
             self.writer.write(text)
             await self.writer.drain()
         except (BrokenPipeError, ConnectionResetError,
