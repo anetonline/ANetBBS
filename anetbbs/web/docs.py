@@ -8,10 +8,64 @@ renders them with the existing markdown filter, and exposes:
   /tutorial             - slideshow walkthrough for new sysops
 """
 from pathlib import Path
-from flask import Blueprint, render_template, abort, url_for
+from flask import Blueprint, render_template, abort, url_for, request
 
 
 docs_bp = Blueprint('docs', __name__, url_prefix='/docs')
+
+# CHANGELOG.md grows by a handful of entries every release and never
+# shrinks — rendering the whole file as one markdown pass got slow to
+# load as it grew. Paginate it by version-entry count instead of
+# treating it like the other (static, bounded-size) docs pages.
+CHANGELOG_ENTRIES_PER_PAGE = 15
+
+
+class _ListPagination:
+    """Minimal Pagination-like object for paginating a plain Python list,
+    matching the subset of Flask-SQLAlchemy's Pagination interface the
+    existing pagination markup (see echomail/area.html) already expects:
+    page, pages, has_prev, has_next, prev_num, next_num, iter_pages()."""
+
+    def __init__(self, page, per_page, total):
+        self.per_page = per_page
+        self.total = total
+        self.pages = max(1, (total + per_page - 1) // per_page)
+        self.page = max(1, min(page, self.pages))
+        self.has_prev = self.page > 1
+        self.has_next = self.page < self.pages
+        self.prev_num = self.page - 1
+        self.next_num = self.page + 1
+
+    def iter_pages(self):
+        # CHANGELOG won't realistically grow into the hundreds of pages —
+        # no need for the ellipsis-truncation a huge DB-backed result set
+        # would want.
+        return range(1, self.pages + 1)
+
+
+def _split_changelog(text):
+    """Split CHANGELOG.md into (header, [entry_markdown, ...]).
+    header is everything before the first '## ' version heading (the
+    title + the "Versions are internal build numbers..." blurb); each
+    entry is one '## v...' section including its heading, in the file's
+    existing newest-first order."""
+    header_lines = []
+    entries = []
+    current = []
+    in_entry = False
+    for line in text.splitlines(keepends=True):
+        if line.startswith('## '):
+            if current:
+                entries.append(''.join(current))
+            current = [line]
+            in_entry = True
+        elif in_entry:
+            current.append(line)
+        else:
+            header_lines.append(line)
+    if current:
+        entries.append(''.join(current))
+    return ''.join(header_lines), entries
 
 
 def _docs_dir():
@@ -129,8 +183,18 @@ def view(slug):
         lambda m: ']({})'.format(url_for('docs.view',
                                           slug=m.group(1))),
         body)
+
+    pagination = None
+    if slug == 'CHANGELOG':
+        header, entries = _split_changelog(body)
+        page = request.args.get('page', 1, type=int)
+        pagination = _ListPagination(page, CHANGELOG_ENTRIES_PER_PAGE, len(entries))
+        start = (pagination.page - 1) * CHANGELOG_ENTRIES_PER_PAGE
+        chunk = entries[start:start + CHANGELOG_ENTRIES_PER_PAGE]
+        body = header + ''.join(chunk)
+
     docs = _list_docs()
     categories = _categorize(docs)
     return render_template('docs/view.html',
                            body=body, slug=slug, docs=docs,
-                           categories=categories)
+                           categories=categories, pagination=pagination)

@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.21`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.22`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.22 — Paginate the web Changelog page (July 2026)
+
+- FEATURE: `/docs/CHANGELOG` was rendering this entire, ever-growing file as one markdown pass on every load, getting slower release after release. Now paginated at 15 version-entries per page (newest first), with Prev/Next + page-number navigation. Other `/docs/*` pages are unaffected. Verified against the real route: page 1 has the newest entry, page 2 differs, out-of-range page numbers clamp instead of erroring.
+- Also fixed the "Current release" line above, which was stuck at `v1.0b1.6` for a long time — added a note to the version-bump checklist so it's updated alongside every new entry from now on.
 
 ## v1.0b2.21 — Fix: pyspellchecker was never actually installed (July 2026)
 

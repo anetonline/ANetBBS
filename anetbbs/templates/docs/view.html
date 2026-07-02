@@ -32,10 +32,46 @@
 <div class="col-lg-9">
     <style>
       .markdown-body table { display: block; overflow-x: auto; max-width: 100%; }
+      .pagination .page-link {
+          background-color: var(--theme-input-bg);
+          border-color: var(--theme-border);
+          color: var(--theme-primary);
+      }
+      .pagination .page-link:hover {
+          background-color: var(--theme-border);
+          color: var(--theme-text);
+      }
+      .pagination .active .page-link {
+          background-color: var(--theme-primary);
+          border-color: var(--theme-primary);
+          color: var(--theme-bg-dark);
+      }
     </style>
     <article class="markdown-body">
         {{ body | markdown }}
     </article>
+    {% if pagination and pagination.pages > 1 %}
+    <nav aria-label="Changelog pages">
+        <ul class="pagination justify-content-center">
+            {% if pagination.has_prev %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('docs.view', slug=slug, page=pagination.prev_num) }}">‹ Newer</a></li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">‹ Newer</span></li>
+            {% endif %}
+            {% for p in pagination.iter_pages() %}
+            <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                <a class="page-link" href="{{ url_for('docs.view', slug=slug, page=p) }}">{{ p }}</a>
+            </li>
+            {% endfor %}
+            {% if pagination.has_next %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('docs.view', slug=slug, page=pagination.next_num) }}">Older ›</a></li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">Older ›</span></li>
+            {% endif %}
+        </ul>
+        <p class="text-center text-muted small">Page {{ pagination.page }} of {{ pagination.pages }} — newest releases first</p>
+    </nav>
+    {% endif %}
 </div>
 </div>
 {% endblock %}
