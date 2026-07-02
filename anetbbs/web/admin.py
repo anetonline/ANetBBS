@@ -234,6 +234,129 @@ def dashboard():
                            recent_events=recent_events)
 
 
+# Category hub pages — the Admin navbar dropdown only lists these 7
+# entries (+ Dashboard). Each hub renders a card grid of the tools that
+# used to be flat items in one 58-long dropdown. Grouping here is nav-
+# only: none of the linked endpoints or URLs changed, so nothing else
+# (bookmarks, docs, other links) needs updating.
+ADMIN_HUB_SECTIONS = {
+    'users': {
+        'title': 'User Management',
+        'icon': 'bi-people',
+        'tools': [
+            ('admin.users', 'Users', 'bi-people', 'All registered accounts'),
+            ('admin.newuser_questions', 'New User Questions', 'bi-question-circle', 'NUV custom sign-up questions'),
+            ('admin.pending_users', 'Pending Users (NUV)', 'bi-person-check', 'Accounts awaiting validation'),
+            ('admin.password_resets', 'Password Resets', 'bi-key', 'Outstanding reset requests'),
+            ('admin.inactive_users', 'Inactive Users', 'bi-person-dash', 'Accounts with no recent activity'),
+            ('admin.time_budgets', 'Time Budgets', 'bi-clock', 'Per-user daily time allowances'),
+            ('admin.registration_attempts', 'Registration Attempts', 'bi-clipboard-data', 'Signup attempt log'),
+            ('admin.ip_bans', 'IP Bans', 'bi-ban', 'Blocked addresses'),
+            ('admin.ip_whitelist', 'IP Whitelist', 'bi-shield-check', 'Always-allowed addresses'),
+            ('admin.chat_bans', 'Chat Bans', 'bi-chat-square-x', 'Users muted from chat'),
+            ('control.index', 'NodeSpy (kick users)', 'bi-binoculars', 'Live node monitor / disconnect', 'nodespy'),
+        ],
+    },
+    'messages': {
+        'title': 'Message System',
+        'icon': 'bi-chat-left-text',
+        'tools': [
+            ('admin.boards', 'Boards', 'bi-collection', 'Message board / conference list'),
+            ('admin.bulletins', 'Bulletins', 'bi-megaphone', 'System announcements'),
+            ('admin.motd_admin', 'MOTD Pool', 'bi-card-text', 'Message-of-the-day rotation'),
+            ('admin.broadcast', 'Broadcast', 'bi-broadcast', 'Send a message to all online users'),
+            ('echomail_admin.dashboard', 'Echomail', 'bi-envelope-arrow-up', 'FidoNet-style echomail networks'),
+            ('admin.default_echos', 'Default Echo Subs', 'bi-envelope-check', 'Auto-subscribe new users to echoes'),
+            ('admin.word_filter', 'Word Filter', 'bi-filter-circle', 'Blocked words/phrases'),
+            ('admin.pages', 'Sysop Pages', 'bi-bell', 'Users paging the sysop'),
+            ('admin.newsletter', 'Newsletter', 'bi-newspaper', 'Email newsletter to users'),
+        ],
+    },
+    'files': {
+        'title': 'File System',
+        'icon': 'bi-folder',
+        'tools': [
+            ('admin.file_areas_admin', 'File Areas', 'bi-folder2-open', 'Upload/download areas'),
+            ('admin.file_echo_subs', 'File-Echo Subs', 'bi-arrow-left-right', 'File-echo distribution subscriptions'),
+            ('file_queue.index', 'File Queue', 'bi-shield-check', 'Uploads pending approval/scan'),
+            ('admin.tic_log', 'TIC Log', 'bi-truck', 'FidoNet file-echo transfer log'),
+        ],
+    },
+    'content': {
+        'title': 'Content & Presentation',
+        'icon': 'bi-palette',
+        'tools': [
+            ('admin.themes', 'Themes', 'bi-palette', 'Site color themes'),
+            ('admin.theme_builder', 'Theme Builder', 'bi-brush', 'Design a new theme'),
+            ('menu_admin.list_menus', 'BBS Menus', 'bi-list-nested', 'Terminal menu tree'),
+            ('ansi_editor.index', 'ANSI Editor', 'bi-image', 'Edit ANSI/ASCII art screens'),
+            ('wall_admin.index', 'Graffiti Wall', 'bi-pencil-square', 'Public ASCII wall moderation'),
+            ('gallery_admin.index', 'Galleries', 'bi-images', 'Image gallery moderation'),
+            ('rss_admin.index', 'RSS Feeds', 'bi-rss-fill', 'Syndicated feed sources'),
+            ('games_admin.dashboard', 'Door Games', 'bi-controller', 'Door game configuration'),
+        ],
+    },
+    'network': {
+        'title': 'Network',
+        'icon': 'bi-diagram-3',
+        'tools': [
+            ('hub_admin.index', 'Hub Management', 'bi-broadcast', 'Echomail hub connections'),
+            ('admin.registry_index', 'Federation Registry', 'bi-diagram-3', 'Known federated BBSes'),
+            ('peers_health.index', 'Peer Health', 'bi-broadcast', 'Peer connectivity status'),
+            ('admin.irc_presets', 'IRC Server Presets', 'bi-chat-dots', 'Saved IRC server list'),
+            ('admin.dialout_admin', 'Dial-Out Directory', 'bi-telephone-outbound', 'Legacy dial-out numbers'),
+        ],
+    },
+    'system': {
+        'title': 'System & Sysop Tools',
+        'icon': 'bi-tools',
+        'tools': [
+            ('admin.setup_wizard', 'Setup Wizard', 'bi-magic', 'Initial BBS configuration'),
+            ('admin.caller_log', 'Caller Log', 'bi-clock-history', 'Connection history'),
+            ('admin.checklist', 'Launch Checklist', 'bi-check2-square', 'Pre-launch readiness checklist'),
+            ('main.tutorial', 'Sysop Tutorial', 'bi-mortarboard', 'Guided sysop walkthrough'),
+            ('control.index', 'Control Panel', 'bi-sliders', 'Live node control'),
+            ('upgrades_admin.index', 'Check for Updates', 'bi-arrow-up-circle', 'ANetBBS version updates'),
+            ('preflight.index', 'Preflight Checklist', 'bi-clipboard2-check', 'Pre-update sanity checks'),
+            ('events_admin.index', 'Scheduled Events', 'bi-calendar2-event', 'Cron-style maintenance jobs'),
+            ('security_admin.index', 'Security Updates', 'bi-shield-check', 'OS package security patches'),
+            ('door_errors.index', 'Door Errors', 'bi-bug', 'Door game crash log'),
+            ('backups_admin.index', 'Pre-update Backups', 'bi-clock-history', 'Automatic backup snapshots'),
+            ('admin.connection_test', 'Connection Test', 'bi-plug', 'Telnet/SSH/RLogin diagnostics'),
+            ('admin.console', 'Sysop Console', 'bi-terminal', 'Server console access'),
+            ('admin.virus_scan_admin', 'Bulk Virus Scan', 'bi-shield-exclamation', 'Scan uploaded files'),
+            ('admin.activity', 'Activity Log', 'bi-list-check', 'System activity feed'),
+            ('admin.db_backup', 'DB Backup', 'bi-database-down', 'Manual database backup'),
+            ('login_modules_admin.index', 'Logon/Logoff Modules', 'bi-lightning', 'Custom logon/logoff scripts'),
+        ],
+    },
+    'settings': {
+        'title': 'Settings',
+        'icon': 'bi-gear',
+        'tools': [
+            ('admin.settings', 'Settings', 'bi-gear', 'Core BBS configuration'),
+            ('admin.smtp_settings', 'SMTP / Email', 'bi-envelope-at', 'Outgoing mail server'),
+            ('admin.webhooks_admin', 'Webhooks', 'bi-link-45deg', 'Outbound event webhooks'),
+        ],
+    },
+}
+
+
+@admin_bp.route('/hub/<section>')
+@login_required
+@admin_required
+def hub(section):
+    """Category landing page for the Admin navbar dropdown.
+
+    Replaces the old single flat dropdown (58 items) with a short list
+    of categories; each category page shows its tools as cards.
+    """
+    cfg = ADMIN_HUB_SECTIONS.get(section)
+    if not cfg:
+        abort(404)
+    return render_template('admin/hub.html', section=section, cfg=cfg)
+
+
 def _extract_release_notes_for(cfg):
     """Find the section of RELEASE.md that names the running VERSION.
 

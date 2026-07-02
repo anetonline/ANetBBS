@@ -461,70 +461,15 @@
                             <i class="bi bi-shield-lock"></i> Admin
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
-                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Overview</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.dashboard') }}" style="color:var(--theme-primary);">Dashboard</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.setup_wizard') }}" style="color:var(--theme-primary);">🪄 Setup Wizard</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.motd_admin') }}" style="color:var(--theme-primary);">MOTD Pool</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.caller_log') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> Caller Log</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.broadcast') }}" style="color:var(--theme-primary);">📢 Broadcast</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.ip_bans') }}" style="color:var(--theme-primary);"><i class="bi bi-ban"></i> IP Bans</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.ip_whitelist') }}" style="color:var(--theme-primary);"><i class="bi bi-shield-check"></i> IP Whitelist</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.checklist') }}" style="color:var(--theme-primary);"><i class="bi bi-check2-square"></i> Launch Checklist</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('main.tutorial') }}" style="color:var(--theme-primary);"><i class="bi bi-mortarboard"></i> Sysop Tutorial</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('control.index') }}" style="color:var(--theme-primary);"><i class="bi bi-sliders"></i> Control Panel</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('upgrades_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-arrow-up-circle"></i> Check for Updates</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('preflight.index') }}" style="color:var(--theme-primary);"><i class="bi bi-clipboard2-check"></i> Preflight Checklist</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('events_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-calendar2-event"></i> Scheduled Events</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('security_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-shield-check"></i> Security Updates</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('door_errors.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bug"></i> Door Errors</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('backups_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> Pre-update Backups</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('control.index') }}#nodespy" style="color:var(--theme-primary);"><i class="bi bi-binoculars"></i> NodeSpy (kick users)</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.newuser_questions') }}" style="color:var(--theme-primary);"><i class="bi bi-question-circle"></i> New User Questions</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.pending_users') }}" style="color:var(--theme-primary);"><i class="bi bi-person-check"></i> Pending Users (NUV)</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.password_resets') }}" style="color:var(--theme-primary);"><i class="bi bi-key"></i> Password Resets</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.newsletter') }}" style="color:var(--theme-primary);"><i class="bi bi-newspaper"></i> Newsletter</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.inactive_users') }}" style="color:var(--theme-primary);"><i class="bi bi-person-dash"></i> Inactive Users</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.time_budgets') }}" style="color:var(--theme-primary);"><i class="bi bi-clock"></i> Time Budgets</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.connection_test') }}" style="color:var(--theme-primary);">🔌 Connection Test</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.console') }}" style="color:var(--theme-primary);">⌨️ Sysop Console</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.virus_scan_admin') }}" style="color:var(--theme-primary);">🦠 Bulk Virus Scan</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.word_filter') }}" style="color:var(--theme-primary);">🔠 Word Filter</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('file_queue.index') }}" style="color:var(--theme-primary);"><i class="bi bi-shield-check"></i> File Queue</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.webhooks_admin') }}" style="color:var(--theme-primary);">🔗 Webhooks</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.pages') }}" style="color:var(--theme-primary);">🔔 Sysop Pages</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.activity') }}" style="color:var(--theme-primary);">Activity Log</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.registration_attempts') }}" style="color:var(--theme-primary);">Registration Attempts</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.dashboard') }}" style="color:var(--theme-primary);"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Users &amp; Content</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.users') }}" style="color:var(--theme-primary);">Users</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.boards') }}" style="color:var(--theme-primary);">Boards</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.bulletins') }}" style="color:var(--theme-primary);">Bulletins</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.themes') }}" style="color:var(--theme-primary);">Themes</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.theme_builder') }}" style="color:var(--theme-primary);">🎨 Theme Builder</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.db_backup') }}" style="color:var(--theme-primary);">💾 DB Backup</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><h6 class="dropdown-header" style="color:var(--theme-primary);">Subsystems</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('games_admin.dashboard') }}" style="color:var(--theme-primary);">Door Games</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('gallery_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-images"></i> Galleries</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('rss_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-rss-fill"></i> RSS Feeds</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('echomail_admin.dashboard') }}" style="color:var(--theme-primary);">Echomail</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('hub_admin.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast"></i> Hub Management</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.default_echos') }}" style="color:var(--theme-primary);">Default Echo Subs</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.registry_index') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Federation Registry</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('peers_health.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast"></i> Peer Health</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.file_echo_subs') }}" style="color:var(--theme-primary);">File-Echo Subs</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.irc_presets') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-dots"></i> IRC Server Presets</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.dialout_admin') }}" style="color:var(--theme-primary);">Dial-Out Directory</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.file_areas_admin') }}" style="color:var(--theme-primary);">File Areas</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.tic_log') }}" style="color:var(--theme-primary);">TIC Log</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.chat_bans') }}" style="color:var(--theme-primary);">Chat Bans</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('menu_admin.list_menus') }}" style="color:var(--theme-primary);">BBS Menus</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.index') }}" style="color:var(--theme-primary);">🎨 ANSI Editor</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('login_modules_admin.index') }}" style="color:var(--theme-primary);">⚡ Logon/Logoff Modules</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('wall_admin.index') }}" style="color:var(--theme-primary);">🖊️ Graffiti Wall</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.smtp_settings') }}" style="color:var(--theme-primary);"><i class="bi bi-envelope-at"></i> SMTP / Email</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('admin.settings') }}" style="color:var(--theme-primary);">Settings</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='users') }}" style="color:var(--theme-primary);"><i class="bi bi-people"></i> Users</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='messages') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-left-text"></i> Messages</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='files') }}" style="color:var(--theme-primary);"><i class="bi bi-folder"></i> Files</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='content') }}" style="color:var(--theme-primary);"><i class="bi bi-palette"></i> Content</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='network') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Network</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='system') }}" style="color:var(--theme-primary);"><i class="bi bi-tools"></i> System</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.hub', section='settings') }}" style="color:var(--theme-primary);"><i class="bi bi-gear"></i> Settings</a></li>
                         </ul>
                     </li>
                     {% endif %}

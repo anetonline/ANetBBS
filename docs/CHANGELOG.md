@@ -3,6 +3,11 @@
 Versions are internal build numbers. Public releases are tagged
 separately. Current release: **`v1.0b1.6`** (July 2026). Full release: August 1 2026.
 
+## v1.0b2.15 — Terminal message wrapping fix + Admin menu reorg (July 2026)
+
+- FIX: Terminal message reader (board threads, private messages, Inter-BBS instant messages) truncated any line past column 78 (`line[:78]`) instead of word-wrapping it — long web-composed paragraphs were cut off mid-sentence when read over telnet/SSH. `read_thread`, the PM viewer, and the InterBBS IM viewer now build their output through `_wrap_text()` and a new shared `_page_lines()` pager (extracted from `_page_text()`), so long messages word-wrap to the session's terminal width and paginate with a `--MORE--` prompt instead of truncating.
+- FEATURE: Admin navbar dropdown reorganized from one 58-item flat list into 8 entries (Dashboard + Users/Messages/Files/Content/Network/System/Settings). Each category opens a new `/admin/hub/<section>` page rendering its tools as cards (`ADMIN_HUB_SECTIONS` in `web/admin.py`, `templates/admin/hub.html`). Purely a navigation change — no existing admin route or URL was moved.
+
 ## v1.0b2.14 — CP437 encoding fixes: terminal input + web renderer (July 2026)
 
 - FIX: ANEdit dropped CP437 high-byte characters (ä ö ü Ä Ö Ü ß etc.) entered from SyncTERM/CP437 sessions. Root cause: `_Keys` decoded raw bytes as `latin-1`, turning CP437 byte 0x84 (ä) into U+0084 (a C1 control character), which `isprintable()` rejects. `_Keys` now uses `session.encoding` (default `cp437`) so high bytes decode to their correct Unicode glyphs and are inserted normally. UTF-8 multi-byte buffering also added for SSH sessions.

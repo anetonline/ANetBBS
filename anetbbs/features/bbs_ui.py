@@ -275,17 +275,20 @@ class BBSMenuUI:
                     'content': p.content,
                 })
 
-        await self.session.write("\r\n" + "═" * 64 + "\r\n")
+        from .ansi_ui import ui_width
+        col_w = ui_width(self.session)
+        await self.session.write("\r\n" + "═" * col_w + "\r\n")
+        lines = []
         for i, p in enumerate(rendered):
             ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
             tag = '[OP]' if i == 0 else f'[Reply {i}]'
-            await self.session.write(f"\r\n{tag} {p['subject']}\r\n")
-            await self.session.write(f"From: {p['author']}    Date: {ts}\r\n")
-            await self.session.write("─" * 64 + "\r\n")
-            for line in (p['content'] or '').splitlines():
-                await self.session.write(line[:78] + "\r\n")
-            await self.session.write("\r\n")
-        await self.session.read_line("Press Enter...")
+            lines.append('')
+            lines.append(f"{tag} {p['subject']}")
+            lines.append(f"From: {p['author']}    Date: {ts}")
+            lines.append("─" * col_w)
+            lines.extend(self._wrap_text(p['content'] or '', col_w))
+            lines.append('')
+        await self._page_lines(lines, end_message='--- end of thread ---')
 
     # ------------------------------------------------------------------
     # Bulletins
@@ -373,7 +376,17 @@ class BBSMenuUI:
                 lines.append(_ln)
             else:
                 lines.extend(self._wrap_text(_ln, col_w) or [''])
+        await self._page_lines(lines, page_size=page_size)
+
+    async def _page_lines(self, lines, page_size=22, end_message='--- end ---'):
+        """Write a pre-built list of terminal lines, pausing with a
+        [MORE] prompt every `page_size` lines. Shared by any reader that
+        needs to paginate wrapped text (bulletins, threads, PMs, IMs).
+        """
+        YEL = '\x1b[93m'; DIM = '\x1b[37m'; RESET = '\x1b[0m'
         total = len(lines)
+        if not total:
+            return
         page = 0
         while page * page_size < total:
             chunk = lines[page * page_size:(page + 1) * page_size]
@@ -381,11 +394,9 @@ class BBSMenuUI:
                 await self.session.write(line + '\r\n')
             page += 1
             if page * page_size >= total:
-                # End of bulletin
                 await self.session.read_line(
-                    f'{YEL}--- end ---{RESET}  Press Enter to continue: ')
+                    f'{YEL}{end_message}{RESET}  Press Enter to continue: ')
                 return
-            # Show pager prompt
             shown = min(page * page_size, total)
             prompt = (f'{YEL}--MORE--{RESET}  '
                       f'({shown}/{total} lines)  '
@@ -444,15 +455,13 @@ class BBSMenuUI:
                     await self.session.write("\r\n" + "═" * _w + "\r\n")
                     await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
                     await self.session.write("─" * _w + "\r\n")
-                    for line in (body or '').splitlines():
-                        await self.session.write(line[:78] + "\r\n")
+                    await self._page_lines(self._wrap_text(body or '', _w))
                     # Mark as read
                     with _app().app_context():
                         pm = PrivateMessage.query.get(pm_id)
                         if pm and pm.read_at is None:
                             pm.read_at = datetime.utcnow()
                             db.session.commit()
-                    await self.session.read_line("\r\nPress Enter...")
             except ValueError:
                 pass
 
@@ -514,18 +523,16 @@ class BBSMenuUI:
             mid, who, host, when, _, body = rows[idx]
 
             if cmd == 'V':
-                await self.session.write("\r\n" + "═" * 64 + "\r\n")
+                await self.session.write("\r\n" + "═" * _w + "\r\n")
                 ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
                 await self.session.write(f"  From: {who}\r\n  Host: {host}\r\n  Date: {ts}\r\n")
-                await self.session.write("─" * 64 + "\r\n")
-                for line in body.splitlines():
-                    await self.session.write(line[:78] + "\r\n")
+                await self.session.write("─" * _w + "\r\n")
+                await self._page_lines(self._wrap_text(body or '', _w))
                 with _app().app_context():
                     im = InstantMessage.query.get(mid)
                     if im and not im.is_read:
                         im.is_read = True
                         db.session.commit()
-                await self.session.read_line("\r\nPress Enter...")
 
             elif cmd == 'D':
                 with _app().app_context():
