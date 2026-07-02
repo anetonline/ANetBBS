@@ -23,7 +23,7 @@
             
             <div class="mb-3">
                 {{ form.content.label(class="form-label") }}
-                {{ form.content(class="form-control", rows=10) }}
+                {{ form.content(class="form-control", rows=10, spellcheck="true") }}
                 {% if form.content.errors %}
                     <div class="invalid-feedback d-block">
                         {% for error in form.content.errors %}{{ error }}{% endfor %}

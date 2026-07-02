@@ -60,7 +60,7 @@
 
             <div class="mb-3">
                 {{ form.body.label(class="form-label") }}
-                {{ form.body(class="form-control", rows=15,
+                {{ form.body(class="form-control", rows=15, spellcheck="true",
                              style="font-family: 'Courier New', monospace; font-size: 0.9rem;") }}
                 {% for err in form.body.errors %}
                 <div class="text-danger" style="font-size:0.85rem;">{{ err }}</div>

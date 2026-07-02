@@ -43,6 +43,7 @@ def _show():     return f"{_E}[?25h"
 def _reset():    return f"{_E}[0m"
 def _bold():     return f"{_E}[1m"
 def _rev():      return f"{_E}[7m"
+def _under():    return f"{_E}[4m"
 def _fg(n):      return f"{_E}[38;5;{n}m"
 def _bg(n):      return f"{_E}[48;5;{n}m"
 def _clreol():   return f"{_E}[K"
@@ -78,6 +79,7 @@ _THEMES = [
         'sel':       _bg(31)  + _fg(255),
         'quote':     _fg(179),
         'dirty':     _bold()  + _fg(196),
+        'misspell':  _under() + _fg(196),
         'info':      _bold()  + _fg(226),
     },
     {   # Green
@@ -94,6 +96,7 @@ _THEMES = [
         'sel':       _bg(34)  + _fg(255),
         'quote':     _fg(179),
         'dirty':     _bold()  + _fg(196),
+        'misspell':  _under() + _fg(196),
         'info':      _bold()  + _fg(226),
     },
     {   # Amber
@@ -110,9 +113,57 @@ _THEMES = [
         'sel':       _bg(166) + _fg(255),
         'quote':     _fg(190),
         'dirty':     _bold()  + _fg(196),
+        'misspell':  _under() + _fg(196),
         'info':      _bold()  + _fg(226),
     },
 ]
+
+
+# ── Spell check ───────────────────────────────────────────────────────────────
+# pyspellchecker bundles its own dictionary (no network, no external file) —
+# see requirements.txt. Import lazily and degrade silently if it's ever
+# missing, matching the markdown/bleach graceful-degradation pattern used
+# elsewhere in this codebase (web_app.py).
+_WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+_spellchecker = None
+_spellchecker_tried = False
+
+
+def _get_spellchecker():
+    global _spellchecker, _spellchecker_tried
+    if not _spellchecker_tried:
+        _spellchecker_tried = True
+        try:
+            from spellchecker import SpellChecker
+            _spellchecker = SpellChecker()
+        except ImportError:
+            _spellchecker = None
+    return _spellchecker
+
+
+def _find_misspelled(line: str) -> list:
+    """Return [(start, end, word), ...] for misspelled words in *line*.
+    Skips quoted lines (caller's job) and all-caps tokens (BBS/ANSI jargon
+    like SSH, QWK, ANSI reads as a false positive far more often than a
+    real typo)."""
+    sp = _get_spellchecker()
+    if sp is None:
+        return []
+    candidates = []
+    words = {}
+    for m in _WORD_RE.finditer(line):
+        w = m.group(0)
+        if len(w) < 2 or (w.isupper() and len(w) > 1):
+            continue
+        words[w.lower()] = words.get(w.lower(), []) + [m]
+    if not words:
+        return []
+    unknown = sp.unknown(words.keys())
+    for w in unknown:
+        for m in words[w]:
+            candidates.append((m.start(), m.end(), m.group(0)))
+    candidates.sort()
+    return candidates
 
 
 # ── Key parser ─────────────────────────────────────────────────────────────────
@@ -369,9 +420,11 @@ class _Screen:
 
     # ── Text area ──────────────────────────────────────────────────────────────
     def draw_text(self, lines: list, scroll: int,
-                  mark: Optional[tuple], cy: int, cx: int) -> str:
+                  mark: Optional[tuple], cy: int, cx: int,
+                  misspell: Optional[dict] = None) -> str:
         t  = self.t
         o  = []
+        misspell = misspell or {}
 
         # Normalise selection bounds
         sel_s = sel_e = None
@@ -393,20 +446,26 @@ class _Screen:
             line    = lines[ly]
             padded  = line[:_TW].ljust(_TW)
             is_q    = line.lstrip().startswith('>')
+            spans   = misspell.get(ly)
 
-            if sel_s is None:
-                # No selection — fast path
+            if sel_s is None and not spans:
+                # No selection, no misspellings on this line — fast path
                 col = t['quote'] if is_q else _reset()
                 o.append(col + padded + _reset())
             else:
-                # Render char-by-char for selection
+                # Render char-by-char for selection and/or misspell underline
                 chunks = []
                 for ci in range(_TW):
                     pos = (ly, ci)
-                    in_sel = sel_s <= pos < sel_e
+                    in_sel = sel_s is not None and sel_s <= pos < sel_e
+                    in_mis = spans is not None and any(s <= ci < e for s, e, _ in spans)
                     ch = padded[ci]
-                    if in_sel:
+                    if in_sel and in_mis:
+                        chunks.append(t['sel'] + _under() + ch)
+                    elif in_sel:
                         chunks.append(t['sel'] + ch)
+                    elif in_mis:
+                        chunks.append(t['misspell'] + ch)
                     else:
                         chunks.append((t['quote'] if is_q else _reset()) + ch)
                 o.append("".join(chunks) + _reset())
@@ -618,7 +677,8 @@ class ANEdit:
             self._df = False
         if self._dt:
             out.append(self._scr.draw_text(
-                self.lines, self.scroll, self._mark, self.cy, self.cx))
+                self.lines, self.scroll, self._mark, self.cy, self.cx,
+                self._visible_misspellings()))
             self._dt = False
         if self._ds:
             fm = self._flash_msg if self._flash_msg else ""
@@ -641,6 +701,24 @@ class ANEdit:
 
     def _char_count(self) -> int:
         return sum(len(l) for l in self.lines)
+
+    # ── Spell check ────────────────────────────────────────────────────────────
+    def _visible_misspellings(self) -> dict:
+        """Misspelled-word spans for the currently visible lines only —
+        recomputed fresh each redraw (cheap: ~17 lines, sub-millisecond),
+        so no cache/invalidation bookkeeping is needed. Quoted lines
+        (someone else's text) are never flagged."""
+        if _get_spellchecker() is None:
+            return {}
+        out = {}
+        for ly in range(self.scroll, min(self.scroll + _TEXT_H, len(self.lines))):
+            line = self.lines[ly]
+            if line.lstrip().startswith('>'):
+                continue
+            spans = _find_misspelled(line)
+            if spans:
+                out[ly] = spans
+        return out
 
     # ── Scroll helper ──────────────────────────────────────────────────────────
     def _ensure_visible(self):
@@ -1132,6 +1210,7 @@ class ANEdit:
             ("Ctrl+V",       "Paste",               "/replace",     "Find & replace"),
             ("Ctrl+F",       "Find",                "/undo  /redo", "Undo / redo"),
             ("Ctrl+H",       "Find & replace",      "/cc",          "Color codes"),
+            ("",             "",                    "/spell  /sp",  "Check spelling"),
         ]
         for i, (lk, lv, rk, rv) in enumerate(clip):
             o.append(_lc(r1 + 11 + i, lk, lv))
@@ -1167,7 +1246,7 @@ class ANEdit:
     # then dispatches or (on no match) inserts the typed text normally.
     _SLASH_HELP = (
         " Commands: /? or /help=Help  /t=Theme  /m=Mark  /cc=Colors"
-        "  /find  /replace  /undo  /redo  /save  /send  /q=Abort"
+        "  /find  /replace  /undo  /redo  /save  /send  /spell  /q=Abort"
     )
     _SLASH_MAP = {
         '?':       'help',   'help':    'help',
@@ -1180,6 +1259,7 @@ class ANEdit:
         'redo':    'redo',
         'save':    'save',   's':       'save',
         'send':    'send',   'w':       'send',
+        'spell':   'spell',  'sp':      'spell',
         'q':       'abort',  'quit':    'abort',  'abort': 'abort',
     }
 
@@ -1237,6 +1317,8 @@ class ANEdit:
             self._save_draft()
         elif action == 'send':
             self.done = True
+        elif action == 'spell':
+            await self._spell_check()
         elif action == 'abort':
             await self._confirm_abort()
         else:
@@ -1397,6 +1479,103 @@ class ANEdit:
                 self._flash(f"Inserted {code}")
                 break
         self._df = self._dt = self._ds = True
+
+    def _find_next_misspelling(self):
+        """Search forward from just after the cursor, wrapping around the
+        whole document, for the next misspelled word. Returns
+        (line_idx, start, end, word) or None."""
+        if _get_spellchecker() is None:
+            return None
+        total = len(self.lines)
+        for delta in range(total + 1):
+            ly = (self.cy + delta) % total
+            line = self.lines[ly]
+            if line.lstrip().startswith('>'):
+                continue
+            spans = _find_misspelled(line)
+            if not spans:
+                continue
+            if delta == 0:
+                spans = [s for s in spans if s[0] > self.cx]
+            if spans:
+                start, end, word = spans[0]
+                return ly, start, end, word
+        return None
+
+    async def _spell_check(self):
+        """Jump to the next misspelled word and offer suggestions. Loops
+        (not recurses) on skip/replace so a document full of unrecognised
+        words can't grow an unbounded call stack."""
+        if _get_spellchecker() is None:
+            self._flash("Spell check unavailable")
+            return
+        sp = _get_spellchecker()
+        t  = self._scr.t
+        w  = 76
+        r1 = 8
+
+        while True:
+            found = self._find_next_misspelling()
+            if not found:
+                self._flash("No misspelled words found")
+                self._df = self._dt = self._ds = True
+                return
+            ly, start, end, word = found
+            self.cy, self.cx = ly, start
+            self._ensure_visible()
+            self._dt = True
+            await self._redraw()
+
+            best  = sp.correction(word)
+            cands = list(sp.candidates(word) or [])
+            if best and best in cands:
+                cands.remove(best)
+            if best:
+                cands.insert(0, best)
+            cands = cands[:6]   # keep each entry readable within box width
+
+            def render():
+                b = t['border']
+                o = [_mv(r1, 4) + b + "╔" + "═"*(w-2) + "╗",
+                     _mv(r1+1, 4) + b + "║" + t['title']
+                     + f' Misspelled: "{word}"  0-5=Replace  N=Skip  Esc=Cancel '.center(w-2)
+                     + b + "║"]
+                if cands:
+                    row = "".join(f"{i}:{c[:10]:<10}" for i, c in enumerate(cands))
+                else:
+                    row = "(no suggestions)"
+                o.append(_mv(r1+2, 4) + b + "║ " + _reset() + row[:w-4].ljust(w-4) + b + " ║")
+                o.append(_mv(r1+3, 4) + b + "╚" + "═"*(w-2) + "╝" + _reset())
+                return "".join(o)
+
+            await self._wr(render())
+            action = None
+            while action is None:
+                key = await self._read_key()
+                if key is None:
+                    continue
+                if key == 'ESC':
+                    action = 'cancel'
+                elif key.upper() == 'N' or key in ('ENTER', ' '):
+                    action = 'skip'
+                elif len(key) == 1 and key.isdigit() and int(key) < len(cands):
+                    action = int(key)
+
+            if action == 'cancel':
+                self._df = self._dt = self._ds = True
+                return
+            if action == 'skip':
+                continue
+            repl = cands[action]
+            self._push_undo()
+            line = self.lines[ly]
+            self.lines[ly] = line[:start] + repl + line[end:]
+            self.cx = start + len(repl)
+            self._mark_modified()
+            self._dt = True
+            self._flash(f'Replaced "{word}" with "{repl}"')
+            self._df = self._dt = self._ds = True
+            return
 
     # ── Main key dispatcher ────────────────────────────────────────────────────
     async def _handle(self, key: str):

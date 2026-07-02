@@ -455,7 +455,8 @@ class BBSMenuUI:
                     await self.session.write("\r\n" + "═" * _w + "\r\n")
                     await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
                     await self.session.write("─" * _w + "\r\n")
-                    await self._page_lines(self._wrap_text(body or '', _w))
+                    await self._page_lines(
+                        [self._linkify_url_line(l) for l in self._wrap_text(body or '', _w)])
                     # Mark as read
                     with _app().app_context():
                         pm = PrivateMessage.query.get(pm_id)
@@ -527,7 +528,8 @@ class BBSMenuUI:
                 ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
                 await self.session.write(f"  From: {who}\r\n  Host: {host}\r\n  Date: {ts}\r\n")
                 await self.session.write("─" * _w + "\r\n")
-                await self._page_lines(self._wrap_text(body or '', _w))
+                await self._page_lines(
+                    [self._linkify_url_line(l) for l in self._wrap_text(body or '', _w)])
                 with _app().app_context():
                     im = InstantMessage.query.get(mid)
                     if im and not im.is_read:
@@ -2406,6 +2408,30 @@ class BBSMenuUI:
                 out.append(line)
         return out
 
+    _URL_RE = re.compile(r'https?://[^\s<>"\'\x1b]+')
+
+    @classmethod
+    def _linkify_url_line(cls, line):
+        """Wrap https:// URLs in OSC 8 terminal hyperlink escapes so
+        supporting clients (Windows Terminal, iTerm2, kitty, gnome-terminal,
+        etc.) make them clickable. Clients that don't understand OSC 8
+        (most classic BBS terminals — SyncTERM, mTelnet, etc.) simply
+        ignore the unrecognised escape sequence; the URL text itself
+        still displays normally either way, so this never hides anything
+        on an unsupporting terminal."""
+        def sub(m):
+            url = m.group(0)
+            # Strip trailing punctuation that's almost always sentence
+            # punctuation, not part of the URL (e.g. "see https://x.com.")
+            trail = ''
+            while url and url[-1] in '.,;:!?)]}\'"':
+                trail = url[-1] + trail
+                url = url[:-1]
+            if not url:
+                return m.group(0)
+            return f'\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\{trail}'
+        return cls._URL_RE.sub(sub, line)
+
     @staticmethod
     def _sanitize_cp437(text):
         """Replace common Unicode chars with CP437-safe equivalents."""
@@ -3016,6 +3042,7 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
         for source_line in (p['content'] or '').splitlines() or ['']:
             is_quote = source_line.lstrip().startswith('>')
             for wrapped_line in (self._wrap_text(source_line, _line_w) or ['']):
+                wrapped_line = self._linkify_url_line(wrapped_line)
                 if is_quote:
                     lines.append(f"  {FG['gry']}{wrapped_line}{RESET}")
                 else:

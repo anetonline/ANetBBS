@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0b2.post19",
+    version="1.0b2.post21",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -59,6 +59,10 @@ setup(
         # Service Control Center — per-PID CPU% + memory sampler at
         # /admin/control/. Reads /proc, no special privileges.
         'psutil>=5.9.0',
+        # Spell check for ANEdit (anetbbs/features/anedit.py). Pure Python,
+        # bundles its own dictionary, imported lazily and degrades silently
+        # if ever missing — see requirements.txt for the full rationale.
+        'pyspellchecker>=0.8.0',
     ],
     entry_points={
         'console_scripts': [

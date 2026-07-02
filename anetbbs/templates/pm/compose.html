@@ -24,7 +24,7 @@
                     </div>
                     <div class="mb-3">
                         {{ form.content.label(class="form-label") }}
-                        {{ form.content(class="form-control", rows="10") }}
+                        {{ form.content(class="form-control", rows="10", spellcheck="true") }}
                         {% for e in form.content.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
                     </div>
                     <div class="d-flex gap-2 align-items-center">

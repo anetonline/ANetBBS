@@ -93,3 +93,9 @@ aiosmtplib>=3.0.0
 # Service Control Center — per-PID CPU% + memory sampling for the
 # live graphs at /admin/control/. Reads /proc, no special privileges.
 psutil>=5.9.0
+
+# Spell check for ANEdit (anetbbs/features/anedit.py, terminal message
+# editor). Pure Python, bundles its own English dictionary (no network
+# call, no external wordlist file to ship) — imported lazily and degrades
+# silently if ever missing, same pattern as markdown/bleach above.
+pyspellchecker>=0.8.0

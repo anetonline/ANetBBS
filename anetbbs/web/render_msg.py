@@ -166,11 +166,50 @@ def _ansi_to_html(text: str) -> str:
     return ''.join(out)
 
 
+_URL_RE = re.compile(r'(https?://[^\s<>"\']+)')
+_IMG_EXT_RE = re.compile(r'\.(?:jpg|jpeg|png|gif|webp|svg)$', re.IGNORECASE)
+_URL_TRAIL = '.,;:!?)]}\'"'
+
+
+def _linkify(decoded: str, embed_images: bool) -> str:
+    """Split *decoded* on bare https?:// URLs, running everything else
+    through the normal ANSI/CP437-to-HTML pass and turning URLs into
+    clickable <a> tags (or <img> tags for image URLs, when embed_images
+    is set — board posts only, see render_msg_body_rich).
+
+    Trailing sentence punctuation ("see https://x.com." or a URL closing
+    a parenthetical) is kept out of the link target/text, matching the
+    same heuristic used for terminal OSC 8 hyperlinks in bbs_ui.py."""
+    out = []
+    last = 0
+    for m in _URL_RE.finditer(decoded):
+        out.append(_vt_to_html(decoded[last:m.start()]))
+        url = m.group(1)
+        trail = ''
+        while url and url[-1] in _URL_TRAIL:
+            trail = url[-1] + trail
+            url = url[:-1]
+        last = m.end() - len(trail)
+        if not url:
+            continue
+        if embed_images and _IMG_EXT_RE.search(url):
+            out.append('<br><img src="' + str(escape(url)) +
+                       '" alt="" style="max-width:100%;max-height:600px;'
+                       'border:1px solid var(--theme-border);"><br>')
+        else:
+            esc = str(escape(url))
+            out.append(f'<a href="{esc}" target="_blank" '
+                       f'rel="noopener noreferrer">{esc}</a>')
+    out.append(_vt_to_html(decoded[last:]))
+    return ''.join(out)
+
+
 def render_msg_body(text, chrs: str = '') -> Markup:
     """Jinja filter: render a message body as HTML with CP437 + ANSI support.
     Also translates Synchronet/MRC `|NN` pipe color codes to ANSI before
     the ANSI-to-HTML pass — Mystic-originated echomail and netmail commonly
-    embed these in signatures and ANSI art blocks."""
+    embed these in signatures and ANSI art blocks. Bare https:// URLs are
+    turned into clickable links (see _linkify)."""
     if not text:
         return Markup('')
     decoded = _decode_charset(str(text), chrs)
@@ -187,16 +226,12 @@ def render_msg_body(text, chrs: str = '') -> Markup:
     # row/col so artifact \n between them have no visual effect on those rows.
     if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
         decoded = decoded.replace('\n', '')
-    return Markup(_vt_to_html(decoded))
-
-
-_IMG_URL_RE = re.compile(
-    r'(https?://[^\s<>"\']+\.(?:jpg|jpeg|png|gif|webp|svg))',
-    re.IGNORECASE)
+    return Markup(_linkify(decoded, embed_images=False))
 
 
 def render_msg_body_rich(text, chrs: str = '') -> Markup:
-    """Like render_msg_body but also embeds image URLs as <img> tags.
+    """Like render_msg_body but also embeds image URLs as <img> tags
+    instead of a plain link.
 
     Used for board posts where users paste image links and also occasionally
     paste ANSI art / CP437 box-drawing.
@@ -212,14 +247,4 @@ def render_msg_body_rich(text, chrs: str = '') -> Markup:
     decoded = _pipe_to_ansi(decoded)
     if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
         decoded = decoded.replace('\n', '')
-    out = []
-    last = 0
-    for m in _IMG_URL_RE.finditer(decoded):
-        out.append(_vt_to_html(decoded[last:m.start()]))
-        url = m.group(1)
-        out.append('<br><img src="' + str(escape(url)) +
-                   '" alt="" style="max-width:100%;max-height:600px;'
-                   'border:1px solid var(--theme-border);"><br>')
-        last = m.end()
-    out.append(_vt_to_html(decoded[last:]))
-    return Markup(''.join(out))
+    return Markup(_linkify(decoded, embed_images=True))
