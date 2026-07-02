@@ -868,7 +868,7 @@ GRAV     = 0.35
 JUMP_V   = -2.8
 MOVE_SPD = 0.35
 SWIM_SPD = 0.18
-DAY_TICK = 500     # ticks per full day
+DAY_TICK = 7500    # ~10 min/day at 80ms/tick (was 500 = 40s, way too fast)
 
 
 class ANetCraft:

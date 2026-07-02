@@ -3,6 +3,10 @@
 Versions are internal build numbers. Public releases are tagged
 separately. Current release: **`v1.0b1.6`** (July 2026). Full release: August 1 2026.
 
+## v1.0b2.18 — ANetCRAFT: day/night cycle was 40 seconds, now 10 minutes (July 2026)
+
+- FIX: `DAY_TICK` was 500 (40 seconds/day at the 80ms tick rate) — reported by Jerry as far too fast to feel like a real survival mechanic. Changed to 7500 (~10 minutes/day). All consuming code (`DayT()`/`_day_t()`, the "Day N" counters, the saved-game lobby preview) derives from this one constant via division/modulo, so the change propagates cleanly with no other edits needed. Applied identically to both this Python version and the standalone C# ANetCRAFT-Door project.
+
 ## v1.0b2.17 — ANetCRAFT: fix severe lighting-related slowdown (July 2026)
 
 - FIX: v1.0b2.16's `World.light_at()` was ported straight from the C# version's per-cell design — an O(R²) 17×17-tile neighborhood scan for every query, called once per visible cell (~1560 cells/frame in `_draw_world`). Cheap in compiled/JIT'd C#; measured 155ms/frame in pure Python against an 80ms tick budget — reported by Jerry as "very slow" on the main ANetBBS server and "pretty much unplayable" on a Pi3. New `World.compute_light_grid(cam_x, cam_y, vp_w, vp_h, is_day)` computes the entire viewport's lighting in one pass: one O(depth) scan per *column* for skylight instead of per cell, and one pass over the viewport+margin that finds each light source once and splats its falloff onto nearby grid cells, instead of every cell independently re-scanning its neighborhood for sources. `_draw_world` now calls this once per frame. Measured 5-7ms/frame typical, ~29ms even in a deliberately dense-torch stress test — both comfortably under budget. Verified byte-identical output against the old per-cell method across a full viewport (0 mismatches) before trusting the optimization.
