@@ -1,7 +1,7 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b1.6`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.21`** (July 2026). Full release: August 1 2026.
 
 ## v1.0b2.21 — Fix: pyspellchecker was never actually installed (July 2026)
 
