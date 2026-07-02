@@ -2999,23 +2999,28 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
                 'pid': p.id,
             })
     _w = ui_width(self.session)
-    _line_w = max(76, _w - 4)
+    # Was `max(76, _w - 4)` — a floor of 76 meant lines could still overflow
+    # a narrower-than-80 terminal. `max(20, ...)` lets it actually shrink.
+    _line_w = max(20, _w - 4)
     await self.session.write('\x1b[2J\x1b[H')
     await self.session.write(banner(f'{board_name} — {rendered[0]["subject"][:40]}', _w))
+    lines = []
     for i, p in enumerate(rendered):
         ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
         tag = f"{FG['yel']}{BOLD}[OP]{RESET}" if i == 0 else f"{FG['gry']}[Reply {i}]{RESET}"
-        await self.session.write(
-            f"\r\n{tag}  "
-            f"{FG['cyan']}{BOLD}{p['subject']}{RESET}\r\n"
-            f"  {FG['grn']}From:{RESET} {p['author']:<16}"
-            f"  {FG['gry']}Date:{RESET} {ts}\r\n"
-            f"  {FG['gry']}{'─' * max(60, _w - 4)}{RESET}\r\n")
-        for line in (p['content'] or '').splitlines():
-            if line.lstrip().startswith('>'):
-                await self.session.write(f"  {FG['gry']}{line[:_line_w]}{RESET}\r\n")
-            else:
-                await self.session.write(f"  {line[:_line_w]}\r\n")
+        lines.append('')
+        lines.append(f"{tag}  {FG['cyan']}{BOLD}{p['subject']}{RESET}")
+        lines.append(f"  {FG['grn']}From:{RESET} {p['author']:<16}"
+                      f"  {FG['gry']}Date:{RESET} {ts}")
+        lines.append(f"  {FG['gry']}{'─' * max(60, _w - 4)}{RESET}")
+        for source_line in (p['content'] or '').splitlines() or ['']:
+            is_quote = source_line.lstrip().startswith('>')
+            for wrapped_line in (self._wrap_text(source_line, _line_w) or ['']):
+                if is_quote:
+                    lines.append(f"  {FG['gry']}{wrapped_line}{RESET}")
+                else:
+                    lines.append(f"  {wrapped_line}")
+    await self._page_lines(lines, end_message='--- end of thread ---')
     await self.session.write('\r\n' + footer(_w) + '\r\n')
     choice = (await self.session.read_line(
         _prompt('R=reply  Enter=back: ')) or '').strip().upper()
