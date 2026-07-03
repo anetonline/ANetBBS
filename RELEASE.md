@@ -1,3 +1,18 @@
+# ANetBBS v1.0b2.26 — MRC: terminal fixes + stale-session cleanup (July 2026)
+
+- FIX: `/mentions` always showed 0 — mention detection was wired to event types the bridge never sends; moved it to the real `mrc_message` path. The status-bar `!N` indicator now works live too.
+- FIX: messages up to 140 chars could get silently truncated to ~120 — the bridge prepends your display handle before its cutoff; terminal client now accounts for that overhead and splits long messages into `(1/2)`/`(2/2)` chunks instead of losing the tail.
+- FIX: mention indicator was reverse-video red, illegible on some terminals — switched to explicit fg/bg colors.
+- FIX: `/mentions` output misaligned on wrap — restructured into a header line + indented body line per mention.
+- CHANGE: `/help` and `/helpserver` swapped — `/help` now asks the hub for its own help, `/helpserver` shows the client's local command list.
+- FIX: outgoing text color (arrow keys) never persisted across reconnects — now restores on join and saves via `set_style` whenever you cycle color.
+- FIX: Tab nick-completion gave no feedback on zero matches and could dump an unbounded candidate list — now gives explicit "no match" feedback and caps the list at 12 with a "+N more" hint. Also fixed a real bug where a visibly-present user couldn't be found: `/who`'s roster is a comma-separated wire format, but the parser was splitting on whitespace and never extracting anyone correctly. Bridge now also refreshes the roster whenever a client runs `/who`.
+- FIX (critical): a mid-round version of the Tab-completion fix briefly deadlocked terminal MRC solid on the next Tab press (held a lock across a call that needed the same lock). Fixed and covered by a timeout-guarded test.
+- FIX (bridge): a dropped connection (dead cable, force-killed client) left MRC sessions looking permanently logged in, causing "you can only be logged on once" from the upstream hub. The bridge's cleanup logic was already correct but never ran, since the WebSocket had no heartbeat. Added `heartbeat=30`; no client-side changes needed.
+- 42 new tests across `tests/test_mrc_terminal_mentions.py` and `tests/test_mrc_bridge_userlist.py`.
+
+---
+
 # ANetBBS v1.0b2.25 — Paginate large file areas (July 2026)
 
 - FEATURE: file area listings (**File Areas → any area**) are now paginated (50 files/page) instead of rendering every file in the area on one page — reported by the sysop after a door-games file area with 7,000+ files took a noticeable while to load, same complaint pattern as the CHANGELOG page before it was paginated (v1.0b2.22). Sorting (by name/size/date) still applies to the full list before slicing, so page contents are stable and correct regardless of which page you're on; pagination links preserve the active sort. New shared `ListPagination` helper (`anetbbs/web/list_pagination.py`) — same Flask-SQLAlchemy-compatible interface as the CHANGELOG's own pagination class, but with proper `…`-truncated page links for the hundreds of pages a large file area can span (the CHANGELOG's version didn't need that — it never gets anywhere near that many pages). Verified end-to-end against a 137-file scratch area: correct per-page counts including the partial last page, correct sort-then-slice ordering, out-of-range page numbers clamp instead of erroring, sort preserved across page links.

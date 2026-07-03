@@ -193,6 +193,16 @@ class MRCChat(BaseChatSystem):
         self._mention_count    = 0
         self._mention_log      = deque(maxlen=50)
         self._known_users      = set()
+        # Wire chars the bridge prepends before the typed message (styled
+        # display handle for room chat, DM wrapper prefix for /t) -- sent by
+        # the bridge on 'joined' (see mrc/bridge/main.py
+        # _session_display_handle_wire_len/_session_dm_overhead). The bridge
+        # hard-truncates the final packet at 140 chars *after* prepending
+        # this, so outgoing chunks must be capped at 140 minus this to avoid
+        # the tail silently getting cut off server-side. Matches the web
+        # client's handleOverheadChars/dmOverheadChars (mrc/index.html).
+        self._handle_overhead  = 0
+        self._dm_overhead      = 0
         self._scrollback       = deque(maxlen=SCROLLBACK_LINES)
         self._display_lines    = deque(maxlen=SCROLLBACK_LINES)  # rendered lines for screen
         self._split_screen     = True
@@ -277,7 +287,7 @@ class MRCChat(BaseChatSystem):
             await self._enter_split_screen()
             await self._emit(
                 f'\x1b[32mJoined #{self._room} as {self._handle}.\x1b[0m  '
-                'Type /help for commands, /quit to leave.')
+                'Type /helpserver for commands, /quit to leave.')
             await self._emit(
                 '\x1b[33mTip:\x1b[0m use [<] [>] arrow keys to change outgoing text color.')
 
@@ -392,11 +402,35 @@ class MRCChat(BaseChatSystem):
         if self._scroll_offset:
             right_bits.append(f'\x1b[1;37;43m PAUSED+{self._scroll_offset} \x1b[0m')
         if self._mention_count:
-            right_bits.append(f'\x1b[1;7;91m !{self._mention_count} \x1b[0m')
-        # Character count: show remaining chars out of 140 limit
+            # Explicit fg/bg (not reverse-video) -- matches the PAUSED badge's
+            # approach above. The old '1;7;91' (bold+reverse+bright-red-fg)
+            # relied on reverse-video swapping to produce a visible
+            # background, which several terminals render as illegibly dark
+            # red-on-red -- reported as invisible "unless you highlight it".
+            right_bits.append(f'\x1b[1;37;41m !{self._mention_count} \x1b[0m')
+        # Character count: show remaining chars out of the wire limit for
+        # whatever's currently typed (plain chat / DM have different caps
+        # since the bridge prepends a display handle before its hard
+        # 140-char cutoff -- see _chat_wire_cap/_dm_wire_cap).
         typed = len(self._input_buf)
         if typed > 0:
-            remaining = 140 - typed
+            buf_text = ''.join(self._input_buf)
+            low = buf_text.lstrip()
+            lower = low.lower()
+            if any(lower.startswith(f'/{p} ') for p in
+                   ('msg', 't', 'tell', 'dm', 'pm', 'whisper', 'w')):
+                # Only the message portion (after "/cmd target ") counts
+                # against the DM wire cap -- matches what the bridge
+                # actually receives as the DM payload.
+                parts = low.split(' ', 2)
+                msg_part = parts[2] if len(parts) > 2 else ''
+                remaining = self._dm_wire_cap() - len(msg_part)
+            elif lower.startswith('/me '):
+                remaining = MAX_OUTGOING_CHARS - len(low[4:])
+            elif lower.startswith('/'):
+                remaining = MAX_OUTGOING_CHARS - typed
+            else:
+                remaining = self._chat_wire_cap() - typed
             if remaining < 0:
                 cc = f'\x1b[1;91m{remaining}\x1b[0m'   # red: over limit
             elif remaining <= 15:
@@ -481,7 +515,7 @@ class MRCChat(BaseChatSystem):
         self._scroll_offset = max(0, min(max_off, self._scroll_offset + delta))
         await self._redraw_chat_area()
 
-    async def _emit(self, text: str):
+    async def _emit(self, text: str, extra_indent: str = ''):
         """Append text to the chat history and redraw the entire scroll region.
 
         Approach: maintain _display_lines (rendered display strings).  For each
@@ -489,6 +523,14 @@ class MRCChat(BaseChatSystem):
         row-by-row with explicit cursor positioning + line-clear.  No DECSTBM
         scroll dependency — every row is cleared before writing, so no bleed
         from previous content is possible.
+
+        `extra_indent` is additional continuation-line indent (visible chars,
+        as a plain space string) beyond the auto-added "HH:MM " timestamp --
+        for callers whose *text* itself has its own leading column structure
+        (e.g. /mentions' time/room/from columns) that plain word-wrap has no
+        way to know about on its own. Without it, a wrapped continuation line
+        only aligns under the "HH:MM " timestamp, not under wherever the
+        caller's own content actually starts.
         """
         self._scrollback.append(text)
 
@@ -498,9 +540,15 @@ class MRCChat(BaseChatSystem):
 
         ts     = datetime.now().strftime('%H:%M ')
         ts_len = len(ts)                     # always 6 "HH:MM "
-        pfx0   = f'\x1b[2;37m{ts}\x1b[0m'   # dim grey timestamp for first line
-        indent = ' ' * ts_len               # alignment for continuation lines
-        max_w  = max(20, self._term_columns - ts_len)
+        # extra_indent goes on BOTH the first-line prefix and the
+        # continuation indent -- not prepended to *text* itself, since
+        # _word_wrap() deliberately drops leading whitespace on a fresh
+        # line (it's what keeps a normal wrapped sentence from picking up
+        # a stray leading space), which would silently eat a manually
+        # prepended indent otherwise.
+        pfx0   = f'\x1b[2;37m{ts}\x1b[0m' + extra_indent  # first line
+        indent = ' ' * ts_len + extra_indent  # alignment for continuation lines
+        max_w  = max(20, self._term_columns - ts_len - len(extra_indent))
 
         new_lines = 0
         for i, wline in enumerate(_word_wrap(text, max_w, indent=indent)):
@@ -641,8 +689,22 @@ class MRCChat(BaseChatSystem):
                 return
 
             if head.startswith('USERLIST:'):
+                # Per the MRC protocol spec (USERLIST transaction): the
+                # reply is a COMMA-separated list with no spaces --
+                # "{user1},{user2},..." -- not whitespace-separated. This
+                # was parsed with raw_list.split() (whitespace) before,
+                # which never once correctly split a real hub response:
+                # with no whitespace in the payload at all, the entire
+                # comma-joined string became a single bogus "nick" and no
+                # individual user ever made it into _known_users. This is
+                # why the WHOON-triggers-a-USERLIST-refresh fix alone
+                # didn't fix tab-complete -- the refresh was arriving
+                # correctly, the parser just couldn't read it. The web
+                # client has always split on ',' correctly (mrc/index.html
+                # tryParseUserListFromServerMessage) -- matched that here.
                 raw_list = body_raw.split(':', 1)[1].strip()
-                for entry in raw_list.split():
+                for entry in raw_list.split(','):
+                    entry = entry.strip()
                     nick = re.split(r'[@]', entry, 1)[0]
                     if nick:
                         self._known_users.add(nick)
@@ -667,6 +729,31 @@ class MRCChat(BaseChatSystem):
         if evt == 'error':
             await self._emit(
                 f'\x1b[31m*** Error: {data.get("message", "")}\x1b[0m')
+            return
+
+        if evt == 'joined':
+            # Silent -- _connect_and_chat already prints its own "Joined
+            # #room as handle" greeting optimistically before this arrives.
+            # Just absorb the wire-overhead figures for outgoing length caps.
+            ho = data.get('handle_overhead')
+            do = data.get('dm_overhead')
+            if isinstance(ho, int):
+                self._handle_overhead = ho
+            if isinstance(do, int):
+                self._dm_overhead = do
+            # Restore the sysop's saved outgoing text color (persisted
+            # server-side via set_style, same field the web client's
+            # typing-color dropdown reads/writes -- see _cycle_color()).
+            # Without this the arrow-key color always reset to default
+            # ('07') every reconnect even though the handle prefix/suffix/
+            # color style loaded correctly, since those live in a
+            # different part of the same 'joined' payload this handler
+            # was already ignoring wholesale before now.
+            style = data.get('style')
+            if isinstance(style, dict):
+                tc = style.get('typing_color')
+                if tc in _COLOR_SEQ:
+                    self._color_idx = _COLOR_SEQ.index(tc)
             return
 
         if evt == 'system':
@@ -714,15 +801,57 @@ class MRCChat(BaseChatSystem):
                     f'\x1b[1;96m{rest}\x1b[0m')
                 return
             if body:
-                # Fish nick out of formatted body for tab-complete
-                m = re.match(r'^\s*[<\[\(&@]?\s*([A-Za-z][\w\-\.]{1,29})', plain)
-                if m:
-                    nick = m.group(1)
-                    if nick.upper() not in ('PM','NOTICE','JOIN','PART',
-                            'TIMEOUT','JOINING','TOPIC','BROADCAST',
-                            'WELCOME','STATUS'):
-                        self._known_users.add(nick)
-                await self._emit(_pipe_to_ansi(body))
+                # NOTE: this used to also try to "fish a nick out of the
+                # formatted body" here with a regex, as a tab-complete
+                # roster source. Removed 2026-07-04: it's an anchored
+                # match against arbitrary free-form text (chat lines,
+                # WHOON dumps, MOTD, banners, ...), so it both MISSES real
+                # users (anything not shaped like "Nick: text" or
+                # "[Nick] text" -- e.g. every line of a WHOON roster dump,
+                # which starts with "*.:") and MATCHES false positives
+                # (the first word of an ordinary sentence looks exactly
+                # like a "nick" to this regex). Both reference
+                # implementations (the web MRC client's
+                # tryParseUserListFromServerMessage, and the anetmrc_v1.3.9
+                # C client's mrc_send_userlist) deliberately never scrape
+                # chat/WHOON body text for the roster -- they only trust
+                # the structured USERLIST:/CHATTERS: control messages
+                # (parsed below via the USERLIST:/USERIN:/USERNICK:
+                # prefix checks earlier in this function, and via
+                # 'chatters'/'rooms' events). Matched that model instead;
+                # see _handle_server_cmd's WHOON handling in
+                # mrc/bridge/main.py, which now also pushes a fresh
+                # structured USERLIST whenever a client runs /who, so the
+                # roster stays current without needing this fallback.
+                # Mention detection: real chat traffic arrives as
+                # 'mrc_message' (mrc/bridge/main.py), NOT as 'chat'/'action'/
+                # 'private' -- those typed-event branches below never fire
+                # against the actual bridge, which is why /mentions always
+                # showed 0. The bridge embeds a literal '/DirectMsg' marker
+                # in the formatted body for PMs (see mrc/bridge/main.py
+                # _dm_wrapper_prefix) -- same marker the web client checks
+                # (mrc/index.html dmToMe) -- rather than a distinct event
+                # type. A message from yourself, or from SERVER, never
+                # counts, matching the web client's isFromMe/isServer guards.
+                is_dm = evt == 'mrc_message' and '/DirectMsg' in plain
+                is_server = uname.upper() == 'SERVER'
+                is_from_me = bool(uname) and bool(self._handle) \
+                    and uname.lower() == self._handle.lower()
+                mentioned = (evt == 'mrc_message' and not is_server
+                            and not is_from_me
+                            and (self._was_mentioned(plain) or is_dm))
+                if mentioned:
+                    self._mention_count += 1
+                    self._mention_log.append({
+                        'time': datetime.utcnow().strftime('%H:%M'),
+                        'room': f"#{data.get('from_room')}" if data.get('from_room') else '',
+                        'from': f"{uname}@{data.get('from_site', '')}" if uname else 'someone',
+                        'body': ('[DM] ' if is_dm else '') + plain[:200],
+                    })
+                    await self._emit(
+                        '\x07' + self._highlight_mentions(_pipe_to_ansi(body)))
+                else:
+                    await self._emit(_pipe_to_ansi(body))
             return
 
         # ── Typed events: chat / action / private ──
@@ -820,7 +949,7 @@ class MRCChat(BaseChatSystem):
                     self._scroll_offset = 0
                     await self._redraw_chat_area()
                 colored = self._current_color_pipe() + line
-                for chunk in _split_for_wire(colored):
+                for chunk in _split_for_wire(colored, cap=self._chat_wire_cap()):
                     await self._send_json({
                         'type': 'send_message',
                         'room': self._room,
@@ -930,7 +1059,26 @@ class MRCChat(BaseChatSystem):
                     break
         return seq
 
+    _TAB_MATCH_DISPLAY_CAP = 12  # don't flood the screen with every candidate
+
     async def _tab_complete(self):
+        # NOTE: deliberately NOT wrapped in self._input_lock. _emit() (used
+        # below for the no-match/multi-match feedback) calls
+        # _redraw_chat_area() when in split-screen mode, which itself
+        # acquires self._input_lock -- asyncio.Lock is not reentrant, so
+        # holding the lock across an _emit() call here deadlocks the whole
+        # session solid on the very next Tab press. Hit exactly this in
+        # production (2026-07-04) from an earlier version of this function
+        # that wrapped the entire body in the lock; the unit tests didn't
+        # catch it because they all use _split_screen = False, which makes
+        # _emit() take an early-return path that never touches the lock at
+        # all -- see test_mrc_terminal_mentions.py's
+        # TabCompleteDeadlockRegressionTests for a split_screen=True test
+        # that actually exercises this path with a timeout.
+        # No other coroutine mutates _input_buf concurrently with this one
+        # (see the reader loop -- everything that touches it runs
+        # sequentially from the same character-read loop), so this doesn't
+        # need its own locking to be correct.
         cur = ''.join(self._input_buf)
         for sep in range(len(cur) - 1, -1, -1):
             if cur[sep].isspace():
@@ -943,6 +1091,8 @@ class MRCChat(BaseChatSystem):
         pl = prefix.lower()
         matches = sorted(u for u in self._known_users if u.lower().startswith(pl))
         if not matches:
+            await self._emit(
+                f'\x1b[2;90mTab: no match for "{prefix}"\x1b[0m')
             return
         common = matches[0]
         for m in matches[1:]:
@@ -967,7 +1117,15 @@ class MRCChat(BaseChatSystem):
                 self._input_buf.append(c)
             await self._draw_input_line()
             return
-        await self._emit(f'\x1b[2;96mTab: {", ".join(matches)}\x1b[0m')
+        # Multiple candidates, none of which share more in common than
+        # what's already typed -- list them so the user can pick, but
+        # cap it. A busy room can have dozens of names sharing a short
+        # prefix; dumping every single one is unreadable and doesn't
+        # actually help narrow anything down.
+        shown = matches[:self._TAB_MATCH_DISPLAY_CAP]
+        more  = len(matches) - len(shown)
+        tail  = f'  \x1b[2m(+{more} more, keep typing to narrow)\x1b[0m' if more else ''
+        await self._emit(f'\x1b[2;96mTab: {", ".join(shown)}\x1b[0m{tail}')
 
     async def _cycle_color(self, delta: int):
         self._color_idx = (self._color_idx + delta) % len(_COLOR_SEQ)
@@ -975,12 +1133,28 @@ class MRCChat(BaseChatSystem):
         code = _COLOR_SEQ[self._color_idx]
         ansi = self._current_color_ansi()
         await self._emit(f'{ansi}>> text color\x1b[0m |{code}')
+        # Persist to the profile (same 'typing_color' field the web
+        # client's style dropdown reads/writes) so it's restored on the
+        # next 'joined' event instead of resetting to default every
+        # reconnect. Omitting prefix/suffix/handle_color leaves those
+        # fields untouched server-side -- _handle_set_style falls back to
+        # the existing session/profile value for anything not sent.
+        await self._send_json({'type': 'set_style', 'typing_color': code})
 
     def _current_color_ansi(self) -> str:
         return f'\x1b[{_PIPE_COLORS.get(_COLOR_SEQ[self._color_idx], "37")}m'
 
     def _current_color_pipe(self) -> str:
         return f'|{_COLOR_SEQ[self._color_idx]}'
+
+    def _chat_wire_cap(self) -> int:
+        """Max chars per outgoing room-chat chunk, leaving room for the
+        display handle the bridge prepends before its hard 140-char cutoff."""
+        return max(10, MAX_OUTGOING_CHARS - self._handle_overhead)
+
+    def _dm_wire_cap(self) -> int:
+        """Same as _chat_wire_cap() but for /t DMs (different wrapper prefix)."""
+        return max(10, MAX_OUTGOING_CHARS - self._dm_overhead)
 
     def _highlight_mentions(self, text: str) -> str:
         if not self._handle or not text:
@@ -989,7 +1163,9 @@ class MRCChat(BaseChatSystem):
             pat = re.compile(
                 r'(?<!\w)(@?' + re.escape(self._handle) + r')(?!\w)',
                 re.IGNORECASE)
-            return pat.sub(r'\x1b[1;7;91m\1\x1b[0m', text)
+            # Explicit fg/bg, not reverse-video -- same visibility fix as the
+            # status-bar mention badge (_draw_status_line).
+            return pat.sub(r'\x1b[1;37;41m\1\x1b[0m', text)
         except re.error:
             return text
 
@@ -1063,7 +1239,16 @@ class MRCChat(BaseChatSystem):
             await self._emit('\x1b[36mLeaving MRC...\x1b[0m')
             return False
 
-        if cmd in ('help', 'h', '?'):
+        # '/help' asks the MRC hub for its own server-side help (was
+        # '/helpserver'); '/helpserver' now shows this client's local
+        # command reference (was '/help') -- swapped per sysop request
+        # 2026-07-03. '/h' and '/?' stay bound to the local list, matching
+        # their conventional meaning as a quick client-side reference.
+        if cmd == 'help':
+            await self._send_json({'type': 'server_cmd', 'command': 'HELPSERVER'})
+            return True
+
+        if cmd in ('helpserver', 'h', '?'):
             for ln in (
                 '',
                 '\x1b[1mMessaging\x1b[0m',
@@ -1097,7 +1282,7 @@ class MRCChat(BaseChatSystem):
                 '',
                 '\x1b[1mInfo\x1b[0m',
                 '  /motd  /banners  /info [n]  /time  /version  /stats',
-                '  /changelog  /routing  /quickstats  /helpserver',
+                '  /changelog  /routing  /quickstats  /help',
                 '  /last [n]           recent chat history',
                 '',
                 '\x1b[1mClient\x1b[0m',
@@ -1123,7 +1308,7 @@ class MRCChat(BaseChatSystem):
                 await self._emit(f'Usage: /{cmd} user text')
                 return True
             target, body = parts2
-            for chunk in _split_for_wire(body):
+            for chunk in _split_for_wire(body, cap=self._dm_wire_cap()):
                 await self._send_json({
                     'type': 'direct_message',
                     'to_user': target,
@@ -1193,7 +1378,7 @@ class MRCChat(BaseChatSystem):
 
         for simple in ('users', 'userlist', 'bbses', 'connected', 'time',
                        'version', 'stats', 'changelog', 'routing',
-                       'quickstats', 'helpserver'):
+                       'quickstats'):
             if cmd == simple:
                 await self._send_json({
                     'type': 'server_cmd',
@@ -1362,14 +1547,23 @@ class MRCChat(BaseChatSystem):
             await self._emit(
                 f'\x1b[96mMentions:\x1b[0m {n} unread '
                 f'({len(log)} in log)')
+            # Two lines per mention (short metadata header, then the message
+            # body on its own indented, wrap-aware line) instead of one long
+            # "time  room  from  body" line -- a single long line put the
+            # body so far right that a normal 80-col terminal had almost no
+            # room left for it, and _emit()'s wrap indent had no way to know
+            # about the room/from columns baked into the line, so wrapped
+            # continuation lines landed under the timestamp instead of under
+            # the body text, looking misaligned/ragged.
             for m in log:
-                body = m['body']
-                if len(body) > 100:
-                    body = body[:97] + '...'
+                room_bit = f' \x1b[96m{m["room"]}\x1b[0m' if m['room'] else ''
                 await self._emit(
-                    f'  \x1b[2m{m["time"]}\x1b[0m  '
-                    f'\x1b[96m{m["room"]:<10}\x1b[0m  '
-                    f'\x1b[1m{m["from"]:<24}\x1b[0m  {body}')
+                    f'  \x1b[2m{m["time"]}\x1b[0m{room_bit}  '
+                    f'\x1b[1m{m["from"]}\x1b[0m')
+                body = m['body']
+                if len(body) > 300:
+                    body = body[:297] + '...'
+                await self._emit(body, extra_indent='    ')
             await self._emit('\x1b[2m(cleared)\x1b[0m')
             self._mention_count = 0
             self._mention_log.clear()
@@ -1409,5 +1603,5 @@ class MRCChat(BaseChatSystem):
             return True
 
         await self._emit(
-            f'\x1b[33mUnknown command:\x1b[0m /{cmd}. Try /help.')
+            f'\x1b[33mUnknown command:\x1b[0m /{cmd}. Try /helpserver.')
         return True

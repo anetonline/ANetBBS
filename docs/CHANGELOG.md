@@ -1,7 +1,19 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.25`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.26`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.26 — MRC: terminal fixes + stale-session cleanup (July 2026)
+
+- FIX: `/mentions` always showed 0 — mention detection was wired to event types the bridge never sends; moved to the real `mrc_message` path. Status-bar `!N` indicator now works live too.
+- FIX: messages up to 140 chars could get silently truncated to ~120 — terminal client now accounts for the bridge's handle-prefix overhead and splits long messages into `(1/2)`/`(2/2)` chunks instead of losing the tail.
+- FIX: mention indicator was reverse-video red, illegible on some terminals — switched to explicit fg/bg colors.
+- FIX: `/mentions` output misaligned on wrap — restructured into a header line + indented body line per mention.
+- CHANGE: `/help` and `/helpserver` swapped — `/help` now asks the hub for its own help, `/helpserver` shows the client's local command list.
+- FIX: outgoing text color never persisted across reconnects — now restores on join and saves via `set_style` on change.
+- FIX: Tab nick-completion gave no feedback on zero matches and could dump an unbounded candidate list — capped at 12 with a "+N more" hint. Also fixed a real bug where a visibly-present user couldn't be found: `/who`'s roster is comma-separated on the wire, but the parser was splitting on whitespace. Bridge now also refreshes the roster on `/who`.
+- FIX (critical): a mid-round version of the Tab-completion fix briefly deadlocked terminal MRC solid on the next Tab press. Fixed, covered by a timeout-guarded test.
+- FIX (bridge): a dropped connection left MRC sessions looking permanently logged in, causing "you can only be logged on once" from the upstream hub. Added a WebSocket heartbeat so the existing (correct) cleanup logic actually runs.
 
 ## v1.0b2.25 — Paginate large file areas (July 2026)
 

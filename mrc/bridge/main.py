@@ -850,7 +850,20 @@ class BridgeApp:
     # ------------------------------------------------------------------
 
     async def handle_websocket(self, request):
-        ws    = web.WebSocketResponse()
+        # heartbeat=30: aiohttp sends a protocol-level ping every 30s and
+        # closes the connection if no pong comes back. Without this, a
+        # client that goes silent without a clean close (cable pull,
+        # force-killed terminal/browser, dead network) leaves `async for
+        # msg in ws:` below blocked forever -- the disconnect `finally:`
+        # block (and the grace-period session cleanup / upstream LOGOFF it
+        # triggers) never runs, so the session sits in sessions.json
+        # looking permanently logged in, and the upstream hub still thinks
+        # this BBS has the handle connected ("you can only be logged on
+        # once" when the same user tries from elsewhere). Standard
+        # WebSocket clients (browsers, aiohttp's own ws_connect() used by
+        # the terminal MRC door) answer protocol-level pings automatically
+        # -- no client-side change needed for this to take effect.
+        ws    = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
 
         ws_id = id(ws)
@@ -1152,6 +1165,17 @@ class BridgeApp:
                 new_room = None
 
         await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, normalized))
+
+        if normalized.upper() == "WHOON":
+            # WHOON's reply is a plain, hub-formatted cosmetic text dump --
+            # no structural per-user markers a client can safely parse (see
+            # _send_userlist_control below, the ONLY source clients should
+            # ever build a tab-complete roster from). Piggyback a real
+            # structured USERLIST push on every /who so a sysop who just
+            # *looked* at who's in the room also gets a correct, fresh
+            # tab-complete roster out of it, instead of the WHOON display
+            # being purely cosmetic.
+            await self._send_userlist_control(room)
 
         if normalized.upper().startswith("NEWROOM:") and new_room:
             sess["waiting_for_identify"] = False
