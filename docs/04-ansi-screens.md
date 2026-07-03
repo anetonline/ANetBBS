@@ -26,6 +26,60 @@ Each screen has:
 | `goodbye` | every protocol on logoff                                                    |
 | `newuser` | shown right after a successful new-user registration                        |
 
+## File-based override (welcome / goodbye / newuser / custom slots)
+
+Before checking the database, `welcome`/`goodbye`/`newuser` and any
+custom `ansi` slot also look for a plain file drop-in at
+`data/text/<slot>.ans` (and `<slot>132.ans` for widescreen terminals,
+`<slot>.asc` for plain-ASCII terminals) — this takes priority over the
+database screen, so it's the quickest way to swap in art without
+touching Admin. No restart required.
+
+### Multiple screens shown together (classic multi-logon-screen style)
+
+Drop in more than one numbered file and ANetBBS shows **all of them**,
+in order, every single login — the same idea as Synchronet's
+`logon1.ans`/`logon2.ans`/`logon3.ans` convention:
+
+```
+data/text/welcome132.ans      <- shown first (the plain file counts as #1)
+data/text/welcome132_2.ans    <- shown second
+data/text/welcome132_3.ans    <- shown third
+```
+
+Every visitor sees `welcome132.ans`, then `welcome132_2.ans`, then
+`welcome132_3.ans`, all in the same login — not a different one each
+time. Numbers don't need to be contiguous — whatever `_N` files exist
+are used in ascending numeric order. This works independently per
+screen (`welcome`, `welcome132`, `welcome.asc`, `goodbye`, etc. each get
+their own sequence), and for a single file it behaves exactly as
+before — no extra setup needed unless you actually want more than one.
+
+**Each variant controls its own pause.** ANetBBS doesn't automatically
+insert a pause between screens in the sequence — put `@PAUSE@` at the
+end of a variant's content if you want the visitor to press a key
+before the next one loads (see "Display codes" below). Leave it off and
+that screen flows straight into the next with no wait.
+
+### Random: pick just ONE instead of showing the whole sequence
+
+Want variety — a different single screen each login — rather than the
+full sequence every time? Use `_ran` in the filename instead of the
+plain numbered naming:
+
+```
+data/text/welcome132_ran.ans      <- random variant #1
+data/text/welcome132_2_ran.ans    <- random variant #2
+data/text/welcome132_3_ran.ans    <- random variant #3
+```
+
+With `_ran` naming, each login shows **one** of the group, chosen at
+random — not the whole sequence. If both a `_ran` group and a plain
+numbered group exist for the same screen, the `_ran` group wins. Works
+for any screen (`welcome`, `goodbye`, `newuser`, custom slots) — mix and
+match per-screen as you like: the full sequence for one, random-pick-one
+for another.
+
 ## Custom slots
 
 Create any slot name and reference it from a menu item:

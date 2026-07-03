@@ -22,6 +22,111 @@ class CarrierLost(ConnectionError):
     on a stream that will only ever return EOF from here on."""
 
 
+def _find_screen_variants(directory, base_name):
+    """Find every variant of a display screen next to *base_name*.
+
+    The plain file (e.g. 'welcome132.ans') is variant #1 if present. Any
+    sibling named '{stem}_2.{ext}', '{stem}_3.{ext}', ... is an additional
+    variant — no gap/contiguity requirement, whatever numbers exist are
+    used in ascending order. All of them get shown together, in this
+    order, every login (see _resolve_display_screens) — the classic
+    Synchronet logon1.ans/logon2.ans/... multi-screen convention, not a
+    rotate-a-different-one-per-login scheme.
+    Returns a list of Paths (possibly empty), never raises.
+    """
+    stem, dot, ext = base_name.rpartition('.')
+    if not dot:
+        return []
+    variants = []
+    exact = directory / base_name
+    if exact.is_file():
+        variants.append(exact)
+    numbered = []
+    pattern = re.compile(rf'^{re.escape(stem)}_(\d+)\.{re.escape(ext)}$')
+    try:
+        for entry in directory.iterdir():
+            m = pattern.match(entry.name)
+            if m and entry.is_file():
+                numbered.append((int(m.group(1)), entry))
+    except OSError:
+        pass
+    numbered.sort(key=lambda t: t[0])
+    variants.extend(p for _, p in numbered)
+    return variants
+
+
+def _find_random_screen_variants(directory, base_name):
+    """Find the '_ran'-tagged sibling group for *base_name*, if any.
+
+    Naming: 'welcome_ran.ans' is random variant #1, 'welcome_2_ran.ans',
+    'welcome_3_ran.ans', ... are additional variants — the optional
+    number goes *before* the '_ran' tag. A sysop who wants ONE screen
+    picked at random each login (instead of the whole '{stem}_N.{ext}'
+    sequence being shown together) uses this naming instead; the two
+    schemes are independent; see _resolve_display_screens for how
+    they're tried. Returns a list of Paths (possibly empty), never
+    raises.
+    """
+    stem, dot, ext = base_name.rpartition('.')
+    if not dot:
+        return []
+    variants = []
+    exact = directory / f'{stem}_ran.{ext}'
+    if exact.is_file():
+        variants.append(exact)
+    numbered = []
+    pattern = re.compile(rf'^{re.escape(stem)}_(\d+)_ran\.{re.escape(ext)}$')
+    try:
+        for entry in directory.iterdir():
+            m = pattern.match(entry.name)
+            if m and entry.is_file():
+                numbered.append((int(m.group(1)), entry))
+    except OSError:
+        pass
+    numbered.sort(key=lambda t: t[0])
+    variants.extend(p for _, p in numbered)
+    return variants
+
+
+def _resolve_display_screens(directory, base_name):
+    """Resolve base_name to the list of screen Paths to show *this* login.
+
+    Checks the '_ran'-tagged random naming first (welcome_ran.ans,
+    welcome_2_ran.ans, ...) — if that group exists, one is picked at
+    random and returned as a single-item list (a sysop who wants variety
+    without a multi-screen slideshow). Otherwise falls back to the plain
+    numbered naming (welcome.ans, welcome_2.ans, welcome_3.ans, ...),
+    which returns ALL matching files in order — every login shows all of
+    them, one after another, the same way Synchronet's
+    logon1.ans/logon2.ans/... convention works. Each variant file is
+    responsible for its own '@PAUSE@' if a pause is wanted before the
+    next one loads — nothing is auto-inserted between them. A single
+    matching file (either scheme) returns as a one-item list with no
+    extra work — the common case (most sysops have exactly one
+    welcome.ans) is unaffected. Returns None if nothing matches either
+    naming scheme.
+    """
+    random_variants = _find_random_screen_variants(directory, base_name)
+    if random_variants:
+        if len(random_variants) == 1:
+            return [random_variants[0]]
+        import random
+        return [random.choice(random_variants)]
+
+    variants = _find_screen_variants(directory, base_name)
+    if not variants:
+        return None
+    return variants
+
+
+def _load_display_screens(paths):
+    """Read and concatenate every screen in *paths*, in order. Each file
+    is decoded independently (latin-1, matching how screen bodies are
+    decoded elsewhere) and simply joined — see _resolve_display_screens
+    for why there's no automatic pause insertion between them."""
+    return ''.join(p.read_bytes().decode('latin-1') for p in paths)
+
+
 def _stock_screen(slot, mode):
     """Load a bundled stock screen from anetbbs/screens/.
 
@@ -29,6 +134,9 @@ def _stock_screen(slot, mode):
       wide : {slot}132.ans → {slot}.ans → {slot}.asc
       ansi : {slot}.ans    → {slot}.asc
       ascii: {slot}.asc    → {slot}.ans
+    Each candidate supports multiple display variants (see
+    _resolve_display_screens) — either a full ordered sequence shown
+    together, or a single random pick, depending on naming.
     Returns decoded string or None.
     """
     import pathlib as _pl
@@ -40,9 +148,9 @@ def _stock_screen(slot, mode):
     else:
         candidates = [f'{slot}.ans', f'{slot}.asc']
     for fname in candidates:
-        f = _screens_dir / fname
-        if f.exists():
-            return f.read_bytes().decode('latin-1'), fname.endswith('.asc')
+        picked = _resolve_display_screens(_screens_dir, fname)
+        if picked is not None:
+            return _load_display_screens(picked), fname.endswith('.asc')
     return None, False
 
 
@@ -711,6 +819,18 @@ class BBSSession:
           2. BbsAnsiScreen DB row        — set via /admin/menus/screens
           3. nothing                     — silently skip
 
+        Multiple display variants: dropping in {slot}132_2.ans,
+        {slot}132_3.ans, ... alongside {slot}132.ans (which counts as
+        variant #1) shows ALL of them together, in order, every login —
+        the classic Synchronet logon1.ans/logon2.ans/... multi-screen
+        convention (each variant is responsible for its own @PAUSE@ if a
+        pause is wanted before the next one loads). Name them
+        {slot}132_ran.ans / {slot}132_2_ran.ans / ... instead to pick just
+        ONE at random each login rather than showing the whole sequence.
+        See _resolve_display_screens. Works for both the file-based
+        override (step 1) and the bundled stock screen (step 3); a
+        single file (the common case) behaves exactly as before.
+
         @PAUSE@ codes embedded in the ANSI body split the content into pages;
         the user presses any key to advance. force_pause=True adds a final
         pause after the last page (used by the 'ansi' menu action so the
@@ -735,6 +855,7 @@ class BBSSession:
             #    ascii: {slot}.asc
             db_pause = False
             body = None
+            _text_dir = None
             try:
                 _data_dir = _app().config.get('DATA_DIR', '')
                 _text_dir = _pl.Path(_data_dir) / 'text'
@@ -745,25 +866,35 @@ class BBSSession:
                 else:
                     _candidates = [f'{slot}.ans']
                 for _fname in _candidates:
-                    _f = _text_dir / _fname
-                    if _f.exists():
-                        body = _f.read_bytes().decode('latin-1')
+                    _picked = _resolve_display_screens(_text_dir, _fname)
+                    if _picked is not None:
+                        body = _load_display_screens(_picked)
                         is_plain_text = _fname.endswith('.asc')
                         break
             except Exception:
                 pass
 
             # 2. DB lookup (ANSI content — skip for ascii mode)
-            if body is None and mode != 'ascii':
+            if not body and mode != 'ascii':
                 from ..models import BbsAnsiScreen
                 with _app().app_context():
                     row = BbsAnsiScreen.query.filter_by(
                         slot=slot, is_active=True).first()
-                    db_pause = bool(row.pause_after) if row else False
-                    body = row.body if row else None
+                    # An active row with an EMPTY body (e.g. someone saved a
+                    # blank draft in the ANSI editor and left it active) is
+                    # not meaningfully "configured" — treat it the same as
+                    # no row at all so step 3 still falls back to the
+                    # bundled stock screen instead of silently showing
+                    # nothing. Was previously `body = row.body if row else
+                    # None`, which let a truthy row with body='' block the
+                    # `if body is None` gate below without actually
+                    # providing any content.
+                    if row and row.body:
+                        db_pause = bool(row.pause_after)
+                        body = row.body
 
             # 3. Bundled stock screen (anetbbs/screens/) — all modes
-            if body is None:
+            if not body:
                 body, _plain = _stock_screen(slot, mode)
                 if body is not None:
                     is_plain_text = _plain

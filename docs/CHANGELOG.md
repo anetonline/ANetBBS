@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.22`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.23`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.23 — Multi-screen welcome/goodbye/newuser sequences (July 2026)
+
+- FEATURE: sysops can drop in multiple variants of any lifecycle ANSI screen (`welcome`, `goodbye`, `newuser`, or a custom slot) and ANetBBS shows all of them, in order, every login — the classic Synchronet `logon1.ans`/`logon2.ans`/`logon3.ans` multi-screen convention. `welcome132.ans` is shown first; add `welcome132_2.ans`, `welcome132_3.ans`, etc. and they display right after, same login — works for the `data/text/<slot>.ans` override and the bundled stock screens, all three width modes. Each variant controls its own `@PAUSE@`; nothing is auto-inserted between screens. A single file (the common case) behaves exactly as before, no persisted state of any kind. Prefer one random pick instead of the whole sequence? Use `_ran` naming (`welcome_ran.ans`, `welcome_2_ran.ans`, ...) — shows just one, chosen at random; wins over plain numbered naming if both exist. See `docs/04-ansi-screens.md`.
+- FIX (pre-existing, unrelated to the feature above — found while testing on the Pi3): an active `BbsAnsiScreen` DB row with an empty body blocked the fallback to the bundled stock screen, so the screen silently showed nothing at all instead of falling back. Now an empty-but-active row is treated the same as no row.
+- FIX: `welcome132.ans` and `welcome.ans` were the last stock screens with a box border still on them, plus (for the 132-col one) a duplicated Sysop/Version line — rebuilt both borderless to match `goodbye132.ans`/`newuser132.ans`'s style. Added `@PAUSE@` to all three welcome variants and to `goodbye.ans` — none of them had it, so the banner rendered and immediately fell through to the next prompt, easy to miss at normal typing speed.
 
 ## v1.0b2.22 — Paginate the web Changelog page (July 2026)
 
