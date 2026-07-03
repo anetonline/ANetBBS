@@ -1988,6 +1988,35 @@ class IpWhitelist(db.Model):
     added_by = db.relationship('User')
 
 
+class AutoBanConfig(db.Model):
+    """Sysop-configurable thresholds for the login auto-ban (see
+    anetbbs/web/auth.py _login_rate_exceeded). Singleton row, same
+    pattern as SmtpConfig. Defaults match the feature-request resolution:
+    same 10-attempts/5-minute trigger as before, but a 1-hour ban instead
+    of permanent, with everything editable and a full on/off switch."""
+    __tablename__ = 'auto_ban_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    attempt_limit = db.Column(db.Integer, default=10, nullable=False)
+    window_seconds = db.Column(db.Integer, default=300, nullable=False)
+    # 0 = permanent ban (matches IpBan.expires_at=None), same as the
+    # manual ban form's "TTL days, 0 = permanent" convention.
+    ban_duration_hours = db.Column(db.Integer, default=1, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    @classmethod
+    def get(cls):
+        """Return the singleton config row, creating it (with defaults) if absent."""
+        row = cls.query.first()
+        if row is None:
+            row = cls()
+            db.session.add(row)
+            db.session.commit()
+        return row
+
+
 class BoardLastRead(db.Model):
     """Per-user last-visit timestamp per board, for unread counts."""
     __tablename__ = 'board_last_read'

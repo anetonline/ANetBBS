@@ -44,12 +44,16 @@ def _check(name_key, limit, window):
 
 def rate_limit(name, limit, window, key_fn=None, on_block=None, on_exceed=None):
     """Decorator. `name` is a unique identifier for the route. `limit`
-    is the maximum allowed requests in `window` seconds. `key_fn` is
-    a callable returning a string identifier (default: client IP).
-    `on_block` is a callable returning a Flask response when blocked
-    (default: 429 JSON for /api/* paths, plain abort(429) otherwise).
-    `on_exceed` is an optional no-arg side-effect callable fired before
-    the 429 response (e.g. to trigger an auto-ban); exceptions are swallowed.
+    is the maximum allowed requests in `window` seconds. Either can also
+    be a zero-arg callable, resolved fresh on every request instead of
+    once at decoration time — use this when the threshold needs to come
+    from a sysop-editable setting (e.g. AutoBanConfig) rather than being
+    a fixed constant. `key_fn` is a callable returning a string identifier
+    (default: client IP). `on_block` is a callable returning a Flask
+    response when blocked (default: 429 JSON for /api/* paths, plain
+    abort(429) otherwise). `on_exceed` is an optional no-arg side-effect
+    callable fired before the 429 response (e.g. to trigger an auto-ban);
+    exceptions are swallowed.
     """
     def deco(fn):
         @wraps(fn)
@@ -59,7 +63,9 @@ def rate_limit(name, limit, window, key_fn=None, on_block=None, on_exceed=None):
             else:
                 key = str(key_fn())
             bucket_key = f'{name}:{key}'
-            if not _check(bucket_key, limit, window):
+            resolved_limit = limit() if callable(limit) else limit
+            resolved_window = window() if callable(window) else window
+            if not _check(bucket_key, resolved_limit, resolved_window):
                 if on_exceed is not None:
                     try:
                         on_exceed()
@@ -70,11 +76,11 @@ def rate_limit(name, limit, window, key_fn=None, on_block=None, on_exceed=None):
                 if request.path.startswith('/api/'):
                     return jsonify({
                         'error': 'rate limited',
-                        'limit': limit,
-                        'window_seconds': window,
+                        'limit': resolved_limit,
+                        'window_seconds': resolved_window,
                     }), 429
                 abort(429, description=f'Too many requests — limit '
-                      f'{limit} per {window // 60 or 1} min(s).')
+                      f'{resolved_limit} per {resolved_window // 60 or 1} min(s).')
             return fn(*args, **kwargs)
         return wrapper
     return deco

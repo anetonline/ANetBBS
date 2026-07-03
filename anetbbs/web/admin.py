@@ -1728,7 +1728,8 @@ def purge_expired_bulletins():
 @login_required
 @admin_required
 def ip_bans():
-    from ..models import IpBan
+    from ..models import IpBan, AutoBanConfig
+    auto_ban_cfg = AutoBanConfig.get()
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'add':
@@ -1752,9 +1753,28 @@ def ip_bans():
             if row:
                 db.session.delete(row); db.session.commit()
                 flash('Ban removed.', 'success')
+        elif action == 'auto_ban_settings':
+            auto_ban_cfg.enabled = bool(request.form.get('enabled'))
+            attempt_limit = request.form.get('attempt_limit', type=int)
+            window_minutes = request.form.get('window_minutes', type=int)
+            ban_duration_hours = request.form.get('ban_duration_hours', type=int)
+            if attempt_limit is None or attempt_limit < 1:
+                flash('Attempt limit must be at least 1.', 'danger')
+                return redirect(url_for('admin.ip_bans'))
+            if window_minutes is None or window_minutes < 1:
+                flash('Time window must be at least 1 minute.', 'danger')
+                return redirect(url_for('admin.ip_bans'))
+            if ban_duration_hours is None or ban_duration_hours < 0:
+                flash('Ban duration must be 0 (permanent) or more.', 'danger')
+                return redirect(url_for('admin.ip_bans'))
+            auto_ban_cfg.attempt_limit = attempt_limit
+            auto_ban_cfg.window_seconds = window_minutes * 60
+            auto_ban_cfg.ban_duration_hours = ban_duration_hours
+            db.session.commit()
+            flash('Auto-ban settings saved.', 'success')
         return redirect(url_for('admin.ip_bans'))
     rows = IpBan.query.order_by(IpBan.created_at.desc()).all()
-    return render_template('admin/ip_bans.html', rows=rows)
+    return render_template('admin/ip_bans.html', rows=rows, auto_ban_cfg=auto_ban_cfg)
 
 
 @admin_bp.route('/ip-whitelist', methods=['GET', 'POST'])

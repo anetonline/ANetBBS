@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.23`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.24`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.24 — Configurable login auto-ban (July 2026)
+
+- FEATURE: the login auto-ban is now sysop-configurable from **Admin → IP Bans** instead of a hardcoded permanent-only trigger. Reported by Firehawke (feature request 2026-07-03): 10 failed logins in 5 minutes triggered a permanent IP ban with no way to configure the threshold, duration, or disable it — caught one of their test users off guard. Now configurable: attempt limit, time window, ban duration in hours (0 = permanent, still available), and an enable/disable switch. Default ban duration changed from permanent to 1 hour, matching the proposed resolution; the 10-attempts/5-minute trigger threshold is unchanged by default but now editable. New `AutoBanConfig` singleton model, settings card added to the existing IP Bans admin page. 8 new tests in `tests/test_auto_ban.py`.
 
 ## v1.0b2.23 — Multi-screen welcome/goodbye/newuser sequences (July 2026)
 

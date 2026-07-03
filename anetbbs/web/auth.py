@@ -17,7 +17,7 @@ from flask_wtf import FlaskForm
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
                       UserActivity, UserSecurityAnswer, SECURITY_QUESTIONS,
-                      EmailVerifyToken)
+                      EmailVerifyToken, AutoBanConfig)
 from ..features.rate_limit import rate_limit
 
 
@@ -80,18 +80,31 @@ def _ip_is_banned(ip):
         return False
 
 
-def _auto_ban_ip(ip, reason='Auto-ban: login rate limit exceeded (10 attempts / 5 min)'):
-    """Write a permanent IpBan row for ip. No-op if already banned or whitelisted."""
+def _auto_ban_ip(ip):
+    """Write an IpBan row for ip using the sysop-configured AutoBanConfig
+    (see /admin/ip-bans). No-op if auto-ban is disabled, ip is empty, or
+    ip is already banned/whitelisted. Duration comes from
+    ban_duration_hours (0 = permanent, matching the manual-ban form's
+    "TTL days, 0 = permanent" convention)."""
     if not ip or _ip_is_whitelisted(ip):
         return
     try:
+        cfg = AutoBanConfig.get()
+        if not cfg.enabled:
+            return
         from ..models import IpBan
         if IpBan.query.filter_by(cidr=ip).first():
             return
-        db.session.add(IpBan(cidr=ip, reason=reason, banned_by_id=None, expires_at=None))
+        expires_at = (datetime.utcnow() + timedelta(hours=cfg.ban_duration_hours)
+                      if cfg.ban_duration_hours else None)
+        reason = (f'Auto-ban: login rate limit exceeded '
+                  f'({cfg.attempt_limit} attempts / {cfg.window_seconds // 60 or 1} min)')
+        db.session.add(IpBan(cidr=ip, reason=reason, banned_by_id=None,
+                             expires_at=expires_at))
         db.session.commit()
         try:
-            current_app.logger.warning('Auto-banned IP %s: %s', ip, reason)
+            current_app.logger.warning('Auto-banned IP %s: %s (expires %s)',
+                                       ip, reason, expires_at or 'never')
         except RuntimeError:
             pass
     except Exception:
@@ -222,7 +235,10 @@ class RegisterForm(FlaskForm):
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
-@rate_limit('login', limit=10, window=300, on_exceed=_login_rate_exceeded)
+@rate_limit('login',
+           limit=lambda: AutoBanConfig.get().attempt_limit,
+           window=lambda: AutoBanConfig.get().window_seconds,
+           on_exceed=_login_rate_exceeded)
 def login():
     """Login page"""
     if current_user.is_authenticated:
