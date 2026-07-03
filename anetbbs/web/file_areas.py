@@ -24,9 +24,11 @@ from flask_login import login_required, current_user
 
 from ..models import db, FileArea, TicFile, SharedFileLink
 from ..features.archive_meta import extract_archive_description
+from .list_pagination import ListPagination
 
 
 _IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+FILES_PER_PAGE = 50
 
 
 def _is_image(name):
@@ -188,7 +190,13 @@ def view_area(area_id):
         'size': lambda f: f['size'],
     }
     files = sorted(files, key=key_fns.get(key, key_fns['date']), reverse=reverse)
-    return render_template('file_areas/area.html', area=area, files=files, sort=sort)
+
+    page = request.args.get('page', 1, type=int)
+    pagination = ListPagination(page, FILES_PER_PAGE, len(files))
+    page_files = pagination.slice(files)
+
+    return render_template('file_areas/area.html', area=area, files=page_files,
+                           sort=sort, pagination=pagination)
 
 
 @file_areas_bp.route('/<int:area_id>/rescan-descriptions', methods=['POST'])

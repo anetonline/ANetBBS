@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.24`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.25`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.25 — Paginate large file areas (July 2026)
+
+- FEATURE: file area listings are now paginated (50 files/page) instead of rendering the entire area on one page — same fix pattern as the CHANGELOG page's own pagination (v1.0b2.22), reported after a 7,000+ file door-games area took a while to load. Sort (name/size/date) applies before slicing so page contents stay correct, and pagination links preserve the active sort. New shared `ListPagination` helper (`anetbbs/web/list_pagination.py`) with ellipsis-truncated page links, since a large area can span far more pages than the CHANGELOG ever will.
 
 ## v1.0b2.24 — Configurable login auto-ban (July 2026)
 
