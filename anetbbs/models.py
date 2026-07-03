@@ -198,7 +198,9 @@ class Game(db.Model):
     min_access_level = db.Column(db.Integer, default=0)
 
     # Game type determines how it's launched
-    # Types: 'door_dos', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web'
+    # Types: 'door_dos', 'door_dosemu', 'door_dos_browser', 'door_native',
+    #        'door_mystic', 'door_mystic_mps', 'door_synchronet',
+    #        'door_rlogin', 'door_telnet', 'builtin_web'
     game_type = db.Column(db.String(20), nullable=False)
 
     # Door game settings

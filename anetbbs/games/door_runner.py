@@ -1856,23 +1856,27 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
 
 
 # ---------------------------------------------------------------------------
-# Remote rlogin doors (Synchronet xtrn game servers, DoorParty, etc.)
+# Remote rlogin / telnet doors (Synchronet xtrn game servers, DoorParty,
+# TWGS, etc.)
 # ---------------------------------------------------------------------------
 
-class _RloginDoorSession:
-    """DoorSession-shaped wrapper around an :class:`RloginConnection`.
+class _ExternalDoorSession:
+    """DoorSession-shaped wrapper around an outbound connection object
+    (:class:`rlogin_bridge.RloginConnection` or
+    :class:`telnet_bridge.TelnetConnection` — both expose the same
+    ``write()``/``stop()`` API as DosBridge).
 
     DoorSession.write expects a ``dos_bridge`` slot with a ``write()``
-    method; RloginConnection has the same write/stop API as DosBridge,
-    so we can reuse the existing session-management code (send_input,
-    terminate_session, _cleanup_session) without forking it.
+    method, so we can reuse the existing session-management code
+    (send_input, terminate_session, _cleanup_session) without forking
+    it for every remote-connection type.
     """
 
-    def __init__(self, session_id, rlogin_conn):
+    def __init__(self, session_id, conn):
         self.session_id = session_id
-        self.master_fd = -1   # no PTY for rlogin sessions
-        self.pid = 0          # no subprocess for rlogin sessions
-        self.dos_bridge = rlogin_conn   # the slot is generic
+        self.master_fd = -1   # no PTY for remote sessions
+        self.pid = 0          # no subprocess for remote sessions
+        self.dos_bridge = conn   # the slot is generic
         self.started_at = datetime.utcnow()
 
     def write(self, data):
@@ -1882,8 +1886,8 @@ class _RloginDoorSession:
             self.dos_bridge.write(data)
 
     def resize(self, rows, cols):
-        # rlogin doesn't carry SIGWINCH; the remote BBS uses whatever
-        # was in the terminal/speed handshake field. No-op.
+        # Neither rlogin nor telnet carries SIGWINCH through this bridge.
+        # No-op.
         pass
 
     def close(self):
@@ -1891,7 +1895,7 @@ class _RloginDoorSession:
             try:
                 self.dos_bridge.stop()
             except Exception:  # pylint: disable=broad-except
-                logger.exception('rlogin stop failed')
+                logger.exception('external door stop failed')
             self.dos_bridge = None
 
 
@@ -1971,7 +1975,7 @@ def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
 
     # Wrap as a DoorSession-shaped object so send_input / terminate_session
     # / _cleanup_session all work without changes.
-    door_session = _RloginDoorSession(gs.id, conn)
+    door_session = _ExternalDoorSession(gs.id, conn)
     with _sessions_lock:
         _sessions[gs.id] = door_session
 
@@ -2175,6 +2179,243 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         # Drain cancellations — see comment in play_door_game_telnet.
         # Without this, in_task's pending session.reader.read(1) collides
         # with the post-game prompt and leaves the StreamReader at EOF.
+        if pending:
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        writer.close()
+    except Exception:
+        pass
+
+    if abort_event.is_set():
+        await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
+    else:
+        try:
+            await session.read_line(
+                "\r\n\r\nRemote disconnected. Press Enter to continue...")
+        except Exception:
+            pass
+    return True
+
+
+def launch_telnet_session(game, user, emit_fn, bbs_name='ANetBBS'):
+    """Launch a remote TELNET door session for ``game`` (e.g. TWGS —
+    Trade Wars Game Server — or any other telnet-only external game
+    server).
+
+    Same return contract as :func:`launch_door_game`. Unlike rlogin,
+    plain telnet has no pre-authentication handshake — the user logs in
+    interactively on the remote side exactly as they would connecting
+    with any telnet client directly. This is a raw byte pipe with
+    minimal Telnet IAC (RFC 854) option-negotiation handling so the
+    remote server doesn't hang waiting for a reply it'll never get
+    otherwise (see telnet_bridge.TelnetIACFilter).
+
+    Game configuration (in standard Game fields — no schema changes):
+
+      * ``game.executable_path``   = ``HOST:PORT`` (e.g. ``twgs.example.com:23``)
+      * ``game.command_line_args`` = unused — telnet has no login fields to fill
+    """
+    from .telnet_bridge import TelnetConnection
+
+    server_addr = (game.executable_path or '').strip()
+    if not server_addr:
+        raise ValueError('door_telnet: executable_path must be HOST:PORT '
+                         '(e.g. twgs.example.com:23)')
+    if ':' in server_addr:
+        host, port_str = server_addr.rsplit(':', 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 23
+    else:
+        host, port = server_addr, 23
+
+    # Allocate node
+    node = allocate_node(game.id, game.max_nodes or 1, -1)
+    if node is None:
+        logger.warning('No free nodes for game %s', game.slug)
+        return None
+
+    _uid = (user.get('id') if isinstance(user, dict)
+            else getattr(user, 'id', None)) or 0
+    gs = GameSession(game_id=game.id, user_id=_uid, node_number=node,
+                     status='active')
+    db.session.add(gs)
+    db.session.commit()
+
+    from .node_manager import _active, _lock as _node_lock
+    with _node_lock:
+        _active[(game.id, node)] = gs.id
+
+    # Open telnet TCP — no handshake to send.
+    conn = TelnetConnection(host, port)
+    try:
+        conn.connect()
+    except Exception as exc:
+        logger.error('telnet connect to %s:%d failed: %s', host, port, exc)
+        gs.status = 'crashed'
+        gs.ended_at = datetime.utcnow()
+        db.session.commit()
+        release_node(game.id, node)
+        raise ValueError(f'Could not connect to {host}:{port} — {exc}') from exc
+
+    # Wrap as a DoorSession-shaped object so send_input / terminate_session
+    # / _cleanup_session all work without changes.
+    door_session = _ExternalDoorSession(gs.id, conn)
+    with _sessions_lock:
+        _sessions[gs.id] = door_session
+
+    try:
+        from flask import current_app
+        reader_app = current_app._get_current_object()
+    except Exception:
+        reader_app = None
+
+    def _on_close():
+        try:
+            if reader_app is not None:
+                with reader_app.app_context():
+                    _cleanup_session(gs.id)
+            else:
+                _cleanup_session(gs.id)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('telnet close cleanup failed for session %d',
+                             gs.id)
+
+    try:
+        idle_timeout = int(os.environ.get('DOOR_IDLE_TIMEOUT', '300'))
+    except ValueError:
+        idle_timeout = 300
+    conn.bind_emit(emit_fn, on_close=_on_close, idle_timeout=idle_timeout)
+    return gs.id
+
+
+async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
+                               minutes_remaining=60):
+    """Bridge a BBS terminal session to a remote TELNET door game server
+    (e.g. TWGS — Trade Wars Game Server). Unlike rlogin, plain telnet has
+    no pre-authentication handshake — the user logs in interactively on
+    the remote side exactly as they would connecting with any telnet
+    client directly; it's just a raw byte pipe with minimal Telnet IAC
+    (RFC 854) option-negotiation handling so the remote server doesn't
+    hang waiting for a reply it'll never get otherwise.
+
+    Configuration (in standard Game fields — no schema changes):
+
+      executable_path    = ``HOST:PORT`` (e.g. ``twgs.example.com:23``)
+      command_line_args  = unused
+    """
+    import asyncio
+    from .telnet_bridge import TelnetIACFilter
+
+    # Parse executable_path = HOST:PORT
+    server_addr = (game.executable_path or '').strip()
+    if not server_addr:
+        await session.write("\r\ntelnet door is misconfigured: no server address.\r\n")
+        await session.read_line("Press Enter...")
+        return False
+    if ':' in server_addr:
+        host, port_str = server_addr.rsplit(':', 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 23
+    else:
+        host, port = server_addr, 23
+
+    await session.write(
+        f"\r\nConnecting to {host}:{port}...\r\n"
+        f"  - Press Ctrl+] then 'q' to abort\r\n\r\n")
+
+    # Open TCP socket to the telnet server — no handshake to send.
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=15)
+    except (OSError, asyncio.TimeoutError) as exc:
+        await session.write(f"\r\nConnection failed: {exc}\r\n")
+        await session.read_line("Press Enter...")
+        return False
+
+    iac = TelnetIACFilter()
+    abort_event = asyncio.Event()
+
+    # Pump bytes from the telnet socket -> the BBS user's terminal.
+    # Option-negotiation sequences are filtered out of what the user
+    # sees and answered (refused) directly on the socket.
+    async def _output_pump():
+        while not abort_event.is_set():
+            try:
+                data = await reader.read(4096)
+            except Exception:
+                break
+            if not data:
+                break
+            display, reply = iac.process(data)
+            if reply:
+                try:
+                    writer.write(reply)
+                    await writer.drain()
+                except Exception:
+                    break
+            if not display:
+                continue
+            try:
+                text = display.decode(session.encoding, errors='replace') \
+                       if hasattr(session, 'encoding') else \
+                       display.decode('cp437', errors='replace')
+                await session.write(text)
+            except Exception:
+                break
+
+    # Pump BBS user's keystrokes -> the telnet socket. Watch for Ctrl+]q
+    # abort sequence so the user can always escape a stuck session.
+    async def _input_pump():
+        seen_escape = False
+        while not abort_event.is_set():
+            try:
+                ch = await session.reader.read(1)
+            except Exception:
+                break
+            if not ch:
+                break
+            if seen_escape:
+                seen_escape = False
+                if ch in (b'q', b'Q'):
+                    abort_event.set()
+                    break
+                # Forward both bytes — false alarm
+                try:
+                    writer.write(b'\x1d')
+                    writer.write(ch)
+                    await writer.drain()
+                except Exception:
+                    break
+                continue
+            if ch == b'\x1d':
+                seen_escape = True
+                continue
+            try:
+                writer.write(ch)
+                await writer.drain()
+            except Exception:
+                break
+
+    out_task = asyncio.ensure_future(_output_pump())
+    in_task = asyncio.ensure_future(_input_pump())
+
+    try:
+        done, pending = await asyncio.wait(
+            [out_task, in_task],
+            return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
         if pending:
             try:
                 await asyncio.gather(*pending, return_exceptions=True)

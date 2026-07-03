@@ -157,7 +157,8 @@ class GameManager:
         from flask import Flask
         from anetbbs.config import get_config
         from anetbbs.models import db, Game
-        from ..games.door_runner import play_door_game_telnet, play_rlogin_telnet
+        from ..games.door_runner import (play_door_game_telnet, play_rlogin_telnet,
+                                         play_telnet_terminal)
 
         app = Flask(__name__)
         app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
@@ -169,11 +170,14 @@ class GameManager:
                 await self.session.write("\r\nGame disappeared from the catalog.\r\n")
                 return
 
-        # door_rlogin is a remote game-server type — no local subprocess,
-        # just a TCP rlogin handshake bridged to the user's terminal.
-        # Everything else goes through the unified launch path.
-        if game_dict.get('game_type') == 'door_rlogin':
+        # door_rlogin / door_telnet are remote game-server types — no
+        # local subprocess, just a TCP connection bridged to the user's
+        # terminal. Everything else goes through the unified launch path.
+        gtype = game_dict.get('game_type')
+        if gtype == 'door_rlogin':
             launcher = play_rlogin_telnet
+        elif gtype == 'door_telnet':
+            launcher = play_telnet_terminal
         else:
             launcher = play_door_game_telnet
 

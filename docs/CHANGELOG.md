@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.26`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.27`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.27 — Telnet door game servers (July 2026)
+
+- FEATURE: new `door_telnet` game type for external telnet-only game servers (e.g. TWGS — Trade Wars Game Server). No pre-authentication handshake like `door_rlogin` — just `host:port`, user logs in interactively on the remote side. Works on both web and terminal doors, mirrors the rlogin door architecture. Includes a small RFC 854 option-negotiation filter so the remote server doesn't hang and negotiation bytes never reach the player's screen. Configure via Admin → Games → Game Type → "Telnet Door Server".
 
 ## v1.0b2.26 — MRC: terminal fixes + stale-session cleanup (July 2026)
 

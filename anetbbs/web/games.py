@@ -276,14 +276,18 @@ def handle_start_game(data):
             except Exception:
                 logger.exception('flush_pre_join_buffer emit failed')
 
-    from ..games.door_runner import launch_door_game, launch_rlogin_session, _build_command
+    from ..games.door_runner import (launch_door_game, launch_rlogin_session,
+                                     launch_telnet_session, _build_command)
 
-    # door_rlogin has no local subprocess — skip the _build_command
-    # validation (it's DOS-door specific) and use the rlogin launcher.
-    if game.game_type == 'door_rlogin':
+    # door_rlogin / door_telnet have no local subprocess — skip the
+    # _build_command validation (it's DOS-door specific) and use the
+    # matching remote launcher.
+    if game.game_type in ('door_rlogin', 'door_telnet'):
+        launcher = (launch_rlogin_session if game.game_type == 'door_rlogin'
+                   else launch_telnet_session)
+        proto = 'rlogin' if game.game_type == 'door_rlogin' else 'telnet'
         try:
-            session_id = launch_rlogin_session(game, current_user,
-                                                _emit_output, bbs_name)
+            session_id = launcher(game, current_user, _emit_output, bbs_name)
         except Exception as exc:  # pylint: disable=broad-except
             emit('game_error', {'message': f'Cannot start: {exc}'})
             return
@@ -295,7 +299,7 @@ def handle_start_game(data):
         join_room(str(session_id))
         _socket_to_session[request.sid] = session_id
         emit('game_started', {'session_id': session_id,
-                              'cmd': f'rlogin {game.executable_path}'})
+                              'cmd': f'{proto} {game.executable_path}'})
         _flush_pre_join_buffer()
         return
 

@@ -331,6 +331,32 @@
         </div>
     </div>
 
+    <!-- Remote telnet game server -->
+    <div id="section_door_telnet" class="game-type-section">
+        <div class="section-header"><i class="bi bi-terminal"></i> Telnet Door Server</div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-6">
+                <label class="form-label" for="executable_path_telnet">Server (host:port)</label>
+                {{ form.executable_path(class="form-control", placeholder="twgs.example.com:23", id="executable_path_telnet") }}
+                <small style="color:#007700;">Default telnet port is 23.</small>
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-12">
+                <small style="color:#444;">
+                    Plain telnet, no pre-authentication — the user logs in
+                    interactively on the remote side exactly as they would
+                    connecting with any telnet client directly. This is the
+                    right type for external game servers that only offer
+                    telnet, like a <strong>TWGS</strong> (Trade Wars Game
+                    Server) instance. No user template or password needed
+                    here — <code>Command Line Args</code> above is unused
+                    for this door type.
+                </small>
+            </div>
+        </div>
+    </div>
+
     <div class="mt-4">
         {{ form.submit(class="btn btn-primary") }}
         <a href="{{ url_for('games_admin.list_games') }}" class="btn btn-primary ms-2">Cancel</a>
@@ -341,7 +367,7 @@
 {% block extra_js %}
 <script>
 (function () {
-    var sections = ['door_dos', 'door_dosemu', 'door_dos_browser', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin'];
+    var sections = ['door_dos', 'door_dosemu', 'door_dos_browser', 'door_native', 'door_mystic', 'door_mystic_mps', 'door_synchronet', 'builtin_web', 'door_rlogin', 'door_telnet'];
     var sel = document.getElementById('game_type_select');
 
     function showSection(type) {

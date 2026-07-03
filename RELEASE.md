@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.27 — Telnet door game servers (July 2026)
+
+- FEATURE: new `door_telnet` game type for external telnet-only game servers, like a TWGS (Trade Wars Game Server) instance. Unlike the existing `door_rlogin` type, telnet has no pre-authentication handshake — connecting is just `host:port`, and the user logs in interactively on the remote side exactly like connecting with any telnet client directly. Works on both the web game center and terminal (telnet/SSH) doors, mirroring the existing rlogin door architecture. Includes a small RFC 854 option-negotiation filter so the remote server doesn't hang waiting for replies to features this client doesn't implement, and so negotiation control bytes never leak into what the player sees. Configure in Admin → Games: set Game Type to "Telnet Door Server", then just `host:port` in the Server field (default port 23). 13 new tests for the negotiation filter and the connection wrapper.
+
+---
+
 # ANetBBS v1.0b2.26 — MRC: terminal fixes + stale-session cleanup (July 2026)
 
 - FIX: `/mentions` always showed 0 — mention detection was wired to event types the bridge never sends; moved it to the real `mrc_message` path. The status-bar `!N` indicator now works live too.
