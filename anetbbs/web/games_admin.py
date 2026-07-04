@@ -85,11 +85,14 @@ class GameForm(FlaskForm):
     sort_order = IntegerField('Sort Order', validators=[Optional()], default=0)
     is_active = BooleanField('Active', default=True)
     is_multiplayer = BooleanField('Multiplayer', default=False)
+    web_enabled = BooleanField('Web enabled', default=True)
+    terminal_enabled = BooleanField('Terminal enabled', default=True)
 
     # Door game fields
     executable_path = StringField('Executable Path', validators=[Optional(), Length(max=500)])
     working_directory = StringField('Working Directory', validators=[Optional(), Length(max=500)])
     command_line_args = StringField('Command Line Args', validators=[Optional(), Length(max=500)])
+    rlogin_bbs_tag = StringField('BBS Tag', validators=[Optional(), Length(max=20)])
     drop_file_type = SelectField('Drop File Type', choices=[
         ('none', 'None'),
         ('door.sys', 'DOOR.SYS'),
@@ -346,9 +349,12 @@ def _populate_game(game, form):
     game.sort_order = form.sort_order.data or 0
     game.is_active = form.is_active.data
     game.is_multiplayer = form.is_multiplayer.data
+    game.web_enabled = form.web_enabled.data
+    game.terminal_enabled = form.terminal_enabled.data
     game.executable_path = form.executable_path.data
     game.working_directory = form.working_directory.data
     game.command_line_args = form.command_line_args.data
+    game.rlogin_bbs_tag = form.rlogin_bbs_tag.data
     game.drop_file_type = form.drop_file_type.data
     game.drop_file_path = form.drop_file_path.data
     game.use_dosbox = form.use_dosbox.data

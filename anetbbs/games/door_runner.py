@@ -1910,8 +1910,13 @@ def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
 
       * ``game.executable_path``  = ``HOST:PORT``
       * ``game.command_line_args`` = ``USER_TEMPLATE PASSWORD [TERMINAL]``
+      * ``game.rlogin_bbs_tag``   = optional BBS tag (e.g. ``ANET``) —
+        sent as ``username-TAG`` (hyphen-joined) in the client-user
+        field. Kept in its own field rather than typed into
+        command_line_args' USER_TEMPLATE text purely for admin-form
+        clarity, not because the wire format requires it.
     """
-    from .rlogin_bridge import RloginConnection, expand_user_template
+    from .rlogin_bridge import RloginConnection, build_client_user
 
     server_addr = (game.executable_path or '').strip()
     if not server_addr:
@@ -1931,7 +1936,7 @@ def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
     if len(parts) < 2:
         raise ValueError('door_rlogin: command_line_args must be '
                          '"USER_TEMPLATE PASSWORD [TERMINAL]" '
-                         '(e.g. "@USER@-ANET mySharedPassword")')
+                         '(e.g. "@USER@ mySharedPassword")')
     user_template, password = parts[0], parts[1]
     terminal = parts[2] if len(parts) > 2 else 'xterm/57600'
 
@@ -1942,7 +1947,8 @@ def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
     else:
         username = (getattr(user, 'username', None) or 'guest').strip()
         alias = (getattr(user, 'display_name', None) or username).strip()
-    client_user = expand_user_template(user_template, username, alias)
+    client_user = build_client_user(
+        user_template, username, alias, getattr(game, 'rlogin_bbs_tag', None))
 
     # Allocate node
     node = allocate_node(game.id, game.max_nodes or 1, -1)
@@ -2018,13 +2024,19 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         server-user-name\\0    (Synchronet uses this as the password slot)
         terminal/speed\\0
 
-    Configuration (all in standard Game fields — no schema changes):
+    Configuration (in standard Game fields, plus one door_rlogin-only
+    field):
 
       executable_path    = ``HOST:PORT``
                            e.g., ``game.a-net-online.lol:513``
       command_line_args  = ``USER_TEMPLATE PASSWORD [TERMINAL]``
-                           e.g., ``@USER@-ANET 8hf30n^!``
-                           or with direct-to-door: ``@USER@-ANET 8hf30n^! xtrn=LORD408``
+                           e.g., ``@USER@ 8hf30n^!``
+                           or with direct-to-door: ``@USER@ 8hf30n^! xtrn=LORD408``
+      rlogin_bbs_tag     = optional BBS tag (e.g. ``ANET``), sent as
+                           ``username-TAG`` (hyphen-joined) in the
+                           client-user field. A separate field (not part
+                           of command_line_args) purely for admin-form
+                           clarity, not because the wire format needs it.
 
     Token expansion in USER_TEMPLATE:
 
@@ -2032,9 +2044,6 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
       ``@ALIAS@`` → BBS user's display_name (falls back to username)
       ``%u``      → same as ``@USER@`` (Synchronet-style)
       ``%U``      → same as ``@USER@`` (Mystic-style)
-
-    Sysop tag suffixes (e.g., ``-ANET``) are conventional — the remote
-    Synchronet uses them to namespace users by source BBS.
     """
     import asyncio
 
@@ -2060,7 +2069,7 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         await session.write(
             "\r\nrlogin door is misconfigured: command_line_args needs "
             "at least USER_TEMPLATE and PASSWORD.\r\n"
-            "Example: @USER@-BBS mySharedPassword\r\n")
+            "Example: @USER@ mySharedPassword\r\n")
         await session.read_line("Press Enter...")
         return False
     user_template = parts[0]
@@ -2075,11 +2084,9 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         username = (getattr(user, 'username', None) or 'guest').strip()
         alias = (getattr(user, 'display_name', None) or username).strip()
 
-    client_user = (user_template
-                   .replace('@USER@', username)
-                   .replace('@ALIAS@', alias)
-                   .replace('%U', username)
-                   .replace('%u', username))
+    from .rlogin_bridge import build_client_user
+    client_user = build_client_user(
+        user_template, username, alias, getattr(game, 'rlogin_bbs_tag', None))
 
     await session.write(
         f"\r\nConnecting to {host}:{port}...\r\n"

@@ -212,6 +212,15 @@ class Game(db.Model):
     use_dosbox = db.Column(db.Boolean, default=False)
     needs_fossil_driver = db.Column(db.Boolean, default=False)
 
+    # door_rlogin only: Synchronet-style BBS tag (e.g. "ANET") the remote
+    # game server uses to namespace inbound users by source BBS. Kept as
+    # its own field rather than folded into command_line_args because the
+    # real wire value needs a literal space ("username -s-TAG") and
+    # command_line_args is whitespace-split into USER_TEMPLATE/PASSWORD/
+    # [TERMINAL] *before* template expansion, so a space inside the
+    # template field would silently break the split.
+    rlogin_bbs_tag = db.Column(db.String(20))
+
     # Mystic BBS Python game settings
     mystic_script_path = db.Column(db.String(500))
 
@@ -229,6 +238,16 @@ class Game(db.Model):
     is_multiplayer = db.Column(db.Boolean, default=False)
     play_count = db.Column(db.Integer, default=0)
     icon = db.Column(db.String(50))
+
+    # Per-front-end availability -- most game types only exist on one
+    # front end anyway (is_active is the only switch that matters for
+    # them), but a few (currently: the ebook reader) have a real,
+    # independent implementation on both web and terminal, so a sysop
+    # may want e.g. terminal-only with the web version turned off.
+    # Both default True so every existing game keeps working exactly as
+    # before with no config changes required.
+    web_enabled = db.Column(db.Boolean, default=True)
+    terminal_enabled = db.Column(db.Boolean, default=True)
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -564,6 +583,8 @@ class BbsMenuItem(db.Model):
       - 'passwd':     change password
       - 'sysop':      sysop tools (admin only)
       - 'chat':       chat menu
+      - 'rss':        RSS news reader
+      - 'ebooks':     ebook reader (search/read free Gutenberg classics)
       - 'logoff':     end the session
     """
 
@@ -2841,3 +2862,77 @@ class QWKNodeRequest(db.Model):
 
     def __repr__(self):
         return f'<QWKNodeRequest {self.packet_id} [{self.status}]>'
+
+
+class EbookCache(db.Model):
+    """Fetched-once, cached-forever ebook text. Book content never
+    changes once published, so unlike RssItem (re-polled periodically)
+    this is a fetch-on-first-request cache with no expiry.
+    """
+    __tablename__ = 'ebook_cache'
+    __table_args__ = (
+        db.UniqueConstraint('source', 'source_id', name='uq_ebook_cache_source_id'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(20), nullable=False, default='gutenberg')
+    source_id = db.Column(db.String(50), nullable=False, index=True)
+    title = db.Column(db.String(300))
+    author = db.Column(db.String(300))
+    language = db.Column(db.String(10))
+    content = db.Column(db.Text)          # cleaned plain-text body
+    chapters_json = db.Column(db.Text)    # JSON list of {title, start_offset}
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<EbookCache {self.source}:{self.source_id} "{self.title}">'
+
+
+class EbookBookmark(db.Model):
+    """A named bookmark within a book, per user."""
+    __tablename__ = 'ebook_bookmarks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    source = db.Column(db.String(20), nullable=False, default='gutenberg')
+    source_id = db.Column(db.String(50), nullable=False, index=True)
+    title = db.Column(db.String(300))
+    author = db.Column(db.String(300))
+    name = db.Column(db.String(100))
+    position = db.Column(db.Integer, default=0)  # character offset into content
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='ebook_bookmarks')
+
+    def __repr__(self):
+        return f'<EbookBookmark {self.source}:{self.source_id} "{self.name}" user={self.user_id}>'
+
+
+class EbookReadingHistory(db.Model):
+    """Per-user 'last read here' marker, one row per (user, book) —
+    mirrors RssReadStatus's presence-based idiom but also tracks position
+    so 'continue reading' can resume exactly where the user left off.
+    """
+    __tablename__ = 'ebook_reading_history'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'source', 'source_id',
+                             name='uq_ebook_history_user_book'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    source = db.Column(db.String(20), nullable=False, default='gutenberg')
+    source_id = db.Column(db.String(50), nullable=False, index=True)
+    title = db.Column(db.String(300))
+    author = db.Column(db.String(300))
+    last_position = db.Column(db.Integer, default=0)
+    last_read_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship('User', backref='ebook_history')
+
+    def __repr__(self):
+        return f'<EbookReadingHistory {self.source}:{self.source_id} user={self.user_id}>'

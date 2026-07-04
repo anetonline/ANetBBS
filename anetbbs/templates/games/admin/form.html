@@ -95,6 +95,27 @@
                 {{ form.is_multiplayer.label(class="form-check-label") }}
             </div>
         </div>
+        <div class="col-md-3 d-flex align-items-end pb-1">
+            <div class="form-check">
+                {{ form.web_enabled(class="form-check-input") }}
+                {{ form.web_enabled.label(class="form-check-label") }}
+            </div>
+        </div>
+        <div class="col-md-3 d-flex align-items-end pb-1">
+            <div class="form-check">
+                {{ form.terminal_enabled(class="form-check-input") }}
+                {{ form.terminal_enabled.label(class="form-check-label") }}
+            </div>
+        </div>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-md-12">
+            <small style="color:#007700;">
+                Web/Terminal switches only matter for games with a real,
+                independent implementation on both front ends (currently just the
+                Ebook Reader) — turning one off there won't affect anything else.
+            </small>
+        </div>
     </div>
 
     <!-- DOS Door -->
@@ -287,24 +308,36 @@
             </div>
             <div class="col-md-6">
                 <label class="form-label" for="command_line_args">User-template &nbsp;PASSWORD&nbsp; [TERMINAL]</label>
-                {{ form.command_line_args(class="form-control", placeholder="@USER@-ANET 8hf30n^! [xtrn=LORD408]", id="command_line_args") }}
+                {{ form.command_line_args(class="form-control", placeholder="@USER@ 8hf30n^! [xtrn=LORD408]", id="command_line_args") }}
                 <small style="color:#007700;">
                     Three space-separated fields: <code>USER_TEMPLATE PASSWORD [TERMINAL]</code>.
                 </small>
             </div>
         </div>
         <div class="row g-3 mb-2">
+            <div class="col-md-6">
+                <label class="form-label" for="rlogin_bbs_tag">BBS Tag (optional)</label>
+                {{ form.rlogin_bbs_tag(class="form-control", placeholder="ANET", id="rlogin_bbs_tag") }}
+                <small style="color:#007700;">
+                    A short tag the remote server uses to namespace users by source
+                    BBS. Leave blank if the remote server doesn't use tags.
+                </small>
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
             <div class="col-md-12">
                 <small style="color:#444;">
-                    <strong>About the BBS tag suffix.</strong> Synchronet game servers
-                    namespace inbound users by source BBS — the same way Synchronet's
-                    own <code>?rlogin</code> client uses <code>-s-[TAG]</code>
-                    (e.g., <code>-s-ANET</code>) to mark the BBS tag. Here, you build
-                    the same tag into the user template directly:
-                    <code>@USER@-ANET</code> means "send the BBS user's name with
-                    <code>-ANET</code> appended." The remote Synchronet will see
-                    your user log in as <em>username-ANET</em>. Coordinate the tag
-                    + password with the remote sysop.
+                    <strong>About the BBS tag.</strong> Game servers namespace
+                    inbound users by source BBS. Set your tag in the <strong>BBS
+                    Tag</strong> field above (just the letters, e.g. <code>ANET</code>)
+                    and the BBS builds the actual suffix for you, sending it as
+                    <em>username-ANET</em> (hyphen-joined, no space) — the
+                    Mystic-style convention, not Synchronet's own native
+                    <code>?rlogin -s-TAG</code> client convention (which uses a space
+                    + <code>-s-</code> prefix and only applies BBS-to-BBS between two
+                    real Synchronet installs). It's a separate field from
+                    User-template purely so you don't have to hand-assemble a
+                    combined string. Coordinate the tag + password with the remote sysop.
                     <br><br>
                     <strong>Tokens in USER_TEMPLATE:</strong>
                     <code>@USER@</code> → BBS username,
@@ -318,13 +351,13 @@
                     server's website.
                     <br><br>
                     <strong>Examples for game.a-net-online.lol</strong>
-                    (replace <code>YOUR_PASS</code> with the password the remote
-                    sysop assigned to your BBS):
+                    (BBS Tag: <code>ANET</code>; replace <code>YOUR_PASS</code> with
+                    the password the remote sysop assigned to your BBS):
                     <ul style="margin: 4px 0 0 20px; padding: 0;">
-                        <li>Door menu: <code>@USER@-ANET YOUR_PASS</code></li>
-                        <li>Direct LORD: <code>@USER@-ANET YOUR_PASS xtrn=LORD408</code></li>
-                        <li>Direct ASSASSIN: <code>@USER@-ANET YOUR_PASS xtrn=ASSASSIN</code></li>
-                        <li>RPG category menu: <code>@USER@-ANET YOUR_PASS xtrn_sec=RPG</code></li>
+                        <li>Door menu: <code>@USER@ YOUR_PASS</code></li>
+                        <li>Direct LORD: <code>@USER@ YOUR_PASS xtrn=LORD408</code></li>
+                        <li>Direct ASSASSIN: <code>@USER@ YOUR_PASS xtrn=ASSASSIN</code></li>
+                        <li>RPG category menu: <code>@USER@ YOUR_PASS xtrn_sec=RPG</code></li>
                     </ul>
                 </small>
             </div>

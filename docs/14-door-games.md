@@ -419,7 +419,7 @@ under real DOSBox first, set FXDevice to 9, then bundle with
 ```bash
 # DOOM (Shareware)
 python3 tools/prepare_dos_games.py \
-  --source-dir "/media/jerry/EXT HDD/Doom" \
+  --source-dir "/path/to/Doom" \
   --exe DOOM.EXE \
   --output doom \
   --name "DOOM (Shareware)" \
@@ -427,7 +427,7 @@ python3 tools/prepare_dos_games.py \
 
 # Duke Nukem 3D (Shareware)
 python3 tools/prepare_dos_games.py \
-  --source-dir "/media/jerry/EXT HDD/DUKE3D" \
+  --source-dir "/path/to/DUKE3D" \
   --exe DUKE3D.EXE \
   --output duke3d \
   --name "Duke Nukem 3D (Shareware)" \
@@ -485,12 +485,33 @@ sends the rlogin handshake, and bridges bytes between the socket and
 your user's terminal — they appear to teleport into the remote BBS's
 door menu, no second login prompt.
 
-Configuration uses two existing fields (no new schema):
+Configuration uses three fields:
 
 - **Server (host:port)** → `executable_path`, e.g.
   `game.a-net-online.lol:513`
 - **User template + password [+ optional terminal]** →
   `command_line_args`, space-separated.
+- **BBS Tag** (optional) → `rlogin_bbs_tag`, e.g. `ANET`. Kept as its
+  own field rather than folded into `command_line_args` — see "Wire
+  format quirk" below for why.
+
+### Bundled by default
+
+As of v1.0b2.28+, A-Net Online's game server ships pre-installed and
+active, the same way LORD does — a `Game` row (slug
+`a-net-game-server`) gets seeded automatically on first boot, with a
+**randomly generated password and a randomly generated 4-character BBS
+tag**. Each install gets its own — both are generated once, locally,
+the first time your BBS boots, and never touched again afterward, so
+they're private to your install and not something a stranger could
+guess from reading the ANetBBS source.
+
+The remote server doesn't validate the password against anything in
+particular — it just needs to be present and hard to guess, since
+every user on your BBS shares it to connect. The tag just needs to be
+short and reasonably unique so the remote server can tell your BBS's
+users apart from everyone else's. You're free to change either at
+**Admin → Door Games → A-Net Game Server**.
 
 ### Adding A-Net Online's game server
 
@@ -502,24 +523,24 @@ Configuration uses two existing fields (no new schema):
 | Slug | `anet-games` |
 | Game Type | `A-Net Game Server (rlogin)` |
 | Server (host:port) | `game.a-net-online.lol:513` |
-| User template + PASSWORD [+ TERMINAL] | `@USER@-ANET YOUR_PASSWORD` |
+| User template + PASSWORD [+ TERMINAL] | `@USER@ YOUR_PASSWORD` |
+| BBS Tag | `ANET` (pick your own short tag) |
 | Max nodes | 4 |
 
-Coordinate `YOUR_PASSWORD` and the BBS tag suffix (e.g. `-ANET`) with
-the remote sysop. The tag namespaces inbound users from each visitor
-BBS — same convention Synchronet's own `?rlogin -s-[TAG]` client uses.
+Coordinate `YOUR_PASSWORD` and your BBS Tag with the remote sysop. The
+tag namespaces inbound users from each visitor BBS.
 
 ### Direct-to-door
 
 For a per-game menu entry that drops the user straight into a
 specific door instead of the remote BBS's door menu, append a third
-field:
+field to `command_line_args` (BBS Tag stays in its own field either way):
 
 | Door | command_line_args |
 |------|-------------------|
-| LORD 4.08 | `@USER@-ANET YOUR_PASSWORD xtrn=LORD408` |
-| Assassin | `@USER@-ANET YOUR_PASSWORD xtrn=ASSASSIN` |
-| RPG menu | `@USER@-ANET YOUR_PASSWORD xtrn_sec=RPG` |
+| LORD 4.08 | `@USER@ YOUR_PASSWORD xtrn=LORD408` |
+| Assassin | `@USER@ YOUR_PASSWORD xtrn=ASSASSIN` |
+| RPG menu | `@USER@ YOUR_PASSWORD xtrn_sec=RPG` |
 
 The `xtrn=NAME` and `xtrn_sec=NAME` codes match Synchronet's xtrn.cnf
 internal codes — get the list from the remote sysop's website.
@@ -536,6 +557,15 @@ Synchronet's BBS-mode rlogin server uses INVERTED field order vs
 RFC 1282 — password goes in the client-user-name slot (1st), the BBS
 username goes in server-user-name (2nd). Our `RloginConnection`
 already sends in this order; you don't need to think about it.
+
+If a **BBS Tag** is set, it's appended to the client-user-name value as
+`username-TAG` (hyphen-joined, no space) — the Mystic-style convention
+ANetBBS presents its rlogin connections as. This is different from
+Synchronet's own native `?rlogin -s-TAG` client convention (a space
+plus `-s-` prefix), which only applies when a real Synchronet BBS
+calls another real Synchronet BBS. `rlogin_bbs_tag` is a separate
+field from `command_line_args` purely so you don't have to hand-type a
+combined string — not because the wire format itself needs it.
 
 If you're connecting to a non-Synchronet rlogin daemon and auth fails,
 that's the most likely culprit (since standard Unix rlogind expects

@@ -1,0 +1,522 @@
+<style>
+#ebook-app { max-width: 900px; margin: 0 auto; }
+
+/* ---- Shelf (browse/search/history/bookmarks) ---- */
+.eb-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.eb-tab {
+    background: var(--theme-card-bg); color: var(--theme-text-muted);
+    border: 1px solid var(--theme-border); border-radius: 6px;
+    padding: 6px 14px; cursor: pointer; font-size: .9rem;
+}
+.eb-tab.active { background: var(--theme-primary); color: var(--theme-bg-dark); border-color: var(--theme-primary); }
+.eb-search-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.eb-search-row input {
+    flex: 1; background: var(--theme-input-bg); color: var(--theme-text);
+    border: 1px solid var(--theme-border); border-radius: 6px; padding: 8px 12px;
+}
+.eb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.eb-card {
+    background: var(--theme-card-bg); border: 1px solid var(--theme-border);
+    border-radius: 8px; padding: 14px; cursor: pointer; transition: border-color .15s;
+}
+.eb-card:hover { border-color: var(--theme-primary); }
+.eb-card-title { font-weight: 600; color: var(--theme-text); margin-bottom: 4px; }
+.eb-card-author { color: var(--theme-text-muted); font-size: .85rem; }
+.eb-card-meta { color: var(--theme-text-muted); font-size: .75rem; margin-top: 6px; }
+.eb-empty { color: var(--theme-text-muted); text-align: center; padding: 40px 0; }
+.eb-bm-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--theme-card-bg); border: 1px solid var(--theme-border);
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;
+}
+.eb-bm-row .eb-bm-info { cursor: pointer; }
+.eb-bm-del { background: none; border: none; color: #e06c75; cursor: pointer; font-size: 1.1rem; }
+
+/* ---- Reading view: styled to look like an actual book page ---- */
+#eb-reader { display: none; }
+.eb-reader-toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+}
+.eb-reader-toolbar .eb-title-block { color: var(--theme-text); }
+.eb-reader-toolbar .eb-title-block .eb-book-title { font-weight: 600; }
+.eb-reader-toolbar .eb-title-block .eb-book-author { color: var(--theme-text-muted); font-size: .85rem; }
+.eb-toolbar-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.eb-toolbar-btns select, .eb-toolbar-btns button {
+    background: var(--theme-input-bg); color: var(--theme-text);
+    border: 1px solid var(--theme-border); border-radius: 6px;
+    padding: 5px 10px; font-size: .85rem; cursor: pointer;
+}
+
+.eb-page-frame {
+    background: #f4ecd8;
+    border-radius: 4px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.4);
+    padding: 48px 56px;
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+}
+.eb-page-text {
+    font-family: Georgia, 'Palatino Linotype', 'Book Antiqua', serif;
+    font-size: 1.08rem;
+    line-height: 1.75;
+    color: #2b2620;
+    flex: 1;
+    transition: opacity .18s ease;
+}
+.eb-page-text.eb-fading { opacity: 0; }
+.eb-page-text p { margin: 0 0 1em 0; text-indent: 1.5em; }
+.eb-page-text p:first-child { text-indent: 0; }
+.eb-chapter-heading {
+    font-family: Georgia, serif; text-align: center; font-variant: small-caps;
+    letter-spacing: .08em; font-size: 1.3rem; margin-bottom: 1.2em; color: #2b2620;
+}
+.eb-page-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 20px; padding-top: 14px; border-top: 1px solid #d8cdb0;
+    font-family: Georgia, serif; color: #6b5f4a; font-size: .85rem;
+}
+.eb-page-nav-btn {
+    background: none; border: 1px solid #6b5f4a; color: #6b5f4a;
+    border-radius: 4px; padding: 4px 14px; cursor: pointer; font-family: Georgia, serif;
+}
+.eb-page-nav-btn:disabled { opacity: .3; cursor: default; }
+.eb-measure {
+    position: absolute; visibility: hidden; pointer-events: none;
+    left: -9999px; top: 0;
+}
+</style>
+
+<div id="ebook-app">
+    <h4 style="color: var(--theme-text);"><i class="bi bi-book"></i> Ebook Reader</h4>
+
+    <div id="eb-shelf">
+        <div class="eb-tabs">
+            <button class="eb-tab active" data-tab="classics">Classics</button>
+            <button class="eb-tab" data-tab="search">Search</button>
+            <button class="eb-tab" data-tab="history">Continue Reading</button>
+            <button class="eb-tab" data-tab="bookmarks">Bookmarks</button>
+        </div>
+
+        <div id="eb-pane-search" class="eb-pane" style="display:none;">
+            <div class="eb-search-row">
+                <input id="eb-search-input" type="text" placeholder="Search Project Gutenberg by title or author...">
+                <button class="btn btn-primary" id="eb-search-btn"><i class="bi bi-search"></i> Search</button>
+            </div>
+            <div id="eb-search-results" class="eb-grid"></div>
+        </div>
+
+        <div id="eb-pane-classics" class="eb-pane">
+            <div id="eb-classics-grid" class="eb-grid">
+                <div class="eb-empty">Loading classics…</div>
+            </div>
+        </div>
+
+        <div id="eb-pane-history" class="eb-pane" style="display:none;">
+            <div id="eb-history-list"></div>
+        </div>
+
+        <div id="eb-pane-bookmarks" class="eb-pane" style="display:none;">
+            <div id="eb-bookmarks-list"></div>
+        </div>
+    </div>
+
+    <div id="eb-reader">
+        <div class="eb-reader-toolbar">
+            <div class="eb-title-block">
+                <div class="eb-book-title" id="eb-r-title"></div>
+                <div class="eb-book-author" id="eb-r-author"></div>
+            </div>
+            <div class="eb-toolbar-btns">
+                <select id="eb-chapter-select"></select>
+                <button id="eb-bookmark-btn" title="Add bookmark here"><i class="bi bi-bookmark-plus"></i></button>
+                <button id="eb-download-btn" title="Download as .txt"><i class="bi bi-download"></i></button>
+                <button id="eb-close-btn" title="Back to shelf"><i class="bi bi-x-lg"></i> Close</button>
+            </div>
+        </div>
+
+        <div class="eb-page-frame">
+            <div id="eb-chapter-heading" class="eb-chapter-heading"></div>
+            <div class="eb-page-text" id="eb-page-text"></div>
+            <div class="eb-page-footer">
+                <button class="eb-page-nav-btn" id="eb-prev-btn">&larr; Prev</button>
+                <span id="eb-page-indicator"></span>
+                <button class="eb-page-nav-btn" id="eb-next-btn">Next &rarr;</button>
+            </div>
+        </div>
+        <div class="eb-measure" id="eb-measure"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var API = '/games/ebooks';
+
+    // ---- state ----
+    var book = null;          // {source, source_id, title, author, content, chapters}
+    var chapterIdx = 0;
+    var pages = [];           // for the current chapter: [{startOffset, html}]
+    var pageIdx = 0;
+
+    function getCsrf() {
+        // NOT a csrf_token cookie -- this project never sets one (only
+        // session/remember_token), so reading document.cookie for it
+        // (the pattern some other web games use) always returns empty
+        // and silently fails every POST. base.html renders the real
+        // token in a meta tag; read it from there instead.
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function api(path, opts) {
+        opts = opts || {};
+        opts.headers = Object.assign({'X-CSRFToken': getCsrf()}, opts.headers || {});
+        return fetch(API + path, opts).then(function(r) {
+            if (!r.ok) return r.json().then(function(j){ throw new Error(j.error || r.statusText); });
+            return r.json();
+        });
+    }
+
+    // ---- tabs ----
+    document.querySelectorAll('.eb-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.eb-tab').forEach(function(t){ t.classList.remove('active'); });
+            tab.classList.add('active');
+            document.querySelectorAll('.eb-pane').forEach(function(p){ p.style.display = 'none'; });
+            var pane = document.getElementById('eb-pane-' + tab.dataset.tab);
+            if (pane) pane.style.display = '';
+            if (tab.dataset.tab === 'history') loadHistory();
+            if (tab.dataset.tab === 'bookmarks') loadBookmarks();
+        });
+    });
+
+    // ---- shelf rendering ----
+    function bookCard(b) {
+        var div = document.createElement('div');
+        div.className = 'eb-card';
+        div.innerHTML =
+            '<div class="eb-card-title">' + escapeHtml(b.title) + '</div>' +
+            '<div class="eb-card-author">' + escapeHtml(b.author) + '</div>' +
+            (b.download_count ? '<div class="eb-card-meta">' + b.download_count.toLocaleString() + ' downloads</div>' : '');
+        div.addEventListener('click', function() { openBook(b.source_id, b.title, b.author); });
+        return div;
+    }
+
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    function loadClassics() {
+        api('/classics').then(function(data) {
+            var grid = document.getElementById('eb-classics-grid');
+            grid.innerHTML = '';
+            if (!data.books.length) {
+                grid.innerHTML = '<div class="eb-empty">No classics available right now.</div>';
+                return;
+            }
+            data.books.forEach(function(b) { grid.appendChild(bookCard(b)); });
+        }).catch(function() {
+            document.getElementById('eb-classics-grid').innerHTML =
+                '<div class="eb-empty">Could not load classics — check your connection.</div>';
+        });
+    }
+
+    document.getElementById('eb-search-btn').addEventListener('click', doSearch);
+    document.getElementById('eb-search-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') doSearch();
+    });
+
+    function doSearch() {
+        var q = document.getElementById('eb-search-input').value.trim();
+        var results = document.getElementById('eb-search-results');
+        if (!q) return;
+        results.innerHTML = '<div class="eb-empty">Searching…</div>';
+        api('/search?q=' + encodeURIComponent(q)).then(function(data) {
+            results.innerHTML = '';
+            if (!data.books.length) {
+                results.innerHTML = '<div class="eb-empty">No books found.</div>';
+                return;
+            }
+            data.books.forEach(function(b) { results.appendChild(bookCard(b)); });
+        }).catch(function(err) {
+            results.innerHTML = '<div class="eb-empty">Search failed: ' + escapeHtml(err.message) + '</div>';
+        });
+    }
+
+    function loadHistory() {
+        var list = document.getElementById('eb-history-list');
+        list.innerHTML = '<div class="eb-empty">Loading…</div>';
+        api('/history').then(function(data) {
+            list.innerHTML = '';
+            if (!data.history.length) {
+                list.innerHTML = '<div class="eb-empty">You haven\'t started reading anything yet.</div>';
+                return;
+            }
+            data.history.forEach(function(h) {
+                var row = document.createElement('div');
+                row.className = 'eb-bm-row';
+                row.innerHTML =
+                    '<div class="eb-bm-info"><strong>' + escapeHtml(h.title) + '</strong> — ' +
+                    escapeHtml(h.author) + '</div>';
+                row.querySelector('.eb-bm-info').addEventListener('click', function() {
+                    openBook(h.source_id, h.title, h.author, h.last_position);
+                });
+                list.appendChild(row);
+            });
+        });
+    }
+
+    function loadBookmarks() {
+        var list = document.getElementById('eb-bookmarks-list');
+        list.innerHTML = '<div class="eb-empty">Loading…</div>';
+        api('/bookmarks').then(function(data) {
+            list.innerHTML = '';
+            if (!data.bookmarks.length) {
+                list.innerHTML = '<div class="eb-empty">No bookmarks yet — open a book and click the bookmark icon.</div>';
+                return;
+            }
+            data.bookmarks.forEach(function(bm) {
+                var row = document.createElement('div');
+                row.className = 'eb-bm-row';
+                row.innerHTML =
+                    '<div class="eb-bm-info"><strong>' + escapeHtml(bm.name) + '</strong> — ' +
+                    escapeHtml(bm.title) + '</div>' +
+                    '<button class="eb-bm-del" title="Delete"><i class="bi bi-trash"></i></button>';
+                row.querySelector('.eb-bm-info').addEventListener('click', function() {
+                    openBook(bm.source_id, bm.title, bm.author, bm.position);
+                });
+                row.querySelector('.eb-bm-del').addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    api('/bookmarks/' + bm.id, {method: 'DELETE'}).then(loadBookmarks);
+                });
+                list.appendChild(row);
+            });
+        });
+    }
+
+    // ---- reading ----
+    function openBook(sourceId, title, author, resumeOffset) {
+        document.getElementById('eb-shelf').style.display = 'none';
+        // #eb-reader is "display:none" in the stylesheet -- clearing an
+        // inline style (style.display = '') falls back to that
+        // stylesheet rule, it does NOT reset to the element's normal
+        // default. Needs an explicit non-none value to actually show.
+        document.getElementById('eb-reader').style.display = 'block';
+        document.getElementById('eb-r-title').textContent = title || 'Loading…';
+        document.getElementById('eb-r-author').textContent = author || '';
+        document.getElementById('eb-page-text').innerHTML = '<p>Fetching book text — larger books can take a few seconds on first read…</p>';
+
+        api('/book/' + sourceId).then(function(data) {
+            book = data;
+            var select = document.getElementById('eb-chapter-select');
+            select.innerHTML = '';
+            book.chapters.forEach(function(ch, i) {
+                var opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = ch.title;
+                select.appendChild(opt);
+            });
+            document.getElementById('eb-r-title').textContent = book.title;
+            document.getElementById('eb-r-author').textContent = book.author;
+
+            var startChapter = 0, startOffsetInChapter = 0;
+            if (resumeOffset) {
+                for (var i = book.chapters.length - 1; i >= 0; i--) {
+                    if (book.chapters[i].start_offset <= resumeOffset) {
+                        startChapter = i;
+                        startOffsetInChapter = resumeOffset - book.chapters[i].start_offset;
+                        break;
+                    }
+                }
+            }
+            select.value = startChapter;
+            goToChapter(startChapter, startOffsetInChapter);
+        }).catch(function(err) {
+            document.getElementById('eb-page-text').innerHTML =
+                '<p>Could not open this book: ' + escapeHtml(err.message) + '</p>';
+        });
+    }
+
+    document.getElementById('eb-close-btn').addEventListener('click', function() {
+        saveProgress();
+        document.getElementById('eb-reader').style.display = 'none';
+        document.getElementById('eb-shelf').style.display = 'block';
+        book = null;
+    });
+
+    document.getElementById('eb-chapter-select').addEventListener('change', function() {
+        goToChapter(parseInt(this.value, 10), 0);
+    });
+
+    function chapterBounds(idx) {
+        var start = book.chapters[idx].start_offset;
+        var end = (idx + 1 < book.chapters.length) ? book.chapters[idx + 1].start_offset : book.content.length;
+        return [start, end];
+    }
+
+    function goToChapter(idx, offsetInChapter) {
+        chapterIdx = idx;
+        document.getElementById('eb-chapter-heading').textContent = book.chapters[idx].title;
+        var bounds = chapterBounds(idx);
+        var text = book.content.slice(bounds[0], bounds[1]);
+        pages = paginate(text, bounds[0]);
+        var target = 0;
+        if (offsetInChapter) {
+            for (var i = 0; i < pages.length; i++) {
+                if (pages[i].startOffset - bounds[0] <= offsetInChapter) target = i;
+            }
+        }
+        showPage(target);
+    }
+
+    // Splits a chapter's text into pages by measuring rendered height
+    // against an offscreen clone of the visible page area, so pagination
+    // adapts to whatever viewport size the reader is actually using.
+    function paginate(text, chapterStartOffset) {
+        // Recover each paragraph's real absolute offset into the full
+        // book content (not just an approximation) by re-locating it in
+        // the source text -- needed so bookmarks/resume-position point
+        // at an actual place in the book, not a guessed one.
+        var paragraphs = [];
+        var searchFrom = 0;
+        text.split(/\n\s*\n/).forEach(function(raw) {
+            var trimmed = raw.trim();
+            if (!trimmed) return;
+            var idx = text.indexOf(trimmed, searchFrom);
+            if (idx === -1) idx = searchFrom;
+            paragraphs.push({text: trimmed, offset: chapterStartOffset + idx});
+            searchFrom = idx + trimmed.length;
+        });
+
+        var frame = document.querySelector('.eb-page-frame');
+        var measure = document.getElementById('eb-measure');
+        measure.style.width = document.getElementById('eb-page-text').clientWidth + 'px';
+        measure.className = 'eb-measure eb-page-text';
+        var maxHeight = frame.clientHeight ? frame.clientHeight - 120 : 500; // room for heading+footer
+        if (maxHeight < 200) maxHeight = 200;
+
+        var result = [];
+        var currentHtml = '';
+        var currentCount = 0;
+        var pageStartOffset = paragraphs.length ? paragraphs[0].offset : chapterStartOffset;
+
+        paragraphs.forEach(function(p) {
+            var candidateHtml = currentHtml + '<p>' + escapeHtml(p.text).replace(/\n/g, '<br>') + '</p>';
+            measure.innerHTML = candidateHtml;
+            if (measure.scrollHeight > maxHeight && currentCount > 0) {
+                result.push({startOffset: pageStartOffset, html: currentHtml});
+                currentHtml = '<p>' + escapeHtml(p.text).replace(/\n/g, '<br>') + '</p>';
+                currentCount = 1;
+                pageStartOffset = p.offset;
+            } else {
+                if (currentCount === 0) pageStartOffset = p.offset;
+                currentHtml = candidateHtml;
+                currentCount++;
+            }
+        });
+        if (currentCount > 0) {
+            result.push({startOffset: pageStartOffset, html: currentHtml});
+        }
+        if (!result.length) {
+            result.push({html: '<p><em>(No readable text in this chapter.)</em></p>', startOffset: chapterStartOffset});
+        }
+        return result;
+    }
+
+    function showPage(idx, direction) {
+        pageIdx = Math.max(0, Math.min(idx, pages.length - 1));
+        var el = document.getElementById('eb-page-text');
+        el.classList.add('eb-fading');
+        setTimeout(function() {
+            el.innerHTML = pages[pageIdx].html;
+            el.classList.remove('eb-fading');
+        }, 90);
+        document.getElementById('eb-page-indicator').textContent =
+            'Page ' + (pageIdx + 1) + ' of ' + pages.length;
+        document.getElementById('eb-prev-btn').disabled = (pageIdx === 0 && chapterIdx === 0);
+        document.getElementById('eb-next-btn').disabled =
+            (pageIdx === pages.length - 1 && chapterIdx === book.chapters.length - 1);
+        saveProgress();
+    }
+
+    document.getElementById('eb-prev-btn').addEventListener('click', function() { turnPage(-1); });
+    document.getElementById('eb-next-btn').addEventListener('click', function() { turnPage(1); });
+    document.addEventListener('keydown', function(e) {
+        if (!book) return;
+        if (e.key === 'ArrowRight' || e.key === ' ') { turnPage(1); e.preventDefault(); }
+        if (e.key === 'ArrowLeft') { turnPage(-1); e.preventDefault(); }
+    });
+
+    function turnPage(dir) {
+        if (!book) return;
+        var next = pageIdx + dir;
+        if (next >= 0 && next < pages.length) {
+            showPage(next);
+            return;
+        }
+        var nextChapter = chapterIdx + dir;
+        if (nextChapter >= 0 && nextChapter < book.chapters.length) {
+            document.getElementById('eb-chapter-select').value = nextChapter;
+            goToChapter(nextChapter, dir < 0 ? Number.MAX_SAFE_INTEGER : 0);
+        }
+    }
+
+    var _resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(function() {
+            if (book) goToChapter(chapterIdx, pages[pageIdx] ? pages[pageIdx].startOffset - chapterBounds(chapterIdx)[0] : 0);
+        }, 250);
+    });
+
+    function currentAbsoluteOffset() {
+        if (!book || !pages[pageIdx]) return 0;
+        return pages[pageIdx].startOffset;
+    }
+
+    var _saveTimer;
+    function saveProgress() {
+        if (!book) return;
+        clearTimeout(_saveTimer);
+        _saveTimer = setTimeout(function() {
+            api('/history', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    source_id: book.source_id, title: book.title, author: book.author,
+                    position: currentAbsoluteOffset(),
+                }),
+            }).catch(function() {});
+        }, 400);
+    }
+
+    document.getElementById('eb-bookmark-btn').addEventListener('click', function() {
+        if (!book) return;
+        var name = prompt('Bookmark name:', book.chapters[chapterIdx].title);
+        if (name === null) return;
+        api('/bookmarks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                source_id: book.source_id, title: book.title, author: book.author,
+                name: name || 'Bookmark', position: currentAbsoluteOffset(),
+            }),
+        }).then(function() {
+            var btn = document.getElementById('eb-bookmark-btn');
+            var orig = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-bookmark-check-fill"></i>';
+            setTimeout(function() { btn.innerHTML = orig; }, 1200);
+        });
+    });
+
+    document.getElementById('eb-download-btn').addEventListener('click', function() {
+        if (!book) return;
+        window.location = API + '/book/' + book.source_id + '/download';
+    });
+
+    loadClassics();
+})();
+</script>

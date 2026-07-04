@@ -557,7 +557,7 @@ esac
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Step 2/9: Installing required system packages"
 
-REQUIRED_PKGS=(python3 python3-venv python3-pip python3-dev build-essential libffi-dev rsync git curl openssh-client)
+REQUIRED_PKGS=(python3 python3-venv python3-pip python3-dev build-essential libffi-dev rsync git curl openssh-client lrzsz)
 REQUIRED_FAILED=()
 
 for generic in "${REQUIRED_PKGS[@]}"; do

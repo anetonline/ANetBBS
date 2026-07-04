@@ -2560,6 +2560,374 @@ class BBSMenuUI:
                             db.session.commit()
                 rows = [(iid, t, fn, ts, False) for iid, t, fn, ts, _ in rows]
 
+    # ── Ebook Reader (terminal) ──────────────────────────────────────
+    # Reuses the web version's backend (anetbbs/web/ebooks.py: Gutendex
+    # search, curl-based fetch, chapter splitting, EbookCache/Bookmark/
+    # ReadingHistory models) -- only the UI layer here is new. Not a
+    # door/game-session -- just a standalone menu feature, same as RSS.
+    async def show_ebooks(self):
+        """Ebook reader top menu."""
+        from .ansi_ui import banner, FG, RESET, ui_width
+        while True:
+            _w = ui_width(self.session)
+            menu = (
+                '\x1b[2J\x1b[H' + banner('Ebook Reader', _w) +
+                f"\r\n  {FG['cyan']}C{RESET}. Classics\r\n"
+                f"  {FG['cyan']}S{RESET}. Search\r\n"
+                f"  {FG['cyan']}H{RESET}. Continue Reading\r\n"
+                f"  {FG['cyan']}B{RESET}. Bookmarks\r\n"
+                f"  {FG['cyan']}Q{RESET}. Back\r\n\r\n"
+                "Choice: "
+            )
+            # Single-key hotkey, no Enter -- matches the main menu's own
+            # convention. Using read_line() here was a real bug: the main
+            # menu's read_key() only consumes the single hotkey byte, so
+            # any Enter a telnet client sends alongside it is left
+            # sitting in the buffer -- a read_line() call right after
+            # would consume that leftover byte as an instant blank
+            # submit and return immediately without ever showing this
+            # menu to the user.
+            choice = (await self.session.read_key(menu) or '').strip().upper()
+            if choice == 'Q':
+                return
+            elif choice == 'C':
+                await self._ebook_classics()
+            elif choice == 'S':
+                await self._ebook_search()
+            elif choice == 'H':
+                await self._ebook_history()
+            elif choice == 'B':
+                await self._ebook_bookmarks()
+            # empty/unrecognized choice just redraws (matches read_key's
+            # own "bare Enter = redraw" convention)
+
+    async def _ebook_pick_from_list(self, title, rows, empty_msg):
+        """Generic title/author lightbar picker. rows: list of dicts with
+        at least source_id/title/author. Returns the picked dict or None.
+        """
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        if not rows:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(title, ui_width(self.session)))
+            await self.session.write(f"  {FG['gry']}{empty_msg}{RESET}\r\n")
+            await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+            return None
+
+        async def render_header():
+            _w = ui_width(self.session)
+            _tw = max(30, _w - 34)
+            await self.session.write(banner(title, _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Title':<{_tw}}  {'Author':<24}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+        def render_row(idx, row, selected):
+            _tw = max(30, ui_width(self.session) - 34)
+            t = BBSMenuUI._sanitize_cp437(row['title'])[:_tw]
+            a = BBSMenuUI._sanitize_cp437(row.get('author') or '')[:24]
+            return (f"  {FG['grn']}{idx+1:>2}{RESET}  "
+                    f"{t:<{_tw}}  {a:<24}")
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                    f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=open  "
+                    f"{FG['cyan']}Q{RESET}=back")
+
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] == 'enter':
+            return rows[result[1]]
+        return None
+
+    async def _ebook_classics(self):
+        from anetbbs.web.ebooks import get_classics_list
+        await self.session.write('\x1b[2J\x1b[H\r\n  Loading classics...\r\n')
+        try:
+            with _app().app_context():
+                rows = get_classics_list()
+        except Exception:
+            rows = []
+        picked = await self._ebook_pick_from_list(
+            'Ebook Classics', rows,
+            'Could not load classics - check your connection.')
+        if picked:
+            await self._ebook_open_and_read(
+                picked['source_id'], picked['title'], picked['author'])
+
+    async def _ebook_search(self):
+        from anetbbs.web.ebooks import search_books
+        query = (await self.session.read_line(
+            '\r\n  Search Project Gutenberg (title/author): ') or '').strip()
+        if not query:
+            return
+        await self.session.write('\r\n  Searching...\r\n')
+        try:
+            with _app().app_context():
+                rows = search_books(query)
+        except Exception:
+            rows = []
+        picked = await self._ebook_pick_from_list(
+            f'Search: {query[:30]}', rows, 'No books found.')
+        if picked:
+            await self._ebook_open_and_read(
+                picked['source_id'], picked['title'], picked['author'])
+
+    async def _ebook_history(self):
+        from anetbbs.models import EbookReadingHistory
+        uid = (self.session.user or {}).get('id')
+        with _app().app_context():
+            entries = (EbookReadingHistory.query.filter_by(user_id=uid)
+                       .order_by(EbookReadingHistory.last_read_at.desc())
+                       .limit(30).all())
+            rows = [{'source_id': e.source_id, 'title': e.title,
+                     'author': e.author, 'position': e.last_position}
+                    for e in entries]
+        picked = await self._ebook_pick_from_list(
+            'Continue Reading', rows,
+            "You haven't started reading anything yet.")
+        if picked:
+            await self._ebook_open_and_read(
+                picked['source_id'], picked['title'], picked['author'],
+                picked.get('position'))
+
+    async def _ebook_bookmarks(self):
+        from anetbbs.models import EbookBookmark, db
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        uid = (self.session.user or {}).get('id')
+        last_sel = 0
+        while True:
+            with _app().app_context():
+                entries = (EbookBookmark.query.filter_by(user_id=uid)
+                           .order_by(EbookBookmark.created_at.desc()).all())
+                rows = [{'id': b.id, 'source_id': b.source_id, 'title': b.title,
+                         'author': b.author, 'name': b.name, 'position': b.position}
+                        for b in entries]
+
+            if not rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('Bookmarks', ui_width(self.session)))
+                await self.session.write(f"  {FG['gry']}No bookmarks yet.{RESET}\r\n")
+                await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+                return
+
+            async def render_header():
+                _w = ui_width(self.session)
+                await self.session.write(banner('Bookmarks', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'#':>2}  {'Name':<24}  {'Book':<40}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, row, selected):
+                n = BBSMenuUI._sanitize_cp437(row['name'] or '')[:24]
+                t = BBSMenuUI._sanitize_cp437(row['title'])[:40]
+                return (f"  {FG['grn']}{idx+1:>2}{RESET}  "
+                        f"{n:<24}  {t:<40}")
+
+            def render_hint(sel, total):
+                return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=open  "
+                        f"{FG['cyan']}D{RESET}=delete  {FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(
+                rows, render_header, render_row, render_hint, initial_sel=last_sel)
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                last_sel = result[1]
+                row = rows[last_sel]
+                await self._ebook_open_and_read(
+                    row['source_id'], row['title'], row['author'], row['position'])
+            elif result[0] == 'key' and result[1] == 'D':
+                row = rows[last_sel]
+                with _app().app_context():
+                    bm = EbookBookmark.query.get(row['id'])
+                    if bm:
+                        db.session.delete(bm)
+                        db.session.commit()
+
+    async def _ebook_pick_chapter(self, chapters):
+        from .ansi_ui import banner, FG, RESET, ui_width
+
+        async def render_header():
+            await self.session.write(banner('Chapters', ui_width(self.session)))
+
+        def render_row(idx, row, selected):
+            t = BBSMenuUI._sanitize_cp437(row['title'])[:70]
+            return f"  {FG['grn']}{idx+1:>3}{RESET}  {t}"
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                    f"{FG['cyan']}Enter{RESET}=go  {FG['cyan']}Q{RESET}=cancel")
+
+        result = await self._rss_lightbar(chapters, render_header, render_row, render_hint)
+        if result[0] == 'enter':
+            return result[1]
+        return None
+
+    def _ebook_save_history(self, uid, source_id, title, author, position):
+        from anetbbs.models import EbookReadingHistory, db
+        if not uid:
+            return
+        with _app().app_context():
+            entry = EbookReadingHistory.query.filter_by(
+                user_id=uid, source='gutenberg', source_id=str(source_id)).first()
+            if entry is None:
+                entry = EbookReadingHistory(
+                    user_id=uid, source='gutenberg', source_id=str(source_id))
+                db.session.add(entry)
+            entry.title = (title or '')[:300]
+            entry.author = (author or '')[:300]
+            entry.last_position = position
+            entry.last_read_at = datetime.utcnow()
+            db.session.commit()
+
+    async def _ebook_add_bookmark(self, uid, source_id, title, author, position, chapter_title):
+        from anetbbs.models import EbookBookmark, db
+        name = (await self.session.read_line(
+            f"\r\n  Bookmark name [{chapter_title[:40]}]: ") or '').strip()
+        if not name:
+            name = chapter_title[:100]
+        with _app().app_context():
+            db.session.add(EbookBookmark(
+                user_id=uid, source='gutenberg', source_id=str(source_id),
+                title=(title or '')[:300], author=(author or '')[:300],
+                name=name[:100], position=position, created_at=datetime.utcnow()))
+            db.session.commit()
+        await self.session.write("  Bookmark added.\r\n")
+
+    async def _ebook_download(self, title, content):
+        import tempfile
+        from .xfer import send_file, available_protocols
+
+        protocols = available_protocols()
+        if not protocols:
+            await self.session.write(
+                "\r\n  No file-transfer protocol available on this server "
+                "(sysop needs to install lrzsz).\r\n")
+            await self.session.read_line("  Press Enter...")
+            return
+        safe_title = BBSMenuUI._sanitize_cp437(
+            re.sub(r'[^A-Za-z0-9 _-]', '', title or 'book')).strip() or 'book'
+        fd, path = tempfile.mkstemp(
+            suffix='.txt', prefix=safe_title.replace(' ', '_') + '_')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            await self.session.write(
+                f"\r\n  Starting {protocols[0]} download: {safe_title}.txt\r\n")
+            await send_file(self.session, path, protocol=protocols[0])
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    async def _ebook_open_and_read(self, source_id, title=None, author=None,
+                                    resume_offset=None):
+        """Fetch (or pull from cache) and enter the chapter-by-chapter
+        reading loop for one book."""
+        import json as _json
+        from anetbbs.web.ebooks import _fetch_and_cache_book
+        from .ansi_ui import FG, RESET, ui_width
+
+        await self.session.write(
+            f"\r\n  Fetching \"{title or source_id}\"... "
+            f"(larger books can take a few seconds on first read)\r\n")
+        try:
+            with _app().app_context():
+                book = _fetch_and_cache_book(str(source_id))
+                if book is None:
+                    await self.session.write(
+                        f"  {FG['red']}No readable text format for this book.{RESET}\r\n")
+                    await self.session.read_line("  Press Enter...")
+                    return
+                # Gutenberg text is full Unicode (smart quotes, em-dashes,
+                # etc.) -- sanitize for CP437 terminals the same way the
+                # RSS reader does for feed content, or these show up as
+                # mangled '?' characters on a real terminal. Title/author
+                # are small and safe to sanitize outright; the full book
+                # `content` is NOT sanitized here -- chapters[i]
+                # ['start_offset'] was computed against the original
+                # unsanitized text, and several substitutions change
+                # length (e.g. '…' -> '...'), which would silently shift
+                # every offset after the first such character and throw
+                # off chapter boundaries. Sanitize per-paragraph instead,
+                # at display time, after slicing by the real offsets.
+                book_title = BBSMenuUI._sanitize_cp437(book.title or '')
+                book_author = BBSMenuUI._sanitize_cp437(book.author or '')
+                content = book.content or ''
+                chapters = _json.loads(book.chapters_json or '[]')
+                for _ch in chapters:
+                    _ch['title'] = BBSMenuUI._sanitize_cp437(_ch.get('title') or '')
+        except Exception as exc:
+            await self.session.write(f"  {FG['red']}Could not fetch book: {exc}{RESET}\r\n")
+            await self.session.read_line("  Press Enter...")
+            return
+
+        chapter_idx = 0
+        if resume_offset:
+            for i in range(len(chapters) - 1, -1, -1):
+                if chapters[i]['start_offset'] <= resume_offset:
+                    chapter_idx = i
+                    break
+
+        uid = (self.session.user or {}).get('id')
+
+        while True:
+            bounds_start = chapters[chapter_idx]['start_offset']
+            bounds_end = (chapters[chapter_idx + 1]['start_offset']
+                          if chapter_idx + 1 < len(chapters) else len(content))
+            chapter_text = content[bounds_start:bounds_end]
+
+            _w = max(60, ui_width(self.session) - 4)
+            body_lines = []
+            for para in chapter_text.split('\n\n'):
+                para = BBSMenuUI._sanitize_cp437(para.strip())
+                if not para:
+                    continue
+                body_lines.extend(self._wrap_text(para, _w))
+                body_lines.append('')
+
+            hdr = [
+                f"  {FG['cyan']}{book_title[:60]}{RESET} - {FG['gry']}{(book_author or '')[:40]}{RESET}",
+                f"  {chapters[chapter_idx]['title'][:70]}",
+                f"  {FG['gry']}{'─' * _w}{RESET}",
+            ]
+            hint = (f"  {FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Q/Enter{RESET}=menu")
+
+            self._ebook_save_history(uid, source_id, book_title, book_author, bounds_start)
+
+            await self._rss_pager(body_lines, hdr, hint)
+
+            action_menu = (
+                f"\r\n  {FG['cyan']}N{RESET}ext chapter  {FG['cyan']}P{RESET}rev chapter  "
+                f"{FG['cyan']}C{RESET}hapters  {FG['cyan']}K{RESET}=bookmark here  "
+                f"{FG['cyan']}D{RESET}ownload  {FG['cyan']}Q{RESET}uit to menu\r\n"
+                "Choice: "
+            )
+            act = (await self.session.read_key(action_menu) or '').strip().upper()
+            if act == 'Q':
+                return
+            elif act == 'N':
+                if chapter_idx < len(chapters) - 1:
+                    chapter_idx += 1
+            elif act == 'P':
+                if chapter_idx > 0:
+                    chapter_idx -= 1
+            elif act == 'C':
+                picked_idx = await self._ebook_pick_chapter(chapters)
+                if picked_idx is not None:
+                    chapter_idx = picked_idx
+            elif act == 'K':
+                await self._ebook_add_bookmark(
+                    uid, source_id, book_title, book_author, bounds_start,
+                    chapters[chapter_idx]['title'])
+            elif act == 'D':
+                await self._ebook_download(book_title, content)
+            # any other/empty input just redraws the same chapter
+
     async def show_profile(self):
         from anetbbs.models import User
         while True:
@@ -3307,6 +3675,12 @@ async def _show_main_v2(self):
     while True:
         is_sysop = self.session.user.get('is_admin')
         sysop_line = "║  S. Sysop tools                          ║\r\n" if is_sysop else ""
+        with _app().app_context():
+            from anetbbs.models import Game
+            ebooks_game = Game.query.filter_by(slug='ebooks').first()
+            ebooks_terminal_on = bool(
+                ebooks_game and ebooks_game.is_active and ebooks_game.terminal_enabled)
+        ebooks_line = "║  K. Ebook Reader                          ║\r\n" if ebooks_terminal_on else ""
         menu = (
             "\r\n"
             "╔══════════════════════════════════════════╗\r\n"
@@ -3320,6 +3694,7 @@ async def _show_main_v2(self):
             "║  C. Compose Echomail                     ║\r\n"
             "║  F. File Library                         ║\r\n"
             "║  R. RSS News Reader                      ║\r\n"
+            f"{ebooks_line}"
             "║  U. Who's Online                         ║\r\n"
             "║  Y. Your Profile                         ║\r\n"
             "║  X. Edit Profile                         ║\r\n"
@@ -3349,6 +3724,8 @@ async def _show_main_v2(self):
             await self.list_files()
         elif choice == 'R':
             await self.show_rss()
+        elif choice == 'K' and ebooks_terminal_on:
+            await self.show_ebooks()
         elif choice == 'U':
             await self.show_online()
         elif choice == 'Y':

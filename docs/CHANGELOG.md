@@ -1,11 +1,20 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.27`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.28`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.28 — A-Net Game Server bundled by default + Ebook Reader (July 2026)
+
+- FEATURE: A-Net Online's rlogin game server (450+ door games) now ships pre-installed and active like LORD does. Each install gets its own randomly generated password and BBS tag on first boot — private to that BBS, never in the public source, and never regenerated afterward. Sysops can change either any time at Admin → Door Games → A-Net Game Server.
+- FEATURE: new door_rlogin **BBS Tag** field — the tag now has its own admin-form field instead of being hyphen-joined into the user-template text, purely for clarity (the wire format itself, `username-TAG`, is unchanged).
+- FEATURE: new built-in web game, **Ebook Reader** — search + read free Project Gutenberg classics in a book-styled reading view (serif type, page-turn navigation), with bookmarks, reading history, and download-to-`.txt`. Also has a **terminal version** (telnet/SSH/rlogin, main-menu hotkey `K`) with the same feature set.
+- FEATURE: **per-front-end Web/Terminal toggle** on every game (Admin → Games) — lets a sysop run the Ebook Reader as terminal-only, web-only, or both.
+- FIX: bundled-door seeding hardcoded `max_nodes=1` for every stock door — wrong for a 20-slot remote multiplayer server. Now respects a per-door override.
+- FIX: `lrzsz` (ZMODEM, used by every terminal file transfer) was missing from `install.sh`'s required packages — fresh installs had no working terminal downloads out of the box. Now installed automatically. Existing installs upgrading via `update.sh` need `sudo apt-get install -y lrzsz` once by hand (update.sh doesn't manage system packages).
 
 ## v1.0b2.27 — Telnet door game servers (July 2026)
 
-- FEATURE: new `door_telnet` game type for external telnet-only game servers (e.g. TWGS — Trade Wars Game Server). No pre-authentication handshake like `door_rlogin` — just `host:port`, user logs in interactively on the remote side. Works on both web and terminal doors, mirrors the rlogin door architecture. Includes a small RFC 854 option-negotiation filter so the remote server doesn't hang and negotiation bytes never reach the player's screen. Configure via Admin → Games → Game Type → "Telnet Door Server".
+- FEATURE: new `door_telnet` game type for external telnet-only game servers (e.g. TWGS — Trade Wars Game Server, like `game.a-net-online.lol:2002`, A-Net Online's own TWGS). No pre-authentication handshake like `door_rlogin` — just `host:port`, user logs in interactively on the remote side. Works on both web and terminal doors, mirrors the rlogin door architecture. Includes a small RFC 854 option-negotiation filter so the remote server doesn't hang and negotiation bytes never reach the player's screen. Configure via Admin → Games → Game Type → "Telnet Door Server".
 
 ## v1.0b2.26 — MRC: terminal fixes + stale-session cleanup (July 2026)
 

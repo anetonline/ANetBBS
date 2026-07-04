@@ -106,6 +106,20 @@ async def _act_sysop(ui, args):   await ui.session.write(_CLR); await ui.sysop_m
 async def _act_chat(ui, args):    await ui.session.write(_CLR); await ui.session.chat.show_menu(); return None
 async def _act_rss(ui, args):     await ui.session.write(_CLR); await ui.show_rss();           return None
 
+async def _act_ebooks(ui, args):
+    """Ebook reader -- gated by the ebooks Game row's terminal_enabled
+    flag (sysop-configurable independently of the web version)."""
+    from anetbbs.models import Game
+    with _app().app_context():
+        g = Game.query.filter_by(slug='ebooks').first()
+        enabled = bool(g and g.is_active and g.terminal_enabled)
+    if not enabled:
+        await ui.session.write(
+            '\r\n\x1b[1;31mThe terminal Ebook Reader is currently disabled.\x1b[0m\r\n')
+        await ui.session.read_key('\r\n\x1b[33m[Press any key]\x1b[0m')
+        return None
+    await ui.session.write(_CLR); await ui.show_ebooks(); return None
+
 
 async def _act_multinode(ui, args):
     """Multinode chat: see who's connected and broadcast lines to them.
@@ -414,6 +428,7 @@ _ACTIONS = {
     'sysop': _act_sysop,
     'chat': _act_chat,
     'rss': _act_rss,
+    'ebooks': _act_ebooks,
     'games': _act_games,
     'page': _act_page,
     'dialout': _act_dialout,
@@ -698,6 +713,7 @@ DEFAULT_MENUS = [
             {'hotkey': 'G', 'label': 'Game Center', 'action_type': 'games', 'sort_order': 60},
             {'hotkey': 'H', 'label': 'Chat', 'action_type': 'chat', 'sort_order': 70},
             {'hotkey': 'R', 'label': 'RSS News Reader', 'action_type': 'rss', 'sort_order': 75},
+            {'hotkey': 'K', 'label': 'Ebook Reader', 'action_type': 'ebooks', 'sort_order': 76},
             {'hotkey': 'U', 'label': "Who's Online", 'action_type': 'who', 'sort_order': 80},
             {'hotkey': 'A', 'label': 'Page Sysop', 'action_type': 'page', 'sort_order': 85},
             {'hotkey': 'D', 'label': 'Dial Out (visit other BBSes)', 'action_type': 'dialout', 'sort_order': 86},

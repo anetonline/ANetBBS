@@ -48,7 +48,7 @@ def lobby():
         user_access = getattr(current_user, 'access_level', 10) or 10
 
     query = (Game.query
-             .filter_by(is_active=True)
+             .filter_by(is_active=True, web_enabled=True)
              .filter(Game.min_access_level <= user_access))
     if category_filter:
         query = query.filter_by(category=category_filter)
@@ -85,7 +85,7 @@ def lobby():
 @games_bp.route('/<slug>')
 def detail(slug):
     """Game detail page with leaderboard."""
-    game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    game = Game.query.filter_by(slug=slug, is_active=True, web_enabled=True).first_or_404()
     top_scores = (GameScore.query
                   .filter_by(game_id=game.id)
                   .order_by(GameScore.score.desc())
@@ -103,7 +103,7 @@ def detail(slug):
 @login_required
 def play(slug):
     """Launch a game for the current user."""
-    game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    game = Game.query.filter_by(slug=slug, is_active=True, web_enabled=True).first_or_404()
 
     if game.game_type == 'builtin_web':
         module = game.web_game_module or slug

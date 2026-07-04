@@ -187,6 +187,17 @@ WEB_GAMES = [
         'web_game_module': 'breakout',
         'sort_order': 180,
     },
+    {
+        'name': 'Ebook Reader',
+        'slug': 'ebooks',
+        'description': 'Search and read free public-domain classics from Project '
+                       'Gutenberg in a clean, book-styled reading view. '
+                       'Bookmarks, reading history, and downloads included.',
+        'category': 'other',
+        'icon': 'bi-book',
+        'web_game_module': 'ebooks',
+        'sort_order': 190,
+    },
 ]
 
 

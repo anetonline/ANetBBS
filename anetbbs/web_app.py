@@ -13,6 +13,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
+import secrets
 import logging
 import json
 from datetime import datetime
@@ -285,6 +286,7 @@ def create_app(config_name=None):
     from .web.echomail_admin import echomail_admin_bp
     from .web.games import games_bp
     from .web.games_admin import games_admin_bp
+    from .web.ebooks import ebooks_bp
     from .web.gallery import gallery_bp
     from .web.gallery_admin import gallery_admin_bp
     from .web.rss import rss_bp, redirect_bp
@@ -355,6 +357,7 @@ def create_app(config_name=None):
     csrf.exempt(qwk_hub_bp)   # QWK nodes use HTTP Basic Auth, not CSRF tokens
     app.register_blueprint(games_bp)
     app.register_blueprint(games_admin_bp)
+    app.register_blueprint(ebooks_bp)
     app.register_blueprint(gallery_bp)
     app.register_blueprint(gallery_admin_bp)
     app.register_blueprint(rss_bp)
@@ -797,7 +800,12 @@ def _create_default_data():
     if not User.query.filter_by(username='admin').first():
         # Generate a one-time random password instead of hardcoding 'admin123'.
         # Print + persist it so the sysop can find it on first install.
-        import secrets
+        # (secrets is imported at module level now — used again below for
+        # the A-Net Game Server door seed's password. A local `import
+        # secrets` here previously shadowed that module-level import for
+        # this whole function's scope, since Python treats any name
+        # assigned/imported anywhere in a function body as local to the
+        # entire function — even on code paths that don't execute it.)
         from flask import current_app as _ca
         gen_pw = secrets.token_urlsafe(12)
         admin = User(
@@ -1249,6 +1257,47 @@ def _create_default_data():
             '_active_default': True,
         },
         {
+            # A-Net Game Server — StingRay's own rlogin door-game server
+            # (game.a-net-online.lol), 450+ live games. The password
+            # only needs to be hard for a random stranger to guess — the
+            # remote server doesn't validate it against anything
+            # specific — so a locally generated random string is all
+            # that's needed, no coordination with the remote server
+            # required. The BBS tag is a separate rlogin_bbs_tag field
+            # (not folded into command_line_args -- see that field's
+            # comment on the Game model for why) -- a random 4-letter
+            # tag so two ANetBBS installs won't collide with each other
+            # on the remote server by default; the sysop is free to
+            # change it any time. Both are generated fresh only the
+            # FIRST time this seed runs for an install: the update loop
+            # below only re-syncs game_type/web_game_module/
+            # web_game_url on existing rows, so these values are
+            # computed on every boot but only actually used (and thus
+            # only actually matter) the one time the row gets created —
+            # they never overwrite an already-seeded password/tag on
+            # subsequent boots.
+            'name': 'A-Net Game Server',
+            'slug': 'a-net-game-server',
+            'description': 'A-Net Online Door Game Server — over 450 '
+                           'live games, rlogin into a shared game hub.',
+            'category': 'other',
+            'icon': 'bi-controller',
+            'game_type': 'door_rlogin',
+            'executable_path': 'game.a-net-online.lol:513',
+            'command_line_args': f'@USER@ {secrets.token_urlsafe(16)}',
+            'rlogin_bbs_tag': ''.join(
+                secrets.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ') for _ in range(4)),
+            'max_nodes': 20,
+            'sort_order': 20,
+            # No local game files to check for (it's a remote
+            # connection) — door_runner.py always ships, so it's used
+            # here as an always-true guard, matching the must_exist
+            # convention every other bundled door already follows.
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'door_runner.py'),
+            '_active_default': True,
+        },
+        {
             'name': 'DOOM (Shareware)',
             'slug': 'doom',
             'description': 'The 1993 id Software classic — fight demons '
@@ -1286,7 +1335,12 @@ def _create_default_data():
         kw = {k: v for k, v in d.items()
               if k not in ('must_exist', '_active_default')}
         kw['is_active'] = d.get('_active_default', True)
-        kw['max_nodes'] = 1
+        # Every bundled door up to now has been single-player-per-node
+        # locally (DOSBox/JS door instances), hence the flat default of
+        # 1 -- but a remote multiplayer game server (rlogin) shouldn't be
+        # capped at one simultaneous caller. Respect an explicit
+        # max_nodes in the door's own dict if given.
+        kw.setdefault('max_nodes', 1)
         existing = Game.query.filter_by(slug=d['slug']).first()
         if existing:
             # Keep key fields current so version upgrades self-correct

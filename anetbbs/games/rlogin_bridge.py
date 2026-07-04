@@ -162,3 +162,29 @@ def expand_user_template(template: str, username: str, alias: str) -> str:
             .replace('@ALIAS@', alias)
             .replace('%U', username)
             .replace('%u', username))
+
+
+def build_client_user(user_template: str, username: str, alias: str,
+                       bbs_tag: str = '') -> str:
+    """Expand USER_TEMPLATE and append the optional BBS tag suffix.
+
+    Sent as "username-TAG" (hyphen-joined, no space) in the
+    client-user-name slot — the Mystic-style convention ANetBBS
+    presents as, not Synchronet's own native `?rlogin -s-TAG` client
+    convention (space + "-s-" prefix), which only applies when a real
+    Synchronet BBS calls another real Synchronet BBS.
+
+    The tag is kept in its own `Game.rlogin_bbs_tag` field rather than
+    typed into command_line_args' USER_TEMPLATE text purely for admin-
+    form clarity (a separate labeled box beats asking the sysop to
+    hand-assemble a combined string) — not because the wire format
+    itself requires it.
+
+    Used by both the terminal and web rlogin launch paths so this only
+    needs to be gotten right once.
+    """
+    client_user = expand_user_template(user_template, username, alias)
+    tag = (bbs_tag or '').strip()
+    if tag:
+        client_user = f'{client_user}-{tag}'
+    return client_user
