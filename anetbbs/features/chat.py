@@ -62,9 +62,11 @@ class ChatManager:
                 await self.session.write("\r\nInvalid choice. Please try again.\r\n")
 
     async def local_chat(self):
-        await self.session.write("\r\nLocal Chat Room (type /quit to exit)\r\n\r\n")
-        while True:
-            message = await self.session.read_line("> ")
-            if message.lower() == '/quit':
-                break
-            await self.session.write(f"\r\n<{self.session.user['username']}> {message}\r\n")
+        # Was previously a stub that only ever echoed back to the
+        # sender -- never actually broadcast to other nodes, which is
+        # why two logged-in users couldn't hear each other. Delegates
+        # to the same real-time broadcast/queue machinery the
+        # main-menu 'multinode' action already used (that one was
+        # fully working, just never wired into a default menu).
+        from .multinode import run_chat_session
+        await run_chat_session(self.session)

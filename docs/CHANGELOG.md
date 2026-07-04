@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.28`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.29`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.29 — Local Chat actually broadcasts now (July 2026)
+
+- FIX (critical): terminal **Local Chat** (Chat → 1) was a stub that only echoed your own message back to yourself, never broadcasting to other nodes. Now delegates to the already-working real-time broadcast/queue system in `multinode.py` (previously only reachable via a dead, unwired `multinode` menu action).
+- FIX (critical): `broadcast()`'s self-exclusion compared by username, not by node — two nodes logged in under the *same* account (e.g. testing with one account on two terminals) both matched the check, so the message was dropped for everyone. Now excludes by the specific sending node's slot.
+- 9 new tests in `tests/test_multinode_chat.py`, plus manual verification against two real concurrent telnet sessions.
 
 ## v1.0b2.28 — A-Net Game Server bundled by default + Ebook Reader (July 2026)
 

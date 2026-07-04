@@ -124,87 +124,8 @@ async def _act_ebooks(ui, args):
 async def _act_multinode(ui, args):
     """Multinode chat: see who's connected and broadcast lines to them.
     Type /q to quit, /w <slot> <msg> to whisper, /list to see nodes."""
-    from .multinode import list_nodes, broadcast, whisper
-    sess = ui.session
-    entry = getattr(sess, '_node_entry', None)
-    if entry is None:
-        await sess.write("\r\nNo multinode slot - chat unavailable.\r\n")
-        return None
-    entry.listening = True
-
-    async def pump():
-        """Forward incoming queue messages to the user's terminal."""
-        try:
-            while entry.listening:
-                msg = await entry.queue.get()
-                k = msg.get('kind', 'msg')
-                fr = msg.get('from', '?')
-                tx = msg.get('text', '')
-                if k == 'whisper':
-                    line = f'\r\n\x1b[1;35m[whisper from {fr}]\x1b[0m {tx}\r\n'
-                elif k == 'join':
-                    line = f'\r\n\x1b[1;32m*** {fr} {tx}\x1b[0m\r\n'
-                elif k == 'part':
-                    line = f'\r\n\x1b[1;33m*** {fr} {tx}\x1b[0m\r\n'
-                elif k == 'sysop':
-                    line = f'\r\n\x1b[1;31m[sysop] {tx}\x1b[0m\r\n'
-                else:
-                    line = f'\r\n\x1b[1;36m<{fr}>\x1b[0m {tx}\r\n'
-                try:
-                    await sess.write(line)
-                except Exception:
-                    return
-        except asyncio.CancelledError:
-            return
-
-    pump_task = asyncio.create_task(pump())
-    await sess.write(
-        "\r\n\x1b[1;36m=== Multinode Chat ===\x1b[0m\r\n"
-        "Commands: /list  /w <slot> <msg>  /q to quit\r\n\r\n")
-    try:
-        while True:
-            line = await sess.read_line('chat> ')
-            if line is None:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            if line == '/q' or line.lower() == '/quit':
-                break
-            if line == '/list':
-                nodes = list_nodes()
-                if not nodes:
-                    await sess.write("\r\n(no other nodes online)\r\n")
-                else:
-                    await sess.write("\r\n")
-                    for n in nodes:
-                        await sess.write(
-                            f'  Node {n.slot}: {n.username} '
-                            f'({n.protocol}) since '
-                            f'{n.connected_at.strftime("%H:%M")}\r\n')
-                continue
-            if line.startswith('/w '):
-                parts = line[3:].split(None, 1)
-                if len(parts) == 2 and parts[0].isdigit():
-                    target = int(parts[0])
-                    text = parts[1]
-                    if whisper(target, sess.user.get('username', '?'), text):
-                        await sess.write(
-                            f"\x1b[2m(whispered to node {target})\x1b[0m\r\n")
-                    else:
-                        await sess.write(
-                            f"\r\nNode {target} not online.\r\n")
-                else:
-                    await sess.write("Usage: /w <slot> <message>\r\n")
-                continue
-            broadcast(sess.user.get('username', '?'), line, kind='msg')
-    finally:
-        entry.listening = False
-        pump_task.cancel()
-        try:
-            await pump_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    from .multinode import run_chat_session
+    await run_chat_session(ui.session)
     return None
 async def _act_games(ui, args):
     f = _get_flags(ui.session)

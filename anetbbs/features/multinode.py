@@ -74,9 +74,19 @@ def list_nodes():
     return [_NODES[s] for s in sorted(_NODES.keys())]
 
 
-def broadcast(sender_username, text, kind='msg'):
+def broadcast(sender_username, text, kind='msg', sender_slot=None):
     """Send a chat line to every node except the sender. Best-effort —
-    queue is unbounded so this never blocks."""
+    queue is unbounded so this never blocks.
+
+    Pass `sender_slot` (the sending NodeEntry's own slot number) for
+    'msg' broadcasts whenever it's available. Without it, self-
+    exclusion falls back to matching by username -- which silently
+    drops the message for EVERY node sharing that username, not just
+    the sender, whenever the same account is logged in on more than
+    one node at once (e.g. testing with the same login on two
+    terminals). `sender_slot` identifies the one specific node that
+    sent it instead.
+    """
     payload = {
         'kind': kind,                # 'msg' / 'join' / 'part' / 'sysop'
         'from': sender_username,
@@ -84,8 +94,12 @@ def broadcast(sender_username, text, kind='msg'):
         'when': datetime.utcnow().isoformat(),
     }
     for slot, entry in list(_NODES.items()):
-        if entry.username == sender_username and kind == 'msg':
-            continue
+        if kind == 'msg':
+            if sender_slot is not None:
+                if slot == sender_slot:
+                    continue
+            elif entry.username == sender_username:
+                continue
         try:
             entry.queue.put_nowait(payload)
         except asyncio.QueueFull:
@@ -108,6 +122,99 @@ def whisper(target_slot, sender_username, text):
         return True
     except asyncio.QueueFull:
         return False
+
+
+async def run_chat_session(session):
+    """Interactive multinode chat loop for one terminal session.
+
+    Real-time broadcast to every other node's NodeEntry.queue via
+    `broadcast()`, plus /list and /w <slot> <msg>. Shared by both the
+    main-menu 'multinode' action and ChatManager's "Local Chat" menu
+    option -- those used to be two separate code paths, one fully
+    working and one a stub that only ever echoed back to the sender
+    (never actually broadcast anywhere), which is why "Local Chat"
+    looked like you could only talk to yourself.
+    """
+    entry = getattr(session, '_node_entry', None)
+    if entry is None:
+        await session.write("\r\nNo multinode slot - chat unavailable.\r\n")
+        return
+    entry.listening = True
+
+    async def pump():
+        """Forward incoming queue messages to the user's terminal."""
+        try:
+            while entry.listening:
+                msg = await entry.queue.get()
+                k = msg.get('kind', 'msg')
+                fr = msg.get('from', '?')
+                tx = msg.get('text', '')
+                if k == 'whisper':
+                    line = f'\r\n\x1b[1;35m[whisper from {fr}]\x1b[0m {tx}\r\n'
+                elif k == 'join':
+                    line = f'\r\n\x1b[1;32m*** {fr} {tx}\x1b[0m\r\n'
+                elif k == 'part':
+                    line = f'\r\n\x1b[1;33m*** {fr} {tx}\x1b[0m\r\n'
+                elif k == 'sysop':
+                    line = f'\r\n\x1b[1;31m[sysop] {tx}\x1b[0m\r\n'
+                else:
+                    line = f'\r\n\x1b[1;36m<{fr}>\x1b[0m {tx}\r\n'
+                try:
+                    await session.write(line)
+                except Exception:
+                    return
+        except asyncio.CancelledError:
+            return
+
+    pump_task = asyncio.create_task(pump())
+    await session.write(
+        "\r\n\x1b[1;36m=== Local Chat ===\x1b[0m\r\n"
+        "Commands: /list  /w <slot> <msg>  /q to quit\r\n\r\n")
+    try:
+        while True:
+            line = await session.read_line('chat> ')
+            if line is None:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            if line == '/q' or line.lower() == '/quit':
+                break
+            if line == '/list':
+                nodes = list_nodes()
+                if not nodes:
+                    await session.write("\r\n(no other nodes online)\r\n")
+                else:
+                    await session.write("\r\n")
+                    for n in nodes:
+                        await session.write(
+                            f'  Node {n.slot}: {n.username} '
+                            f'({n.protocol}) since '
+                            f'{n.connected_at.strftime("%H:%M")}\r\n')
+                continue
+            if line.startswith('/w '):
+                parts = line[3:].split(None, 1)
+                if len(parts) == 2 and parts[0].isdigit():
+                    target = int(parts[0])
+                    text = parts[1]
+                    if whisper(target, session.user.get('username', '?'), text):
+                        await session.write(
+                            f"\x1b[2m(whispered to node {target})\x1b[0m\r\n")
+                    else:
+                        await session.write(
+                            f"\r\nNode {target} not online.\r\n")
+                else:
+                    await session.write("Usage: /w <slot> <message>\r\n")
+                continue
+            broadcast(session.user.get('username', '?'), line, kind='msg',
+                      sender_slot=entry.slot)
+    finally:
+        entry.listening = False
+        pump_task.cancel()
+        try:
+            await pump_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 def kick_node(target_slot, sender_username='SYSOP', reason=''):
