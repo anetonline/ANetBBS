@@ -101,6 +101,44 @@ class HubAdminBlueprintGatingTests(unittest.TestCase):
         resp = client.get('/admin/echomail/hub/qwk/requests')
         self.assertNotEqual(resp.status_code, 404)
 
+    def _login_as_admin(self, app, client):
+        """Bypass the real login form (rate limiting, CSRF) by injecting
+        Flask-Login's session keys directly -- a standard technique for
+        testing @login_required routes."""
+        from anetbbs.models import db, User
+        with app.app_context():
+            admin = User.query.filter_by(username='admin').first()
+            if admin is None:
+                admin = User(username='admin', email='admin@example.com', is_admin=True)
+                admin.set_password('password123')
+                db.session.add(admin)
+                db.session.commit()
+            admin_id = admin.id
+        with client.session_transaction() as sess:
+            sess['_user_id'] = str(admin_id)
+            sess['_fresh'] = True
+
+    def test_hub_management_card_hidden_on_non_hub_install(self):
+        # Since the entire hub_admin_bp blueprint 404s on non-hub
+        # installs, a nav card linking to it would be a dead link --
+        # confirm hub() filters it out of the Network section.
+        app = _make_app(str(Path(self._tmp.name) / 'k.db'), registry_mode_enabled=False)
+        client = app.test_client()
+        self._login_as_admin(app, client)
+        resp = client.get('/admin/hub/network')
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'Hub Management', resp.data)
+        self.assertIn(b'Register with Hub', resp.data)
+
+    def test_hub_management_card_shown_on_hub_install(self):
+        app = _make_app(str(Path(self._tmp.name) / 'l.db'), registry_mode_enabled=True)
+        client = app.test_client()
+        self._login_as_admin(app, client)
+        resp = client.get('/admin/hub/network')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'Hub Management', resp.data)
+        self.assertIn(b'Register with Hub', resp.data)
+
 
 class QwkHubApplyApiTests(unittest.TestCase):
     @classmethod

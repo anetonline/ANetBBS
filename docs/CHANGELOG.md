@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.29`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.30`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.30 — Federation "Register with Hub" nav fix (July 2026)
+
+- FIX: the "Register this BBS with a federation hub" admin page existed but had no link anywhere in the UI. Added a **Register with Hub** card to Admin → Network.
+- FIX: the v1.0b2.29 hub-gating fix left the **Hub Management** card linking to a now-404 blueprint on every non-hub install. Hidden unless `REGISTRY_MODE_ENABLED=true`.
+- 2 new tests in `tests/test_qwk_hub_gating.py`.
 
 ## v1.0b2.29 — Local chat, terminal colors, QWK/federation hub gating (July 2026)
 

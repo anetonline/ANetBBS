@@ -300,8 +300,15 @@ ADMIN_HUB_SECTIONS = {
         'title': 'Network',
         'icon': 'bi-diagram-3',
         'tools': [
+            # 'Hub Management' only shown when REGISTRY_MODE_ENABLED --
+            # see hub() below, which filters it out otherwise (the
+            # blueprint itself 404s on non-hub installs since the QWK/
+            # federation hub gating fix, so a card linking to it would
+            # be a dead link everywhere except the actual hub).
             ('hub_admin.index', 'Hub Management', 'bi-broadcast', 'Echomail hub connections'),
             ('admin.registry_index', 'Federation Registry', 'bi-diagram-3', 'Known federated BBSes'),
+            ('admin.registry_self', 'Register with Hub', 'bi-broadcast-pin',
+             'Register this BBS with a federation hub (e.g. bbs.a-net.fyi)'),
             ('peers_health.index', 'Peer Health', 'bi-broadcast', 'Peer connectivity status'),
             ('admin.irc_presets', 'IRC Server Presets', 'bi-chat-dots', 'Saved IRC server list'),
             ('admin.dialout_admin', 'Dial-Out Directory', 'bi-telephone-outbound', 'Legacy dial-out numbers'),
@@ -354,6 +361,12 @@ def hub(section):
     cfg = ADMIN_HUB_SECTIONS.get(section)
     if not cfg:
         abort(404)
+    if section == 'network' and not current_app.config.get('REGISTRY_MODE_ENABLED'):
+        # hub_admin_bp 404s its entire blueprint on non-hub installs
+        # (see the QWK/federation hub gating fix) -- don't show a card
+        # that's a dead link everywhere except the actual hub.
+        cfg = dict(cfg)
+        cfg['tools'] = [t for t in cfg['tools'] if t[0] != 'hub_admin.index']
     return render_template('admin/hub.html', section=section, cfg=cfg)
 
 

@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.30 — Federation "Register with Hub" nav fix (July 2026)
+
+- FIX: the "Register this BBS with a federation hub" admin page (`/admin/registry/self`) existed and worked, but had no link anywhere in the admin UI — genuinely undiscoverable unless you already knew the exact URL. Added a **Register with Hub** card to Admin → Network.
+- FIX (found while adding the above): the v1.0b2.29 hub-gating fix made the entire `hub_admin_bp` blueprint 404 on non-hub installs, but the **Hub Management** card in Admin → Network still unconditionally linked to it — a dead link on every install except the actual hub. Now hidden unless `REGISTRY_MODE_ENABLED=true`.
+- 2 new tests in `tests/test_qwk_hub_gating.py` covering both card-visibility cases.
+
+---
+
 # ANetBBS v1.0b2.29 — Local chat, terminal colors, QWK/federation hub gating (July 2026)
 
 - FIX (critical): the terminal **Local Chat** menu option (Chat → 1) was a stub that only ever echoed your own message back to yourself — it never broadcast to any other node. Reported by the sysop: "I logged on 2 nodes and could not see what the other 'person' is typing." A fully working real-time broadcast/queue system already existed in `anetbbs/features/multinode.py` (used by a *different*, unreachable `multinode` menu action that was never wired into any default menu) — Local Chat now delegates to it, so it actually works: real-time broadcast, `/list` to see who's online, `/w <slot> <msg>` to whisper.
