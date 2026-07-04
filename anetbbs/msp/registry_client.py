@@ -140,10 +140,23 @@ def _loop(app):
 
 
 def _tick(app):
-    """One iteration: try heartbeat, fall back to register on 404."""
+    """One iteration: try heartbeat, fall back to register on 404.
+
+    Returns a dict describing what happened -- {'ok': bool, 'action':
+    'heartbeat'|'register'|'skipped', 'reason': str (on failure),
+    'verify_url': str (on a fresh register)}. Callers that only care
+    about the daily background loop can ignore the return value, but
+    anything showing the sysop a result (the setup wizard, the
+    "register now" admin button) needs it: previously this function
+    just `return`d silently on every failure path -- including when
+    REGISTRY_URL was blank -- so callers had no way to tell success
+    from a silent no-op, and ended up showing a flat "success" message
+    regardless of what (if anything) actually happened.
+    """
     base = (app.config.get('REGISTRY_URL') or '').rstrip('/')
     if not base:
-        return
+        return {'ok': False, 'action': 'skipped',
+                'reason': 'REGISTRY_URL is not configured'}
     meta = _our_metadata(app)
     state = _load_state(app)
     sess = requests.Session()
@@ -165,17 +178,18 @@ def _tick(app):
                 _save_state(app, state)
                 logger.info('registry-client: heartbeat to %s ok (%s)',
                             base, r.json().get('is_listed', '?'))
-                return
+                return {'ok': True, 'action': 'heartbeat'}
             elif r.status_code == 404:
                 logger.info('registry-client: hub %s says we are unknown '
                             '— re-registering', base)
             else:
                 logger.warning('registry-client: heartbeat %s returned %d: %s',
                                base, r.status_code, r.text[:200])
-                return
+                return {'ok': False, 'action': 'heartbeat',
+                        'reason': f'hub returned HTTP {r.status_code}'}
         except requests.RequestException as exc:
             logger.warning('registry-client: heartbeat failed: %s', exc)
-            return
+            return {'ok': False, 'action': 'heartbeat', 'reason': str(exc)}
 
     # Full register (first time, or after a 404 fallback).
     try:
@@ -193,8 +207,13 @@ def _tick(app):
                 'registry-client: registered with %s — status=%s '
                 'verify_url=%s', base, body.get('status'),
                 body.get('verify_url'))
+            return {'ok': True, 'action': 'register',
+                    'verify_url': body.get('verify_url') or ''}
         else:
             logger.warning('registry-client: register %s returned %d: %s',
                            base, r.status_code, r.text[:200])
+            return {'ok': False, 'action': 'register',
+                    'reason': f'hub returned HTTP {r.status_code}: {r.text[:200]}'}
     except requests.RequestException as exc:
         logger.warning('registry-client: register failed: %s', exc)
+        return {'ok': False, 'action': 'register', 'reason': str(exc)}

@@ -20,8 +20,11 @@ from datetime import datetime
 _PIPE_FG = {
     '00': '30', '01': '34', '02': '32', '03': '36',
     '04': '31', '05': '35', '06': '33', '07': '37',
-    '08': '90', '09': '94', '10': '92', '11': '96',
-    '12': '91', '13': '95', '14': '93', '15': '97',
+    # Bright (08-15) are bold + base color -- bare aixterm 90-97 isn't
+    # recognized by MagiTerm/NetRunner/PuTTY (silently no color shown);
+    # SyncTerm supports both, which is why this only showed up there.
+    '08': '1;30', '09': '1;34', '10': '1;32', '11': '1;36',
+    '12': '1;31', '13': '1;35', '14': '1;33', '15': '1;37',
 }
 _PIPE_BG = {
     '16': '40', '17': '44', '18': '42', '19': '46',
@@ -36,13 +39,16 @@ POSTS_PER_PAGE = 4   # 3 header + 4×4 posts + 3 footer = 22 lines max (fits 23)
 _RST  = '\x1b[0m'
 _BOLD = '\x1b[1m'
 _DIM  = '\x1b[2m'
-_CY   = '\x1b[96m'
-_YE   = '\x1b[93m'
-_GR   = '\x1b[92m'
-_RD   = '\x1b[91m'
-_WH   = '\x1b[97m'
-_BLU  = '\x1b[94m'
-_MAG  = '\x1b[95m'
+# Bold+base combined (1;3X) -- usage below isn't consistent about
+# prepending _BOLD separately, so each constant carries its own bold;
+# bare aixterm 90-97 isn't recognized by MagiTerm/NetRunner/PuTTY.
+_CY   = '\x1b[1;36m'
+_YE   = '\x1b[1;33m'
+_GR   = '\x1b[1;32m'
+_RD   = '\x1b[1;31m'
+_WH   = '\x1b[1;37m'
+_BLU  = '\x1b[1;34m'
+_MAG  = '\x1b[1;35m'
 
 # Preset color schemes: (border, title, username, hotkey)
 WALL_SCHEMES = {
@@ -87,8 +93,11 @@ def _wall_dims(session) -> tuple[int, bool]:
     ascii_mode:  True when terminal can't render CP437 box-drawing chars.
     """
     from .ansi_ui import ui_width
-    t = (getattr(session, 'term_type', '') or '').lower()
-    ascii_mode = (t == 'ascii')
+    # BBSSession has no `term_type` attribute -- the real property is
+    # `term_mode` (see core/session.py), which this was silently missing
+    # entirely (always fell through to the getattr default, so ASCII
+    # fallback for box-drawing chars never actually triggered).
+    ascii_mode = (getattr(session, 'term_mode', 'ansi') == 'ascii')
     # ui_width caps at 131; subtract 2 for the ╔ and ╗ border chars
     inner = ui_width(session) - 2
     return inner, ascii_mode

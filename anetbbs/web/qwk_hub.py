@@ -22,7 +22,7 @@ from datetime import datetime
 from functools import wraps
 
 from flask import (Blueprint, request, abort, send_file,
-                   current_app, g)
+                   current_app, g, jsonify)
 
 from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)
@@ -329,3 +329,87 @@ def upload_rep(packet_id_rep: str):
 
     n = import_rep_packet(node, rep_bytes)
     return f'OK {n} messages imported\r\n', 200
+
+
+# ---------------------------------------------------------------------------
+# Node-request API — lets a REMOTE BBS's terminal wizard (bbs_ui.py's
+# _apply_qwk_node) submit an application to the real hub over HTTP,
+# instead of writing straight into whichever install's own database
+# happened to run the wizard. Gated to the designated hub only (see
+# hub_admin.py's blueprint-wide gate for the human-facing review UI --
+# this is the machine-facing counterpart for the same underlying data).
+# ---------------------------------------------------------------------------
+
+def _require_hub_mode():
+    if not current_app.config.get('REGISTRY_MODE_ENABLED'):
+        abort(404)
+
+
+@qwk_hub_bp.route('/apply', methods=['POST'])
+def apply_for_node():
+    """POST /qwkhub/apply — a remote BBS applies for a QWK node.
+
+    JSON body: bbs_name, packet_id, sysop_name, email, bbs_address, notes.
+    Returns {"ok": true, "request_token": "..."} on success, or
+    {"ok": false, "error": "..."} with a 4xx status otherwise.
+    """
+    _require_hub_mode()
+    import re
+    import secrets
+    from ..models import QWKNodeRequest
+
+    data = request.get_json(silent=True) or {}
+    bbs_name = (data.get('bbs_name') or '').strip()[:100]
+    packet_id = (data.get('packet_id') or '').strip().upper()[:8]
+    if not bbs_name or not packet_id:
+        return jsonify(ok=False, error='bbs_name and packet_id are required'), 400
+    if not re.match(r'^[A-Z0-9]{2,8}$', packet_id):
+        return jsonify(ok=False, error='packet_id must be 2-8 chars, A-Z/0-9 only'), 400
+
+    taken = (QWKNode.query.filter_by(packet_id=packet_id).first() or
+             QWKNodeRequest.query.filter_by(packet_id=packet_id, status='pending').first())
+    if taken:
+        return jsonify(ok=False, error=f'packet_id {packet_id} is already taken'), 409
+
+    token = secrets.token_urlsafe(32)
+    req = QWKNodeRequest(
+        bbs_name=bbs_name,
+        packet_id=packet_id,
+        sysop_name=(data.get('sysop_name') or '').strip()[:100] or None,
+        email=(data.get('email') or '').strip()[:200] or None,
+        bbs_address=(data.get('bbs_address') or '').strip()[:200] or None,
+        notes=(data.get('notes') or '').strip()[:500] or None,
+        applied_via='api',
+        applied_by_username=(data.get('applied_by_username') or '').strip()[:100] or None,
+        request_token=token,
+    )
+    db.session.add(req)
+    db.session.commit()
+    return jsonify(ok=True, request_token=token), 200
+
+
+@qwk_hub_bp.route('/status/<token>', methods=['GET'])
+def request_status(token: str):
+    """GET /qwkhub/status/<token> — check a previously submitted
+    application's status. No login needed -- the token itself (32
+    bytes of secrets.token_urlsafe) is the credential, same principle
+    as an email verify link."""
+    _require_hub_mode()
+    from ..models import QWKNodeRequest
+
+    req = QWKNodeRequest.query.filter_by(request_token=token).first()
+    if req is None:
+        return jsonify(ok=False, error='unknown request token'), 404
+
+    body = {
+        'ok': True,
+        'status': req.status,
+        'packet_id': req.packet_id,
+        'bbs_name': req.bbs_name,
+    }
+    if req.status == 'approved':
+        body['generated_password'] = req.generated_password
+        body['hub_ftp'] = 'bbs.a-net.fyi:21'
+    elif req.status == 'denied':
+        body['deny_reason'] = req.deny_reason
+    return jsonify(body), 200

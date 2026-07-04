@@ -52,8 +52,11 @@ _ANSI_SEQ_RE = re.compile(r'\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[78])')
 _PIPE_COLORS = {
     '00': '30', '01': '34', '02': '32', '03': '36',
     '04': '31', '05': '35', '06': '33', '07': '37',
-    '08': '90', '09': '94', '10': '92', '11': '96',
-    '12': '91', '13': '95', '14': '93', '15': '97',
+    # Bright (08-15) are bold + base color -- bare aixterm 90-97 isn't
+    # recognized by MagiTerm/NetRunner/PuTTY (silently no color shown);
+    # SyncTerm supports both, which is why this only showed up there.
+    '08': '1;30', '09': '1;34', '10': '1;32', '11': '1;36',
+    '12': '1;31', '13': '1;35', '14': '1;33', '15': '1;37',
 }
 _PIPE_RE = re.compile(r'\|(\d{2})')
 
@@ -396,7 +399,7 @@ class MRCChat(BaseChatSystem):
         if not self._split_screen:
             return
         room_s = f'\x1b[1;96m[#{self._room}]\x1b[0m'
-        topic_s = f' \x1b[96m{self._topic}\x1b[0m' if self._topic else ''
+        topic_s = f' \x1b[1;36m{self._topic}\x1b[0m' if self._topic else ''
 
         right_bits = []
         if self._scroll_offset:
@@ -436,12 +439,12 @@ class MRCChat(BaseChatSystem):
             elif remaining <= 15:
                 cc = f'\x1b[1;93m{remaining}\x1b[0m'   # yellow: close
             else:
-                cc = f'\x1b[96m{remaining}\x1b[0m'     # cyan: fine
+                cc = f'\x1b[1;36m{remaining}\x1b[0m'     # cyan: fine
             right_bits.append(cc)
         if self._latency_ms is not None:
             right_bits.append(f'\x1b[2;37m{self._latency_ms}ms\x1b[0m')
         if self._is_away:
-            right_bits.append('\x1b[93mAWAY\x1b[0m')
+            right_bits.append('\x1b[1;33mAWAY\x1b[0m')
         right = '  '.join(right_bits)
 
         left_v  = _visible_len(room_s) + _visible_len(topic_s)
@@ -451,7 +454,7 @@ class MRCChat(BaseChatSystem):
         overflow = (left_v + right_v) - self._term_columns
         if overflow > 0 and self._topic:
             cut = max(1, len(self._topic) - overflow - 1)
-            topic_s = f' \x1b[96m{self._topic[:cut]}>\x1b[0m'
+            topic_s = f' \x1b[1;36m{self._topic[:cut]}>\x1b[0m'
             gap = 0
 
         # room_s, topic_s, and right all contain \x1b[0m resets which kill the
@@ -671,7 +674,7 @@ class MRCChat(BaseChatSystem):
                 room = body_raw.split(':', 1)[1].strip()
                 if room and room.lower() != self._room.lower():
                     self._room = room
-                    await self._emit(f'\x1b[96m*** Now in #{room}\x1b[0m')
+                    await self._emit(f'\x1b[1;36m*** Now in #{room}\x1b[0m')
                 return
 
             if head.startswith('USERIN:'):
@@ -770,7 +773,7 @@ class MRCChat(BaseChatSystem):
                     if nick:
                         self._known_users.add(nick)
             await self._emit(
-                f'\x1b[96m{label}:\x1b[0m {", ".join(items) or "(none)"}')
+                f'\x1b[1;36m{label}:\x1b[0m {", ".join(items) or "(none)"}')
             return
 
         if evt in ('mrc_message', 'message', 'notice', 'banner',
@@ -790,14 +793,14 @@ class MRCChat(BaseChatSystem):
                     sender, _, ctcp_cmd = pieces[0], pieces[1], pieces[2]
                     args = pieces[3] if len(pieces) > 3 else ''
                     await self._emit(
-                        f'\x1b[90m[\x1b[93mCTCP\x1b[90m]\x1b[0m '
+                        f'\x1b[1;30m[\x1b[1;33mCTCP\x1b[1;30m]\x1b[0m '
                         f'\x1b[1m{sender}\x1b[0m -> \x1b[33m{ctcp_cmd.upper()}\x1b[0m'
                         + (f' \x1b[2m{args}\x1b[0m' if args else ''))
                 return
             if plain.startswith('[CTCP-REPLY] '):
                 rest = plain[13:]
                 await self._emit(
-                    f'\x07\x1b[90m[\x1b[93mCTCP-REPLY\x1b[90m]\x1b[0m '
+                    f'\x07\x1b[1;30m[\x1b[1;33mCTCP-REPLY\x1b[1;30m]\x1b[0m '
                     f'\x1b[1;96m{rest}\x1b[0m')
                 return
             if body:
@@ -874,7 +877,7 @@ class MRCChat(BaseChatSystem):
             })
             rendered = self._highlight_mentions(_pipe_to_ansi(body))
             await self._emit(
-                f'\x07\x1b[90m[\x1b[93mPM\x1b[90m]\x1b[0m '
+                f'\x07\x1b[1;30m[\x1b[1;33mPM\x1b[1;30m]\x1b[0m '
                 f'\x1b[1;93m{user}@{bbs}\x1b[0m: {rendered}')
             return
 
@@ -909,14 +912,14 @@ class MRCChat(BaseChatSystem):
             # Format: |08[|11Nick|08]|07@bbs text  (anetmrc style with bbs suffix)
             await self._emit(
                 f'{bell}'
-                f'\x1b[90m[\x1b[96m{user}\x1b[90m]\x1b[2;37m@{bbs}\x1b[0m '
+                f'\x1b[1;30m[\x1b[1;36m{user}\x1b[1;30m]\x1b[2;37m@{bbs}\x1b[0m '
                 f'{rendered}')
             return
 
         # Unknown event with body — show it
         if body:
             await self._emit(
-                f'\x1b[90m[{evt}]\x1b[0m {_pipe_to_ansi(body)}')
+                f'\x1b[1;30m[{evt}]\x1b[0m {_pipe_to_ansi(body)}')
 
     # ── Input: char-by-char with split-screen ────────────────────────────────
 
@@ -1316,7 +1319,7 @@ class MRCChat(BaseChatSystem):
                 })
             # Local echo so sender sees their own DM in the chat + scrollback
             await self._emit(
-                f'\x1b[95m[DM \x1b[0m\x1b[1;95m-> {target}\x1b[0m\x1b[95m] '
+                f'\x1b[1;35m[DM \x1b[0m\x1b[1;95m-> {target}\x1b[0m\x1b[1;35m] '
                 f'\x1b[0m{body}\x1b[0m'
             )
             return True
@@ -1354,7 +1357,7 @@ class MRCChat(BaseChatSystem):
                 'command': f'JOIN {new_room}',
             })
             self._room = new_room
-            await self._emit(f'\x1b[96mJoining #{new_room}...\x1b[0m')
+            await self._emit(f'\x1b[1;36mJoining #{new_room}...\x1b[0m')
             return True
 
         if cmd in ('list', 'rooms'):
@@ -1421,14 +1424,14 @@ class MRCChat(BaseChatSystem):
             await self._send_json({'type': 'server_cmd', 'command': cmd_str})
             self._is_away = True
             await self._emit(
-                f'\x1b[96m(afk{": " + rest if rest else ""})\x1b[0m')
+                f'\x1b[1;36m(afk{": " + rest if rest else ""})\x1b[0m')
             return True
 
         if cmd == 'back':
             await self._send_json({'type': 'server_cmd', 'command': 'BACK'})
             self._is_away = False
             self._last_input_time = time.time()
-            await self._emit('\x1b[96m(back)\x1b[0m')
+            await self._emit('\x1b[1;36m(back)\x1b[0m')
             return True
 
         if cmd == 'status':
@@ -1490,7 +1493,7 @@ class MRCChat(BaseChatSystem):
                 return True
             await self._send_json({
                 'type': 'server_cmd', 'command': f'IDENTIFY {password}'})
-            await self._emit('\x1b[96m(identify sent)\x1b[0m')
+            await self._emit('\x1b[1;36m(identify sent)\x1b[0m')
             return True
 
         if cmd == 'register':
@@ -1541,11 +1544,11 @@ class MRCChat(BaseChatSystem):
             n   = self._mention_count
             log = list(self._mention_log)
             if not log:
-                await self._emit('\x1b[96mMentions:\x1b[0m 0')
+                await self._emit('\x1b[1;36mMentions:\x1b[0m 0')
                 self._mention_count = 0
                 return True
             await self._emit(
-                f'\x1b[96mMentions:\x1b[0m {n} unread '
+                f'\x1b[1;36mMentions:\x1b[0m {n} unread '
                 f'({len(log)} in log)')
             # Two lines per mention (short metadata header, then the message
             # body on its own indented, wrap-aware line) instead of one long
@@ -1556,7 +1559,7 @@ class MRCChat(BaseChatSystem):
             # continuation lines landed under the timestamp instead of under
             # the body text, looking misaligned/ragged.
             for m in log:
-                room_bit = f' \x1b[96m{m["room"]}\x1b[0m' if m['room'] else ''
+                room_bit = f' \x1b[1;36m{m["room"]}\x1b[0m' if m['room'] else ''
                 await self._emit(
                     f'  \x1b[2m{m["time"]}\x1b[0m{room_bit}  '
                     f'\x1b[1m{m["from"]}\x1b[0m')
@@ -1598,7 +1601,7 @@ class MRCChat(BaseChatSystem):
         if cmd in ('tab-users', 'tabusers'):
             users = sorted(self._known_users, key=str.lower)
             await self._emit(
-                f'\x1b[96mTab pool ({len(users)}):\x1b[0m '
+                f'\x1b[1;36mTab pool ({len(users)}):\x1b[0m '
                 + (', '.join(users) if users else '(empty)'))
             return True
 

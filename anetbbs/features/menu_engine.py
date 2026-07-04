@@ -458,11 +458,13 @@ async def run_menu(session, start='main'):
         # ANSI palette
         RESET = '\x1b[0m'
         BOLD  = '\x1b[1m'
-        # Foregrounds (bright = 9x)
+        # Foregrounds (bright = bold + base color, classic ANSI.SYS
+        # convention -- bare 90-97 aixterm codes aren't recognized by
+        # MagiTerm/NetRunner/PuTTY, see ansi_ui.FG for the full story)
         FG = {
-            'cyan':  '\x1b[96m', 'yel': '\x1b[93m', 'grn': '\x1b[92m',
-            'wht':   '\x1b[97m', 'dim': '\x1b[37m', 'red': '\x1b[91m',
-            'blu':   '\x1b[94m', 'mag': '\x1b[95m', 'gry': '\x1b[90m',
+            'cyan':  '\x1b[1;36m', 'yel': '\x1b[1;33m', 'grn': '\x1b[1;32m',
+            'wht':   '\x1b[1;37m', 'dim': '\x1b[37m',   'red': '\x1b[1;31m',
+            'blu':   '\x1b[1;34m', 'mag': '\x1b[1;35m', 'gry': '\x1b[1;30m',
         }
         BG = {
             'blu': '\x1b[44m', 'cya': '\x1b[46m', 'red': '\x1b[41m',
@@ -743,7 +745,7 @@ async def _act_oneliners(ui, args):
     await sess.write("\r\n\x1b[1;36m=== Last 10 Callers ===\x1b[0m\r\n")
     for u, p, w in callers:
         await sess.write(
-            f"  \x1b[1;33m{u:<20}\x1b[0m \x1b[90m{p:<8}\x1b[0m "
+            f"  \x1b[1;33m{u:<20}\x1b[0m \x1b[1;30m{p:<8}\x1b[0m "
             f"{w.strftime('%m-%d %H:%M')}\r\n")
     await sess.write("\r\n\x1b[1;36m=== Recent One-Liners ===\x1b[0m\r\n")
     if not ol:

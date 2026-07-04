@@ -25,11 +25,14 @@ from pathlib import Path
 
 C_RESET = '\x1b[0m'
 C_BOLD = '\x1b[1m'
-C_CYAN = '\x1b[96m'
-C_GREEN = '\x1b[92m'
-C_YELLOW = '\x1b[93m'
-C_RED = '\x1b[91m'
-C_GREY = '\x1b[90m'
+# Bold+base combined (1;3X), not bare aixterm 90-97 -- some terminals
+# emulating classic ANSI.SYS don't recognize 90-97 (see the same fix
+# in anetbbs/features/ansi_ui.py for the full story on the BBS side).
+C_CYAN = '\x1b[1;36m'
+C_GREEN = '\x1b[1;32m'
+C_YELLOW = '\x1b[1;33m'
+C_RED = '\x1b[1;31m'
+C_GREY = '\x1b[1;30m'
 
 
 def banner(text):

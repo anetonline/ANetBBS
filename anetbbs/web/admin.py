@@ -908,9 +908,13 @@ def registry_self_register_now():
     without waiting for the daily heartbeat)."""
     from ..msp.registry_client import _tick
     try:
-        _tick(current_app._get_current_object())
-        flash('Self-registration tick triggered. Check the status below '
-              'for the hub response.', 'success')
+        result = _tick(current_app._get_current_object())
+        if result.get('ok'):
+            flash('Self-registration tick triggered. Check the status below '
+                  'for the hub response.', 'success')
+        else:
+            flash(f'Self-registration did not go through: '
+                  f'{result.get("reason", "unknown error")}', 'warning')
     except Exception as exc:
         flash(f'Self-registration failed: {exc}', 'danger')
     return redirect(url_for('admin.registry_self'))
@@ -2623,9 +2627,19 @@ def _setup_wizard_impl():
                 flash(f'Federation .env update failed: {exc}', 'warning')
             try:
                 from ..msp.registry_client import _tick as _registry_tick
-                _registry_tick(current_app._get_current_object())
-                flash(f'Federation registration sent — check {sysop_email} '
-                      f'for the verification email from the hub.', 'success')
+                result = _registry_tick(current_app._get_current_object())
+                if result.get('ok'):
+                    flash(f'Federation registration sent — check {sysop_email} '
+                          f'for the verification email from the hub.', 'success')
+                else:
+                    # Previously this showed the same "success" message
+                    # regardless of what _tick() actually did -- including
+                    # when REGISTRY_URL was blank and nothing was sent
+                    # anywhere at all. Show the real reason instead.
+                    flash(f'Saved sysop details, but federation registration '
+                          f'did not go through: {result.get("reason", "unknown error")}. '
+                          f'The daily heartbeat will retry once REGISTRY_URL is set.',
+                          'warning')
             except Exception as exc:
                 flash(f'Saved sysop details, but the immediate registration '
                       f'tick failed: {exc}. The daily heartbeat will retry.',

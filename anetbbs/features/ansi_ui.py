@@ -10,9 +10,17 @@ RESET = '\x1b[0m'
 BOLD  = '\x1b[1m'
 
 FG = {
-    'cyan':  '\x1b[96m', 'yel': '\x1b[93m', 'grn': '\x1b[92m',
-    'wht':   '\x1b[97m', 'dim': '\x1b[37m', 'red': '\x1b[91m',
-    'blu':   '\x1b[94m', 'mag': '\x1b[95m', 'gry': '\x1b[90m',
+    # Bright colors are bold + base color (\x1b[1;3Xm), the classic
+    # ANSI.SYS/BBS convention -- not the bare aixterm 90-97 range.
+    # MagiTerm, NetRunner, and PuTTY (in ANSI-BBS mode) don't recognize
+    # 90-97 and silently drop it (no color shown at all); SyncTerm
+    # happens to support both, which is why this bug only showed up on
+    # the other clients. The shipped .ans art files (e.g. screens/menus/
+    # main.ans) already use bold+3X and render fine everywhere -- this
+    # matches that same convention.
+    'cyan':  '\x1b[1;36m', 'yel': '\x1b[1;33m', 'grn': '\x1b[1;32m',
+    'wht':   '\x1b[1;37m', 'dim': '\x1b[37m',   'red': '\x1b[1;31m',
+    'blu':   '\x1b[1;34m', 'mag': '\x1b[1;35m', 'gry': '\x1b[1;30m',
 }
 BG = {
     'blu': '\x1b[44m', 'cya': '\x1b[46m', 'red': '\x1b[41m',

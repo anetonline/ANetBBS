@@ -59,20 +59,28 @@ class Config:
     # Banner shown on connect — replace at will.
     FTP_BANNER = os.environ.get('FTP_BANNER', 'ANetBBS FTP — file areas')
 
-    # ANetBBS federation registry —
-    #   REGISTRY_MODE_ENABLED: this BBS doubles as the central hub for
-    #     anetbbs.lst (the federation directory). Most installs leave it
-    #     false; only the designated hub sysop enables it.
-    #   REGISTRY_URL: where peer ANetBBS instances POST their registration
-    #     + heartbeat, and pull the latest anetbbs.lst from. Set this to
-    #     the URL of the hub you want to register with. Leave blank to
-    #     disable federation entirely.
-    #   REGISTRY_SELF_REGISTER: if true, this BBS auto-registers itself
-    #     against REGISTRY_URL on startup + heartbeats daily.
+    # ANetBBS federation registry / ANotherNetwork QWK hub —
+    #
+    #   REGISTRY_MODE_ENABLED: this install itself IS the hub (bbs.a-net.fyi).
+    #     Gates the federation directory (anetbbs.lst), the QWK/BinkP hub
+    #     admin UI, and the QWK node "apply for a node" API — all of those
+    #     only make sense on the one designated hub. Leave this false on
+    #     every OTHER install. Easy to confuse with REGISTRY_SELF_REGISTER
+    #     below (opposite meaning: "I am the hub" vs "register WITH the
+    #     hub") — do not set both true on the same install.
+    #   REGISTRY_URL: the hub's base URL. On a peer install, this is where
+    #     your BBS sends its federation registration/heartbeat AND where
+    #     the terminal "Apply for ANotherNetwork QWK node" wizard actually
+    #     submits to (both point at the same physical hub). Defaults to
+    #     the public ANetBBS hub; set blank to disable federation/QWK-
+    #     node-apply entirely. Ignored on the install that has
+    #     REGISTRY_MODE_ENABLED=true (that install IS what this points at).
+    #   REGISTRY_SELF_REGISTER: if true, this (peer) BBS auto-registers
+    #     itself against REGISTRY_URL on startup + heartbeats daily.
     REGISTRY_MODE_ENABLED = os.environ.get(
         'REGISTRY_MODE_ENABLED', 'false').lower() == 'true'
     REGISTRY_URL = os.environ.get(
-        'REGISTRY_URL', '')
+        'REGISTRY_URL', 'https://bbs.a-net.fyi')
     REGISTRY_SELF_REGISTER = os.environ.get(
         'REGISTRY_SELF_REGISTER', 'false').lower() == 'true'
     # How long an entry can go without a heartbeat before SYSTAT probes

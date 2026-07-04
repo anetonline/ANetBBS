@@ -46,7 +46,7 @@ async def launch_anetirc_telnet(user, session):
     binary = _find_binary()
     if not binary:
         await session.write(
-            '\r\n\x1b[91mANetIRC binary not found.\x1b[0m\r\n'
+            '\r\n\x1b[1;31mANetIRC binary not found.\x1b[0m\r\n'
             'Sysop: run  bash doors/anetirc/build.sh  to compile it.\r\n\r\n')
         await session.read_line('Press Enter to continue...')
         return

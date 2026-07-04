@@ -2859,6 +2859,13 @@ class QWKNodeRequest(db.Model):
     generated_password  = db.Column(db.String(50))
     seen_by_applicant   = db.Column(db.Boolean, default=False)
     node_id             = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'), nullable=True)
+    # Set by the hub on creation (whether created via the /qwkhub/apply
+    # API from a remote BBS, or locally when this install IS the hub).
+    # A remote applicant's terminal session doesn't have its own login
+    # on the hub, so this opaque token is how it later re-identifies
+    # its own request via GET /qwkhub/status/<token> without needing
+    # one -- see anetbbs/web/qwk_hub.py.
+    request_token       = db.Column(db.String(64), unique=True, index=True, nullable=True)
 
     def __repr__(self):
         return f'<QWKNodeRequest {self.packet_id} [{self.status}]>'

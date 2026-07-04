@@ -85,8 +85,10 @@ class GameManager:
         flat_list = [g for slug in ordered_slugs for g in grouped[slug]]
 
         from .ansi_ui import write_menu_art, ui_width
-        CYAN = '\x1b[96m'; WHT = '\x1b[97m'; YEL = '\x1b[93m'
-        GRN = '\x1b[92m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
+        # Bold+base (1;3X), not bare aixterm 90-97 -- MagiTerm/NetRunner/
+        # PuTTY don't recognize 90-97 and silently drop the color.
+        CYAN = '\x1b[1;36m'; WHT = '\x1b[1;37m'; YEL = '\x1b[1;33m'
+        GRN = '\x1b[1;32m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         while True:
             _iw = ui_width(self.session)
             _name_w  = max(25, _iw - 28)       # game name column

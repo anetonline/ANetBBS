@@ -351,7 +351,10 @@ class BBSMenuUI:
         breaks on every 22 visible-text lines so users can read at their
         own pace. After the last page, waits for a single keypress.
         """
-        CYAN = '\x1b[96m'; YEL = '\x1b[93m'; WHT = '\x1b[97m'
+        # Base 30-37 -- BOLD is already combined alongside every use of
+        # these below, so bare aixterm 90-97 (unrecognized by MagiTerm/
+        # NetRunner/PuTTY) isn't needed here.
+        CYAN = '\x1b[36m'; YEL = '\x1b[33m'; WHT = '\x1b[37m'
         DIM = '\x1b[37m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'
 
         # Header
@@ -383,7 +386,10 @@ class BBSMenuUI:
         [MORE] prompt every `page_size` lines. Shared by any reader that
         needs to paginate wrapped text (bulletins, threads, PMs, IMs).
         """
-        YEL = '\x1b[93m'; DIM = '\x1b[37m'; RESET = '\x1b[0m'
+        # Bold+base combined (1;33) -- no separate BOLD var in this
+        # function, and bare aixterm 93 isn't recognized by MagiTerm/
+        # NetRunner/PuTTY.
+        YEL = '\x1b[1;33m'; DIM = '\x1b[37m'; RESET = '\x1b[0m'
         total = len(lines)
         if not total:
             return
@@ -751,8 +757,21 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def _apply_qwk_node(self):
-        """Walk the sysop through a QWK node application wizard."""
-        import re, secrets, string as _str
+        """Walk the sysop through a QWK node application wizard.
+
+        On the designated hub install (REGISTRY_MODE_ENABLED=true) this
+        writes directly to the local QWKNodeRequest table -- no network
+        round trip needed, since this IS the hub. On every other
+        install it POSTs to the real hub's /qwkhub/apply API instead of
+        writing locally, which is what this used to do incorrectly: the
+        request would land in whichever BBS happened to run the wizard,
+        not the actual hub ("all the sysops try to put in for a node
+        and it goes to their system"). The local QWKNodeRequest row
+        created afterward here is just a cache of the hub's answer,
+        refreshed from the hub's /qwkhub/status/<token> on each visit
+        -- not the authoritative copy.
+        """
+        import re
         from anetbbs.models import db, QWKNode, QWKNodeRequest
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
@@ -760,8 +779,10 @@ class BBSMenuUI:
         user_id  = user.get('id')
         username = user.get('username', 'Guest')
 
-        # Check for an existing request from this user.
         with _app().app_context():
+            from flask import current_app
+            is_hub = bool(current_app.config.get('REGISTRY_MODE_ENABLED'))
+            registry_url = (current_app.config.get('REGISTRY_URL') or '').rstrip('/')
             existing = None
             if user_id:
                 existing = (QWKNodeRequest.query
@@ -769,7 +790,15 @@ class BBSMenuUI:
                             .order_by(QWKNodeRequest.created_at.desc())
                             .first())
         if existing:
-            await self._show_qwk_request_status(existing)
+            await self._show_qwk_request_status(existing, is_hub=is_hub,
+                                                 registry_url=registry_url)
+            return
+
+        if not is_hub and not registry_url:
+            await self.session.write(
+                f"\r\n  {FG['red']}This BBS hasn't configured a hub to apply "
+                f"to (REGISTRY_URL is blank) -- contact your sysop.{RESET}\r\n")
+            await self.session.read_line(_prompt('Press Enter to continue...'))
             return
 
         _w = ui_width(self.session)
@@ -815,14 +844,20 @@ class BBSMenuUI:
                 await self.session.write(
                     f"  {FG['red']}Use 2-8 characters: A-Z and 0-9 only.{RESET}\r\n")
                 continue
-            with _app().app_context():
-                taken = (QWKNode.query.filter_by(packet_id=pid).first() or
-                         QWKNodeRequest.query.filter_by(
-                             packet_id=pid, status='pending').first())
-            if taken:
-                await self.session.write(
-                    f"  {FG['red']}That packet ID is taken — please choose another.{RESET}\r\n")
-                continue
+            if is_hub:
+                # We ARE the hub, so the local tables are authoritative --
+                # check here rather than making the sysop fill out the
+                # whole form first. On a peer install the local tables
+                # mean nothing (the hub's are authoritative); the hub's
+                # own /qwkhub/apply does this same check server-side.
+                with _app().app_context():
+                    taken = (QWKNode.query.filter_by(packet_id=pid).first() or
+                             QWKNodeRequest.query.filter_by(
+                                 packet_id=pid, status='pending').first())
+                if taken:
+                    await self.session.write(
+                        f"  {FG['red']}That packet ID is taken — please choose another.{RESET}\r\n")
+                    continue
             packet_id = pid
 
         sysop_in = (await self.session.read_line(
@@ -860,6 +895,66 @@ class BBSMenuUI:
                 _prompt('Press Enter to continue...'))
             return
 
+        if is_hub:
+            # We ARE the hub -- write directly, no round trip needed.
+            import secrets as _secrets
+            with _app().app_context():
+                req = QWKNodeRequest(
+                    bbs_name=bbs_name,
+                    packet_id=packet_id,
+                    sysop_name=sysop_name,
+                    email=email,
+                    bbs_address=bbs_addr,
+                    notes=notes,
+                    applied_via='terminal',
+                    applied_by_user_id=user_id,
+                    applied_by_username=username,
+                    request_token=_secrets.token_urlsafe(32),
+                )
+                db.session.add(req)
+                db.session.commit()
+
+            await self.session.write(
+                f"\r\n  {FG['grn']}{BOLD}Application submitted!{RESET}\r\n"
+                f"  {FG['wht']}Review it under Admin -> Echomail -> Hub -> "
+                f"Node Requests.{RESET}\r\n\r\n"
+            )
+            await self.session.read_line(_prompt('Press Enter to continue...'))
+            return
+
+        # Peer install -- actually POST to the real hub instead of
+        # writing to our own local database (the original bug).
+        import requests
+        try:
+            resp = requests.post(
+                f'{registry_url}/qwkhub/apply',
+                json={
+                    'bbs_name': bbs_name, 'packet_id': packet_id,
+                    'sysop_name': sysop_name, 'email': email,
+                    'bbs_address': bbs_addr, 'notes': notes,
+                    'applied_by_username': username,
+                },
+                timeout=15)
+            body = (resp.json()
+                    if resp.headers.get('content-type', '').startswith('application/json')
+                    else {})
+        except requests.RequestException as exc:
+            await self.session.write(
+                f"\r\n  {FG['red']}Could not reach the hub ({registry_url}): "
+                f"{exc}{RESET}\r\n  {FG['wht']}Try again later.{RESET}\r\n\r\n")
+            await self.session.read_line(_prompt('Press Enter to continue...'))
+            return
+
+        if resp.status_code != 200 or not body.get('ok'):
+            err = body.get('error') or f'HTTP {resp.status_code}'
+            await self.session.write(
+                f"\r\n  {FG['red']}Hub rejected the application: {err}{RESET}\r\n\r\n")
+            await self.session.read_line(_prompt('Press Enter to continue...'))
+            return
+
+        # Cache locally so _show_qwk_request_status can look this up on
+        # a later visit -- this row mirrors the hub's answer, it is NOT
+        # the authoritative copy (that lives on the hub itself).
         with _app().app_context():
             req = QWKNodeRequest(
                 bbs_name=bbs_name,
@@ -868,28 +963,62 @@ class BBSMenuUI:
                 email=email,
                 bbs_address=bbs_addr,
                 notes=notes,
-                applied_via='terminal',
+                applied_via='terminal_remote',
                 applied_by_user_id=user_id,
                 applied_by_username=username,
+                request_token=body['request_token'],
             )
             db.session.add(req)
             db.session.commit()
 
         await self.session.write(
-            f"\r\n  {FG['grn']}{BOLD}Application submitted!{RESET}\r\n"
+            f"\r\n  {FG['grn']}{BOLD}Application submitted to {registry_url}!{RESET}\r\n"
             f"  {FG['wht']}The hub sysop will review your request.{RESET}\r\n"
             f"  {FG['wht']}Return to this menu to check your status.{RESET}\r\n\r\n"
         )
         await self.session.read_line(_prompt('Press Enter to continue...'))
 
-    async def _show_qwk_request_status(self, req):
-        """Show the applicant their application status (pending/approved/denied)."""
+    async def _show_qwk_request_status(self, req, is_hub=True, registry_url=''):
+        """Show the applicant their application status (pending/approved/denied).
+
+        On a peer install (is_hub=False), the local `req` row is only a
+        cache of the hub's last known answer -- refresh it from the
+        hub's /qwkhub/status/<token> first, so approvals/denials show
+        up here without the sysop needing to do anything else.
+        """
         from anetbbs.models import db, QWKNodeRequest as _QNR
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+
+        stale_note = ''
+        if not is_hub and registry_url and req.request_token:
+            import requests
+            try:
+                resp = requests.get(
+                    f'{registry_url}/qwkhub/status/{req.request_token}',
+                    timeout=10)
+                body = (resp.json()
+                        if resp.headers.get('content-type', '').startswith('application/json')
+                        else {})
+                if resp.status_code == 200 and body.get('ok'):
+                    with _app().app_context():
+                        r = _QNR.query.get(req.id)
+                        if r:
+                            r.status = body.get('status', r.status)
+                            r.generated_password = body.get(
+                                'generated_password', r.generated_password)
+                            r.deny_reason = body.get('deny_reason', r.deny_reason)
+                            db.session.commit()
+                            req = r
+                else:
+                    stale_note = 'showing last known status (hub returned an error)'
+            except requests.RequestException:
+                stale_note = 'showing last known status (hub unreachable right now)'
 
         _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
         await self.session.write(banner('ANotherNetwork — Node Application Status', _w))
+        if stale_note:
+            await self.session.write(f"\r\n  {FG['gry']}({stale_note}){RESET}\r\n")
 
         date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
 

@@ -4,9 +4,19 @@ Hub administration — manage downstream BinkP nodes and QWK nodes.
 
 Sits under /admin/echomail/hub/ alongside the existing echomail_admin blueprint.
 All routes require admin login.
+
+This entire blueprint only makes sense on the ONE install designated as
+the network hub (REGISTRY_MODE_ENABLED=true) -- a peer install has no
+downstream BinkP/QWK nodes of its own to manage. Previously every
+install exposed this same admin UI (including the QWK "Node Requests"
+review queue), so a sysop applying for a node via the terminal wizard
+on ANY install would have their request land in THAT install's own
+local queue instead of the real hub's -- "all the sysops try to put in
+for a node and it goes to their system." Gated with a blueprint-wide
+before_request check below.
 """
 from flask import (Blueprint, render_template, redirect, url_for,
-                   flash, request, abort, jsonify)
+                   flash, request, abort, jsonify, current_app)
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, IntegerField,
                      BooleanField, PasswordField, SelectMultipleField)
@@ -18,6 +28,14 @@ from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNodeRequest)
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
+
+
+@hub_admin_bp.before_request
+def _require_hub_mode():
+    """404 the entire blueprint on any install that isn't the designated
+    hub -- see the module docstring for why this matters."""
+    if not current_app.config.get('REGISTRY_MODE_ENABLED'):
+        abort(404)
 
 
 def _admin_required(f):

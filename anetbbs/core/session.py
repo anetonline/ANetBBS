@@ -1044,7 +1044,12 @@ class BBSSession:
                 )
             else:
                 B = '\x1b[1m'; R = '\x1b[0m'
-                CY = '\x1b[96m'; YE = '\x1b[93m'; GR = '\x1b[92m'; WH = '\x1b[97m'; DI = '\x1b[37m'
+                # Bold (B, above) is already combined with each of these
+                # everywhere they're used below -- base 30-37 codes here,
+                # not bare aixterm 90-97 (MagiTerm/NetRunner/PuTTY don't
+                # recognize 90-97 and silently drop the color; SyncTerm
+                # happens to, which is why this only showed up elsewhere).
+                CY = '\x1b[36m'; YE = '\x1b[33m'; GR = '\x1b[32m'; WH = '\x1b[37m'; DI = '\x1b[37m'
                 menu = (
                     "\r\n"
                     f"{B}{CY}╔════════════════════════════════════════╗{R}\r\n"
@@ -1575,7 +1580,7 @@ class BBSSession:
                     pass
                 if _fl_enabled:
                     _fl_resp = (await self.read_line(
-                        '\r\n\x1b[93m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
+                        '\r\n\x1b[1;33m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
                     fast_logon = _fl_resp.strip().lower() == 'y'
             except Exception:
                 pass
