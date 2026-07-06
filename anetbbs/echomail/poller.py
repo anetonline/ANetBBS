@@ -152,6 +152,36 @@ def _is_poll_due(network, now: datetime) -> bool:
     return now >= network.last_poll_at + timedelta(minutes=minutes)
 
 
+def _self_referential_reason(network, app):
+    """Return a reason string if *network* looks like it's configured to
+    poll our own BBS instead of a genuine remote peer, else None.
+
+    This happens when a sysop is the hub for a network (so the seeded
+    "point at the hub" row also exists on the hub's own install) and
+    activates/configures that same row on their own BBS -- there's
+    nothing wrong with the row itself (other sysops need it exactly as
+    seeded to reach the hub), it's just never valid for the hub's own
+    install to dial itself. Areas stay visible either way (that's keyed
+    off EchomailNetwork.is_active, which this deliberately doesn't
+    touch) -- this only stops the pointless/failing dial-out attempt.
+    """
+    if network.network_type == 'binkp':
+        our = (network.our_address or '').strip().lower()
+        hub = (network.hub_address or '').strip().lower()
+        if our and hub and our == hub:
+            return (f"our_address ({network.our_address}) matches "
+                    f"hub_address ({network.hub_address})")
+    elif network.network_type == 'qwk':
+        our_host = ((app.config.get('BBS_PUBLIC_HOST')
+                     or app.config.get('BBS_DOMAIN') or '')
+                    .strip().lower())
+        qwk_host = (network.qwk_host or '').strip().lower()
+        if our_host and qwk_host and our_host == qwk_host:
+            return (f"qwk_host ({network.qwk_host}) matches this BBS's "
+                    f"own public host")
+    return None
+
+
 def _do_poll(app, network):
     """
     Perform a poll for *network*.  Creates a PollLog entry, runs the
@@ -167,6 +197,19 @@ def _do_poll(app, network):
     )
     db.session.add(log)
     db.session.commit()
+
+    self_ref = _self_referential_reason(network, app)
+    if self_ref:
+        logger.warning(
+            "Poller: skipping %s -- %s. This is expected if this install "
+            "is the hub for this network; peer sysops should point their "
+            "own install at the hub, not the hub at itself.",
+            network.name, self_ref)
+        log.status = 'skipped'
+        log.error_message = f'Skipped: {self_ref}'
+        log.completed_at = datetime.utcnow()
+        db.session.commit()
+        return
 
     try:
         from ..models import NetmailMessage
