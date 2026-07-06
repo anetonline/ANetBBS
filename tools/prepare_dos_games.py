@@ -9,7 +9,7 @@ the game exits (controlled by EJS_defaultOptions dosbox_pure_menu_time='0').
 Usage examples:
     # Doom shareware
     python tools/prepare_dos_games.py \
-        --source-dir "/media/jerry/EXT HDD/Doom" \
+        --source-dir "/path/to/Doom" \
         --exe DOOM.EXE \
         --output doom \
         --name "DOOM (Shareware)" \
@@ -17,7 +17,7 @@ Usage examples:
 
     # Duke Nukem 3D shareware
     python tools/prepare_dos_games.py \
-        --source-dir "/media/jerry/EXT HDD/DUKE3D" \
+        --source-dir "/path/to/DUKE3D" \
         --exe DUKE3D.EXE \
         --output duke3d \
         --name "Duke Nukem 3D (Shareware)" \

@@ -335,7 +335,7 @@ def _run_all(cfg):
     checks.append(_check_listener('ssh', cfg.get('SSH_PORT', 2222), cfg))
     checks.append(_check_listener('rlogin', cfg.get('RLOGIN_PORT', 513), cfg))
     checks.append(_check_listener('ftp', cfg.get('FTP_PORT', 2121), cfg))
-    checks.append(_check_listener('finger', cfg.get('FINGER_PORT', 79), cfg))
+    checks.append(_check_listener('finger', cfg.get('FINGER_LISTEN_PORT', 79), cfg))
     checks.append(_check_sudoers())
     checks.append(_check_federation_reachable(cfg))
     checks.append(_check_secret_key(cfg))

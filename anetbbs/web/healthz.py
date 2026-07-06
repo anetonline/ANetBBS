@@ -64,7 +64,7 @@ def _listener_states(cfg) -> dict:
         ('ssh',     cfg.get('SSH_PORT', 2222)),
         ('rlogin',  cfg.get('RLOGIN_PORT', 513)),
         ('ftp',     cfg.get('FTP_PORT', 2121)),
-        ('finger',  cfg.get('FINGER_PORT', 79)),
+        ('finger',  cfg.get('FINGER_LISTEN_PORT', 79)),
     ]
     out = {}
     for name, port in candidates:

@@ -45,7 +45,7 @@ Examples:
       --file.bbs /opt/anetbbs/data/files/OS2.BBS/FILES.BSS \
       --empty-description "Description coming soon"
 
-Requests to: neo67@linuxmintusers.de
+Issues and feature requests: https://github.com/anetonline/ANetBBS/issues
 """
 
 from __future__ import annotations
@@ -920,7 +920,7 @@ def create_parser() -> argparse.ArgumentParser:
       --filebase /opt/anetbbs/data/files/GAMES \\
       --files-bbs /opt/anetbbs/data/files/GAMES/FILES.BBS
 
-  Requests to: neo67@linuxmintusers.de
+  Issues and feature requests: https://github.com/anetonline/ANetBBS/issues
 """,
     )
     parser.add_argument(

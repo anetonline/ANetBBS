@@ -166,7 +166,7 @@ in plumbing. Below is the full feature inventory.
 
 - [[Doors]] — door game subsystem driving:
   - Native Synchronet (over rlogin)
-  - DOS doors via [[DOSBox-staging]] + TCP nullmodem bridge
+  - DOS doors via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge
   - Web doors (native HTML/JS games)
 
 ## Real-time
@@ -657,7 +657,7 @@ fake COM port; today there's a wider menagerie.
 |------|------------|------------------|
 | `web` | Native HTML/JS — runs in the browser, no shell-out | 2048, Wordle |
 | `door_rlogin` | Remote Synchronet game server | LORD, TradeWars on a partner BBS |
-| `door_dos` | DOS executable via [[DOSBox-staging]] + TCP nullmodem bridge | LORD locally |
+| `door_dos` | DOS executable via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge | LORD locally |
 | `door_native` | Linux native binary speaking DOOR.SYS | various forks |
 
 ## Playing
@@ -1889,8 +1889,9 @@ allow guest access.
 
 ## What you get
 
-A full CP437/ANSI terminal — the same UI you'd see in [[SyncTERM]]
-or [[NetRunner]], rendered in the browser:
+A full CP437/ANSI terminal — the same UI you'd see in
+[SyncTERM](http://syncterm.bbsdev.net/) or
+[NetRunner](https://mysticbbs.com/downloads/), rendered in the browser:
 
 - 80×25 default; resizable to whatever your viewport allows
 - ANSI color, bold, blink (animated)

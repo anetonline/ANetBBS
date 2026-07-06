@@ -49,6 +49,16 @@ class Config:
     FTP_HOST = os.environ.get('FTP_HOST', '0.0.0.0')
     FTP_PORT = int(os.environ.get('FTP_PORT', '21'))
     FTP_ANON_ENABLED = os.environ.get('FTP_ANON_ENABLED', 'true').lower() == 'true'
+
+    # Finger (RFC 1288) — its own standalone service, no enable flag since
+    # it's always its own systemd unit/container. finger_server.py reads
+    # these two env vars directly (not via this Config class), but they're
+    # also exposed here so anything using app.config (health checks,
+    # preflight validation) can see the actual configured port instead of
+    # silently assuming the default.
+    FINGER_LISTEN_HOST = os.environ.get('FINGER_LISTEN_HOST', '0.0.0.0')
+    FINGER_LISTEN_PORT = int(os.environ.get('FINGER_LISTEN_PORT', '79'))
+
     # Optional TLS — reuses the same cert nginx is using. Set both paths to
     # enable FTPS (AUTH TLS) on the same port. Without these, only plain
     # FTP works.

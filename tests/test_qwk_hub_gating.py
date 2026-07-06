@@ -68,6 +68,7 @@ class HubAdminBlueprintGatingTests(unittest.TestCase):
         cls._data_dir_before = _snapshot_data_dir()
         import anetbbs.config as cfg_mod
         cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        cls._orig_flask_env = os.environ.get('FLASK_ENV')
 
     @classmethod
     def tearDownClass(cls):
@@ -76,9 +77,15 @@ class HubAdminBlueprintGatingTests(unittest.TestCase):
         # file and never restores it, so any test file that runs after
         # this one (in the same pytest/unittest session) would otherwise
         # inherit a now-deleted scratch-file path instead of the default
-        # in-memory DB.
+        # in-memory DB. Same for FLASK_ENV, also set by _make_app() and
+        # never restored -- a process-wide env var leak, not just a
+        # class attribute one.
         import anetbbs.config as cfg_mod
         cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+        if cls._orig_flask_env is None:
+            os.environ.pop('FLASK_ENV', None)
+        else:
+            os.environ['FLASK_ENV'] = cls._orig_flask_env
 
         for entry in _snapshot_data_dir() - cls._data_dir_before:
             if entry.is_dir():
@@ -157,13 +164,18 @@ class QwkHubApplyApiTests(unittest.TestCase):
         cls._data_dir_before = _snapshot_data_dir()
         import anetbbs.config as cfg_mod
         cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        cls._orig_flask_env = os.environ.get('FLASK_ENV')
 
     @classmethod
     def tearDownClass(cls):
         # See HubAdminBlueprintGatingTests.tearDownClass above -- same
-        # shared-class-attribute leak, same fix.
+        # shared-class-attribute + env-var leak, same fix.
         import anetbbs.config as cfg_mod
         cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+        if cls._orig_flask_env is None:
+            os.environ.pop('FLASK_ENV', None)
+        else:
+            os.environ['FLASK_ENV'] = cls._orig_flask_env
 
         for entry in _snapshot_data_dir() - cls._data_dir_before:
             if entry.is_dir():

@@ -89,6 +89,10 @@ buildx` once there's a registry to publish to.
   fully run **LORD** (Legend of the Red Dragon — Synchronet's JS port,
   pre-installed, no Synchronet required)
 - Native binary doors with DOOR.SYS / DOOR32.SYS / DORINFO drop files
+- **rlogin door bridge** (`door_rlogin`) — connects out to a remote
+  BBS's own door server (Synchronet xtrn, DoorParty, etc.) instead of
+  running a local subprocess. **A-Net Online's game server ships
+  pre-installed and active by default**, same as LORD.
 - **Web terminal pinned to 80×25 with the full CGA palette** so doors
   draw the same way as on a 1990s VGA terminal — Violet's portrait in
   LORD looks like Violet's portrait in LORD
@@ -97,7 +101,7 @@ buildx` once there's a registry to publish to.
 - Full collaborative wiki at `/wiki/` with markdown bodies, `[[Page]]`
   cross-links, per-page revision history, unified-diff compare,
   revert, full-text search, recent changes, wanted/orphan pages
-- 41 seeded pages cover connecting, every messaging subsystem, doors
+- 43 seeded pages cover connecting, every messaging subsystem, doors
   (including a LORD recipe + the DosBridge), echomail/BinkP setup,
   NodeSpy, backup, full architecture, sysop guide, glossary, FAQ
 - Anyone can read; logged-in users can edit (configurable minimum post count + account age); admins can lock/delete/rename

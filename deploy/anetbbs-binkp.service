@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=stingray
-Group=stingray
-WorkingDirectory=/home/stingray/anetbbs
-EnvironmentFile=/home/stingray/anetbbs/.env
-ExecStart=/home/stingray/anetbbs/venv/bin/python -m anetbbs.echomail.binkp_server
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+ExecStart=/opt/anetbbs/venv/bin/python -m anetbbs.echomail.binkp_server
 Restart=always
 RestartSec=5
 

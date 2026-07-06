@@ -16,7 +16,7 @@ nothing regressed.
 
 ```bash
 cd /opt/anetbbs
-python3 tests/msp_loopback_test.py
+python3 tests/msp_loopback_check.py
 ```
 
 The test:
