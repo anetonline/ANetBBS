@@ -8,11 +8,11 @@
 | 513   | TCP   | off     | rlogin         | Legacy rlogin (disable unless you need it)       | `RLOGIN_PORT`       |
 | 21    | TCP   | off     | FTP            | FTP file-area access (anon + authenticated)      | `FTP_PORT`          |
 | 40000-40050 | TCP | off  | FTP (passive)  | Data channels for the FTP control session above  | `FTP_PASV_PORTS`    |
-| 24554 | TCP   | yes     | BinkP          | FidoNet echomail/netmail mailer                  | per-network in DB   |
+| 24554 | TCP   | yes     | BinkP          | FidoNet echomail/netmail mailer — listener bind port. Per-network AKA/hub settings (outbound) are separate, configured in the DB. | `BINKP_LISTEN_PORT` |
 | 18    | TCP   | yes     | MSP            | Inter-BBS Instant Message inbound (RFC 1312)     | `MSP_PORT`          |
 | 11    | UDP   | yes     | SYSTAT         | "Who's online" lookup from peer BBSes (Finger-style) | `SYSTAT_PORT`   |
 | 79    | TCP   | yes     | Finger         | RFC 1288 Finger — per-user info queries          | `FINGER_LISTEN_PORT`|
-| 8080  | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | bridge config       |
+| 8080  | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | `MRC_BRIDGE_PORT`   |
 
 ## Listening interface
 

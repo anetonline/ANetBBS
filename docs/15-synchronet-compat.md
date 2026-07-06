@@ -64,7 +64,7 @@ These door categories are confirmed running through the shim:
   no per-iteration thrash
 
 The shim also exposes vendored Synchronet `.js` libraries from
-`anetbbs/games/sbbs_stubs/` (174 files) when a door does
+`anetbbs/games/sbbs_stubs/` (187 files) when a door does
 `load("dd_lightbar_menu.js")` etc. The upstream `xtrn/dorkit/` subtree
 ships under `sbbs_stubs/dorkit/`. Heavy lifting is often done by these
 libraries rather than the shim itself.

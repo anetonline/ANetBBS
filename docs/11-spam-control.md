@@ -40,6 +40,7 @@ their replacement (e.g. `****`). Applied at write-time on:
 - Shoutbox posts
 - Board posts
 - PMs
+- Oneliners
 
 Filter is in-memory cached; click "Reload" after edits.
 

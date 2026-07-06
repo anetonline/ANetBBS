@@ -22,16 +22,27 @@ Shows:
   every 5 seconds.
 
 For service start/stop/restart from the web to actually work, the
-user `anetbbs-web` runs as needs sudoers permission for the units.
-Install the supplied template:
+account the `anetbbs-web` *service* runs as (its systemd unit's
+`User=`, `anetbbs` by default) needs sudoers permission for the units.
+
+`update.sh` sets this up for you automatically on every run — it
+substitutes the real service-account name into the template and
+installs it, so a sysop who's run at least one update already has this
+working. On a brand-new install that hasn't been updated yet, install
+it yourself:
 
 ```
-sudo cp /opt/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+sudo sed "s/^__SERVICE_USER__ /anetbbs /" /opt/anetbbs/deploy/sudoers.anetbbs \
+    | sudo tee /etc/sudoers.d/anetbbs > /dev/null
 sudo chmod 0440 /etc/sudoers.d/anetbbs
 sudo visudo -cf /etc/sudoers.d/anetbbs    # syntax check
 ```
 
-(The template uses the `anetbbs` service account. Edit it if your install runs under a different username.)
+Replace `anetbbs` in the `sed` command with your actual service
+account if you didn't use the installer's default. Don't just `cp` the
+template directly — it ships with a literal `__SERVICE_USER__`
+placeholder, not a real username, so a plain copy installs a rule that
+matches nobody.
 
 ## /admin/checklist — first-launch checklist
 

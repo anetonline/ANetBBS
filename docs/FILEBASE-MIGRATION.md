@@ -48,7 +48,8 @@ are listed for the sysop.
 
 The tool can automatically detect common legacy encodings:
 
-- UTF-8
+- UTF-8 (with or without a BOM — the flag value is `utf-8-sig`, not
+  plain `utf-8`)
 - CP437
 - CP850
 - Latin-1

@@ -6,9 +6,13 @@ Tested on Debian 12 / Ubuntu 22.04+. Should work on any Linux with Python ≥3.1
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git build-essential \
-                    libffi-dev libssl-dev sqlite3
+sudo apt install -y python3 python3-venv python3-pip python3-dev \
+                    build-essential libffi-dev git rsync curl \
+                    openssh-client lrzsz
 ```
+
+(`rsync`/`curl`/`openssh-client` are used by the update flow;
+`lrzsz` provides X/Y/Zmodem for terminal file transfers.)
 
 Optional, but unlock features:
 
@@ -43,7 +47,7 @@ sudo apt install -y libsixel-bin
 sudo mkdir -p /opt/anetbbs
 sudo chown $USER /opt/anetbbs
 cd /opt/anetbbs
-git clone <your-repo-url> .            # or extract the alpha tarball here
+git clone <your-repo-url> .            # or extract the release tarball here
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
@@ -74,7 +78,6 @@ export TELNET_PORT=2233
 export SSH_PORT=2234
 export MSP_PORT=18              # privileged
 export SYSTAT_PORT=11           # privileged (UDP)
-export ECHOMAIL_DATA_DIR=/opt/anetbbs/data/echomail
 export DATABASE_URL="sqlite:////opt/anetbbs/data/anetbbs.db"
 ```
 
@@ -101,17 +104,35 @@ under your profile, then configure echomail / file areas / doors.
 
 ## 5. Run as a systemd service
 
-Templates are in `deploy/`:
+The unit templates in `deploy/` hardcode `User=anetbbs`/`/opt/anetbbs` —
+create that dedicated system account and hand ownership over to it
+before installing them (you built everything as your own login in
+steps 2-4, which is fine, but the service itself shouldn't run as
+your personal account):
+
+```bash
+sudo useradd -r -d /opt/anetbbs -s /usr/sbin/nologin anetbbs
+sudo chown -R anetbbs:anetbbs /opt/anetbbs
+```
+
+Then install the unit templates — `anetbbs.service` is the unified
+process for telnet/SSH/rlogin (which of those actually start is driven
+by the `*_ENABLED` flags in `.env`, not by which unit you install):
 
 ```bash
 sudo cp deploy/anetbbs-web.service /etc/systemd/system/
-sudo cp deploy/anetbbs-telnet.service /etc/systemd/system/
-sudo cp deploy/anetbbs-ssh.service /etc/systemd/system/
+sudo cp deploy/anetbbs.service /etc/systemd/system/
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now anetbbs-web anetbbs-telnet anetbbs-ssh
+sudo systemctl enable --now anetbbs-web anetbbs
 journalctl -u anetbbs-web -f
 ```
+
+(Older versions of this project shipped split `anetbbs-telnet.service`/
+`anetbbs-ssh.service` units — those templates still exist in `deploy/`
+for reference, but are legacy: they fought each other for ports and
+are replaced by the unified `anetbbs.service` above. Don't install
+them on a fresh setup.)
 
 ## 6. Privileged ports (MSP/SYSTAT)
 
@@ -198,5 +219,4 @@ your linked node configs in `/admin/echomail/networks`. See
   `[Service]` and `daemon-reload`.
 - **MRC `<no name>` in Synchronet's IM display** → Synchronet IDENTs
   (RFC 1413) the sender to look up "real name". ANetBBS doesn't ship
-  an identd; the workaround is cosmetic only and on the alpha
-  follow-up list.
+  an identd; this is a known cosmetic-only limitation.

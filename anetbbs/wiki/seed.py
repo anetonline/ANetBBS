@@ -321,7 +321,9 @@ Several pages use Socket.IO for live updates:
     ('telnet', 'Telnet', """
 # Telnet
 
-Classic terminal access. Port **23/tcp**.
+Classic terminal access. Port **2233/tcp** by default (not the
+standard 23 — chosen so it doesn't need root/setcap to bind, and
+doesn't conflict if you're already running something else on 23).
 
 ## Clients
 
@@ -364,12 +366,13 @@ in a browser tab).
 # SSH
 
 Secure-shell access to the same ANSI menus you'd get via [[Telnet]].
-Port **22/tcp**.
+Port **2234/tcp** by default (deliberately not 22, so it can't
+conflict with the box's real system SSH daemon).
 
 ## Connect
 
 ```bash
-ssh -p 22 username@bbs.a-net.fyi
+ssh -p 2234 username@bbs.a-net.fyi
 ```
 
 Replace hostname / port to match your BBS.
@@ -655,10 +658,16 @@ fake COM port; today there's a wider menagerie.
 
 | Type | What it is | Typical example |
 |------|------------|------------------|
-| `web` | Native HTML/JS — runs in the browser, no shell-out | 2048, Wordle |
-| `door_rlogin` | Remote Synchronet game server | LORD, TradeWars on a partner BBS |
+| `builtin_web` | Native HTML/JS — runs in the browser, no shell-out | 2048, Wordle |
+| `door_rlogin` | Outbound rlogin to a remote BBS's own game server | LORD, TradeWars on a partner BBS |
+| `door_telnet` | Outbound telnet to a remote game server, no pre-auth handshake | TWGS (Trade Wars Game Server) |
 | `door_dos` | DOS executable via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge | LORD locally |
+| `door_dosemu` | DOS executable via dosemu2, virtual COM1 (no FOSSIL) | DOS doors needing dosemu2 specifically |
 | `door_native` | Linux native binary speaking DOOR.SYS | various forks |
+| `door_synchronet` | Synchronet `.js` doors — real `jsexec` if present, otherwise Node + compat shim | LORD-JS, MajorMUD-JS |
+| `door_mystic` | Mystic Python `.mpy` with our compat shim | Mystic-native Python doors |
+| `door_mystic_mps` | Mystic Pascal `.mps`, auto-compiled via `mplc` | Mystic-native Pascal doors |
+| `door_dos_browser` | DOS .ZIP bundle via EmulatorJS + dosbox_pure, runs entirely client-side | DOOM/Duke3D shareware, no telnet/SSH needed |
 
 ## Playing
 
@@ -1318,12 +1327,15 @@ several themes plus a custom-theme editor.
 
 | Slug | Look |
 |------|------|
-| `modern-dark` | High-contrast slate (recommended) |
-| `amber-crt` | Amber-on-black 80s vibe |
-| `green-crt` | Green-on-black classic |
-| `solarized-dark` | Solarized palette |
-| `dracula` | Popular dark scheme |
-| `nord` | Cool blues |
+| `modern-dark` | High-contrast Catppuccin-style slate (recommended, default) |
+| `classic-green` | Green-on-black classic BBS terminal look |
+| `amber-terminal` | Warm amber on dark brown |
+| `blue-ice` | Cyan accent on deep navy |
+| `matrix` | Bright neon green on pure black |
+| `synthwave` | Hot pink + cyan on dark purple |
+| `paper-white` | Light theme for daytime use |
+| `enhanced` | "VOID SIGNAL" — triple neon (green/cyan/magenta) on black, scanlines, glitch effects |
+| `hackers` | "HACKERS (1995)" — neon violet/lime/cyan cyberpunk homage |
 
 ## Per-user
 
@@ -1338,17 +1350,17 @@ new accounts see this theme until they change it.
 
 ## Custom themes
 
-`/admin/themes/` lets the sysop author a new theme. Pick variable
-values from a color-picker; preview live; save. Every theme is just
-a set of CSS variables — `--theme-bg`, `--theme-primary`,
+`/admin/theme-builder` lets the sysop author a new theme. Pick
+variable values from a color-picker; preview live; save. Every theme
+is just a set of CSS variables — `--theme-bg`, `--theme-primary`,
 `--theme-text`, etc.
 
 ## Light themes
 
 ANetBBS is dark-by-default — every list-group, table-row tint, and
-alert palette is hand-tuned for dark backgrounds. Light themes are
-possible but require overriding the few "dark" overrides in
-base.html. There's no shipped light theme today.
+alert palette is hand-tuned for dark backgrounds. `paper-white` is the
+one shipped light theme; building another light theme requires
+overriding the same "dark" assumptions in base.html.
 
 ## Terminal menu art
 
@@ -1366,15 +1378,17 @@ than the [[Tutorial]].
 
 ## What runs
 
-ANetBBS is a couple of services:
+ANetBBS is a handful of services:
 
 | Service | What it does |
 |---------|--------------|
 | `anetbbs-web` | gunicorn + eventlet. Serves the web UI, REST, sockets. |
-| `anetbbs-telnet` | asyncio listener on 23/22/513 — telnet, SSH, rlogin |
+| `anetbbs` | asyncio listener on 2233/2234/513 — telnet, SSH, rlogin (one process, which protocols actually start is driven by `.env` flags) |
 | `anetbbs-mrc-bridge` | persistent MRC connection |
+| `anetbbs-finger` | RFC 1288 Finger daemon |
+| `anetbbs-binkp` | FidoNet BinkP inbound listener |
 
-`systemctl status anetbbs-web anetbbs-telnet anetbbs-mrc-bridge`
+`systemctl status anetbbs-web anetbbs anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp`
 shows the lot.
 
 ## Daily
@@ -1404,12 +1418,14 @@ shows the lot.
 
 ## On upgrade
 
-1. `sudo systemctl stop anetbbs-web anetbbs-telnet anetbbs-mrc-bridge`
-2. Run [[Backup]]
-3. `sudo bash update.sh --install-dir /opt/anetbbs`
-4. `sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-mrc-bridge`
-5. Hard-refresh your browser to bust cached CSS.
-6. Watch `journalctl -u anetbbs-web -f` for a minute to catch
+1. Take your own backup if you want extra safety beyond what
+   `update.sh` snapshots automatically (see [[Backup]]).
+2. `sudo bash update.sh --install-dir /opt/anetbbs` — this stops
+   services, backs up `.env`/the DB/systemd units, applies the new
+   code, migrates the schema, and restarts everything itself. No
+   manual stop/start needed.
+3. Hard-refresh your browser to bust cached CSS.
+4. Watch `journalctl -u anetbbs-web -f` for a minute to catch
    any column-add migration noise.
 
 ## Where things live
@@ -1439,9 +1455,14 @@ The launchpad for live operations. `/admin/control/`. Admin-only.
 
 ### Services
 
-systemctl-driven status for `anetbbs-web`, `anetbbs-telnet`,
-`anetbbs-mrc-bridge`, etc. Start / Stop / Restart buttons need the
-`anetbbs` sudoers entry — see `deploy/sudoers.anetbbs`.
+systemctl-driven status for `anetbbs-web`, `anetbbs` (unified
+telnet/SSH/rlogin), `anetbbs-mrc-bridge`, `anetbbs-finger`,
+`anetbbs-binkp`. Start / Stop / Restart buttons need sudoers
+permission for the account these run as — see `deploy/sudoers.anetbbs`
+(`update.sh` installs this automatically on every run; on a fresh
+install that hasn't been updated yet, it needs the `__SERVICE_USER__`
+placeholder substituted with `sed`, not just copied — see
+[[Sysop Guide]]).
 
 ### NodeSpy
 
@@ -1553,16 +1574,18 @@ Run that out of cron once a week, rotate keep-last-30.
 
 ## Hot DB copy
 
-sqlite's online backup API gives a consistent dump even while the
-BBS is writing. The bundled script:
+sqlite's online backup API (`.backup`, not a raw file `cp`) gives a
+consistent dump even while the BBS is writing — this is the same
+mechanism `update.sh` uses for its own pre-update snapshot:
 
 ```bash
-sudo -u anetbbs /opt/anetbbs/tools/db_backup.sh \\
-    /backup/db/anetbbs-$(date +%F-%H%M).db
+sudo -u anetbbs sqlite3 /opt/anetbbs/data/anetbbs.db \\
+    ".backup '/backup/db/anetbbs-$(date +%F-%H%M).db'"
 ```
 
 cron this every 6 hours during the day if you want point-in-time
-recovery.
+recovery. (There's also a one-click "Download DB Backup" button in
+Admin → Backups for an on-demand copy through the web UI.)
 
 ## Off-site
 
@@ -1589,23 +1612,24 @@ A 10,000-ft overview of how ANetBBS is wired up.
 
 ```
 +---------------------+         +------------------------+
-|  anetbbs-web        |         |  anetbbs-telnet        |
+|  anetbbs-web        |         |  anetbbs               |
 |  gunicorn+eventlet  |         |  asyncio listener      |
 |  Flask app + sock.IO|         |  telnet/ssh/rlogin     |
+|                     |         |  (one process, unified)|
 +----------+----------+         +-----------+------------+
            |                                |
            |  SQLite (shared)               |
-           +--------- data/anetbbs.db ------+
-                                            |
-                                  +---------+----------+
-                                  |  anetbbs-mrc-bridge|
-                                  |  MRC client (long  |
-                                  |  poll)             |
-                                  +--------------------+
+           +--------- data/anetbbs.db ------+-----------+
+                                            |            |
+                                  +---------+--+  +------+-----+
+                                  |anetbbs-mrc-|  |anetbbs-    |
+                                  |bridge      |  |finger/binkp|
+                                  +------------+  +------------+
 ```
 
-Two main services (`web`, `telnet`), one secondary (`mrc-bridge`),
-all sharing the same SQLite database. Cross-process signals (like
+Two core services (`web`, the unified `anetbbs` terminal process),
+plus three optional ones (`mrc-bridge`, `finger`, `binkp`) — all
+sharing the same SQLite database. Cross-process signals (like
 [[NodeSpy]] kick) go via DB flags polled by the other process.
 
 ## Tech stack
@@ -1620,18 +1644,18 @@ all sharing the same SQLite database. Cross-process signals (like
 | Frontend | Bootstrap 5, xterm.js, vanilla JS |
 | Markdown | python-markdown + bleach |
 | RSS | feedparser |
-| ANSI | custom CP437 helpers in `anetbbs/core/ansi_ui.py` |
+| ANSI | custom CP437 helpers in `anetbbs/features/ansi_ui.py` |
 
 ## Repo layout
 
 ```
 anetbbs-rebuilt/
   anetbbs/
-    core/           session, ANSI, terminal protocols
-    features/       BBS sub-systems (menus, doors, multinode...)
+    core/           session, terminal protocols (telnet/ssh/rlogin/finger)
+    features/       BBS sub-systems (menus, doors, multinode, ANSI helpers...)
     web/            Flask blueprints (one per feature)
     wiki/           wiki renderer + slug + seed
-    models.py       SQLAlchemy models (one file, ~2000 lines)
+    models.py       SQLAlchemy models (one file, ~3000 lines)
     web_app.py      Flask app factory
     config.py       env-driven config
   templates/        Jinja templates
@@ -2281,18 +2305,24 @@ the [[Sysop Guide]]; the long-form admin tools are at
 Want to write a door, a web feature, a theme, or hook into messaging?
 You're in the right place.
 
-## The seven door types
+## The ten door types
 
-ANetBBS runs door games via seven distinct backends:
+ANetBBS runs door games via ten distinct backends:
 
 1. **DOS doors** (DOSBox-staging) — TradeWars, LORD-DOS, Usurper
-2. **Native Linux doors** — any executable, stdio piped
-3. **Synchronet `.js` doors** — real `jsexec` if installed, otherwise
+2. **DOS doors** (dosemu2, virtual COM1, no FOSSIL) — an alternative to
+   DOSBox-staging for DOS games that need it specifically
+3. **Native Linux doors** — any executable, stdio piped
+4. **Synchronet `.js` doors** — real `jsexec` if installed, otherwise
    our built-in Node + Synchronet API shim (~270 functions)
-4. **Mystic Pascal `.mps`/`.mpx`** — bundled Mystic 1.12 A48 runtime
-5. **Mystic Python `.py`** — fake `mystic_bbs` module
-6. **rlogin out-dial** — DoorParty / A-Net Online / Synchronet xtrn
-7. **Built-in web games** — Flask-routed mini-games
+5. **Mystic Pascal `.mps`/`.mpx`** — bundled Mystic 1.12 A48 runtime
+6. **Mystic Python `.py`** — fake `mystic_bbs` module
+7. **rlogin out-dial** — DoorParty / A-Net Online / Synchronet xtrn
+8. **Telnet out-dial** — TWGS and other telnet-only remotes, no
+   pre-auth handshake
+9. **Built-in web games** — Flask-routed mini-games
+10. **In-browser DOS games** — EmulatorJS + dosbox_pure, runs entirely
+    client-side, no telnet/SSH client needed
 
 See [`docs/17-development.md`](/docs/17-development) for the
 deep-dive: drop file formats, token substitution table, working code

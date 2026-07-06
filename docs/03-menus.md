@@ -48,6 +48,8 @@ Each item has:
 | `boards`    | —                                                 | message boards UI                             |
 | `pm`        | —                                                 | PM inbox                                      |
 | `pm_send`   | —                                                 | compose new PM                                |
+| `imsg`      | —                                                 | Inter-BBS Instant Message (MSP) inbox         |
+| `imsg_send` | —                                                 | compose new Inter-BBS Instant Message         |
 | `bulletins` | —                                                 | bulletins                                     |
 | `echo`      | —                                                 | echomail areas                                |
 | `echo_post` | —                                                 | compose echomail                              |
@@ -56,6 +58,9 @@ Each item has:
 | `multinode` | —                                                 | interactive multinode chat                    |
 | `oneliners` | —                                                 | last 10 callers + recent one-liners           |
 | `chat`      | —                                                 | chat menu (IRC / shoutbox)                    |
+| `rss`       | —                                                 | RSS reader                                    |
+| `ebooks`    | —                                                 | ebook reader (Gutenberg)                      |
+| `wall`      | —                                                 | graffiti wall                                 |
 | `games`     | —                                                 | game center                                   |
 | `dialout`   | —                                                 | dial out to other BBSes                       |
 | `page`      | —                                                 | page sysop                                    |

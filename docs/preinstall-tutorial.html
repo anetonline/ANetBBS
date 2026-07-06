@@ -80,23 +80,31 @@
     <h2>Decisions to make ahead of time</h2>
     <p>The install wizard will ask you. Have answers ready:</p>
     <ul>
+        <li><strong>Install mode</strong> — production (public, HTTPS via
+            Let's Encrypt) / behind (your own reverse proxy) / test
+            (local/LAN, no domain)? This comes first and changes several
+            other defaults.</li>
         <li>What's your <strong>BBS name</strong>?</li>
-        <li>What's your <strong>sysop handle</strong>?</li>
+        <li>What's your <strong>sysop handle</strong>? (Password can be
+            left blank to auto-generate one.)</li>
         <li>What's your <strong>domain</strong> (or leave blank for IP)?</li>
-        <li>Which protocols (telnet/SSH/rlogin) do you want enabled?</li>
-        <li>How many <strong>concurrent terminal nodes</strong> (1–100)?</li>
-        <li>Do you want <strong>FidoNet echomail</strong>?</li>
-        <li>What <strong>admin password</strong> will you use?
-            (Make it good — &gt;12 random chars.)</li>
+        <li>Which protocols (telnet/SSH/nginx) do you want enabled?</li>
+        <li>Want the <strong>MRC bridge</strong> (inter-BBS chat), MSP/SYSTAT
+            instant messaging, Finger, or BinkP (FidoNet inbound mail)?</li>
+        <li>Any optional extras — DOSBox-staging, ClamAV, lhasa, sixel
+            support, Mystic BBS runtime?</li>
     </ul>
+    <p><em>Concurrent terminal nodes and echomail on/off aren't wizard
+    prompts — they default on and get changed later via
+    <code>.env</code> or Admin → Settings.</em></p>
 </section>
 
 <!-- Slide 4: First install -->
 <section class="slide">
     <span class="step">4 / 10</span>
     <h2>First install — three commands</h2>
-    <pre>tar xzf ANetBBS-v1.0a2.NNN.tar.gz
-cd ANetBBS-v1.0a2.NNN
+    <pre>tar xzf ANetBBS-v1.0b2.NNN.tar.gz
+cd ANetBBS-v1.0b2.NNN
 sudo bash install.sh</pre>
     <p>The wizard handles:</p>
     <ul>
@@ -106,11 +114,11 @@ sudo bash install.sh</pre>
         <li>Building the Python venv and installing deps</li>
         <li>Initializing the SQLite database</li>
         <li>Creating + saving your sysop account</li>
-        <li>Installing systemd unit files (auto-starts on reboot)</li>
+        <li>Installing systemd unit files and starting every service
+            you enabled — nothing left to start manually</li>
     </ul>
-    <p>When it finishes:</p>
-    <pre>sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-ssh</pre>
-    <p>Visit <code>http://your_host:5000/</code>.</p>
+    <p>Visit <code>http://your_host:5000/</code> (port 5000 in
+    production mode, 8080 in test/behind mode).</p>
 </section>
 
 <!-- Slide 5: nginx -->
@@ -203,9 +211,13 @@ sudo certbot --nginx -d bbs.example.com</pre>
         <li>Live who's-online (web + terminal) refreshing every 5s</li>
         <li>One-click journal viewer per service</li>
     </ul>
-    <p>Install the supplied sudoers rule so service control works
-       without password prompts:</p>
-    <pre>sudo cp deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+    <p><code>update.sh</code> sets up the sudoers rule for service
+       control automatically on every run. If you haven't updated yet,
+       set it up yourself — the template ships with a
+       <code>__SERVICE_USER__</code> placeholder that needs
+       substituting, not a plain copy:</p>
+    <pre>sudo sed "s/^__SERVICE_USER__ /anetbbs /" deploy/sudoers.anetbbs \
+    | sudo tee /etc/sudoers.d/anetbbs > /dev/null
 sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
 </section>
 
@@ -218,14 +230,18 @@ cd ANetBBS-vX.Y.Z
 sudo bash update.sh</pre>
     <p>The script:</p>
     <ul>
-        <li>Snapshots <code>data/</code>, <code>.env</code>,
-            <code>logs/</code> to a timestamped backup</li>
+        <li>Backs up <code>.env</code>, the SQLite database, and your
+            systemd units to <code>/tmp/anetbbs-backup-*</code>
+            (<code>data/</code> and <code>logs/</code> are never
+            touched by an update at all, so there's nothing to back up
+            there)</li>
         <li>Stops services</li>
         <li>Rsync's the new code (preserves your data + config)</li>
         <li><code>pip install -e</code> picks up new modules</li>
         <li>Runs the schema migrator</li>
         <li>Restarts services</li>
-        <li>Probes <code>/healthz</code> — auto-rolls-back if it fails</li>
+        <li>Probes <code>/healthz</code> — auto-rolls-back if it fails,
+            no prompt</li>
     </ul>
     <p style="margin-top:2rem;"><strong>That's it. Welcome aboard, sysop.</strong></p>
     <p style="color:#a6adc8;">Once installed, every detail is in

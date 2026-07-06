@@ -90,9 +90,9 @@ BBS_NODES=8</pre>
                 <span class="step-badge">Step 3 / 10</span>
                 <h2><i class="bi bi-palette"></i> Pick a theme + draw a welcome banner</h2>
                 <ul>
-                    <li><strong>Profile → Themes</strong> — pick from 7 built-in
+                    <li><strong>Profile → Themes</strong> — pick from 9 built-in
                         themes (Modern Dark / Classic Green / Amber / Blue Ice /
-                        Matrix / Synthwave / Paper White)</li>
+                        Matrix / Synthwave / Paper White / VOID SIGNAL / HACKERS)</li>
                     <li><strong>Admin → Themes</strong> — sysop builds custom themes</li>
                     <li><strong>Admin → BBS Menus → ANSI screens</strong> — paste
                         a Pablo / Moebius .ans into the welcome / goodbye / newuser
@@ -165,9 +165,15 @@ BBS_NODES=8</pre>
                     <li>Live who's-online list (web + terminal)</li>
                     <li>One-click journal viewer for each service</li>
                 </ul>
-                <p>For service control to work, install
-                <code>deploy/sudoers.anetbbs</code>:</p>
-                <pre>sudo cp /opt/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+                <p>For service control to work, the account your
+                <code>anetbbs-web</code> service runs as needs sudoers
+                permission — <code>update.sh</code> sets this up
+                automatically on every run. On a fresh install that
+                hasn't been updated yet, set it up yourself (the
+                template ships with a placeholder that needs
+                substituting, not a plain copy):</p>
+                <pre>sudo sed "s/^__SERVICE_USER__ /anetbbs /" /opt/anetbbs/deploy/sudoers.anetbbs \
+    | sudo tee /etc/sudoers.d/anetbbs > /dev/null
 sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
             </div>
         </div>

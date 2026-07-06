@@ -1,6 +1,6 @@
 # Themes
 
-ANetBBS ships seven hand-picked themes, all WCAG-AA-readable on
+ANetBBS ships nine hand-picked themes, all WCAG-AA-readable on
 body text:
 
 - **Modern Dark** (default) — high-contrast Catppuccin-style palette
@@ -10,6 +10,10 @@ body text:
 - **Matrix** — bright neon green on pure black
 - **Synthwave** — hot pink + cyan on dark purple
 - **Paper White** — light theme for daytime
+- **VOID SIGNAL** — triple neon (green + cyan + magenta) on pure black,
+  with scanlines, brand glitch, and animated card borders
+- **HACKERS (1995)** — neon violet + lime + cyan rave cyberpunk, an
+  homage to the 1995 film
 
 ## Per-user
 

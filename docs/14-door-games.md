@@ -7,19 +7,17 @@ through their terminal:
 | Type                 | Source                  | Runtime                             |
 |----------------------|-------------------------|-------------------------------------|
 | `door_dos`           | DOS .EXE / .COM         | DOSBox (auto-detect staging/x/vanilla) + TCP nullmodem bridge to BNU FOSSIL. Snap-packaged DOSBox is auto-rejected. |
+| `door_dosemu`        | DOS .EXE / .COM         | dosemu2, virtual COM1 (no FOSSIL) bridged to the caller's PTY. |
 | `door_native`        | any Linux executable    | Direct fork inside a PTY. |
 | `door_synchronet`    | Synchronet `.js`        | Real `jsexec` if installed, otherwise Node + our compat shim. See [`15-synchronet-compat.md`](15-synchronet-compat.md). |
 | `door_mystic_mps`    | Mystic Pascal `.mps`    | `mplc` auto-compiles to `.mpx`, `mystic -x` runs it. |
 | `door_mystic`        | Mystic Python `.mpy`    | Python with our `mystic_bbs` compat shim. |
 | `door_rlogin`        | remote BBS              | Outbound rlogin TCP bridge to a Synchronet xtrn server / DoorParty / etc. The "door" lives on someone else's BBS. |
-| `builtin_web`        | in-process              | Flask templates — for the 10 web mini-games. |
+| `door_telnet`        | remote telnet server    | Outbound telnet TCP bridge (e.g. TWGS — Trade Wars Game Server). Same idea as `door_rlogin` but no pre-auth handshake; the remote handles login interactively. |
+| `builtin_web`        | in-process              | Flask templates — for the built-in web mini-games. |
 | `door_dos_browser`   | DOS .ZIP bundle         | EmulatorJS + dosbox_pure core, runs entirely in the browser. No telnet/SSH — web only. |
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
-
-> The `door_dosemu` type was removed in v280.1 — drive-letter detection
-> against dosemu2's FreeDOS layout was unreliable and the admin form
-> fields didn't render. Use `door_dos` for all DOS games.
 
 ## Per-node scratch directories
 
@@ -66,7 +64,7 @@ Reference: `wiki.synchro.net/ref:xtrn` and `xtrn.cnf` REPLACEMENT KEYWORDS.
 | `%d`  | Baud rate (always `0` — local connection)                          |
 | `%e`  | Node number (synonym of `%n`)                                      |
 | `%f`  | Full path to the drop file the BBS just wrote                      |
-| `%g`  | SSH session active flag                                            |
+| `%g`  | SSH session active flag (always `0` — not modelled, same as `%h`/`%y`/`%z` below) |
 | `%h`  | Socket handle (always `0` — we use a PTY, not a real socket)       |
 | `%i`  | Caller's IP address                                                |
 | `%j`  | Data dir (`<install>/data/`)                                       |

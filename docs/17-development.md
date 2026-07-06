@@ -37,21 +37,24 @@ in a new feature.
 
 ---
 
-## Doors — 7 ways in
+## Doors — 10 ways in
 
-ANetBBS supports seven distinct **door types** out of the box. Each
+ANetBBS supports ten distinct **door types** out of the box. Each
 maps to a `Game` model row (sysop creates via `/admin/games/`) with a
 `game_type` discriminator.
 
 | `game_type` | Run path | Drop file | Use when |
 |---|---|---|---|
 | `door_dos` | DOSBox-staging bridge with TCP nullmodem on 127.0.0.1:5001-N | `DOOR.SYS` / `DORINFO1.DEF` | Original DOS doors (TradeWars, LORD-DOS, Usurper…) |
+| `door_dosemu` | dosemu2, virtual COM1 bridged to caller's PTY (no FOSSIL) | `DOOR.SYS` | DOS doors that need dosemu2 specifically instead of DOSBox |
 | `door_native` | Direct exec, stdio piped to caller | configurable | Linux-native doors (Java, Go, …) |
 | `door_synchronet` | Real `jsexec` if present, otherwise Node + our compat shim | `DOOR32.SYS` | Synchronet `.js` doors (LORD-JS, MajorMUD-JS, dorkit-based doors) |
 | `door_mystic` | `mystic` binary running compiled `.mpx` script | Mystic-style | Mystic Pascal-script doors (`.mpx` precompiled) |
 | `door_mystic_mps` | Auto-compile `.mps` → `.mpx` via `mplc`, then run | Mystic-style | Mystic source doors (`.mps`) |
 | `door_rlogin` | Outbound rlogin to remote BBS game-server | none — passes user identity | DoorParty, A-Net Online, Synchronet xtrn servers |
+| `door_telnet` | Outbound telnet to remote game server, no pre-auth handshake | none | TWGS (Trade Wars Game Server) and similar telnet-only remotes |
 | `builtin_web` | Flask-routed browser game (xterm.js not needed) | none | Pure-web mini-games (Snake, 2048, Hangman…) |
+| `door_dos_browser` | EmulatorJS + dosbox_pure, runs entirely client-side in the browser | none | DOS shareware bundles playable with no telnet/SSH client at all |
 
 ### Door entrypoints (config fields)
 
@@ -359,11 +362,19 @@ your request.
 ```bash
 cd <install>
 venv/bin/pytest tests/
+# or, equivalently (no pytest install required):
+venv/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Pytest currently has 3 passing tests / 2 skips. Add tests for new
-features under `tests/`. Use `tests/conftest.py`'s `app`/`client`
-fixtures — they spin up an isolated SQLite DB and Flask test client.
+The suite is a mix of `unittest.TestCase`-based files (most of them)
+and a couple of pytest-fixture-based files — there's no shared
+`conftest.py`; each test file that needs a Flask app/test client
+builds its own (see any `test_*.py` file's `setUpClass`/fixture
+functions for the pattern most commonly used — create a fresh
+`create_app('testing')`, point `TestingConfig.SQLALCHEMY_DATABASE_URI`
+at a scratch file or `tempfile.TemporaryDirectory()`, and restore any
+shared state in `tearDownClass`). Add tests for new features under
+`tests/`.
 
 ---
 

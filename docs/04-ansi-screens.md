@@ -185,7 +185,7 @@ The same codes also work inside Synchronet door files served via
 | `@DATE@`                          | local `YYYY-MM-DD`              |
 | `@DAY@`                           | weekday, e.g. `Tuesday`         |
 | `@VER@` / `@VERSION@`             | ANetBBS build version           |
-| `@TIMELEFT@`                      | minutes left in this session    |
+| `@TIMELEFT@`                      | always blank — not modelled yet |
 
 | Mystic code | Resolves to                                           |
 | ----------- | ----------------------------------------------------- |

@@ -110,6 +110,23 @@ sudo bash install.sh
 > `/opt` is owned by root and can cause permission edge cases on Raspbian.
 > Using `/home/<user>/anetbbs` means the service user already owns the whole tree.
 
+### Known Python 3.13 / eventlet issue on ARM
+
+If `anetbbs-web` crashes on first boot with
+`AttributeError: module 'eventlet.green.thread' has no attribute
+'start_joinable_thread'`, it's because piwheels (the Raspberry Pi
+prebuilt-wheel mirror) sometimes ships an `eventlet` wheel compiled
+before this Python 3.13 compatibility fix landed, even at a version
+number that should have it. `update.sh` detects and auto-fixes this on
+every upgrade, but a **fresh** `install.sh` run has no equivalent
+check yet. If you hit it, rebuild eventlet from source once:
+
+```bash
+sudo -u <service-user> /home/<user>/anetbbs/venv/bin/pip install \
+    --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.38.0"
+sudo systemctl restart anetbbs-web
+```
+
 ---
 
 ## DDNS Setup (for Pis Behind a Home Router)
@@ -276,11 +293,16 @@ ls -la "$INSTALL_DIR/data"
 # should show: data -> /mnt/bbsdata/data
 ```
 
-### 4. Update DATA_DIR and DATABASE_URL in .env
+### 4. Update DATABASE_URL in .env
+
+The symlink from step 3 is what actually relocates `data/` — there's
+no `DATA_DIR` environment variable that does anything (it's hardcoded
+relative to the install directory), so don't bother setting one.
+`DATABASE_URL` **is** read from the environment and matters here,
+since it's an absolute path baked in at install time:
 
 ```bash
 cat >> "$INSTALL_DIR/.env" << EOF
-DATA_DIR=/mnt/bbsdata/data
 DATABASE_URL=sqlite:////mnt/bbsdata/data/anetbbs.db
 EOF
 ```

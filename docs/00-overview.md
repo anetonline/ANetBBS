@@ -49,7 +49,7 @@ app uses, so the "who's online" widget shows everyone at once.
   IRC bridge, MRC bridge for inter-BBS chat, in-page shoutbox.
 - **Real-time sysop control panel** — service start/stop/restart
   from the web, NodeSpy showing what every terminal user is doing.
-- **Themes** — pick from 7 built-in or sysop builds custom.
+- **Themes** — pick from 9 built-in or sysop builds custom.
 - **Customizable everything** — every menu, hotkey, ANSI screen,
   external program, board category is data-driven.
 

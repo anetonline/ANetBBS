@@ -18,7 +18,10 @@ steps. Read this whole file before exposing the BBS to the internet.
   rejected unless it's a same-origin path (`urlparse().netloc == ''`,
   not protocol-relative, not Windows-path-tricks).
 - **Rate limits** (sliding window, in-memory):
-  - `/auth/login` — 10 attempts / 5 min / IP
+  - `/auth/login` — sysop-configurable via Admin → IP Bans (default 10
+    attempts / 5 min / IP); exceeding it **auto-bans the source IP**
+    for a sysop-configurable duration (default 1 hour, 0 = permanent)
+  - `/auth/register` — 3 attempts / hour / IP
   - `/imsg/send` — 30 messages / hour / user
   - `/api/vote` — 60 votes / min / user
 - **Path traversal mitigated** — uploads stored under UUID filenames; the
@@ -67,8 +70,9 @@ steps. Read this whole file before exposing the BBS to the internet.
   attempts. For a real multi-worker setup, replace with a Redis-backed
   store (the `rate_limit` decorator is the only call site to change).
 - **No 2FA.** Single password for both web and terminal logins.
-- **No account lockout** (just rate limit). Brute-force is throttled
-  but never permanently locks an account.
+- **No per-account lockout** — the auto-ban above works on the source
+  IP, not the targeted username, so a distributed brute-force attempt
+  from many IPs against one account isn't slowed by this mechanism.
 - **Uploads are not sandboxed beyond ClamAV** if you have it installed.
   Don't run the BBS on a host where executable uploads matter.
 - **Synchronet `.js` doors** without real `jsexec` get a Node.js

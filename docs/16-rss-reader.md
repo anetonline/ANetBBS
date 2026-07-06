@@ -46,7 +46,7 @@ To refresh manually, hit the circular-arrow icon next to a feed in
 | Field          | Notes |
 |----------------|-------|
 | **Name**       | Display name shown to users (e.g., `X-News`) |
-| **Category**   | Free text — `news`, `tech`, `scene`, `general`. Used for grouping in future versions; currently informational. |
+| **Category**   | Free text — `news`, `tech`, `scene`, `general`. Feeds are grouped by this on the web feed picker. |
 | **Feed URL**   | RSS 2.0 / Atom / RSS 1.0 — feedparser handles all of them. |
 | **Site URL**   | Optional human-facing homepage of the feed source. |
 | **Description**| One-liner shown on the feed picker. |
@@ -81,8 +81,6 @@ No manual SQL needed.
 - **Web autorefresh** — the user has to reload the page to see new
   items between poll ticks. A SocketIO push of "new item arrived"
   would be a nice touch.
-- **Feed groupings by category** — currently the category field is
-  stored but not surfaced in the UI.
 - **Per-user feed subscriptions** — right now every user sees every
   active feed. A future version could let users hide/show specific
   feeds.
