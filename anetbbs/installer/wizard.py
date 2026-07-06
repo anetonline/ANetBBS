@@ -315,7 +315,12 @@ def main():
 
 
 def _install_systemd_units(install_dir, web_port, tel, ssh, rl):
-    user = os.environ.get('SUDO_USER') or os.environ.get('USER') or 'stingray'
+    user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+    if not user:
+        raise RuntimeError(
+            'Could not determine which user to run the systemd services '
+            'as -- neither $SUDO_USER nor $USER is set. Re-run with sudo '
+            'from a normal login shell.')
     units_dir = install_dir / 'deploy'
     target_dir = Path('/etc/systemd/system')
     if not target_dir.is_dir() or not os.access(str(target_dir), os.W_OK):

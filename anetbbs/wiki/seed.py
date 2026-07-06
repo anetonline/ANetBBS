@@ -1285,16 +1285,16 @@ Recommended editors:
 ## Permissions
 
 Files must be readable by the service user (`anetbbs`). After copying via
-SCP as `stingray`, set ownership:
+SCP as your own login, set ownership:
 
 ```bash
-sudo chown anetbbs:anetbbs /home/stingray/anetbbs/data/text/menus/game_center.ans
+sudo chown anetbbs:anetbbs /opt/anetbbs/data/text/menus/game_center.ans
 ```
 
 Or fix the whole directory at once:
 
 ```bash
-sudo chown -R anetbbs:anetbbs /home/stingray/anetbbs/data/text/
+sudo chown -R anetbbs:anetbbs /opt/anetbbs/data/text/
 ```
 
 ## Removing an override
@@ -1406,7 +1406,7 @@ shows the lot.
 
 1. `sudo systemctl stop anetbbs-web anetbbs-telnet anetbbs-mrc-bridge`
 2. Run [[Backup]]
-3. `sudo bash update.sh --install-dir /home/stingray/anetbbs`
+3. `sudo bash update.sh --install-dir /opt/anetbbs`
 4. `sudo systemctl start anetbbs-web anetbbs-telnet anetbbs-mrc-bridge`
 5. Hard-refresh your browser to bust cached CSS.
 6. Watch `journalctl -u anetbbs-web -f` for a minute to catch
@@ -1414,9 +1414,9 @@ shows the lot.
 
 ## Where things live
 
-- Install: `/home/stingray/anetbbs/` (this site)
-- Data: `/home/stingray/anetbbs/data/` (sqlite + uploads)
-- Logs: `/home/stingray/anetbbs/logs/` (rotated)
+- Install: `/opt/anetbbs/` (this site)
+- Data: `/opt/anetbbs/data/` (sqlite + uploads)
+- Logs: `/opt/anetbbs/logs/` (rotated)
 - DOSBox doors: `/var/lib/anetbbs/doors/<name>/`
 - Echomail spool: under data dir, `echomail/{in,out}box/`
 
@@ -1545,7 +1545,7 @@ tarball.
 ```bash
 sudo tar czf /backup/anetbbs-$(date +%F).tar.gz \\
     --exclude=data/logs --exclude=__pycache__ \\
-    /home/stingray/anetbbs/data \\
+    /opt/anetbbs/data \\
     /var/lib/anetbbs/doors
 ```
 
@@ -1557,7 +1557,7 @@ sqlite's online backup API gives a consistent dump even while the
 BBS is writing. The bundled script:
 
 ```bash
-sudo -u stingray /home/stingray/anetbbs/tools/db_backup.sh \\
+sudo -u anetbbs /opt/anetbbs/tools/db_backup.sh \\
     /backup/db/anetbbs-$(date +%F-%H%M).db
 ```
 
@@ -1574,7 +1574,7 @@ box.
 
 1. Stop the services.
 2. Untar the backup into a fresh tree.
-3. `chown -R stingray:stingray /home/stingray/anetbbs/data`
+3. `chown -R anetbbs:anetbbs /opt/anetbbs/data`
 4. Start the services. Auto-sweep migrations will fix any
    column-add diffs between the backup era and current code.
 """),
@@ -2191,8 +2191,8 @@ running under DOSBox-staging on Linux behind ANetBBS.
 
 ```bash
 sudo mkdir -p /var/lib/anetbbs/doors/lord
-sudo chown stingray:stingray /var/lib/anetbbs/doors/lord
-sudo -u stingray cp -a /path/to/lord/* /var/lib/anetbbs/doors/lord/
+sudo chown anetbbs:anetbbs /var/lib/anetbbs/doors/lord
+sudo -u anetbbs cp -a /path/to/lord/* /var/lib/anetbbs/doors/lord/
 ```
 
 ### 2. Configure DOSBox

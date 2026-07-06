@@ -74,7 +74,7 @@ def main():
 
     # 2. Install dir
     install_dir = ask('Install directory',
-                      default='/home/stingray/anetbbs',
+                      default='/opt/anetbbs',
                       validator=lambda s: (Path(s).is_dir(),
                                            'Not a directory.'))
     install_dir = Path(install_dir).resolve()
@@ -150,10 +150,18 @@ def main():
         dos_dst.mkdir(parents=True, exist_ok=True)
         _run(['rsync', '-a', f'{dos_src}/', f'{dos_dst}/'], check=False)
         ok('DOS game bundles updated')
-    # Restore ownership in case rsync ran as a different user
-    user = os.environ.get('SUDO_USER') or 'stingray'
-    _run(['chown', '-R', f'{user}:{user}', str(install_dir)],
-         capture_output=True)
+    # Restore ownership in case rsync ran as a different user. If
+    # SUDO_USER isn't set, fall back to whatever already owns the
+    # install dir rather than guessing a specific username.
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        _run(['chown', '-R', f'{sudo_user}:{sudo_user}', str(install_dir)],
+             capture_output=True)
+    else:
+        owner_uid = install_dir.stat().st_uid
+        owner_gid = install_dir.stat().st_gid
+        _run(['chown', '-R', f'{owner_uid}:{owner_gid}', str(install_dir)],
+             capture_output=True)
     ok('Files updated')
 
     # 7. pip install

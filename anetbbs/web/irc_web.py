@@ -331,7 +331,7 @@ class _IrcSession:
                 elif ctcp_name == 'CLIENTINFO':
                     reply = '\x01CLIENTINFO PING VERSION TIME CLIENTINFO ACTION SOURCE\x01'
                 elif ctcp_name == 'SOURCE':
-                    reply = '\x01SOURCE https://github.com/stingray/anetbbs\x01'
+                    reply = '\x01SOURCE https://github.com/anetonline/ANetBBS\x01'
                 if reply:
                     self.send_raw(f'NOTICE {sender} :{reply}')
                 # Also surface to UI as a system note so we have a record.

@@ -16,7 +16,7 @@ WRAPPERS = ('anetbbs', 'anetbbs-web', 'anetbbs-install',
 
 def main():
     """Console entry point: `anetbbs-symlinks [install_dir]`."""
-    install_dir = sys.argv[1] if len(sys.argv) > 1 else '/home/stingray/anetbbs'
+    install_dir = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parents[2])
     print(f'Installing /usr/local/bin/ symlinks pointing at {install_dir}/venv/bin/...')
     for name, status in ensure_symlinks(install_dir):
         marker = '✗' if status.startswith('failed') else '✓'

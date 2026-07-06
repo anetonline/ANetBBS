@@ -481,8 +481,8 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
         # Per-door runtime state: doors that persist state (TW2's json-client,
         # etc.) must NOT write into the source tree — the source dir is owned
-        # by the install-account (stingray) and the runtime user (anetbbs uid
-        # 998) can't create files there. Route writes to
+        # by the install-account (the sysop's own login) and the runtime user
+        # (anetbbs uid 998) can't create files there. Route writes to
         # {INSTALL}/data/sbbs_doors/<slug>/ which the runtime user owns.
         # The child reads ANETBBS_TW2_DB_DIR (and any other future
         # ANETBBS_<SLUG>_DB_DIR) to find its writable home; existing doors

@@ -1,3 +1,16 @@
+# ANetBBS v1.0b2.32 — Sysop-specific paths scrubbed from shared code (July 2026)
+
+- FIX (real bugs, not just cosmetic): several hardcoded fallback paths/usernames from the maintainer's own install had leaked into shared code, meaning they'd silently misconfigure anyone else's install if the normal config lookup ever failed:
+  - `anetbbs/games/dropfile.py` — drop-file output path fallback now derives from the file's own location instead of a hardcoded absolute path.
+  - `anetbbs/web/gallery.py` — default seed galleries pointed at content that isn't part of the shipped tarball at all (the maintainer's own personal collections); every fresh install was silently getting broken gallery entries. Default is now empty — sysops add their own via `/admin/galleries/`.
+  - `anetbbs/installer/symlinks.py`, `anetbbs/installer/upgrade.py`, `anetbbs/installer/wizard.py` — install-dir and service-user fallbacks that would have misconfigured (or, in one case, `chown`'d files to a nonexistent user on) any other sysop's install if triggered.
+  - `anetbbs/web/irc_web.py` — the IRC bot's CTCP `SOURCE` reply pointed at a broken GitHub URL; fixed to the real repo.
+  - `deploy/sudoers.anetbbs` / `update.sh` — the sudoers template used the maintainer's own username as a literal placeholder token that `sed` substitutes on every update. Renamed to `__SERVICE_USER__`, which also removes any chance of colliding with a real sysop who happens to share that username.
+- FIX (public-facing content): the in-app sysop tutorial (`anetbbs/templates/main/tutorial.html`), ~10 spots in the seeded wiki content (`anetbbs/wiki/seed.py` — ships to every fresh install), the GitHub issue template, and two form placeholder fields all had the same maintainer-specific path/username baked in as if it were a generic example. Genericized throughout.
+- No behavior change for the maintainer's own existing install — these only affect what a *different* sysop's fresh install would have seen.
+
+---
+
 # ANetBBS v1.0b2.31 — Docker support (July 2026)
 
 - FEATURE: **Docker deployment**, two ways to run ANetBBS in containers, sitting alongside (not replacing) the traditional `install.sh`/systemd path:

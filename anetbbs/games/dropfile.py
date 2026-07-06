@@ -7,6 +7,7 @@ from a user session so that classic BBS door games can be launched.
 """
 import os
 from datetime import datetime
+from pathlib import Path
 
 
 def _u(user, field, default=None):
@@ -292,13 +293,16 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
 
     # Resolve relative paths to absolute against the install dir.
     if not os.path.isabs(output_path):
-        # Fall back to the legacy hardcoded base if BASE_DIR isn't accessible
-        # (which only happens in unit tests with no app context).
+        # Fall back to deriving the install dir from this file's own
+        # location if BASE_DIR isn't accessible (which only happens in
+        # unit tests with no app context) -- works on any install,
+        # regardless of where the sysop put it.
         try:
             from ..config import get_config
-            base = str(getattr(get_config(), 'BASE_DIR', '/home/stingray/anetbbs'))
+            base = str(getattr(get_config(), 'BASE_DIR', None) or
+                       Path(__file__).resolve().parents[2])
         except Exception:
-            base = '/home/stingray/anetbbs'
+            base = str(Path(__file__).resolve().parents[2])
         output_path = os.path.normpath(os.path.join(base, output_path))
 
     # If they gave us a DIRECTORY (common — "put the drop file inside this

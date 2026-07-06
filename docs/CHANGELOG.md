@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.31`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.32`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.32 — Sysop-specific paths scrubbed from shared code (July 2026)
+
+- FIX: several hardcoded fallback paths/usernames from the maintainer's own install had leaked into shared code (drop-file path resolution, default gallery seed data, installer/upgrade-wizard fallbacks, an IRC CTCP reply URL, the sudoers template) — real bugs that would misconfigure a different sysop's install if the normal config lookup ever failed, not just cosmetic. Fixed all of them; also scrubbed the same path from the in-app tutorial, the seeded wiki content, and the GitHub issue template.
+- No behavior change for the maintainer's own install.
 
 ## v1.0b2.31 — Docker support (July 2026)
 

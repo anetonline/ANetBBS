@@ -20,25 +20,10 @@ gallery_bp = Blueprint('gallery', __name__, url_prefix='/gallery')
 IMAGE_EXTS = {'.jpg', '.jpeg', '.gif', '.png', '.bmp', '.webp'}
 _CONFIG_LOCK = threading.Lock()
 
-# Seeded on first run if no config file exists.
-DEFAULT_GALLERIES = [
-    {
-        'slug': 'gifs',
-        'label': '90s GIFs Galore',
-        'path': '/home/stingray/anetbbs/doors/sbbs/dsr/gifs',
-        'description': '6,500+ classic 90s GIFs.',
-        'is_active': True,
-        'sort_order': 10,
-    },
-    {
-        'slug': 'swim',
-        'label': 'Sports Illustrated Swimsuit',
-        'path': '/home/stingray/anetbbs/doors/sbbs/dsr/swim',
-        'description': 'Sports Illustrated Swimsuit collection.',
-        'is_active': True,
-        'sort_order': 20,
-    },
-]
+# Seeded on first run if no config file exists. Empty by default -- the
+# sysop adds their own collections via /admin/galleries/; there's no
+# generic sample image content bundled with the project to point at.
+DEFAULT_GALLERIES = []
 
 
 def _config_path():

@@ -5,9 +5,9 @@
 # anetbbs-* units — no full root shell. Read-only ops (status, show,
 # journalctl) do NOT need sudo and the panel calls them directly.
 #
-# Replace `stingray` with whatever User= the anetbbs-web.service unit
-# runs as. The installer / update.sh re-writes this file on every run
-# so the user, paths, and unit names stay in sync.
+# Replace `__SERVICE_USER__` with whatever User= the anetbbs-web.service
+# unit runs as. The installer / update.sh re-writes this file on every
+# run so the user, paths, and unit names stay in sync.
 #
 # Install with:
 #   sudo cp deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
@@ -95,4 +95,4 @@ Defaults!ANETBBS_UPGRADE  !log_input, !log_output
 Defaults!ANETBBS_RESTORE  !log_input, !log_output
 Defaults!ANETBBS_SYSCTL   !log_input, !log_output
 
-stingray ALL=(root) NOPASSWD: ANETBBS_SYSCTL, ANETBBS_UPGRADE, ANETBBS_RESTORE
+__SERVICE_USER__ ALL=(root) NOPASSWD: ANETBBS_SYSCTL, ANETBBS_UPGRADE, ANETBBS_RESTORE

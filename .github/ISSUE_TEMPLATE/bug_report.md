@@ -7,7 +7,7 @@ assignees: ''
 ---
 
 ## ANetBBS Version
-<!-- Run: cat /home/stingray/anetbbs/VERSION  or check Admin → About -->
+<!-- Run: cat /path/to/anetbbs/VERSION  or check Admin → About -->
 
 
 ## How You Connect

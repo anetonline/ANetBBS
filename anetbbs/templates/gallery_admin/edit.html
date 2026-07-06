@@ -34,8 +34,8 @@
 <div class="mb-3">
     <label class="form-label">Filesystem Path</label>
     <input type="text" name="path" class="form-control" required
-           value="{{ g.path if g else '/home/stingray/anetbbs/' }}"
-           placeholder="/home/stingray/anetbbs/gallery/photos">
+           value="{{ g.path if g else '' }}"
+           placeholder="/opt/anetbbs/gallery/photos">
     <div class="form-text">Directory will be auto-created if it doesn't exist.</div>
 </div>
 <div class="mb-3">

@@ -59,7 +59,7 @@ class SymlinkAwareFS(AbstractedFS):
 
     We also override lstat() to use os.stat() — the default behavior
     leaks the absolute server-side path to clients via the LIST output
-    (e.g. `lrwxrwxrwx ... FILES.GAMES -> /home/stingray/.../data/files/games`).
+    (e.g. `lrwxrwxrwx ... FILES.GAMES -> /opt/anetbbs/.../data/files/games`).
     Resolving through the symlink makes each entry look like an
     ordinary directory in `ls -l`.
     """
@@ -102,8 +102,8 @@ def _build_symlink_tree(root_dir, areas, mode='user'):
             except PermissionError as exc:
                 # Leftover from a previous FTP run that executed as a
                 # different user — usually root, before the BBS was
-                # converted to run as `stingray`/`anetbbs`. We can't
-                # remove the stale symlink but we can still operate
+                # converted to run as the sysop's own service account.
+                # We can't remove the stale symlink but we can still operate
                 # around it (worst case the link points at a dead
                 # target). Log + continue rather than crash the whole
                 # FTP thread, which is what kept FTP silently dead

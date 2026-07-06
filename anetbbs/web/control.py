@@ -523,7 +523,7 @@ def _read_journal_systemd(unit, lines=200):
                 log += (
                     '\n\nHint: the service user needs read access to the '
                     'system journal. On Debian/Ubuntu run:\n'
-                    f'    sudo usermod -aG systemd-journal,adm {os.getenv("USER", "stingray")}\n'
+                    f'    sudo usermod -aG systemd-journal,adm {os.getenv("USER", "<your-username>")}\n'
                     'then restart anetbbs-web.')
             return log
         return r.stdout or '(empty)'

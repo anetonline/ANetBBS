@@ -72,11 +72,11 @@
             <div class="slide">
                 <span class="step-badge">Step 2 / 10</span>
                 <h2><i class="bi bi-pencil-square"></i> Brand the BBS</h2>
-                <p>Edit <code>/home/stingray/anetbbs/.env</code>
+                <p>Edit <code>/opt/anetbbs/.env</code>
                 and set:</p>
                 <pre>BBS_NAME=My Awesome BBS
 BBS_DESCRIPTION=Where the cool kids hang out
-SYSOP_NAME=Stingray
+SYSOP_NAME=YourHandle
 BBS_DOMAIN=bbs.example.com
 BBS_NODES=8</pre>
                 <p>Or use <strong>Admin → Settings</strong> for the same fields
@@ -167,7 +167,7 @@ BBS_NODES=8</pre>
                 </ul>
                 <p>For service control to work, install
                 <code>deploy/sudoers.anetbbs</code>:</p>
-                <pre>sudo cp /home/stingray/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
+                <pre>sudo cp /opt/anetbbs/deploy/sudoers.anetbbs /etc/sudoers.d/anetbbs
 sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
             </div>
         </div>

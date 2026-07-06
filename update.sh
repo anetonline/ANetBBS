@@ -97,10 +97,10 @@ done < <(grep -v '^\s*#' "$ENV_FILE" | grep '=')
 # Why: the old `stat -c '%U' "$INSTALL_DIR"` logic returned the OWNER of
 # the install dir, which is fine on a stock install (install.sh chowns
 # the tree to the service user). But many installs sit under a sysop
-# home directory like /home/stingray/anetbbs, so the dir owner is the
-# human "stingray" while the actual service user is "anetbbs". Using
-# dir-owner would then write the systemd unit with `User=stingray`
-# AND `chown -R stingray:stingray data/` — which fights the live
+# home directory like /home/sysopname/anetbbs, so the dir owner is the
+# human "sysopname" while the actual service user is "anetbbs". Using
+# dir-owner would then write the systemd unit with `User=sysopname`
+# AND `chown -R sysopname:sysopname data/` — which fights the live
 # service every update, breaking writes from doors and the web app.
 SERVICE_USER=""
 if command -v systemctl >/dev/null 2>&1; then
@@ -932,8 +932,8 @@ HOOKEOF
     fi
 
     # 5. Add SupplementaryGroups=ssl-cert to anetbbs.service if missing.
-    #    Without this systemd's User=stingray doesn't pick up the new
-    #    group membership — systemd doesn't call initgroups() on its
+    #    Without this systemd's User=<service-user> doesn't pick up the
+    #    new group membership — systemd doesn't call initgroups() on its
     #    own; you have to declare supplementary groups explicitly.
     ANETBBS_UNIT_FOR_SSL=/etc/systemd/system/anetbbs.service
     if [[ -f "$ANETBBS_UNIT_FOR_SSL" ]] && \
@@ -1104,7 +1104,7 @@ SUDOERS_DST="/etc/sudoers.d/anetbbs"
 if [[ -f "$SUDOERS_SRC" ]]; then
     info "Refreshing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
     # Substitute placeholders so the sudoers grants:
-    #   - run as the actual SERVICE_USER (not the template's 'stingray')
+    #   - run as the actual SERVICE_USER (not the template's '__SERVICE_USER__')
     #   - reference the real upgrade wrapper path ($INSTALL_DIR/deploy/run_upgrade.sh,
     #     not the template's /opt/anetbbs/ placeholder)
     UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
@@ -1112,7 +1112,7 @@ if [[ -f "$SUDOERS_SRC" ]]; then
     # Substitute both deploy paths plus the user placeholder. Without
     # the -g flag each sed only hits its first match; we need every
     # /opt/anetbbs/deploy/* line to land on the real install path.
-    sed -e "s/^stingray /$SERVICE_USER /" \
+    sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
         -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
         -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
         "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
