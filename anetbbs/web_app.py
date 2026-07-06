@@ -1124,6 +1124,59 @@ def _create_default_data():
                 ))
     db.session.commit()
 
+    # ANotherNetwork file areas (TIC file-echo distribution) — 9 areas,
+    # same shared-between-BinkP-and-QWK pattern as the message areas
+    # above. `is_nodelist_source` flags the one area whose inbound TICs
+    # should auto-populate the Nodelist table.
+    from .models import FileArea
+    from flask import current_app as _ca2
+    _ANN_FILE_AREAS = [
+        # (tag, name, description, storage_slug, is_nodelist_source)
+        ('ANN.FILES.NODELIST', 'Weekly Nodelists',
+         'Weekly ANotherNetwork nodelists', 'annet_nodelist', True),
+        ('ANN.FILES.INFOPACK', 'ANotherNetwork Infopacks',
+         'Weekly/monthly ANotherNetwork infopacks', 'annet_infopack', False),
+        ('ANN.FILES.BBSSOFT', 'BBS Software',
+         'ANetBBS releases and other BBS software', 'annet_bbssoft', False),
+        ('ANN.FILES.DOORS', 'Door Games & Utilities',
+         'Door games and utilities for BBS use', 'annet_doors', False),
+        ('ANN.FILES.EBOOKS', 'eBooks',
+         'eBooks', 'annet_ebooks', False),
+        ('ANN.FILES.LINUX', 'Linux / Open Source Files',
+         'Linux and open-source files', 'annet_linux', False),
+        ('ANN.FILES.RETRO', 'Retro Computing Files',
+         'Retro computing files', 'annet_retro', False),
+        ('ANN.FILES.ANSIART', 'ANSI / ASCII Art Collections',
+         'ANSI and ASCII art collections', 'annet_ansiart', False),
+        ('ANN.FILES.TEST', 'Testing Only',
+         'Testing only', 'annet_test', False),
+    ]
+    existing_file_tags = {
+        a.tag for a in FileArea.query.filter(
+            FileArea.tag.like('ANN.FILES.%')).all()
+    }
+    # Unlike EchoArea, FileArea.tag has a database-level UNIQUE
+    # constraint (it's the lookup key the TIC processor uses), so each
+    # area can only belong to one network row -- not duplicated across
+    # both like the message areas above. TIC file-echo distribution is
+    # a BinkP-native mechanism, so these attach to the BinkP entry.
+    if _ann_binkp_row is not None:
+        for (_ftag, _fname, _fdesc, _fslug, _fnodelist) in _ANN_FILE_AREAS:
+            if _ftag not in existing_file_tags:
+                db.session.add(FileArea(
+                    network_id=_ann_binkp_row.id,
+                    tag=_ftag,
+                    name=_fname,
+                    description=_fdesc,
+                    storage_path=os.path.join(
+                        _ca2.config['DATA_DIR'], 'files', _fslug),
+                    is_active=True,
+                    is_subscribed=False,
+                    is_nodelist_source=_fnodelist,
+                    nodelist_domain='anothernetwork' if _fnodelist else None,
+                ))
+    db.session.commit()
+
     # Create default built-in web games
     from .games.web_games import WEB_GAMES
     for game_data in WEB_GAMES:

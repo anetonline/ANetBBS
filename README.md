@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.32`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.33`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.32.tar.gz
-cd ANetBBS-v1.0b2.32
+tar xzf ANetBBS-v1.0b2.33.tar.gz
+cd ANetBBS-v1.0b2.33
 sudo bash install.sh
 ```
 
@@ -66,9 +66,11 @@ buildx` once there's a registry to publish to.
   Also a QWK hub: HTTP download/upload endpoints, per-node conference
   subscriptions with high-water mark tracking. Admin → Echomail → Hub.
 - **ANotherNetwork** (Zone 1200) — ANetBBS's own echomail network, seeded on
-  every fresh install. 26 conference areas across 8 groups (General, Tech, BBS
-  Scene, Retro, Hobby, Trading, Data, SysOp). Join via BinkP (`1200:1/1`) or
-  QWK/FTP (hub ID: `ANET`). Hub: `bbs.a-net.fyi`. Apply for a node number.
+  every fresh install. 26 message areas across 9 categories (General,
+  Technology, BBS Scene, Retro, Hobby, Trading, Data, SysOp, Test) plus 9
+  TIC file-echo areas (nodelists, infopacks, BBS software, doors, ebooks,
+  Linux, retro, ANSI art). Join via BinkP (`1200:1/1`) or QWK/FTP (hub ID:
+  `ANET`). Hub: `bbs.a-net.fyi`. Apply for a node number.
   Public nodelist at `/admin/echomail/hub/nodelist`.
 - **DOVE-Net QWK** — fetch + REP packet upload, CONTROL.DAT-driven area
   auto-create, conf# mapping, manual quick-add for known confs

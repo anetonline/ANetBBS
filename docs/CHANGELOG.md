@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.32`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.33`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.33 — ANotherNetwork file areas + real infopack (July 2026)
+
+- FEATURE: ANotherNetwork gets 9 new TIC file-echo areas (`ANN.FILES.NODELIST`, `.INFOPACK`, `.BBSSOFT`, `.DOORS`, `.EBOOKS`, `.LINUX`, `.RETRO`, `.ANSIART`, `.TEST`), seeded automatically the same way the 26 message areas already are. `ANN.FILES.NODELIST` is flagged `is_nodelist_source` so inbound TICs there auto-populate the nodelist. Found and fixed a real bug while wiring this up: unlike `EchoArea.tag`, `FileArea.tag` has a database-level `UNIQUE` constraint, so file areas attach to the BinkP network entry only (not duplicated across both BinkP and QWK entries the way message areas are) — TIC distribution is a BinkP-native mechanism anyway.
+- New distributable infopack for other sysops to apply with: `annetinfo.zip` (goals, rules, full area list, application form, a new CP437 ANSI banner) and `annetareas.zip` (machine-readable `.na` area lists for both message and file areas), built from the project's real seed data rather than placeholder text.
+- FIX (docs): README's ANotherNetwork description had a stale category count (said 8, actual is 9 including Test) and didn't mention the new file areas.
 
 ## v1.0b2.32 — Sysop-specific paths scrubbed from shared code (July 2026)
 

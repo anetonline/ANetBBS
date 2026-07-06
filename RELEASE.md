@@ -1,3 +1,12 @@
+# ANetBBS v1.0b2.33 — ANotherNetwork file areas + real infopack (July 2026)
+
+- FEATURE: ANotherNetwork gets 9 new TIC file-echo areas (`ANN.FILES.NODELIST`, `.INFOPACK`, `.BBSSOFT`, `.DOORS`, `.EBOOKS`, `.LINUX`, `.RETRO`, `.ANSIART`, `.TEST`), auto-seeded the same idempotent way the 26 message areas already are — safe to deploy to an existing install, it only adds what's missing. `ANN.FILES.NODELIST` is flagged as the network's nodelist-distribution area.
+- Real bug caught while wiring this up: `FileArea.tag` has a database-level `UNIQUE` constraint (unlike `EchoArea.tag`), so file areas can't be duplicated across both the BinkP and QWK network entries the way message areas are — they now attach to the BinkP entry only, which matches how TIC file distribution actually works anyway (it's a BinkP-native mechanism, not really a QWK one).
+- New distributable infopack, built from the project's actual seed data (not placeholder text), using a real third-party network's infopack (`tqwinfo.zip`) as the format reference: `annetinfo.zip` (goals/rules/full area list/application form, plus a new CP437 ANSI banner — verified by rendering it through a small PIL-based CP437 renderer using the project's own bundled VGA font, rather than guessing the escape codes blind) and `annetareas.zip` (machine-readable `.na` files for both message and file areas).
+- FIX (docs): README's ANotherNetwork description had a stale category count (said 8, actual is 9) and didn't mention the new file areas.
+
+---
+
 # ANetBBS v1.0b2.32 — Sysop-specific paths scrubbed from shared code (July 2026)
 
 - FIX (real bugs, not just cosmetic): several hardcoded fallback paths/usernames from the maintainer's own install had leaked into shared code, meaning they'd silently misconfigure anyone else's install if the normal config lookup ever failed:
