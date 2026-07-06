@@ -42,6 +42,12 @@ class AutoBanTests(unittest.TestCase):
         cls._dbfile = str(Path(__file__).resolve().parent / '.auto_ban_test.db')
         if os.path.exists(cls._dbfile):
             os.remove(cls._dbfile)
+        # TestingConfig is a shared class object across the whole test
+        # process -- save the original so tearDownClass can restore it,
+        # otherwise every test file that runs after this one (in the same
+        # pytest/unittest session) inherits this scratch-file path, which
+        # no longer exists once THIS class's tearDown deletes it.
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
         cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{cls._dbfile}'
 
         from anetbbs.web_app import create_app
@@ -60,6 +66,9 @@ class AutoBanTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+
         # WAL mode (anetbbs/models.py) creates -wal/-shm companion files
         # alongside the main .db -- removing only the main file left
         # these two behind after every run (an untracked, un-gitignored

@@ -59,9 +59,20 @@ class EbookMenuWiringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._data_dir_before = _snapshot_data_dir()
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
 
     @classmethod
     def tearDownClass(cls):
+        # TestingConfig is a shared class object across the whole test
+        # process -- _fresh_app() overwrites it on every call in this
+        # file and never restores it, so any test file that runs after
+        # this one (in the same pytest/unittest session) would otherwise
+        # inherit a now-deleted scratch-file path instead of the default
+        # in-memory DB.
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+
         for entry in _snapshot_data_dir() - cls._data_dir_before:
             if entry.is_dir():
                 shutil.rmtree(entry, ignore_errors=True)

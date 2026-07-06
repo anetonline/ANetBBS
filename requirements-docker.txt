@@ -5,3 +5,11 @@
 # into docker/Dockerfile's runtime image; not part of requirements.txt
 # so a traditional install.sh/update.sh install doesn't pull it in.
 docker>=7.0.0
+
+# Needed only to run the test suite inside the built image
+# (.github/workflows/docker-build.yml's smoke test) -- the project's
+# own tests are normally run via `python -m unittest discover`, but
+# tests/test_mrc_integration.py is written against real pytest fixtures
+# (@pytest.fixture), so pytest itself has to actually be installed
+# somewhere for a full `python -m pytest tests/` run to work at all.
+pytest>=7.0.0
