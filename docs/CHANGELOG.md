@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.30`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.31`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.31 — Docker support (July 2026)
+
+- FEATURE: Docker deployment alongside the traditional install.sh/systemd path — single-container quick start (supervisord-managed) and a docker-compose "correct way" (one container per service), both built multi-arch (amd64+arm64). See `docs/22-containers.md`.
+- FEATURE: Sysop Control Panel restart/upgrade works under docker-compose via a Docker-socket backend instead of systemctl; one-click self-upgrade pulls a new image tag and recreates containers.
+- FIX (hardening, also benefits bare metal): SQLite WAL mode + busy-timeout (`anetbbs/models.py`); `MSP_PORT`/`SYSTAT_PORT` now environment-overridable.
+- FIX: the admin **DB Backup download button** streamed the SQLite file with a plain copy and no checkpoint — under the new WAL mode, recent writes could sit only in the `-wal` file and be missed. Now forces `PRAGMA wal_checkpoint(TRUNCATE)` first. `update.sh`'s own automated backups were already safe (`sqlite3 .backup`).
+- FIX (critical, live-caught): **reading any echomail message via terminal (SSH/telnet/rlogin) failed with "Menu action failed (see server log)"**. Root cause: the read-only message viewer (`_ViewerScreen.draw_text()` in `anedit.py`) was never updated to accept the `misspell` parameter added when spell-check shipped (v1.0b2.20) — the shared redraw code the viewer inherits from the editor always passes it. Latent since v1.0b2.20; nobody had tried reading an echomail message via terminal since. Fixed + regression-tested (`tests/test_aneview_draw_text.py`, verified it reproduces the exact live traceback before the fix and passes after).
+- FIX (release hygiene): `build-release.sh` rewritten to build from git's own tracked/ignored file list instead of a manually maintained `--exclude` denylist, which had let `bbs.log` (containing a plaintext admin password from a local test boot) leak into 7 prior release tarballs, plus assorted stray test-scratch files. See `.gitignore` for the accompanying rule additions.
+- 30 new tests. Docker builds/runs themselves still need verification with real Docker access — not available in the environment this was built in.
 
 ## v1.0b2.30 — Federation "Register with Hub" nav fix (July 2026)
 

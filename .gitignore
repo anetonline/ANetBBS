@@ -18,7 +18,20 @@ mrc/bridge/data/*.db-shm
 mrc/bridge/data/*.db-wal
 mrc/bridge/data-*/
 data/mrc/mrc.log
+
+# BBS-door dropfile, regenerated per session by any door game that uses
+# it (not just anetsims) -- runtime state, never source.
+door32.sys
 data/mrc/mrcstats.dat
+
+# Botwars runtime state -- .keep placeholders stay tracked so the
+# (otherwise empty) directories exist on checkout, actual save/score
+# data doesn't.
+vendor/games/botwars/scores.ans
+vendor/games/botwars/botwars_data/*
+vendor/games/botwars/botwars_saves/*
+!vendor/games/botwars/botwars_data/.keep
+!vendor/games/botwars/botwars_saves/.keep
 
 # Config files with secrets
 mrc/bridge/config/config.json
@@ -63,6 +76,19 @@ gallery-config.json
 .mypy_cache/
 .coverage
 htmlcov/
+# Scratch SQLite DBs some test files create directly under tests/ (most
+# use tempfile.TemporaryDirectory() instead, which self-cleans, but a
+# couple of older tests manage their own file path) -- covers the main
+# .db file AND WAL-mode's -wal/-shm companions, so a test run that gets
+# killed before its own cleanup runs can't leave these behind as an
+# untracked, unignored stray that leaks into a release tarball.
+tests/.*.db
+tests/.*.db-wal
+tests/.*.db-shm
+
+# Claude Code's own local session/config state -- never source, never
+# shippable, shouldn't be tracked or packaged under any circumstance.
+.claude/
 
 # OS / IDE noise
 .DS_Store

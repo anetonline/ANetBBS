@@ -6,9 +6,33 @@ Supports both SQLite (development) and PostgreSQL (production)
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+@event.listens_for(Engine, "connect")
+def _sqlite_pragmas(dbapi_connection, connection_record):
+    """Every ANetBBS process (web, terminal, MRC bridge, finger, binkp --
+    5 separate OS processes today, 5 separate containers under Docker)
+    opens its own engine against the SAME SQLite file. This has always
+    "worked" on bare metal purely because they share one OS user and one
+    local filesystem -- there was never any WAL mode or busy-timeout
+    tuning, just SQLAlchemy/pysqlite's untuned defaults. WAL mode +
+    a real busy timeout meaningfully reduces "database is locked" risk
+    from concurrent writers (web + terminal + binkp all write), and
+    costs nothing on a single-process/single-user dev setup either.
+    This is an Engine-class-level hook, so it fires for every engine any
+    process creates -- no per-service wiring needed.
+    """
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=15000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 class Theme(db.Model):

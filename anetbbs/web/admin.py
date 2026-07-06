@@ -2854,7 +2854,20 @@ def time_budgets():
 @login_required
 @admin_required
 def db_backup():
-    """Stream the SQLite DB file as a download. Only for sqlite installs."""
+    """Stream the SQLite DB file as a download. Only for sqlite installs.
+
+    Forces a WAL checkpoint first: in WAL mode (anetbbs/models.py's
+    connect-time PRAGMA hook), recently committed writes can sit only
+    in the separate `-wal` file until checkpointed -- a raw copy of
+    just the main .db file (which is all send_file() below sees) could
+    silently miss them. `PRAGMA wal_checkpoint(TRUNCATE)` merges
+    everything back into the main file and empties the WAL, so the
+    file this route streams is always self-contained regardless of
+    journal mode. update.sh's own pre-update backup already avoided
+    this problem a different way (`sqlite3 .backup`, safe under any
+    journal mode) -- this route needed its own fix since it does a
+    plain file copy instead.
+    """
     from flask import send_file as _send_file, current_app as _ca
     uri = _ca.config.get('SQLALCHEMY_DATABASE_URI', '')
     if not uri.startswith('sqlite'):
@@ -2866,6 +2879,13 @@ def db_backup():
     if not os.path.isfile(path):
         flash(f'DB file not found: {path}', 'danger')
         return redirect(url_for('admin.dashboard'))
+    try:
+        from sqlalchemy import text as _text
+        db.session.execute(_text('PRAGMA wal_checkpoint(TRUNCATE)'))
+    except Exception as exc:  # pylint: disable=broad-except
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            'db_backup: WAL checkpoint failed (continuing anyway): %s', exc)
     return _send_file(path,
                       as_attachment=True,
                       download_name=f'anetbbs-backup-{datetime.utcnow().strftime("%Y%m%d-%H%M")}.db',

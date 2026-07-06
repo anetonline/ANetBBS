@@ -60,8 +60,15 @@ class AutoBanTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if os.path.exists(cls._dbfile):
-            os.remove(cls._dbfile)
+        # WAL mode (anetbbs/models.py) creates -wal/-shm companion files
+        # alongside the main .db -- removing only the main file left
+        # these two behind after every run (an untracked, un-gitignored
+        # stray in tests/ that leaked into a release tarball before this
+        # was caught -- see build-release.sh's rewrite).
+        for suffix in ('', '-wal', '-shm'):
+            path = cls._dbfile + suffix
+            if os.path.exists(path):
+                os.remove(path)
         import shutil
         for entry in _snapshot_data_dir() - cls._data_dir_before:
             if entry.is_dir():

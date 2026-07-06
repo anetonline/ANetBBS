@@ -1,0 +1,7 @@
+# ANetBBS — optional extra dependency for the Docker-compose control
+# panel backend (anetbbs/web/control_docker.py). Bare-metal installs
+# and the single-container quick-start path never need this -- it's
+# only imported when ANETBBS_RUNTIME=docker-compose. Already baked
+# into docker/Dockerfile's runtime image; not part of requirements.txt
+# so a traditional install.sh/update.sh install doesn't pull it in.
+docker>=7.0.0

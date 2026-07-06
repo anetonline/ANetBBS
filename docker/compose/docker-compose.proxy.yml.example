@@ -1,0 +1,44 @@
+# docker/compose/docker-compose.proxy.yml.example
+#
+# OPTIONAL reverse-proxy overlay -- not maintained as part of the core
+# compose file (see docs/22-containers.md). Demonstrates fronting the
+# web service with Caddy for automatic HTTPS (simplest option for a
+# single-domain BBS). If you're already running nginx/Traefik/Caddy on
+# the host for other sites, skip this and point your existing proxy at
+# the `web` container's published port (5000) instead.
+#
+# Usage:
+#   cp docker-compose.proxy.yml.example docker-compose.proxy.yml
+#   # edit the Caddyfile below with your real domain
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d
+
+services:
+  # Note: this overlay ADDS Caddy alongside web's existing :5000
+  # publish rather than trying to remove it (Compose's merge behavior
+  # for `ports:` across multiple -f files isn't worth relying on here).
+  # If you want web reachable ONLY through Caddy, delete web's
+  # "5000:5000" line from docker-compose.yml directly instead of
+  # overriding it here.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+# Caddyfile (place next to this file, NOT inline -- Caddy reads its own
+# file, this is just for reference):
+#
+#   your-bbs-domain.example.com {
+#       reverse_proxy web:5000
+#   }

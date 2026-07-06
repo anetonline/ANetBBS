@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.30`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.31`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.30.tar.gz
-cd ANetBBS-v1.0b2.30
+tar xzf ANetBBS-v1.0b2.31.tar.gz
+cd ANetBBS-v1.0b2.31
 sudo bash install.sh
 ```
 
@@ -31,6 +31,27 @@ change it on first use.
 
 For details on individual services and post-install configuration see
 [`docs/INSTALL.md`](docs/INSTALL.md).
+
+## Quick install (Docker)
+
+Prefer containers? Two options — a single-container quick start, or a
+proper multi-container `docker-compose` deployment (recommended for
+anything beyond kicking the tires). No pre-built image is published
+anywhere yet, so build from source first:
+
+```
+docker build -f docker/Dockerfile -t anetbbs:local .
+cp .env.docker.example .env      # fill in SECRET_KEY, BBS_NAME, etc.
+# then set ANETBBS_IMAGE=anetbbs / ANETBBS_IMAGE_TAG=local in .env
+cp docker/compose/mrc-bridge-config.json.example mrc-bridge-config.json
+docker compose -f docker/compose/docker-compose.yml up -d
+```
+
+New to Docker? [`docs/22-containers.md`](docs/22-containers.md) has a
+full hand-held walkthrough (including the single-container option,
+what each command actually does, and troubleshooting). Multi-arch
+images (amd64 + arm64, works on a Raspberry Pi) are built via `docker
+buildx` once there's a registry to publish to.
 
 ## Features
 

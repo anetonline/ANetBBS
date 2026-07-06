@@ -19,6 +19,11 @@ class Config:
     # Database
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = False
+    # Paired with models.py's WAL-mode PRAGMA hook: a 15s busy timeout so
+    # concurrent writers (multiple processes/containers sharing one
+    # SQLite file) retry instead of immediately raising "database is
+    # locked" under brief write contention.
+    SQLALCHEMY_ENGINE_OPTIONS = {'connect_args': {'timeout': 15}}
     
     # Telnet Server
     TELNET_ENABLED = os.environ.get('TELNET_ENABLED', 'true').lower() == 'true'
@@ -172,11 +177,11 @@ class Config:
     # Inter-BBS Instant Messaging (MSP / RFC 1312)
     MSP_ENABLED = True
     MSP_BIND_HOST = '0.0.0.0'
-    MSP_PORT = 18
+    MSP_PORT = int(os.environ.get('MSP_PORT', '18'))
     # SYSTAT / ActiveUser UDP service (Synchronet IMSG companion)
     SYSTAT_ENABLED = True
     SYSTAT_BIND_HOST = '0.0.0.0'
-    SYSTAT_PORT = 11
+    SYSTAT_PORT = int(os.environ.get('SYSTAT_PORT', '11'))
     # Inter-BBS directory (sbbsimsg.lst from Vertrauen)
     SBBSIMSG_LIST_URL = 'ftp://vert.synchro.net/sbbsimsg.lst'
     SBBSIMSG_AUTO_REFRESH = True

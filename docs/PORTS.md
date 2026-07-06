@@ -40,6 +40,11 @@ sudo systemctl daemon-reload && sudo systemctl restart anetbbs-web.service
 Or run FTP on `FTP_PORT=2121` and put an iptables redirect / nginx-stream
 proxy in front.
 
+Running under Docker? See `docs/22-containers.md` for the container-
+specific version of this (Finger uses a free port-remap trick already;
+MSP/SYSTAT use `cap_add: [NET_BIND_SERVICE]` by default, with the same
+port-remap escape hatch available if your platform doesn't allow that).
+
 ## Outbound ports the BBS uses
 
 | Port  | Proto | When                                              |

@@ -1797,7 +1797,12 @@ class _ViewerScreen(_Screen):
         return _mv(24, 1) + t['stat_bg'] + t['hint_key'] + stat.ljust(self._vw)[:self._vw] + _reset()
 
     def draw_text(self, lines: list, scroll: int,
-                  mark, cy: int, cx: int) -> str:
+                  mark, cy: int, cx: int, misspell=None) -> str:
+        # `misspell` exists only so this matches the base _Screen.draw_text()
+        # signature that ANEdit._redraw() (inherited by ANView, which is
+        # read-only and never spell-checks) always calls with 6 args --
+        # this class just ignores it since there's nothing to underline
+        # in a read-only viewer.
         o = []
         for i in range(_VTEXT_H):
             ly  = scroll + i

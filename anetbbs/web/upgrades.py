@@ -53,6 +53,11 @@ upgrades_api_bp = Blueprint('upgrades_api', __name__)
 upgrades_admin_bp = Blueprint('upgrades_admin', __name__,
                               url_prefix='/admin/upgrades')
 
+# Set in the Dockerfile's ENV, unset on bare metal -- see
+# anetbbs/web/control.py for the same runtime switch used by the
+# service-restart side of the admin panel.
+_RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
+
 
 # === Version handling ========================================================
 
@@ -177,6 +182,12 @@ def _latest_payload(req) -> Optional[dict]:
         'size': top['size'],
         'published_at': datetime.utcfromtimestamp(top['mtime'])
                                 .strftime('%Y-%m-%dT%H:%M:%SZ'),
+        # Same version string doubles as the Docker image tag (see
+        # docker/updater/upgrade.sh + .github/workflows/docker-build.yml)
+        # -- container installs pull this tag instead of downloading
+        # the tarball. No separate tracking needed since releases and
+        # image builds share one version number.
+        'docker_tag': top['version'],
     }
 
 
@@ -352,6 +363,9 @@ def install():
         return jsonify({'ok': False,
                         'error': 'already at or ahead of upstream'}), 409
 
+    if _RUNTIME != 'systemd':
+        return _install_container(target, upstream)
+
     wrapper = _wrapper_path(cfg)
     if not os.path.isfile(wrapper):
         return jsonify({'ok': False,
@@ -381,6 +395,73 @@ def install():
 
     _patch_wrapper_if_needed(wrapper)
     _spawn_upgrade(wrapper, target, url, sha256, label='upgrade')
+    return jsonify({'ok': True,
+                    'log_url': url_for('upgrades_admin.log_tail')})
+
+
+def _install_container(target, upstream):
+    """Container-runtime counterpart of install() above. No tarball/
+    sha256/wrapper concerns at all here -- Docker registries handle
+    their own transport integrity over TLS, and `docker compose pull`
+    does the fetching. Only meaningful for docker-single or
+    docker-compose (systemd installs never hit this path).
+
+    docker-single has no in-place self-upgrade button (see
+    docs/22-containers.md) -- the sysop pulls + recreates the one
+    container manually. Only docker-compose spawns an updater here.
+    """
+    if _RUNTIME != 'docker-compose':
+        return jsonify({
+            'ok': False,
+            'error': ('Self-upgrade from the panel isn\'t available in '
+                      'single-container mode -- pull the new image tag '
+                      'and recreate the container manually. See '
+                      'docs/22-containers.md.'),
+        }), 501
+
+    docker_tag = upstream.get('docker_tag') or target
+    with _INSTALL_LOCK:
+        if _install_state['running']:
+            return jsonify({'ok': False,
+                            'error': 'install already running'}), 409
+        _install_state.update({'running': True,
+                               'started_at': time.time(),
+                               'version': target})
+    try:
+        open(_UPGRADE_LOG_PATH, 'w').close()
+    except OSError:
+        pass
+
+    def _runner():
+        try:
+            from .control_docker import spawn_container_upgrade
+            with open(_UPGRADE_LOG_PATH, 'a') as log:
+                log.write(f'[{datetime.utcnow().isoformat()}Z] spawning '
+                          f'container updater for tag {docker_tag}\n')
+                log.flush()
+                try:
+                    name = spawn_container_upgrade(docker_tag)
+                    log.write(f'[{datetime.utcnow().isoformat()}Z] '
+                              f'updater container started: {name}\n'
+                              f'(docker compose pull + up -d running '
+                              f'detached -- this web container may '
+                              f'restart momentarily once the new image '
+                              f'is in place)\n')
+                except Exception as exc:
+                    log.write(f'\n[!] Could not start updater container: '
+                              f'{exc}\n')
+        except Exception as exc:
+            try:
+                with open(_UPGRADE_LOG_PATH, 'a') as log:
+                    log.write(f'\n[runner] exception: {exc!r}\n')
+            except OSError:
+                pass
+        finally:
+            with _INSTALL_LOCK:
+                _install_state['running'] = False
+
+    threading.Thread(target=_runner, daemon=True,
+                     name='anetbbs-container-upgrade').start()
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
 

@@ -1,0 +1,174 @@
+# docker/compose/docker-compose.yml
+#
+# The "correct" multi-container ANetBBS deployment: one container per
+# service role, matching the 5 systemd units a traditional install.sh
+# install runs (web, terminal, mrc-bridge, finger, binkp). All 5 share
+# ONE image (see ../Dockerfile) and ONE named volume for data/ -- safe
+# because every container runs as the same fixed UID 1000, the same
+# property that already makes 5 separate systemd processes sharing one
+# SQLite file safe on bare metal today. See docs/22-containers.md
+# before deploying -- especially the docker.sock trust-boundary
+# warning on the web service and the MRC_BRIDGE_HOST gotcha.
+#
+# Quick start (see docs/22-containers.md for the full walkthrough):
+#   docker build -f ../Dockerfile -t anetbbs:local ../..    # nothing's
+#                                                            # published
+#                                                            # yet, build first
+#   cp .env.docker.example .env            # fill in SECRET_KEY, BBS_NAME, etc.
+#                                           # + set ANETBBS_IMAGE=anetbbs /
+#                                           #   ANETBBS_IMAGE_TAG=local
+#   cp mrc-bridge-config.json.example mrc-bridge-config.json
+#   docker compose up -d
+#
+# Enable rlogin/FTP by uncommenting their `ports:` lines below AND
+# setting RLOGIN_ENABLED=true / FTP_ENABLED=true in .env (both default
+# off, matching install.sh's own default-off posture for these).
+
+x-anetbbs-image: &anetbbs-image ${ANETBBS_IMAGE:-ghcr.io/anetonline/anetbbs}:${ANETBBS_IMAGE_TAG:-latest}
+
+# Every container must agree on this SAME absolute path -- see
+# docker/entrypoint.sh's fail-loud check and docs/22-containers.md.
+x-anetbbs-db-env: &anetbbs-db-env
+  ANETBBS_DB_URL: sqlite:////app/data/anetbbs.db
+  DATABASE_URL: sqlite:////app/data/anetbbs.db
+
+services:
+  web:
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint-web.sh", "python", "deploy/serve.py"]
+    env_file: [.env]
+    environment:
+      <<: *anetbbs-db-env
+      ANETBBS_RUNTIME: docker-compose
+      # Host-side absolute path to the directory containing THIS
+      # docker-compose.yml/.env -- needed so the self-upgrade flow can
+      # bind-mount the same files (by host path, not a path as seen
+      # from inside this container) into a sibling updater container.
+      # Defaults to wherever `docker compose up` was run from; override
+      # explicitly in .env if that's not reliable on your setup.
+      ANETBBS_COMPOSE_DIR: ${ANETBBS_COMPOSE_DIR:-${PWD}}
+    # NET_BIND_SERVICE: MSP (18) and SYSTAT (11) are privileged ports.
+    # docker.sock (rw): lets the panel restart/upgrade sibling
+    # containers via the Docker API instead of systemctl -- this grants
+    # root-equivalent host control to anything reaching the panel's
+    # endpoints. See docs/22-containers.md before enabling. Omit the
+    # docker.sock mount (and set ANETBBS_RUNTIME=docker-single... no,
+    # keep docker-compose, just accept restart/upgrade won't work) if
+    # you'd rather not accept that tradeoff -- everything else still
+    # works, the sysop just runs `docker compose restart <service>` by
+    # hand instead of clicking the panel button.
+    cap_add: ["NET_BIND_SERVICE"]
+    ports:
+      - "5000:5000"
+      - "18:18"
+      - "11:11/udp"
+    volumes:
+      - anetbbs_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/project/docker-compose.yml:ro
+      - ./.env:/project/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  terminal:
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint.sh", "anetbbs"]
+    env_file: [.env]
+    environment: *anetbbs-db-env
+    ports:
+      - "2233:2233"
+      - "2234:2234"
+      # Uncomment if RLOGIN_ENABLED=true / FTP_ENABLED=true in .env
+      # (both default off -- see docs/22-containers.md's FTP-under-
+      # Docker NAT caveat before enabling FTP):
+      # - "513:513"
+      # - "21:21"
+      # - "40000-40050:40000-40050"
+    volumes:
+      - anetbbs_data:/app/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/2233"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  mrc-bridge:
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint.sh", "python", "-m", "mrc.bridge.main"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - anetbbs_mrc_data:/app/mrc/bridge/data
+      - ./mrc-bridge-config.json:/app/mrc/bridge/config.json:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  finger:
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint.sh", "python", "-m", "anetbbs.core.finger_server"]
+    env_file: [.env]
+    environment:
+      <<: *anetbbs-db-env
+      # Unprivileged internally -- no cap_add needed, unlike web's
+      # MSP/SYSTAT ports. finger_server.py already reads this env var
+      # directly (unlike MSP/SYSTAT, which needed a small code change
+      # to become overridable the same way).
+      FINGER_LISTEN_PORT: "1079"
+    ports:
+      - "79:1079"
+    volumes:
+      - anetbbs_data:/app/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/1079"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  binkp:
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint.sh", "python", "-m", "anetbbs.echomail.binkp_server"]
+    env_file: [.env]
+    environment: *anetbbs-db-env
+    ports:
+      - "24554:24554"
+    volumes:
+      - anetbbs_data:/app/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/24554"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Optional IRC<->MRC relay bridge, off by default -- enable with
+  # `docker compose --profile irc up -d`. Untested by default; only
+  # relevant if you run a separate ANetIRC/IRC network alongside MRC.
+  # mrc-irc-bridge:
+  #   image: *anetbbs-image
+  #   command: ["/usr/local/bin/entrypoint.sh", "python", "-m",
+  #             "anetbbs.features.mrc_irc_bridge", "--bridge-id", "0"]
+  #   env_file: [.env]
+  #   environment: *anetbbs-db-env
+  #   profiles: ["irc"]
+  #   volumes:
+  #     - anetbbs_data:/app/data
+  #   restart: unless-stopped
+
+volumes:
+  anetbbs_data:
+  anetbbs_mrc_data:

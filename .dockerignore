@@ -1,0 +1,60 @@
+# .dockerignore
+# Keeps the Docker build context (and the image's `COPY . /app` layer)
+# free of sysop-specific runtime state, secrets, and dev-only cruft.
+# Mirrors .gitignore's runtime-data section, plus Docker-specific
+# exclusions (.git/, the bare-metal venv/, doors/ which is fetched
+# separately, not baked into the image for v1).
+
+.git/
+.github/
+
+# Runtime data -- DB, uploads, echomail spool, SSH host keys, etc.
+# Populated at runtime via the shared named volume, not baked in.
+data/
+logs/
+bbs.log*
+*.log
+
+# Secrets / per-install config -- supplied via env_file/volume mounts
+# at container start, never baked into the image.
+.env
+mrc/bridge/config.json
+mrc/bridge/data/
+mrc/bridge/data-*/
+
+# Bare-metal-only concerns, not used in containers
+venv/
+deploy/sudoers.anetbbs
+instance/
+
+# DOS/Mystic/door-game vendor trees -- excluded from the image for v1
+# (see docs/22-containers.md's "unsupported in Docker for now" list)
+doors/
+vendor/
+
+# js-dos runtime WASM binary, fetched separately by tools/download_jsdos.sh
+anetbbs/static/js-dos/
+
+# Python / editor / OS noise
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Zip archives, backups, dated snapshots
+*.zip
+*.bak
+*.bak.*
+*.orig
+*.backup
+backups/

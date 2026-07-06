@@ -20,6 +20,17 @@ crashed" from "process down."
 Service control uses systemctl. To make this work without prompting
 for sudo, ``deploy/sudoers.anetbbs`` grants the service user permission
 to run *only* anetbbs-* unit operations.
+
+Under Docker, there's no systemd inside the container at all, so this
+module dispatches on ``ANETBBS_RUNTIME`` (set in the Dockerfile, unset
+on bare metal) instead:
+  - ``systemd`` (default): the systemctl-based behavior above, unchanged.
+  - ``docker-single``: the single-container quick-start path -- swaps
+    systemctl calls for ``supervisorctl`` against the same 5-process
+    supervisord (see docker/single/supervisord.conf).
+  - ``docker-compose``: the multi-container path -- delegates to
+    ``control_docker.py``, which talks to the Docker Engine API over
+    the socket mounted into the web container.
 """
 import os
 import socket
@@ -33,6 +44,20 @@ from flask import (Blueprint, render_template, redirect, url_for, flash,
 from flask_login import login_required, current_user
 
 from ..models import User, UserSession
+
+_RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
+
+# KNOWN_UNITS' systemd-unit names -> the short name used by the other
+# two runtimes (docker-compose's service name in docker-compose.yml,
+# and supervisord's [program:] name in docker/single/supervisord.conf
+# -- both happen to use the same short names).
+UNIT_TO_SERVICE_NAME = {
+    'anetbbs-web': 'web',
+    'anetbbs': 'terminal',
+    'anetbbs-mrc-bridge': 'mrc-bridge',
+    'anetbbs-finger': 'finger',
+    'anetbbs-binkp': 'binkp',
+}
 
 
 # Probe-result cache: opening multiple admin tabs (or other clients)
@@ -175,7 +200,7 @@ def _systemctl_change(*args):
         return False, '', str(exc)
 
 
-def _unit_state(unit):
+def _unit_state_systemd(unit):
     """Return a dict with ActiveState / SubState / ActiveEnterTimestamp /
     MainPID. Falls back to a partial dict on failure so the caller can
     always render *something*."""
@@ -193,6 +218,65 @@ def _unit_state(unit):
             if k in state:
                 state[k] = v
     return state
+
+
+def _supervisorctl(*args):
+    """Run a supervisorctl command against the single-container image's
+    supervisord (docker/single/supervisord.conf). Structurally mirrors
+    _systemctl_read()'s subprocess pattern -- supervisorctl needs no
+    sudo since supervisord itself already runs as root in that image."""
+    cmd = ['supervisorctl', '-c', '/app/docker/single/supervisord.conf'] + list(args)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return r.returncode == 0, r.stdout, r.stderr
+    except subprocess.TimeoutExpired:
+        return False, '', 'timeout'
+    except FileNotFoundError:
+        return False, '', 'supervisorctl not found'
+    except Exception as exc:  # pylint: disable=broad-except
+        return False, '', str(exc)
+
+
+def _unit_state_supervisor(unit):
+    """Same return shape as _unit_state_systemd(), sourced from
+    ``supervisorctl status <program>``. Output looks like:
+        web    RUNNING   pid 123, uptime 0:05:23
+        binkp  STOPPED   Not started
+        finger FATAL     Exited too quickly
+    """
+    state = {'ActiveState': 'unknown', 'SubState': '',
+             'ActiveEnterTimestamp': '', 'MainPID': '0',
+             'LoadState': 'loaded'}
+    program = UNIT_TO_SERVICE_NAME.get(unit)
+    if not program:
+        return state
+    ok, out, _ = _supervisorctl('status', program)
+    line = (out or '').strip()
+    if not line:
+        return state
+    parts = line.split(None, 2)
+    if len(parts) < 2:
+        return state
+    status_word = parts[1].upper()
+    state['SubState'] = status_word.lower()
+    state['ActiveState'] = 'active' if status_word == 'RUNNING' else 'inactive'
+    rest = parts[2] if len(parts) > 2 else ''
+    if 'pid ' in rest:
+        try:
+            pid_part = rest.split('pid ', 1)[1]
+            state['MainPID'] = pid_part.split(',')[0].strip()
+        except (IndexError, ValueError):
+            pass
+    return state
+
+
+def _unit_state(unit):
+    if _RUNTIME == 'docker-compose':
+        from .control_docker import unit_state as _docker_unit_state
+        return _docker_unit_state(unit)
+    if _RUNTIME == 'docker-single':
+        return _unit_state_supervisor(unit)
+    return _unit_state_systemd(unit)
 
 
 def _probe_tcp_uncached(port, host='127.0.0.1', timeout=0.4):
@@ -383,6 +467,22 @@ def connections_json():
     })
 
 
+def _change_state(unit, action):
+    """Dispatch a start/stop/restart/reload to whichever backend this
+    runtime uses. Returns (ok, out, err) in all three cases."""
+    if _RUNTIME == 'docker-compose':
+        from .control_docker import change_state as _docker_change_state
+        return _docker_change_state(unit, action)
+    if _RUNTIME == 'docker-single':
+        program = UNIT_TO_SERVICE_NAME.get(unit)
+        if not program:
+            return False, '', f'no supervisor program mapped for unit {unit}'
+        # supervisorctl has no separate "reload" verb -- treat it as restart.
+        verb = 'restart' if action == 'reload' else action
+        return _supervisorctl(verb, program)
+    return _systemctl_change(action, unit)
+
+
 @control_bp.route('/service/<unit>/<action>', methods=['POST'])
 @login_required
 def service_action(unit, action):
@@ -393,20 +493,20 @@ def service_action(unit, action):
     if action not in VALID_ACTIONS:
         flash(f'Unknown action: {action}', 'danger')
         return redirect(url_for('control.index'))
-    ok, out, err = _systemctl_change(action, unit)
+    ok, out, err = _change_state(unit, action)
     if ok:
-        flash(f'systemctl {action} {unit}: OK', 'success')
+        flash(f'{action} {unit}: OK', 'success')
     else:
-        # Surface the underlying sudo error so the sysop can fix it
-        # without digging through journalctl. Common ones: "a password
-        # is required" (NOPASSWD rule missing), "command not allowed"
+        # Surface the underlying error so the sysop can fix it without
+        # digging through logs. Common systemd ones: "a password is
+        # required" (NOPASSWD rule missing), "command not allowed"
         # (sudoers path doesn't match the resolved systemctl binary).
-        flash(f'systemctl {action} {unit} failed: {err or out or "no output"}',
+        flash(f'{action} {unit} failed: {err or out or "no output"}',
               'danger')
     return redirect(url_for('control.index'))
 
 
-def _read_journal(unit, lines=200):
+def _read_journal_systemd(unit, lines=200):
     """Return ``journalctl`` output for *unit*. We never elevate via
     sudo here — that fails under the unit's restricted capability set.
     The service user just needs read access to the system journal
@@ -429,6 +529,30 @@ def _read_journal(unit, lines=200):
         return r.stdout or '(empty)'
     except Exception as exc:  # pylint: disable=broad-except
         return f'Could not read journal: {exc}'
+
+
+def _read_journal_supervisor(unit, lines=200):
+    """supervisorctl tail -- the [program:] stanzas in
+    docker/single/supervisord.conf all log to stdout, captured by
+    `docker logs` for the whole container; supervisorctl's own tail
+    only sees what it's buffered since its own start, which is good
+    enough for the panel's purposes."""
+    program = UNIT_TO_SERVICE_NAME.get(unit)
+    if not program:
+        return f'No supervisor program mapped for unit {unit}'
+    ok, out, err = _supervisorctl('tail', '-{}'.format(int(lines)), program)
+    if not ok:
+        return err or out or '(supervisorctl tail returned no output)'
+    return out or '(empty)'
+
+
+def _read_journal(unit, lines=200):
+    if _RUNTIME == 'docker-compose':
+        from .control_docker import read_logs as _docker_read_logs
+        return _docker_read_logs(unit, lines=lines)
+    if _RUNTIME == 'docker-single':
+        return _read_journal_supervisor(unit, lines=lines)
+    return _read_journal_systemd(unit, lines=lines)
 
 
 @control_bp.route('/service/<unit>/journal')
