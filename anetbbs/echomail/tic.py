@@ -276,6 +276,44 @@ def process_tic(tic_path, inbound_dir):
     return tic
 
 
+def hatch_local_file(area, stored_path, filename, description=''):
+    """Queue a locally-originated file (uploaded by a sysop/user directly,
+    not received via an inbound TIC) for outbound distribution to every
+    peer subscribed to this file echo.
+
+    Mirrors the fan-out in process_tic()'s hatch-out step (above), but
+    for a file that originates here -- there's no prior SEEN-BY/PATH to
+    inherit since this IS the origin hop; build_tic_text() fills those in
+    when the queued item is actually transmitted.
+
+    Returns the number of peers queued (0 if nobody is subscribed, or if
+    the area has no active subscriptions at all).
+    """
+    crc = _crc32_file(stored_path)
+    size = os.path.getsize(stored_path)
+
+    subs = (FileEchoSubscription.query
+            .filter_by(file_area_id=area.id, is_active=True).all())
+    queued = 0
+    for sub in subs:
+        db.session.add(HatchQueue(
+            file_area_id=area.id,
+            peer_address=sub.peer_address,
+            binary_path=stored_path,
+            filename=filename,
+            description=description or '',
+            crc32=crc,
+            size_bytes=size,
+            seenby=json.dumps([]),
+            path=json.dumps([]),
+            status='pending',
+        ))
+        queued += 1
+    if queued:
+        db.session.commit()
+    return queued
+
+
 def build_tic_text(item, our_address):
     """Render a HatchQueue row back to a TIC file body for outbound transmit.
 

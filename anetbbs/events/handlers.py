@@ -251,6 +251,25 @@ def security_check(app, params):
     return True, summary
 
 
+def hub_generate_nodelist(app, params):
+    """Generate the ANotherNetwork nodelist and publish it into the
+    ANN.FILES.NODELIST file area, replacing the prior copy, so peers can
+    pull it like any other file-echo entry.
+
+    Only meaningful on the install designated as the ANotherNetwork hub
+    (REGISTRY_MODE_ENABLED) -- on any other install, ANN.FILES.NODELIST
+    won't have real downstream BinkPNode data to publish, but the
+    handler still runs harmlessly (writes a nodelist with just the hub
+    entry, no downstream nodes).
+    """
+    try:
+        from ..echomail.nodelist import write_nodelist_to_area
+        summary = write_nodelist_to_area()
+        return True, summary
+    except Exception as exc:  # noqa: BLE001
+        return False, f'nodelist generation failed: {exc}'
+
+
 def shell(app, params):
     """Run an arbitrary shell command. Dangerous — only for sysops who
     know what they're typing. Runs as the service user (no sudo).
@@ -280,12 +299,13 @@ def shell(app, params):
 HandlerFn = Callable[[object, dict], Tuple[bool, str]]
 
 REGISTRY: Dict[str, HandlerFn] = {
-    'noop':            noop,
-    'tw2_maint':       tw2_maint,
-    'db_vacuum':       db_vacuum,
-    'log_rotate':      log_rotate,
-    'security_check':  security_check,
-    'shell':           shell,
+    'noop':                 noop,
+    'tw2_maint':            tw2_maint,
+    'db_vacuum':            db_vacuum,
+    'log_rotate':           log_rotate,
+    'security_check':       security_check,
+    'hub_generate_nodelist': hub_generate_nodelist,
+    'shell':                shell,
 }
 
 # Friendly names + descriptions for the admin form dropdown.
@@ -295,6 +315,7 @@ HANDLER_META = {
     'db_vacuum':      ('SQLite VACUUM',          'Reclaim free pages + refresh planner stats. Off-peak.'),
     'log_rotate':     ('Rotate large logs',      'Roll any logs/*.log over the threshold to .1. Params: max_mb (default 50).'),
     'security_check': ('Security update check',  'apt + pip outdated scan, tags Ubuntu-security rows. Report at /admin/security/.'),
+    'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'shell':          ('Shell command',          'Run an arbitrary command as the service user. Params: command, timeout.'),
 }
 

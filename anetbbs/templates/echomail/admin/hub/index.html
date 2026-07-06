@@ -75,6 +75,137 @@
     </div>
 </div>
 
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-gear-wide-connected"></i> Generation &amp; Distribution</div>
+            <div class="card-body">
+                <ul class="nav nav-tabs mb-3" id="genTabs">
+                    <li class="nav-item">
+                        <a class="nav-link {% if gen_tab == 'nodelist' %}active{% endif %}"
+                           href="{{ url_for('hub_admin.index', gen_tab='nodelist') }}#genTabs">
+                            <i class="bi bi-diagram-2"></i> Nodelist
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if gen_tab == 'qwk' %}active{% endif %}"
+                           href="{{ url_for('hub_admin.index', gen_tab='qwk') }}#genTabs">
+                            <i class="bi bi-archive"></i> QWK Packets
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if gen_tab == 'tic' %}active{% endif %}"
+                           href="{{ url_for('hub_admin.index', gen_tab='tic') }}#genTabs">
+                            <i class="bi bi-file-earmark-arrow-up"></i> TIC / File Distribution
+                            {% if hatch_pending %}<span class="badge bg-warning text-dark ms-1">{{ hatch_pending }}</span>{% endif %}
+                            {% if hatch_failed %}<span class="badge bg-danger ms-1">{{ hatch_failed }}</span>{% endif %}
+                        </a>
+                    </li>
+                </ul>
+
+                {% if gen_tab == 'nodelist' %}
+                <p class="text-muted small">
+                    Publishes the ANotherNetwork nodelist into the
+                    <code>ANN.FILES.NODELIST</code> file area, replacing the
+                    prior copy, so peers can pull it like any other file-echo
+                    entry (BinkP/FTP/web).
+                </p>
+                {% if nodelist_event %}
+                <table class="table table-sm">
+                    <tr><th style="width:160px;">Schedule</th>
+                        <td>{{ nodelist_event.schedule_human }}
+                            {% if not nodelist_event.row.is_enabled %}<span class="badge bg-secondary ms-1">disabled</span>{% endif %}
+                            — <a href="{{ url_for('events_admin.edit', eid=nodelist_event.row.id) }}">edit schedule</a>
+                        </td></tr>
+                    <tr><th>Last run</th>
+                        <td>
+                            {% if nodelist_event.row.last_run_at %}
+                                {{ nodelist_event.row.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                                {% if nodelist_event.row.last_status == 'ok' %}<span class="badge bg-success ms-1">ok</span>
+                                {% else %}<span class="badge bg-danger ms-1">{{ nodelist_event.row.last_status }}</span>{% endif %}
+                            {% else %}
+                                never
+                            {% endif %}
+                        </td></tr>
+                    {% if nodelist_event.row.last_output %}
+                    <tr><th>Last output</th><td><code>{{ nodelist_event.row.last_output }}</code></td></tr>
+                    {% endif %}
+                </table>
+                {% else %}
+                <div class="alert alert-warning">No nodelist-generation event found — enable REGISTRY_MODE_ENABLED and restart to seed it.</div>
+                {% endif %}
+                <form method="post" action="{{ url_for('hub_admin.nodelist_generate_now') }}" class="d-inline">
+                    <button type="submit" class="btn btn-primary" {% if not nodelist_event %}disabled{% endif %}>
+                        <i class="bi bi-play-circle"></i> Generate Now
+                    </button>
+                </form>
+
+                {% elif gen_tab == 'qwk' %}
+                <p class="text-muted small">
+                    QWK packets are already built fresh automatically every
+                    time a node's FTP client connects or hits the download
+                    URL — nothing to schedule. Use "Preview" to build and
+                    download a packet on demand for testing; this does
+                    <strong>not</strong> mark messages as sent, so the node's
+                    real next download is unaffected.
+                </p>
+                {% if qwk_nodes %}
+                <table class="table table-sm table-striped mb-0">
+                    <thead><tr><th>Packet ID</th><th>Name</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                        {% for node in qwk_nodes %}
+                        <tr>
+                            <td><a href="{{ url_for('hub_admin.qwk_node_detail', node_id=node.id) }}">{{ node.packet_id }}</a></td>
+                            <td>{{ node.name }}</td>
+                            <td>
+                                {% if node.is_active %}<span class="badge bg-success">active</span>
+                                {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('hub_admin.qwk_preview', node_id=node.id) }}" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i> Preview
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center p-3 text-muted">No QWK nodes registered yet.</div>
+                {% endif %}
+
+                {% elif gen_tab == 'tic' %}
+                <p class="text-muted small">
+                    Files uploaded to any ANN.FILES.* area are automatically
+                    queued for TIC distribution to subscribed peers — no
+                    manual step needed. This shows the outbound queue's
+                    current state; delivery happens on the next BinkP poll
+                    per peer.
+                </p>
+                <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div style="font-size:1.5rem; color:#ffff00;">{{ hatch_pending }}</div>
+                                <div>Pending</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div style="font-size:1.5rem; color:#ff4444;">{{ hatch_failed }}</div>
+                                <div>Failed</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-3">
     <div class="col-md-6">
         <div class="card">

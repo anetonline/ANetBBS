@@ -46,6 +46,24 @@ def _visible_to(user, area):
     return True
 
 
+def _hatch_if_network_area(area, dest_path, filename, description=None):
+    """Queue a freshly-saved file for outbound TIC distribution if its
+    area belongs to an echomail network (e.g. ANN.FILES.*) -- purely
+    local file areas (network_id is None) have no peers to hatch to.
+
+    Best-effort: logs and swallows any error so a hatch failure never
+    blocks the upload itself from succeeding.
+    """
+    if area.network_id is None:
+        return
+    try:
+        from ..echomail.tic import hatch_local_file
+        hatch_local_file(area, dest_path, filename, description or '')
+    except Exception:
+        current_app.logger.exception(
+            'hatch_local_file failed for %s in area %s', filename, area.tag)
+
+
 _DESC_CACHE_FILENAME = '.descriptions.json'
 
 
@@ -414,6 +432,8 @@ def upload(area_id):
             db.session.commit()
         except Exception:
             db.session.rollback()
+        _hatch_if_network_area(area, dest, safe_name,
+                               request.form.get('description'))
         flash(f'Uploaded {safe_name}.', 'success')
     except OSError as exc:
         flash(f'Save failed: {exc}', 'danger')
@@ -624,6 +644,7 @@ def manage_upload(area_id):
                 'description': description,
             }
             _save_desc_cache(area, cache)
+        _hatch_if_network_area(area, dest, safe_name, description)
         flash(f'Uploaded {safe_name}.', 'success')
     except OSError as exc:
         flash(f'Upload failed: {exc}', 'danger')
@@ -696,6 +717,8 @@ def smart_upload():
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
                 pass
+            _hatch_if_network_area(target, dest, safe,
+                                   request.form.get('description'))
             flash(f'Uploaded {safe} to {target.tag}.', 'success')
             return redirect(url_for('file_areas.view_area', area_id=target.id))
         except OSError as exc:

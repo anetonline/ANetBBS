@@ -410,3 +410,61 @@ def generate_nodelist(zone: int, net: int, hub_node: int,
         )
 
     return '\r\n'.join(lines) + '\r\n'
+
+
+def write_nodelist_to_area() -> str:
+    """Generate the ANotherNetwork nodelist and publish it into the
+    ANN.FILES.NODELIST file area's storage, replacing any prior
+    NODELIST.* file there so exactly one copy exists at a time -- this
+    makes the nodelist a real file peers can pull via BinkP/FTP/web like
+    any other file-area entry, instead of only the existing public HTTP
+    link (still served separately by hub_admin.nodelist()).
+
+    Returns a one-line summary string; raises on failure so a
+    ScheduledEvent handler wrapping this can report the error.
+    """
+    import os
+    import datetime as _dt
+    from flask import current_app
+    from ..models import FileArea, BinkPNode
+
+    area = FileArea.query.filter_by(tag='ANN.FILES.NODELIST').first()
+    if area is None:
+        raise RuntimeError(
+            'ANN.FILES.NODELIST file area not found -- is ANotherNetwork seeded?')
+
+    cfg = current_app.config
+    sysop = cfg.get('SYSOP_NAME') or 'SysOp'
+    location = cfg.get('BBS_LOCATION') or 'Internet'
+
+    content = generate_nodelist(
+        zone=1200, net=1, hub_node=1,
+        hub_name='ANotherNetwork',
+        hub_location=location,
+        hub_sysop=sysop,
+        hub_phone='-Unpublished-',
+        hub_speed=115200,
+    )
+
+    today = _dt.date.today()
+    day_of_year = today.timetuple().tm_yday
+    filename = f'NODELIST.{day_of_year:03d}'
+
+    storage_path = area.storage_path or os.path.join(
+        cfg['DATA_DIR'], 'files', 'annet_nodelist')
+    os.makedirs(storage_path, exist_ok=True)
+
+    for existing in os.listdir(storage_path):
+        if existing.upper().startswith('NODELIST.'):
+            try:
+                os.remove(os.path.join(storage_path, existing))
+            except OSError:
+                pass
+
+    dest = os.path.join(storage_path, filename)
+    with open(dest, 'w', encoding='utf-8', newline='') as f:
+        f.write(content)
+
+    node_count = BinkPNode.query.filter_by(is_active=True).count()
+    return (f'Wrote {filename} ({len(content)} bytes, {node_count} '
+            f'downstream node(s)) to {storage_path}')

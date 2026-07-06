@@ -89,17 +89,51 @@ class QWKNodeForm(FlaskForm):
 @login_required
 @_admin_required
 def index():
+    from ..models import ScheduledEvent, HatchQueue
+    from .events_admin import _row_view
     binkp_nodes     = BinkPNode.query.order_by(BinkPNode.ftn_address).all()
     qwk_nodes       = QWKNode.query.order_by(QWKNode.packet_id).all()
     pending_hold    = BinkPHoldQueue.query.filter_by(status='pending').count()
     pending_requests = QWKNodeRequest.query.filter_by(status='pending').count()
+    nodelist_ev_row = ScheduledEvent.query.filter_by(
+        handler_key='hub_generate_nodelist').first()
+    nodelist_event  = _row_view(nodelist_ev_row) if nodelist_ev_row else None
+    hatch_pending   = HatchQueue.query.filter_by(status='pending').count()
+    hatch_failed    = HatchQueue.query.filter_by(status='failed').count()
+    gen_tab = request.args.get('gen_tab', 'nodelist')
+    if gen_tab not in ('nodelist', 'qwk', 'tic'):
+        gen_tab = 'nodelist'
     return render_template(
         'echomail/admin/hub/index.html',
         binkp_nodes=binkp_nodes,
         qwk_nodes=qwk_nodes,
         pending_hold=pending_hold,
         pending_requests=pending_requests,
+        nodelist_event=nodelist_event,
+        hatch_pending=hatch_pending,
+        hatch_failed=hatch_failed,
+        gen_tab=gen_tab,
     )
+
+
+@hub_admin_bp.route('/nodelist/generate-now', methods=['POST'])
+@login_required
+@_admin_required
+def nodelist_generate_now():
+    """Manually trigger nodelist generation right now (same handler the
+    scheduler calls) -- runs synchronously, same as events_admin's
+    "Run now" button."""
+    from ..events.runner import fire
+    from ..models import ScheduledEvent
+    event = ScheduledEvent.query.filter_by(
+        handler_key='hub_generate_nodelist').first()
+    if event is None:
+        flash('No nodelist-generation event is configured.', 'danger')
+        return redirect(url_for('hub_admin.index'))
+    ok, out = fire(current_app._get_current_object(), event.id)
+    flash(('Nodelist generated: ' if ok else 'Nodelist generation failed: ') + out,
+          'success' if ok else 'danger')
+    return redirect(url_for('hub_admin.index'))
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +468,32 @@ def qwk_reset_hwm(node_id):
             db.session.commit()
             flash('High-water mark reset — node will receive all messages on next poll.', 'success')
     return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
+
+
+@hub_admin_bp.route('/qwk/<int:node_id>/preview')
+@login_required
+@_admin_required
+def qwk_preview(node_id):
+    """Build the QWK packet this node would receive right now, and hand
+    it back as a download -- diagnostic only. Deliberately does NOT call
+    mark_qwk_sent(), so previewing never consumes the node's real
+    unsent-message queue; the node's actual next download still
+    includes everything shown here."""
+    import io
+    from flask import send_file
+    from ..web.qwk_hub import _build_qwk_hub_packet, _hub_id
+
+    node = QWKNode.query.get_or_404(node_id)
+    packet_data, _new_hwm, total_msgs = _build_qwk_hub_packet(node)
+    flash(f'Preview built: {total_msgs} message(s) -- this download does '
+          f'NOT mark them as sent to {node.packet_id}.', 'info')
+    filename = f'{_hub_id()}-preview.QWK'
+    return send_file(
+        io.BytesIO(packet_data),
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 # ---------------------------------------------------------------------------

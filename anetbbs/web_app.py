@@ -1181,6 +1181,22 @@ def _create_default_data():
                 ))
     db.session.commit()
 
+    # Weekly nodelist generation -- only meaningful on the hub install
+    # (REGISTRY_MODE_ENABLED); a peer install has no downstream BinkPNode
+    # data of its own, so seeding this everywhere would just be noise.
+    if _ca2.config.get('REGISTRY_MODE_ENABLED'):
+        from .models import ScheduledEvent
+        if not ScheduledEvent.query.filter_by(
+                handler_key='hub_generate_nodelist').first():
+            db.session.add(ScheduledEvent(
+                name='ANotherNetwork: weekly nodelist',
+                handler_key='hub_generate_nodelist',
+                params_json='{}',
+                schedule_json='{"kind": "weekly", "day": 6, "time": "05:00"}',
+                is_enabled=True,
+            ))
+            db.session.commit()
+
     # Create default built-in web games
     from .games.web_games import WEB_GAMES
     for game_data in WEB_GAMES:

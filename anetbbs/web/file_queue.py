@@ -76,6 +76,14 @@ def approve(entry_id):
     entry.reviewed_by_id = current_user.id
     entry.reviewed_at = datetime.utcnow()
     db.session.commit()
+    if area.network_id is not None:
+        try:
+            from ..echomail.tic import hatch_local_file
+            hatch_local_file(area, dest, safe_name, entry.description or '')
+        except Exception:
+            current_app.logger.exception(
+                'hatch_local_file failed for %s in area %s',
+                safe_name, area.tag)
     flash(f'Approved {entry.filename}.', 'success')
     return redirect(url_for('file_queue.index'))
 

@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.34 — Hub "Generation & Distribution" admin UI (July 2026)
+
+- FEATURE: Hub Management gets a new "Generation & Distribution" panel with three tabs: **Nodelist** (manual "Generate Now" + weekly schedule, publishes directly into the `ANN.FILES.NODELIST` file area so peers pull it like any other file), **QWK Packets** (a "Preview" button per node to build/download a test packet without touching the real high-water mark), and **TIC / File Distribution** (status dashboard for a new real fix — files uploaded to any network-attached file area now auto-queue for TIC distribution to subscribed peers, across all 4 upload code paths).
+- Built on the existing generic `ScheduledEvent` scheduler (already used for log rotation, security checks, etc.) rather than a new scheduling mechanism — sysops get the same "Run now" + flexible daily/weekly/interval schedule UI they already know.
+- 6 new tests in `tests/test_hub_generation_features.py`, including a real route-level test that POSTs an actual file upload and confirms it auto-hatches to a subscribed peer end-to-end.
+
+---
+
 # ANetBBS v1.0b2.33 — ANotherNetwork file areas + real infopack (July 2026)
 
 - FEATURE: ANotherNetwork gets 9 new TIC file-echo areas (`ANN.FILES.NODELIST`, `.INFOPACK`, `.BBSSOFT`, `.DOORS`, `.EBOOKS`, `.LINUX`, `.RETRO`, `.ANSIART`, `.TEST`), auto-seeded the same idempotent way the 26 message areas already are — safe to deploy to an existing install, it only adds what's missing. `ANN.FILES.NODELIST` is flagged as the network's nodelist-distribution area.

@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.33`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.34`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.34 — Hub "Generation & Distribution" admin UI (July 2026)
+
+- FEATURE: Hub Management (`/admin/echomail/hub/`) gets a new "Generation & Distribution" panel with three tabs:
+  - **Nodelist**: manual "Generate Now" button + a weekly-by-default schedule (via the existing `ScheduledEvent` framework), publishing the ANotherNetwork nodelist directly into the `ANN.FILES.NODELIST` file area (replacing the prior copy) so peers pull it like any other file-echo entry, instead of only the pre-existing public HTTP link. New `EchomailNetwork`-agnostic handler `hub_generate_nodelist`, only seeded on installs with `REGISTRY_MODE_ENABLED` (a peer install has no downstream `BinkPNode` data of its own to publish).
+  - **QWK Packets**: a "Preview" button per node builds and downloads a packet on demand for testing/verification — deliberately does not call `mark_qwk_sent()`, so previewing never consumes the node's real unsent-message queue.
+  - **TIC / File Distribution**: status dashboard (pending/failed counts) for a new real gap that got fixed alongside this — files uploaded to any `ANN.FILES.*` (or any other network-attached) file area now automatically queue for TIC distribution to every subscribed peer (`hatch_local_file()` in `echomail/tic.py`, mirroring the existing inbound-TIC hatch-out fan-out logic), across all 4 upload code paths (regular upload, sysop direct upload, smart-upload, and file-queue approval). Purely local file areas (`network_id` is `None`) are unaffected.
+- 6 new tests in `tests/test_hub_generation_features.py` covering nodelist replace-on-generate, the ScheduledEvent hub-only seeding gate, hatch fan-out to multiple peers, a real route-level upload test confirming auto-hatch end-to-end, confirming local-only areas don't hatch, and confirming QWK preview doesn't touch the high-water mark.
 
 ## v1.0b2.33 — ANotherNetwork file areas + real infopack (July 2026)
 
