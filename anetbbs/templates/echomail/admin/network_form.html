@@ -81,6 +81,19 @@
                         </div>
                     </div>
                     <div class="row g-3 mt-1">
+                        <div class="col-md-4">
+                            {{ form.ftn_domain.label(class="form-label") }}
+                            {{ form.ftn_domain(class="form-control", placeholder="e.g. anet") }}
+                            {% for e in form.ftn_domain.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                            <div class="form-text">
+                                Optional. Without this, the qualified BinkP
+                                address (addr@domain) derives its domain from
+                                the network name above, truncated to 8 chars
+                                — can look awkward for a long name.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-1">
                         <div class="col-md-6">
                             {{ form.areafix_password.label(class="form-label") }}
                             {{ form.areafix_password(class="form-control",

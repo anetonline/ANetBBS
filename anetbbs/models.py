@@ -430,6 +430,14 @@ class EchomailNetwork(db.Model):
     areafix_password = db.Column(db.String(255))
     our_address = db.Column(db.String(50))  # FTN address like 1:234/567
     hub_address = db.Column(db.String(50))
+    # Per FSP-1028 the qualified-address domain suffix (addr@domain) must be
+    # <=8 chars, [a-z0-9_~-]+. Without this, the poller derives it from
+    # `name` (truncated/lowercased), which can produce an awkward result for
+    # a long display name -- e.g. "ANotherNetwork" truncates to "anothern".
+    # Set this to override with something shorter/cleaner while keeping the
+    # display name intact. Blank/NULL falls back to the old name-derived
+    # behavior for backward compatibility with existing networks.
+    ftn_domain = db.Column(db.String(8))
 
     # QWK settings
     qwk_host = db.Column(db.String(255))

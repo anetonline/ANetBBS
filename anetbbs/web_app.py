@@ -751,6 +751,9 @@ def _lightweight_migrate(app):
                    'BOOLEAN NOT NULL DEFAULT 1')
     _ensure_column('echomail_networks', 'binkp_tls',
                    'BOOLEAN NOT NULL DEFAULT 0')
+    # Optional short domain-suffix override -- see the field's own comment
+    # in models.py. NULL for existing networks preserves current behavior.
+    _ensure_column('echomail_networks', 'ftn_domain', 'VARCHAR(8)')
 
     # ------------------------------------------------------------------
     # Auto-sweep: any model column that the DB is missing — add it.
@@ -983,6 +986,7 @@ def _create_default_data():
             binkp_host='bbs.a-net.fyi',
             binkp_port=24554,
             hub_address='1200:1/1',
+            ftn_domain='anet',
             is_active=False,
         )
         db.session.add(ann_binkp)

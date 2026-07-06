@@ -279,7 +279,8 @@ def _run_client(network, outbound_messages, app):
             hub_address=network.hub_address or '1:1/0',
             password=network.binkp_password or '',
             use_tls=bool(getattr(network, 'binkp_tls', False)),
-            domain=(network.name or '').strip().lower() or None,
+            domain=(getattr(network, 'ftn_domain', None)
+                    or network.name or '').strip().lower() or None,
         )
         data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
         # Pick up any pending hatch-out files for this peer (the network's

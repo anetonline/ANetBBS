@@ -51,6 +51,9 @@ class NetworkForm(FlaskForm):
     our_address = StringField('Our FTN Address (e.g. 1:234/567)',
                               validators=[Optional(), Length(max=50)])
     hub_address = StringField('Hub FTN Address', validators=[Optional(), Length(max=50)])
+    ftn_domain = StringField(
+        'Domain suffix override (addr@domain, max 8 chars, optional)',
+        validators=[Optional(), Length(max=8)])
     cram_md5 = BooleanField(
         'Use CRAM-MD5 for BinkP auth (recommended — required by Synchronet)',
         default=True)
@@ -203,6 +206,7 @@ def new_network():
             areafix_password=form.areafix_password.data or None,
             our_address=form.our_address.data or None,
             hub_address=form.hub_address.data or None,
+            ftn_domain=(form.ftn_domain.data or '').strip().lower() or None,
             qwk_host=form.qwk_host.data or None,
             qwk_port=form.qwk_port.data or None,
             qwk_username=form.qwk_username.data or None,
