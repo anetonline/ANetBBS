@@ -45,12 +45,17 @@ The wizard asks every question it needs, roughly in this order:
   (sixel images in the terminal RSS reader), Mystic BBS runtime (.mps
   door support) — each its own yes/no, all default **no**.
 - **Configure UFW firewall** to open the ports you just enabled?
-  (default **no**)
+  (default **no**) — this prompt only appears in `production` mode;
+  `test` and `behind` installs skip it (test mode is local-only, and
+  `behind` mode assumes your own reverse proxy/firewall already
+  handles this).
 
-Number of concurrent terminal nodes and echomail enable/disable are
-**not** wizard prompts — they default on (`GAMES_MAX_NODES=10`,
-`ECHOMAIL_ENABLED=true`) and are changed later via `.env` or
-Admin → Settings, not during install.
+Number of concurrent terminal nodes (telnet/SSH/rlogin) and echomail
+enable/disable are **not** wizard prompts — they default on
+(`BBS_NODES=8`, `ECHOMAIL_ENABLED=true`) and are changed later via
+`.env` or Admin → Settings, not during install. (Door games have
+their own, separate concurrency cap, `GAMES_MAX_NODES=10`, also not a
+wizard prompt.)
 
 It then, without any further prompts:
 
@@ -77,6 +82,58 @@ Safe to re-run. It won't touch an existing `.env` — it just skips
 regenerating it and prints "already exists — skipping (use `--force`
 to overwrite)". Pass `--force` if you actually want it to overwrite
 your current config.
+
+## Alternative: the Python installer toolchain
+
+Separate from `install.sh`/`update.sh` above, four console-script
+entry points ship with the package itself and become reachable the
+moment you `pip install -e .` (e.g. via the manual-install path in
+`docs/INSTALL.md`):
+
+- **`anetbbs-install`** (`anetbbs/installer/wizard.py`) — a shorter,
+  self-contained interactive Python installer. Asks install directory,
+  BBS branding, ports, `BBS_NODES`, echomail on/off, and sysop
+  credentials; writes `.env`, creates the venv, runs `pip install -e .`,
+  initializes the database + seeds the sysop account, and optionally
+  installs systemd units and `/usr/local/bin` command symlinks.
+- **`anetbbs-upgrade`** (`anetbbs/installer/upgrade.py`) — point it at a
+  release tarball or extracted directory. Backs up `data/`, `.env`, and
+  `logs/` to a timestamped directory, rsyncs the new code in, reinstalls
+  Python deps, runs schema migrations, restarts services, probes
+  `/healthz`, and offers automatic rollback to the backup if the health
+  check fails.
+- **`anetbbs-symlinks`** / **`anetbbs-cleanup`** (`symlinks.py`,
+  `cleanup.py`) — smaller helpers the two wizards above call
+  internally; also runnable standalone.
+
+`install.sh` and `update.sh` never call any of these — it's a
+completely separate, lighter-weight toolchain. Reach for it for a
+minimal or scripted install where the long interactive `install.sh`
+prompt sequence (install-mode selection, nginx, optional-dependency
+prompts, etc.) is more than you need.
+
+**Known gaps vs. `install.sh`** — worth knowing before you pick this
+path:
+
+- No install-mode concept at all (no `production` / `behind` / `test`
+  choice) — it always writes `FLASK_ENV=production`.
+- No nginx or Let's Encrypt/SSL prompts — TLS termination is entirely
+  on you afterward.
+- No MSP/SYSTAT, Finger, or BinkP prompts — none of those `.env` vars
+  get written and none of the matching systemd units
+  (`anetbbs-finger.service`, `anetbbs-binkp.service`) get installed.
+  Set those up by hand afterward — see `docs/INSTALL.md` §6, §8, §9.
+- No UFW/firewall step.
+- `wizard.py` writes `IDLE_TIMEOUT_SECONDS=0` into `.env` — that's
+  different from the `Config` class default of `1800` (30 minutes)
+  that an `install.sh`/manual install without an explicit override
+  gets. `0` means idle terminal sessions are never force-disconnected;
+  if you use this installer, that's worth changing on purpose rather
+  than by surprise.
+
+If you want everything `install.sh` sets up — nginx, SSL, UFW,
+MSP/SYSTAT/Finger/BinkP — use `install.sh`. The Python installer
+toolchain is a lighter, scriptable alternative, not a superset of it.
 
 ## Putting nginx in front
 

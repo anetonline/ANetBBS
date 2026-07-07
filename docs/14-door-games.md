@@ -19,6 +19,67 @@ through their terminal:
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
 
+## Built-in web games — casino wallet economy
+
+The `builtin_web` type covers several in-process casino-style mini-games
+(blackjack, slots, video poker, hold'em). Instead of real money, each
+of these shares a common **persistent wallet** system
+(`WebGameWallet` in `anetbbs/models.py`, API in `anetbbs/web/games.py`):
+
+- Each user gets one wallet row **per game** (`game_slug` +
+  `user_id`), not one shared pool across all four games.
+- **Starting balance** per game is configurable via `.env` / Admin →
+  Settings: `CASINO_BLACKJACK_START` (default 500),
+  `CASINO_SLOTS_START` (default 200), `CASINO_VIDEOPOKER_START`
+  (default 200), `CASINO_HOLDEM_START` (default 1000).
+- **Weekly reset**: the wallet tracks a `week_start` (the ISO week's
+  Monday). Every time the wallet is loaded (`GET /games/<slug>/wallet`)
+  or updated (`POST /games/<slug>/wallet`), if the stored `week_start`
+  doesn't match the current week, the balance resets to that game's
+  starting balance. This is a **lazy** reset — it happens the next
+  time the user opens/plays the game after a Monday rolls over, not on
+  a background schedule of its own.
+- Going broke (`balance <= 0`) doesn't lock the user out — the wallet
+  API reports a `resets` date (next Monday) alongside `broke: true` so
+  the UI can tell the player when they'll get a fresh stake.
+- `peak_balance` is tracked alongside the live balance (a high-water
+  mark), separate from `starting_balance`.
+
+## Achievements system
+
+A lightweight badge/achievement engine lives in
+`anetbbs/features/achievements.py` (models: `Achievement`,
+`UserAchievement`) — not games-specific, but documented here for lack
+of a more dedicated doc. Ten badges are seeded by default:
+
+| code            | name              | earned for                          |
+|-----------------|-------------------|--------------------------------------|
+| `first_login`   | First Login       | logged in once                       |
+| `login_30`      | 30-Day Caller     | 30 total logins                      |
+| `first_post`    | First Post        | first board post                     |
+| `post_10`       | Frequent Poster   | 10 board posts                       |
+| `post_100`      | Centurion Poster  | 100 board posts                      |
+| `first_pm`      | PM Sent           | first private message sent           |
+| `first_echomail`| Echomail Hatchling| first outbound echomail message      |
+| `first_netmail` | Netmail Pioneer   | first outbound netmail message       |
+| `shouter`       | Town Crier        | 25 shoutbox posts                    |
+| `veteran`       | Veteran           | account older than 1 year            |
+
+`check_for_user()` re-runs **every** rule for a user and awards any
+newly-qualifying badges, but it's only called from a handful of
+trigger points: login (`anetbbs/web/auth.py`), board post
+(`anetbbs/web/boards.py`), PM send (`anetbbs/web/pm.py`), and shoutbox
+post (`anetbbs/web/shoutbox.py`). Sending echomail or netmail doesn't
+itself trigger a check — the `first_echomail`/`first_netmail` badges
+only actually get awarded the next time the user hits one of those
+four trigger points afterward, not the instant they send the message.
+Newly-earned badges are flashed to the user at login; earned badges
+are listed on the user's own profile page
+(`anetbbs/web/profile.py`/`templates/profile/view.html`). There's no
+dedicated admin view for achievements — only the per-user profile
+listing and an aggregate count on the stats page
+(`anetbbs/web/stats.py`).
+
 ## Per-node scratch directories
 
 Every active terminal node gets its own scratch directory under

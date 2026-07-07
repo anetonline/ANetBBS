@@ -116,8 +116,9 @@ sudo chown -R anetbbs:anetbbs /opt/anetbbs
 ```
 
 Then install the unit templates — `anetbbs.service` is the unified
-process for telnet/SSH/rlogin (which of those actually start is driven
-by the `*_ENABLED` flags in `.env`, not by which unit you install):
+process for telnet/SSH/rlogin/FTP (which of those actually start is
+driven by the `*_ENABLED` flags in `.env`, not by which unit you
+install):
 
 ```bash
 sudo cp deploy/anetbbs-web.service /etc/systemd/system/
@@ -133,6 +134,27 @@ journalctl -u anetbbs-web -f
 for reference, but are legacy: they fought each other for ports and
 are replaced by the unified `anetbbs.service` above. Don't install
 them on a fresh setup.)
+
+If you're enabling Finger and/or BinkP (BinkP/FidoNet setup is covered
+in §8 below; Finger is a simple RFC 1288 per-user info query service,
+see `docs/PORTS.md`), they run as their own separate systemd units,
+not part of `anetbbs.service`:
+
+```bash
+# Finger (RFC 1288) — only if you plan to enable it
+sudo cp deploy/anetbbs-finger.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now anetbbs-finger
+
+# BinkP (FidoNet inbound mail) — only if you're joining a FidoNet-style network
+sudo cp deploy/anetbbs-binkp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now anetbbs-binkp
+```
+
+Both templates already carry `AmbientCapabilities=CAP_NET_BIND_SERVICE`
+where needed (Finger binds the privileged port 79) so they don't need
+to run as root.
 
 ## 6. Privileged ports (MSP/SYSTAT)
 
@@ -187,9 +209,46 @@ the privileged ports.
 
 ## 8. Inbound BinkP / FTN
 
-If you participate in FidoNet, also forward TCP `24554` (BinkP) and put
-your linked node configs in `/admin/echomail/networks`. See
-`docs/06-echomail.md`.
+If you participate in FidoNet, install + enable `anetbbs-binkp.service`
+(see §5 above), forward TCP `24554` (BinkP), and put your linked node
+configs in `/admin/echomail/networks`. See `docs/06-echomail.md`.
+
+## 9. FTP file-area access (optional)
+
+FTP isn't a separate systemd unit — it runs as a background thread
+inside the same unified `anetbbs.service` process as telnet/SSH/rlogin
+(see `anetbbs/main.py` / `anetbbs/ftp/server.py`), gated by
+`FTP_ENABLED`. To turn it on:
+
+```bash
+export FTP_ENABLED=true
+export FTP_PORT=21               # privileged — see §6 for the setcap/
+                                  # AmbientCapabilities/iptables options.
+                                  # NOTE: unlike MSP/SYSTAT, FTP runs in
+                                  # anetbbs.service, not anetbbs-web.service
+                                  # — if you use the AmbientCapabilities
+                                  # option (§6.B), edit anetbbs.service.
+export FTP_PASV_PORTS=40000-40050  # passive-mode data channel range —
+                                    # open this range on your firewall too
+export FTP_ANON_ENABLED=true     # read-only anonymous access to public areas
+export FTP_ROOT_DIR=data/ftp_root  # virtual FTP tree, rebuilt on every start
+export FTP_BANNER="ANetBBS FTP — file areas"
+```
+
+Optional FTPS (`AUTH TLS`) — set both to enable, reusing the same cert
+nginx uses:
+
+```bash
+export FTP_TLS_CERTFILE=/etc/letsencrypt/live/yourdomain/fullchain.pem
+export FTP_TLS_KEYFILE=/etc/letsencrypt/live/yourdomain/privkey.pem
+```
+
+Put these in `.env` (not just your shell) so they survive a service
+restart, then `sudo systemctl restart anetbbs`. `pyftpdlib>=2.0.0` is
+already a normal dependency (installed by `pip install -e .` in step
+2) — if it's missing, FTP logs a warning and stays disabled rather
+than crashing the rest of the BBS. See `docs/PORTS.md` for the full
+port table and firewall rules.
 
 ## Troubleshooting
 

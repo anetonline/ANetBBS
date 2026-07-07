@@ -21,9 +21,14 @@ steps. Read this whole file before exposing the BBS to the internet.
   - `/auth/login` — sysop-configurable via Admin → IP Bans (default 10
     attempts / 5 min / IP); exceeding it **auto-bans the source IP**
     for a sysop-configurable duration (default 1 hour, 0 = permanent)
-  - `/auth/register` — 3 attempts / hour / IP
   - `/imsg/send` — 30 messages / hour / user
   - `/api/vote` — 60 votes / min / user
+- **`/auth/register` rate limit** (3 attempts / hour / IP) — unlike the
+  in-memory limits above, this one is backed by a DB table
+  (`RegistrationAttempt`), not the shared `rate_limit` decorator. It
+  persists across restarts and is shared correctly across multiple
+  gunicorn workers — the "N × workers" caveat under Known limitations
+  below does **not** apply to registration.
 - **Path traversal mitigated** — uploads stored under UUID filenames; the
   `download` route uses `send_from_directory` against the configured
   uploads dir.
@@ -69,6 +74,8 @@ steps. Read this whole file before exposing the BBS to the internet.
   the limiter is effectively per-worker — the user gets `N × workers`
   attempts. For a real multi-worker setup, replace with a Redis-backed
   store (the `rate_limit` decorator is the only call site to change).
+  This does not affect `/auth/register`, which is already DB-backed
+  and correctly shared across workers/restarts (see above).
 - **No 2FA.** Single password for both web and terminal logins.
 - **No per-account lockout** — the auto-ban above works on the source
   IP, not the targeted username, so a distributed brute-force attempt

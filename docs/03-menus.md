@@ -70,6 +70,36 @@ Each item has:
 | `sysop`     | —                                                 | sysop tools (admin only)                      |
 | `logoff`    | —                                                 | end session                                   |
 
+## A couple of action types in more detail
+
+Most action types are self-explanatory from the table above, but two
+are easy to underestimate from a one-line description:
+
+- **`wall`** — the graffiti wall (`anetbbs/features/wall.py`). A
+  shared, paginated bulletin board of short (1-2 line) messages any
+  user can post to, rendered as an ANSI box that adapts its width to
+  the caller's terminal (79 cols on standard 80-col, up to 131 wide).
+  Posts support Synchronet/Mystic-style `|XX` pipe color codes, with
+  an ASCII-only fallback for terminals that can't render CP437
+  box-drawing characters. Sysops get an extra `[D]el` option to remove
+  a post by ID. Not networked or moderated beyond that — it's a purely
+  local, lightweight "who was here" wall, distinct from boards,
+  echomail, and the shoutbox.
+- **`ebooks`** — the ebook reader (slug `ebooks`, `anetbbs/web/ebooks.py`
+  for the web version, `show_ebooks()` in `anetbbs/features/bbs_ui.py`
+  for the terminal version — both share the same backend). Lets users
+  search and read free public-domain books from Project Gutenberg via
+  Gutendex (gutendex.com, a community JSON search API over Gutenberg's
+  catalog), plus a curated "classics" shelf for browsing without
+  searching first. Book text is fetched once per title and cached
+  forever (`EbookCache`); per-user bookmarks and reading history
+  persist across sessions. The terminal reader offers the same
+  classics/search/history/bookmarks flow as the web version, paginated
+  for the terminal. This action is gated per-`Game` row by a
+  `terminal_enabled` toggle (Admin → Games) independent of the web
+  version's own `web_enabled` toggle, so a sysop can offer one without
+  the other.
+
 ## Adding a sub-menu
 
 Click any menu's edit page → "**Add a sub-menu (one click)**" card.

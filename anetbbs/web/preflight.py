@@ -223,15 +223,17 @@ def _check_port_consistency(cfg):
                       f'Either fix .env (WEB_PORT={actual}) or rewrite the unit '
                       f'to -b 0.0.0.0:{expected} and restart anetbbs-web.')
     # Cross-check: is MRC on whatever port WEB_PORT used to be?
+    # The bridge's own ExecStart is just `python -m mrc.bridge.main` --
+    # no port ever appears on that line, it reads web_listen_port from
+    # its own config.json. Read that directly instead of trying (and
+    # previously failing silently) to regex a port out of the unit file.
+    import json as _json
     mrc_bind = None
+    mrc_config_path = os.path.join(install_root, 'mrc', 'bridge', 'config.json')
     try:
-        with open('/etc/systemd/system/anetbbs-mrc-bridge.service', 'r') as f:
-            for line in f:
-                m = _re.search(r':(\d+)', line)
-                if m and 'ExecStart' in line:
-                    mrc_bind = int(m.group(1))
-                    break
-    except OSError:
+        with open(mrc_config_path, 'r') as f:
+            mrc_bind = int(_json.load(f).get('web_listen_port') or 0) or None
+    except (OSError, ValueError, _json.JSONDecodeError):
         pass
     if mrc_bind and mrc_bind == expected:
         return _check('WEB_PORT consistency', 'warn',

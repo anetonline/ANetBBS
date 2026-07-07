@@ -336,6 +336,16 @@ ask TELNET_PORT     "Telnet port"            "$DEF_TELNET_PORT"
 ask SSH_PORT        "SSH port"               "$DEF_SSH_PORT"
 echo ""
 
+# MRC bridge default port is derived from WEB_PORT+1, not a fixed 8080 --
+# test/behind modes default WEB_PORT itself to 8080, so a fixed MRC
+# default would collide with gunicorn (both trying to bind the same
+# port) whenever the sysop leaves both at their defaults. Computed here
+# (unconditionally, right after WEB_PORT is finalized) rather than
+# inside the .env-generation block below, since that block is skipped
+# entirely on a re-run where .env already exists but the MRC config.json
+# generation further down still runs independently.
+MRC_BRIDGE_PORT_DEFAULT=$((WEB_PORT + 1))
+
 echo -e "${BOLD}  ── Services to Enable ──${NC}"
 ask_yn ENABLE_TELNET "Enable Telnet server? (y/n)"   "$DEF_ENABLE_TELNET"
 ask_yn ENABLE_SSH    "Enable SSH server? (y/n)"       "$DEF_ENABLE_SSH"
@@ -1001,7 +1011,7 @@ ECHOMAIL_TEAR_LINE=--- $BBS_NAME
 
 # MRC Bridge
 MRC_BRIDGE_HOST=localhost
-MRC_BRIDGE_PORT=8080
+MRC_BRIDGE_PORT=$MRC_BRIDGE_PORT_DEFAULT
 MRC_BRIDGE_USE_SSL=false
 MRC_BRIDGE_WS_PATH=/mrcws
 ENVEOF
@@ -1064,7 +1074,7 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
   "info_desc": "$BBS_DESC",
   "capabilities": ["MCI", "MSGEXT", "CTCP"],
   "web_listen_host": "127.0.0.1",
-  "web_listen_port": 8080,
+  "web_listen_port": $MRC_BRIDGE_PORT_DEFAULT,
   "message_rate_seconds": 0.5,
   "iamhere_interval_seconds": 60,
   "log_level": "INFO",

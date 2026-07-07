@@ -17,7 +17,11 @@
 ## Listening interface
 
 All defaults bind `0.0.0.0`. Override with `WEB_HOST`, `MSP_BIND_HOST`,
-`SYSTAT_BIND_HOST`, `TELNET_HOST`, `SSH_HOST`.
+`SYSTAT_BIND_HOST`, `TELNET_HOST`, `SSH_HOST`, `RLOGIN_HOST`,
+`FTP_HOST`, `FINGER_LISTEN_HOST`, and `BINKP_LISTEN_HOST` (the last one
+is read directly by `anetbbs/echomail/binkp_server.py` rather than
+through the shared `Config` class, but it's just as real and
+overridable as the others).
 
 ## Privileged ports
 
@@ -27,14 +31,17 @@ for the three fix options. The MSP/SYSTAT/Finger services log a clear
 `Permission denied` error and exit cleanly if the bind fails — the rest
 of the BBS keeps running.
 
-For the FTP server specifically, the cleanest fix is a systemd drop-in:
+For the FTP server specifically, the cleanest fix is a systemd drop-in
+— note this is `anetbbs.service`, not `anetbbs-web.service`: FTP runs
+as a background thread inside the unified telnet/SSH/rlogin process
+(`anetbbs/main.py`), not inside the Flask/gunicorn process:
 ```bash
-sudo systemctl edit anetbbs-web.service
+sudo systemctl edit anetbbs.service
 # Add:
 # [Service]
 # AmbientCapabilities=CAP_NET_BIND_SERVICE
 # CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-sudo systemctl daemon-reload && sudo systemctl restart anetbbs-web.service
+sudo systemctl daemon-reload && sudo systemctl restart anetbbs.service
 ```
 
 Or run FTP on `FTP_PORT=2121` and put an iptables redirect / nginx-stream

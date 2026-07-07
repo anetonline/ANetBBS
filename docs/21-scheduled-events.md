@@ -54,6 +54,7 @@ produce.
 | `db_vacuum` | SQLite VACUUM | none | Reclaims free pages, defragments, refreshes planner stats. Skips (returns ok) on non-SQLite backends — Postgres autovacuums itself. |
 | `log_rotate` | Rotate large logs | `max_mb` (default 50) | Any `logs/*.log` over the threshold is renamed to `.1` and a fresh empty file is created in its place. |
 | `security_check` | Security update check | none | Scans `apt list --upgradable` and the venv's `pip list --outdated`, tags Ubuntu `-security` rows, writes `logs/security-report.json` consumed by **Admin → Security**. Always returns ok=True even on a non-Ubuntu box, so a missing `apt` doesn't permanently red-flag the row. |
+| `hub_generate_nodelist` | ANotherNetwork: generate nodelist | none | Publishes the ANotherNetwork nodelist into the `ANN.FILES.NODELIST` file area via `anetbbs.echomail.nodelist.write_nodelist_to_area()`, replacing the prior copy so peers can pull it like any other file-echo entry. Only meaningful on the install designated as the ANotherNetwork hub (`REGISTRY_MODE_ENABLED`) — on any other install it still runs harmlessly, just publishing a nodelist with only the hub entry and no downstream nodes. See [`20-federation.md`](20-federation.md) for the hub role this supports. |
 | `shell` | Shell command | `command` (required), `timeout` (default 60s) | Runs an arbitrary command as the service user via `subprocess.run(..., shell=True)`. **No sudo** — anything needing root privileges will silently fail at that step. Output is captured as raw bytes and decoded with `errors='replace'`, so non-UTF8 output (e.g. CP437 from DOS programs) doesn't crash the handler — it just shows replacement characters in the log. |
 
 ### `shell` handler — worked example
@@ -94,6 +95,16 @@ that already have a row):
 
 Any of these can be disabled, deleted, or have their schedule
 changed — they're normal rows, not special-cased.
+
+On installs with `REGISTRY_MODE_ENABLED=true` (the designated
+ANotherNetwork hub), a fifth event is also seeded:
+
+| Name | Schedule | Handler |
+|---|---|---|
+| ANotherNetwork: weekly nodelist | Weekly, Sunday 05:00 UTC | `hub_generate_nodelist` |
+
+This one is skipped on regular (non-hub) installs — there's nothing
+useful for it to publish there.
 
 ## Troubleshooting
 

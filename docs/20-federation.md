@@ -4,6 +4,16 @@ A small federation registry that lets ANetBBS instances find each other.
 Modelled on Synchronet's `sbbsimsg.lst` but JSON-shaped and built into
 the BBS itself (no separate service to run).
 
+This page covers two related but distinct things:
+
+1. The `anetbbs.lst` peer-directory/registry described below — a
+   lightweight "who else is running ANetBBS" list.
+2. **ANotherNetwork**, ANetBBS's bundled echomail/QWK network — see
+   [ANotherNetwork](#anothernetwork) further down. Both roles are
+   gated by the same `REGISTRY_MODE_ENABLED` flag; see
+   [REGISTRY_MODE_ENABLED gates two roles](#registry_mode_enabled-gates-two-roles)
+   before you flip it on.
+
 ## How it works
 
 One BBS is designated the **central hub**. Other BBSes (the **peers**)
@@ -164,6 +174,120 @@ All env vars are read at service start. Defaults are sensible for the
 | `REGISTRY_PROBE_INTERVAL_SEC` | `3600` | hub: SYSTAT probe cadence (1 hour) |
 | `REGISTRY_PROBE_FAILURE_THRESHOLD` | `3` | hub: probe-fails before delist |
 | `ANETBBS_DIRECTORY_REFRESH_SEC` | `86400` | peer pull cadence (1 day) |
+
+## ANotherNetwork
+
+Separate from the `anetbbs.lst` peer directory above, **ANotherNetwork**
+is a real, pre-configured echomail/QWK network that ships with every
+ANetBBS install — the same way Dove-Net ships with a fresh Synchronet
+install. It's seeded automatically (`anetbbs/web_app.py`, the
+"Seed ANotherNetwork" block) and needs no setup to exist, only to be
+activated:
+
+- **26 message echo areas** (tags `ANN.GENERAL`, `ANN.BBS`,
+  `ANN.ANETBBS`, `ANN.DOORS`, `ANN.SYSOP`, etc.) spanning General,
+  Technology, BBS Scene, Retro, Hobby, Trading, Data, SysOp, and Test
+  categories.
+- **9 file-echo areas** (tags `ANN.FILES.NODELIST`, `ANN.FILES.BBSSOFT`,
+  `ANN.FILES.DOORS`, `ANN.FILES.EBOOKS`, `ANN.FILES.LINUX`,
+  `ANN.FILES.RETRO`, `ANN.FILES.ANSIART`, `ANN.FILES.INFOPACK`,
+  `ANN.FILES.TEST`) distributed via TIC, same as any other file echo.
+- Two `EchomailNetwork` rows are seeded — one BinkP, one QWK/FTP —
+  both **inactive and unsubscribed by default**. All 26 message areas
+  and all 9 file areas are shared between the two transports via the
+  hub tosser, so a sysop can join over whichever transport suits them.
+
+To actually join, apply for a node at `bbs.a-net.fyi` and fill in the
+node address/packet-id + password on the seeded network row(s) at
+`/admin/echomail/`, then activate + subscribe the areas you want.
+
+### `ftn_domain` — fixing the BinkP address suffix
+
+`EchomailNetwork.ftn_domain` (`anetbbs/models.py`) is an optional,
+≤8-character override for the BinkP qualified-address domain suffix
+(the part after `@` in `1200:1/1@domain`). Per FSP-1028 that suffix
+must be ≤8 chars and `[a-z0-9_~-]+`; without an override the poller
+derives it from the network's `name` field instead, which is why
+"ANotherNetwork" on its own would otherwise truncate to the awkward
+`anothern`. The seeded ANotherNetwork BinkP row sets `ftn_domain=anet`
+to sidestep this. It's editable per-network at `/admin/echomail/` —
+the "Domain suffix override (addr@domain, max 8 chars, optional)"
+field on the network edit form (`anetbbs/web/echomail_admin.py`).
+Leave it blank on other networks to keep the old name-derived behavior.
+
+## Hub Management panel
+
+The install designated as the ANotherNetwork hub gets an extra admin
+section at **`/admin/echomail/hub/`** (`anetbbs/web/hub_admin.py`) —
+404s entirely on any install that isn't `REGISTRY_MODE_ENABLED`, so
+peer installs never see it. It covers:
+
+- **BinkP node management** — CRUD for downstream `BinkPNode` rows
+  (FTN address, session password, sysop/system/location metadata for
+  the nodelist, per-node subscribe/catch-up/flush-queue actions).
+- **QWK node management** — CRUD for downstream `QWKNode` rows (packet
+  ID, download password, subscribe/reset-high-water-mark, and a
+  **Preview** action that builds a QWK packet on demand without
+  marking anything as sent — useful for testing a node's setup without
+  affecting their real next download).
+- **Hold queue** — messages held back from distribution pending review.
+- **Node-request approval** — the queue of sysops applying for a BinkP
+  or QWK node via the terminal wizard; approve/deny from here. (This
+  used to be visible on every install, which meant a sysop applying
+  for a node from *any* ANetBBS install had their request land in that
+  install's own local queue instead of the real hub's — fixed by
+  gating this whole blueprint to the hub install only.)
+- **Generation & Distribution panel**, with three tabs:
+  - **Nodelist** — shows the `hub_generate_nodelist` scheduled event's
+    schedule and last-run status, plus a **Generate Now** button that
+    fires the same handler synchronously for testing. See
+    [`21-scheduled-events.md`](21-scheduled-events.md).
+  - **QWK Packets** — per-node **Preview** links (see above).
+  - **TIC / File Distribution** — pending/failed counts from the
+    `HatchQueue` table; files uploaded to any `ANN.FILES.*` area are
+    queued automatically, no manual step needed, delivery happens on
+    each peer's next BinkP poll.
+
+## REGISTRY_MODE_ENABLED gates two roles
+
+**One flag, two separate hub roles activate together.** Setting
+`REGISTRY_MODE_ENABLED=true` in `.env` doesn't just turn this install
+into the `anetbbs.lst` federation/peer-directory hub described earlier
+on this page — it *also* turns it into the ANotherNetwork echomail hub:
+
+- **Federation/directory role** (covered above): `/registry/api/v1/*`
+  endpoints, `/anetbbs.lst`, the SYSTAT prober, `anetbbs/web/registry.py`,
+  `anetbbs/msp/probe.py`, `anetbbs/msp/hub_self_register.py`,
+  `anetbbs/web/peer_health.py`.
+- **ANotherNetwork echomail hub role**: the `/admin/echomail/hub/`
+  blueprint (`hub_admin.py` above), QWK node serving
+  (`anetbbs/web/qwk_hub.py`), the hub's own self-registration
+  (`hub_self_register.py`), and the weekly `hub_generate_nodelist`
+  scheduled event that only gets seeded on these installs (see
+  [`21-scheduled-events.md`](21-scheduled-events.md)).
+
+Both checks read the exact same `REGISTRY_MODE_ENABLED` config value —
+there's no way to enable one role without the other today. A sysop
+standing up a private federation registry only (no interest in running
+an ANotherNetwork-style echomail hub) should know that flipping this
+flag on also exposes the Hub Management panel and starts seeding the
+nodelist-generation event. Neither does anything harmful on its own —
+the echomail hub role is inert until you actually add downstream
+BinkP/QWK nodes — but it's worth understanding both switch on together,
+not just the directory role this page is mostly about.
+
+## Dialing yourself is handled safely
+
+If your install is the ANotherNetwork hub, the same seeded "point at
+the hub" network row also exists on your own install (since every
+fresh install seeds it) — activating that row on the hub's own BBS
+would otherwise mean the poller tries to dial itself. It doesn't fail
+or spam errors: `anetbbs/echomail/poller.py`'s `_self_referential_reason()`
+detects this automatically (BinkP: `our_address` matches `hub_address`;
+QWK: `qwk_host` matches this BBS's own public host) and the poller
+logs a one-line explanation and skips the dial-out cleanly. The areas
+themselves stay visible either way — this only stops the pointless
+outbound connection attempt, nothing else is affected.
 
 ## Limitations + future work
 

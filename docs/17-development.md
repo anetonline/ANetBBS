@@ -336,6 +336,16 @@ Echomail message bodies go through `anetbbs/echomail/kludges.py` for
 FTS-0001-compliant CR-terminated kludge handling. Don't reinvent —
 the spec is hostile to bytes.
 
+On the hub side, `anetbbs/web/hub_admin.py` (the `/admin/echomail/hub/`
+blueprint), the `HatchQueue`/TIC hatch pipeline, and the
+`ScheduledEvent` handler registry (`anetbbs/events/handlers.py`) are
+the extension points if you're adding hub-side infrastructure —
+distributing a new file type over TIC, adding another handler to the
+scheduler, etc. — rather than a new peer-side protocol. See
+[`20-federation.md`](20-federation.md) and
+[`21-scheduled-events.md`](21-scheduled-events.md) for how those fit
+together.
+
 ---
 
 ## Outbound notifications / webhooks

@@ -24,6 +24,16 @@ a registry reference only becomes real once a release is actually
 tagged and pushed — don't run `docker pull ghcr.io/...` yet, it won't
 find anything.
 
+**A transparency note on how tested this path is:** the Dockerfile,
+entrypoints, and both compose layouts described below have been built
+and unit-tested with mocked Docker/subprocess calls, but have **not**
+yet been run end-to-end against a real Docker daemon — no actual
+`docker build` or `docker compose up` has been done on this yet. The
+steps below are believed correct and are written from a real reading
+of the files in `docker/`, but if you hit something that doesn't match
+what's documented here, that's exactly the kind of gap this note is
+warning you about — please report it.
+
 ## If you're new to Docker — a few concepts first
 
 - An **image** is a packaged snapshot of the application (code +

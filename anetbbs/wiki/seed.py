@@ -34,14 +34,17 @@ they're logged in) help edit and expand the docs.
 ANetBBS speaks every classic BBS protocol plus a modern web UI:
 
 - [[Web Access]] — the easy path, in your browser
-- [[Telnet]] — classic terminal access on TCP 23
-- [[SSH]] — secure terminal access on TCP 22
-- [[Rlogin]] — game-server style auto-login on TCP 513
+- [[Telnet]] — classic terminal access on TCP 2233
+- [[SSH]] — secure terminal access on TCP 2234
+- [[Rlogin]] — game-server style auto-login on TCP 513 (off by
+  default — sysop opts in)
 
 ## What's inside
 
 - [[Message Boards]] — local discussion forums
 - [[Echomail]] — FidoNet-style global mail (BinkP networking)
+- [[ANotherNetwork]] — the echomail/QWK network this BBS ships
+  pre-joined to
 - [[Private Messages]] — one-on-one mail between users
 - [[Instant Messages]] — Inter-BBS instant messaging via MSP
 - [[Files]] — the file library
@@ -86,8 +89,8 @@ Pick the access path that suits you and register:
 | Path | URL | Notes |
 |------|-----|-------|
 | Web  | `/register` | Email + password — fastest |
-| Telnet | port 23 | Choose `(N)ew user` at the prompt |
-| SSH | port 22 | Same `(N)ew user` flow over SSH |
+| Telnet | port 2233 | Choose `(N)ew user` at the prompt |
+| SSH | port 2234 | Same `(N)ew user` flow over SSH |
 
 After registering, the sysop may require you to answer a few
 questions — these are configured per-BBS and seen on first login.
@@ -138,10 +141,12 @@ in plumbing. Below is the full feature inventory.
 ## Access
 
 - [[Web Access]] (HTTP/HTTPS, real-time updates via WebSockets)
-- [[Telnet]] (TCP 23)
-- [[SSH]] (TCP 22, password and key auth)
-- [[Rlogin]] (TCP 513, used by game-server style auto-login)
-- [[Gemini]] (TCP 1965, read-only mirror of public boards)
+- [[Telnet]] (TCP 2233)
+- [[SSH]] (TCP 2234, password and key auth)
+- [[Rlogin]] (TCP 513, used by game-server style auto-login — off by
+  default, sysop must enable it)
+- [[Gemini]] — not a real Gemini-protocol (TLS+1965) listener; your
+  gemtext capsule is exposed over plain HTTP at `/gemini/<username>`
 - [[Finger]] (TCP 79, user info)
 
 ## Messaging
@@ -159,6 +164,9 @@ in plumbing. Below is the full feature inventory.
 
 - [[Files|File Library]] with file areas, categorization,
   uploads, downloads, descriptions, ratings, and virus scanning
+- FTP access (off by default, `FTP_ENABLED`) — browse/download file
+  areas with any plain FTP client; anonymous read-only + authenticated
+  uploads where permitted, see [[Files]]
 - [[TIC Processor]] for FidoNet TIC echo distribution
 - [[QWK]] mail packets for offline reading
 
@@ -172,7 +180,10 @@ in plumbing. Below is the full feature inventory.
 ## Real-time
 
 - [[Chat]] — multi-user chat with channels
-- [[IRC Bridge]] — bridge to/from external IRC networks
+- [[IRC Bridge]] — relays one local MRC room to one IRC
+  server/channel (sysop sets this up in the database; no admin UI)
+- [[IRC Client]] — each logged-in user can connect to their own IRC
+  server, nick, and channels from the web
 - [[MRC]] — the Multi-Relay Chat protocol used by many BBSes
 - [[Telegram Bridge]]
 - [[Sysop Page]] — bell the sysop, see who's around
@@ -413,6 +424,12 @@ access. Port **513/tcp**. Mostly used by **inter-BBS game servers**
 where one BBS launches a game on another and the player travels with
 their identity intact.
 
+**Off by default.** Rlogin is unauthenticated and unencrypted — a
+client's claimed username is trusted at face value — so
+`RLOGIN_ENABLED` defaults to `false`. A sysop has to explicitly turn
+it on (and should only do so on a trusted network, or firewalled to
+known peers) before this port answers at all.
+
 ## How it works
 
 The client opens a connection to port 513 and sends three null-
@@ -439,10 +456,13 @@ remote-game flow.
 
 ## Locally
 
-For local user logins, ANetBBS uses rlogin to auto-login from the
-[[Web Terminal]] and from MRC user-roster joins. The user types
-nothing — their identity rides the rlogin handshake and they land
-on the menu.
+Note the current [[Web Terminal]] does *not* go through rlogin — it
+opens a plain socket straight to the local [[Telnet]] listener, so
+you still see the normal login prompt inside the browser terminal.
+Rlogin's local auto-login handshake (username pre-filled, no
+password re-prompt) is for genuine rlogin clients — other BBS
+software launching a door on this system, or a sysop's own rlogin
+client — not the web UI.
 """),
 
     # ------------------------------------------------------------------
@@ -562,6 +582,16 @@ networks today are:
 Each network has its own uplink, addressing scheme (`zone:net/node`),
 and area policies. See [[BinkP Setup]] to join one.
 
+## Pre-configured: ANotherNetwork
+
+Every ANetBBS install ships pre-joined to **ANotherNetwork** (hub
+`bbs.a-net.fyi`, zone **1200**) — 26 message echo areas across
+General, Technology, BBS Scene, Retro, Hobby, Trading, Data, and
+SysOp categories, seeded automatically on first run but **inactive
+and unsubscribed** until a sysop turns on the ones they want. See
+[[ANotherNetwork]] for the full area list and how to get your own
+node number.
+
 ## Encoding
 
 Echomail bodies travel as raw bytes and can be in any codepage. ANetBBS
@@ -576,6 +606,12 @@ renders ANSI art correctly.
 # BinkP Setup
 
 How to join an [[Echomail]] network or netmail-peer with another BBS.
+
+Every install already has one network pre-configured and waiting:
+**ANotherNetwork**, hub `bbs.a-net.fyi`, zone 1200 — see
+[[ANotherNetwork]]. Everything below also applies to activating that
+one; you're just filling in a node number instead of registering a
+whole new network from scratch.
 
 ## What you need
 
@@ -610,21 +646,21 @@ have a list.
 
 ## Step 3 — first poll
 
-`/admin/echomail/poll/<network>` runs an immediate BinkP session.
-Watch the log for handshake success and "received N packets".
-On the first poll you'll often get a big initial dump as the uplink
-catches your node up.
+On the network's row in `/admin/echomail/` (Networks list), click
+**Poll Now** — it runs an immediate BinkP session in the background
+and flashes a confirmation; watch `/admin/echomail/log/` for
+handshake success and "received N packets". On the first poll you'll
+often get a big initial dump as the uplink catches your node up.
 
-## Step 4 — automated polling
+## Step 4 — automated polling (nothing to set up)
 
-Sysop adds a cron entry (recommended every 30–60 minutes):
-
-```cron
-*/30 * * * * curl -fsS https://bbs.a-net.fyi/admin/echomail/poll/fsxnet
-```
-
-Or use the built-in scheduler under
-`/admin/echomail/schedule/`.
+Polling is **not** cron-driven — no cron entry, no external curl
+call, no `/admin/echomail/schedule/` page. `anetbbs-web` runs a
+background poller thread from the moment it starts, and it polls
+every active network on its own **Poll Interval** (a field on the
+network's edit form, in minutes; default 60). Change that field if
+you want faster or slower polling for a given network — there's
+nothing else to configure.
 
 ## Areafix
 
@@ -641,9 +677,115 @@ the body:
 ANetBBS has an [[AreaFix]] processor for inbound areafix requests
 on your own node too — useful if other BBSes peer off you.
 
-## TIC files
+## TIC files — file-echo distribution
 
-For BinkP-distributed file echoes, see [[TIC Processor]].
+BinkP doesn't only move messages — it moves *files* too, the same
+way, via a **file echo**. Where a message-echo message carries the
+text, a file-echo file is accompanied by a small `.TIC` control file
+(area tag, filename, description, CRC32) that tells every hop along
+the chain what the file is and where it's headed. A file dropped into
+a network-attached file area (`network_id` set — [[ANotherNetwork]]'s
+9 `ANN.FILES.*` areas are the built-in example) gets queued for
+outbound TIC distribution automatically the moment it's uploaded, no
+manual "send this out" step. See [[TIC Processor]] for the full flow,
+both inbound and outbound.
+
+## Hub Management vs. this page
+
+Everything above (`/admin/echomail/` and `/admin/echomail/areas/`) is
+about *your own* node peering out to an uplink — the normal case for
+almost every install. A separate admin surface,
+`/admin/echomail/hub/`, only appears if this install is itself
+designated the network hub (`REGISTRY_MODE_ENABLED=true`) and is
+about managing *downstream* nodes that peer off **you** — see
+[[Sysop Control Panel]] and [[QWK]] for what's in there.
+"""),
+
+    # ------------------------------------------------------------------
+    ('anothernetwork', 'ANotherNetwork', """
+# ANotherNetwork
+
+The [[Echomail]]/[[QWK]] network every ANetBBS install ships
+pre-joined to. It exists so a fresh install isn't a ghost town —
+there's somewhere to talk to other ANetBBS sysops and users from
+day one, the same way classic Synchronet installs shipped pre-joined
+to Dove-Net.
+
+- **Hub:** `bbs.a-net.fyi`
+- **Zone:** 1200
+- **Transport:** BinkP (message + file echoes) or QWK/FTP, your
+  choice — both reach the same areas via the hub's tosser
+
+## What's seeded automatically
+
+On first run, two network entries and 35 areas are created — all
+**inactive / unsubscribed by default**. Nothing polls or shows up on
+your boards until a sysop turns areas on.
+
+**Two network rows** (`/admin/echomail/`, both `is_active=False`
+until you fill in your node info):
+
+- **ANotherNetwork** — BinkP transport, `bbs.a-net.fyi:24554`
+- **ANotherNetwork (QWK)** — QWK-over-FTP transport, same hub
+
+**26 message echo areas** (tag prefix `ANN.`), grouped by category:
+
+| Category | Areas |
+|----------|-------|
+| General | General Discussion, Introductions, Humor & Jokes, Friendly Debate, Network Feedback |
+| Technology | Technology, Linux & Open Source, Security & Privacy, Networking & Internet |
+| BBS Scene | BBS News & Discussion, BBS Software Development, ANetBBS Support, Door Games, ANSI / ASCII Art |
+| Retro | Retro Computing, Games & Gaming, Music |
+| Hobby | Movies & TV, Books & Reading, Food & Cooking, Sports |
+| Trading | For Sale / Wanted / Trades |
+| Data | Data & File Discussion |
+| SysOp | SysOp Discussion, SysOp Help & Tips *(sysop-only)* |
+| Test | Test Messages |
+
+**9 file echo areas** (tag prefix `ANN.FILES.`): Weekly Nodelists,
+Infopacks, BBS Software, Door Games & Utilities, eBooks,
+Linux/Open-Source Files, Retro Computing Files,
+ANSI/ASCII Art Collections, and a Testing-only area. See [[Files]]
+and [[TIC Processor]] for how file-echo distribution actually moves
+bytes.
+
+## Turning it on
+
+1. Pick which of the 26 message areas and 9 file areas you actually
+   want — subscribe to them under [[Echomail Admin]] /
+   [[Files Admin]]. Nothing forces you to run all of them.
+2. Get a node number (see below) and fill in the address/password on
+   whichever of the two network rows matches your transport.
+3. Flip that network row's **Active** flag on.
+
+## Getting your own node number
+
+You need a node number before your BinkP/QWK sessions with the hub
+will authenticate. Two ways to apply:
+
+- **Terminal:** Echomail main menu → pick the Echomail Networks
+  screen → **A = Apply for ANotherNetwork QWK node**. Fill in your
+  BBS name, a proposed packet ID, sysop name, contact email, and BBS
+  address. On the hub itself this writes straight into the request
+  queue; on any other install it POSTs to the real hub's
+  `/qwkhub/apply` endpoint instead (fixed in v1.0b2.29 — it used to
+  wrongly write to whichever install you ran the wizard from).
+- **Hub side:** the sysop running `bbs.a-net.fyi` reviews pending
+  applications at `/admin/echomail/hub/qwk/requests` and
+  approves or denies them; approving auto-creates the QWK node
+  record with a generated password.
+
+There's no equivalent self-service flow for a **BinkP** node number
+yet — for BinkP transport, contact the hub sysop directly and they'll
+add your node under `/admin/echomail/hub/binkp/`.
+
+## See also
+
+- [[Echomail]] — how message-echo distribution works
+- [[BinkP Setup]] — joining any FTN-style network, including this one
+- [[QWK]] — the offline-reading side, and Hub Management for QWK nodes
+- [[TIC Processor]] — file-echo distribution mechanics
+- [[Sysop Control Panel]] — where Hub Management lives if you run the hub
 """),
 
     # ------------------------------------------------------------------
@@ -746,7 +888,8 @@ in [[DOS Door Recipe]]. Short version:
 4. Register the game in the admin UI with type `door_dos`. Set the
    bridge port and the DOSBox command line.
 5. Test by playing it. Watch
-   `journalctl -u anetbbs-telnet -f` for bridge bytes-in/out.
+   `journalctl -u anetbbs -f` for bridge bytes-in/out (telnet, SSH,
+   and rlogin are one unified systemd service, not separate units).
 
 [[DOS Door Recipe]] walks through LORD as a concrete example,
 including the [[LORD Setup]] gotchas.
@@ -964,17 +1107,17 @@ main menu → Chat.
 Backed by Socket.IO on the web side and async on the terminal side.
 History scrollback is 200 lines per channel.
 
-## 2. IRC bridge
+## 2. IRC
 
-The BBS can join external IRC networks and bridge them into local
-channels. Sysop configures servers/networks under
-`/admin/irc/`. Once linked, anything users say in a bridged local
-channel is forwarded to the IRC channel and vice versa.
+Two separate, unrelated things both use the word "IRC" here:
 
-Web users see their IRC nick on hover; user/channel modes (op,
-voice) are preserved.
-
-See [[IRC Bridge]].
+- **IRC Bridge** — a sysop-configured relay between one MRC room and
+  one external IRC server/channel. There's no admin web UI for this;
+  it's a database row plus its own systemd instance. See
+  [[IRC Bridge]].
+- **IRC Client** — a personal, per-user IRC connection at `/irc/` —
+  you pick your own server, nick, and channels, same as running your
+  own IRC client. See [[IRC Client]].
 
 ## 3. MRC (Multi-Relay Chat)
 
@@ -1196,6 +1339,11 @@ The BBS file library — uploads, downloads, descriptions, areas.
 - Terminal: main menu *F*. Terminal downloads happen via Zmodem
   if the client supports it; otherwise base64-into-a-pager
   fallback.
+- FTP: if the sysop has turned it on (`FTP_ENABLED`, off by
+  default), any plain FTP client can browse and download from the
+  same file areas — anonymous access is read-only and limited to
+  active, non-sysop-only areas; logged-in users can also upload
+  where an area's upload permission allows it. Default port `21`.
 
 ## Uploading
 
@@ -1227,6 +1375,18 @@ Common BBS-scene practice.
 For files received via [[TIC Processor]], the file lands in the
 configured TIC area, its `.tic` companion is parsed, and the
 description is read from the `Desc:` line.
+
+Every install ships with 9 such areas already configured (though
+unsubscribed by default) under [[ANotherNetwork]] — tags
+`ANN.FILES.NODELIST`, `ANN.FILES.INFOPACK`, `ANN.FILES.BBSSOFT`,
+`ANN.FILES.DOORS`, `ANN.FILES.EBOOKS`, `ANN.FILES.LINUX`,
+`ANN.FILES.RETRO`, `ANN.FILES.ANSIART`, and `ANN.FILES.TEST`.
+
+This works in both directions: uploading a file into *any*
+network-attached file area (not just ANotherNetwork's) automatically
+queues it for outbound distribution to every subscribed peer — no
+separate "publish" step. See the Outbound section of
+[[TIC Processor]] for exactly which upload paths trigger this.
 
 ## Quotas
 
@@ -1396,9 +1556,14 @@ shows the lot.
 - Glance at the [[Sysop Control Panel]] for service health and
   who's online.
 - Check the [[NodeSpy]] panel for any stuck sessions; kick if needed.
-- Process [[Echomail]] polls (cron handles this; verify
-  `/admin/echomail/log/` for errors).
+- [[Echomail]] polling runs on its own — a background poller thread
+  inside `anetbbs-web` polls each network on its configured interval
+  (default every 60 min), no cron needed. Verify
+  `/admin/echomail/log/` for errors.
 - Approve any [[Files|files]] flagged by the virus scanner.
+- If you run the network hub: peek at the hatch/hold queue under
+  Hub Management (see below) — a backlog there means outbound files
+  or messages aren't reaching peers.
 
 ## Weekly
 
@@ -1411,10 +1576,42 @@ shows the lot.
 ## Monthly
 
 - Rotate logs (`/var/log/anetbbs/` — `logrotate` config in
-  `deploy/logrotate.anetbbs`).
+  `deploy/logrotate.anetbbs`). This can also be automated — see
+  **Scheduled events** below.
 - Review user registrations: ban obvious spam accounts.
 - Update door binaries if their authors have patched.
 - Check [[Peers]] for dead links (`/admin/peers/health`).
+
+## Hub Management
+
+If this install is the designated network hub
+(`REGISTRY_MODE_ENABLED=true` — see [[ANotherNetwork]]), an extra
+admin surface appears at `/admin/echomail/hub/`:
+
+- **BinkP nodes** and **QWK nodes** — add/edit/delete downstream
+  nodes, subscribe/unsubscribe them from areas, reset a QWK node's
+  high-water mark.
+- **Hold queue** — messages/files held back from distribution rather
+  than sent straight out.
+- **Node requests** — the approve/deny queue for BBSes applying for
+  a node number (terminal wizard or the peer-facing `/qwkhub/apply`
+  endpoint both land here).
+- **Generation & Distribution** — generate the nodelist right now
+  (in addition to its weekly schedule), preview a QWK packet for a
+  node without marking anything as sent, and see TIC/file
+  distribution status.
+
+A peer install (not the hub) doesn't see this section — it has
+nothing of its own to manage there.
+
+## Scheduled events
+
+`/admin/events/` lets a sysop automate routine maintenance instead
+of doing it by hand: log rotation, a security-update check, SQLite
+`VACUUM`, TradeWars 2002 daily maintenance, generating the
+ANotherNetwork nodelist, or an arbitrary shell command, each on its
+own schedule. Worth a look if you're tired of remembering to do the
+**Monthly** items above yourself.
 
 ## On upgrade
 
@@ -1484,6 +1681,23 @@ Quick links to:
 - [[Files Admin]]
 - [[Themes|Theme manager]]
 - [[Backup]]
+
+### Hub Management
+
+Only present when this install is the network hub
+(`REGISTRY_MODE_ENABLED=true`) — links into `/admin/echomail/hub/`:
+
+- BinkP node management and QWK node management (add/edit/delete,
+  subscribe to areas, reset a QWK node's high-water mark)
+- The hold queue — items withheld from distribution
+- The node-request approve/deny queue for new BBSes applying for a
+  node number
+- Generation & Distribution — generate/publish the nodelist on
+  demand (plus its weekly schedule), preview a QWK packet per node
+  without marking it sent, and TIC/file-distribution status
+
+See [[ANotherNetwork]] for what this network actually is, and
+[[QWK]] / [[TIC Processor]] for the mechanics each panel is managing.
 
 ## See also
 
@@ -1695,8 +1909,9 @@ subscription requests. See [[AreaFix]].
 [[BinkP Setup]].
 
 **Bridge** — Glue between two protocols. The [[DosBridge]] copies
-bytes between TCP and a terminal writer; the [[IRC Bridge]] copies
-messages between local chat and IRC.
+bytes between TCP and a terminal writer; the [[IRC Bridge]] relays
+one MRC room to one IRC channel (a separate feature from the
+per-user [[IRC Client]]).
 
 **CP437** — The "OEM-US" codepage with line-drawing chars and blocks
 that ANSI art relies on. See [[CP437]].
@@ -1908,8 +2123,7 @@ A real terminal in your browser, talking to the BBS's local
 
 ## Where
 
-`/term/` on the web UI. Logged-in users only by default; sysop can
-allow guest access.
+`/terminal/` on the web UI. Logged-in users only.
 
 ## What you get
 
@@ -1924,9 +2138,14 @@ A full CP437/ANSI terminal — the same UI you'd see in
 
 ## Auth
 
-The web app generates a one-shot token tied to your session,
-opens an internal rlogin to `localhost:513` with your username,
-and pipes both ends. Your password isn't re-prompted.
+You must already be logged into the web UI to open `/terminal/` at
+all — but the emulated terminal itself is a plain socket straight to
+the local [[Telnet]] listener (`localhost:2233` by default; a sysop
+can point it at any host/port from the connect dialog, telnet or
+SSH). It does **not** use rlogin and there's no auto-login token: you
+still see the normal `(G)uest, (L)ogin, (N)ew user` prompt and type
+your username/password inside the emulated session, same as any
+telnet client. See [[Rlogin]] for what auto-login rlogin actually is.
 
 ## Why use it
 
@@ -1948,47 +2167,110 @@ and pipes both ends. Your password isn't re-prompted.
     ('irc-bridge', 'IRC Bridge', """
 # IRC Bridge
 
-Bridges between local [[Chat]] channels and external IRC networks.
-One bridge per network, many channel mappings per bridge.
+Relays **one** [[MRC]] room to **one** external IRC server + channel.
+Each bridge is its own row and its own running process — there's no
+web admin page for this, and it's a completely different feature
+from the per-user [[IRC Client]] at `/irc/`.
 
 ## Configure
 
-`/admin/irc/` — sysop only. Fields:
+There's no web UI. A sysop creates a row in the `mrc_irc_bridges`
+table directly (a one-off script, `flask shell`, or a small admin
+tool you write yourself). The fields on a bridge row:
 
-- **Network name** (label only — e.g. `Libera`)
-- **Server** (`irc.libera.chat`)
-- **Port** + TLS toggle
-- **Nick / username**
-- **SASL** credentials if applicable
-- **Auto-join channels** + which local channel each maps to
+| Field | Meaning |
+|-------|---------|
+| `name` | Label for the bridge (your own reference) |
+| `mrc_room` | Which local MRC room to relay |
+| `mrc_handle` | The name the bridge uses on the MRC side (default `ircbridge`) |
+| `mrc_ws_url` | WebSocket URL of the local MRC bridge service |
+| `irc_server` / `irc_port` | Target IRC server |
+| `irc_use_ssl` | TLS toggle |
+| `irc_nick` | Nick the bridge uses on IRC (default `ANETBridge`) |
+| `irc_channel` / `irc_channel_key` | Target channel + key if it's locked |
+| `sasl_user` / `sasl_pass` | SASL PLAIN credentials, if the network needs them |
+| `is_active` | Whether the bridge should be running |
+
+## Running it
+
+Each bridge row runs as its own instance of the systemd template unit:
+
+```
+systemctl enable --now anetbbs-mrc-irc-bridge@<id>.service
+```
+
+where `<id>` is the bridge row's primary key. `%i` in the unit
+expands to that ID, so `anetbbs.features.mrc_irc_bridge --bridge-id
+<id>` knows which row's config to load. One bridge = one systemd
+instance = one MRC room ↔ one IRC channel.
 
 ## How it works
 
-1. The bridge connects on BBS startup and joins the configured
-   channels.
-2. Anything users say in a mapped local channel is forwarded to
-   IRC tagged with the user's BBS nick.
-3. Anything IRC users say is forwarded into the local channel.
-
-## Identity
-
-IRC sees a single bridge bot. The bot's NICK is set in admin; the
-real BBS-user identity is prefixed onto the message text:
-`<jerry@anet> hello world`.
-
-Some networks like Libera prefer a "relay bot"-style namespace;
-configure your nick accordingly.
+1. The process opens a WebSocket to the local MRC bridge service and
+   a plain TCP (or TLS) socket to the configured IRC server, joining
+   the one configured channel.
+2. Messages posted in the MRC room are relayed to IRC prefixed
+   `[mrc:<user>]`.
+3. Messages said in the IRC channel are relayed into the MRC room
+   prefixed `[irc:<nick>]`.
 
 ## Limits
 
-- One-way for the moment: bridge can't run /msg or /whois on
-  behalf of BBS users. PMs from IRC go to the sysop.
-- No DCC.
-- TLS supported; SASL EXTERNAL not yet (sasl PLAIN works).
+- One MRC room, one IRC channel, per bridge row — for more mappings,
+  run more bridge instances (more rows, more `@<id>` units).
+- The bridge appears as a single bot on both sides; it doesn't proxy
+  per-user identity beyond the message-text prefix.
 
 ## See also
 
 - [[Chat]]
+- [[MRC]]
+- [[IRC Client]] — the unrelated personal/per-user IRC feature
+"""),
+
+    # ------------------------------------------------------------------
+    ('irc-client', 'IRC Client', """
+# IRC Client
+
+A personal IRC client built into the web UI — `/irc/`. Every
+logged-in user can connect to whatever IRC server, nick, and
+channels *they* want, independent of anything the sysop has set up.
+This is a different feature from the sysop-run [[IRC Bridge]]; the
+two aren't connected to each other.
+
+## Using it
+
+Open `/irc/`. Fill in:
+
+- **Server** (default `irc.libera.chat`)
+- **Port** (default `6667`) + a TLS toggle
+- **Nick** (defaults to your BBS username)
+- **Channels** to auto-join on connect
+- Optional **SASL** username/password if the network requires
+  authenticated connections
+
+Click Connect. The page keeps a live Socket.IO session to the IRC
+server for as long as your browser tab (or your saved session) stays
+open, with the usual channel window, nick list, and `/commands`
+you'd expect from any IRC client.
+
+## Saved settings
+
+Click **Save** and your server/port/SSL/nick/channel choices persist
+to your account (`IrcServerConfig`), so the page reconnects with the
+same setup next time you open it. Nothing here is shared with other
+users or with the sysop's [[IRC Bridge]] configuration.
+
+## Scrollback
+
+If you get disconnected (closed tab, lost network) recent channel
+activity replays when you reconnect, so you don't lose the last
+stretch of conversation.
+
+## See also
+
+- [[Chat]]
+- [[IRC Bridge]] — the separate, sysop-configured MRC↔IRC relay
 - [[MRC]]
 """),
 
@@ -2047,10 +2329,28 @@ terminals) as the "B" main-menu option.
 
 `/admin/bulletins/` → **Add**. Fields:
 
-- **Title** (1–80 chars)
-- **Body** (markdown supported)
-- **Active** (uncheck to hide without deleting)
-- **Order** (lower first)
+- **Title** (up to 200 chars)
+- **Content** (markdown supported)
+- **Pinned** (checkbox) — pinned bulletins always sort first
+- **Expires At** (`YYYY-MM-DD HH:MM`, optional) — after this time the
+  bulletin stops showing to users automatically; leave blank for no
+  expiry
+
+There's no manual sort-order field and no separate "active/hidden"
+toggle — a bulletin is either pinned (shown first) or not, and either
+current or expired. To hide one immediately without waiting for its
+expiry, delete it or edit `Expires At` to a time in the past.
+
+## Sort order
+
+Bulletins list pinned-first, then newest-first: `is_pinned desc,
+created_at desc`.
+
+## Cleaning up
+
+Expired bulletins stay in the database (for history/audit) until a
+sysop clears them. `/admin/bulletins/purge-expired` permanently
+deletes every bulletin whose `expires_at` has passed.
 
 ## Pager view
 
@@ -2104,10 +2404,28 @@ BBS parses it and posts your replies to the right boards / echos.
 - [Bluewave](https://www.bbsdocumentary.com/) (DOS, classic)
 - Various Windows tools
 
-## Sysop tools
+## Sysop tools — Hub Management
 
-`/admin/qwk/` controls hub mode (let other BBSes pull QWK from
-yours) and per-network packet limits.
+Hub-side QWK administration lives under
+`/admin/echomail/hub/qwk/` (part of Hub Management — see
+[[Sysop Control Panel]] — gated behind `REGISTRY_MODE_ENABLED`, only
+meaningful on the one install that *is* the network hub):
+
+- **Node list** (`/admin/echomail/hub/qwk/`) — every downstream QWK
+  node, packet ID, and subscription state; add/edit/delete nodes,
+  subscribe/unsubscribe them from areas, reset their high-water mark.
+- **Preview** — a **Preview** button per node builds and downloads a
+  test `.QWK` packet for that node on demand *without* marking any
+  messages as sent, so a sysop can sanity-check what a peer would
+  receive before the real packet goes out.
+- **Hold queue** (`/admin/echomail/hub/holdqueue`) — messages held
+  back from distribution (e.g. awaiting moderation or a size/policy
+  check) before they're released to nodes.
+- **Node requests** (`/admin/echomail/hub/qwk/requests`) — the
+  approve/deny queue for BBSes applying for a new QWK node number
+  (see [[ANotherNetwork]] for how a sysop submits one of these).
+  Approving auto-creates the QWK node record with a generated
+  password.
 """),
 
     # ------------------------------------------------------------------
@@ -2138,17 +2456,42 @@ File appears in /files/<area>/
 
 ## Sysop config
 
-`/admin/echomail/tic/` — list of TIC areas your node carries.
-
-For each: which local file area to drop into, who's allowed to
-upload (your uplink + maybe a few peers), and whether to forward
-to downlinks.
+File areas that carry a TIC file-echo are managed at
+`/admin/file-areas` — each one is a `FileArea` row attached to an
+`EchomailNetwork` (`network_id` set). For each: which local storage
+path to drop into, and (under `/admin/file-echo-subs`) which peers
+are subscribed to receive it.
 
 ## Forwarding
 
 If you have nodes peering off you for the same TIC area, the
 processor regenerates a fresh `.TIC` with you in the path and
 queues it for outbound BinkP to each downlink.
+
+## Outbound — auto-hatch on local upload
+
+Inbound TIC processing (above) isn't the only way a file gets
+distributed. **Any file that lands in a network-attached file area
+gets queued for outbound distribution automatically** — no separate
+"send this out" step:
+
+1. A user or sysop uploads a file into a file area whose
+   `network_id` is not null (for example one of
+   [[ANotherNetwork]]'s `ANN.FILES.*` areas).
+2. The upload route calls `hatch_local_file()`, which looks up every
+   peer subscribed to that file echo and drops one `HatchQueue` row
+   per peer — this is the *origin* hop, so there's no prior TIC to
+   forward, just a fresh one built from scratch.
+3. The next outbound BinkP session to each subscribed peer picks up
+   its pending `HatchQueue` rows, builds the `.TIC` companion file
+   (filling in `SEEN-BY`/`PATH` for that hop), and ships the file.
+
+This runs from every upload path that can write into a network file
+area — the regular `/files/` upload form, the sysop's
+"manage upload" tool, the smart-upload flow, and approving a queued
+file in the upload-review queue. A local-only file area
+(`network_id` is null) never triggers this — there's nobody to hatch
+to.
 
 ## Checksums
 
@@ -2161,6 +2504,7 @@ intervention required.
 - [[Echomail]]
 - [[BinkP Setup]]
 - [[Files]]
+- [[ANotherNetwork]]
 """),
 
     # ------------------------------------------------------------------
@@ -2257,7 +2601,9 @@ Pick a free TCP port (9001 here) — used by the [[DosBridge]].
 ### 4. First test
 
 Play it from your sysop account first. Watch
-`journalctl -u anetbbs-telnet -f` — you should see:
+`journalctl -u anetbbs -f` (telnet, SSH, and rlogin all run inside
+this one unified service now — the old split `anetbbs-telnet` /
+`anetbbs-ssh` units are retired) — you should see:
 
 ```
 bridge connected to 127.0.0.1:9001
@@ -2337,24 +2683,33 @@ feature is roughly:
 2. Register it in `anetbbs/web_app.py`
 3. Add templates in `anetbbs/templates/myfeature/`
 4. (Optional) Add a nav-bar link in `templates/base.html`
-5. (Optional) Add a model class to `anetbbs/models.py` + run
-   `flask db migrate`
+5. (Optional) Add a model class (or a new column on an existing one)
+   to `anetbbs/models.py` — see **Database** below, no migration
+   command needed for the common case
 
 The whole pipeline is ~50 lines of code for a working feature blueprint.
 
 ## Database
 
 `anetbbs/models.py` is the single source of truth for SQLAlchemy
-models. Flask-Migrate (alembic) handles schema changes — add a column,
-run `flask db migrate -m "..."`, the service auto-runs `flask db
-upgrade` on next start.
+models. There's no alembic/`flask db migrate` step in normal use —
+`web_app.py` runs an auto-sweep (`_lightweight_migrate()`) on every
+startup: it walks `db.metadata.sorted_tables`, and for any column a
+model declares that the live table is missing, issues a permissive
+`ALTER TABLE ADD COLUMN` (nullable, no default, so it always succeeds
+on SQLite). Add a column, restart `anetbbs-web`, done. See
+[[Architecture]] for the same mechanism described from the ops side.
+A hand-written migration is still the right call for anything
+destructive (renaming/dropping a column, backfilling data) — the
+auto-sweep only ever adds.
 
 ## Themes
 
 Themes are DB rows with CSS variable values, edited visually at
 `/admin/theme-builder/`. Add a new built-in theme by tweaking colors
-in the builder, then add the resulting values to the theme seed block
-in `anetbbs/seed_data.py`.
+in the builder, then add the resulting values to the default-theme
+seed block in `_create_default_data()` in `anetbbs/web_app.py`
+(there's no separate `seed_data.py` — it's all in `web_app.py`).
 
 ## Real-time features
 

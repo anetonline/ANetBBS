@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.35 — Full documentation + wiki accuracy pass (July 2026)
+
+- FIX (real bug): a fresh Pi/hobbyist-mode ("test"/"behind") install could have the web app and MRC bridge both trying to bind `127.0.0.1:8080` — `install.sh` hardcoded the MRC bridge's default port regardless of `WEB_PORT`. Fixed by deriving it as `WEB_PORT+1`.
+- FIX (real bug): the preflight check meant to catch that exact collision after the fact never actually fired — it tried to parse a port number out of a systemd unit line that never contains one. Fixed to read the MRC bridge's own `config.json` directly. 4 new tests.
+- FIX (docs + wiki, dozens of concrete mistakes): wrong config vars, wrong admin paths, wrong port numbers on the two most-viewed wiki pages, a fabricated protocol claim, a wrong bulletins field list, a retired systemd unit name, a fictional migration workflow contradicting the wiki's own Architecture page, and a wiki page describing an admin feature that doesn't exist (rewritten to describe what's actually there).
+- NEW CONTENT: substantial documentation added across docs and wiki for ANotherNetwork (26 message + 9 file echo areas, new dedicated wiki page), `ftn_domain`, AreaFix, netmail, the Hub Management panel, auto-hatch-on-upload, achievements, the casino/wallet economy, the ebook reader, the separate Python installer toolchain (documented as a lightweight alternative), a new wiki page for the real per-user IRC client, and a Docker verification-status disclaimer.
+- Full details in `docs/CHANGELOG.md`.
+
+---
+
 # ANetBBS v1.0b2.34 — Hub "Generation & Distribution" admin UI (July 2026)
 
 - FEATURE: Hub Management gets a new "Generation & Distribution" panel with three tabs: **Nodelist** (manual "Generate Now" + weekly schedule, publishes directly into the `ANN.FILES.NODELIST` file area so peers pull it like any other file), **QWK Packets** (a "Preview" button per node to build/download a test packet without touching the real high-water mark), and **TIC / File Distribution** (status dashboard for a new real fix — files uploaded to any network-attached file area now auto-queue for TIC distribution to subscribed peers, across all 4 upload code paths).

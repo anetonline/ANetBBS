@@ -75,12 +75,23 @@ Priority is "how often do real doors hit it":
 
 ### High priority (many doors fail without these)
 
-- **`bbs.exec()`** — runs another `.js` door from inside one. Doors that
-  chain into sub-modules fail.
-- **`bbs.menu()`** — Synchronet's built-in menu engine. Used by hub-style
-  door packs.
-- **`user.security`** complete — only `level` is shimmed. Doors that
-  check `flags1`/`flags2`/`exempt` etc. for access gates fail.
+- **`bbs.exec()`** — a stub exists (shells out to the command line via
+  Node's `child_process.execSync`), but it doesn't implement
+  Synchronet's exec-string mini-language or in-process JS-door
+  chaining. Doors that expect `bbs.exec()` to launch another `.js`
+  door through the real dispatcher (rather than just running an OS
+  command) still fail.
+- **`bbs.menu()`** — a stub exists that dumps a static `<name>.msg`
+  file straight to stdout, but it isn't Synchronet's real interactive
+  menu engine (no hotkey capture, no return value). Hub-style door
+  packs that rely on the actual menu engine still fail.
+- **`user.security`** — `level`, `flags1`–`flags4`, `exempt`,
+  `restrictions`, and `password` are all present as fields, so doors
+  reading them won't crash. They're hardcoded stub values though
+  (`flags1`/`flags2`/`exempt` = all-bits-set), not derived from real
+  per-user data — so a door gating a feature on a specific security
+  flag will see it as always-granted rather than reflecting the
+  logged-in user's actual permissions.
 - **`user.stats.*`** — call/post/upload counters. Doors that pull these
   for ranking displays show zeros.
 
