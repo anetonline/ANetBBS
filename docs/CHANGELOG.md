@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.43`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.44`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.44 — Make the network join form discoverable (July 2026)
+
+- FIX: the new `/join/` page (v1.0b2.43) had no link to it anywhere except Hub Management's own "view live" button — a real visitor had no way to find it. Added a "Join Our Network" entry to the Tools nav dropdown, shown only to logged-in users (deliberately not exposed to anonymous visitors) and only when the feature is actually reachable (hub install + enabled), via a new `network_join_enabled` context processor. 1 new test covering all four combinations of logged-in/enabled state.
 
 ## v1.0b2.43 — Public "apply to join this network" form (July 2026)
 

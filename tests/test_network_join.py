@@ -369,6 +369,46 @@ class NetworkJoinRouteTests(unittest.TestCase):
         resp = client.get('/admin/echomail/hub/join/requests')
         self.assertIn(resp.status_code, (302, 401, 403))
 
+    def test_nav_link_only_shown_when_logged_in_and_enabled(self):
+        """Jerry asked how anyone would discover /join/ -- it wasn't
+        linked from anywhere. Fixed by adding a Tools-dropdown nav link,
+        deliberately logged-in-only (Jerry's explicit choice, not shown
+        to anonymous visitors) and only rendered when the feature is
+        actually reachable (hub mode + enabled), via a context processor
+        (_inject_network_join_enabled in anetbbs/web_app.py)."""
+        from anetbbs.models import db, User, NetworkJoinConfig
+        with self.app.app_context():
+            u = User.query.filter_by(username='navlinktest').first()
+            if not u:
+                u = User(username='navlinktest', is_admin=False,
+                        email='navlinktest@example.com')
+                u.set_password('x')
+                db.session.add(u)
+                db.session.commit()
+            uid = u.id
+
+        self._enable_join_form()
+        client = self.app.test_client()
+
+        # Logged out -- must not show even though the feature is enabled.
+        resp = client.get('/')
+        self.assertNotIn('Join Our Network', resp.get_data(as_text=True))
+
+        # Logged in, enabled -- must show.
+        with client.session_transaction() as sess:
+            sess['_user_id'] = str(uid)
+            sess['_fresh'] = True
+        resp = client.get('/')
+        self.assertIn('Join Our Network', resp.get_data(as_text=True))
+
+        # Logged in, disabled -- must not show.
+        with self.app.app_context():
+            cfg = NetworkJoinConfig.get()
+            cfg.enabled = False
+            db.session.commit()
+        resp = client.get('/')
+        self.assertNotIn('Join Our Network', resp.get_data(as_text=True))
+
     def test_approve_binkp_only_creates_one_node(self):
         from anetbbs.models import db, NetworkJoinRequest, BinkPNode
         with self.app.app_context():

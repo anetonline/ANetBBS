@@ -443,6 +443,9 @@
                             <li><a class="dropdown-item" href="{{ url_for('rss.index') }}" style="color:var(--theme-primary);"><i class="bi bi-rss-fill"></i> RSS Reader</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('polls.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bar-chart"></i> Polls</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('saved.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bookmark-star"></i> Saved Messages</a></li>
+                            {% if network_join_enabled %}
+                            <li><a class="dropdown-item" href="{{ url_for('network_join.apply') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Join Our Network</a></li>
+                            {% endif %}
                             <li><hr class="dropdown-divider"></li>
                             {% endif %}
                             <li><a class="dropdown-item" href="{{ url_for('nodelist.browse') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Nodelist</a></li>

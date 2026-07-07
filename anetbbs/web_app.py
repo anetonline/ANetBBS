@@ -155,6 +155,21 @@ def create_app(config_name=None):
             pass
         return {'qotd': qotd}
 
+    @app.context_processor
+    def _inject_network_join_enabled():
+        """Expose {{ network_join_enabled }} so the Tools nav dropdown
+        can link to /join/ only when it's actually reachable (hub
+        install + sysop has turned it on) -- cheap config check first,
+        DB query only on hub installs, since this runs every request."""
+        if not app.config.get('REGISTRY_MODE_ENABLED'):
+            return {'network_join_enabled': False}
+        try:
+            from .models import NetworkJoinConfig
+            cfg = NetworkJoinConfig.query.first()
+            return {'network_join_enabled': bool(cfg and cfg.enabled)}
+        except Exception:
+            return {'network_join_enabled': False}
+
     @app.template_filter('from_json')
     def from_json_filter(value):
         try:
