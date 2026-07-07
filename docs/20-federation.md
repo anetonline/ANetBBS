@@ -231,13 +231,41 @@ peer installs never see it. It covers:
   marking anything as sent — useful for testing a node's setup without
   affecting their real next download).
 - **Hold queue** — messages held back from distribution pending review.
-- **Node-request approval** — the queue of sysops applying for a BinkP
-  or QWK node via the terminal wizard; approve/deny from here. (This
+- **Node-request approval** — the queue of sysops applying for a QWK
+  node via the terminal wizard (`anetbbs/features/bbs_ui.py`'s
+  `_apply_qwk_node()`, submitting `QWKNodeRequest` rows); approve/deny
+  at `/admin/echomail/hub/qwk/requests`. There has never been a BinkP
+  equivalent of this wizard — BinkP nodes are only ever created by hand
+  at `/admin/echomail/` or via the public join form below. (This queue
   used to be visible on every install, which meant a sysop applying
   for a node from *any* ANetBBS install had their request land in that
   install's own local queue instead of the real hub's — fixed by
   gating this whole blueprint to the hub install only.)
-- **Generation & Distribution panel**, with three tabs:
+- **Public join form** — a separate, newer way in: a public page at
+  `/join/` (`anetbbs/web/network_join.py`), reachable with no login at
+  all, where anyone can apply to join this hub's network. One generic
+  form covers both transports — a BinkP address/crash-or-hold section
+  and a QWK packet-ID section, either of which can be left blank as
+  long as at least one is filled in. There are no password fields
+  anywhere on the form; like the QWK terminal wizard above, real
+  credentials are always hub-generated at approval time, never
+  applicant-supplied. Above the form, the applicant reads the rules
+  text pulled from the sysop's uploaded infopack (see the **Join
+  Form** tab below) and must check a box confirming they read it
+  before submitting. The route 404s until both `REGISTRY_MODE_ENABLED`
+  and the Join Form tab's own "enabled" checkbox are on — two
+  independent switches, not one. Applications land in their own review
+  queue at `/admin/echomail/hub/join/requests` (separate from the
+  QWK-only queue above) and every admin gets notified. Approving a
+  request creates a `BinkPNode` and/or a `QWKNode` depending on which
+  transport section(s) the applicant filled in — zero, one, or both —
+  each with its own independently hub-generated password; if either
+  address is already taken the whole approval is rejected rather than
+  partially creating one node. If SMTP relay is configured on this
+  install, the new credentials are emailed to the applicant
+  automatically. This isn't ANotherNetwork-specific — any sysop
+  running their own ANetBBS hub can turn it on for their own network.
+- **Generation & Distribution panel**, with four tabs:
   - **Nodelist** — shows the `hub_generate_nodelist` scheduled event's
     schedule and last-run status, plus a **Generate Now** button that
     fires the same handler synchronously for testing. See
@@ -247,6 +275,16 @@ peer installs never see it. It covers:
     `HatchQueue` table; files uploaded to any `ANN.FILES.*` area are
     queued automatically, no manual step needed, delivery happens on
     each peer's next BinkP poll.
+  - **Join Form** — enable/configure the public `/join/` page above.
+    A checkbox turns it on, with optional "Network Name" and short
+    "Intro Text" fields displayed above the rules on the public page.
+    Upload one infopack zip (rules text, area lists, ANSI art, whatever
+    applicants should see or download) and the system automatically
+    picks the largest `.txt` member inside it as the rules text shown
+    inline on the public page — a dropdown lists every `.txt` member
+    found in the zip so the sysop can override the pick if it grabbed
+    the wrong file, without re-uploading. The full zip is also served
+    as a public, no-login download link.
 
 ## REGISTRY_MODE_ENABLED gates two roles
 
@@ -285,9 +323,20 @@ would otherwise mean the poller tries to dial itself. It doesn't fail
 or spam errors: `anetbbs/echomail/poller.py`'s `_self_referential_reason()`
 detects this automatically (BinkP: `our_address` matches `hub_address`;
 QWK: `qwk_host` matches this BBS's own public host) and the poller
-logs a one-line explanation and skips the dial-out cleanly. The areas
-themselves stay visible either way — this only stops the pointless
-outbound connection attempt, nothing else is affected.
+skips the dial-out cleanly.
+
+As of v1.0b2.41 this check runs *before* `_do_poll()` creates an
+`EchomailPollLog` row, so a detected self-reference leaves no poll-log
+entry at all — not even a "skipped" status row — only a
+`logger.debug(...)` application-log line, invisible at the default
+INFO log level. It used to create a real `EchomailPollLog` row every
+time, but since the poller loop re-checks every network once a
+minute, that flooded the admin UI's poll log with dozens of identical
+entries within about 20 minutes of uptime on a freshly-started hub
+(live-caught on Jerry's own install), drowning out real poll activity.
+The areas themselves stay visible either way — this only stops the
+pointless outbound connection attempt and its logging noise, nothing
+else is affected.
 
 ## Limitations + future work
 

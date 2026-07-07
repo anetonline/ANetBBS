@@ -67,6 +67,35 @@ the boxes, mass-PM "we miss you" / soft-deactivate / hard-delete.
 When `NUV_ENABLED=true`, new users land here for approval.
 One-click Approve sends a welcome PM automatically.
 
+## Admin notifications
+
+The bell-icon notification system (`/notifications/`) also fires for
+five sysop admin-review events, so you don't have to manually check
+each page for new work:
+
+- **MSP federation registry join requests** — fires once a registrant
+  verifies their contact email, not at the earlier unverified
+  registration step. Links to `/admin/registry/`.
+- **QWK node applications** — fires when a sysop applies for a QWK
+  node number, via API or the terminal wizard. Links to
+  `/admin/echomail/hub/qwk/requests`.
+- **New users pending NUV approval** — fires on registration when NUV
+  is enabled. Plain email-verification-only signups don't trigger
+  this — those are fully self-service. Links to `/admin/pending-users`.
+- **Unknown/bad echomail areas** — fires once per newly-discovered
+  unknown area tag (not once per message) when inbound echomail
+  arrives for an area this BBS doesn't carry. Links to
+  `/admin/echomail/bad_areas`.
+- **Network join applications** — fires when someone submits the
+  public "apply to join this network" form (`/join/`; see
+  echomail/federation docs for the feature itself). Links to
+  `/admin/echomail/hub/join/requests`.
+
+Every `is_admin=True` user gets these independently, and each can
+toggle any of the five off in **Notification Settings**
+(`/notifications/settings`) — an admin-only section that's invisible
+to non-admin accounts. Default is ON for all five.
+
 ## /admin/newsletter
 
 Compose a one-time newsletter. Fans out as a PM to every active

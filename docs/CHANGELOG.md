@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.44`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.45`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.45 — Document today's QWK/notification/join-form changes (July 2026)
+
+- DOCS: `docs/06-echomail.md` and `docs/20-federation.md` updated to describe the current self-referential-poll-skip behavior (no poll-log row created at all, as of v1.0b2.41 — was previously described as a `status='skipped'` log entry), QWK node conference subscription management including the new "Subscribe to All" button (v1.0b2.40), and the new public "apply to join this network" form end to end (v1.0b2.43-44) — gating, applicant flow, infopack upload + rules-text auto-pick, the Join Requests review queue, and the approval logic. `docs/02-sysop-daily-ops.md` gets a new "Admin notifications" section covering all five admin-review notification kinds (v1.0b2.42). Wiki pages `qwk` and `anothernetwork` updated to match, including fixing a self-introduced contradiction (the QWK page said "no self-service BinkP flow exists" right next to a new bullet describing exactly that).
 
 ## v1.0b2.44 — Make the network join form discoverable (July 2026)
 

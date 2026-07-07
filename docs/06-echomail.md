@@ -197,13 +197,22 @@ start/completion time, sent/received counts, and any error.
 If a network's poller looks like it's configured to dial the BBS's own
 install instead of a genuine remote peer — for BinkP, `our_address`
 equals `hub_address`; for QWK, `qwk_host` equals this BBS's own public
-host — the poller detects this and safely skips the dial-out, logging
-the attempt as `status='skipped'` rather than failing. This is
-expected and harmless on the hub's own install: the seeded "point at
-the hub" network row needs to exist and be configured exactly that way
-for *other* sysops to reach the hub, it's just never meaningful for
-the hub to dial itself. Areas stay visible either way — this only
-stops the pointless connection attempt, nothing else. See
+host — the poller detects this and safely skips the dial-out instead of
+failing. This is expected and harmless on the hub's own install: the
+seeded "point at the hub" network row needs to exist and be configured
+exactly that way for *other* sysops to reach the hub, it's just never
+meaningful for the hub to dial itself. Areas stay visible either way —
+this only stops the pointless connection attempt, nothing else.
+
+As of v1.0b2.41, the check happens first in `_do_poll()`
+(`anetbbs/echomail/poller.py`), before any `EchomailPollLog` row gets
+created — a self-referential network produces **no poll log entry at
+all**, just a single `logger.debug(...)` line (invisible at the
+default INFO log level) for anyone specifically chasing this down.
+Earlier versions logged the skip as a `status='skipped'` poll-log row
+every time the loop re-checked the network (once a minute), which
+flooded the Poll Logs page with dozens of identical entries within
+about 20 minutes of uptime and drowned out real poll activity. See
 `_self_referential_reason()` in `anetbbs/echomail/poller.py`.
 
 ## Hub Management — running ANetBBS as a network hub
@@ -228,14 +237,27 @@ regular per-network echomail admin every install has:
   generation).
 - **QWK node management** (`/admin/echomail/hub/qwk/`) — add, edit,
   and delete downstream `QWKNode` peers (packet ID, download
-  password).
+  password). Each node's detail page
+  (`/admin/echomail/hub/qwk/<node_id>`, `qwk_node_detail()` in
+  `hub_admin.py`) manages which echo areas that node actually
+  receives — subscription is per-node, not global, tracked via
+  `QWKNodeLastSent` rows (each carries the `conf_number` used in the
+  QWK packet format). Areas can be subscribed/unsubscribed one at a
+  time, or in bulk with the **"Subscribe to All"** button
+  (`POST /admin/echomail/hub/qwk/<node_id>/subscribe-all`,
+  `qwk_subscribe_all()`) — deliberately scoped to active areas on
+  QWK-transport networks only, not every file/message area on the
+  whole BBS, since a QWK node has no business receiving areas that
+  only exist on a BinkP-only network.
 - **Hold queue** (`/admin/echomail/hub/holdqueue`) — outbound BinkP
   items queued per node, filterable by status (pending/sent/failed).
 - **QWK node-request approval queue**
   (`/admin/echomail/hub/qwk/requests`) — sysops can apply for a QWK
   node number from their own BBS's terminal; those applications land
-  here for the hub operator to approve or deny.
-- **Generation & Distribution** panel, three tabs:
+  here for the hub operator to approve or deny. QWK-terminal-wizard-
+  specific — see the **Public join form** section below for the
+  newer, broader review queue that covers both transports.
+- **Generation & Distribution** panel, four tabs:
   - **Nodelist** — shows the weekly nodelist-generation schedule (a
     `ScheduledEvent` seeded automatically when `REGISTRY_MODE_ENABLED`
     is on) plus last-run status/output, and a **Generate Now** button
@@ -253,3 +275,71 @@ regular per-network echomail admin every install has:
     queued in the first place; no manual step needed, files uploaded
     to any `ANN.FILES.*`-style network-attached area queue themselves
     automatically.
+  - **Join Form** — enable/configure the public application page
+    described below.
+
+### Public join form (v1.0b2.43)
+
+A public web page at `/join/` (`anetbbs/web/network_join.py`, blueprint
+`network_join_bp`) lets anyone — no login required — apply to join this
+hub's echomail network, instead of the sysop having to walk them
+through it by email or a terminal wizard. It's gated by two independent
+checks: `REGISTRY_MODE_ENABLED` (same as the rest of Hub Management)
+**and** the sysop explicitly enabling it on the Join Form tab; if
+either is off, `/join/` 404s just like the rest of this blueprint.
+
+**Applicant flow**: read the rules text and (optionally) download the
+full infopack zip, check a box confirming the rules were read (the
+form won't submit without it), then fill in an application — name,
+location, BBS name, BBS software, OS, telnet address, website URL,
+email are always asked for, followed by an optional BinkP section (FTN
+address + crash-or-hold) and an optional QWK section (packet ID).
+Leave either transport section blank if it doesn't apply, but at least
+one must be filled in. There are no password fields anywhere on the
+form — real session/download credentials are always hub-generated at
+approval time, never applicant-supplied, the same security rule the
+QWK node-request wizard already follows. The endpoint is fully
+unauthenticated, so it's rate-limited per IP: a 30-second floor between
+submissions and a 10/hour cap.
+
+**Setting it up**, on the **Join Form** tab:
+
+1. Enable the checkbox, optionally set a **Network Name** (shown on
+   the public page) and **Intro Text** (a blurb shown above the
+   rules).
+2. Upload a single infopack zip — a real-world bundle of whatever the
+   sysop wants applicants to see: rules/info text, a readme, a node
+   list, ANSI art, machine-readable area lists, etc.
+3. The system automatically picks the **largest `.txt` member** in the
+   zip as "the rules text" and displays it inline on the public page
+   (not just offered as a download). If the auto-pick guesses wrong, a
+   dropdown lists every other `.txt` member found in the zip so the
+   sysop can manually re-pick one, without re-uploading.
+4. The whole zip is also offered as a public download,
+   `GET /join/infopack.zip`, no login required — same pattern as the
+   existing public file-download route.
+
+**Review queue**: applications land on a new **Join Requests** page
+(`/admin/echomail/hub/join/requests`) — separate from, and in addition
+to, the QWK-only node-request queue above; that older queue is
+specific to the terminal AreaFix/QWK wizard, this one is for the
+public web form and covers both transports. Every admin gets an
+in-app notification when a new application arrives (see
+[doc 2 — Sysop daily ops](02-sysop-daily-ops.md) for the notification
+system itself).
+
+**Approving a request** creates a `BinkPNode` and/or `QWKNode` — zero,
+one, or both, driven entirely by which section(s) the applicant filled
+in, not by an admin choice. Each new node gets its own independently
+hub-generated random password. If either transport's address/packet ID
+collides with an existing node, the whole approval is rejected — the
+BBS won't partially create one side and silently drop the other — so
+the sysop can resolve the conflict and retry. If outbound SMTP is
+configured (see [doc 2 — Sysop daily ops](02-sysop-daily-ops.md)), the
+applicant is emailed their new credentials automatically; otherwise the
+sysop is told to relay them manually. Denials can include a reason,
+also emailed if SMTP is working.
+
+This feature isn't hardcoded to ANotherNetwork — it's meant to be
+usable by any sysop running their own ANetBBS hub for their own
+network. ANotherNetwork is simply the first real network to use it.

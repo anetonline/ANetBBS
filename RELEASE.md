@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.45 — Document today's QWK/notification/join-form changes (July 2026)
+
+- DOCS: updated docs/06-echomail.md, docs/20-federation.md, docs/02-sysop-daily-ops.md, and the qwk/anothernetwork wiki pages to cover everything shipped today — the corrected self-referential-poll-skip behavior, QWK "Subscribe to All", admin notifications, and the new public join form end to end.
+
+---
+
 # ANetBBS v1.0b2.44 — Make the network join form discoverable (July 2026)
 
 - FIX: the /join/ page from v1.0b2.43 wasn't linked from anywhere a real visitor would find it. Added a "Join Our Network" link to the Tools nav menu, logged-in-users-only, shown only when the feature is actually enabled.
