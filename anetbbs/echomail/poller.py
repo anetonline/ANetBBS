@@ -383,7 +383,11 @@ def _run_client(network, outbound_messages, app):
         client = QWKClient(
             host=network.qwk_host or '',
             port=network.qwk_port or 80,
-            username=network.qwk_username or '',
+            # QNET-FTP-style hubs (e.g. ANotherNetwork) authenticate the
+            # FTP login using the Packet ID as the username -- fall back
+            # to it if qwk_username is blank, since a blank username
+            # always fails login anyway (nothing lost by trying).
+            username=network.qwk_username or network.qwk_packet_id or '',
             password=network.qwk_password or '',
             packet_id=network.qwk_packet_id or 'ANET',
             download_url=getattr(network, 'qwk_download_url', '') or '',

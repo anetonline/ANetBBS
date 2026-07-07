@@ -66,7 +66,13 @@ class NetworkForm(FlaskForm):
     # QWK fields
     qwk_host = StringField('QWK Host', validators=[Optional(), Length(max=255)])
     qwk_port = IntegerField('QWK Port', validators=[Optional(), NumberRange(1, 65535)], default=80)
-    qwk_username = StringField('QWK Username', validators=[Optional(), Length(max=255)])
+    qwk_username = StringField(
+        'QWK Username — used to LOG IN to the hub\'s FTP/HTTP server. '
+        'For a QNET-FTP-style hub (e.g. ANotherNetwork), this must be '
+        'set to the SAME value as your Packet ID below, or the login '
+        'will fail with no useful error -- the poller sends this field '
+        'as the FTP username, not the Packet ID field.',
+        validators=[Optional(), Length(max=255)])
     qwk_password = PasswordField('QWK Password', validators=[Optional()])
     qwk_packet_id = StringField(
         'QWK Packet ID — YOUR registered node ID on the hub '

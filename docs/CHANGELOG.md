@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.36`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.37`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.37 — Fix QWK node application crash + FTP login confusion (July 2026)
+
+- FIX (live-caught, real bug): checking QWK node application status a second time (via the terminal's Echomail → "A" apply screen, after already being approved) crashed with `DetachedInstanceError` at `req.created_at.strftime(...)` in `_show_qwk_request_status()`. Root cause: `_apply_qwk_node()` queried the existing `QWKNodeRequest` row inside one `with _app().app_context():` block, then passed that ORM object to `_show_qwk_request_status()` *after* the block (and its DB session) had already closed — and that function's own internal hub-refresh commit (in a second, nested `app_context()`) expired the row's attributes, so touching them afterward with no active session raised the error instead of silently re-fetching. Fixed by having `_show_qwk_request_status()` take an id and do one fresh query inside a single, consistent `app_context`, extracting every field it needs into plain local variables before that context closes. 3 new tests in `tests/test_qwk_apply_status_detached_instance.py`.
+- FIX (live-caught, real bug): the QWK poller used only the `qwk_username` field for the FTP login username, with no fallback — but QNET-FTP-style hubs (like ANotherNetwork) authenticate using the Packet ID as the username. A sysop who filled in Packet ID but left QWK Username blank (an easy mistake, since the old form label didn't explain the two fields needed to match) got a silent, always-failing login with an unhelpfully empty error message. Fixed with a defensive fallback — blank `qwk_username` now falls back to `qwk_packet_id`, which can only help since a blank username always failed anyway. Also rewrote the `QWK Username` field's label in Admin → Echomail Networks to explain this requirement explicitly, and updated the applicant-facing approval screen to tell the sysop to set both fields to the same value. 2 new tests in `tests/test_qwk_username_fallback.py`.
 
 ## v1.0b2.36 — Fix unreachable QWK node application on a fresh install (July 2026)
 

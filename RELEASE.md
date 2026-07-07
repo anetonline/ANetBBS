@@ -1,3 +1,10 @@
+# ANetBBS v1.0b2.37 — Fix QWK node application crash + FTP login confusion (July 2026)
+
+- FIX (live-caught, real bug): re-checking QWK node application status crashed with `DetachedInstanceError` — an ORM row was queried inside one `app_context()` block, then used after that context (and its DB session) had closed. Fixed by doing all DB work inside a single, consistent context and extracting plain values before it closes. 3 new tests.
+- FIX (live-caught, real bug): the QWK poller only used `qwk_username` for the FTP login, with no fallback — but QNET-FTP-style hubs authenticate using the Packet ID as the username. A sysop who filled in Packet ID but left Username blank got a silent, always-failing login. Fixed with a fallback to `qwk_packet_id`, plus clearer field labels and applicant-facing instructions. 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.36 — Fix unreachable QWK node application (July 2026)
 
 - FIX (live-caught, real bug): a fresh install's terminal "Echomail Networks" screen bailed out with "No echomail areas configured" before ever reaching the "Apply for ANotherNetwork QWK node" option — making it unreachable for exactly the sysop it's meant for, since every fresh install starts with zero active networks/subscribed areas. Found live testing a real Pi peer install. Fixed; 2 new tests.

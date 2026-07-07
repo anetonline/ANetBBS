@@ -798,8 +798,15 @@ class BBSMenuUI:
                             .filter_by(applied_by_user_id=user_id)
                             .order_by(QWKNodeRequest.created_at.desc())
                             .first())
-        if existing:
-            await self._show_qwk_request_status(existing, is_hub=is_hub,
+            existing_id = existing.id if existing else None
+        if existing_id is not None:
+            # Pass the id, not the ORM row -- the row above was loaded
+            # inside the app_context that just closed, so its attributes
+            # aren't safe to touch afterward (SQLAlchemy raises
+            # DetachedInstanceError on the first expired-attribute access
+            # once the session is gone). _show_qwk_request_status()
+            # re-queries fresh inside its own app_context instead.
+            await self._show_qwk_request_status(existing_id, is_hub=is_hub,
                                                  registry_url=registry_url)
             return
 
@@ -987,41 +994,64 @@ class BBSMenuUI:
         )
         await self.session.read_line(_prompt('Press Enter to continue...'))
 
-    async def _show_qwk_request_status(self, req, is_hub=True, registry_url=''):
+    async def _show_qwk_request_status(self, req_id, is_hub=True, registry_url=''):
         """Show the applicant their application status (pending/approved/denied).
 
-        On a peer install (is_hub=False), the local `req` row is only a
-        cache of the hub's last known answer -- refresh it from the
-        hub's /qwkhub/status/<token> first, so approvals/denials show
-        up here without the sysop needing to do anything else.
+        On a peer install (is_hub=False), the local row is only a cache
+        of the hub's last known answer -- refresh it from the hub's
+        /qwkhub/status/<token> first, so approvals/denials show up here
+        without the sysop needing to do anything else.
+
+        Takes an id, not an ORM row: every DB read/write happens inside
+        one app_context block below, with all needed fields copied out
+        to plain local variables before that block closes. Passing a
+        SQLAlchemy row across an app_context boundary and touching its
+        attributes afterward raises DetachedInstanceError the moment an
+        expired attribute is accessed with no session left to refresh
+        it from -- live-caught exactly this way (v1.0b2.37).
         """
         from anetbbs.models import db, QWKNodeRequest as _QNR
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         stale_note = ''
-        if not is_hub and registry_url and req.request_token:
-            import requests
-            try:
-                resp = requests.get(
-                    f'{registry_url}/qwkhub/status/{req.request_token}',
-                    timeout=10)
-                body = (resp.json()
-                        if resp.headers.get('content-type', '').startswith('application/json')
-                        else {})
-                if resp.status_code == 200 and body.get('ok'):
-                    with _app().app_context():
-                        r = _QNR.query.get(req.id)
-                        if r:
-                            r.status = body.get('status', r.status)
-                            r.generated_password = body.get(
-                                'generated_password', r.generated_password)
-                            r.deny_reason = body.get('deny_reason', r.deny_reason)
-                            db.session.commit()
-                            req = r
-                else:
-                    stale_note = 'showing last known status (hub returned an error)'
-            except requests.RequestException:
-                stale_note = 'showing last known status (hub unreachable right now)'
+        with _app().app_context():
+            req = _QNR.query.get(req_id)
+            if req is None:
+                await self.session.write(
+                    f"\r\n  {FG['red']}That application no longer exists.{RESET}\r\n")
+                await self.session.read_line(_prompt('\r\nPress Enter to continue...'))
+                return
+
+            if not is_hub and registry_url and req.request_token:
+                import requests
+                try:
+                    resp = requests.get(
+                        f'{registry_url}/qwkhub/status/{req.request_token}',
+                        timeout=10)
+                    body = (resp.json()
+                            if resp.headers.get('content-type', '').startswith('application/json')
+                            else {})
+                    if resp.status_code == 200 and body.get('ok'):
+                        req.status = body.get('status', req.status)
+                        req.generated_password = body.get(
+                            'generated_password', req.generated_password)
+                        req.deny_reason = body.get('deny_reason', req.deny_reason)
+                        db.session.commit()
+                    else:
+                        stale_note = 'showing last known status (hub returned an error)'
+                except requests.RequestException:
+                    stale_note = 'showing last known status (hub unreachable right now)'
+
+            status = req.status
+            packet_id = req.packet_id
+            bbs_name = req.bbs_name
+            date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
+            generated_password = req.generated_password
+            deny_reason = req.deny_reason
+
+            if status == 'approved' and not req.seen_by_applicant:
+                req.seen_by_applicant = True
+                db.session.commit()
 
         _w = ui_width(self.session)
         await self.session.write('\x1b[2J\x1b[H')
@@ -1029,49 +1059,43 @@ class BBSMenuUI:
         if stale_note:
             await self.session.write(f"\r\n  {FG['gry']}({stale_note}){RESET}\r\n")
 
-        date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
-
-        if req.status == 'pending':
+        if status == 'pending':
             await self.session.write(
                 f"\r\n  {FG['yel']}{BOLD}Status : PENDING REVIEW{RESET}\r\n"
                 f"\r\n"
-                f"  {FG['wht']}Packet ID requested : {FG['grn']}{req.packet_id}{RESET}\r\n"
-                f"  {FG['wht']}BBS Name            : {FG['wht']}{req.bbs_name}{RESET}\r\n"
+                f"  {FG['wht']}Packet ID requested : {FG['grn']}{packet_id}{RESET}\r\n"
+                f"  {FG['wht']}BBS Name            : {FG['wht']}{bbs_name}{RESET}\r\n"
                 f"  {FG['wht']}Applied             : {FG['gry']}{date_str}{RESET}\r\n"
                 f"\r\n"
                 f"  {FG['gry']}Your application is under review. Check back soon.{RESET}\r\n"
             )
 
-        elif req.status == 'approved':
+        elif status == 'approved':
             await self.session.write(
                 f"\r\n  {FG['grn']}{BOLD}Status : APPROVED{RESET}\r\n"
                 f"\r\n"
                 f"  {FG['wht']}Configure your BBS with these credentials:{RESET}\r\n"
                 f"\r\n"
-                f"  {FG['cyan']}Packet ID : {FG['grn']}{BOLD}{req.packet_id}{RESET}\r\n"
-                f"  {FG['cyan']}Password  : {FG['grn']}{BOLD}{req.generated_password or '(contact hub sysop)'}{RESET}\r\n"
+                f"  {FG['cyan']}Packet ID : {FG['grn']}{BOLD}{packet_id}{RESET}\r\n"
+                f"  {FG['cyan']}Password  : {FG['grn']}{BOLD}{generated_password or '(contact hub sysop)'}{RESET}\r\n"
                 f"  {FG['cyan']}Hub FTP   : {FG['wht']}bbs.a-net.fyi  port 21{RESET}\r\n"
                 f"  {FG['cyan']}Download  : {FG['wht']}ANET.qwk{RESET}\r\n"
-                f"  {FG['cyan']}Upload    : {FG['wht']}{req.packet_id}.rep{RESET}\r\n"
+                f"  {FG['cyan']}Upload    : {FG['wht']}{packet_id}.rep{RESET}\r\n"
                 f"\r\n"
-                f"  {FG['gry']}Login to FTP with your Packet ID as the username.{RESET}\r\n"
+                f"  {FG['gry']}Set BOTH \"QWK Username\" and \"QWK Packet ID\" to "
+                f"{packet_id} on your Echomail Network settings -- the FTP "
+                f"login uses the Username field, not the Packet ID field.{RESET}\r\n"
             )
-            if not req.seen_by_applicant:
-                with _app().app_context():
-                    r = _QNR.query.get(req.id)
-                    if r:
-                        r.seen_by_applicant = True
-                        db.session.commit()
 
-        elif req.status == 'denied':
+        elif status == 'denied':
             await self.session.write(
                 f"\r\n  {FG['red']}{BOLD}Status : NOT APPROVED{RESET}\r\n"
                 f"\r\n"
-                f"  {FG['wht']}Your application for {FG['grn']}{req.packet_id}{FG['wht']} was not approved.{RESET}\r\n"
+                f"  {FG['wht']}Your application for {FG['grn']}{packet_id}{FG['wht']} was not approved.{RESET}\r\n"
             )
-            if req.deny_reason:
+            if deny_reason:
                 await self.session.write(
-                    f"  {FG['yel']}Reason : {FG['wht']}{req.deny_reason}{RESET}\r\n"
+                    f"  {FG['yel']}Reason : {FG['wht']}{deny_reason}{RESET}\r\n"
                 )
             await self.session.write(
                 f"\r\n  {FG['gry']}You may apply again with a different packet ID.{RESET}\r\n"
