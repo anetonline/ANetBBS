@@ -247,6 +247,17 @@ def verify(token):
         # row was self-verified. Token gets rotated on next re-register
         # if the email changes.
         db.session.commit()
+        # Notify now, not at initial /register -- that step hasn't
+        # confirmed the registrant controls the contact email yet, so
+        # there's nothing actionable for the sysop until this point.
+        from ..features.notify import notify_admins
+        notify_admins(
+            'msp_join_request',
+            title=f'MSP registry: {entry.host} verified, awaiting approval',
+            body=f'{entry.name} ({entry.sysop or "unknown sysop"}) at '
+                 f'{entry.host} has verified their contact email and is '
+                 f'waiting for approval to join the federation registry.',
+            target_url='/admin/registry/')
     return render_template_string(
         '<h1>Contact email verified ✓</h1>'
         '<p>{{ host }} is now waiting for the registry sysop to approve '

@@ -421,6 +421,20 @@ def register():
         db.session.commit()
         _log_activity(user.id, 'register')
 
+        if nuv_on:
+            # NUV needs an actual sysop click to resolve -- unlike email
+            # verification (self-service, user clicks their own emailed
+            # link, is_verified flips with zero admin involvement), an
+            # NUV-gated account just sits in the queue until someone
+            # goes looking for it under Admin -> Pending Users.
+            from ..features.notify import notify_admins
+            notify_admins(
+                'nuv_pending',
+                title=f'New user pending approval: {user.username}',
+                body=f'{user.username} ({user.email}) registered and is '
+                     f'waiting for NUV sysop approval.',
+                target_url='/admin/pending-users')
+
         # Email verification path — send link and redirect to "check your email" page.
         if ev_on:
             from ..mailer import send_verification_email

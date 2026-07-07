@@ -479,6 +479,18 @@ def _import_message(network, msg_data: dict) -> int:
                         first_seen_at=datetime.utcnow(),
                         last_seen_at=datetime.utcnow(),
                     ))
+                    # Only on first sighting of this (network, tag) pair --
+                    # existing_bad above absorbs every later message for
+                    # the same bad area, so this can't turn into a
+                    # per-message notification flood.
+                    from ..features.notify import notify_admins
+                    notify_admins(
+                        'bad_area',
+                        title=f'Unknown echomail area: {area_tag} on {network.name}',
+                        body=f'Inbound mail arrived tagged for {area_tag!r}, '
+                             f'which this BBS does not carry. Review under '
+                             f'Admin -> Echomail -> Bad Areas.',
+                        target_url='/admin/echomail/bad_areas')
             except Exception as exc:
                 logger.debug("BadAreaLog write failed (table may be absent): %s", exc)
             logger.info("Echomail: dropping msg for unknown area %s on %s",

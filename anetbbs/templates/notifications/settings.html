@@ -12,6 +12,17 @@
         <label class="form-check-label" for="k_{{ kind }}">{{ label }}</label>
     </div>
     {% endfor %}
+    {% if admin_kinds %}
+    <hr>
+    <p class="small text-muted mb-2"><i class="bi bi-shield-check"></i> Sysop: things needing your review</p>
+    {% for kind, label in admin_kinds %}
+    <div class="form-check mb-2">
+        <input type="checkbox" id="k_{{ kind }}" name="{{ kind }}" class="form-check-input"
+               {% if prefs.get(kind, True) %}checked{% endif %}>
+        <label class="form-check-label" for="k_{{ kind }}">{{ label }}</label>
+    </div>
+    {% endfor %}
+    {% endif %}
     <div class="mt-2">
         <button class="btn btn-primary"><i class="bi bi-check"></i> Save</button>
         <a href="{{ url_for('notifications.index') }}" class="btn btn-secondary">Cancel</a>

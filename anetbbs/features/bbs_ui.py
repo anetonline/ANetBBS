@@ -929,6 +929,13 @@ class BBSMenuUI:
                 )
                 db.session.add(req)
                 db.session.commit()
+                from .notify import notify_admins
+                notify_admins(
+                    'qwk_node_app',
+                    title=f'QWK node application: {bbs_name} ({packet_id})',
+                    body=f'{bbs_name} applied for packet ID {packet_id}. '
+                         f'Review under Admin -> Echomail -> Hub -> Node Requests.',
+                    target_url='/admin/echomail/hub/qwk/requests')
 
             await self.session.write(
                 f"\r\n  {FG['grn']}{BOLD}Application submitted!{RESET}\r\n"

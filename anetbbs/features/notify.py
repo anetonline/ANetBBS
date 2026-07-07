@@ -37,6 +37,21 @@ def notify(user_id, kind, title='', body='', target_url=''):
         db.session.rollback()
 
 
+def notify_admins(kind, title='', body='', target_url=''):
+    """Notify every admin user of something needing their review --
+    a new MSP federation join request, a new QWK node application, a
+    new user pending verification, a new bad-area echomail entry, etc.
+    Each admin still gets their own per-kind notify_prefs toggle honored
+    via the normal notify() call."""
+    try:
+        admin_ids = [u.id for u in User.query.filter_by(is_admin=True).all()]
+    except Exception:
+        db.session.rollback()
+        return
+    for admin_id in admin_ids:
+        notify(admin_id, kind, title=title, body=body, target_url=target_url)
+
+
 def notify_mentions(text, sender_name, target_url=''):
     """Scan `text` for @mentions and notify each mentioned user.
     Skips self-mentions, unknown usernames, and users who've blocked

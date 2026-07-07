@@ -45,6 +45,17 @@ _NOTIFY_KINDS = [
     ('achievement',  "Achievement unlocks"),
 ]
 
+# Admin-only: things that need a sysop's review, sent to every admin user
+# via notify_admins() (anetbbs/features/notify.py). Kept separate from
+# _NOTIFY_KINDS so a regular user's settings page doesn't show toggles for
+# notifications they could never receive.
+_ADMIN_NOTIFY_KINDS = [
+    ('msp_join_request', "MSP federation registry join requests"),
+    ('qwk_node_app',     "QWK node applications"),
+    ('nuv_pending',      "New users pending NUV approval"),
+    ('bad_area',         "Unknown/unsubscribed echomail areas (bad area log)"),
+]
+
 
 @notif_bp.route('/settings', methods=['GET', 'POST'])
 @login_required
@@ -57,9 +68,10 @@ def settings():
             prefs = _json.loads(current_user.notify_prefs) or {}
         except (ValueError, TypeError):
             prefs = {}
+    all_kinds = _NOTIFY_KINDS + (_ADMIN_NOTIFY_KINDS if current_user.is_admin else [])
     if request.method == 'POST':
         new_prefs = {}
-        for kind, _ in _NOTIFY_KINDS:
+        for kind, _ in all_kinds:
             new_prefs[kind] = bool(request.form.get(kind))
         current_user.notify_prefs = _json.dumps(new_prefs)
         db.session.commit()
@@ -67,4 +79,6 @@ def settings():
         flash('Notification preferences saved.', 'success')
         return redirect(url_for('notifications.settings'))
     return render_template('notifications/settings.html',
-                           kinds=_NOTIFY_KINDS, prefs=prefs)
+                           kinds=_NOTIFY_KINDS,
+                           admin_kinds=(_ADMIN_NOTIFY_KINDS if current_user.is_admin else []),
+                           prefs=prefs)

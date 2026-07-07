@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.42 — Admin notifications for things needing sysop review (July 2026)
+
+- FEATURE: the sysop no longer has to go looking for MSP federation join requests, QWK node applications, users pending NUV approval, or newly-discovered bad echomail areas — each now sends an in-app notification to every admin account, honoring existing per-kind notification preferences. New toggles appear in Notification Settings for admin accounts. 7 new tests.
+
+---
+
 # ANetBBS v1.0b2.41 — Stop self-referential polls from flooding the poll log (July 2026)
 
 - FIX (live-caught): a hub's own network row pointing at itself was correctly getting skipped every minute by the poller, but logged a full poll-log row each time — dozens of identical entries drowned out real activity within 20 minutes. No longer creates a log row at all for this case.

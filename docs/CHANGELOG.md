@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.41`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.42`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.42 — Admin notifications for things needing sysop review (July 2026)
+
+- FEATURE: the sysop asked "for any incoming request, I should have a notification... I don't know unless I go looking for it," specifically citing MSP federation join requests and QWK node applications. A research pass confirmed the in-app notification system (`anetbbs/features/notify.py`) already existed with per-kind user preferences but had zero call sites for any admin-review event — a sysop had to manually visit each admin page to discover any of them. Added a `notify_admins(kind, ...)` helper (notifies every `is_admin=True` user, each still honoring their own per-kind `notify_prefs` toggle) and wired it into four gaps at their actual creation site: MSP federation registry join requests (fires once the registrant verifies their contact email, not at the earlier unverified-registration step, since that's the first point actually actionable for the sysop), QWK node applications (both the hub-facing API route and the direct-terminal-write path used when someone applies while connected straight to the hub), new users pending NUV approval (deliberately not the separate email-verification path, which is fully self-service and would just be noise), and newly-discovered unknown/bad echomail areas (fires once per area, not once per message, so a large batch of misdirected mail can't flood the inbox). New admin-only preference toggles appear in Notification Settings, visible only to admin accounts. 7 new tests in `tests/test_admin_review_notifications.py`.
 
 ## v1.0b2.41 — Stop self-referential polls from flooding the poll log (July 2026)
 
