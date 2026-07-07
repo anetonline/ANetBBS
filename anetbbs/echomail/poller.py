@@ -189,6 +189,24 @@ def _do_poll(app, network):
     """
     from ..models import db, EchomailMessage, EchomailPollLog
 
+    # Check self-referential BEFORE creating any log row at all -- this
+    # is expected, static, unchanging configuration state (a hub's own
+    # network row pointing at itself), not a real poll attempt, and the
+    # poller loop re-checks every network once a minute. Logging a full
+    # PollLog row for it every single minute drowned the real activity
+    # out of the admin UI's poll log -- live-caught after Jerry's own
+    # hub had been running for under 20 minutes and the log was already
+    # dozens of rows deep. A single debug-level log line (invisible at
+    # the default INFO level) is enough for anyone actually debugging
+    # this specific thing; the web UI shouldn't see it at all.
+    self_ref = _self_referential_reason(network, app)
+    if self_ref:
+        logger.debug("Poller: skipping %s -- %s. This is expected if "
+                     "this install is the hub for this network; peer "
+                     "sysops should point their own install at the hub, "
+                     "not the hub at itself.", network.name, self_ref)
+        return
+
     log = EchomailPollLog(
         network_id=network.id,
         poll_type='both',
@@ -197,19 +215,6 @@ def _do_poll(app, network):
     )
     db.session.add(log)
     db.session.commit()
-
-    self_ref = _self_referential_reason(network, app)
-    if self_ref:
-        logger.warning(
-            "Poller: skipping %s -- %s. This is expected if this install "
-            "is the hub for this network; peer sysops should point their "
-            "own install at the hub, not the hub at itself.",
-            network.name, self_ref)
-        log.status = 'skipped'
-        log.error_message = f'Skipped: {self_ref}'
-        log.completed_at = datetime.utcnow()
-        db.session.commit()
-        return
 
     try:
         from ..models import NetmailMessage

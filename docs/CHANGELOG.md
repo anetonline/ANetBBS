@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.40`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.41`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.41 — Stop self-referential polls from flooding the poll log (July 2026)
+
+- FIX (live-caught): a hub's own network row pointing at itself (e.g. a QWK hub's local "ANotherNetwork" rows) gets correctly skipped by the poller every minute, but was logging a full `EchomailPollLog` row each time — dozens of identical "skipped" entries drowned out real poll activity in the admin UI within 20 minutes of uptime. This is static, unchanging configuration state, not a real poll attempt, so it no longer creates a log row at all; a single debug-level line in the application log (invisible at the default INFO level) is enough for anyone actually debugging this specific thing.
 
 ## v1.0b2.40 — Fix total QWK message loss on every packet + Subscribe to All (July 2026)
 

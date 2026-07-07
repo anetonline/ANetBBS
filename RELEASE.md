@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.41 — Stop self-referential polls from flooding the poll log (July 2026)
+
+- FIX (live-caught): a hub's own network row pointing at itself was correctly getting skipped every minute by the poller, but logged a full poll-log row each time — dozens of identical entries drowned out real activity within 20 minutes. No longer creates a log row at all for this case.
+
+---
+
 # ANetBBS v1.0b2.40 — Fix total QWK message loss + Subscribe to All (July 2026)
 
 - FIX (live-caught, critical): every QWK message to every node was silently vanishing on the wire — the hub's outbound packet writer had a byte-offset bug that made the conference number unreadable on the client side, so every message got dropped during parsing with zero error reported anywhere. A poll always showed clean "success, 0 received" no matter how many real messages existed. Fixed; 3 new round-trip tests verified to reproduce total message loss before the fix and pass after.

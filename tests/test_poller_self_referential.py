@@ -39,6 +39,13 @@ class SelfReferentialPollTests(unittest.TestCase):
                 os.remove(path)
 
     def test_binkp_network_dialing_its_own_address_gets_skipped(self):
+        """Self-referential skip creates NO poll-log row at all -- this
+        is static, unchanging config state re-checked every minute by
+        the poller loop, not a real poll attempt. Logging a full row
+        every minute drowned real poll activity out of the admin UI's
+        log (live-caught after ~20 minutes of runtime). A single
+        debug-level application log line is enough; the web UI should
+        never see this at all."""
         from anetbbs.models import db, EchomailNetwork, EchomailPollLog
         from anetbbs.echomail.poller import _do_poll
 
@@ -53,12 +60,13 @@ class SelfReferentialPollTests(unittest.TestCase):
             db.session.commit()
             net_id = net.id
 
+            before = EchomailPollLog.query.filter_by(network_id=net_id).count()
             _do_poll(self.app, net)
+            after = EchomailPollLog.query.filter_by(network_id=net_id).count()
 
-            log = (EchomailPollLog.query.filter_by(network_id=net_id)
-                   .order_by(EchomailPollLog.id.desc()).first())
-            self.assertEqual(log.status, 'skipped')
-            self.assertIn('our_address', log.error_message)
+            self.assertEqual(before, after,
+                             'self-referential skip should not create any '
+                             'EchomailPollLog row')
 
     def test_binkp_network_with_different_addresses_is_not_flagged(self):
         from anetbbs.echomail.poller import _self_referential_reason
