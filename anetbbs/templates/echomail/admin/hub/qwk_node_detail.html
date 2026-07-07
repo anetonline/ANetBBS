@@ -52,7 +52,15 @@
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-chat-square-text"></i> Conference Subscriptions</span>
-                <span class="badge bg-primary">{{ subscriptions|length }} subscribed</span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary">{{ subscriptions|length }} subscribed</span>
+                    <form method="POST" action="{{ url_for('hub_admin.qwk_subscribe_all', node_id=node.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Subscribe to every active area on QWK-transport networks">
+                            <i class="bi bi-check2-all"></i> Subscribe to All
+                        </button>
+                    </form>
+                </div>
             </div>
             <div class="card-body p-0" style="max-height:360px; overflow-y:auto;">
                 {% if subscriptions %}

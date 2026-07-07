@@ -453,6 +453,41 @@ def qwk_subscribe(node_id):
     return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
 
 
+@hub_admin_bp.route('/qwk/<int:node_id>/subscribe-all', methods=['POST'])
+@login_required
+@_admin_required
+def qwk_subscribe_all(node_id):
+    """Subscribe a node to every active area on QWK-transport networks in
+    one click, instead of clicking Subscribe once per area. Scoped to
+    QWK-type networks specifically -- a QWK node has no business
+    receiving areas that only exist on a BinkP-only network."""
+    node = QWKNode.query.get_or_404(node_id)
+    already = {s.echo_area_id for s in
+              QWKNodeLastSent.query.filter_by(node_id=node_id).all()}
+    areas = (EchoArea.query
+             .join(EchomailNetwork, EchoArea.network_id == EchomailNetwork.id)
+             .filter(EchoArea.is_active == True,
+                     EchomailNetwork.network_type == 'qwk')
+             .order_by(EchoArea.tag)
+             .all())
+    next_conf = (db.session.query(db.func.max(QWKNodeLastSent.conf_number))
+                .filter_by(node_id=node_id).scalar() or 0) + 1
+    added = 0
+    for area in areas:
+        if area.id in already:
+            continue
+        db.session.add(QWKNodeLastSent(
+            node_id=node_id, echo_area_id=area.id, conf_number=next_conf))
+        next_conf += 1
+        added += 1
+    if added:
+        db.session.commit()
+        flash(f'Subscribed {node.packet_id} to {added} area(s).', 'success')
+    else:
+        flash(f'{node.packet_id} is already subscribed to every QWK area.', 'info')
+    return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
+
+
 @hub_admin_bp.route('/qwk/<int:node_id>/reset', methods=['POST'])
 @login_required
 @_admin_required

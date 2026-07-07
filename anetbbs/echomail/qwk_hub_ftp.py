@@ -145,8 +145,10 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
     hdr[0:6] = b'Welcom'
     out += bytes(hdr)
 
+    msg_counter = 0
     for conf_num, msgs in sorted(messages_by_conf.items()):
         for msg in msgs:
+            msg_counter += 1
             from_name = (msg.from_name or 'SysOp')[:25]
             to_name   = (msg.to_name or 'All')[:25]
             subject   = (msg.subject or '')[:25]
@@ -160,20 +162,40 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             # Number of 128-byte blocks needed for header + body.
             total_blocks = 1 + (len(body_bytes) + BLOCK - 1) // BLOCK
 
+            # QWK message header layout (128 bytes) -- this must match
+            # what QWKClient._parse_messages_dat() (anetbbs/echomail/qwk.py)
+            # expects on the reading side, which is the real, standard QWK
+            # format (verified against real Dove-Net packets). A previous
+            # version of this writer had every field from byte 113 onward
+            # at the wrong offset (off by several bytes) and used binary
+            # encoding for num_chunks where the format requires 6-char
+            # ASCII text -- every message silently failed to parse as a
+            # result (conf_num read as garbage, dropped as "not advertised
+            # in CONTROL.DAT"), live-caught testing the real ANotherNetwork
+            # QWK flow end-to-end (0 messages ever received, no error).
+            #   byte    0      : status (0xE1 = unread public)
+            #   bytes   1:8    : message number (7-char ASCII)
+            #   bytes   8:21   : date+time (13-char ASCII, "MM-DD-YYHH:MM")
+            #   bytes  21:46   : to (25 chars)
+            #   bytes  46:71   : from (25 chars)
+            #   bytes  71:96   : subject (25 chars)
+            #   bytes  96:108  : password (12 chars, unused)
+            #   bytes 108:116  : reference message number (8-char ASCII)
+            #   bytes 116:122  : number of 128-byte blocks (6-char ASCII!)
+            #   byte   122     : active flag (0xE1=active, 0xE2=killed)
+            #   bytes 123:125  : conference number (binary, little-endian uint16)
             header = bytearray(BLOCK)
-            header[0]     = 0xe1  # status: unread public
-            header[1:7]   = f'{0:06d}'.encode()  # msgnum placeholder
-            header[7:15]  = date_str.encode()[:8].ljust(8)
-            header[15:21] = time_str.encode()[:6].ljust(6)
-            header[21:46] = to_name.encode('cp437', errors='replace')[:25].ljust(25)
-            header[46:71] = from_name.encode('cp437', errors='replace')[:25].ljust(25)
-            header[71:96] = subject.encode('cp437', errors='replace')[:25].ljust(25)
-            header[96:113]= b' ' * 17  # password
-            header[113:117] = b'0000'   # references
-            struct.pack_into('<H', header, 116, total_blocks)
-            header[119] = 0  # alive
-            struct.pack_into('<H', header, 120, conf_num)
-            header[122:124] = b'\x00\x00'  # msgnum high bytes
+            header[0]      = 0xe1
+            header[1:8]    = f'{msg_counter:07d}'.encode()[:7]
+            header[8:21]   = (date_str + time_str).encode()[:13].ljust(13)
+            header[21:46]  = to_name.encode('cp437', errors='replace')[:25].ljust(25)
+            header[46:71]  = from_name.encode('cp437', errors='replace')[:25].ljust(25)
+            header[71:96]  = subject.encode('cp437', errors='replace')[:25].ljust(25)
+            header[96:108] = b' ' * 12   # password, unused
+            header[108:116] = b' ' * 8   # reference message number -- no reply-threading yet
+            header[116:122] = f'{total_blocks:<6d}'.encode()[:6]
+            header[122]    = 0xe1        # active
+            struct.pack_into('<H', header, 123, conf_num)
             out += bytes(header)
 
             # Body blocks (padded with spaces).

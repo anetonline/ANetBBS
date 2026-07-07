@@ -1,3 +1,10 @@
+# ANetBBS v1.0b2.40 — Fix total QWK message loss + Subscribe to All (July 2026)
+
+- FIX (live-caught, critical): every QWK message to every node was silently vanishing on the wire — the hub's outbound packet writer had a byte-offset bug that made the conference number unreadable on the client side, so every message got dropped during parsing with zero error reported anywhere. A poll always showed clean "success, 0 received" no matter how many real messages existed. Fixed; 3 new round-trip tests verified to reproduce total message loss before the fix and pass after.
+- FEATURE: "Subscribe to All" button on a QWK node's detail page — one click instead of one area at a time. 3 new tests.
+
+---
+
 # ANetBBS v1.0b2.39 — Fix QWK node FTP home directory path-doubling (July 2026)
 
 - FIX (live-caught, real bug, affects every QWK node): a QWK node's FTP home directory got computed with a doubled `qwk-hub/qwk-hub` path segment, landing the client's session one directory away from where the packet actually gets generated. Login always succeeded and packet generation always "succeeded" silently, but `RETR` always failed with `550 No such file or directory` regardless of correct credentials or config. Found live testing the real ANotherNetwork QWK flow end-to-end, after ruling out network topology, Python version, eventlet, and stored credentials one at a time. 2 new tests.

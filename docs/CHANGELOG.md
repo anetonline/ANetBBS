@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.39`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.40`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.40 — Fix total QWK message loss on every packet + Subscribe to All (July 2026)
+
+- FIX (live-caught, critical, affects every message to every QWK node ever): `_build_messages_dat()` in `anetbbs/echomail/qwk_hub_ftp.py` wrote every message-header field from byte 113 onward at the wrong offset compared to what `_parse_messages_dat()` (the reading side, verified against real Dove-Net packets) expects — including using binary encoding for the block-count field where the real QWK format requires 6-char ASCII text. The conference number specifically landed 3 bytes off from where the reader looks for it, so every message's conference number came back as garbage on read — which never matched a real conference in CONTROL.DAT, so every single message was silently dropped *inside the parser itself*, before ever reaching the poller's "received" count. Net effect: a QWK poll would report clean "success" with 0 messages received and no error at all, no matter how many real messages existed in the subscribed areas on the hub — every message, to every node, always silently vanished on the wire. Found live testing the real ANotherNetwork QWK flow end-to-end, after confirming real messages existed on the hub and a fresh high-water mark, ruling out every other explanation first. Fixed by rewriting the header to the correct, verified byte layout. 3 new tests in `tests/test_qwk_packet_roundtrip.py` doing a full hub-write → client-parse round trip, verified to reproduce total message loss before the fix and pass after.
+- FEATURE: Hub Management → QWK Nodes → node detail gets a "Subscribe to All" button, adding every active area on QWK-transport networks in one click instead of one area at a time. Deliberately scoped to QWK-type networks only — a QWK node has no business receiving areas that only exist on a BinkP-only network. 3 new tests in `tests/test_qwk_subscribe_all.py`.
 
 ## v1.0b2.39 — Fix QWK node FTP home directory path-doubling (July 2026)
 
