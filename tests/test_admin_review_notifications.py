@@ -224,6 +224,71 @@ class AdminReviewNotificationTests(unittest.TestCase):
                              'bad_area notification should fire once per '
                              'newly-discovered area, not once per message')
 
+    # --- Network join application (5th kind, added with the public
+    # "apply to join this network" feature) --------------------------
+
+    def test_network_join_app_notifies_admins(self):
+        from anetbbs.models import db, NetworkJoinConfig, Notification
+
+        with self.app.app_context():
+            admin_id = self._make_admin('adm_netjoin')
+            cfg = NetworkJoinConfig.get()
+            cfg.enabled = True
+            cfg.network_name = 'TestJoinNet'
+            db.session.commit()
+
+        client = self.app.test_client()
+        get_resp = client.get('/join/')
+        import re
+        token = re.search(r'name="csrf_token" value="([^"]+)"',
+                          get_resp.get_data(as_text=True))
+        resp = client.post('/join/', data={
+            'csrf_token': token.group(1) if token else '',
+            'name': 'NotifyTester', 'bbs_name': 'NotifyTestBBS',
+            'email': 'notify@example.com', 'binkp_ftn_address': '1:1/888',
+            'rules_ack': 'y',
+        }, headers={'X-Forwarded-For': '203.0.113.10'})
+        self.assertEqual(resp.status_code, 200)
+
+        with self.app.app_context():
+            n = Notification.query.filter_by(
+                user_id=admin_id, kind='network_join_app').first()
+            self.assertIsNotNone(n)
+            self.assertIn('NotifyTestBBS', n.title)
+
+    def test_network_join_app_honors_admin_opt_out(self):
+        from anetbbs.models import db, User, NetworkJoinConfig, Notification
+        import json as _json
+
+        with self.app.app_context():
+            admin = User(username='adm_netjoin_optout', is_admin=True,
+                        email='adm_netjoin_optout@example.com')
+            admin.set_password('x')
+            admin.notify_prefs = _json.dumps({'network_join_app': False})
+            db.session.add(admin)
+            db.session.commit()
+            admin_id = admin.id
+            cfg = NetworkJoinConfig.get()
+            cfg.enabled = True
+            db.session.commit()
+
+        client = self.app.test_client()
+        get_resp = client.get('/join/')
+        import re
+        token = re.search(r'name="csrf_token" value="([^"]+)"',
+                          get_resp.get_data(as_text=True))
+        client.post('/join/', data={
+            'csrf_token': token.group(1) if token else '',
+            'name': 'OptOutTester', 'bbs_name': 'OptOutTestBBS',
+            'email': 'optout@example.com', 'binkp_ftn_address': '1:1/889',
+            'rules_ack': 'y',
+        }, headers={'X-Forwarded-For': '203.0.113.20'})
+
+        with self.app.app_context():
+            n = Notification.query.filter_by(
+                user_id=admin_id, kind='network_join_app').first()
+            self.assertIsNone(n, 'admin opted out of this kind -- should not notify')
+
 
 if __name__ == '__main__':
     unittest.main()

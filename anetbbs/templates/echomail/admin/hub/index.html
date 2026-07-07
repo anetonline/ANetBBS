@@ -67,6 +67,10 @@
                     <i class="bi bi-person-plus"></i> Node Requests
                     {% if pending_requests %}<span class="badge bg-light text-dark">{{ pending_requests }}</span>{% endif %}
                 </a>
+                <a href="{{ url_for('hub_admin.join_requests') }}" class="btn btn-{% if pending_join_requests %}danger{% else %}secondary{% endif %}">
+                    <i class="bi bi-file-earmark-person"></i> Join Requests
+                    {% if pending_join_requests %}<span class="badge bg-light text-dark">{{ pending_join_requests }}</span>{% endif %}
+                </a>
                 <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-secondary">
                     <i class="bi bi-arrow-left"></i> Echomail Dashboard
                 </a>
@@ -99,6 +103,13 @@
                             <i class="bi bi-file-earmark-arrow-up"></i> TIC / File Distribution
                             {% if hatch_pending %}<span class="badge bg-warning text-dark ms-1">{{ hatch_pending }}</span>{% endif %}
                             {% if hatch_failed %}<span class="badge bg-danger ms-1">{{ hatch_failed }}</span>{% endif %}
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if gen_tab == 'join' %}active{% endif %}"
+                           href="{{ url_for('hub_admin.index', gen_tab='join') }}#genTabs">
+                            <i class="bi bi-file-earmark-person"></i> Join Form
+                            {% if pending_join_requests %}<span class="badge bg-danger ms-1">{{ pending_join_requests }}</span>{% endif %}
                         </a>
                     </li>
                 </ul>
@@ -200,6 +211,101 @@
                         </div>
                     </div>
                 </div>
+
+                {% elif gen_tab == 'join' %}
+                <p class="text-muted small">
+                    Lets anyone apply to join your network from a public
+                    web page — read the rules, download the full
+                    infopack, check a box confirming they read the
+                    rules, then submit. Applications land in
+                    <a href="{{ url_for('hub_admin.join_requests') }}">Join Requests</a>
+                    for you to review.
+                </p>
+
+                <form method="post" action="{{ url_for('hub_admin.join_config_save') }}" class="row g-2 mb-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input type="checkbox" id="join_enabled" name="enabled" class="form-check-input"
+                                   {% if join_cfg.enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="join_enabled">
+                                Enable the public join form
+                                {% if join_cfg.enabled %}
+                                <a href="{{ url_for('network_join.apply') }}" target="_blank" class="ms-1">
+                                    <i class="bi bi-box-arrow-up-right"></i> view live
+                                </a>
+                                {% endif %}
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Network Name</label>
+                        <input type="text" name="network_name" class="form-control"
+                               value="{{ join_cfg.network_name or '' }}" placeholder="e.g. ANotherNetwork">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Intro Text (shown above the rules)</label>
+                        <textarea name="intro_text" class="form-control" rows="2">{{ join_cfg.intro_text or '' }}</textarea>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-check"></i> Save Settings
+                        </button>
+                    </div>
+                </form>
+
+                <hr>
+
+                <h6>Infopack</h6>
+                {% if join_cfg.infopack_filename %}
+                <p class="small">
+                    Current: <code>{{ join_cfg.infopack_original_filename }}</code>
+                    ({{ join_cfg.infopack_size }} bytes, uploaded
+                    {{ join_cfg.infopack_uploaded_at.strftime('%Y-%m-%d %H:%M UTC') if join_cfg.infopack_uploaded_at else '?' }})
+                    — <a href="{{ url_for('network_join.download_infopack') }}">download</a>
+                </p>
+                {% if join_txt_members %}
+                <form method="post" action="{{ url_for('hub_admin.join_pick_rules_file') }}" class="row g-2 align-items-end mb-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-auto">
+                        <label class="form-label small mb-0">Rules text source</label>
+                        <select name="member_name" class="form-select form-select-sm">
+                            {% for member_name, size in join_txt_members %}
+                            <option value="{{ member_name }}" {% if member_name == join_cfg.rules_member_name %}selected{% endif %}>
+                                {{ member_name }} ({{ size }} bytes)
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Use This File</button>
+                    </div>
+                </form>
+                {% endif %}
+                {% if join_cfg.rules_text %}
+                <div class="card mb-3">
+                    <div class="card-header small">Rules preview (from <code>{{ join_cfg.rules_member_name }}</code>)</div>
+                    <div class="card-body" style="max-height:250px; overflow-y:auto;">
+                        <pre style="white-space:pre-wrap; font-family:inherit; font-size:0.85rem;">{{ join_cfg.rules_text }}</pre>
+                    </div>
+                </div>
+                {% endif %}
+                {% else %}
+                <p class="text-muted small">No infopack uploaded yet.</p>
+                {% endif %}
+
+                <form method="post" action="{{ url_for('hub_admin.join_upload_infopack') }}"
+                      enctype="multipart/form-data" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-auto">
+                        <input type="file" name="infopack" accept=".zip" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-upload"></i> Upload Infopack
+                        </button>
+                    </div>
+                </form>
                 {% endif %}
             </div>
         </div>

@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.43 — Public "apply to join this network" form (July 2026)
+
+- FEATURE: any hub sysop can now enable a public page where anyone can read the rules, download the infopack, confirm they read the rules, and apply to join — one form covering both BinkP and QWK. Configured from Hub Management's new "Join Form" tab: upload one zip, the system finds the rules text automatically. Applications go to a review queue, notify every admin, and on approval auto-create the right node type(s) with hub-generated credentials — emailed to the applicant if SMTP relay is set up. 29 new tests.
+
+---
+
 # ANetBBS v1.0b2.42 — Admin notifications for things needing sysop review (July 2026)
 
 - FEATURE: the sysop no longer has to go looking for MSP federation join requests, QWK node applications, users pending NUV approval, or newly-discovered bad echomail areas — each now sends an in-app notification to every admin account, honoring existing per-kind notification preferences. New toggles appear in Notification Settings for admin accounts. 7 new tests.

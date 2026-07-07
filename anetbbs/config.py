@@ -218,6 +218,7 @@ class Config:
     AVATAR_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
     UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
     AVATARS_DIR = os.path.join(DATA_DIR, 'avatars')
+    NETWORK_JOIN_DIR = os.path.join(DATA_DIR, 'network_join')
     
     # Logging
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')

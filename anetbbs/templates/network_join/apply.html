@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Join {{ cfg.network_name or 'the Network' }} - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-9">
+        <div class="bbs-header">
+            <h1><i class="bi bi-diagram-3"></i> Join {{ cfg.network_name or 'the Network' }}</h1>
+        </div>
+
+        {% if cfg.intro_text %}
+        <div class="card mb-3">
+            <div class="card-body">{{ cfg.intro_text }}</div>
+        </div>
+        {% endif %}
+
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-file-earmark-text"></i> Rules &amp; Info</span>
+                {% if cfg.infopack_filename %}
+                <a href="{{ url_for('network_join.download_infopack') }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-download"></i> Download Full Infopack
+                </a>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if cfg.rules_text %}
+                <pre style="white-space:pre-wrap; font-family:inherit; max-height:400px; overflow-y:auto;">{{ cfg.rules_text }}</pre>
+                {% else %}
+                <p class="text-muted">No rules text available yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><i class="bi bi-pencil-square"></i> Application</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('network_join.apply') }}">
+                    {{ form.hidden_tag() }}
+
+                    {% for field in [form.name, form.location, form.bbs_name, form.bbs_software,
+                                     form.bbs_os, form.telnet_address, form.website_url, form.email] %}
+                    <div class="mb-3">
+                        {{ field.label(class="form-label") }}
+                        {{ field(class="form-control" + (" is-invalid" if field.errors else "")) }}
+                        {% if field.errors %}
+                        <div class="invalid-feedback">{% for e in field.errors %}{{ e }}{% endfor %}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+
+                    <hr>
+                    <p class="small text-muted">Fill in either section below (or both) — leave the other blank.</p>
+
+                    <div class="card mb-3 border-secondary">
+                        <div class="card-header">BinkP</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.binkp_ftn_address.label(class="form-label") }}
+                                {{ form.binkp_ftn_address(class="form-control" + (" is-invalid" if form.binkp_ftn_address.errors else "")) }}
+                                {% if form.binkp_ftn_address.errors %}
+                                <div class="invalid-feedback">{% for e in form.binkp_ftn_address.errors %}{{ e }}{% endfor %}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-0">
+                                {{ form.binkp_crash_or_hold.label(class="form-label") }}
+                                {{ form.binkp_crash_or_hold(class="form-control") }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card mb-3 border-secondary">
+                        <div class="card-header">QWK / Offline-Mail</div>
+                        <div class="card-body mb-0">
+                            {{ form.qwk_packet_id.label(class="form-label") }}
+                            {{ form.qwk_packet_id(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.notes.label(class="form-label") }}
+                        {{ form.notes(class="form-control", rows=3) }}
+                    </div>
+
+                    <div class="form-check mb-3">
+                        {{ form.rules_ack(class="form-check-input" + (" is-invalid" if form.rules_ack.errors else "")) }}
+                        {{ form.rules_ack.label(class="form-check-label") }}
+                        {% if form.rules_ack.errors %}
+                        <div class="invalid-feedback">{% for e in form.rules_ack.errors %}{{ e }}{% endfor %}</div>
+                        {% endif %}
+                    </div>
+
+                    {{ form.submit(class="btn btn-primary") }}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -2903,6 +2903,95 @@ class QWKNodeRequest(db.Model):
         return f'<QWKNodeRequest {self.packet_id} [{self.status}]>'
 
 
+class NetworkJoinConfig(db.Model):
+    """Singleton config for the public "apply to join this network" page
+    (anetbbs/web/network_join.py). One config per hub install, not per
+    EchomailNetwork row -- a hub's BinkP and QWK EchomailNetwork rows
+    share one set of areas and one real-world join process (a real
+    applicant's infopack has a single application template covering
+    both transports), so one join-form config covers both.
+    """
+    __tablename__ = 'network_join_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=False, nullable=False)
+    network_name = db.Column(db.String(100), default='')
+    intro_text = db.Column(db.Text)
+    infopack_filename = db.Column(db.String(255))
+    infopack_original_filename = db.Column(db.String(255))
+    infopack_uploaded_at = db.Column(db.DateTime)
+    infopack_size = db.Column(db.Integer)
+    rules_member_name = db.Column(db.String(255))
+    rules_text = db.Column(db.Text)
+    rules_text_extracted_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    @classmethod
+    def get(cls):
+        """Return the singleton config row, creating it (disabled) if absent."""
+        row = cls.query.first()
+        if row is None:
+            row = cls()
+            db.session.add(row)
+            db.session.commit()
+        return row
+
+
+class NetworkJoinRequest(db.Model):
+    """A public application to join this hub's network, submitted via
+    the anonymous /join/ web form. Generic across transports -- an
+    applicant may fill in BinkP details, QWK details, or both, matching
+    the real-world infopack application template (see NetworkJoinConfig)
+    that asks for both in one form.
+
+    No password-input fields anywhere: the real session/download
+    password is always hub-generated at approval time (see
+    approve_join_request in anetbbs/web/hub_admin.py), mirroring
+    QWKNodeRequest's existing approval flow -- never trust a credential
+    proposed by an unauthenticated web submitter.
+    """
+    __tablename__ = 'network_join_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Applicant-supplied, general info
+    name = db.Column(db.String(100))
+    location = db.Column(db.String(150))
+    bbs_name = db.Column(db.String(100), nullable=False)
+    bbs_software = db.Column(db.String(100))
+    bbs_os = db.Column(db.String(100))
+    telnet_address = db.Column(db.String(200))
+    website_url = db.Column(db.String(400))
+    email = db.Column(db.String(200), nullable=False)
+    # BinkP section -- blank if not requesting BinkP
+    binkp_ftn_address = db.Column(db.String(60))
+    binkp_crash_or_hold = db.Column(db.String(10))
+    # QWK section -- blank if not requesting QWK
+    qwk_packet_id = db.Column(db.String(8))
+    notes = db.Column(db.Text)
+    # The read-and-checked rules gate. Rejected server-side on submit if
+    # not true, not just disabled client-side.
+    rules_ack = db.Column(db.Boolean, nullable=False, default=False)
+    # Submission meta
+    status = db.Column(db.String(20), default='pending', index=True)
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    # Review
+    reviewed_at = db.Column(db.DateTime)
+    reviewed_by = db.Column(db.String(100))
+    deny_reason = db.Column(db.Text)
+    # Approval output -- zero, one, or two of these get set depending on
+    # which transport section(s) the applicant filled in.
+    binkp_node_id = db.Column(db.Integer, db.ForeignKey('binkp_nodes.id'), nullable=True)
+    qwk_node_id = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'), nullable=True)
+    generated_binkp_password = db.Column(db.String(50))
+    generated_qwk_password = db.Column(db.String(50))
+
+    def __repr__(self):
+        return f'<NetworkJoinRequest {self.bbs_name} [{self.status}]>'
+
+
 class EbookCache(db.Model):
     """Fetched-once, cached-forever ebook text. Book content never
     changes once published, so unlike RssItem (re-polled periodically)

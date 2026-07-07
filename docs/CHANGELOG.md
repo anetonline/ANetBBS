@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.42`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.43`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.43 — Public "apply to join this network" form (July 2026)
+
+- FEATURE: a hub sysop can now enable a public web page (`/join/`) where anyone can apply to join their echomail network — read the rules, download the full infopack, check a box confirming they read the rules, then submit an application covering both BinkP and QWK transports in one form (leave either section blank if not applicable). Configured from Hub Management's new "Join Form" tab: enable the feature, upload a single infopack zip, and the system auto-picks the largest `.txt` member inside as the rules text (correctly picks `annet.txt` over `readme.txt`/`systems.txt` in a real-world infopack), with a dropdown to override if the auto-pick is wrong. Applications land in a new "Join Requests" review queue (mirrors the existing QWK node request flow) and notify every admin via the notification system built earlier this release cycle. On approval, creates a `BinkPNode` and/or `QWKNode` — whichever transport(s) the applicant filled in, zero, one, or both — with hub-generated passwords (never applicant-supplied, matching the existing QWK approval rule), and emails the applicant their credentials if SMTP relay is configured (falls back to a flash message telling the sysop to relay them manually if not). Denials can include a reason, also emailed if SMTP is set up. Rate-limited per IP to guard the fully public, unauthenticated form against spam. Not hardcoded to any one network — any sysop running their own ANetBBS hub can enable this and upload their own infopack. 29 new tests across `tests/test_network_join.py` and extensions to `tests/test_admin_review_notifications.py`.
 
 ## v1.0b2.42 — Admin notifications for things needing sysop review (July 2026)
 

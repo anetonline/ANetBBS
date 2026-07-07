@@ -82,6 +82,7 @@ def create_app(config_name=None):
     os.makedirs(app.config['DATA_DIR'], exist_ok=True)
     os.makedirs(app.config.get('UPLOADS_DIR', os.path.join(app.config['DATA_DIR'], 'uploads')), exist_ok=True)
     os.makedirs(app.config.get('AVATARS_DIR', os.path.join(app.config['DATA_DIR'], 'avatars')), exist_ok=True)
+    os.makedirs(app.config.get('NETWORK_JOIN_DIR', os.path.join(app.config['DATA_DIR'], 'network_join')), exist_ok=True)
     
     # Initialize extensions
     db.init_app(app)
@@ -339,6 +340,7 @@ def create_app(config_name=None):
     from .web.wiki import wiki_bp
     from .web.hub_admin import hub_admin_bp
     from .web.qwk_hub import qwk_hub_bp
+    from .web.network_join import network_join_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -355,6 +357,7 @@ def create_app(config_name=None):
     app.register_blueprint(hub_admin_bp)
     app.register_blueprint(qwk_hub_bp)
     csrf.exempt(qwk_hub_bp)   # QWK nodes use HTTP Basic Auth, not CSRF tokens
+    app.register_blueprint(network_join_bp)  # real browser form -- keeps CSRF
     app.register_blueprint(games_bp)
     app.register_blueprint(games_admin_bp)
     app.register_blueprint(ebooks_bp)

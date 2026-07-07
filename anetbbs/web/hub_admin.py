@@ -15,6 +15,8 @@ local queue instead of the real hub's -- "all the sysops try to put in
 for a node and it goes to their system." Gated with a blueprint-wide
 before_request check below.
 """
+import os
+
 from flask import (Blueprint, render_template, redirect, url_for,
                    flash, request, abort, jsonify, current_app)
 from flask_login import login_required, current_user
@@ -25,7 +27,7 @@ from flask_wtf import FlaskForm
 
 from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNode, QWKNodeLastSent, EchoArea, EchomailNetwork,
-                       QWKNodeRequest)
+                       QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest)
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -100,8 +102,18 @@ def index():
     nodelist_event  = _row_view(nodelist_ev_row) if nodelist_ev_row else None
     hatch_pending   = HatchQueue.query.filter_by(status='pending').count()
     hatch_failed    = HatchQueue.query.filter_by(status='failed').count()
+    join_cfg        = NetworkJoinConfig.get()
+    pending_join_requests = NetworkJoinRequest.query.filter_by(status='pending').count()
+    from ..echomail.network_join import list_txt_members
+    join_txt_members = []
+    if join_cfg.infopack_filename:
+        join_zip_path = os.path.join(
+            current_app.config.get('NETWORK_JOIN_DIR',
+                                   os.path.join(current_app.config['DATA_DIR'], 'network_join')),
+            join_cfg.infopack_filename)
+        join_txt_members = list_txt_members(join_zip_path)
     gen_tab = request.args.get('gen_tab', 'nodelist')
-    if gen_tab not in ('nodelist', 'qwk', 'tic'):
+    if gen_tab not in ('nodelist', 'qwk', 'tic', 'join'):
         gen_tab = 'nodelist'
     return render_template(
         'echomail/admin/hub/index.html',
@@ -112,6 +124,9 @@ def index():
         nodelist_event=nodelist_event,
         hatch_pending=hatch_pending,
         hatch_failed=hatch_failed,
+        join_cfg=join_cfg,
+        pending_join_requests=pending_join_requests,
+        join_txt_members=join_txt_members,
         gen_tab=gen_tab,
     )
 
@@ -642,6 +657,244 @@ def deny_qwk_request(req_id):
     db.session.commit()
     flash(f'Request from {req.bbs_name} ({req.packet_id}) denied.', 'info')
     return redirect(url_for('hub_admin.qwk_node_requests'))
+
+
+# ---------------------------------------------------------------------------
+# Network join form — public "apply to join this network" page config +
+# application review queue. See anetbbs/web/network_join.py for the
+# public-facing side.
+# ---------------------------------------------------------------------------
+
+def _join_dir():
+    return current_app.config.get(
+        'NETWORK_JOIN_DIR',
+        os.path.join(current_app.config['DATA_DIR'], 'network_join'))
+
+
+@hub_admin_bp.route('/join/config', methods=['POST'])
+@login_required
+@_admin_required
+def join_config_save():
+    cfg = NetworkJoinConfig.get()
+    cfg.enabled = bool(request.form.get('enabled'))
+    cfg.network_name = (request.form.get('network_name') or '').strip()[:100]
+    cfg.intro_text = (request.form.get('intro_text') or '').strip()
+    db.session.commit()
+    flash('Join form settings saved.', 'success')
+    return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+
+@hub_admin_bp.route('/join/upload', methods=['POST'])
+@login_required
+@_admin_required
+def join_upload_infopack():
+    import datetime
+    from werkzeug.utils import secure_filename
+    from ..echomail.network_join import auto_pick_rules_member, extract_member_text
+
+    f = request.files.get('infopack')
+    if not f or not f.filename:
+        flash('No file selected.', 'warning')
+        return redirect(url_for('hub_admin.index', gen_tab='join'))
+    if not f.filename.lower().endswith('.zip'):
+        flash('Infopack must be a .zip file.', 'danger')
+        return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+    cfg = NetworkJoinConfig.get()
+    original_name = f.filename
+    stored_name = secure_filename(f.filename) or 'infopack.zip'
+    join_dir = _join_dir()
+    os.makedirs(join_dir, exist_ok=True)
+    dest = os.path.join(join_dir, stored_name)
+    f.save(dest)
+
+    cfg.infopack_filename = stored_name
+    cfg.infopack_original_filename = original_name
+    cfg.infopack_uploaded_at = datetime.datetime.utcnow()
+    cfg.infopack_size = os.path.getsize(dest)
+
+    picked = auto_pick_rules_member(dest)
+    if picked:
+        cfg.rules_member_name = picked
+        cfg.rules_text = extract_member_text(dest, picked)
+        cfg.rules_text_extracted_at = datetime.datetime.utcnow()
+        flash(f'Infopack uploaded. Auto-picked "{picked}" as the rules text '
+              f'— override below if that\'s wrong.', 'success')
+    else:
+        cfg.rules_member_name = None
+        cfg.rules_text = None
+        flash('Infopack uploaded, but it has no .txt files inside — '
+              'pick a rules file manually is not possible without one.', 'warning')
+    db.session.commit()
+    return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+
+@hub_admin_bp.route('/join/rules-file', methods=['POST'])
+@login_required
+@_admin_required
+def join_pick_rules_file():
+    import datetime
+    from ..echomail.network_join import extract_member_text
+    cfg = NetworkJoinConfig.get()
+    member = (request.form.get('member_name') or '').strip()
+    if not cfg.infopack_filename or not member:
+        flash('No infopack uploaded yet.', 'warning')
+        return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+    zip_path = os.path.join(_join_dir(), cfg.infopack_filename)
+    text = extract_member_text(zip_path, member)
+    if text is None:
+        flash(f'Could not extract "{member}" from the infopack.', 'danger')
+        return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+    cfg.rules_member_name = member
+    cfg.rules_text = text
+    cfg.rules_text_extracted_at = datetime.datetime.utcnow()
+    db.session.commit()
+    flash(f'Rules text now sourced from "{member}".', 'success')
+    return redirect(url_for('hub_admin.index', gen_tab='join'))
+
+
+@hub_admin_bp.route('/join/requests')
+@login_required
+@_admin_required
+def join_requests():
+    pending  = (NetworkJoinRequest.query.filter_by(status='pending')
+               .order_by(NetworkJoinRequest.created_at.asc()).all())
+    reviewed = (NetworkJoinRequest.query.filter(NetworkJoinRequest.status != 'pending')
+               .order_by(NetworkJoinRequest.reviewed_at.desc()).limit(50).all())
+    return render_template('echomail/admin/hub/join_requests.html',
+                           pending=pending, reviewed=reviewed)
+
+
+@hub_admin_bp.route('/join/requests/<int:req_id>/approve', methods=['POST'])
+@login_required
+@_admin_required
+def approve_join_request(req_id):
+    """Approve a pending network join request. Creates a BinkPNode
+    and/or a QWKNode depending on which transport section(s) the
+    applicant filled in -- driven entirely by the data, not an admin
+    choice in the UI. Passwords are always hub-generated (never
+    applicant-supplied), mirroring approve_qwk_request()'s rule."""
+    import datetime
+    import secrets
+    import string
+
+    req = NetworkJoinRequest.query.get_or_404(req_id)
+    if req.status != 'pending':
+        flash('Request is no longer pending.', 'warning')
+        return redirect(url_for('hub_admin.join_requests'))
+
+    if not req.binkp_ftn_address and not req.qwk_packet_id:
+        flash('Request has neither a BinkP address nor a QWK packet ID '
+              '-- nothing to approve.', 'danger')
+        return redirect(url_for('hub_admin.join_requests'))
+
+    alphabet = string.ascii_letters + string.digits
+
+    if req.binkp_ftn_address and BinkPNode.query.filter_by(
+            ftn_address=req.binkp_ftn_address).first():
+        flash(f'BinkP address {req.binkp_ftn_address} is already taken '
+              f'-- deny this request or edit first.', 'danger')
+        return redirect(url_for('hub_admin.join_requests'))
+    if req.qwk_packet_id and QWKNode.query.filter_by(
+            packet_id=req.qwk_packet_id).first():
+        flash(f'QWK packet ID {req.qwk_packet_id} is already taken '
+              f'-- deny this request or edit first.', 'danger')
+        return redirect(url_for('hub_admin.join_requests'))
+
+    binkp_password = qwk_password = None
+    if req.binkp_ftn_address:
+        binkp_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+        binkp_node = BinkPNode(
+            name=req.bbs_name,
+            ftn_address=req.binkp_ftn_address,
+            password=binkp_password,
+            sysop=req.name,
+            system_name=req.bbs_name,
+            location=req.location,
+            email=req.email,
+            is_active=True,
+            notes=f'Auto-created from network join request #{req.id}.',
+        )
+        db.session.add(binkp_node)
+        db.session.flush()
+        req.binkp_node_id = binkp_node.id
+        req.generated_binkp_password = binkp_password
+
+    if req.qwk_packet_id:
+        qwk_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+        qwk_node = QWKNode(
+            packet_id=req.qwk_packet_id,
+            name=req.bbs_name,
+            sysop=req.name,
+            email=req.email,
+            password=qwk_password,
+            is_active=True,
+            notes=f'Auto-created from network join request #{req.id}.',
+        )
+        db.session.add(qwk_node)
+        db.session.flush()
+        req.qwk_node_id = qwk_node.id
+        req.generated_qwk_password = qwk_password
+
+    req.status = 'approved'
+    req.reviewed_at = datetime.datetime.utcnow()
+    req.reviewed_by = current_user.username
+    db.session.commit()
+
+    # Best-effort credentials email -- never blocks the approval itself
+    # if SMTP isn't configured or the send fails.
+    from ..mailer import smtp_enabled, send_email
+    if smtp_enabled():
+        lines = [f'Hi {req.name},', '',
+                 f'Your application to join as {req.bbs_name} has been approved!', '']
+        if binkp_password:
+            lines += [f'BinkP address: {req.binkp_ftn_address}',
+                      f'BinkP session password: {binkp_password}', '']
+        if qwk_password:
+            lines += [f'QWK packet ID: {req.qwk_packet_id}',
+                      f'QWK password: {qwk_password}', '']
+        ok, err = send_email(req.email, 'Your network join application was approved',
+                             '\n'.join(lines))
+        if ok:
+            flash(f'Approved! Credentials emailed to {req.email}.', 'success')
+        else:
+            flash(f'Approved, but the credentials email failed to send '
+                  f'({err}) -- relay them to {req.email} manually.', 'warning')
+    else:
+        flash('Approved! SMTP relay is not configured, so you\'ll need to '
+              'relay the generated credentials to the applicant yourself.', 'warning')
+    return redirect(url_for('hub_admin.join_requests'))
+
+
+@hub_admin_bp.route('/join/requests/<int:req_id>/deny', methods=['POST'])
+@login_required
+@_admin_required
+def deny_join_request(req_id):
+    """Deny a pending network join request with an optional reason."""
+    import datetime
+    req = NetworkJoinRequest.query.get_or_404(req_id)
+    if req.status != 'pending':
+        flash('Request is no longer pending.', 'warning')
+        return redirect(url_for('hub_admin.join_requests'))
+
+    reason = (request.form.get('reason') or '').strip()
+    req.status = 'denied'
+    req.reviewed_at = datetime.datetime.utcnow()
+    req.reviewed_by = current_user.username
+    req.deny_reason = reason or None
+    db.session.commit()
+
+    from ..mailer import smtp_enabled, send_email
+    if smtp_enabled():
+        body = (f'Hi {req.name},\n\nYour application to join as '
+                f'{req.bbs_name} was not approved.'
+                + (f'\n\nReason: {reason}' if reason else ''))
+        send_email(req.email, 'Your network join application', body)
+
+    flash(f'Request from {req.bbs_name} denied.', 'info')
+    return redirect(url_for('hub_admin.join_requests'))
 
 
 # ---------------------------------------------------------------------------

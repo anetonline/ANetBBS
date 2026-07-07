@@ -54,6 +54,7 @@ _ADMIN_NOTIFY_KINDS = [
     ('qwk_node_app',     "QWK node applications"),
     ('nuv_pending',      "New users pending NUV approval"),
     ('bad_area',         "Unknown/unsubscribed echomail areas (bad area log)"),
+    ('network_join_app', "Network join applications (public join form)"),
 ]
 
 
