@@ -31,6 +31,12 @@ CMD_BSY  = 8   # Busy
 CMD_GET  = 9   # Request specific file
 CMD_SKIP = 10  # Skip / not needed
 
+CMD_NAMES = {
+    CMD_NUL: 'NUL', CMD_ADR: 'ADR', CMD_PWD: 'PWD', CMD_FILE: 'FILE',
+    CMD_OK: 'OK', CMD_EOB: 'EOB', CMD_GOT: 'GOT', CMD_ERR: 'ERR',
+    CMD_BSY: 'BSY', CMD_GET: 'GET', CMD_SKIP: 'SKIP',
+}
+
 # FTS-0001 packed-message types
 MSG_TYPE_2 = b'\x02\x00'
 
@@ -486,7 +492,8 @@ class BinkPClient:
 
     def __init__(self, host: str, port: int, our_address: str,
                  hub_address: str, password: str = '', timeout: int = 60,
-                 use_tls: bool = False, domain: str = None):
+                 use_tls: bool = False, domain: str = None,
+                 transcript: list = None):
         self.host = host
         self.port = port
         self.our_address = our_address
@@ -501,6 +508,16 @@ class BinkPClient:
                         (domain or '').strip().lower())[:8]
         self.domain = clean or None
         self._sock = None
+        # Caller-owned list (not an instance-only attribute) -- if
+        # poll() raises partway through, the caller (poller.py's
+        # _do_poll()) still holds this same list and can read whatever
+        # got captured up to the failure point, since the BinkPClient
+        # instance itself goes out of scope with the exception.
+        self._transcript = transcript if transcript is not None else []
+
+    def _log_transcript(self, line: str):
+        ts = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
+        self._transcript.append(f'{ts} {line}')
 
     # ------------------------------------------------------------------
     # Public API
@@ -578,7 +595,7 @@ class BinkPClient:
     def _wait_got(self, max_frames: int = 20) -> bool:
         """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail)."""
         for _ in range(max_frames):
-            is_cmd, data = _recv_frame(self._sock)
+            is_cmd, data = self._recv_frame_logged()
             if is_cmd:
                 cmd = data[0]
                 if cmd == CMD_GOT:
@@ -594,12 +611,15 @@ class BinkPClient:
     def _connect(self):
         logger.info("BinkP: connecting to %s:%s%s",
                     self.host, self.port, ' (TLS)' if self.use_tls else '')
+        self._log_transcript(
+            f'CONNECT {self.host}:{self.port}{" (TLS)" if self.use_tls else ""}')
         sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
         if self.use_tls:
             import ssl
             ctx = ssl.create_default_context()
             sock = ctx.wrap_socket(sock, server_hostname=self.host)
         self._sock = sock
+        self._log_transcript('CONNECTED')
 
     def _disconnect(self):
         if self._sock:
@@ -608,15 +628,34 @@ class BinkPClient:
             except Exception:
                 pass
             self._sock = None
+        self._log_transcript('DISCONNECT')
 
     def _send_cmd(self, cmd: int, text: str = ''):
+        name = CMD_NAMES.get(cmd, str(cmd))
+        self._log_transcript(f'>> CMD {name}' + (f': {text}' if text else ''))
         self._sock.sendall(_build_cmd(cmd, text))
 
     def _send_data(self, data: bytes):
         # Send in chunks ≤ 32 KiB
+        self._log_transcript(f'>> DATA: {len(data)} bytes')
         chunk_size = 0x7FFF
         for i in range(0, len(data), chunk_size):
             self._sock.sendall(_build_data(data[i:i + chunk_size]))
+
+    def _recv_frame_logged(self):
+        """Wrapper around the module-level _recv_frame() that also
+        appends a transcript line -- one centralized place instead of
+        repeating logging at every call site (_handshake,
+        _send_messages, _receive_messages, _wait_got)."""
+        is_cmd, data = _recv_frame(self._sock)
+        if is_cmd:
+            cmd = data[0]
+            text = data[1:].decode('latin-1', errors='replace')
+            name = CMD_NAMES.get(cmd, str(cmd))
+            self._log_transcript(f'<< CMD {name}' + (f': {text}' if text else ''))
+        else:
+            self._log_transcript(f'<< DATA: {len(data)} bytes')
+        return is_cmd, data
 
     def _handshake(self):
         """Perform BinkP session setup with optional CRAM-MD5 (FTS-1027).
@@ -660,7 +699,7 @@ class BinkPClient:
         authenticated = False
 
         for _ in range(50):
-            is_cmd, data = _recv_frame(self._sock)
+            is_cmd, data = self._recv_frame_logged()
             if not is_cmd:
                 continue
             cmd = data[0]
@@ -720,7 +759,7 @@ class BinkPClient:
 
         # Wait for GOT or SKIP
         for _ in range(20):
-            is_cmd, data = _recv_frame(self._sock)
+            is_cmd, data = self._recv_frame_logged()
             if is_cmd:
                 cmd = data[0]
                 text = data[1:].decode('latin-1', errors='replace')
@@ -838,7 +877,7 @@ class BinkPClient:
 
         for _ in range(5000):
             try:
-                is_cmd, data = _recv_frame(self._sock)
+                is_cmd, data = self._recv_frame_logged()
             except (ConnectionError, OSError) as exc:
                 logger.info(
                     "BinkP: hub closed after our M_EOB (clean): %s", exc)

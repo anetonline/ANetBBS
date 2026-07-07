@@ -28,7 +28,7 @@
             <thead>
                 <tr>
                     <th>Network</th><th>Started</th><th>Completed</th>
-                    <th>Type</th><th>Status</th><th>Sent</th><th>Received</th><th>Error</th>
+                    <th>Type</th><th>Status</th><th>Sent</th><th>Received</th><th>Error</th><th></th>
                 </tr>
             </thead>
             <tbody>
@@ -50,6 +50,14 @@
                     <td style="font-size:0.8rem; color:#ff6600; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
                         title="{{ log.error_message or '' }}">
                         {{ log.error_message or '' }}
+                    </td>
+                    <td style="white-space:nowrap;">
+                        {% if log.transcript %}
+                        <a href="{{ url_for('echomail_admin.poll_log_transcript', log_id=log.id) }}"
+                           class="btn btn-sm btn-outline-secondary" title="Full BinkP session transcript">
+                            <i class="bi bi-file-text"></i> Transcript
+                        </a>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

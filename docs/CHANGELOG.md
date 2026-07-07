@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.46`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.47`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.47 — Full BinkP session transcripts for failed polls (July 2026)
+
+- FEATURE: a sysop reported not having enough BinkP logging to diagnose a failing session. Two real gaps found: the generic poll-failure handler (`anetbbs/echomail/poller.py`) stored only `str(exc)`, which can be empty or unhelpful for some exception types (bare `socket.timeout`, some `ConnectionError`s); and there was zero frame-level logging anywhere in the BinkP client — `_send_cmd()`/`_send_data()` logged nothing, received frames were only logged sporadically during the handshake. Fixed both: every poll failure's error message now always includes the exception type name, and every BinkP poll now captures a full, timestamped, frame-by-frame transcript (what was sent, what was received, connect/disconnect) into a new `EchomailPollLog.transcript` column — viewable from a new "Transcript" link on the Poll Logs admin page, so a sysop can see exactly what happened on the wire without needing server SSH/journalctl access at all. The transcript survives even when a session fails partway through (captured into a list owned by the poller, not the BinkP client object itself, since the client goes out of scope with the exception). Capped in size (~500 lines / ~100KB) since there's no retention/cleanup for poll-log rows. Client-side only for now (a sysop's own install polling out) — the inbound/server side has no equivalent session model today, noted as a natural follow-up. 14 new tests in `tests/test_binkp_transcript.py`.
 
 ## v1.0b2.46 — Fill the two docs gaps flagged after v1.0b2.45 (July 2026)
 

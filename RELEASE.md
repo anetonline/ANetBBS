@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.47 — Full BinkP session transcripts for failed polls (July 2026)
+
+- FEATURE: every BinkP poll now captures a full timestamped transcript of everything sent/received on the wire, viewable from a new "Transcript" link on the Poll Logs admin page — no more guessing what broke or needing server log access. Also fixed poll failure messages to always include the exception type, not just str(exc) which can be empty for some failure types. 14 new tests.
+
+---
+
 # ANetBBS v1.0b2.46 — Fill the two docs gaps flagged after v1.0b2.45 (July 2026)
 
 - WIKI: new dedicated Notifications page (closes a long-dangling `[[Notifications]]` link) and a Hub Management writeup update on the Sysop Control Panel page.

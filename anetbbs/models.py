@@ -563,6 +563,11 @@ class EchomailPollLog(db.Model):
     messages_sent = db.Column(db.Integer, default=0)
     messages_received = db.Column(db.Integer, default=0)
     error_message = db.Column(db.Text)
+    # Frame-by-frame BinkP session transcript (send/receive commands,
+    # data-frame sizes, connect/disconnect, timestamped) -- lets a
+    # sysop see exactly what happened on the wire for a failed poll
+    # without needing server log access. QWK polls leave this blank.
+    transcript = db.Column(db.Text)
 
     def __repr__(self):
         return f'<EchomailPollLog network={self.network_id} status={self.status}>'

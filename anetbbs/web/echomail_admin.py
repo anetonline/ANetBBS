@@ -809,6 +809,21 @@ def logs():
                            network_filter=network_filter)
 
 
+@echomail_admin_bp.route('/logs/<int:log_id>/transcript')
+@login_required
+@_admin_required
+def poll_log_transcript(log_id):
+    """Full frame-by-frame BinkP session transcript for one poll
+    attempt -- lets a sysop see exactly what was sent/received without
+    needing server log access. QWK polls never have one (BinkP-only
+    concept); 404s if this particular poll predates the feature or
+    never captured anything."""
+    log = EchomailPollLog.query.get_or_404(log_id)
+    if not log.transcript:
+        abort(404)
+    return render_template('echomail/admin/poll_log_transcript.html', log=log)
+
+
 # ---------------------------------------------------------------------------
 # Bad areas (echomail received for areas we don't carry)
 # ---------------------------------------------------------------------------

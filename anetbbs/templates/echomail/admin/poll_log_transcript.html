@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}BinkP Session Transcript — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-file-text"></i> BinkP Session Transcript</h1>
+    <p>{{ log.network.name }} — {{ log.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+       {% if log.status == 'success' %}<span style="color:#00ff00;">✓ success</span>
+       {% elif log.status == 'error' %}<span style="color:#ff0000;">✗ error</span>
+       {% else %}<span style="color:#ffff00;">~ {{ log.status }}</span>{% endif %}
+    </p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('echomail_admin.logs') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Poll Logs
+    </a>
+</div>
+
+{% if log.error_message %}
+<div class="alert alert-danger">{{ log.error_message }}</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        Frame-by-frame session log — <code>&gt;&gt;</code> sent, <code>&lt;&lt;</code> received
+    </div>
+    <div class="card-body">
+        <pre style="white-space:pre-wrap; font-family:monospace; font-size:0.85rem; max-height:70vh; overflow-y:auto;">{{ log.transcript }}</pre>
+    </div>
+</div>
+{% endblock %}

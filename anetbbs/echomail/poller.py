@@ -15,6 +15,28 @@ logger = logging.getLogger(__name__)
 _poller_thread = None
 _stop_event = threading.Event()
 
+# Caps for EchomailPollLog.transcript -- BinkP session transcripts are
+# normally a few dozen lines even for a real file transfer, but there's
+# no retention/cleanup for EchomailPollLog rows at all, so bound each
+# one rather than let a single large transfer make a row unbounded.
+_TRANSCRIPT_MAX_LINES = 500
+_TRANSCRIPT_MAX_CHARS = 100_000
+
+
+def _format_transcript(lines):
+    """Join transcript lines into one string, truncated to a bounded
+    size (keeps the LAST lines, since a failure's most useful context
+    is usually right before the session ends)."""
+    if len(lines) > _TRANSCRIPT_MAX_LINES:
+        omitted = len(lines) - _TRANSCRIPT_MAX_LINES
+        lines = [f'...transcript truncated, {omitted} earlier lines omitted...'] + \
+                lines[-_TRANSCRIPT_MAX_LINES:]
+    text = '\n'.join(lines)
+    if len(text) > _TRANSCRIPT_MAX_CHARS:
+        text = f'...transcript truncated to last {_TRANSCRIPT_MAX_CHARS} chars...\n' + \
+               text[-_TRANSCRIPT_MAX_CHARS:]
+    return text
+
 
 class _NetmailAdapter:
     """Adapt a NetmailMessage row to the attribute set the FTS-0001 packet
@@ -216,6 +238,13 @@ def _do_poll(app, network):
     db.session.add(log)
     db.session.commit()
 
+    # Caller-owned list -- BinkPClient appends frame-by-frame lines to
+    # this same list object, so it's still readable here even if
+    # _run_client() raises partway through a session (the client
+    # instance itself goes out of scope with the exception, but this
+    # list doesn't, since _do_poll() -- not the client -- owns it).
+    transcript_lines = []
+
     try:
         from ..models import NetmailMessage
 
@@ -242,7 +271,7 @@ def _do_poll(app, network):
 
         outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
 
-        result = _run_client(network, outbound, app)
+        result = _run_client(network, outbound, app, transcript=transcript_lines)
 
         # Snapshot the current max message id so the tosser can find new ones.
         from ..models import EchomailMessage as _EM_PRE
@@ -306,17 +335,28 @@ def _do_poll(app, network):
 
     except Exception as exc:
         log.status = 'error'
-        log.error_message = str(exc)
+        # Always include the exception type -- str(exc) alone can be
+        # empty or unhelpful for some failure types (bare
+        # socket.timeout, some ConnectionErrors), which left sysops
+        # with close to nothing to diagnose a failed poll from.
+        detail = str(exc)
+        log.error_message = f'{type(exc).__name__}: {detail}' if detail else type(exc).__name__
         db.session.commit()
         logger.error("Poller: poll failed for %s: %s", network.name, exc)
         raise
     finally:
         log.completed_at = datetime.utcnow()
+        if transcript_lines:
+            log.transcript = _format_transcript(transcript_lines)
         db.session.commit()
 
 
-def _run_client(network, outbound_messages, app):
-    """Instantiate and run the appropriate protocol client."""
+def _run_client(network, outbound_messages, app, transcript=None):
+    """Instantiate and run the appropriate protocol client.
+
+    `transcript`, if given, is a caller-owned list that BinkPClient
+    appends frame-by-frame session lines to -- QWK ignores it, this
+    concept is BinkP-specific."""
     if network.network_type == 'binkp':
         from .binkp import BinkPClient
         from ..models import db, HatchQueue
@@ -329,6 +369,7 @@ def _run_client(network, outbound_messages, app):
             use_tls=bool(getattr(network, 'binkp_tls', False)),
             domain=(getattr(network, 'ftn_domain', None)
                     or network.name or '').strip().lower() or None,
+            transcript=transcript,
         )
         data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
         # Pick up any pending hatch-out files for this peer (the network's
