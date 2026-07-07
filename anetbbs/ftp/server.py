@@ -185,8 +185,18 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                     .filter(QWKNode.packet_id.ilike(username))
                     .first())
             if node is not None and node.password == password:
-                from ..echomail.qwk_hub_ftp import ensure_node_dir
-                node_home = ensure_node_dir(node.packet_id, self.qwk_root)
+                # self.qwk_root is ALREADY <DATA_DIR>/qwk-hub (set at
+                # construction, see run() below) -- do NOT pass it to
+                # ensure_node_dir(), which appends its own 'qwk-hub'
+                # segment and expects the bare DATA_DIR instead. Doing
+                # so here doubled the path (.../qwk-hub/qwk-hub/<ID>),
+                # landing the FTP session's home dir one level away
+                # from where on_login()'s generate_node_packet() (which
+                # correctly receives the bare DATA_DIR) actually writes
+                # the packet -- the client always saw an empty
+                # directory no matter how successfully login went.
+                node_home = os.path.join(self.qwk_root, node.packet_id.upper())
+                os.makedirs(node_home, exist_ok=True)
                 handler._qwk_node_id = node.id
                 handler._qwk_packet_id = node.packet_id.upper()
                 reg_name = node.packet_id.upper()

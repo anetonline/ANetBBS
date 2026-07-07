@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.38`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.39`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.39 — Fix QWK node FTP home directory path-doubling (July 2026)
+
+- FIX (live-caught, real bug, affects every QWK node): `AnetbbsAuthorizer.validate_authentication()` in `anetbbs/ftp/server.py` computed a QWK node's FTP home directory by passing `self.qwk_root` (already `<DATA_DIR>/qwk-hub`, set at construction) into `ensure_node_dir()` — which appends its own `qwk-hub` segment and expects the bare `DATA_DIR` instead. This doubled the path to `<DATA_DIR>/qwk-hub/qwk-hub/<PACKET_ID>`, one level away from where `on_login()`'s `generate_node_packet()` (which correctly receives the bare `DATA_DIR`) actually writes the packet. Net effect: login always succeeded, packet generation always "succeeded" with no exception, but the FTP client's session was rooted at an empty directory no matter how correctly everything else was configured — `RETR` always failed with `550 No such file or directory`. Found live, testing the real ANotherNetwork QWK flow end-to-end between bbs.a-net.fyi and a Pi peer install, after ruling out the network, Python version, eventlet, and the stored credentials as the cause one at a time. Fixed by computing the home directory directly from `self.qwk_root` without the extra `ensure_node_dir()` call. 2 new tests in `tests/test_ftp_qwk_node_home_dir.py`, verified to reproduce the exact bug before the fix and pass after.
 
 ## v1.0b2.38 — Better diagnostics for QWK download failures (July 2026)
 
