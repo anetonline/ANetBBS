@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.37`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.38`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.38 — Better diagnostics for QWK download failures (July 2026)
+
+- FIX: `QWKClient.poll()`'s error message included only `str(exc)`, which is empty for some exception types (e.g. a bare connection timeout) — producing an uninformative "QWK: failed to download packet:" with nothing after the colon. Hit live trying to diagnose a real QWK poll failure between bbs.a-net.fyi and a Pi peer install, where the FTP connection itself was confirmed reachable (a raw `curl -v ftp://` test succeeded end-to-end, including passive-mode data transfer) but the poller's own connection attempt failed instantly with no useful detail and no `_ftp_download()` login log line ever appearing. Fixed to always include the exception's type name alongside its message, so the next occurrence of whatever's actually failing shows up clearly in the poll log instead of a bare colon. 2 new tests in `tests/test_qwk_error_detail.py`.
 
 ## v1.0b2.37 — Fix QWK node application crash + FTP login confusion (July 2026)
 

@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.38 — Better diagnostics for QWK download failures (July 2026)
+
+- FIX: QWK download errors with an empty exception message (e.g. a bare connection timeout) used to show up in the poll log as an uninformative "QWK: failed to download packet:" with nothing after the colon. Now always includes the exception type name too, so the actual failure is visible instead of a bare colon. 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.37 — Fix QWK node application crash + FTP login confusion (July 2026)
 
 - FIX (live-caught, real bug): re-checking QWK node application status crashed with `DetachedInstanceError` — an ORM row was queried inside one `app_context()` block, then used after that context (and its DB session) had closed. Fixed by doing all DB work inside a single, consistent context and extracting plain values before it closes. 3 new tests.

@@ -470,7 +470,14 @@ class QWKClient:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     qwk_data = resp.read()
         except Exception as exc:
-            raise ConnectionError(f"QWK: failed to download packet: {exc}") from exc
+            # Some exceptions (e.g. a bare connection timeout) have an
+            # empty str(exc) -- always include the exception type too,
+            # so the poll log shows *something* actionable instead of
+            # "QWK: failed to download packet:" with nothing after it.
+            detail = str(exc) or '(no message)'
+            raise ConnectionError(
+                f"QWK: failed to download packet: "
+                f"{type(exc).__name__}: {detail}") from exc
 
         result['received'] = self._parse_qwk_packet(qwk_data)
 
