@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.45`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.46`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.46 — Fill the two docs gaps flagged after v1.0b2.45 (July 2026)
+
+- WIKI: new dedicated `Notifications` page — the `[[Notifications]]` wiki-link had pointed to a nonexistent page since before today's changes; now covers all five user-facing kinds and all five sysop admin-review kinds in one place. `sysop-control-panel` page updated to link to it, and its "Hub Management" section now mentions the second (generic BinkP+QWK) join-request queue, the new Join Form tab, the QWK "Subscribe to All" button, and that new applications trigger a notification.
 
 ## v1.0b2.45 — Document today's QWK/notification/join-form changes (July 2026)
 

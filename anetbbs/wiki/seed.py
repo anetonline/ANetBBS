@@ -1284,6 +1284,58 @@ exists for the other party. Sysops can hard-delete from
 """),
 
     # ------------------------------------------------------------------
+    ('notifications', 'Notifications', """
+# Notifications
+
+The bell icon (top nav) is a per-user in-app inbox — `/notifications/`
+— that fires for things that need your attention, without needing to
+go check every page yourself.
+
+## For every user
+
+- **Mentions** — someone typed `@yourusername` in a post, PM, or
+  shout.
+- **Replies** — someone replied to a thread you posted in.
+- **Private messages** — a new [[Private Messages|PM]] arrived.
+- **Subscriptions** — a new post landed in a board you've
+  [[Message Boards|subscribed]] to.
+- **Achievement unlocks** — a badge/achievement you earned.
+
+## For sysops — admin-review notifications
+
+Every `is_admin=True` user additionally gets notified about five
+things that need a sysop's review, so nobody has to manually check
+each admin page for new work:
+
+- **MSP federation registry join requests** — once a registrant
+  verifies their contact email (not the earlier, unverified
+  registration step, which isn't yet actionable). See
+  [[ANotherNetwork]].
+- **QWK node applications** — a sysop applied for a QWK node number,
+  via the API or the terminal wizard. See [[QWK]].
+- **New users pending NUV approval** — a new signup needs manual
+  sysop approval. Plain email-verification-only signups don't trigger
+  this — those resolve themselves with no sysop action needed.
+- **Unknown/bad echomail areas** — inbound mail arrived tagged for an
+  area this BBS doesn't carry. Fires once per newly-discovered area,
+  not once per message. See [[Echomail]].
+- **Network join applications** — someone submitted the public
+  "apply to join this network" form. See [[ANotherNetwork]].
+
+## Preferences
+
+`/notifications/settings` lets you turn any kind off individually —
+default is on for everything. The five admin-review kinds only show
+up on this page for admin accounts; a regular user's settings page
+never shows toggles for notifications they could never receive.
+
+## See also
+
+- [[Sysop Guide]]
+- [[Sysop Control Panel]]
+"""),
+
+    # ------------------------------------------------------------------
     ('instant-messages', 'Instant Messages', """
 # Instant Messages
 
@@ -1696,6 +1748,9 @@ Quick links to:
 - [[Files Admin]]
 - [[Themes|Theme manager]]
 - [[Backup]]
+- [[Notifications|Notification Settings]] — turn off any of the five
+  admin-review notification kinds you don't want (they're all on by
+  default)
 
 ### Hub Management
 
@@ -1703,13 +1758,21 @@ Only present when this install is the network hub
 (`REGISTRY_MODE_ENABLED=true`) — links into `/admin/echomail/hub/`:
 
 - BinkP node management and QWK node management (add/edit/delete,
-  subscribe to areas, reset a QWK node's high-water mark)
+  subscribe to areas — including a **Subscribe to All** button per
+  QWK node — reset a QWK node's high-water mark)
 - The hold queue — items withheld from distribution
-- The node-request approve/deny queue for new BBSes applying for a
-  node number
-- Generation & Distribution — generate/publish the nodelist on
-  demand (plus its weekly schedule), preview a QWK packet per node
-  without marking it sent, and TIC/file-distribution status
+- Two separate node-request review queues: the QWK-only one for
+  applications submitted via a BBS's own terminal wizard, and a newer
+  one covering the public "apply to join this network" form
+  (`/join/`, both BinkP and QWK) — see [[ANotherNetwork]]
+- Generation & Distribution, four tabs — generate/publish the
+  nodelist on demand (plus its weekly schedule), preview a QWK packet
+  per node without marking it sent, TIC/file-distribution status, and
+  the Join Form tab for enabling/configuring the public application
+  page above
+
+New applications on either queue send you a [[Notifications|notification]]
+— no need to keep checking these pages for new work.
 
 See [[ANotherNetwork]] for what this network actually is, and
 [[QWK]] / [[TIC Processor]] for the mechanics each panel is managing.
@@ -1718,6 +1781,7 @@ See [[ANotherNetwork]] for what this network actually is, and
 
 - [[NodeSpy]]
 - [[Sysop Guide]]
+- [[Notifications]]
 """),
 
     # ------------------------------------------------------------------
