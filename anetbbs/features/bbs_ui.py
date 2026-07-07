@@ -2115,18 +2115,47 @@ class BBSMenuUI:
                 return
 
     # ── Sixel image rendering ────────────────────────────────────────
-    async def _rss_detect_sixel(self):
-        """Detect sixel support via DA1 primary device attributes. Cached.
+    async def _detect_sixel_support(self):
+        """General-purpose sixel capability check -- usable by any
+        feature, not just RSS. Cached per-session.
 
-        Sends ESC [ 0 c and reads the response, which looks like:
-          ESC [ ? 65 ; 1 ; 2 ; 4 ; 9 c
-        The flag 4 in the parameter list means sixel is supported.
-        We also need img2sixel on PATH — if it's missing, report False."""
+        Honors the user's `sixel_mode` profile preference first:
+          'forced_off' -> always False, no DA1 round-trip at all.
+          'forced_on'  -> always True (if img2sixel is installed --
+                          still needed server-side to actually generate
+                          sixel data), no DA1 round-trip. Covers
+                          terminals that support sixel but don't
+                          self-report it via DA1 (e.g. Windows Terminal
+                          over SSH).
+          'auto' (default) -> DA1 primary device attributes detection:
+                          sends ESC [ 0 c and reads the response, which
+                          looks like ESC [ ? 65 ; 1 ; 2 ; 4 ; 9 c -- flag
+                          4 in the parameter list means sixel is
+                          supported.
+        """
         if hasattr(self.session, '_sixel_ok'):
             return self.session._sixel_ok
+        import shutil as _sh
+
+        uid = (self.session.user or {}).get('id')
+        mode = 'auto'
+        if uid is not None:
+            with _app().app_context():
+                from ..models import User
+                u = User.query.get(uid)
+                if u is not None:
+                    mode = u.sixel_mode or 'auto'
+
+        if mode == 'forced_off':
+            self.session._sixel_ok = False
+            return False
+        if mode == 'forced_on':
+            self.session._sixel_ok = bool(_sh.which('img2sixel'))
+            return self.session._sixel_ok
+
+        # 'auto' -- DA1 detection.
         import asyncio as _aio
         import re as _re
-        import shutil as _sh
         # Cheap fast-path: if the tool isn't installed, skip the DA1 round-trip.
         if not _sh.which('img2sixel'):
             self.session._sixel_ok = False
@@ -2236,19 +2265,14 @@ class BBSMenuUI:
         user_level = int((self.session.user or {}).get('access_level', 10))
         is_admin   = bool((self.session.user or {}).get('is_admin'))
 
-        # Ask once per session whether sixel is supported.
-        # Skips auto-detection entirely — no DA1 round-trip needed.
-        if not hasattr(self.session, '_sixel_ok'):
-            import shutil as _sh
-            await self.session.write(
-                '\x1b[2J\x1b[H'
-                f"\r\n  {FG['cyan']}ANetBBS RSS Reader{RESET}\r\n\r\n"
-                f"  Does your terminal support sixel graphics? [{FG['wht']}Y{RESET}/{FG['wht']}N{RESET}] "
-            )
-            ans = await self.session.read_line()
-            self.session._sixel_ok = (
-                ans.strip().upper() == 'Y' and bool(_sh.which('img2sixel'))
-            )
+        # Detect sixel support once per session -- honors the user's
+        # sixel_mode profile preference (forced_on/forced_off/auto),
+        # falling back to DA1 auto-detection for 'auto'. This used to
+        # be an unconditional manual Y/N prompt shown every session,
+        # which pre-populated the same _sixel_ok cache flag the DA1
+        # detector checks first -- meaning the DA1 logic never actually
+        # ran in practice. Now it does.
+        await self._detect_sixel_support()
 
         last_sel = 0
         while True:
@@ -2490,7 +2514,7 @@ class BBSMenuUI:
                     db.session.rollback()
 
         # Detect sixel support once per session
-        sixel_ok = await self._rss_detect_sixel() if image_url else False
+        sixel_ok = await self._detect_sixel_support() if image_url else False
 
         # Build fixed header lines for the pager
         _w = ui_width(self.session)

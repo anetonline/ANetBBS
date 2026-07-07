@@ -186,6 +186,22 @@
                 </div>
             </div>
         </div>
+
+        <!-- Terminal Capabilities -->
+        <div class="col-12">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-terminal"></i> Terminal Capabilities</div>
+                <div class="card-body">
+                    <div class="mb-1">
+                        {{ form.sixel_mode.label(class="form-label") }}
+                        {{ form.sixel_mode(class="form-select") }}
+                    </div>
+                    {% if form.sixel_mode.description %}
+                    <small class="text-muted">{{ form.sixel_mode.description }}</small>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
     </div>
 
     {% if custom_fields_list %}

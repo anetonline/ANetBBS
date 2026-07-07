@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.47`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.48`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.48 — Sixel capability preference + door-game output queue fix (July 2026)
+
+- FEATURE: scoped the highest-priority piece of a Firehawke feature request ("Fuller CTerm support and Display Codes") — sixel detection. Found sixel auto-detection (DA1 device-attributes query) already existed but was dead code in practice: the RSS reader's entry point unconditionally asked a manual "Does your terminal support sixel? [Y/N]" prompt on every session, pre-populating the same cache flag the DA1 detector checks first, so the DA1 logic never actually ran in production. It was also RSS-specific and per-session only, with no way to force it on for a client that supports sixel but doesn't self-report via DA1 (e.g. Windows Terminal over SSH), or force it off. Added a new `sixel_mode` profile preference (`auto`/`forced_on`/`forced_off`, default `auto`, editable at `/profile/edit`), promoted the detector to a general-purpose `_detect_sixel_support()` usable by any feature, and fixed the RSS reader to actually call it instead of the old always-on manual prompt.
+- FIX: door-game output (`anetbbs/web/games.py`) previously called `socketio.emit()` directly from the PTY-reader thread; now marshaled through a proper thread-safe queue drained by a `socketio.start_background_task()`, matching documented Flask-SocketIO practice — purely additive, same order and content for the text output that already works. Added alongside a DEBUG-level diagnostic that logs sixel/DCS-shaped output chunks, to help confirm (on a real DSR test session, not reproducible in a sandbox) whether 8-bit C1 control-code framing is getting silently corrupted by the `cp437` decode — a known, already-documented dead end where sixel image rendering has never worked through the gunicorn-spawned PTY chain for Synchronet-compatible doors, despite the frontend already having working sixel rendering capability (`xterm-addon-image`). 9 new tests across `tests/test_sixel_detection.py` and `tests/test_door_output_queue.py`.
 
 ## v1.0b2.47 — Full BinkP session transcripts for failed polls (July 2026)
 

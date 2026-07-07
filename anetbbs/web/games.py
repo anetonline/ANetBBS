@@ -5,6 +5,7 @@ Games blueprint — user-facing Game Center views for ANetBBS.
 import json
 import logging
 import os
+import queue
 from datetime import datetime
 
 from flask import Blueprint, render_template, request, current_app, send_from_directory, abort, make_response, jsonify
@@ -243,12 +244,36 @@ def handle_start_game(data):
     _buf_lock = _thr.Lock()
     _buffering = [True]
 
+    # PTY output previously called socketio.emit() directly from
+    # _pty_reader's own thread (anetbbs/games/door_runner.py). Under
+    # eventlet.monkey_patch() that thread already runs cooperatively,
+    # so this wasn't as unsafe as a raw-OS-thread emit would be on a
+    # non-monkey-patched app -- but it's still not the documented
+    # Flask-SocketIO pattern for emitting from outside a request/socket
+    # handler context. Marshal every emit through a thread-safe queue,
+    # drained by a proper socketio background task, instead -- purely
+    # additive, same order, same content, only the call stack changes.
+    out_q = queue.Queue()
+
     def _emit_output(output_bytes):
         try:
             text = output_bytes.decode('cp437', errors='replace')
         except Exception:
             logger.exception('emit_output decode failed')
             return
+        # Diagnostic only -- fires solely on sixel/DCS-shaped chunks, so
+        # this is silent for every normal text-output door. Distinguishes
+        # 7-bit DCS framing (ESC P ... ESC \) from 8-bit C1 framing
+        # (\x90 ... \x9c) -- cp437 decode above does NOT preserve 8-bit
+        # C1 control-code semantics (it remaps \x90/\x9c to printable
+        # Latin letters), which would silently corrupt 8-bit-framed
+        # sixel data before it ever reaches the browser. Needed to
+        # confirm/refute this against a real sixel-capable door (e.g.
+        # DSR) -- can't be reproduced in a sandbox with no real
+        # PTY+Node+ImageMagick+browser chain available.
+        if b'\x1bP' in output_bytes or b'\x90' in output_bytes:
+            logger.debug('door output contains a possible sixel/DCS '
+                        'introducer: %r', output_bytes[:80])
         with _buf_lock:
             if _buffering[0]:
                 _pre_join_buf.append(text)
@@ -256,11 +281,7 @@ def handle_start_game(data):
             sid = sid_box[0]
         if sid is None:
             return
-        try:
-            socketio.emit('game_output', {'output': text},
-                          namespace='/game', room=str(sid))
-        except Exception:
-            logger.exception('emit_output failed')
+        out_q.put((sid, text))
 
     def _flush_pre_join_buffer():
         """Drain anything the door wrote before the room was joined.
@@ -270,11 +291,44 @@ def handle_start_game(data):
             _pre_join_buf.clear()
             _buffering[0] = False
         if pending and sid_box[0] is not None:
+            out_q.put((sid_box[0], pending))
+
+    def _drain_queue():
+        """Background task (real eventlet greenthread via
+        socketio.start_background_task) that owns every socketio.emit()
+        call for this game session -- _emit_output/_flush_pre_join_buffer
+        only ever push onto out_q, never emit directly. Exits once the
+        session is no longer active and the queue has drained, so this
+        doesn't leak a greenthread per session forever."""
+        idle_checks = 0
+        while True:
             try:
-                socketio.emit('game_output', {'output': pending},
-                              namespace='/game', room=str(sid_box[0]))
+                item = out_q.get(timeout=5)
+            except queue.Empty:
+                idle_checks += 1
+                sid = sid_box[0]
+                if sid is not None:
+                    try:
+                        gs = GameSession.query.get(sid)
+                        if gs is None or gs.status != 'active':
+                            break
+                    except Exception:
+                        logger.exception('drain_queue: session status check failed')
+                        break
+                # No session yet (still launching) -- keep waiting, but
+                # don't spin forever if something went very wrong.
+                elif idle_checks > 12:  # ~60s with no session ever assigned
+                    break
+                continue
+            idle_checks = 0
+            sid, text = item
+            try:
+                socketio.emit('game_output', {'output': text},
+                              namespace='/game', room=str(sid))
             except Exception:
-                logger.exception('flush_pre_join_buffer emit failed')
+                logger.exception('drain_queue emit failed')
+
+    socketio.start_background_task(_drain_queue)
 
     from ..games.door_runner import (launch_door_game, launch_rlogin_session,
                                      launch_telnet_session, _build_command)

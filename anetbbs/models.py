@@ -82,6 +82,11 @@ class User(UserMixin, db.Model):
     codepage = db.Column(db.String(8), default='cp437')
     # Preferred language code (ISO-639-1) for menu translations: en/es/fr/...
     language = db.Column(db.String(8), default='en')
+    # Sixel graphics capability override: 'auto' (DA1-detect, default),
+    # 'forced_on' (assume support -- e.g. Windows Terminal over SSH,
+    # which supports sixel but doesn't self-report via DA1), or
+    # 'forced_off' (never use it, even if detected).
+    sixel_mode = db.Column(db.String(10), default='auto')
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)

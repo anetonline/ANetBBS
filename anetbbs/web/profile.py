@@ -52,6 +52,15 @@ class UpdateProfileForm(FlaskForm):
     avatar_url = StringField('Avatar URL', validators=[Optional(), Length(max=500)])
     avatar_file = WTFFileField('Upload Avatar', validators=[Optional(), FileAllowed(['jpg', 'jpeg', 'png', 'gif', 'webp'], 'Images only!')])
     theme_id = SelectField('Theme', coerce=int, validators=[Optional()])
+    sixel_mode = SelectField('Sixel Graphics', validators=[Optional()], choices=[
+        ('auto', 'Automatic (detect)'),
+        ('forced_on', 'Always On'),
+        ('forced_off', 'Always Off'),
+    ], description=(
+        "Automatic asks your terminal whether it supports sixel graphics -- "
+        "most terminals answer honestly, but some (e.g. Windows Terminal over "
+        "SSH) support sixel without saying so. Use Always On to force it "
+        "for those, or Always Off if you just don't want it."))
     submit = SubmitField('Update Profile')
 
     def __init__(self, original_email, *args, **kwargs):
@@ -221,6 +230,8 @@ def edit():
         theme_id = form.theme_id.data
         current_user.theme_id = theme_id if theme_id and theme_id != 0 else None
 
+        current_user.sixel_mode = form.sixel_mode.data or 'auto'
+
         # Handle avatar upload
         if form.avatar_file.data and form.avatar_file.data.filename:
             filename, error = _save_avatar(form.avatar_file.data, current_user.avatar_upload)
@@ -271,6 +282,7 @@ def edit():
         form.show_email.data = current_user.show_email
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
+        form.sixel_mode.data = current_user.sixel_mode or 'auto'
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)

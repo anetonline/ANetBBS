@@ -1,3 +1,10 @@
+# ANetBBS v1.0b2.48 — Sixel capability preference + door-game output queue fix (July 2026)
+
+- FEATURE: new `sixel_mode` profile preference (Automatic/Always On/Always Off) — fixes a real, previously-dead-code bug where sixel auto-detection never actually ran because a manual prompt always short-circuited it first.
+- FIX: door-game output now queue-marshaled through a proper background task instead of emitting directly from the PTY-reader thread, matching documented Flask-SocketIO practice. Added diagnostic logging to help confirm a known sixel-rendering dead end for Synchronet-compatible doors on a future real test session. 9 new tests.
+
+---
+
 # ANetBBS v1.0b2.47 — Full BinkP session transcripts for failed polls (July 2026)
 
 - FEATURE: every BinkP poll now captures a full timestamped transcript of everything sent/received on the wire, viewable from a new "Transcript" link on the Poll Logs admin page — no more guessing what broke or needing server log access. Also fixed poll failure messages to always include the exception type, not just str(exc) which can be empty for some failure types. 14 new tests.
