@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.35`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.36`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.36 — Fix unreachable QWK node application on a fresh install (July 2026)
+
+- FIX (live-caught, real bug): the terminal "Echomail Networks" screen (`list_echo_areas()` in `anetbbs/features/bbs_ui.py`) returned immediately with "No echomail areas configured." whenever a sysop had zero active networks and zero subscribed areas — which is exactly the state of every fresh install, since both `EchomailNetwork.is_active` and `EchoArea.is_subscribed` default to false on seed. That early return happened *before* the code ever reached the "A = Apply for ANotherNetwork QWK node" option a few lines down, making the apply flow completely unreachable for precisely the sysop it exists for: someone who hasn't joined the network yet. Found live by Jerry testing his Pi peer install after updating and trying to apply for a node. Fixed by no longer bailing out early — the screen now always offers the Apply option, showing a "no areas configured yet — apply below" message instead of just quitting when there's nothing to list. 2 new tests in `tests/test_echo_areas_empty_apply_option.py`, verified to reproduce the exact bug before the fix and pass after.
 
 ## v1.0b2.35 — Full documentation + wiki accuracy pass (July 2026)
 

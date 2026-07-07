@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.36 — Fix unreachable QWK node application (July 2026)
+
+- FIX (live-caught, real bug): a fresh install's terminal "Echomail Networks" screen bailed out with "No echomail areas configured" before ever reaching the "Apply for ANotherNetwork QWK node" option — making it unreachable for exactly the sysop it's meant for, since every fresh install starts with zero active networks/subscribed areas. Found live testing a real Pi peer install. Fixed; 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.35 — Full documentation + wiki accuracy pass (July 2026)
 
 - FIX (real bug): a fresh Pi/hobbyist-mode ("test"/"behind") install could have the web app and MRC bridge both trying to bind `127.0.0.1:8080` — `install.sh` hardcoded the MRC bridge's default port regardless of `WEB_PORT`. Fixed by deriving it as `WEB_PORT+1`.

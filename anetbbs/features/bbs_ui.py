@@ -639,27 +639,34 @@ class BBSMenuUI:
                 if count:
                     net_rows.append((net.id, net.name, net.network_type, count))
 
-        if not net_rows:
-            await self.session.write("\r\nNo echomail areas configured.\r\n")
-            await self.session.read_line("\r\nPress Enter...")
-            return
-
+        # NOTE: deliberately do NOT early-return here when net_rows is
+        # empty. A fresh install (or any sysop who hasn't yet been
+        # granted/subscribed to a network) has zero active networks and
+        # zero subscribed areas by design -- exactly the sysop this
+        # screen's "Apply for ANotherNetwork QWK node" option exists
+        # for. Returning early used to make that option unreachable for
+        # precisely the audience who'd need it.
         while True:
             _w = ui_width(self.session)
             _net_w = max(30, _w - 22)
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner('Echomail Networks', _w))
-            await self.session.write(
-                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<{_net_w}} "
-                f"{'Type':<6} {'Areas':>5}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
-            for i, (_, name, ntype, count) in enumerate(net_rows, 1):
-                type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
+            if net_rows:
                 await self.session.write(
-                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
-                    f"{FG['wht']}{name[:_net_w]:<{_net_w}}{RESET}  "
-                    f"{type_col}{ntype[:5]:<5}{RESET}  "
-                    f"{FG['grn']}{count:5d}{RESET}\r\n")
+                    f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<{_net_w}} "
+                    f"{'Type':<6} {'Areas':>5}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
+                for i, (_, name, ntype, count) in enumerate(net_rows, 1):
+                    type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
+                    await self.session.write(
+                        f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
+                        f"{FG['wht']}{name[:_net_w]:<{_net_w}}{RESET}  "
+                        f"{type_col}{ntype[:5]:<5}{RESET}  "
+                        f"{FG['grn']}{count:5d}{RESET}\r\n")
+            else:
+                await self.session.write(
+                    f"  {FG['gry']}No echomail areas configured yet -- apply "
+                    f"for a network below to get started.{RESET}\r\n")
             await self.session.write(
                 f"\r\n  {FG['gry']}A = Apply for ANotherNetwork QWK node{RESET}\r\n")
             await self.session.write('\r\n' + footer(_w) + '\r\n')
@@ -669,6 +676,8 @@ class BBSMenuUI:
                 return
             if choice == 'A':
                 await self._apply_qwk_node()
+                continue
+            if not net_rows:
                 continue
             try:
                 idx = int(choice) - 1
