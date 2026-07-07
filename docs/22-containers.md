@@ -24,15 +24,17 @@ a registry reference only becomes real once a release is actually
 tagged and pushed — don't run `docker pull ghcr.io/...` yet, it won't
 find anything.
 
-**A transparency note on how tested this path is:** the Dockerfile,
-entrypoints, and both compose layouts described below have been built
-and unit-tested with mocked Docker/subprocess calls, but have **not**
-yet been run end-to-end against a real Docker daemon — no actual
-`docker build` or `docker compose up` has been done on this yet. The
-steps below are believed correct and are written from a real reading
-of the files in `docker/`, but if you hit something that doesn't match
-what's documented here, that's exactly the kind of gap this note is
-warning you about — please report it.
+**A transparency note on how tested this path is:** the single-container
+quick start has now been run end-to-end against a real Docker daemon
+(build, run, all 5 services reaching `RUNNING` under supervisord, web
++ terminal + MRC web + MRC terminal all confirmed working) — that real
+test caught and fixed three bugs the mocked unit tests couldn't have
+(wrong entrypoint path, a broken terminal-service Python import, and
+MRC web chat's WebSocket URL construction). The multi-container
+docker-compose path is still unit-tested with mocked Docker/subprocess
+calls only, not yet run end-to-end against a real Docker daemon — if
+you hit something there that doesn't match what's documented, please
+report it.
 
 ## If you're new to Docker — a few concepts first
 
@@ -234,6 +236,27 @@ WebSocket **directly** — it isn't proxied through Flask — so setting
 this to a Docker-internal service name (unreachable from outside the
 Docker network) will silently break MRC chat for web users even though
 everything looks fine in `docker compose ps`.
+
+**Single-container mode doesn't need `MRC_BRIDGE_HOST` set at all** —
+there's no nginx in that image, so the web page automatically builds
+the bridge WebSocket URL using your browser's own hostname with the
+bridge's port (`8080` by default) swapped in, instead of assuming an
+nginx proxy exists on the same port as the web app. This only kicks in
+when `ANETBBS_RUNTIME=docker-single` (set by the documented `docker
+run` command above) — leave `MRC_BRIDGE_HOST` unset/default for this
+mode.
+
+One consequence either way (single-container OR compose): because the
+browser talks to the bridge **directly**, on port 8080, the bridge
+itself has no login check of its own — the only place MRC web access
+is gated behind your BBS login is nginx's `auth_request` on a
+traditional install. If port 8080 is reachable from the open internet
+in either Docker mode, anyone who finds that port can join MRC chat
+without ever logging into your BBS. If that matters for your
+deployment, don't publish port 8080 to a public interface (bind it to
+`127.0.0.1` only, or put a real reverse proxy in front of it that adds
+its own auth gate) — this is a pre-existing tradeoff of the "direct
+bridge connection, no nginx" path, not something new to fix.
 
 ## Why this is safe with SQLite (no Postgres required)
 

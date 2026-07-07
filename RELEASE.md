@@ -1,3 +1,12 @@
+# ANetBBS v1.0b2.49 — Three real Docker bugs found testing against an actual daemon (July 2026)
+
+- FIX: single-container quick-start's documented `docker run` command referenced an entrypoint script the Dockerfile never actually copied there — every quick-start attempt failed instantly.
+- FIX: the terminal service (single-container and docker-compose) invoked a broken console-script shim, failing with `ModuleNotFoundError: No module named 'anetbbs'`. Now invokes `python -m anetbbs.main` directly, matching every other service.
+- FIX: MRC web chat 404'd in single-container mode (terminal MRC worked fine). The real WebSocket URL is built client-side and was hardcoded to the page's own host — now respects a server-rendered override for Docker single-container mode and the documented explicit-host docker-compose pattern. 5 new tests.
+- Docs: single-container Docker path is now confirmed working end-to-end against a real Docker daemon, not just mocked unit tests.
+
+---
+
 # ANetBBS v1.0b2.48 — Sixel capability preference + door-game output queue fix (July 2026)
 
 - FEATURE: new `sixel_mode` profile preference (Automatic/Always On/Always Off) — fixes a real, previously-dead-code bug where sixel auto-detection never actually ran because a manual prompt always short-circuited it first.

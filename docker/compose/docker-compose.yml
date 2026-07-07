@@ -77,7 +77,16 @@ services:
 
   terminal:
     image: *anetbbs-image
-    command: ["/usr/local/bin/entrypoint.sh", "anetbbs"]
+    # `python -m anetbbs.main`, not the bare `anetbbs` console-script:
+    # that script's sys.path[0] is /usr/local/bin (where it lives), not
+    # /app, and its editable-install shim (built against /src in the
+    # Dockerfile's builder stage) doesn't survive into the runtime
+    # image -- both single-container mode (see docker/single/
+    # supervisord.conf) and this hit the exact same
+    # "ModuleNotFoundError: No module named 'anetbbs'" for the same
+    # reason, found testing the single-container image against a real
+    # Docker daemon.
+    command: ["/usr/local/bin/entrypoint.sh", "python", "-m", "anetbbs.main"]
     env_file: [.env]
     environment: *anetbbs-db-env
     ports:

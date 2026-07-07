@@ -82,6 +82,14 @@ WORKDIR /app
 COPY . /app
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/entrypoint-web.sh /usr/local/bin/entrypoint-web.sh
+# entrypoint-single.sh also gets its own /usr/local/bin copy, matching
+# the other two entrypoints -- docs/22-containers.md's single-container
+# `docker run` command invokes it by this well-known path. (Real-world
+# gap found testing this against an actual Docker daemon: the file only
+# existed at /app/docker/single/entrypoint-single.sh, which the docs
+# never referenced -- every quick-start run failed with "no such file
+# or directory".)
+COPY docker/single/entrypoint-single.sh /usr/local/bin/entrypoint-single.sh
 # The source tree lives on a VFAT/FAT32 external drive during
 # development, which has no concept of Unix executable bits at all --
 # every file always reads back as non-executable regardless of chmod
@@ -90,7 +98,7 @@ COPY docker/entrypoint-web.sh /usr/local/bin/entrypoint-web.sh
 # needs its +x re-applied explicitly here, not just the two copied
 # individually above.
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-web.sh \
-                /app/docker/single/entrypoint-single.sh \
+                /usr/local/bin/entrypoint-single.sh \
                 /app/docker/updater/upgrade.sh \
     && mkdir -p /app/data \
     && chown -R anetbbs:anetbbs /app /home/anetbbs

@@ -7,10 +7,14 @@ Auth model: the page itself uses @login_required. The WS endpoint upstream
 which returns 200 only for logged-in users. So an unauthenticated user
 can't even open the WebSocket, even if they know the URL.
 """
+import os
+
 from flask import Blueprint, render_template, current_app, request, abort
 from flask_login import login_required, current_user
 
 mrc_bp = Blueprint('mrc', __name__, url_prefix='/mrc')
+
+_RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
 
 
 @mrc_bp.route('/auth-check')
@@ -28,31 +32,46 @@ def auth_check():
 @login_required
 def index():
     """MRC chat page - requires authentication"""
-    use_ssl = current_app.config.get('MRC_BRIDGE_USE_SSL', False)
-    ws_path = current_app.config.get('MRC_BRIDGE_WS_PATH', '/mrcws')
-
-    # When deployed behind nginx the WS path is proxied relative to the
-    # current host (e.g. wss://example.com/mrcws → bridge /ws).
-    # Fall back to the legacy host:port form for direct connections.
+    # NOTE: the WS URL the browser actually connects to is built
+    # client-side in mrc/index.html's buildWsUrlForChoice() (it lets
+    # the user pick between multiple MRC server choices, each with its
+    # own ws_path -- something a single server-rendered URL can't
+    # represent). That function defaults to `location.host` (same
+    # host+port the page itself was loaded from), which is correct
+    # when nginx proxies /mrcws on that same port (native installs,
+    # docker-compose with its documented nginx/Caddy overlay) but wrong
+    # for the single-container "quick start" Docker image, which has no
+    # nginx at all -- there, only the bridge's own port (published
+    # directly, see docs/22-containers.md) actually answers /mrcws.
+    # `mrc_ws_host_override`, when non-empty, tells the JS to use THIS
+    # host:port instead of location.host for every server choice's
+    # path; empty means "no override, keep using location.host" (the
+    # already-correct default for nginx-fronted deployments). Found
+    # live-testing the single-container image against a real Docker
+    # daemon for the first time: web MRC 404'd while terminal MRC (a
+    # separate, direct server-to-server bridge connection, not
+    # browser-facing) worked fine.
     legacy_host = current_app.config.get('MRC_BRIDGE_HOST', '')
     legacy_port = current_app.config.get('MRC_BRIDGE_PORT', 8080)
-    # Flask sits behind nginx so request.is_secure is always False (Flask
-    # sees plain HTTP from the proxy). Check X-Forwarded-Proto instead.
-    forwarded_https = request.headers.get('X-Forwarded-Proto', '') == 'https'
-    protocol = 'wss' if (use_ssl or request.is_secure or forwarded_https) else 'ws'
 
     if legacy_host and legacy_host not in ('localhost', '127.0.0.1', '0.0.0.0'):
-        # Explicit host configured — use it (direct bridge connection)
-        bridge_ws_url = f"{protocol}://{legacy_host}:{legacy_port}{ws_path}"
+        # Explicit public host configured (the documented docker-compose
+        # pattern, direct-to-bridge, no nginx involved for this part).
+        mrc_ws_host_override = f"{legacy_host}:{legacy_port}"
+    elif _RUNTIME == 'docker-single':
+        browser_host = request.host.split(':', 1)[0]
+        mrc_ws_host_override = f"{browser_host}:{legacy_port}"
     else:
-        # Behind nginx proxy — construct relative to current host
-        bridge_ws_url = f"{protocol}://{request.host}{ws_path}"
+        # Behind nginx proxy (native install or docker-compose with its
+        # documented overlay) — /mrcws is proxied on the same
+        # public-facing port as the page itself; no override needed.
+        mrc_ws_host_override = ''
 
     # Get suggested handle from current user
     suggested_handle = current_user.username if current_user.is_authenticated else ''
 
     return render_template(
         'mrc/index.html',
-        bridge_ws_url=bridge_ws_url,
+        mrc_ws_host_override=mrc_ws_host_override,
         suggested_handle=suggested_handle
     )

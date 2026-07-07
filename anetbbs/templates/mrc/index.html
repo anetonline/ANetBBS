@@ -753,6 +753,12 @@
 
   <script>
     window.RETURN_TO_BBS_URL = "{{ url_for('main.index') }}";
+    // Non-empty only when nginx isn't proxying /mrcws on the same port
+    // as this page (single-container Docker "quick start", or an
+    // explicit public MRC_BRIDGE_HOST) -- see anetbbs/web/mrc_web.py.
+    // buildWsUrlForChoice() below uses this instead of location.host
+    // when set.
+    window.MRC_WS_HOST_OVERRIDE = "{{ mrc_ws_host_override }}";
   </script>
   <script src="{{ url_for('static', filename='mrc/client.js') }}"></script>
   <script>
@@ -896,7 +902,8 @@
     function buildWsUrlForChoice(choice) {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const path = (choice && choice.ws_path) ? String(choice.ws_path) : '/mrcws';
-      return proto + '//' + location.host + path;
+      const host = window.MRC_WS_HOST_OVERRIDE || location.host;
+      return proto + '//' + host + path;
     }
 
     function getSelectedWsUrl() {
