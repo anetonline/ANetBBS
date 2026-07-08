@@ -596,6 +596,13 @@ def _import_message(network, msg_data: dict) -> int:
             area_tag, msg_id, msg_data.get('from_name', ''), exc)
         return -1
 
+    try:
+        from ..features.webhooks import fire
+        fire('echomail', {'from_name': msg.from_name, 'subject': msg.subject,
+                          'area_tag': area_tag, 'content': msg.body})
+    except Exception:
+        pass
+
     return 1
 
 

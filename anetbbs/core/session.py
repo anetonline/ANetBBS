@@ -1584,6 +1584,12 @@ class BBSSession:
                         post_lastcaller_to_interbbs(_cl)
                     except Exception:
                         pass
+                    try:
+                        from ..features.webhooks import fire
+                        fire('login', {'user': self.user.get('username', '?'),
+                                       'service': proto})
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

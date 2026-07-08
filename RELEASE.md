@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.56 — Wire up the remaining 7 webhook event types (July 2026)
+
+- FEATURE: the webhooks admin form has always offered 8 event types, but only `shout` actually fired anything — the other 7 (`post`, `bulletin`, `login`, `achievement`, `broadcast`, `sysop_page`, `echomail`) were selectable but never called. All 7 are now wired to their real trigger points, including logins across all four services (web, telnet, SSH, rlogin), not just web. New doc `docs/23-webhooks.md` covers all 8 events' payload formats and gotchas. 8 new tests.
+
+---
+
 # ANetBBS v1.0b2.55 — Fix QWK REP uploads never actually importing (July 2026)
 
 - FIX (live-caught verifying the v1.0b2.54 fix end to end): a reply uploaded from a QWK node showed "sent" but never appeared on the hub. Root cause: the hub's REP importer read the parsed message using the wrong dict keys (`conference`/`from`/`to` instead of the parser's real `conf_num`/`from_name`/`to_name`), silently falling back to defaults instead of erroring. `conference` defaulting to `0` meant every uploaded reply, from every QWK node, always resolved to conference 0 (private mail) and was silently dropped — this was never node-specific, inbound REP processing has been completely broken since this function was written. Fixed by reading the correct keys. Also fixed a second, unrelated crash found in the same investigation: a trailing log statement outside the app-context block raised `DetachedInstanceError` after a successful import, misleadingly logging "REP processing failed" for uploads that had actually already succeeded. 1 new regression test.

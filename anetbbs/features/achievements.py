@@ -80,6 +80,7 @@ def check_for_user(user):
         return []
     ensure_seeded()
     newly = []
+    newly_named = []  # (code, name) -- for the webhook payload below
     earned_codes = {ua.achievement.code for ua in user.achievements_earned
                     if ua.achievement}
     for code, _, _, _, fn in _RULES:
@@ -92,8 +93,15 @@ def check_for_user(user):
                     db.session.add(UserAchievement(user_id=user.id,
                                                     achievement_id=a.id))
                     newly.append(code)
+                    newly_named.append((code, a.name))
         except Exception:
             db.session.rollback()
     if newly:
         db.session.commit()
+        try:
+            from .webhooks import fire
+            for code, name in newly_named:
+                fire('achievement', {'user': user.username, 'code': code, 'name': name})
+        except Exception:
+            pass
     return newly

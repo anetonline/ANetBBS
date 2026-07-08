@@ -748,6 +748,12 @@ def add_bulletin():
         )
         db.session.add(message)
         db.session.commit()
+        try:
+            from ..features.webhooks import fire
+            fire('bulletin', {'user': current_user.username, 'title': message.title,
+                              'content': message.content})
+        except Exception:
+            pass
         flash('Bulletin created!', 'success')
         return redirect(url_for('admin.bulletins'))
     return render_template('admin/bulletin_form.html', form=form, title='Add Bulletin')

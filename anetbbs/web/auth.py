@@ -305,6 +305,11 @@ def login():
                 pass
         except Exception:
             db.session.rollback()
+        try:
+            from ..features.webhooks import fire
+            fire('login', {'user': user.username, 'service': 'web'})
+        except Exception:
+            pass
         # Random MOTD pick.
         try:
             from ..models import MotdEntry

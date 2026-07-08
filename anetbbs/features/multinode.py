@@ -105,6 +105,14 @@ def broadcast(sender_username, text, kind='msg', sender_slot=None):
         except asyncio.QueueFull:
             pass
 
+    try:
+        from .bbs_ui import _app
+        from .webhooks import fire
+        with _app().app_context():
+            fire('broadcast', {'user': sender_username, 'text': text or '', 'kind': kind})
+    except Exception:
+        pass
+
 
 def whisper(target_slot, sender_username, text):
     """Direct private message to a single node. Returns True on hit."""

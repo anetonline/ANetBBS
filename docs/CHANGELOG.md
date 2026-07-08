@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.55`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.56`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.56 — Wire up the remaining 7 webhook event types (July 2026)
+
+- FEATURE: the webhooks admin form (Admin → Webhooks) has always offered 8 event types, but only `shout` (shoutbox posts) actually fired anything — `post`, `bulletin`, `login`, `achievement`, `broadcast`, `sysop_page`, and `echomail` were selectable and would sit there showing "never called" forever, since nothing in the codebase ever called `fire()` for them. All 7 are now wired to their real trigger points: new board posts and replies (both web and terminal), sysop-created bulletins, logins (web, telnet, SSH, and rlogin — all four, not just web), newly-awarded achievement badges, multinode "Local Chat" broadcasts, sysop pages, and newly-imported inbound echomail messages (BinkP and QWK alike). Each event has its own payload shape (documented in `docs/23-webhooks.md`, which also covers the (lack of) HMAC signing, no-retry delivery semantics, and other gotchas already found documenting the pre-existing `shout` event). 8 new tests in `tests/test_webhooks_all_events_wired.py`.
+- New doc: [`23-webhooks.md`](23-webhooks.md) — full sysop-facing setup guide covering all 8 events, payload formats, the Bearer-secret auth model (not HMAC), delivery mechanics, and a worked Discord example.
 
 ## v1.0b2.55 — Fix QWK REP uploads never actually importing (July 2026)
 

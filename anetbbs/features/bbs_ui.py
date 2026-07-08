@@ -3272,6 +3272,12 @@ async def _post_compose(self, board_id, board_name, parent_id=None):
                  parent_id=parent_id, subject=subject[:200], content=body)
         db.session.add(p)
         db.session.commit()
+        try:
+            from .webhooks import fire
+            fire('post', {'user': username, 'board_id': board_id,
+                          'subject': p.subject, 'content': body})
+        except Exception:
+            pass
     await self.session.write(
         f"\r\n  {FG['grn']}{BOLD}[OK]{RESET} Posted (#{p.id}).\r\n")
     await self.session.read_line("\r\n  Press Enter...")

@@ -148,6 +148,13 @@ def new_post(board_id):
         db.session.commit()
 
         try:
+            from ..features.webhooks import fire
+            fire('post', {'user': current_user.username, 'board_id': board_id,
+                          'subject': clean_subject, 'content': clean_content})
+        except Exception:
+            pass
+
+        try:
             from ..features.notify import notify, notify_mentions
             url = url_for('boards.view_post', post_id=post.id)
             notify_mentions(f'{clean_subject}\n{clean_content}',
@@ -284,6 +291,13 @@ def reply_post(post_id):
         )
         db.session.add(reply)
         db.session.commit()
+
+        try:
+            from ..features.webhooks import fire
+            fire('post', {'user': current_user.username, 'board_id': reply.board_id,
+                          'subject': reply.subject, 'content': clean_content})
+        except Exception:
+            pass
 
         # Notifications: @mentions plus a direct ping to the parent author
         # so they know someone replied to their post (unless self-reply).

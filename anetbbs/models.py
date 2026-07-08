@@ -1702,8 +1702,11 @@ class Webhook(db.Model):
     """Outbound webhook — POST JSON to a URL when an event fires.
 
     `event` is one of: shout, post, bulletin, login, achievement, broadcast,
-    sysop_page, echomail. `template` is an optional JSON body with
-    placeholders like {user}, {text}, {url}; blank uses default shape."""
+    sysop_page, echomail -- see docs/23-webhooks.md for what payload keys
+    each one actually sends (they differ per event; there is no universal
+    placeholder set). `template` is an optional JSON body using {key}
+    placeholders substituted from that event's payload; blank uses the
+    default json.dumps(payload) shape."""
     __tablename__ = 'webhooks'
 
     id = db.Column(db.Integer, primary_key=True)

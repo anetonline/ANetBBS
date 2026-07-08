@@ -75,3 +75,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [20 — Federation directory (anetbbs.lst)](20-federation.md)
 - [21 — Scheduled events (cron-style maintenance jobs)](21-scheduled-events.md)
 - [22 — Running ANetBBS in Docker](22-containers.md)
+- [23 — Webhooks (outbound event notifications)](23-webhooks.md)
