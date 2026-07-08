@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.49`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.50`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.50 — Fix SyncTerm sixel auto-detect + terminal sixel profile option (July 2026)
+
+- FIX: a sysop reported sixel auto-detect (`sixel_mode` = Automatic) never worked on SyncTerm, even though forcing it on/off always worked and auto-detect worked fine on other sixel-capable clients (proving the DA1 mechanism itself wasn't generally broken). Root cause, confirmed against SyncTerm's own CTerm manual: SyncTerm's DA1 reply doesn't use the standard `?`-prefixed capability-flag list that xterm/mlterm/wezterm/contour use — it spells "CTerm" out in decimal ASCII (`CSI = 67;84;101;114;109;rev c`) and never reports sixel support in that reply at all, regardless of whether the terminal actually has it. Sixel support is only exposed through a second, CTerm-specific extended device-attributes query (`CSI < 0 c` → `CSI < 0 ; Ps... c`, where flag `4` means pixel/sixel graphics are supported). `_detect_sixel_support()` (`anetbbs/features/bbs_ui.py`) now recognizes the CTerm signature in the primary DA1 reply and, only then, sends the follow-up CTDA query and checks flag 4 there — other terminals are untouched, still a single round-trip. 3 new regression tests in `tests/test_sixel_detection.py` cover the xterm-style path (no follow-up query sent), a bare CTerm DA1 reply with no CTDA response available (must not be misread as sixel support), and the full CTerm → CTDA handshake.
+- FEATURE: the terminal "Edit Profile" menu (telnet/ssh) had no way to set the `sixel_mode` preference at all — only the web `/profile/edit` page did, since the preference shipped in v1.0b2.48. Added a matching Automatic/Always On/Always Off prompt to `_edit_profile()`.
+- FIX (dev tooling): `docs/17-development.md` claimed `python -m unittest discover` needed no pytest install, but `tests/test_mrc_integration.py` uses real `@pytest.fixture` decorators — that file fails to even *import* without pytest present, breaking a full local `unittest discover` run for anyone who hadn't separately installed it. Added `requirements-dev.txt` (`-r requirements.txt` plus `pytest>=7.0.0`) and corrected the docs to install it first. Verified: a fresh venv with only `requirements-dev.txt` installed runs the full 258-test suite (256 unittest-discovered + the 3 pytest-fixture tests in `test_mrc_integration.py`, 2 of which skip because the MRC bridge isn't present in a bare dev checkout) with zero import errors.
 
 ## v1.0b2.49 — Three real Docker bugs found testing against an actual daemon (July 2026)
 

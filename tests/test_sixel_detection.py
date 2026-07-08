@@ -205,6 +205,101 @@ class DetectSixelSupportTests(unittest.TestCase):
                         'auto mode must send the DA1 query (ESC[0c)')
         self.assertFalse(result)  # no real response -> no sixel support detected
 
+    def test_auto_xterm_style_da1_detects_sixel(self):
+        """A real xterm-family reply (?-prefixed flag list, flag 4
+        present) must be detected directly, no follow-up query."""
+        import asyncio
+        uid = self._make_user('detectxterm', 'auto')
+        ui = self._ui_for(uid)
+
+        write_calls = []
+        async def _capture_write(text):
+            write_calls.append(text)
+        ui.session.write = _capture_write
+
+        # xterm/mlterm/wezterm-style DA1 response: ESC[?65;1;2;4;9c
+        resp_bytes = iter(b'\x1b[?65;1;2;4;9c')
+        class _FakeReader:
+            async def read(self, n):
+                try:
+                    return bytes([next(resp_bytes)])
+                except StopIteration:
+                    return b''
+        ui.session.reader = _FakeReader()
+
+        with patch('shutil.which', return_value='/usr/bin/img2sixel'):
+            result = asyncio.run(ui._detect_sixel_support())
+
+        self.assertEqual(write_calls, ['\x1b[0c'],
+                          'non-CTerm terminals must not trigger a CTDA follow-up query')
+        self.assertTrue(result)
+
+    def test_auto_syncterm_da1_alone_is_not_enough(self):
+        """SyncTerm/CTerm's real DA1 reply spells 'CTerm' in decimal
+        ASCII (CSI = 67;84;101;114;109;rev c) and never carries a
+        standalone sixel flag -- this was the actual bug: auto-detect
+        could never succeed on SyncTerm even though it supports sixel,
+        because there's no '4' token to find in that reply."""
+        import asyncio
+        uid = self._make_user('detectctermbare', 'auto')
+        ui = self._ui_for(uid)
+
+        async def _capture_write(text):
+            pass
+        ui.session.write = _capture_write
+
+        # CTerm's real DA1 reply, no CTDA follow-up available (times out).
+        resp_bytes = iter(b'\x1b[=67;84;101;114;109;1;156c')
+        class _FakeReader:
+            async def read(self, n):
+                try:
+                    return bytes([next(resp_bytes)])
+                except StopIteration:
+                    return b''
+        ui.session.reader = _FakeReader()
+
+        with patch('shutil.which', return_value='/usr/bin/img2sixel'):
+            result = asyncio.run(ui._detect_sixel_support())
+
+        self.assertFalse(result, 'a bare CTerm DA1 reply must not be misread as sixel support')
+
+    def test_auto_syncterm_ctda_followup_detects_sixel(self):
+        """When the primary DA1 reply identifies the client as
+        SyncTerm/CTerm, the detector must follow up with CTerm's
+        extended-DA query (CSI < 0 c) and read flag 4 (pixel/sixel
+        graphics) from CSI < 0 ; Ps... c -- this is the actual fix."""
+        import asyncio
+        uid = self._make_user('detectctermfull', 'auto')
+        ui = self._ui_for(uid)
+
+        write_calls = []
+        async def _capture_write(text):
+            write_calls.append(text)
+        ui.session.write = _capture_write
+
+        # One continuous byte stream: the first read loop stops as soon as
+        # it hits the 'c' that ends the primary DA1 reply, leaving the CTDA
+        # reply's bytes still queued up for the second read loop.
+        stream = iter(b'\x1b[=67;84;101;114;109;1;156c' + b'\x1b[<0;1;2;4;7c')
+        async def _capture_write(text):
+            write_calls.append(text)
+        ui.session.write = _capture_write
+
+        class _SeqReader:
+            async def read(self, n):
+                try:
+                    return bytes([next(stream)])
+                except StopIteration:
+                    return b''
+        ui.session.reader = _SeqReader()
+
+        with patch('shutil.which', return_value='/usr/bin/img2sixel'):
+            result = asyncio.run(ui._detect_sixel_support())
+
+        self.assertEqual(write_calls, ['\x1b[0c', '\x1b[<0c'],
+                          'CTerm signature in the DA1 reply must trigger the CTDA follow-up query')
+        self.assertTrue(result, 'flag 4 in the CTDA reply must be detected as sixel support')
+
 
 if __name__ == '__main__':
     unittest.main()

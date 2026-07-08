@@ -2132,6 +2132,22 @@ class BBSMenuUI:
                           looks like ESC [ ? 65 ; 1 ; 2 ; 4 ; 9 c -- flag
                           4 in the parameter list means sixel is
                           supported.
+
+                          SyncTerm/CTerm is a special case: its DA1
+                          reply doesn't use the '?'-prefixed flag list
+                          at all. It spells "CTerm" in decimal ASCII
+                          instead (CSI = 67;84;101;114;109;rev c), and
+                          never reports sixel support there regardless
+                          of whether it has it. Per the CTerm manual,
+                          you have to detect that signature and then
+                          send CTerm's own extended-DA query (CSI < 0 c)
+                          to get CSI < 0 ; Ps... c back, where flag 4
+                          means pixel/sixel graphics are supported. This
+                          is why forcing sixel on/off always worked but
+                          auto-detect never did on SyncTerm specifically
+                          -- the standard DA1 parse can never see a "4"
+                          in a response that's just spelling out a
+                          product name.
         """
         if hasattr(self.session, '_sixel_ok'):
             return self.session._sixel_ok
@@ -2154,7 +2170,6 @@ class BBSMenuUI:
             return self.session._sixel_ok
 
         # 'auto' -- DA1 detection.
-        import asyncio as _aio
         import re as _re
         # Cheap fast-path: if the tool isn't installed, skip the DA1 round-trip.
         if not _sh.which('img2sixel'):
@@ -2162,25 +2177,40 @@ class BBSMenuUI:
             return False
         # Send DA1 query and read until 'c' or timeout.
         await self.session.write('\x1b[0c')
-        buf = b''
-        try:
-            # Allow up to 1.5 s — covers high-latency links
-            deadline = _aio.get_event_loop().time() + 1.5
-            while _aio.get_event_loop().time() < deadline:
-                remaining = deadline - _aio.get_event_loop().time()
-                ch = await _aio.wait_for(
-                    self.session.reader.read(1), timeout=min(0.3, remaining))
-                if not ch:
-                    break
-                buf += ch
-                if ch == b'c':   # final byte of DA1 response
-                    break
-        except Exception:
-            pass
-        resp = buf.decode('latin-1', errors='replace')
+        resp = await self._read_escape_response(timeout_total=1.5)
+
+        # SyncTerm/CTerm signature: "CSI = 67;84;101;114;109;rev c" is
+        # "CTerm" spelled out in decimal ASCII, not a real flag list --
+        # follow up with CTerm's own extended-DA query to get a real
+        # capability list back.
+        if '=67;84;101;114;109' in resp:
+            await self.session.write('\x1b[<0c')
+            resp = await self._read_escape_response(timeout_total=1.0)
+
         # Flag 4 = sixel: appears as ;4; or ;4c in the CSI response
         self.session._sixel_ok = bool(_re.search(r'[;?]4[;c]', resp))
         return self.session._sixel_ok
+
+    async def _read_escape_response(self, terminator=b'c', timeout_total=1.5,
+                                     timeout_per_read=0.3):
+        """Read raw bytes from the session until `terminator` byte or timeout.
+        Shared by DA1/CTDA-style device-attributes round trips."""
+        import asyncio as _aio
+        buf = b''
+        try:
+            deadline = _aio.get_event_loop().time() + timeout_total
+            while _aio.get_event_loop().time() < deadline:
+                remaining = deadline - _aio.get_event_loop().time()
+                ch = await _aio.wait_for(
+                    self.session.reader.read(1), timeout=min(timeout_per_read, remaining))
+                if not ch:
+                    break
+                buf += ch
+                if ch == terminator:
+                    break
+        except Exception:
+            pass
+        return buf.decode('latin-1', errors='replace')
 
     async def _rss_render_sixel(self, image_url, width_px=280):
         """Download image_url and emit sixel to terminal. Returns True if OK."""
@@ -3490,6 +3520,21 @@ async def _edit_profile(self):
             new = await self.session.read_line(f"{label} [{current[:30]}]: ")
             if new and new.strip():
                 setattr(u, attr, new.strip()[:maxlen])
+
+        cur_sixel = u.sixel_mode or 'auto'
+        await self.session.write(
+            "\r\nSixel Graphics: auto (detect) / on (always) / off (never)\r\n"
+            "  'on' is for terminals that support sixel but don't self-report\r\n"
+            "  it via DA1 (e.g. Windows Terminal over SSH).\r\n")
+        new_sixel = await self.session.read_line(
+            f"Sixel mode [auto/on/off, blank = keep '{cur_sixel}']: ")
+        new_sixel = (new_sixel or '').strip().lower()
+        if new_sixel in ('a', 'auto'):
+            u.sixel_mode = 'auto'
+        elif new_sixel in ('on', 'forced_on'):
+            u.sixel_mode = 'forced_on'
+        elif new_sixel in ('off', 'forced_off'):
+            u.sixel_mode = 'forced_off'
         db.session.commit()
     await self.session.write("\r\nProfile saved.\r\n")
     await self.session.read_line("Press Enter...")

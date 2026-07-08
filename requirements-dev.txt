@@ -1,0 +1,10 @@
+# ANetBBS — extra dependencies for local development and running the
+# full test suite. Never needed for a production install (install.sh
+# and update.sh only ever use requirements.txt).
+-r requirements.txt
+
+# tests/test_mrc_integration.py uses real @pytest.fixture decorators,
+# so pytest itself has to be installed for that file to even be
+# importable -- `python -m unittest discover` fails on it too, not
+# just `pytest tests/`.
+pytest>=7.0.0

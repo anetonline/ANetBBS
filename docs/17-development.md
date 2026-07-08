@@ -371,13 +371,20 @@ your request.
 
 ```bash
 cd <install>
+venv/bin/pip install -r requirements-dev.txt   # one-time, pulls in pytest
 venv/bin/pytest tests/
-# or, equivalently (no pytest install required):
+# or:
 venv/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
+`requirements-dev.txt` is needed either way: `tests/test_mrc_integration.py`
+uses real `@pytest.fixture` decorators, so pytest has to be installed
+for that one file to even be *importable* — `unittest discover` will
+fail to load it (not just skip it) without pytest present, same as
+running it under `pytest` directly.
+
 The suite is a mix of `unittest.TestCase`-based files (most of them)
-and a couple of pytest-fixture-based files — there's no shared
+and a single pytest-fixture-based file — there's no shared
 `conftest.py`; each test file that needs a Flask app/test client
 builds its own (see any `test_*.py` file's `setUpClass`/fixture
 functions for the pattern most commonly used — create a fresh

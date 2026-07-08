@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.50 — Fix SyncTerm sixel auto-detect + terminal sixel profile option (July 2026)
+
+- FIX: sixel auto-detect (`sixel_mode` = Automatic) never worked on SyncTerm specifically, even though forcing it on/off always worked and auto-detect worked fine on other sixel-capable clients. Root cause: SyncTerm's DA1 reply doesn't use the standard `?`-prefixed flag list at all — it spells "CTerm" out in decimal ASCII (`CSI = 67;84;101;114;109;rev c`) and never reports sixel support there regardless of whether it has it. Per SyncTerm's own CTerm manual, sixel support is only exposed via a second, CTerm-specific extended-DA query (`CSI < 0 c` → `CSI < 0 ; Ps... c`, flag 4 = pixel/sixel graphics). `_detect_sixel_support()` now recognizes the CTerm signature and follows up with that query; other terminals are unaffected (still a single round-trip). 3 new regression tests in `tests/test_sixel_detection.py`.
+- FEATURE: the terminal "Edit Profile" menu (telnet/ssh) had no way to set the `sixel_mode` preference at all — only the web `/profile/edit` page did, since it shipped in v1.0b2.48. Added a matching Automatic/Always On/Always Off prompt to the terminal menu.
+- FIX: `tests/test_mrc_integration.py` uses real `@pytest.fixture`s, so it was never importable by `unittest discover` without pytest installed, contradicting the dev docs' claim that running via `unittest` needed no pytest install. Added `requirements-dev.txt` (pulls in `requirements.txt` + `pytest`) and corrected `docs/17-development.md`'s Testing section.
+
+---
+
 # ANetBBS v1.0b2.49 — Three real Docker bugs found testing against an actual daemon (July 2026)
 
 - FIX: single-container quick-start's documented `docker run` command referenced an entrypoint script the Dockerfile never actually copied there — every quick-start attempt failed instantly.
