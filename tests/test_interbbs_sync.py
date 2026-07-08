@@ -1,8 +1,7 @@
 """Tests for InterBBS Wall (anetbbs/echomail/interbbs_sync.py) -- posts
 shared with other ANetBBS installs over a dedicated echomail area,
 riding the existing QWK/BinkP transport rather than a bespoke sync
-protocol (Jerry's own suggestion, matching how fsxnet's wall/last-caller
-areas work).
+protocol, matching how fsxnet's wall/last-caller areas work.
 
 Covers the safety-critical properties the design depends on:
 
@@ -40,6 +39,23 @@ def _make_app(db_path):
 
 
 class InterbbsSyncTests(unittest.TestCase):
+    # _make_app() overwrites the shared TestingConfig.SQLALCHEMY_DATABASE_URI
+    # class attribute on every call -- restore it after this class runs, or
+    # any test file that runs later in the same pytest process inherits a
+    # scratch-DB path that's already been deleted by our own tempdir
+    # cleanup (confirmed: this exact leak broke test_mrc_integration.py
+    # when run as part of the full suite). Same pattern as
+    # test_qwk_hub_gating.py's teardown.
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+
     def setUp(self):
         import tempfile
         self._tmp = tempfile.TemporaryDirectory()
@@ -301,6 +317,18 @@ class InterbbsLastCallersTests(unittest.TestCase):
     """Same loop-prevention/dedup properties as InterbbsSyncTests, for
     the Last Callers half -- plus the privacy invariant that ip_address
     must never be relayed or materialized for imported entries."""
+
+    # See InterbbsSyncTests' setUpClass/tearDownClass comment -- same leak,
+    # same fix, needed independently here since this is a separate class.
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
 
     def setUp(self):
         import tempfile

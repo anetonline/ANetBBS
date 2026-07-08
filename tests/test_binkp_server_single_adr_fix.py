@@ -9,9 +9,22 @@ same "advertise both qualified and bare forms" pattern per configured
 EchomailNetwork row when announcing our own AKAs to whoever connects
 in -- same self-collision risk on the calling peer's busy-lock logic.
 Fixed by sending exactly one form per configured address.
+
+Deliberately does NOT create a real Flask app / call create_app() or
+db.init_app() anywhere in this file. _handle_connection() (the function
+under test) already creates its own internal Flask app + db.init_app()
+to look up EchomailNetwork rows -- confirmed via bisection that a
+SECOND, test-created app/engine coexisting with that one in the same
+process (even torn down carefully before/after) leaves scoped-session
+state that corrupts unrelated test files' own create_app() calls
+elsewhere in the same pytest run (surfaced as a spurious "UNIQUE
+constraint failed: users.username" in test_mrc_integration.py). Mocking
+the EchomailNetwork.query lookup directly sidesteps needing any real
+Flask/SQLAlchemy app in this file at all, and is a tighter unit test
+for what's actually being verified here (address dedup/formatting
+logic, not real DB round-tripping).
 """
 import asyncio
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -43,6 +56,23 @@ class _FakeReader:
         raise asyncio.IncompleteReadError(partial=b'', expected=n)
 
 
+class _FakeNetworkRow:
+    def __init__(self, name, our_address):
+        self.name = name
+        self.our_address = our_address
+
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter_by(self, **kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+
 def _decode_sent_commands(raw_frames):
     """Reconstruct (cmd, text) tuples from the raw BinkP frame bytes
     _send_cmd() wrote, using the same frame format binkp.py builds."""
@@ -60,29 +90,26 @@ def _decode_sent_commands(raw_frames):
 
 class BinkPServerSingleAdrFormTests(unittest.TestCase):
     def _run(self, network_rows):
-        import tempfile
-        import anetbbs.config as cfg_mod
-        tmp_db = tempfile.mktemp(suffix='.db')
-        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{tmp_db}'
-        os.environ['FLASK_ENV'] = 'testing'
-
-        from anetbbs.web_app import create_app
-        from anetbbs.models import db, EchomailNetwork
-        app = create_app('testing')
-        with app.app_context():
-            db.create_all()
-            for name, addr in network_rows:
-                db.session.add(EchomailNetwork(
-                    name=name, network_type='binkp', our_address=addr,
-                    is_active=True))
-            db.session.commit()
-
         from anetbbs.echomail.binkp_server import _handle_connection, CMD_ADR
+        from anetbbs.models import EchomailNetwork
+
+        fake_rows = [_FakeNetworkRow(name, addr) for name, addr in network_rows]
         reader = _FakeReader()
         writer = _FakeWriter()
-        asyncio.run(_handle_connection(reader, writer, '1:114/30', 'ANetBBS'))
 
-        os.remove(tmp_db)
+        # EchomailNetwork.query is a Flask-SQLAlchemy descriptor that
+        # requires an active app context just to be READ -- unittest.mock
+        # .patch.object() tries to read the "original" value up front to
+        # save it for restoration, which raises with no app context
+        # active. Plain class-attribute assignment shadows the inherited
+        # descriptor without reading it first; del restores the
+        # inherited descriptor behavior afterward.
+        EchomailNetwork.query = _FakeQuery(fake_rows)
+        try:
+            asyncio.run(_handle_connection(reader, writer, '1:114/30', 'ANetBBS'))
+        finally:
+            del EchomailNetwork.query
+
         commands = _decode_sent_commands(writer.sent)
         return [text for cmd, text in commands if cmd == CMD_ADR]
 
