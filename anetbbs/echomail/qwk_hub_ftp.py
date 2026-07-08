@@ -156,8 +156,20 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             date_str  = when.strftime('%m-%d-%y')
             time_str  = when.strftime('%H:%M')
 
-            body_text = (msg.body or '').replace('\r\n', '\xe3').replace('\n', '\xe3')
-            body_bytes = body_text.encode('cp437', errors='replace') + b'\xe3'
+            # Encode to CP437 BYTES first, then do the newline -> 0xE3
+            # paragraph-separator substitution at the byte level, not on
+            # the Python str. The Python string literal '\xe3' is the
+            # Unicode codepoint U+00E3 ('ã'), which CP437 cannot represent
+            # (no such character in that code page) -- doing the replace
+            # on the str before encoding meant every embedded newline
+            # silently became a literal '?' (errors='replace''s fallback)
+            # instead of the real QWK paragraph-separator byte, corrupting
+            # every multi-line outbound QWK message. \r and \n are plain
+            # ASCII and survive CP437 encoding unchanged, so replacing
+            # them with the raw byte b'\xe3' after encoding is safe and
+            # unambiguous.
+            body_bytes = (msg.body or '').encode('cp437', errors='replace')
+            body_bytes = body_bytes.replace(b'\r\n', b'\xe3').replace(b'\n', b'\xe3') + b'\xe3'
 
             # Number of 128-byte blocks needed for header + body.
             total_blocks = 1 + (len(body_bytes) + BLOCK - 1) // BLOCK

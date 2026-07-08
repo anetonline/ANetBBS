@@ -58,7 +58,15 @@ class BinkPNodeForm(FlaskForm):
     name = StringField('Friendly Name', validators=[DataRequired(), Length(max=100)])
     ftn_address = StringField('FTN Address (e.g. 1:337/100)',
                               validators=[DataRequired(), Length(max=60)])
-    password = PasswordField('Session Password', validators=[DataRequired(), Length(max=255)])
+    # Optional, not DataRequired: on the edit route (see edit_binkp_node)
+    # leaving this blank means "keep the current password" -- a
+    # DataRequired() here silently blocked EVERY edit (including fixing a
+    # typo'd name/address) unless the admin retyped a new password,
+    # forcibly rotating credentials the node's own sysop might not have
+    # been told about. Node creation (new_binkp_node) enforces its own
+    # "password required" check explicitly since this validator no longer
+    # does that for it.
+    password = PasswordField('Session Password', validators=[Optional(), Length(max=255)])
     sysop = StringField('Sysop Name', validators=[Optional(), Length(max=100)])
     system_name = StringField('System Name', validators=[Optional(), Length(max=100)])
     location = StringField('Location', validators=[Optional(), Length(max=100)])
@@ -77,7 +85,9 @@ class QWKNodeForm(FlaskForm):
     name = StringField('BBS Name', validators=[DataRequired(), Length(max=100)])
     sysop = StringField('Sysop Name', validators=[Optional(), Length(max=100)])
     email = StringField('Sysop Email', validators=[Optional(), Length(max=200)])
-    password = PasswordField('Download Password', validators=[DataRequired(), Length(max=255)])
+    # Optional, not DataRequired -- see BinkPNodeForm.password above for
+    # why (same bug, same fix, same reasoning).
+    password = PasswordField('Download Password', validators=[Optional(), Length(max=255)])
     is_active = BooleanField('Active', default=True)
     notes = TextAreaField('Notes', validators=[Optional()])
     submit = SubmitField('Save Node')
@@ -169,6 +179,10 @@ def binkp_nodes():
 def new_binkp_node():
     form = BinkPNodeForm()
     if form.validate_on_submit():
+        if not form.password.data:
+            flash('Session password is required when creating a new node.', 'danger')
+            return render_template('echomail/admin/hub/binkp_node_form.html',
+                                   form=form, node=None)
         existing = BinkPNode.query.filter_by(
             ftn_address=form.ftn_address.data.strip()).first()
         if existing:
@@ -340,6 +354,10 @@ def qwk_nodes():
 def new_qwk_node():
     form = QWKNodeForm()
     if form.validate_on_submit():
+        if not form.password.data:
+            flash('Download password is required when creating a new node.', 'danger')
+            return render_template('echomail/admin/hub/qwk_node_form.html',
+                                   form=form, node=None)
         pid = form.packet_id.data.strip().upper()
         if QWKNode.query.filter_by(packet_id=pid).first():
             flash('A node with that Packet ID already exists.', 'danger')

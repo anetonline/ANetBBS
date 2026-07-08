@@ -93,6 +93,57 @@ class QwkPacketRoundtripTests(unittest.TestCase):
         conf_num = struct.unpack('<H', header[123:125])[0]
         self.assertEqual(conf_num, 5)
 
+    def test_multiline_body_survives_roundtrip_with_real_linebreaks(self):
+        """Regression test for a second real bug, found while testing the
+        QWK inbound msg_id dedup fix: _build_messages_dat() replaced '\\n'
+        with the Python str '\\xe3' (Unicode U+00E3, 'a with tilde') BEFORE
+        cp437-encoding the body. CP437 has no mapping for U+00E3, so
+        encode(..., errors='replace') silently turned every line break
+        into a literal '?' instead of the real QWK paragraph-separator
+        byte (raw 0xE3) -- corrupting every multi-paragraph outbound QWK
+        message. Fixed by doing the newline substitution at the byte
+        level, after encoding."""
+        from anetbbs.echomail.qwk_hub_ftp import _build_control_dat, _build_messages_dat
+        from anetbbs.echomail.qwk import _parse_control_dat, _parse_messages_dat
+
+        conferences = {1: FakeArea('ANN.TECH')}
+        body = 'First line.\nSecond line.\nThird line.'
+        messages_by_conf = {1: [FakeMsg('Tech News Bot', 'All', 'multi-line test', body)]}
+
+        control = _build_control_dat('ANET', conferences)
+        messages_dat = _build_messages_dat(messages_by_conf, 'PI3ANET')
+        info = _parse_control_dat(control)
+        parsed = _parse_messages_dat(messages_dat, info['conferences'])
+
+        self.assertEqual(len(parsed), 1)
+        self.assertNotIn('?', parsed[0]['body'],
+                          "line breaks must not have been mangled into '?'")
+        self.assertEqual(parsed[0]['body'], body,
+                          'multi-line body must survive the round trip byte-for-byte')
+
+    def test_cp437_extended_characters_survive_roundtrip(self):
+        """CP437 box-drawing/block characters (real BBS ANSI-art content)
+        must round-trip correctly, not just plain ASCII."""
+        from anetbbs.echomail.qwk_hub_ftp import _build_control_dat, _build_messages_dat
+        from anetbbs.echomail.qwk import _parse_control_dat, _parse_messages_dat
+
+        conferences = {1: FakeArea('ANN.ANSIART')}
+        body = '███ block ╔═╗ box ☺ smiley'
+        messages_by_conf = {1: [FakeMsg('Artist', 'All', 'cp437 test', body)]}
+
+        control = _build_control_dat('ANET', conferences)
+        messages_dat = _build_messages_dat(messages_by_conf, 'PI3ANET')
+        info = _parse_control_dat(control)
+        parsed = _parse_messages_dat(messages_dat, info['conferences'])
+
+        self.assertEqual(len(parsed), 1)
+        # Parsed back out via latin-1 (CP437 bytes decoded as latin-1
+        # upstream in _parse_messages_dat), so compare at the CP437-byte
+        # level rather than expecting the original Unicode glyphs back.
+        expected_bytes = body.encode('cp437', errors='replace')
+        actual_bytes = parsed[0]['body'].encode('latin-1', errors='replace')
+        self.assertEqual(actual_bytes, expected_bytes)
+
     def test_num_chunks_is_ascii_text_not_binary(self):
         """The real QWK spec requires num_chunks as 6-char ASCII text at
         bytes 116-121 -- pins this explicitly since it's easy to

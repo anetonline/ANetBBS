@@ -5,9 +5,22 @@ Supports different environments (development, production)
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base directory
 BASE_DIR = Path(__file__).parent.parent
+
+# Systemd services load .env via EnvironmentFile=, so os.environ is already
+# correct when running as a real service -- load_dotenv()'s default
+# override=False means it never clobbers those. But nothing in this
+# codebase ever called load_dotenv() anywhere, so any script run manually
+# (a one-shot tools/*.py maintenance script, a bare `python -m ...`, a
+# plain interactive shell) never saw .env at all and silently fell back to
+# DevelopmentConfig's anetbbs_dev.db instead of the real anetbbs.db --
+# live-caught running tools/dedupe_qwk_messages.py by hand, which reported
+# "nothing to clean up" against an empty database while the real one had
+# hundreds of duplicate rows, no error or warning either way.
+load_dotenv(BASE_DIR / '.env')
 
 
 class Config:

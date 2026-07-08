@@ -242,13 +242,29 @@ def _parse_messages_dat(data: bytes, conferences: dict):
 
         logger.info('QWK inbound msg: conf=%d area_tag=%r from=%r subj=%r',
                     conf_num, area_tag, from_name, subject)
+        msg_id = clean['msg_id']
+        if not msg_id:
+            # Vanilla QWK hubs (unlike FTN-tunneling gateways) don't embed an
+            # @MSGID: kludge, so _clean_body() returns None here for almost
+            # every message. Without a msg_id, the dedup check in
+            # poller.py:_import_message (`if msg_id: ...`) is silently
+            # skipped entirely, so any poll that re-serves overlapping
+            # content (no per-network checkpoint exists to prevent this)
+            # re-imports every message as brand new, uncapped, on every
+            # poll. Synthesize a deterministic ID from stable message
+            # content — same real message always hashes the same, so a
+            # re-download of the same content is now caught — mirroring
+            # the outbound stable-ID fallback below in _build_rep_packet().
+            fallback_key = f'{conf_num}|{from_name}|{to_name}|{subject}|{date}|{clean["body"]}'
+            msg_id = 'QWK-' + hashlib.md5(
+                fallback_key.encode('utf-8', errors='replace')).hexdigest()
         messages.append({
             'from_name': from_name,
             'to_name': to_name or 'All',
             'subject': subject,
             'date_str': date,
             'body': clean['body'],
-            'msg_id': clean['msg_id'],
+            'msg_id': msg_id,
             'reply_id': clean['reply_id'],
             'chrs': clean['chrs'],
             'tear_line': clean['tear_line'],
