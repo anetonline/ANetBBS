@@ -291,8 +291,19 @@ async def send_file(session, filepath: str, protocol: str = 'zmodem') -> bool:
         except Exception:
             pass
         await asyncio.gather(t_out, t_in, return_exceptions=True)
-        if is_telnet:
-            await _negotiate_binary(session, False)
+        # Deliberately NOT renegotiating BINARY back off here. The
+        # transfer's own reader (with the unescaper that consumes the
+        # client's telnet-negotiation replies) has already been
+        # cancelled by this point -- a "turn it back off" write would
+        # provoke a WONT/DONT reply from the client that nothing is
+        # listening for anymore, and it would sit in the socket buffer
+        # until the *next* normal read (e.g. a "Press Enter..." prompt)
+        # picked it up raw. Live-caught: this made the session
+        # disconnect (straight to the goodbye screen) the instant a
+        # transfer finished. Leaving BINARY mode on for the rest of the
+        # connection is standard, harmless practice -- it only
+        # suppresses NVT ASCII translation and doesn't affect normal
+        # text/ANSI output.
 
     return proc.returncode == 0
 
@@ -410,8 +421,19 @@ async def recv_file(session, protocol: str = 'zmodem') -> list:
         except Exception:
             pass
         await asyncio.gather(t_out, t_in, return_exceptions=True)
-        if is_telnet:
-            await _negotiate_binary(session, False)
+        # Deliberately NOT renegotiating BINARY back off here. The
+        # transfer's own reader (with the unescaper that consumes the
+        # client's telnet-negotiation replies) has already been
+        # cancelled by this point -- a "turn it back off" write would
+        # provoke a WONT/DONT reply from the client that nothing is
+        # listening for anymore, and it would sit in the socket buffer
+        # until the *next* normal read (e.g. a "Press Enter..." prompt)
+        # picked it up raw. Live-caught: this made the session
+        # disconnect (straight to the goodbye screen) the instant a
+        # transfer finished. Leaving BINARY mode on for the rest of the
+        # connection is standard, harmless practice -- it only
+        # suppresses NVT ASCII translation and doesn't affect normal
+        # text/ANSI output.
 
     if proc.returncode != 0:
         shutil.rmtree(tmpdir, ignore_errors=True)

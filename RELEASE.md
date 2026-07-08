@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.58 — Fix session disconnect right after a telnet transfer completes (July 2026)
+
+- FIX (live-caught testing v1.0b2.57): a telnet ZMODEM download worked correctly but the session disconnected to the goodbye screen the instant it finished. The transfer's own reader (which consumes the client's telnet-negotiation replies) was cancelled before the post-transfer "turn BINARY back off" command was sent, so the client's reply to that sat unconsumed in the socket buffer and got misread as a disconnect by the next normal prompt. Fixed by not sending that command — leaving a session in BINARY mode for the rest of the connection is standard, harmless practice. Same feature as v1.0b2.57; see that entry for credit to andy5995's original PR #6 diagnosis.
+
+---
+
 # ANetBBS v1.0b2.57 — Fix ZMODEM/XMODEM/YMODEM corruption on RFC-compliant telnet clients (July 2026)
 
 - FIX: the terminal file-transfer bridge never undid a compliant telnet client's IAC doubling, so every `0xFF` byte in a transfer corrupted the ZMODEM/XMODEM/YMODEM stream — lenient clients that skip telnet processing happened to work by accident, RFC-compliant ones didn't. Root-caused and originally patched by andy5995 (GitHub PR #6, with Claude Opus 4.8's assistance) — the diagnosis and telnet-side fix were correct; landed here with a protocol gate added on top, since the transfer bridge is shared with SSH/rlogin sessions (which have no IAC concept and would have been corrupted instead by an unconditional fix). 21 new tests — this module had none before.

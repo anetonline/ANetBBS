@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.57`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.58`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.58 — Fix session disconnect right after a telnet transfer completes (July 2026)
+
+- FIX (live-caught testing v1.0b2.57 against a real telnet client): a ZMODEM download completed correctly (byte-perfect, the actual fix worked), but the session disconnected straight to the goodbye screen the instant the transfer finished. Root cause: the transfer's own reader task — the one whose telnet-unescape codec consumes the client's replies to our BINARY-mode negotiation — was cancelled before the post-transfer "turn BINARY back off" command was sent. The client dutifully replies to that with its own WONT/DONT bytes, but nothing was listening anymore; those bytes sat in the socket buffer and got picked up raw by the very next normal read (the "Press Enter..." prompt), which read them as a disconnect. The "turn BINARY on" side never had this problem, since the transfer's reader is already running by the time that reply comes back — only the "turn it back off" step was affected. Fixed by not sending that command at all: leaving a session in telnet BINARY mode for the rest of the connection is standard, harmless practice (it only suppresses NVT ASCII translation, no effect on normal text/ANSI output), and avoids the reply-timing hazard entirely. Same underlying feature as v1.0b2.57 — see that entry for credit to andy5995's original PR #6 diagnosis.
 
 ## v1.0b2.57 — Fix ZMODEM/XMODEM/YMODEM corruption on RFC-compliant telnet clients (July 2026)
 
