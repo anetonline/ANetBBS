@@ -80,6 +80,16 @@ def settings():
 
     if interbbs_enabled:
         _ensure_lastcallers_sync_event()
+        # Create the ANET_LASTCALLERS area right now, not lazily on the
+        # first local login after enabling -- see wall_admin.py's
+        # identical fix for why (confirmed missing live: enabling the
+        # feature alone created nothing at all).
+        try:
+            from ..echomail.interbbs_sync import ensure_special_area, LASTCALLERS_AREA_TAG
+            ensure_special_area(network, LASTCALLERS_AREA_TAG)
+        except Exception as e:
+            flash(f'Settings saved, but could not create the ANET_LASTCALLERS area yet: {e}', 'warning')
+            return redirect(url_for('.index'))
 
     flash(f'Last Callers InterBBS sharing {"enabled" if interbbs_enabled else "disabled"}.', 'success')
     return redirect(url_for('.index'))

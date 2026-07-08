@@ -132,6 +132,30 @@ class InterbbsBinkpOnlyTests(unittest.TestCase):
         self.assertTrue(self.app.config.get('WALL_INTERBBS_ENABLED'))
         self.assertEqual(self.app.config.get('WALL_INTERBBS_NETWORK_ID'), str(binkp_id))
 
+    def test_wall_settings_creates_area_immediately_not_lazily(self):
+        """Live-caught: enabling the feature alone created nothing at
+        all -- the ANET_WALL area only got created the first time
+        someone posted a new local wall message. A sysop enabling this
+        should see the area right away, not have to post something
+        first just to bootstrap it."""
+        binkp_id, qwk_id = self._make_networks()
+        client = self.app.test_client()
+        self._login_as_admin(client)
+
+        client.post('/admin/wall/settings', data={
+            'color_scheme': 'cyan',
+            'interbbs_enabled': 'on',
+            'interbbs_network_id': str(binkp_id),
+        }, follow_redirects=True)
+
+        from anetbbs.echomail.interbbs_sync import WALL_AREA_TAG
+        from anetbbs.models import EchoArea
+        with self.app.app_context():
+            area = EchoArea.query.filter_by(network_id=binkp_id, tag=WALL_AREA_TAG).first()
+            self.assertIsNotNone(area, 'ANET_WALL area must be created immediately on enable')
+            self.assertTrue(area.is_sysop_only)
+            self.assertTrue(area.is_subscribed)
+
     def test_lastcallers_network_dropdown_excludes_qwk(self):
         binkp_id, qwk_id = self._make_networks()
         client = self.app.test_client()
@@ -154,6 +178,26 @@ class InterbbsBinkpOnlyTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'BinkP network', resp.data)
         self.assertFalse(self.app.config.get('LASTCALLERS_INTERBBS_ENABLED'))
+
+    def test_lastcallers_settings_creates_area_immediately_not_lazily(self):
+        """Same fix as Wall's -- see
+        test_wall_settings_creates_area_immediately_not_lazily."""
+        binkp_id, qwk_id = self._make_networks()
+        client = self.app.test_client()
+        self._login_as_admin(client)
+
+        client.post('/admin/lastcallers/settings', data={
+            'interbbs_enabled': 'on',
+            'interbbs_network_id': str(binkp_id),
+        }, follow_redirects=True)
+
+        from anetbbs.echomail.interbbs_sync import LASTCALLERS_AREA_TAG
+        from anetbbs.models import EchoArea
+        with self.app.app_context():
+            area = EchoArea.query.filter_by(network_id=binkp_id, tag=LASTCALLERS_AREA_TAG).first()
+            self.assertIsNotNone(area, 'ANET_LASTCALLERS area must be created immediately on enable')
+            self.assertTrue(area.is_sysop_only)
+            self.assertTrue(area.is_subscribed)
 
 
 if __name__ == '__main__':

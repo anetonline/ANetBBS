@@ -100,6 +100,18 @@ def settings():
 
     if interbbs_enabled:
         _ensure_wall_sync_event()
+        # Create the ANET_WALL area right now, not lazily on the first
+        # local post -- a sysop enabling this should see the area
+        # immediately (to verify it, check AreaFix went out, etc.), and
+        # inbound sync needs somewhere to write into even before anyone
+        # here has posted anything locally. Confirmed missing live:
+        # enabling the feature alone created nothing at all.
+        try:
+            from ..echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+            ensure_special_area(network, WALL_AREA_TAG)
+        except Exception as e:
+            flash(f'Settings saved, but could not create the ANET_WALL area yet: {e}', 'warning')
+            return redirect(url_for('.index'))
 
     flash(f'Wall settings saved (color: "{WALL_SCHEME_LABELS.get(scheme, scheme)}", '
           f'InterBBS: {"on" if interbbs_enabled else "off"}).', 'success')
