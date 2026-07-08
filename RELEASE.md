@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.57 — Fix ZMODEM/XMODEM/YMODEM corruption on RFC-compliant telnet clients (July 2026)
+
+- FIX: the terminal file-transfer bridge never undid a compliant telnet client's IAC doubling, so every `0xFF` byte in a transfer corrupted the ZMODEM/XMODEM/YMODEM stream — lenient clients that skip telnet processing happened to work by accident, RFC-compliant ones didn't. Root-caused and originally patched by andy5995 (GitHub PR #6, with Claude Opus 4.8's assistance) — the diagnosis and telnet-side fix were correct; landed here with a protocol gate added on top, since the transfer bridge is shared with SSH/rlogin sessions (which have no IAC concept and would have been corrupted instead by an unconditional fix). 21 new tests — this module had none before.
+
+---
+
 # ANetBBS v1.0b2.56 — Wire up the remaining 7 webhook event types (July 2026)
 
 - FEATURE: the webhooks admin form has always offered 8 event types, but only `shout` actually fired anything — the other 7 (`post`, `bulletin`, `login`, `achievement`, `broadcast`, `sysop_page`, `echomail`) were selectable but never called. All 7 are now wired to their real trigger points, including logins across all four services (web, telnet, SSH, rlogin), not just web. New doc `docs/23-webhooks.md` covers all 8 events' payload formats and gotchas. 8 new tests.

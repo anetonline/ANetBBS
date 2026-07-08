@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.56`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.57`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.57 — Fix ZMODEM/XMODEM/YMODEM corruption on RFC-compliant telnet clients (July 2026)
+
+- FIX: the terminal file-transfer bridge (`xfer.py`) fed raw socket bytes straight to sz/rz and wrote sz/rz output straight to the socket. On a telnet channel, `0xFF` is IAC and a compliant client doubles it on the wire (RFC 854/856); the bridge never undid that doubling, so every `0xFF` byte in a transfer reached rz as a spurious extra byte and corrupted the stream, which ZMODEM answered with ZCAN. Lenient clients that send raw 8-bit bytes with no telnet processing happened to work by accident; anything RFC-compliant did not. Root-caused and originally patched by andy5995 (GitHub PR #6, drafted with Claude Opus 4.8's assistance) — thank you for tracking this down. Their fix added a telnet escape/unescape codec plus BINARY+SGA negotiation around the transfer, which is correct for telnet — but `send_file()`/`recv_file()` are shared by telnet, SSH, and rlogin sessions with no protocol check anywhere before they're called, and SSH/rlogin channels have no IAC concept at all (already 8-bit clean at the transport layer), so applying that codec unconditionally would have fixed telnet by corrupting SSH/rlogin transfers instead. Landed with a protocol gate added on top so the new codec only ever runs for telnet sessions; SSH/rlogin pass bytes through exactly as before. 21 new tests in `tests/test_xfer_telnet_framing.py` — `xfer.py` had no test coverage prior to this.
 
 ## v1.0b2.56 — Wire up the remaining 7 webhook event types (July 2026)
 
