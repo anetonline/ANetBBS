@@ -98,23 +98,42 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 a = (r.our_address or '').strip()
                 if not a:
                     continue
-                # Advertise BOTH qualified (`addr@domain`) and bare
-                # (`addr`) forms.  Synchronet emits qualified only, but
-                # Mystic + binkd peers may have node entries keyed on
-                # either form — we don't know which key the peer uses
-                # until they ship, so cover both.  Domain is sanitised
-                # per FSP-1028 (a-z 0-9 _ - ~, ≤8 chars).
+                # Advertise ONE form per address -- qualified
+                # (`addr@domain`) when a domain is derivable, bare
+                # otherwise. Previously sent BOTH forms for every
+                # address as a "cover whichever form the peer keys on"
+                # compat measure, but real binkd's ADR() handler calls
+                # bsy_add() (its busy-lock acquire) once per
+                # space-separated token with no de-duplication -- for a
+                # secure (password-protected) link the first token
+                # acquires the lock and the second, same address in the
+                # other form, immediately fails to acquire it and binkd
+                # drops the session with "Secure AKA busy", before
+                # password verification ever runs. Confirmed live in
+                # both directions: ANetBBS calling out to a real binkd
+                # hub, AND a real binkd hub calling in to an ANetBBS
+                # install (this code path). A spec-compliant peer
+                # parses the domain-qualified form fine on its own, so
+                # one form is sufficient. Domain is sanitised per
+                # FSP-1028 (a-z 0-9 _ - ~, ≤8 chars).
                 raw = (r.name or '').strip().lower()
                 domain = _re.sub(r'[^a-z0-9_~-]+', '', raw)[:8]
-                qualified = f'{a}@{domain}' if domain else a
-                if qualified and qualified not in akas:
-                    akas.append(qualified)
-                if a not in akas:
-                    akas.append(a)
+                one_form = f'{a}@{domain}' if domain else a
+                if one_form not in akas:
+                    akas.append(one_form)
     except Exception as exc:
         logger.warning('BinkP listener: AKA lookup failed (%s) — using default', exc)
 
-    if our_address and our_address not in akas:
+    # Fallback default address, only if its bare form isn't ALREADY
+    # covered by an entry from the DB loop above (qualified or bare) --
+    # a plain `not in akas` exact-string check missed this, since the
+    # DB loop may have added the qualified form ("1:114/30@fidonet")
+    # while this bare "1:114/30" is a different string, silently
+    # re-introducing the exact same duplicate-token bug this whole fix
+    # is for.
+    if our_address and not any(
+            existing == our_address or existing.split('@', 1)[0] == our_address
+            for existing in akas):
         akas.append(our_address)
 
     # Sort AKAs so the most-FTN-looking ones come first. BinkP/1.1 has

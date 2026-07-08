@@ -270,6 +270,22 @@ def hub_generate_nodelist(app, params):
         return False, f'nodelist generation failed: {exc}'
 
 
+def sync_wall_inbound(app, params):
+    """Materialize new inbound InterBBS Wall messages into local
+    WallPost rows. Thin wrapper -- see anetbbs/echomail/interbbs_sync.py
+    for the real logic (dedup, loop-prevention, etc.)."""
+    from ..echomail.interbbs_sync import sync_wall_inbound as _impl
+    return _impl(app, params)
+
+
+def sync_lastcallers_inbound(app, params):
+    """Materialize new inbound InterBBS Last Callers messages into local
+    CallerLog rows. Thin wrapper -- see
+    anetbbs/echomail/interbbs_sync.py."""
+    from ..echomail.interbbs_sync import sync_lastcallers_inbound as _impl
+    return _impl(app, params)
+
+
 def shell(app, params):
     """Run an arbitrary shell command. Dangerous — only for sysops who
     know what they're typing. Runs as the service user (no sudo).
@@ -305,6 +321,8 @@ REGISTRY: Dict[str, HandlerFn] = {
     'log_rotate':           log_rotate,
     'security_check':       security_check,
     'hub_generate_nodelist': hub_generate_nodelist,
+    'sync_wall_inbound':     sync_wall_inbound,
+    'sync_lastcallers_inbound': sync_lastcallers_inbound,
     'shell':                shell,
 }
 
@@ -316,6 +334,8 @@ HANDLER_META = {
     'log_rotate':     ('Rotate large logs',      'Roll any logs/*.log over the threshold to .1. Params: max_mb (default 50).'),
     'security_check': ('Security update check',  'apt + pip outdated scan, tags Ubuntu-security rows. Report at /admin/security/.'),
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
+    'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
+    'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
     'shell':          ('Shell command',          'Run an arbitrary command as the service user. Params: command, timeout.'),
 }
 

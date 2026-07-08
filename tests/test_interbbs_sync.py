@@ -1,0 +1,424 @@
+"""Tests for InterBBS Wall (anetbbs/echomail/interbbs_sync.py) -- posts
+shared with other ANetBBS installs over a dedicated echomail area,
+riding the existing QWK/BinkP transport rather than a bespoke sync
+protocol (Jerry's own suggestion, matching how fsxnet's wall/last-caller
+areas work).
+
+Covers the safety-critical properties the design depends on:
+
+  - Loop prevention: a WallPost with origin_bbs already set (i.e.
+    imported from another BBS) must NEVER be relayed back out -- doing
+    so would compose a brand-new EchomailMessage with a brand-new
+    msg_id (binkp.py only reuses msg_id if already set on the ORM
+    object, never regenerates deterministically from content), so no
+    downstream dedup could ever catch a re-relayed loop.
+  - Global dedup: the inbound sync scan must catch the same msg_id
+    arriving via two different areas/networks, not just within one.
+  - NULL msg_id rows (malformed/legacy packets) must be skipped, not
+    materialized -- they can never be deduped on a later scan.
+  - ensure_special_area() must gate the AreaFix follow-up request on
+    network_type == 'binkp' -- QWK networks have no AreaFix protocol.
+"""
+import os
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def _make_app(db_path):
+    import anetbbs.config as cfg_mod
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{db_path}'
+    os.environ['FLASK_ENV'] = 'testing'
+    from anetbbs.web_app import create_app
+    app = create_app('testing')
+    app.config['TESTING'] = True
+    return app
+
+
+class InterbbsSyncTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_app(str(Path(self._tmp.name) / 'a.db'))
+        with self.app.app_context():
+            from anetbbs.models import db
+            db.create_all()
+
+    def _network(self, network_type='binkp', hub_address=None):
+        from anetbbs.models import db, EchomailNetwork
+        net = EchomailNetwork(
+            name='ANotherNetwork', network_type=network_type,
+            hub_address=hub_address, our_address='1:2/3.4',
+            areafix_password='secret' if hub_address else None,
+        )
+        db.session.add(net)
+        db.session.commit()
+        return net
+
+    # ------------------------------------------------------------------
+    # ensure_special_area()
+    # ------------------------------------------------------------------
+
+    def test_ensure_special_area_creates_once_idempotent(self):
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import EchoArea
+        with self.app.app_context():
+            net = self._network()
+            a1 = ensure_special_area(net, WALL_AREA_TAG)
+            a2 = ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(a1.id, a2.id)
+            self.assertEqual(EchoArea.query.filter_by(
+                network_id=net.id, tag=WALL_AREA_TAG).count(), 1)
+
+    def test_ensure_special_area_reasserts_sysop_only_flag(self):
+        """A sysop's own DB edit (or a template default) flipping
+        is_sysop_only off must be repaired on the next call -- this area
+        is a sync channel, not a normal user-browsable discussion area."""
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            area.is_sysop_only = False
+            db.session.commit()
+
+            area2 = ensure_special_area(net, WALL_AREA_TAG)
+            self.assertTrue(area2.is_sysop_only)
+
+    def test_ensure_special_area_skips_areafix_for_qwk_network(self):
+        """send_areafix_request() itself only gates on hub_address being
+        set, NOT on network_type -- QWK networks have no AreaFix
+        protocol at all, so ensure_special_area() must add that gate
+        itself or it would queue a NetmailMessage the QWK transport can
+        never send."""
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import NetmailMessage
+        with self.app.app_context():
+            net = self._network(network_type='qwk', hub_address='hub.example.com')
+            ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(NetmailMessage.query.count(), 0,
+                              'no AreaFix netmail should be queued for a QWK network')
+
+    def test_ensure_special_area_sends_areafix_for_binkp_spoke(self):
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import NetmailMessage
+        with self.app.app_context():
+            net = self._network(network_type='binkp', hub_address='hub.example.com')
+            ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(NetmailMessage.query.count(), 1,
+                              'a BinkP spoke should request the area via AreaFix')
+
+    # ------------------------------------------------------------------
+    # Loop prevention
+    # ------------------------------------------------------------------
+
+    def test_local_post_relays_outbound(self):
+        from anetbbs.echomail.interbbs_sync import post_wall_to_interbbs
+        from anetbbs.models import db, WallPost, EchomailMessage
+        with self.app.app_context():
+            self.app.config['WALL_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
+
+            wp = WallPost(username='jerry', display_name='StingRay', line1='hi')
+            db.session.add(wp)
+            db.session.commit()
+            post_wall_to_interbbs(wp)
+
+            msgs = EchomailMessage.query.filter_by(direction='outbound').all()
+            self.assertEqual(len(msgs), 1)
+            self.assertEqual(msgs[0].subject, 'ANET-WALL-POST')
+
+    def test_imported_post_never_relays_back_out(self):
+        """THE critical loop-prevention test. A WallPost with origin_bbs
+        already set must produce zero outbound EchomailMessage rows,
+        regardless of how WALL_INTERBBS_ENABLED is configured."""
+        from anetbbs.echomail.interbbs_sync import post_wall_to_interbbs
+        from anetbbs.models import db, WallPost, EchomailMessage
+        with self.app.app_context():
+            self.app.config['WALL_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
+
+            wp = WallPost(username='remote', display_name='Other BBS User',
+                          line1='hi', origin_bbs='OtherBBS', remote_msg_id='ABC123')
+            db.session.add(wp)
+            db.session.commit()
+            post_wall_to_interbbs(wp)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_disabled_feature_never_relays(self):
+        from anetbbs.echomail.interbbs_sync import post_wall_to_interbbs
+        from anetbbs.models import db, WallPost, EchomailMessage
+        with self.app.app_context():
+            self.app.config['WALL_INTERBBS_ENABLED'] = False
+            net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
+
+            wp = WallPost(username='jerry', line1='hi')
+            db.session.add(wp)
+            db.session.commit()
+            post_wall_to_interbbs(wp)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    # ------------------------------------------------------------------
+    # Inbound sync: global dedup + NULL msg_id handling
+    # ------------------------------------------------------------------
+
+    def test_inbound_sync_materializes_new_message(self):
+        from anetbbs.echomail.interbbs_sync import sync_wall_inbound, ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, EchomailMessage, WallPost
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-1',
+                from_name='Firehawke', to_name='All', subject='ANET-WALL-POST',
+                body='hello\nworld', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_wall_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            posts = WallPost.query.all()
+            self.assertEqual(len(posts), 1)
+            self.assertEqual(posts[0].line1, 'hello')
+            self.assertEqual(posts[0].line2, 'world')
+            self.assertEqual(posts[0].remote_msg_id, 'MSG-1')
+            self.assertIsNotNone(posts[0].origin_bbs)
+
+    def test_inbound_sync_dedup_is_global_not_per_area(self):
+        """The same msg_id arriving via TWO different areas (e.g. two
+        overlapping network subscriptions) must only ever materialize
+        ONE WallPost -- the transport layer's own dedup (poller.py) is
+        scoped to (msg_id, area_id), so this scan must not rely on
+        that."""
+        from anetbbs.echomail.interbbs_sync import sync_wall_inbound, ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, EchomailMessage, EchoArea, WallPost
+        with self.app.app_context():
+            net = self._network()
+            area1 = ensure_special_area(net, WALL_AREA_TAG)
+            # Simulate a second area somehow carrying the same tag (e.g.
+            # a duplicate-tag network topology) with an identical msg_id.
+            area2 = EchoArea(network_id=net.id, tag='ANET_WALL_DUP',
+                             name='dup', is_active=True, is_subscribed=True)
+            db.session.add(area2)
+            db.session.commit()
+
+            for area in (area1, area2):
+                db.session.add(EchomailMessage(
+                    area_id=area.id, network_id=net.id, msg_id='SAME-ID',
+                    from_name='X', to_name='All', subject='ANET-WALL-POST',
+                    body='dup test', direction='inbound',
+                ))
+            db.session.commit()
+
+            # Both areas carry tag ANET_WALL via ensure_special_area's own
+            # tag-based lookup only finds area1 normally; to actually
+            # exercise cross-area dedup, sync scans by tag == WALL_AREA_TAG.
+            # Retag area2 to match so both are in-scope for the scan.
+            area2.tag = WALL_AREA_TAG
+            db.session.commit()
+
+            ok, out = sync_wall_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(WallPost.query.count(), 1,
+                              'the same msg_id across two areas must only import once')
+
+    def test_inbound_sync_skips_null_msg_id(self):
+        """Rows with msg_id IS NULL (malformed/legacy packets) must be
+        skipped, not materialized -- they can never be deduped on a
+        later scan and would otherwise re-import forever."""
+        from anetbbs.echomail.interbbs_sync import sync_wall_inbound, ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, EchomailMessage, WallPost
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id=None,
+                from_name='X', to_name='All', subject='ANET-WALL-POST',
+                body='no msgid', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_wall_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(WallPost.query.count(), 0)
+            self.assertIn('skipped 1', out)
+
+    def test_inbound_sync_does_not_reimport_already_known_message(self):
+        """Running the scan twice must not create a second WallPost for
+        the same inbound message."""
+        from anetbbs.echomail.interbbs_sync import sync_wall_inbound, ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, EchomailMessage, WallPost
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='REPEAT-1',
+                from_name='X', to_name='All', subject='ANET-WALL-POST',
+                body='once please', direction='inbound',
+            ))
+            db.session.commit()
+
+            sync_wall_inbound(self.app, {})
+            sync_wall_inbound(self.app, {})
+            self.assertEqual(WallPost.query.count(), 1)
+
+    def test_soft_deleted_imported_post_is_not_reimported(self):
+        """A sysop soft-deleting a specific imported post (local
+        moderation) must not cause it to reappear on the next scan."""
+        from anetbbs.echomail.interbbs_sync import sync_wall_inbound, ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, EchomailMessage, WallPost
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MOD-1',
+                from_name='X', to_name='All', subject='ANET-WALL-POST',
+                body='spam probably', direction='inbound',
+            ))
+            db.session.commit()
+            sync_wall_inbound(self.app, {})
+
+            post = WallPost.query.filter_by(remote_msg_id='MOD-1').first()
+            post.is_deleted = True
+            db.session.commit()
+
+            sync_wall_inbound(self.app, {})
+            self.assertEqual(WallPost.query.filter_by(remote_msg_id='MOD-1').count(), 1,
+                              'soft-deleted imported post must not be re-materialized')
+
+
+class InterbbsLastCallersTests(unittest.TestCase):
+    """Same loop-prevention/dedup properties as InterbbsSyncTests, for
+    the Last Callers half -- plus the privacy invariant that ip_address
+    must never be relayed or materialized for imported entries."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_app(str(Path(self._tmp.name) / 'lc.db'))
+        with self.app.app_context():
+            from anetbbs.models import db
+            db.create_all()
+
+    def _network(self):
+        from anetbbs.models import db, EchomailNetwork
+        net = EchomailNetwork(name='ANotherNetwork', network_type='binkp',
+                              our_address='1:2/3.4')
+        db.session.add(net)
+        db.session.commit()
+        return net
+
+    def test_local_caller_relays_outbound_without_ip(self):
+        from anetbbs.echomail.interbbs_sync import post_lastcaller_to_interbbs
+        from anetbbs.models import db, CallerLog, EchomailMessage
+        with self.app.app_context():
+            self.app.config['LASTCALLERS_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
+
+            cl = CallerLog(username='jerry', service='telnet', ip_address='203.0.113.5')
+            db.session.add(cl)
+            db.session.commit()
+            post_lastcaller_to_interbbs(cl)
+
+            msgs = EchomailMessage.query.filter_by(direction='outbound').all()
+            self.assertEqual(len(msgs), 1)
+            self.assertNotIn('203.0.113.5', msgs[0].body,
+                              'ip_address must never appear in the relayed body')
+
+    def test_imported_caller_never_relays_back_out(self):
+        from anetbbs.echomail.interbbs_sync import post_lastcaller_to_interbbs
+        from anetbbs.models import db, CallerLog, EchomailMessage
+        with self.app.app_context():
+            self.app.config['LASTCALLERS_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
+
+            cl = CallerLog(username='remote', service='telnet',
+                           origin_bbs='OtherBBS', remote_msg_id='LC-1')
+            db.session.add(cl)
+            db.session.commit()
+            post_lastcaller_to_interbbs(cl)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_inbound_sync_materializes_without_ip_and_dedups_globally(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_lastcallers_inbound, ensure_special_area, LASTCALLERS_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, EchoArea, CallerLog
+        with self.app.app_context():
+            net = self._network()
+            area1 = ensure_special_area(net, LASTCALLERS_AREA_TAG)
+            area2 = EchoArea(network_id=net.id, tag='ANET_LASTCALLERS_DUP',
+                             name='dup', is_active=True, is_subscribed=True)
+            db.session.add(area2)
+            db.session.commit()
+            area2.tag = LASTCALLERS_AREA_TAG
+            db.session.commit()
+
+            for area in (area1, area2):
+                db.session.add(EchomailMessage(
+                    area_id=area.id, network_id=net.id, msg_id='LC-SAME',
+                    from_name='Firehawke', to_name='All', subject='ANET-LASTCALLER',
+                    body='telnet\n2026-07-08T12:00:00', direction='inbound',
+                ))
+            db.session.commit()
+
+            ok, out = sync_lastcallers_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            entries = CallerLog.query.filter_by(remote_msg_id='LC-SAME').all()
+            self.assertEqual(len(entries), 1,
+                              'the same msg_id across two areas must only import once')
+            self.assertIsNone(entries[0].ip_address,
+                              'imported caller entries must never have an ip_address')
+            self.assertEqual(entries[0].service, 'telnet')
+
+    def test_inbound_sync_skips_null_msg_id(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_lastcallers_inbound, ensure_special_area, LASTCALLERS_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, CallerLog
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, LASTCALLERS_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id=None,
+                from_name='X', to_name='All', subject='ANET-LASTCALLER',
+                body='telnet\n', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_lastcallers_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(CallerLog.query.filter(CallerLog.origin_bbs.isnot(None)).count(), 0,
+                              'a NULL msg_id row must not be materialized')
+
+
+class TransportInvariantTests(unittest.TestCase):
+    """This whole design's loop-safety depends on one transport-layer
+    fact: relaying a message never silently regenerates a msg_id that
+    was already set on the ORM object. Pin that invariant directly."""
+
+    def test_binkp_packer_reuses_existing_msg_id(self):
+        import inspect
+        from anetbbs.echomail import binkp
+        src = inspect.getsource(binkp)
+        self.assertIn('if msg.msg_id:', src,
+                      "binkp.py's packet builder must still gate msg_id "
+                      "generation on 'not already set' -- if this ever "
+                      "changes to unconditionally regenerate, the "
+                      "InterBBS Wall loop-prevention design breaks.")
+
+
+if __name__ == '__main__':
+    unittest.main()

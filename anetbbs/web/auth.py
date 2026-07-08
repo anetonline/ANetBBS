@@ -293,10 +293,16 @@ def login():
         # Caller log row — best effort, never block the login.
         try:
             from ..models import CallerLog
-            db.session.add(CallerLog(
+            _cl = CallerLog(
                 user_id=user.id, username=user.username,
-                service='web', ip_address=_client_ip()))
+                service='web', ip_address=_client_ip())
+            db.session.add(_cl)
             db.session.commit()
+            try:
+                from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
+                post_lastcaller_to_interbbs(_cl)
+            except Exception:
+                pass
         except Exception:
             db.session.rollback()
         # Random MOTD pick.

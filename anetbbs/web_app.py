@@ -350,6 +350,7 @@ def create_app(config_name=None):
     from .web.backups_admin import backups_bp
     from .web.login_modules_admin import login_modules_admin_bp
     from .web.wall_admin import wall_admin_bp
+    from .web.lastcallers_admin import lastcallers_admin_bp
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
@@ -452,6 +453,7 @@ def create_app(config_name=None):
     # Logon/logoff modules and graffiti wall admin.
     app.register_blueprint(login_modules_admin_bp)
     app.register_blueprint(wall_admin_bp)
+    app.register_blueprint(lastcallers_admin_bp)
 
     # Public downloads — auto-listing of the sysop's release directory.
     # No DB rows; scans DOWNLOADS_DIR on each (cached) request.
@@ -798,6 +800,27 @@ def _lightweight_migrate(app):
                 _ensure_column(table_obj.name, col.name, ddl)
     except Exception as exc:
         app.logger.warning('Auto-column sweep failed: %s', exc)
+
+    # InterBBS Wall/Last Callers: the auto-sweep above adds new nullable
+    # columns but never indexes/constraints. remote_msg_id needs a real
+    # unique index so the inbound-sync scheduled job can't double-insert
+    # on a race between overlapping runs (nullable-safe -- SQLite and
+    # Postgres both allow multiple NULLs under a unique index). Must run
+    # AFTER the auto-sweep above, which is what actually creates the
+    # column on an upgrading install.
+    for _idx_table, _idx_col, _idx_name in (
+            ('wall_posts', 'remote_msg_id', 'ix_wall_posts_remote_msg_id_unique'),
+            ('caller_log', 'remote_msg_id', 'ix_caller_log_remote_msg_id_unique')):
+        try:
+            if _idx_col not in {c['name'] for c in insp.get_columns(_idx_table)}:
+                continue
+            with engine.begin() as conn:
+                conn.execute(_sa.text(
+                    f'CREATE UNIQUE INDEX IF NOT EXISTS {_idx_name} '
+                    f'ON {_idx_table} ({_idx_col})'))
+        except Exception as exc:
+            app.logger.warning('Could not create %s.%s unique index: %s',
+                               _idx_table, _idx_col, exc)
 
 
 def _create_default_data():

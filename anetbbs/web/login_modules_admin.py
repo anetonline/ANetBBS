@@ -29,6 +29,7 @@ def _admin_required():
 
 MODULE_TYPES = [
     ('wall',        'Graffiti Wall'),
+    ('lastcallers', 'Last Callers'),
     ('ansi',        'ANSI Screen (slot)'),
     ('shell',       'Shell Command'),
     ('door_native', 'Native Linux Door'),
@@ -40,6 +41,7 @@ EVENT_TYPES = [('logon', 'Logon'), ('logoff', 'Logoff')]
 def _params_help(module_type: str) -> str:
     helps = {
         'wall':        'No params needed — leave as {}',
+        'lastcallers': 'No params needed — leave as {}',
         'ansi':        '{"slot": "welcome"}  — any BbsAnsiScreen slot name',
         'shell':       '{"command": "/path/to/script.sh"}',
         'door_native': '{"path": "/path/to/door", "args": "--node $NODE"}',

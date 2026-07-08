@@ -1,0 +1,303 @@
+# anetbbs/echomail/interbbs_sync.py
+"""
+InterBBS Wall / Last Callers -- opt-in sharing of local Graffiti Wall
+posts and recent-caller entries with other ANetBBS installs, riding the
+existing QWK/BinkP echomail transport (special-purpose EchoAreas) rather
+than a bespoke sync protocol. Each feature is scoped to exactly one
+EchomailNetwork, picked by the sysop in the admin UI (config keys
+WALL_INTERBBS_NETWORK_ID / LASTCALLERS_INTERBBS_NETWORK_ID) -- never
+"every active network", since that would silently create these areas on
+unrelated third-party FTN networks too.
+
+Two directions per feature:
+  - outbound (post_wall_to_interbbs / post_lastcaller_to_interbbs):
+    called right after a LOCAL WallPost/CallerLog row is created. Composes
+    a normal EchomailMessage in the feature's special area and tosses it
+    to any downstream subscribers.
+  - inbound (sync_wall_inbound / sync_lastcallers_inbound): ScheduledEvent
+    handlers (see anetbbs/events/handlers.py) that periodically scan for
+    new inbound EchomailMessage rows in the special area and materialize
+    them into WallPost/CallerLog rows.
+
+CRITICAL loop-prevention invariant: a materialized row always gets
+`origin_bbs` set (non-NULL). The outbound functions refuse to relay any
+row that already has `origin_bbs` set. This is the ONLY thing preventing
+an infinite bounce -- a re-composed message gets a brand-new msg_id
+(anetbbs/echomail/binkp.py's packer only reuses msg_id if already set on
+the ORM object, never regenerates deterministically from content), so no
+downstream MSGID dedup could ever catch a re-relayed loop on its own.
+Never remove the `origin_bbs is not None: return` checks below.
+"""
+import logging
+
+logger = logging.getLogger(__name__)
+
+WALL_AREA_TAG = 'ANET_WALL'
+LASTCALLERS_AREA_TAG = 'ANET_LASTCALLERS'
+
+
+def ensure_special_area(network, tag):
+    """Get-or-create the special-purpose EchoArea for `tag` on `network`.
+    Idempotent -- re-asserts is_active/is_subscribed/is_sysop_only on
+    every call in case a sysop's own DB edit ever flips one off.
+    is_sysop_only=True hides it from normal users' terminal/web echomail
+    browsing (confirmed: this is a real content gate on both surfaces,
+    not just a listing filter) -- it's a sync channel, not a discussion
+    area meant to be read directly.
+
+    If we're a spoke of this network (hub_address set) on a BinkP
+    network, also request the hub subscribe us via AreaFix. QWK networks
+    have no AreaFix protocol at all -- send_areafix_request() itself
+    doesn't gate on network_type, so we must.
+    """
+    from ..models import db, EchoArea
+
+    area = EchoArea.query.filter_by(network_id=network.id, tag=tag).first()
+    if area is None:
+        area = EchoArea(
+            network_id=network.id, tag=tag, name=tag,
+            is_active=True, is_subscribed=True, is_sysop_only=True,
+        )
+        db.session.add(area)
+        db.session.commit()
+    else:
+        changed = False
+        if not area.is_active:
+            area.is_active = True
+            changed = True
+        if not area.is_subscribed:
+            area.is_subscribed = True
+            changed = True
+        if not area.is_sysop_only:
+            area.is_sysop_only = True
+            changed = True
+        if changed:
+            db.session.commit()
+
+    if network.hub_address and network.network_type == 'binkp':
+        try:
+            from .areafix import send_areafix_request
+            send_areafix_request(network, plus_tags=[tag])
+        except Exception:
+            logger.exception('interbbs_sync: areafix request failed for %s', tag)
+
+    return area
+
+
+def _configured_network(network_id):
+    """Resolve the one EchomailNetwork a feature is scoped to. Returns
+    None if unconfigured or inactive -- callers must no-op in that case."""
+    if not network_id:
+        return None
+    from ..models import EchomailNetwork
+    network = EchomailNetwork.query.get(int(network_id))
+    if network is None or not network.is_active:
+        return None
+    return network
+
+
+def post_wall_to_interbbs(wall_post):
+    """Relay a freshly-created local WallPost out to the configured
+    ANET_WALL area. No-op unless WALL_INTERBBS_ENABLED and a network is
+    configured, and -- critically -- no-op if this post itself came from
+    another BBS (origin_bbs set). That check is the loop-prevention gate;
+    never remove it."""
+    from flask import current_app
+    if not current_app.config.get('WALL_INTERBBS_ENABLED'):
+        return
+    if wall_post.origin_bbs is not None:
+        return
+    network = _configured_network(current_app.config.get('WALL_INTERBBS_NETWORK_ID'))
+    if network is None:
+        return
+
+    from ..models import db, EchomailMessage
+    from . import tosser
+
+    line1 = wall_post.line1 or ''
+    line2 = wall_post.line2 or ''
+    body = line1 if not line2 else f'{line1}\n{line2}'
+    try:
+        area = ensure_special_area(network, WALL_AREA_TAG)
+        msg = EchomailMessage(
+            area_id=area.id, network_id=network.id,
+            from_name=(wall_post.display_name or wall_post.username or '?')[:100],
+            from_address=(network.our_address or '')[:60],
+            to_name='All', subject='ANET-WALL-POST',
+            body=body, direction='outbound',
+        )
+        db.session.add(msg)
+        db.session.commit()
+        tosser.toss_message(msg.id)
+    except Exception:
+        db.session.rollback()
+        logger.exception('interbbs_sync: failed to relay wall post %s', wall_post.id)
+
+
+def post_lastcaller_to_interbbs(caller_log_row):
+    """Same shape as post_wall_to_interbbs, for Last Callers. Body carries
+    ONLY service + started_at -- never ip_address. There is no precedent
+    anywhere in this codebase for sharing caller IPs across BBS
+    boundaries, and there shouldn't be one."""
+    from flask import current_app
+    if not current_app.config.get('LASTCALLERS_INTERBBS_ENABLED'):
+        return
+    if caller_log_row.origin_bbs is not None:
+        return
+    network = _configured_network(current_app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'))
+    if network is None:
+        return
+
+    from ..models import db, EchomailMessage
+    from . import tosser
+
+    started = caller_log_row.started_at.isoformat() if caller_log_row.started_at else ''
+    body = f'{caller_log_row.service or "?"}\n{started}'
+    try:
+        area = ensure_special_area(network, LASTCALLERS_AREA_TAG)
+        msg = EchomailMessage(
+            area_id=area.id, network_id=network.id,
+            from_name=(caller_log_row.username or '?')[:100],
+            from_address=(network.our_address or '')[:60],
+            to_name='All', subject='ANET-LASTCALLER',
+            body=body, direction='outbound',
+        )
+        db.session.add(msg)
+        db.session.commit()
+        tosser.toss_message(msg.id)
+    except Exception:
+        db.session.rollback()
+        logger.exception('interbbs_sync: failed to relay caller log %s', caller_log_row.id)
+
+
+def _origin_from_message(msg):
+    """Best-effort human-readable origin BBS name for an inbound message
+    -- prefers the FTN '* Origin: ...' line, falls back to from_address,
+    falls back to a fixed placeholder (never blank/None -- that would
+    collide with the "local post" sentinel)."""
+    if msg.origin_line:
+        return msg.origin_line.strip()[:100] or 'unknown'
+    if msg.from_address:
+        return msg.from_address[:100]
+    return 'unknown'
+
+
+def sync_wall_inbound(app, params):
+    """ScheduledEvent handler: materialize new inbound ANET_WALL messages
+    into local WallPost rows. Signature per events/handlers.py convention:
+    f(app, params) -> (ok, output).
+
+    Dedup is by EchomailMessage.msg_id against WallPost.remote_msg_id,
+    queried GLOBALLY (not scoped to one area/network) -- the transport
+    layer's own dedup (poller.py) is scoped to (msg_id, area_id), so the
+    same message arriving via two areas/networks would not be caught
+    there. Rows with msg_id IS NULL (malformed/legacy packets) are
+    skipped, not materialized -- they can never be deduped on a later
+    scan and would re-import forever otherwise.
+
+    Inserts WallPost directly via db.session.add() -- NEVER through
+    wall.py's _post_to_wall(), since that's the function carrying the
+    outbound-relay hook, and calling it here would defeat the
+    loop-prevention gate entirely.
+    """
+    from ..models import db, EchoArea, EchomailMessage, WallPost
+    from ..features.word_filter import apply as _wf_apply
+
+    imported = 0
+    skipped_no_msgid = 0
+    try:
+        area_ids = [a.id for a in EchoArea.query.filter_by(tag=WALL_AREA_TAG).all()]
+        if not area_ids:
+            return True, 'no ANET_WALL areas configured'
+
+        known_ids = {
+            r[0] for r in db.session.query(WallPost.remote_msg_id)
+            .filter(WallPost.remote_msg_id.isnot(None)).all()
+        }
+        rows = (EchomailMessage.query
+                .filter(EchomailMessage.area_id.in_(area_ids),
+                        EchomailMessage.direction == 'inbound')
+                .all())
+        for msg in rows:
+            if not msg.msg_id:
+                skipped_no_msgid += 1
+                continue
+            if msg.msg_id in known_ids:
+                continue
+
+            body = msg.body or ''
+            lines = body.split('\n', 1)
+            line1 = _wf_apply(lines[0])[:200]
+            line2 = _wf_apply(lines[1])[:200] if len(lines) > 1 else None
+            wp = WallPost(
+                username=(msg.from_name or '?')[:80],
+                display_name=(msg.from_name or '?')[:100],
+                line1=line1, line2=line2,
+                origin_bbs=_origin_from_message(msg),
+                remote_msg_id=msg.msg_id,
+            )
+            db.session.add(wp)
+            db.session.commit()
+            known_ids.add(msg.msg_id)
+            imported += 1
+        return True, f'imported {imported}, skipped {skipped_no_msgid} (no msg_id)'
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception('sync_wall_inbound failed')
+        return False, str(exc)
+
+
+def sync_lastcallers_inbound(app, params):
+    """Same shape as sync_wall_inbound, for Last Callers -- see that
+    function's docstring for the dedup/loop-prevention reasoning, which
+    applies identically here."""
+    from ..models import db, EchoArea, EchomailMessage, CallerLog
+    from datetime import datetime as _dt
+
+    imported = 0
+    skipped_no_msgid = 0
+    try:
+        area_ids = [a.id for a in EchoArea.query.filter_by(tag=LASTCALLERS_AREA_TAG).all()]
+        if not area_ids:
+            return True, 'no ANET_LASTCALLERS areas configured'
+
+        known_ids = {
+            r[0] for r in db.session.query(CallerLog.remote_msg_id)
+            .filter(CallerLog.remote_msg_id.isnot(None)).all()
+        }
+        rows = (EchomailMessage.query
+                .filter(EchomailMessage.area_id.in_(area_ids),
+                        EchomailMessage.direction == 'inbound')
+                .all())
+        for msg in rows:
+            if not msg.msg_id:
+                skipped_no_msgid += 1
+                continue
+            if msg.msg_id in known_ids:
+                continue
+
+            body_lines = (msg.body or '').split('\n')
+            service = (body_lines[0].strip() if body_lines else '')[:20] or 'unknown'
+            started_at = None
+            if len(body_lines) > 1 and body_lines[1].strip():
+                try:
+                    started_at = _dt.fromisoformat(body_lines[1].strip())
+                except Exception:
+                    started_at = None
+            cl = CallerLog(
+                username=(msg.from_name or '?')[:80],
+                service=service,
+                started_at=started_at or _dt.utcnow(),
+                origin_bbs=_origin_from_message(msg),
+                remote_msg_id=msg.msg_id,
+                ip_address=None,
+            )
+            db.session.add(cl)
+            db.session.commit()
+            known_ids.add(msg.msg_id)
+            imported += 1
+        return True, f'imported {imported}, skipped {skipped_no_msgid} (no msg_id)'
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception('sync_lastcallers_inbound failed')
+        return False, str(exc)

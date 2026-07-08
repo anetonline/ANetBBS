@@ -40,6 +40,7 @@ ACTION_TYPES = [
     ('chat', 'Chat menu'),
     ('multinode', 'Multinode chat (between connected terminal nodes)'),
     ('oneliners', 'Show one-liners + last 10 callers'),
+    ('lastcallers', 'Last callers list (full, paginated)'),
     ('who', "Who's online"),
     ('profile', 'View own profile'),
     ('edit_prof', 'Edit profile'),

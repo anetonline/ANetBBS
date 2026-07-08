@@ -333,6 +333,11 @@ async def _post_to_wall(session, border: str, key_c: str,
         )
         db.session.add(post)
         db.session.commit()
+        try:
+            from ..echomail.interbbs_sync import post_wall_to_interbbs
+            post_wall_to_interbbs(post)
+        except Exception:
+            pass  # best-effort -- never break local posting on a sync failure
 
     session.writer.write(_enc(f'\r\n{_GR}Posted!{_RST}\r\n'))
     await session.writer.drain()

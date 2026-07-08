@@ -683,14 +683,26 @@ class BinkPClient:
                        f'TIME {_dt.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}')
         self._send_cmd(CMD_NUL, 'VER ANetBBS/1.0a binkp/1.1')
         self._send_cmd(CMD_NUL, 'OPT CRAM-MD5')
-        # Send BOTH qualified (`addr@domain`) and bare (`addr`) AKAs in
-        # one M_ADR. Synchronet emits qualified only, but Mystic + binkd
-        # peers may have node entries keyed on either form — covering
-        # both means our session matches whichever the peer keys on.
+        # Send ONE address per M_ADR -- qualified (`addr@domain`) when we
+        # have a domain, bare otherwise. Previously sent BOTH forms as a
+        # "cover whichever form the peer keys on" compat measure, but
+        # real binkd's ADR() handler (protocol.c) calls bsy_add() once
+        # per space-separated token in the line, with no de-duplication.
+        # For a "secure" (password-protected) link, the first token
+        # acquires binkd's busy-lock for that AKA; the second token --
+        # same numeric address, just unqualified -- immediately fails to
+        # acquire the SAME lock a split-second later in the same loop,
+        # and binkd sends "Secure AKA <addr> busy" and drops the session
+        # BEFORE password verification ever runs. Live-caught: a real
+        # binkd peer (binkp.pharcyde.org) rejected every single connect
+        # attempt this way regardless of password correctness, since the
+        # failure happens purely from binkd colliding with itself on our
+        # own duplicate token. A spec-compliant peer parses the
+        # domain-qualified form fine on its own (binkd's own
+        # parse_ftnaddress() supports the @domain suffix), so sending
+        # only one form is sufficient and doesn't trigger this collision.
         if self.domain:
-            self._send_cmd(
-                CMD_ADR,
-                f'{self.our_address}@{self.domain} {self.our_address}')
+            self._send_cmd(CMD_ADR, f'{self.our_address}@{self.domain}')
         else:
             self._send_cmd(CMD_ADR, self.our_address)
 

@@ -1776,6 +1776,12 @@ class CallerLog(db.Model):
     duration_seconds = db.Column(db.Integer)
     started_at = db.Column(db.DateTime, default=datetime.utcnow,
                            nullable=False, index=True)
+    # InterBBS Last Callers (anetbbs/echomail/interbbs_sync.py) -- same
+    # shape/meaning as WallPost.origin_bbs/remote_msg_id. NULL = local
+    # login. ip_address is NEVER populated for imported rows (privacy --
+    # no precedent anywhere in this codebase for cross-BBS IP sharing).
+    origin_bbs = db.Column(db.String(100), nullable=True)
+    remote_msg_id = db.Column(db.String(100), nullable=True, index=True, unique=True)
 
 
 class DialoutDestination(db.Model):
@@ -2607,6 +2613,14 @@ class WallPost(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     is_deleted = db.Column(db.Boolean, default=False, nullable=False)
     node = db.Column(db.Integer, default=1)
+    # InterBBS Wall (anetbbs/echomail/interbbs_sync.py): NULL = authored
+    # locally on this install. Non-NULL = imported from another ANetBBS
+    # system over echomail -- origin_bbs is the sending system's name,
+    # remote_msg_id is the source EchomailMessage.msg_id (dedup key, and
+    # the load-bearing check that prevents this post from ever being
+    # relayed back out again, which would bounce forever).
+    origin_bbs = db.Column(db.String(100), nullable=True)
+    remote_msg_id = db.Column(db.String(100), nullable=True, index=True, unique=True)
 
     def __repr__(self):
         return f'<WallPost {self.id} by {self.username}>'

@@ -1559,6 +1559,34 @@ class BBSSession:
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
 
+            # Caller log row — best effort, never block login. Mirrors
+            # web/auth.py's login route, which already does this for web
+            # logins; telnet/SSH/rlogin never had an equivalent, so "Last
+            # Callers" only ever showed web users on an otherwise
+            # telnet-first BBS.
+            try:
+                from ..models import CallerLog, db as _db
+                from ..features.bbs_ui import _app
+                # `peer` (set above) is always defined -- 'ip:port' or ''
+                # -- unlike `addr`, which can be left unbound if the
+                # get_extra_info() call above raised.
+                _ip = peer.rsplit(':', 1)[0] if peer else ''
+                with _app().app_context():
+                    _cl = CallerLog(
+                        user_id=self.user['id'],
+                        username=self.user.get('username', '?'),
+                        service=proto,
+                        ip_address=_ip)
+                    _db.session.add(_cl)
+                    _db.session.commit()
+                    try:
+                        from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
+                        post_lastcaller_to_interbbs(_cl)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # Fast logon check — if the sysop has enabled it, offer the user
             # a chance to skip logon modules and jump straight to the menu.
             # Read directly from .env so changes take effect without restart.

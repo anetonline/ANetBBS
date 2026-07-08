@@ -291,6 +291,7 @@ ADMIN_HUB_SECTIONS = {
             ('menu_admin.list_menus', 'BBS Menus', 'bi-list-nested', 'Terminal menu tree'),
             ('ansi_editor.index', 'ANSI Editor', 'bi-image', 'Edit ANSI/ASCII art screens'),
             ('wall_admin.index', 'Graffiti Wall', 'bi-pencil-square', 'Public ASCII wall moderation'),
+            ('lastcallers_admin.index', 'Last Callers', 'bi-people', 'Recent-caller list + InterBBS sharing'),
             ('gallery_admin.index', 'Galleries', 'bi-images', 'Image gallery moderation'),
             ('rss_admin.index', 'RSS Feeds', 'bi-rss-fill', 'Syndicated feed sources'),
             ('games_admin.dashboard', 'Door Games', 'bi-controller', 'Door game configuration'),

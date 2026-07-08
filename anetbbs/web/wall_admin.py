@@ -13,8 +13,9 @@ from flask import (Blueprint, abort, current_app, flash, redirect,
                    render_template, request, url_for)
 from flask_login import current_user, login_required
 
-from ..models import db, WallPost
+from ..models import db, WallPost, EchomailNetwork
 from ..features.wall import WALL_SCHEMES, WALL_SCHEME_LABELS
+from .admin import _write_env_keys
 
 wall_admin_bp = Blueprint('wall_admin', __name__, url_prefix='/admin/wall')
 
@@ -47,7 +48,10 @@ def index():
                            pagination=pagination,
                            show_deleted=show_deleted,
                            current_scheme=current_scheme,
-                           schemes=WALL_SCHEME_LABELS)
+                           schemes=WALL_SCHEME_LABELS,
+                           interbbs_enabled=current_app.config.get('WALL_INTERBBS_ENABLED', False),
+                           interbbs_network_id=current_app.config.get('WALL_INTERBBS_NETWORK_ID'),
+                           networks=EchomailNetwork.query.filter_by(is_active=True).order_by(EchomailNetwork.name).all())
 
 
 @wall_admin_bp.route('/settings', methods=['POST'])
@@ -57,28 +61,51 @@ def settings():
     scheme = request.form.get('color_scheme', 'cyan')
     if scheme not in WALL_SCHEMES:
         scheme = 'cyan'
-    current_app.config['WALL_COLOR_SCHEME'] = scheme
-    try:
-        env_path = _env_path()
-        lines = []
-        found = False
-        if os.path.exists(env_path):
-            with open(env_path, 'r') as f:
-                for line in f:
-                    if line.startswith('WALL_COLOR_SCHEME='):
-                        lines.append(f'WALL_COLOR_SCHEME={scheme}\n')
-                        found = True
-                    else:
-                        lines.append(line)
-        if not found:
-            lines.append(f'WALL_COLOR_SCHEME={scheme}\n')
-        with open(env_path, 'w') as f:
-            f.writelines(lines)
-    except Exception as e:
-        flash(f'Color updated in memory but could not save to .env: {e}', 'warning')
+
+    interbbs_enabled = request.form.get('interbbs_enabled') == 'on'
+    network_id = (request.form.get('interbbs_network_id') or '').strip()
+    if interbbs_enabled and not network_id:
+        flash('Pick a network before enabling InterBBS Wall sharing.', 'danger')
         return redirect(url_for('.index'))
-    flash(f'Wall color scheme set to "{WALL_SCHEME_LABELS.get(scheme, scheme)}".', 'success')
+
+    current_app.config['WALL_COLOR_SCHEME'] = scheme
+    current_app.config['WALL_INTERBBS_ENABLED'] = interbbs_enabled
+    current_app.config['WALL_INTERBBS_NETWORK_ID'] = network_id or None
+
+    try:
+        _write_env_keys(_env_path(), {
+            'WALL_COLOR_SCHEME': scheme,
+            'WALL_INTERBBS_ENABLED': 'true' if interbbs_enabled else 'false',
+            'WALL_INTERBBS_NETWORK_ID': network_id,
+        })
+    except Exception as e:
+        flash(f'Settings updated in memory but could not save to .env: {e}', 'warning')
+        return redirect(url_for('.index'))
+
+    if interbbs_enabled:
+        _ensure_wall_sync_event()
+
+    flash(f'Wall settings saved (color: "{WALL_SCHEME_LABELS.get(scheme, scheme)}", '
+          f'InterBBS: {"on" if interbbs_enabled else "off"}).', 'success')
     return redirect(url_for('.index'))
+
+
+def _ensure_wall_sync_event():
+    """Idempotent get-or-create of the ScheduledEvent that drives inbound
+    InterBBS Wall sync — a sysop enabling the feature shouldn't need a
+    separate manual trip to Admin -> Scheduled Events to make it actually
+    work."""
+    from ..models import ScheduledEvent
+    existing = ScheduledEvent.query.filter_by(handler_key='sync_wall_inbound').first()
+    if existing:
+        return
+    db.session.add(ScheduledEvent(
+        name='InterBBS Wall: import inbound posts',
+        handler_key='sync_wall_inbound',
+        params_json='{}',
+        schedule_json='{"kind": "interval", "minutes": 15}',
+    ))
+    db.session.commit()
 
 
 @wall_admin_bp.route('/<int:post_id>/delete', methods=['POST'])

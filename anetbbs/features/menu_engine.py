@@ -162,6 +162,16 @@ async def _act_wall(ui, args):
     return None
 
 
+async def _act_lastcallers(ui, args):
+    """Show the paginated Last Callers list."""
+    try:
+        from .lastcallers import show_last_callers
+        await show_last_callers(ui.session, args)
+    except Exception:
+        logger.exception('lastcallers action failed')
+    return None
+
+
 async def _act_exec(ui, args):
     """Run an external program with the user's terminal attached.
 
@@ -355,6 +365,7 @@ _ACTIONS = {
     'dialout': _act_dialout,
     'ansi': _act_ansi,
     'wall': _act_wall,
+    'lastcallers': _act_lastcallers,
     'exec': _act_exec,
     'multinode': _act_multinode,
 }

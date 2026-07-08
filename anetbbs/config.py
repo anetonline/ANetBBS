@@ -261,6 +261,20 @@ class Config:
     ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS - A Modern BBS System')
     ECHOMAIL_TEAR_LINE = os.environ.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS')
 
+    # InterBBS Wall / Last Callers -- opt-in sharing of local Graffiti
+    # Wall posts / recent-caller entries with other ANetBBS installs over
+    # a dedicated echomail area (see anetbbs/echomail/interbbs_sync.py).
+    # Scoped to ONE specific EchomailNetwork (picked in the admin UI, not
+    # every active network this install happens to carry) -- relaying to
+    # every configured network indiscriminately would silently create an
+    # ANET_WALL area on an unrelated third-party FTN network too.
+    WALL_INTERBBS_ENABLED = os.environ.get(
+        'WALL_INTERBBS_ENABLED', 'false').lower() == 'true'
+    WALL_INTERBBS_NETWORK_ID = os.environ.get('WALL_INTERBBS_NETWORK_ID') or None
+    LASTCALLERS_INTERBBS_ENABLED = os.environ.get(
+        'LASTCALLERS_INTERBBS_ENABLED', 'false').lower() == 'true'
+    LASTCALLERS_INTERBBS_NETWORK_ID = os.environ.get('LASTCALLERS_INTERBBS_NETWORK_ID') or None
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""

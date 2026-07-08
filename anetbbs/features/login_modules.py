@@ -76,6 +76,10 @@ async def _dispatch(session, module_type: str, params: dict) -> None:
         from .wall import show_wall
         await show_wall(session, allow_post=True)
 
+    elif module_type == 'lastcallers':
+        from .lastcallers import show_last_callers
+        await show_last_callers(session)
+
     elif module_type == 'ansi':
         slot = params.get('slot', '')
         if slot:
