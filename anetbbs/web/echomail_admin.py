@@ -9,7 +9,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, SelectField,
                      IntegerField, BooleanField, PasswordField)
-from wtforms.validators import DataRequired, Length, Optional, NumberRange
+from wtforms.validators import DataRequired, Length, Optional, NumberRange, ValidationError
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
 
@@ -118,6 +118,26 @@ class EchoAreaForm(FlaskForm):
         validators=[Optional(), NumberRange(min=0, max=255)], default=10)
     submit = SubmitField('Save Area')
 
+    def validate_tag(self, field):
+        # QWK's wire format (MESSAGES.DAT) only ever carries a numeric
+        # conference number -- there is no field anywhere in it for a
+        # symbolic tag. A non-numeric tag on a QWK-network area doesn't
+        # just look wrong, it silently breaks: outbound posts fall back
+        # to conference 0 (private mail) and get dropped entirely on
+        # import, since no subscription is ever registered at conf 0.
+        # Confirmed live, not theoretical -- see the ANotherNetwork QWK
+        # area migration in web_app.py's seeder for the install-wide
+        # version of this same bug.
+        network = EchomailNetwork.query.get(self.network_id.data)
+        if network and network.network_type == 'qwk':
+            if not (field.data or '').strip().isdigit():
+                raise ValidationError(
+                    'QWK areas must use a plain numeric conference number '
+                    'as the tag (e.g. "2010"), not a symbolic name -- QWK\'s '
+                    'wire format has no field for anything else, and a '
+                    'symbolic tag here means posts silently vanish instead '
+                    'of being delivered.')
+
 
 class BulkImportForm(FlaskForm):
     network_id = SelectField('Network', coerce=int, validators=[DataRequired()])
@@ -174,7 +194,18 @@ def dashboard():
     total_networks = EchomailNetwork.query.count()
     total_areas = EchoArea.query.count()
     total_messages = EchomailMessage.query.count()
-    pending_outbound = EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count()
+    # Scoped to BinkP only -- sent_at is meaningless for QWK, which tracks
+    # delivery via a per-node/per-area high-water mark (QWKNodeLastSent)
+    # instead and never sets this column at all. Counting QWK messages
+    # here made this number climb forever regardless of whether anything
+    # was actually stuck, since every QWK message ever sent stays
+    # sent_at=None permanently -- confirmed live, not a hypothetical.
+    pending_outbound = (EchomailMessage.query
+                        .join(EchomailNetwork, EchomailMessage.network_id == EchomailNetwork.id)
+                        .filter(EchomailMessage.direction == 'outbound',
+                                EchomailMessage.sent_at.is_(None),
+                                EchomailNetwork.network_type == 'binkp')
+                        .count())
     recent_logs = EchomailPollLog.query.order_by(EchomailPollLog.started_at.desc()).limit(10).all()
     return render_template('echomail/admin/dashboard.html',
                            total_networks=total_networks,

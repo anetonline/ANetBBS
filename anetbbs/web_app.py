@@ -1146,19 +1146,54 @@ def _create_default_data():
          'Test',       False, 80),
     ]
 
-    existing_tags = {
-        a.tag for a in EchoArea.query.filter(
-            EchoArea.tag.like('ANN.%')).all()
-    }
     # Find the network IDs to attach to (may have just been created above).
     _ann_binkp_row = EchomailNetwork.query.filter_by(name='ANotherNetwork').first()
     _ann_qwk_row   = EchomailNetwork.query.filter_by(name='ANotherNetwork (QWK)').first()
+
+    # QWK cannot carry a symbolic tag like 'ANN.LINUX' -- MESSAGES.DAT
+    # only ever stores a numeric conference number, end to end. The BinkP
+    # side keeps the symbolic tag (FTN AREA: kludges are arbitrary
+    # strings); the QWK side needs its own STABLE, fixed number per area,
+    # the same for every downstream node, matching how a real QWK-net's
+    # CONTROL.DAT is a shared catalog, not something reassigned per
+    # subscriber. `order` is already unique per area in this list, so
+    # `order + 1` (offset to keep conf 0 reserved for netmail/personal
+    # mail) is used as that fixed number.
+    #
+    # Live-caught, not hypothetical: a sysop posting from a QWK-connected
+    # node into one of these areas got a silent no-op -- the outbound
+    # conf-number resolver couldn't parse 'ANN.LINUX' as a number, fell
+    # back to conference 0, and the hub's REP importer has no subscription
+    # ever registered at conf 0, so the message was dropped, not just
+    # misfiled. This affected all 26 areas on every install that had ever
+    # activated the QWK side of this network, not one area in isolation.
+    existing_binkp_names = {
+        a.name for a in EchoArea.query.filter_by(network_id=_ann_binkp_row.id).all()
+    } if _ann_binkp_row else set()
+    existing_qwk_by_name = {
+        a.name: a for a in EchoArea.query.filter_by(network_id=_ann_qwk_row.id).all()
+    } if _ann_qwk_row else {}
+
     for (_tag, _name, _desc, _cat, _sop, _ord) in _ANN_AREAS:
-        if _tag not in existing_tags:
-            for _net in filter(None, [_ann_binkp_row, _ann_qwk_row]):
+        _qwk_conf_tag = str(_ord + 1)
+        if _ann_binkp_row and _name not in existing_binkp_names:
+            db.session.add(EchoArea(
+                network_id=_ann_binkp_row.id,
+                tag=_tag,
+                name=_name,
+                description=_desc,
+                category=_cat,
+                is_active=True,
+                is_subscribed=False,
+                is_sysop_only=_sop,
+                order=_ord,
+            ))
+        if _ann_qwk_row:
+            _qwk_existing = existing_qwk_by_name.get(_name)
+            if _qwk_existing is None:
                 db.session.add(EchoArea(
-                    network_id=_net.id,
-                    tag=_tag,
+                    network_id=_ann_qwk_row.id,
+                    tag=_qwk_conf_tag,
                     name=_name,
                     description=_desc,
                     category=_cat,
@@ -1167,6 +1202,21 @@ def _create_default_data():
                     is_sysop_only=_sop,
                     order=_ord,
                 ))
+            elif _qwk_existing.tag != _qwk_conf_tag:
+                # Self-heal an already-seeded install: this row was
+                # created before this fix with the symbolic tag copied
+                # from the BinkP side. Rename it to the correct fixed
+                # conference number, and bring any existing subscriptions
+                # in line so every node ends up on the same shared number.
+                from flask import current_app as _ca3
+                _ca3.logger.info(
+                    "ANotherNetwork QWK area migration: %r tag %r -> %r",
+                    _name, _qwk_existing.tag, _qwk_conf_tag)
+                _qwk_existing.tag = _qwk_conf_tag
+                from .models import QWKNodeLastSent
+                (QWKNodeLastSent.query
+                 .filter_by(echo_area_id=_qwk_existing.id)
+                 .update({QWKNodeLastSent.conf_number: _ord + 1}))
     db.session.commit()
 
     # ANotherNetwork file areas (TIC file-echo distribution) — 9 areas,

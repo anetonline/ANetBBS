@@ -1,3 +1,21 @@
+# ANetBBS v1.0b2.55 — Fix QWK REP uploads never actually importing (July 2026)
+
+- FIX (live-caught verifying the v1.0b2.54 fix end to end): a reply uploaded from a QWK node showed "sent" but never appeared on the hub. Root cause: the hub's REP importer read the parsed message using the wrong dict keys (`conference`/`from`/`to` instead of the parser's real `conf_num`/`from_name`/`to_name`), silently falling back to defaults instead of erroring. `conference` defaulting to `0` meant every uploaded reply, from every QWK node, always resolved to conference 0 (private mail) and was silently dropped — this was never node-specific, inbound REP processing has been completely broken since this function was written. Fixed by reading the correct keys. Also fixed a second, unrelated crash found in the same investigation: a trailing log statement outside the app-context block raised `DetachedInstanceError` after a successful import, misleadingly logging "REP processing failed" for uploads that had actually already succeeded. 1 new regression test.
+- FIX: "Pending Outbound" (dashboard + terminal sysop status) counted QWK messages that can never clear, since QWK never sets `sent_at` at all — the number could only climb, never reflect reality. Scoped to BinkP only. 1 new test.
+
+---
+
+# ANetBBS v1.0b2.54 — Fix QWK areas silently dropping messages (July 2026)
+
+- FIX (live-caught): a message posted from a QWK-connected node vanished with no error — reported "sent" locally, never arrived at the hub. QWK's wire format only carries a numeric conference number, but the ANotherNetwork seeder created the QWK side of all 26 built-in areas with the same symbolic tag as the BinkP side (`ANN.LINUX`, etc.), so any post into one silently fell back to conference 0 and was dropped on import — every install that had activated the QWK side of this network was affected, not one area. Conference numbers were also being assigned per-node-subscription instead of as a fixed property of the area, so two nodes could get different numbers for the same area. Fixed with a stable per-area conference number, a self-healing migration for already-seeded installs (renumbers areas, fixes existing subscriptions), and validation blocking non-numeric QWK area tags going forward. 10 new tests.
+- FIX: InterBBS Wall/Last Callers restricted to BinkP networks only — QWK's numeric-only wire format can never carry the special area tag these features need.
+- FIX: enabling InterBBS Wall/Last Callers created nothing until someone posted new content — now creates the area immediately on enable.
+- FEATURE: QWK "Subscribe to All" is now scoped per-network (checkboxes) instead of sweeping every QWK network; BinkP got the same bulk-subscribe feature, built from scratch.
+- New `tools/manage_qwk_requests.py` for clearing stuck pending QWK node requests.
+- 31 more new tests total. Full suite: 316/316 passing.
+
+---
+
 # ANetBBS v1.0b2.53 — InterBBS Wall + InterBBS Last Callers (July 2026)
 
 - FEATURE: opt-in InterBBS Graffiti Wall — share Wall posts with other ANetBBS installs over a dedicated `ANET_WALL` echomail area, riding the existing QWK/BinkP transport (real per-node auth, FTN dedup/threading fields, hub subscribe/approve UI) instead of a bespoke sync protocol, matching how fsxnet's own wall echo works. Toggle + network picker on the Wall admin page; a scheduled job (auto-created on enable, every 15 min) imports inbound posts. Remote posts are tagged with their origin BBS in the moderation view. Loop-prevention: an imported post is tagged `origin_bbs`, and the relay hook refuses to ever re-relay a tagged post — the only thing standing between this design and an infinite bounce between two hubs, since a re-composed message would get a brand-new msg_id no downstream dedup could catch.

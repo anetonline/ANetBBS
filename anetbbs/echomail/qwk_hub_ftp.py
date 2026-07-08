@@ -275,7 +275,18 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
         new_ids = []
         for msg_dict in parsed:
             try:
-                conf_num = msg_dict.get('conference', 0)
+                # _parse_messages_dat() (qwk.py) returns dicts keyed
+                # 'conf_num'/'from_name'/'to_name' -- these three read the
+                # wrong keys ('conference'/'from'/'to', which never exist
+                # in that dict) and silently fell back to their .get()
+                # defaults. conf_num defaulting to 0 meant every REP
+                # upload, from every QWK node, always resolved to
+                # conference 0 -- which no node ever has a legitimate
+                # subscription to -- so every uploaded reply was silently
+                # dropped by the `if sub is None: continue` below. This
+                # was never Pi3-specific; it broke inbound REP processing
+                # entirely, for as long as this function has existed.
+                conf_num = msg_dict.get('conf_num', 0)
                 sub = (QWKNodeLastSent.query
                        .filter_by(node_id=node.id, conf_number=conf_num)
                        .first())
@@ -288,8 +299,8 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                 em = EchomailMessage(
                     area_id=area.id,
                     network_id=area.network_id,
-                    from_name=msg_dict.get('from', '')[:100],
-                    to_name=msg_dict.get('to', 'All')[:100],
+                    from_name=msg_dict.get('from_name', '')[:100],
+                    to_name=msg_dict.get('to_name', 'All')[:100],
                     subject=msg_dict.get('subject', '')[:200],
                     body=msg_dict.get('body', ''),
                     msg_id=msg_dict.get('msg_id', ''),
@@ -321,6 +332,17 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
         except Exception:
             db.session.rollback()
 
+        # Capture while still inside the app context -- node.packet_id is
+        # a lazy-loaded ORM attribute, and the commits above leave it
+        # expired (SQLAlchemy's default expire_on_commit). Reading it
+        # after the context (and its session) tears down raises
+        # DetachedInstanceError. Live-caught: the import and both commits
+        # above completed successfully every time, but this trailing log
+        # line crashed anyway, which made on_file_received()'s except
+        # block log "REP processing failed" for an upload that had
+        # actually already succeeded.
+        node_label = node.packet_id
+
     logger.info('QWK FTP REP: imported %d messages from node %s',
-                count, node.packet_id if node else node_id)
+                count, node_label)
     return count

@@ -492,6 +492,43 @@ def delete_qwk_node(node_id):
     return redirect(url_for('hub_admin.qwk_nodes'))
 
 
+def _qwk_conf_number_for(node_id, area):
+    """Resolve the conference number a subscription to *area* should use.
+
+    Must be a FIXED, STABLE number shared by every node subscribed to
+    this area -- not something reassigned per-subscriber. QWK's own
+    wire format only ever carries a numeric conference number (no field
+    for a symbolic tag), so `EchoArea.tag` on a QWK-network area IS that
+    number (enforced at area-creation time; see echomail_admin.py's
+    validation). Live-caught bug this fixes: subscriptions used to get
+    an auto-incremented, per-node conf number independent of the area's
+    own identity, so two different nodes could get two different numbers
+    for "the same" area, and a node posting into a fresh area got
+    silently dropped because outbound resolution derives the conference
+    number from the area's tag directly, with no connection at all to
+    whatever number subscribe() had assigned.
+
+    Falls back to the old per-node auto-increment ONLY for the
+    unexpected case of a pre-existing non-numeric-tag QWK area slipping
+    through (legacy data predating the tag validation) -- logs a warning
+    since that's a sign the area itself needs fixing, not proof this
+    function is wrong.
+    """
+    tag = (area.tag or '').strip()
+    if tag.isdigit():
+        return int(tag)
+    current_app.logger.warning(
+        'QWK subscribe: area %r (id=%s) has a non-numeric tag %r -- '
+        'falling back to per-node auto-increment. This area needs its '
+        'tag fixed to a real conference number; posts into it will be '
+        'silently dropped as conference 0 otherwise.',
+        area.name, area.id, area.tag)
+    max_conf = (db.session.query(db.func.max(QWKNodeLastSent.conf_number))
+                .filter_by(node_id=node_id)
+                .scalar() or 0)
+    return max_conf + 1
+
+
 @hub_admin_bp.route('/qwk/<int:node_id>/subscribe', methods=['POST'])
 @login_required
 @_admin_required
@@ -508,17 +545,14 @@ def qwk_subscribe(node_id):
         existing = QWKNodeLastSent.query.filter_by(
             node_id=node_id, echo_area_id=area_id).first()
         if not existing:
-            # Assign next available conference number for this node.
-            max_conf = (db.session.query(db.func.max(QWKNodeLastSent.conf_number))
-                        .filter_by(node_id=node_id)
-                        .scalar() or 0)
+            conf_num = _qwk_conf_number_for(node_id, area)
             db.session.add(QWKNodeLastSent(
                 node_id=node_id,
                 echo_area_id=area_id,
-                conf_number=max_conf + 1,
+                conf_number=conf_num,
             ))
             db.session.commit()
-            flash(f'Subscribed {node.packet_id} to {area.tag} (conf #{max_conf + 1}).', 'success')
+            flash(f'Subscribed {node.packet_id} to {area.tag} (conf #{conf_num}).', 'success')
     elif action == 'unsubscribe':
         row = QWKNodeLastSent.query.filter_by(
             node_id=node_id, echo_area_id=area_id).first()
@@ -559,15 +593,13 @@ def qwk_subscribe_all(node_id):
                      EchomailNetwork.id.in_(network_ids))
              .order_by(EchoArea.tag)
              .all())
-    next_conf = (db.session.query(db.func.max(QWKNodeLastSent.conf_number))
-                .filter_by(node_id=node_id).scalar() or 0) + 1
     added = 0
     for area in areas:
         if area.id in already:
             continue
         db.session.add(QWKNodeLastSent(
-            node_id=node_id, echo_area_id=area.id, conf_number=next_conf))
-        next_conf += 1
+            node_id=node_id, echo_area_id=area.id,
+            conf_number=_qwk_conf_number_for(node_id, area)))
         added += 1
     if added:
         db.session.commit()

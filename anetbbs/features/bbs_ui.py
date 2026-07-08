@@ -3876,10 +3876,22 @@ BBSMenuUI.sysop_boards = _sysop_boards
 async def _sysop_status(self):
     """Quick server-status snapshot for sysops (counts + recent activity)."""
     from anetbbs.models import (User, UserSession, Post, Message as Bulletin,
-                                PrivateMessage, EchomailMessage)
+                                PrivateMessage, EchomailMessage, EchomailNetwork)
     from .ansi_ui import write_menu_art, banner, footer, FG, RESET, BOLD, prompt as _p, ui_width
     with _app().app_context():
         five = datetime.utcnow() - timedelta(minutes=5)
+        # "Echo out (queue)" is scoped to BinkP only -- sent_at is
+        # meaningless for QWK (delivery is tracked via a per-node
+        # high-water mark instead, QWKNodeLastSent, and QWK never sets
+        # this column), so counting QWK messages here made the number
+        # climb forever regardless of whether anything was actually
+        # stuck. Confirmed live, not a hypothetical.
+        echo_out_queue = (EchomailMessage.query
+                          .join(EchomailNetwork, EchomailMessage.network_id == EchomailNetwork.id)
+                          .filter(EchomailMessage.direction == 'outbound',
+                                  EchomailMessage.sent_at.is_(None),
+                                  EchomailNetwork.network_type == 'binkp')
+                          .count())
         stats = {
             'Users total':      User.query.count(),
             'Active (30d)':     User.query.filter(User.last_login >= datetime.utcnow() - timedelta(days=30)).count(),
@@ -3888,7 +3900,7 @@ async def _sysop_status(self):
             'Private msgs':     PrivateMessage.query.count(),
             'Bulletins':        Bulletin.query.count(),
             'Echo inbound':     EchomailMessage.query.filter_by(direction='inbound').count(),
-            'Echo out (queue)': EchomailMessage.query.filter_by(direction='outbound', sent_at=None).count(),
+            'Echo out (queue)': echo_out_queue,
             'Echo out (sent)':  EchomailMessage.query.filter(EchomailMessage.sent_at != None).count(),
         }
     _w = ui_width(self.session)
