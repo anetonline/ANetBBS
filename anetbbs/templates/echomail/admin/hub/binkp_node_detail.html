@@ -91,7 +91,27 @@
 
 <!-- Add subscription -->
 <div class="card mb-4">
-    <div class="card-header">Add Area Subscription</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Add Area Subscription</span>
+        <details class="d-inline-block">
+            <summary class="btn btn-sm btn-outline-primary" style="list-style:none; cursor:pointer;">
+                <i class="bi bi-check2-all"></i> Subscribe to All
+            </summary>
+            <form method="POST" action="{{ url_for('hub_admin.binkp_subscribe_all', node_id=node.id) }}"
+                  class="p-2 mt-1 rounded" style="background:rgba(0,0,0,0.2); position:absolute; z-index:10; right:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-2" style="font-size:0.85rem;">Pick which BinkP network(s):</div>
+                {% for net in binkp_networks %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="network_ids"
+                           value="{{ net.id }}" id="binkpsuball_net_{{ net.id }}">
+                    <label class="form-check-label" for="binkpsuball_net_{{ net.id }}" style="font-size:0.85rem;">{{ net.name }}</label>
+                </div>
+                {% endfor %}
+                <button type="submit" class="btn btn-sm btn-primary mt-2">Subscribe to Selected</button>
+            </form>
+        </details>
+    </div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('hub_admin.binkp_subscribe', node_id=node.id) }}" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

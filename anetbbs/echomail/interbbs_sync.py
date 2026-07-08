@@ -86,12 +86,24 @@ def ensure_special_area(network, tag):
 
 def _configured_network(network_id):
     """Resolve the one EchomailNetwork a feature is scoped to. Returns
-    None if unconfigured or inactive -- callers must no-op in that case."""
+    None if unconfigured, inactive, or (defensively) QWK -- callers must
+    no-op in that case. QWK areas are identified by numeric conference
+    number end to end (qwk.py/qwk_hub_ftp.py), so a symbolic tag like
+    ANET_WALL can never receive real QWK traffic no matter how the
+    EchoArea row is created -- the admin UI already only offers BinkP
+    networks, this is just a second guard in case an old .env still has
+    a QWK network id saved from before that restriction existed."""
     if not network_id:
         return None
     from ..models import EchomailNetwork
     network = EchomailNetwork.query.get(int(network_id))
     if network is None or not network.is_active:
+        return None
+    if network.network_type != 'binkp':
+        logger.warning(
+            'interbbs_sync: configured network %s is %r, not binkp -- '
+            'refusing to use it (QWK areas cannot carry a symbolic tag)',
+            network.name, network.network_type)
         return None
     return network
 

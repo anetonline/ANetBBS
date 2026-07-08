@@ -51,7 +51,16 @@ def index():
                            schemes=WALL_SCHEME_LABELS,
                            interbbs_enabled=current_app.config.get('WALL_INTERBBS_ENABLED', False),
                            interbbs_network_id=current_app.config.get('WALL_INTERBBS_NETWORK_ID'),
-                           networks=EchomailNetwork.query.filter_by(is_active=True).order_by(EchomailNetwork.name).all())
+                           # BinkP only -- QWK areas are identified by
+                           # numeric conference number end to end (see
+                           # qwk.py/qwk_hub_ftp.py), so a symbolic tag
+                           # like ANET_WALL can never actually receive
+                           # real QWK traffic no matter how the EchoArea
+                           # row is created. Offering a QWK network here
+                           # would silently never work.
+                           networks=EchomailNetwork.query.filter_by(
+                               is_active=True, network_type='binkp'
+                           ).order_by(EchomailNetwork.name).all())
 
 
 @wall_admin_bp.route('/settings', methods=['POST'])
@@ -67,6 +76,13 @@ def settings():
     if interbbs_enabled and not network_id:
         flash('Pick a network before enabling InterBBS Wall sharing.', 'danger')
         return redirect(url_for('.index'))
+    if interbbs_enabled:
+        network = EchomailNetwork.query.get(int(network_id))
+        if network is None or network.network_type != 'binkp':
+            flash('InterBBS Wall only works over a BinkP network -- QWK areas '
+                  'are identified by conference number, not by name, so this '
+                  'area could never actually receive QWK traffic.', 'danger')
+            return redirect(url_for('.index'))
 
     current_app.config['WALL_COLOR_SCHEME'] = scheme
     current_app.config['WALL_INTERBBS_ENABLED'] = interbbs_enabled

@@ -231,6 +231,9 @@ def binkp_node_detail(node_id):
                     .all())
     pending_count = BinkPHoldQueue.query.filter_by(
         node_id=node_id, status='pending').count()
+    binkp_networks = (EchomailNetwork.query
+                      .filter_by(is_active=True, network_type='binkp')
+                      .order_by(EchomailNetwork.name).all())
     return render_template(
         'echomail/admin/hub/binkp_node_detail.html',
         node=node,
@@ -238,6 +241,7 @@ def binkp_node_detail(node_id):
         all_areas=all_areas,
         hold_entries=hold_entries,
         pending_count=pending_count,
+        binkp_networks=binkp_networks,
     )
 
 
@@ -305,6 +309,42 @@ def binkp_subscribe(node_id):
             db.session.commit()
             flash(f'Unsubscribed {node.ftn_address} from {area.tag}.', 'success')
 
+    return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
+
+
+@hub_admin_bp.route('/binkp/<int:node_id>/subscribe-all', methods=['POST'])
+@login_required
+@_admin_required
+def binkp_subscribe_all(node_id):
+    """Subscribe a node to every active area on the selected network(s)
+    in one click, instead of clicking Subscribe once per area. Mirrors
+    qwk_subscribe_all() -- BinkP had no bulk-subscribe at all before
+    this, only one-at-a-time via binkp_subscribe()."""
+    node = BinkPNode.query.get_or_404(node_id)
+    network_ids = request.form.getlist('network_ids', type=int)
+    if not network_ids:
+        flash('Pick at least one network before subscribing to all its areas.', 'danger')
+        return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
+
+    already = {s.echo_area_id for s in node.subscriptions.all()}
+    areas = (EchoArea.query
+             .join(EchomailNetwork, EchoArea.network_id == EchomailNetwork.id)
+             .filter(EchoArea.is_active == True,
+                     EchomailNetwork.network_type == 'binkp',
+                     EchomailNetwork.id.in_(network_ids))
+             .order_by(EchoArea.tag)
+             .all())
+    added = 0
+    for area in areas:
+        if area.id in already:
+            continue
+        db.session.add(EchoAreaNode(node_id=node_id, echo_area_id=area.id))
+        added += 1
+    if added:
+        db.session.commit()
+        flash(f'Subscribed {node.ftn_address} to {added} area(s).', 'success')
+    else:
+        flash(f'{node.ftn_address} is already subscribed to every area on the selected network(s).', 'info')
     return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
 
 
@@ -398,6 +438,9 @@ def qwk_node_detail(node_id):
                  .all())
     # Assign conference numbers for display (1-based).
     conf_map = {s.echo_area_id: s.conf_number for s in subscriptions}
+    qwk_networks = (EchomailNetwork.query
+                    .filter_by(is_active=True, network_type='qwk')
+                    .order_by(EchomailNetwork.name).all())
     return render_template(
         'echomail/admin/hub/qwk_node_detail.html',
         node=node,
@@ -405,6 +448,7 @@ def qwk_node_detail(node_id):
         subscribed_area_ids=subscribed_area_ids,
         all_areas=all_areas,
         conf_map=conf_map,
+        qwk_networks=qwk_networks,
     )
 
 
@@ -493,14 +537,26 @@ def qwk_subscribe_all(node_id):
     """Subscribe a node to every active area on QWK-transport networks in
     one click, instead of clicking Subscribe once per area. Scoped to
     QWK-type networks specifically -- a QWK node has no business
-    receiving areas that only exist on a BinkP-only network."""
+    receiving areas that only exist on a BinkP-only network.
+
+    `network_ids` (checkbox values, one or more) further scopes this to
+    specific QWK networks -- without it, this used to sweep in every
+    QWK network on the install at once (confirmed real: a sysop running
+    more than one QWK network had no way to add just one node's home
+    network without also pulling in every other QWK network's areas)."""
     node = QWKNode.query.get_or_404(node_id)
+    network_ids = request.form.getlist('network_ids', type=int)
+    if not network_ids:
+        flash('Pick at least one network before subscribing to all its areas.', 'danger')
+        return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
+
     already = {s.echo_area_id for s in
               QWKNodeLastSent.query.filter_by(node_id=node_id).all()}
     areas = (EchoArea.query
              .join(EchomailNetwork, EchoArea.network_id == EchomailNetwork.id)
              .filter(EchoArea.is_active == True,
-                     EchomailNetwork.network_type == 'qwk')
+                     EchomailNetwork.network_type == 'qwk',
+                     EchomailNetwork.id.in_(network_ids))
              .order_by(EchoArea.tag)
              .all())
     next_conf = (db.session.query(db.func.max(QWKNodeLastSent.conf_number))
@@ -517,7 +573,7 @@ def qwk_subscribe_all(node_id):
         db.session.commit()
         flash(f'Subscribed {node.packet_id} to {added} area(s).', 'success')
     else:
-        flash(f'{node.packet_id} is already subscribed to every QWK area.', 'info')
+        flash(f'{node.packet_id} is already subscribed to every area on the selected network(s).', 'info')
     return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
 
 

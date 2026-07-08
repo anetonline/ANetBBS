@@ -184,6 +184,30 @@ class InterbbsSyncTests(unittest.TestCase):
 
             self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
 
+    def test_qwk_configured_network_never_relays(self):
+        """QWK areas are identified by numeric conference number end to
+        end -- a symbolic tag like ANET_WALL can never receive real QWK
+        traffic no matter how the EchoArea row is created. Even if
+        WALL_INTERBBS_NETWORK_ID somehow ends up pointing at a QWK
+        network (e.g. a stale .env value from before the admin UI
+        started filtering to BinkP-only), _configured_network() must
+        refuse it rather than silently creating a useless area."""
+        from anetbbs.echomail.interbbs_sync import post_wall_to_interbbs
+        from anetbbs.models import db, WallPost, EchomailMessage, EchoArea
+        with self.app.app_context():
+            self.app.config['WALL_INTERBBS_ENABLED'] = True
+            net = self._network(network_type='qwk')
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
+
+            wp = WallPost(username='jerry', line1='hi')
+            db.session.add(wp)
+            db.session.commit()
+            post_wall_to_interbbs(wp)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+            self.assertEqual(EchoArea.query.filter_by(network_id=net.id).count(), 0,
+                              'no ANET_WALL area should be created on a QWK network at all')
+
     # ------------------------------------------------------------------
     # Inbound sync: global dedup + NULL msg_id handling
     # ------------------------------------------------------------------

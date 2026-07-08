@@ -1,8 +1,15 @@
-"""Tests for the QWK node "Subscribe to All" bulk action -- Jerry asked
-for this after having to click Subscribe once per area, one at a time,
-for every ANN.* area. Scoped to QWK-transport networks only (not every
-area across the whole BBS, including BinkP-only networks a QWK node
-has no business receiving).
+"""Tests for the QWK node "Subscribe to All" bulk action -- originally
+requested after having to click Subscribe once per area, one at a
+time, for every ANN.* area. Scoped to QWK-transport networks only (not
+every area across the whole BBS, including BinkP-only networks a QWK
+node has no business receiving).
+
+Also requires an explicit `network_ids` selection now (checkboxes in
+the admin UI) -- it used to silently sweep in every QWK network on the
+install with no way to scope it to just one, confirmed as a real
+problem for a sysop running more than one QWK network who couldn't add
+a node to just its own home network without also pulling in every
+other QWK network's areas.
 """
 import os
 import sys
@@ -79,20 +86,42 @@ class QwkSubscribeAllTests(unittest.TestCase):
             db.session.add(node)
             db.session.commit()
             node_id = node.id
+            qwk_net_id = qwk_net.id
 
         client = self._client()
         resp = client.post(f'/admin/echomail/hub/qwk/{node_id}/subscribe-all',
+                           data={'network_ids': [qwk_net_id]},
                            follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
 
         with self.app.app_context():
-            # Real seeded ANotherNetwork QWK areas also get subscribed by
-            # this same action (create_app('testing') seeds them too) --
-            # assert our test areas are a subset, not an exact match.
+            # Scoped to just qwk_net's id -- the real seeded
+            # ANotherNetwork QWK areas must NOT get swept in this time,
+            # since only qwk_net.id was selected.
             subs = QWKNodeLastSent.query.filter_by(node_id=node_id).all()
             tags = {EchoArea.query.get(s.echo_area_id).tag for s in subs}
-            self.assertTrue({'QWK.ONE', 'QWK.TWO'}.issubset(tags))
-            self.assertNotIn('BINKP.ONE', tags)
+            self.assertEqual(tags, {'QWK.ONE', 'QWK.TWO'})
+
+    def test_subscribe_all_requires_at_least_one_network_selected(self):
+        from anetbbs.models import db, EchomailNetwork, EchoArea, QWKNode, QWKNodeLastSent
+        with self.app.app_context():
+            net = EchomailNetwork(name='NoSelectionNet', network_type='qwk')
+            db.session.add(net)
+            db.session.flush()
+            db.session.add(EchoArea(network_id=net.id, tag='NOSEL.ONE', name='N1', is_active=True))
+            node = QWKNode(packet_id='NOSELTEST', name='Test', password='x', is_active=True)
+            db.session.add(node)
+            db.session.commit()
+            node_id = node.id
+
+        client = self._client()
+        resp = client.post(f'/admin/echomail/hub/qwk/{node_id}/subscribe-all',
+                           follow_redirects=True)  # no network_ids at all
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'Pick at least one network', resp.data)
+
+        with self.app.app_context():
+            self.assertEqual(QWKNodeLastSent.query.filter_by(node_id=node_id).count(), 0)
 
     def test_subscribe_all_assigns_sequential_conf_numbers(self):
         from anetbbs.models import (db, EchomailNetwork, EchoArea, QWKNode,
@@ -109,23 +138,20 @@ class QwkSubscribeAllTests(unittest.TestCase):
             db.session.add(node)
             db.session.commit()
             node_id = node.id
+            net_id = net.id
 
         client = self._client()
         client.post(f'/admin/echomail/hub/qwk/{node_id}/subscribe-all',
+                    data={'network_ids': [net_id]},
                     follow_redirects=True)
 
         with self.app.app_context():
-            # Real seeded areas get subscribed too, so conf numbers won't
-            # be exactly [1,2,3] for just our 3 -- assert the invariant
-            # that actually matters: no gaps, no duplicates, contiguous
-            # from 1.
+            # Scoped to just net.id, so this is now an exact count.
             subs = (QWKNodeLastSent.query.filter_by(node_id=node_id)
                     .order_by(QWKNodeLastSent.conf_number).all())
-            self.assertGreaterEqual(len(subs), 3)
+            self.assertEqual(len(subs), 3)
             conf_numbers = [s.conf_number for s in subs]
-            self.assertEqual(len(conf_numbers), len(set(conf_numbers)),
-                             'duplicate conf_number assigned')
-            self.assertEqual(conf_numbers, list(range(1, len(conf_numbers) + 1)),
+            self.assertEqual(conf_numbers, [1, 2, 3],
                              'conf numbers are not contiguous starting from 1')
 
     def test_subscribe_all_does_not_duplicate_existing_subscriptions(self):
@@ -147,24 +173,24 @@ class QwkSubscribeAllTests(unittest.TestCase):
                                            conf_number=1))
             db.session.commit()
             node_id = node.id
+            net_id = net.id
 
         client = self._client()
         client.post(f'/admin/echomail/hub/qwk/{node_id}/subscribe-all',
+                    data={'network_ids': [net_id]},
                     follow_redirects=True)
 
         with self.app.app_context():
-            # Real seeded areas get subscribed too -- check the invariant
-            # that matters: no duplicate echo_area_id for this node, and
-            # our two specific tags each appear exactly once (area1 was
-            # already subscribed before subscribe-all ran; it must not
-            # have been re-added as a second row).
+            # Scoped to just net.id: exactly 2 rows, no duplicate for
+            # area1 (already subscribed before subscribe-all ran; must
+            # not have been re-added as a second row).
             subs = QWKNodeLastSent.query.filter_by(node_id=node_id).all()
+            self.assertEqual(len(subs), 2)
             area_ids = [s.echo_area_id for s in subs]
             self.assertEqual(len(area_ids), len(set(area_ids)),
                              'duplicate echo_area_id subscription created')
-            tags = [EchoArea.query.get(s.echo_area_id).tag for s in subs]
-            self.assertEqual(tags.count('DUP.ONE'), 1)
-            self.assertEqual(tags.count('DUP.TWO'), 1)
+            tags = {EchoArea.query.get(s.echo_area_id).tag for s in subs}
+            self.assertEqual(tags, {'DUP.ONE', 'DUP.TWO'})
 
 
 if __name__ == '__main__':

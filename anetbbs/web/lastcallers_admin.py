@@ -41,7 +41,12 @@ def index():
                            pagination=pagination,
                            interbbs_enabled=current_app.config.get('LASTCALLERS_INTERBBS_ENABLED', False),
                            interbbs_network_id=current_app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'),
-                           networks=EchomailNetwork.query.filter_by(is_active=True).order_by(EchomailNetwork.name).all())
+                           # BinkP only -- see wall_admin.py's identical
+                           # filter for why (QWK areas are numeric
+                           # conferences, not symbolic tags).
+                           networks=EchomailNetwork.query.filter_by(
+                               is_active=True, network_type='binkp'
+                           ).order_by(EchomailNetwork.name).all())
 
 
 @lastcallers_admin_bp.route('/settings', methods=['POST'])
@@ -53,6 +58,13 @@ def settings():
     if interbbs_enabled and not network_id:
         flash('Pick a network before enabling InterBBS Last Callers sharing.', 'danger')
         return redirect(url_for('.index'))
+    if interbbs_enabled:
+        network = EchomailNetwork.query.get(int(network_id))
+        if network is None or network.network_type != 'binkp':
+            flash('InterBBS Last Callers only works over a BinkP network -- QWK '
+                  'areas are identified by conference number, not by name, so '
+                  'this area could never actually receive QWK traffic.', 'danger')
+            return redirect(url_for('.index'))
 
     current_app.config['LASTCALLERS_INTERBBS_ENABLED'] = interbbs_enabled
     current_app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = network_id or None
