@@ -575,8 +575,11 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
     Triggers areafix bot if a netmail's to_name matches 'areafix' (any case).
     """
     import json
-    from ..models import db, EchomailMessage, EchoArea, NetmailMessage
+    from ..models import db, EchomailMessage, EchoArea, NetmailMessage, EchomailNetwork
     from .kludges import find_kludge
+    from .routing import resolve_netmail_recipient
+
+    network = EchomailNetwork.query.get(network_id)
 
     messages = _parse_ftn_packet(pkt_bytes)
     imported = 0
@@ -640,12 +643,20 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                     if len(parts) > 1:
                         from_addr = parts[1]
 
+            # Match a local user by AKA address or by name -- this
+            # listener path never did this at all before, so BinkP-
+            # received netmail was never linked to a User row and could
+            # only be found later by string-matching to_name in the web
+            # inbox (and its recipient never got notified of new mail).
+            to_user = resolve_netmail_recipient(m['to_name'], to_addr, network)
+
             nm = NetmailMessage(
                 network_id=network_id,
                 from_address=from_addr or None,
                 to_address=to_addr or None,
                 from_name=m['from_name'][:120],
                 to_name=m['to_name'][:120],
+                to_user_id=to_user.id if to_user else None,
                 subject=m['subject'][:200],
                 body=m['body'],
                 kludges=kludges_json,
@@ -659,7 +670,10 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
             )
             db.session.add(nm)
             db.session.flush()
-            netmails_to_process.append((nm.id, (m.get('to_name') or '').lower()))
+            netmails_to_process.append((
+                nm.id, (m.get('to_name') or '').lower(),
+                to_user.id if to_user else None,
+                m['from_name'], m['subject']))
         imported += 1
 
     db.session.commit()
@@ -679,14 +693,24 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
 
     # Areafix bot — trigger reply for any netmail addressed to 'areafix'
     # (or any Synchronet-style robot name we recognize). Done AFTER the
-    # commit so the netmail is durable before the bot runs.
+    # commit so the netmail is durable before the bot runs. Everything
+    # else that resolved to a real local user gets a Notification row
+    # (in-app bell + terminal "You have new" banner) -- this listener
+    # path never notified the recipient of new netmail at all before.
     from .areafix import handle_areafix_netmail
-    for nm_id, to_lower in netmails_to_process:
+    from ..features.notify import notify
+    for nm_id, to_lower, to_uid, from_name, subject in netmails_to_process:
         if to_lower in ('areafix', 'area fix', 'areamgr'):
             try:
                 handle_areafix_netmail(nm_id)
             except Exception:
                 logger.exception('Areafix bot failed for netmail %d', nm_id)
+        elif to_uid:
+            try:
+                notify(to_uid, 'netmail', title=f'Netmail from {from_name}',
+                      body=subject or '', target_url=f'/netmail/{nm_id}')
+            except Exception:
+                logger.exception('Netmail notify failed for netmail %d', nm_id)
 
     return imported
 

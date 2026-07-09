@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.64`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.65`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.65 — Fix missing notification for inbound netmail (July 2026)
+
+- FIX: new inbound netmail (FTN point-to-point private mail) never triggered any notification — the in-app bell and the terminal "You have new mail" banner both stayed silent even when netmail addressed to you had actually arrived. Root cause was two separate gaps in the two inbound-netmail import paths: the QWK/poll-response path (`anetbbs/echomail/poller.py`) resolved the message to a local recipient but never called the notification helper, and the real-time BinkP listener path (`anetbbs/echomail/binkp_server.py`, used whenever another system polls in live) never resolved a local recipient at all — so netmail received that way wasn't even linked to a `User` account, only findable later by manually browsing and string-matching the "To" name. Both paths now share one recipient-resolution helper (`anetbbs/echomail/routing.py:resolve_netmail_recipient`, matching by AKA address, then username, then display name, then the network's configured DefaultRecipient) and both now create a Notification for the resolved recipient, which the existing web bell and terminal banner already know how to display — no changes needed on that side. 8 new tests in `tests/test_netmail_notification.py`.
 
 ## v1.0b2.64 — Terminal sysop tools: Node Monitor, broadened Sysop menu, MSP picker, profile redesign (July 2026)
 

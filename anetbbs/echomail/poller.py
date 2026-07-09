@@ -611,7 +611,8 @@ def _import_netmail(network, msg_data: dict) -> int:
     when the recipient name or to_address matches one of their AKAs.
     Falls back to the configured DefaultRecipient if no match.
     """
-    from ..models import db, NetmailMessage, User, UserAka
+    from ..models import db, NetmailMessage
+    from .routing import resolve_netmail_recipient
     import json as _json
 
     msg_id = msg_data.get('msg_id') or ''
@@ -622,29 +623,7 @@ def _import_netmail(network, msg_data: dict) -> int:
 
     to_name = (msg_data.get('to_name') or '').strip()
     to_address = (msg_data.get('to_address') or '').strip()
-
-    # Match a local user by name or by AKA address.
-    to_user = None
-    if to_address:
-        aka = UserAka.query.filter_by(address=to_address).first()
-        if aka:
-            to_user = User.query.get(aka.user_id)
-    if to_user is None and to_name:
-        to_user = (User.query
-                   .filter(db.func.lower(User.username) == to_name.lower())
-                   .first())
-        if to_user is None:
-            to_user = (User.query
-                       .filter(db.func.lower(User.display_name) == to_name.lower())
-                       .first())
-
-    # DefaultRecipient fallback (from network config or app config)
-    if to_user is None:
-        default_name = (getattr(network, 'default_recipient', '') or '').strip()
-        if default_name:
-            to_user = (User.query
-                       .filter(db.func.lower(User.username) == default_name.lower())
-                       .first())
+    to_user = resolve_netmail_recipient(to_name, to_address, network)
 
     # NetmailMessage has no tear_line / origin_line columns (those are
     # echomail-specific — see EchomailMessage). For netmail, the tear and
@@ -669,4 +648,17 @@ def _import_netmail(network, msg_data: dict) -> int:
         received_at=datetime.utcnow(),
     )
     db.session.add(nm)
+
+    if to_user is not None:
+        db.session.flush()  # assigns nm.id, needed for target_url below
+        try:
+            from ..features.notify import notify
+            notify(to_user.id, 'netmail',
+                  title=f'Netmail from {nm.from_name}',
+                  body=nm.subject or '',
+                  target_url=f'/netmail/{nm.id}')
+        except Exception as exc:
+            logger.debug("Netmail notify() failed for user %s: %s",
+                        to_user.id, exc)
+
     return 1

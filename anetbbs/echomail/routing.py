@@ -12,9 +12,11 @@ This module exposes:
   - find_network_for_address(addr)  -> EchomailNetwork that handles `addr`'s zone
   - find_aka_for_network(user, network)  -> UserAka the user should send from
   - format_address(zone, net, node, point=0)  -> canonical 'z:n/no[.p]' string
+  - resolve_netmail_recipient(to_name, to_address, network) -> local User or None
 """
 import re
-from ..models import EchomailNetwork
+from sqlalchemy import func
+from ..models import EchomailNetwork, User, UserAka
 
 
 _ADDR_RE = re.compile(r'^(\d+):(\d+)/(\d+)(?:\.(\d+))?$')
@@ -106,3 +108,45 @@ def find_aka_for_network(user, network):
         if a.is_primary:
             return a
     return akas[0]
+
+
+def resolve_netmail_recipient(to_name, to_address, network):
+    """Match an inbound netmail's recipient to a local User account.
+
+    Match order: UserAka.address exact match, then username, then
+    display_name (case-insensitive), then the network's configured
+    DefaultRecipient as a last-resort catch-all. Returns None if nothing
+    matches -- the netmail still gets stored, just unlinked to any user
+    (and so never gets a Notification).
+
+    Shared by both inbound netmail import paths (anetbbs/echomail/poller.py's
+    _import_netmail, used by the QWK/poll-response path, and
+    anetbbs/echomail/binkp_server.py's _import_pkt_payload, used by the
+    real-time BinkP listener) -- they used to duplicate this logic, and the
+    BinkP listener path didn't do it at all (netmail received over a live
+    BinkP session was never linked to a User, so its recipient never got
+    notified of new mail).
+    """
+    to_name = (to_name or '').strip()
+    to_address = (to_address or '').strip()
+
+    user = None
+    if to_address:
+        aka = UserAka.query.filter_by(address=to_address).first()
+        if aka:
+            user = User.query.get(aka.user_id)
+    if user is None and to_name:
+        user = (User.query
+                .filter(func.lower(User.username) == to_name.lower())
+                .first())
+        if user is None:
+            user = (User.query
+                    .filter(func.lower(User.display_name) == to_name.lower())
+                    .first())
+    if user is None:
+        default_name = (getattr(network, 'default_recipient', '') or '').strip()
+        if default_name:
+            user = (User.query
+                    .filter(func.lower(User.username) == default_name.lower())
+                    .first())
+    return user

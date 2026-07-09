@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.65 — Fix missing notification for inbound netmail (July 2026)
+
+- FIX: new inbound netmail never triggered a notification (web bell or terminal "You have new mail" banner). Two gaps: the poll-response import path resolved a recipient but never notified them, and the real-time BinkP listener path never resolved a recipient at all, so live-received netmail wasn't linked to a user account. Both paths now share one recipient-resolution helper and both notify correctly. 8 new tests.
+
+---
+
 # ANetBBS v1.0b2.64 — Terminal sysop tools: Node Monitor, broadened Sysop menu, MSP picker, profile redesign (July 2026)
 
 - FEATURE: new terminal **Node Monitor** (Sysop Tools → Node Monitor) — scrollable live node list (slot/user/protocol/page/action/idle), with Kick and Message actions. Same live data source as the web NodeSpy panel.
