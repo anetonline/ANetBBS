@@ -1,6 +1,6 @@
 # ANetBBS v1.0b2.59 — Fix BinkP handshake announcing a hardcoded, stale version (July 2026)
 
-- FIX: the BinkP handshake's `VER` line was a hardcoded literal (`ANetBBS/1.0a binkp/1.1`) in both the client and server handshake code, unrelated to the actual running version — it's said `1.0a` since this code was first written, on every release since. Found while investigating a real FTN interop report where the stale string looked like evidence of an out-of-date install, but wasn't. Now pulls from `anetbbs.__version__`. 2 new tests.
+- FIX: the BinkP handshake's `VER` line was a hardcoded literal (`ANetBBS/1.0a binkp/1.1`) in both the client and server handshake code, unrelated to the actual running version — it's said `1.0a` since this code was first written, on every release since. Found while investigating a real FTN interop report. Now pulls from `anetbbs.__version__`. 2 new tests.
 
 ---
 
