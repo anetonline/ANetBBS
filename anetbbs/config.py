@@ -274,6 +274,14 @@ class Config:
     LASTCALLERS_INTERBBS_ENABLED = os.environ.get(
         'LASTCALLERS_INTERBBS_ENABLED', 'false').lower() == 'true'
     LASTCALLERS_INTERBBS_NETWORK_ID = os.environ.get('LASTCALLERS_INTERBBS_NETWORK_ID') or None
+    # Hide sysop logins from the user-facing Last Callers displays (web
+    # oneliners page, terminal Last Callers screen, terminal inline
+    # "Last 10 Callers" block) -- a sysop who logs in several times a
+    # day can otherwise flood the list with themselves instead of real
+    # users. Off by default (unchanged behavior); does NOT affect the
+    # admin audit view, which always shows everything.
+    LASTCALLERS_HIDE_SYSOP = os.environ.get(
+        'LASTCALLERS_HIDE_SYSOP', 'false').lower() == 'true'
 
     # InterBBS door-game score sharing -- opt-in relay of new personal-best
     # GameScore rows with other ANetBBS installs, same pattern as Wall/Last

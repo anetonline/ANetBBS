@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.63 — Option to hide sysop from Last Callers (July 2026)
+
+- FEATURE: new "Hide sysop logins from the Last Callers displays" toggle at Admin → Last Callers, off by default. Keeps a sysop who logs in several times a day from flooding the user-facing Last Callers list with themselves instead of real users. The admin audit list always shows everyone; InterBBS-shared entries from other BBSes are never affected. 7 new tests.
+
+---
+
 # ANetBBS v1.0b2.62 — InterBBS Game Score Sharing (July 2026)
 
 - FEATURE: door/web game high scores can now be shared with other ANetBBS installs, the same pattern as the Graffiti Wall and Last Callers. Only new personal bests relay, not every submission. Per-game opt-in (Admin → Games, defaults on) plus an install-wide switch at Admin → Games → InterBBS Scores. Casino games are included and shown as dollar amounts; enabling the feature locks the four casino starting balances to a shared standard so scores are comparable across installs, and changing any of them afterward automatically disables sharing again. 20 new tests.

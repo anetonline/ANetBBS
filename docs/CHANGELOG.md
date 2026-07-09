@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.62`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.63`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.63 — Option to hide sysop from Last Callers (July 2026)
+
+- FEATURE: new "Hide sysop logins from the Last Callers displays" toggle at Admin → Last Callers, off by default. Keeps a sysop who logs in several times a day from flooding the user-facing Last Callers list (terminal screen, terminal inline block, and the web one-liners page) with themselves instead of real users. The admin audit list always shows everyone regardless of this setting, and InterBBS-shared entries from other BBSes are never affected by it. 7 new tests.
 
 ## v1.0b2.62 — InterBBS Game Score Sharing (July 2026)
 

@@ -16,18 +16,41 @@ from .bbs_ui import _app
 PAGE_SIZE = 20
 
 
+def recent_callers_query(limit=200):
+    """Shared query builder for every user-facing Last Callers display
+    (terminal full view, terminal inline block, web oneliners page --
+    NOT the admin audit view, which always shows everything).
+
+    Applies the LASTCALLERS_HIDE_SYSOP filter: excludes CallerLog rows
+    for a local login by an is_admin user. Uses an outer join so rows
+    with no local user_id at all (InterBBS-imported entries, which
+    never carry a real user_id -- see interbbs_sync.py's
+    sync_lastcallers_inbound) are never affected by this filter; there's
+    no local User to check for those, and a sysop hiding their own
+    frequent local logins says nothing about a remote BBS's callers.
+    """
+    from flask import current_app
+    from ..models import db, CallerLog, User
+
+    query = CallerLog.query.order_by(CallerLog.started_at.desc())
+    if current_app.config.get('LASTCALLERS_HIDE_SYSOP'):
+        # isnot(True), not is_(False) -- a legacy/migrated User row with
+        # is_admin IS NULL (nullable column, no DB-level default) must
+        # read as "not admin", not get excluded by SQL's three-valued
+        # NULL logic.
+        query = (query.outerjoin(User, CallerLog.user_id == User.id)
+                 .filter(db.or_(User.is_admin.isnot(True), User.id.is_(None))))
+    return query.limit(limit)
+
+
 async def show_last_callers(session, args=None):
     """Entry point -- takes `session` directly (not the full BBSMenuUI),
     matching wall.py's show_wall(session, ...) signature, since this is
     called both from menu_engine.py's _act_lastcallers (which has a `ui`
     to pull .session off of) and login_modules.py's _dispatch (which
     only ever has `session`, no `ui`)."""
-    from ..models import CallerLog
-
     with _app().app_context():
-        callers = (CallerLog.query
-                  .order_by(CallerLog.started_at.desc())
-                  .limit(200).all())
+        callers = recent_callers_query(200).all()
         rows = [
             (c.username or '?', c.service or '?', c.started_at, c.origin_bbs)
             for c in callers

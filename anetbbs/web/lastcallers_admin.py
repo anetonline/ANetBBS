@@ -41,6 +41,7 @@ def index():
                            pagination=pagination,
                            interbbs_enabled=current_app.config.get('LASTCALLERS_INTERBBS_ENABLED', False),
                            interbbs_network_id=current_app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'),
+                           hide_sysop=current_app.config.get('LASTCALLERS_HIDE_SYSOP', False),
                            # BinkP only -- see wall_admin.py's identical
                            # filter for why (QWK areas are numeric
                            # conferences, not symbolic tags).
@@ -55,6 +56,7 @@ def settings():
     _admin_required()
     interbbs_enabled = request.form.get('interbbs_enabled') == 'on'
     network_id = (request.form.get('interbbs_network_id') or '').strip()
+    hide_sysop = request.form.get('hide_sysop') == 'on'
     if interbbs_enabled and not network_id:
         flash('Pick a network before enabling InterBBS Last Callers sharing.', 'danger')
         return redirect(url_for('.index'))
@@ -68,11 +70,13 @@ def settings():
 
     current_app.config['LASTCALLERS_INTERBBS_ENABLED'] = interbbs_enabled
     current_app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = network_id or None
+    current_app.config['LASTCALLERS_HIDE_SYSOP'] = hide_sysop
 
     try:
         _write_env_keys(_env_path(), {
             'LASTCALLERS_INTERBBS_ENABLED': 'true' if interbbs_enabled else 'false',
             'LASTCALLERS_INTERBBS_NETWORK_ID': network_id,
+            'LASTCALLERS_HIDE_SYSOP': 'true' if hide_sysop else 'false',
         })
     except Exception as e:
         flash(f'Settings updated in memory but could not save to .env: {e}', 'warning')
@@ -91,7 +95,9 @@ def settings():
             flash(f'Settings saved, but could not create the ANET_LASTCALLERS area yet: {e}', 'warning')
             return redirect(url_for('.index'))
 
-    flash(f'Last Callers InterBBS sharing {"enabled" if interbbs_enabled else "disabled"}.', 'success')
+    flash(f'Last Callers InterBBS sharing {"enabled" if interbbs_enabled else "disabled"}. '
+          f'Sysop logins are {"hidden from" if hide_sysop else "shown in"} the Last Callers displays.',
+          'success')
     return redirect(url_for('.index'))
 
 

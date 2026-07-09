@@ -740,15 +740,15 @@ async def _act_oneliners(ui, args):
     """Show last 30 one-liners + last 10 callers like Mystic does."""
     sess = ui.session
     try:
-        from ..models import OneLiner, CallerLog
+        from ..models import OneLiner
         from .bbs_ui import _app
+        from .lastcallers import recent_callers_query
         with _app().app_context():
             ol = (OneLiner.query.filter_by(is_hidden=False)
                   .order_by(OneLiner.created_at.desc()).limit(30).all())
             ol = [(o.user.username if o.user else '?',
                    o.text, o.created_at) for o in ol]
-            callers = (CallerLog.query
-                       .order_by(CallerLog.started_at.desc()).limit(10).all())
+            callers = recent_callers_query(10).all()
             callers = [(c.username or '?', c.service or '?',
                         c.started_at) for c in callers]
     except Exception:

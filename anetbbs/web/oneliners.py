@@ -3,7 +3,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 
-from ..models import db, OneLiner, CallerLog
+from ..models import db, OneLiner
 
 
 ol_bp = Blueprint('oneliners', __name__, url_prefix='/oneliners')
@@ -11,10 +11,10 @@ ol_bp = Blueprint('oneliners', __name__, url_prefix='/oneliners')
 
 @ol_bp.route('/')
 def index():
+    from ..features.lastcallers import recent_callers_query
     rows = (OneLiner.query.filter_by(is_hidden=False)
             .order_by(OneLiner.created_at.desc()).limit(50).all())
-    last_callers = (CallerLog.query
-                    .order_by(CallerLog.started_at.desc()).limit(10).all())
+    last_callers = recent_callers_query(10).all()
     return render_template('oneliners/index.html', rows=rows,
                            last_callers=last_callers)
 
