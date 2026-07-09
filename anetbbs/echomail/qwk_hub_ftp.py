@@ -185,7 +185,17 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             # result (conf_num read as garbage, dropped as "not advertised
             # in CONTROL.DAT"), live-caught testing the real ANotherNetwork
             # QWK flow end-to-end (0 messages ever received, no error).
-            #   byte    0      : status (0xE1 = unread public)
+            #   byte    0      : status flag -- printable ASCII, not the
+            #                    0xE1 marker (that belongs at byte 122
+            #                    only): ' '=public/unread, '-'=public/read,
+            #                    '+'=private/unread, '*'=private/read.
+            #                    Verified against Synchronet's own reader
+            #                    (qwktomsg.cpp), which checks byte 0
+            #                    against exactly those characters -- 0xE1
+            #                    here isn't a valid status value at all.
+            #                    ANetBBS's own reader is lenient (treats
+            #                    anything but '*'/'+' as public), which is
+            #                    why this went unnoticed talking to itself.
             #   bytes   1:8    : message number (7-char ASCII)
             #   bytes   8:21   : date+time (13-char ASCII, "MM-DD-YYHH:MM")
             #   bytes  21:46   : to (25 chars)
@@ -197,7 +207,7 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             #   byte   122     : active flag (0xE1=active, 0xE2=killed)
             #   bytes 123:125  : conference number (binary, little-endian uint16)
             header = bytearray(BLOCK)
-            header[0]      = 0xe1
+            header[0]      = ord(' ')    # public, unread
             header[1:8]    = f'{msg_counter:07d}'.encode()[:7]
             header[8:21]   = (date_str + time_str).encode()[:13].ljust(13)
             header[21:46]  = to_name.encode('cp437', errors='replace')[:25].ljust(25)

@@ -107,19 +107,27 @@ def _build_qwk_hub_packet(node: QWKNode) -> bytes:
     bbs_name = current_app.config.get('BBS_NAME', 'ANetBBS')
     bbs_location = current_app.config.get('BBS_LOCATION', 'Online')
 
-    # Build CONTROL.DAT.
+    # Build CONTROL.DAT. Line layout verified against Synchronet's own
+    # writer (pack_qwk.cpp): a strict positional reader expects exactly
+    # this many lines before the conference count, plus a mandatory
+    # "0" / "E-mail" pair for the reserved conference-0 (netmail) slot
+    # before any real conferences are listed. The previous version was
+    # missing one blank placeholder line and the conf-0 pair entirely,
+    # which shifted every line after it out of position.
     control_lines = [
         bbs_name,
         bbs_location,
         '---',
-        current_app.config.get('SYSOP_NAME', 'Sysop'),
-        f'{hub_id}, 0',          # sys_id, version (unused)
-        datetime.utcnow().strftime('%m-%d-%Y, %H:%M:%S'),
-        node.packet_id,           # logged-in user
-        '0',                      # starting msg number
-        '0',                      # total messages
-        str(len(conferences)),    # number of conferences
-        '0',                      # first conference number
+        f"{current_app.config.get('SYSOP_NAME', 'Sysop')}, Sysop",
+        f'0000,{hub_id}',          # serial, sys_id
+        datetime.utcnow().strftime('%m-%d-%Y,%H:%M:%S'),
+        node.packet_id,            # logged-in user (alias)
+        '',                        # blank (placeholder)
+        '0',                       # placeholder
+        '0',                       # placeholder
+        str(len(conferences)),     # number of conferences
+        '0',                       # reserved conference 0 (netmail) number
+        'E-mail',                  # reserved conference 0 name
     ]
     for conf_num in sorted(conferences):
         control_lines.append(str(conf_num))

@@ -40,18 +40,35 @@ def _parse_control_dat(data: str):
         'conferences': {},
     }
 
-    # Conference block starts at line 11 (index 10)
-    # Format: conf_number followed by conf_name on next line
-    i = 10
-    while i < len(lines):
+    # Standard QWK CONTROL.DAT layout (verified against Synchronet's own
+    # writer, pack_qwk.cpp): line index 10 is the *real* conference
+    # count (NOT counting the reserved conference 0/"E-mail" netmail
+    # slot, which is always written separately right after it). The
+    # conference block is exactly count+1 number/name pairs, starting
+    # at line index 11: first the mandatory "0"/"E-mail" pair, then one
+    # pair per real conference. A previous version scanned forward
+    # guessing pair boundaries by testing isdigit() starting at index
+    # 10 directly (i.e. treating the count line itself as the first
+    # conference number) -- this happened to self-resync for most real
+    # packets since "E-mail" isn't a digit, but produced one bogus
+    # phantom conference entry and wasn't reliably correct against a
+    # standards-compliant hub's CONTROL.DAT.
+    try:
+        count = int(lines[10].strip())
+    except (IndexError, ValueError):
+        count = 0
+    count = max(0, min(count, 10000))  # sanity guard against garbage
+
+    i = 11
+    for _ in range(count + 1):  # +1 for the mandatory conference-0/E-mail pair
+        if i + 1 >= len(lines):
+            break
         num_str = lines[i].strip()
         if num_str.isdigit():
             conf_num = int(num_str)
-            conf_name = lines[i + 1].strip() if i + 1 < len(lines) else f'Conference {conf_num}'
+            conf_name = lines[i + 1].strip()
             info['conferences'][conf_num] = conf_name
-            i += 2
-        else:
-            i += 1
+        i += 2
 
     return info
 

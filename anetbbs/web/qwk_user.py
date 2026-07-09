@@ -51,17 +51,27 @@ def _build_qwk_blob(user):
         conf_lines.append((area.tag or area.name or f'AREA{i}')[:13])
         conf_lookup[area.id] = i
 
+    # Line layout verified against Synchronet's own CONTROL.DAT writer
+    # (pack_qwk.cpp): a strict positional reader expects exactly this
+    # many lines before the conference count, plus a mandatory
+    # "0" / "E-mail" pair for the reserved conference-0 (netmail)
+    # slot before any real conferences are listed. The previous
+    # version was missing one blank placeholder line and the conf-0
+    # pair entirely, which shifts every line after it out of position.
     control_dat_lines = [
-        bbs_name,
-        '',                        # city
+        bbs_name,                  # sys_name
+        '',                        # city / location
         '',                        # phone
-        sysop,
-        '00000,' + bbs_name[:13],
+        f'{sysop}, Sysop',
+        '0000,' + bbs_name[:13],   # serial, sys_id
         datetime.utcnow().strftime('%m-%d-%Y,%H:%M:%S'),
-        user.username,
-        '',                        # menu name
-        '0',                       # not used
-        str(len(areas)),           # number of confs - 1
+        user.username,             # user alias
+        '',                        # blank (placeholder)
+        '0',                       # placeholder
+        '0',                       # placeholder
+        str(len(areas)),           # number of conferences
+        '0',                       # reserved conference 0 (netmail) number
+        'E-mail',                  # reserved conference 0 name
     ]
     control_dat_lines.extend(conf_lines)
     control_dat_lines.append('HELLO')
@@ -97,10 +107,16 @@ def _build_qwk_blob(user):
             num_blocks = f'{block_count:>6}'.encode('ascii')
             active = b'\xe1'        # active flag
             conf = struct.pack('<H', conf_num)
-            msg_left = struct.pack('<H', 1)
+            # Bytes 125-126 are unused in the real QWK header format --
+            # two literal space bytes, not a binary field. Verified
+            # against Synchronet's own writer (msgtoqwk.cpp), whose
+            # format string spells these out as two explicit ' ' chars
+            # right after the conference number. There's no "messages
+            # left" field anywhere in the spec at this position.
+            unused = b'  '
             net_tag = b' '
             header = (status + number + date + time + to + sender + subject +
-                      password + ref + num_blocks + active + conf + msg_left + net_tag)
+                      password + ref + num_blocks + active + conf + unused + net_tag)
             header = header.ljust(128, b' ')
             msgs.extend(header)
             # Body in 128-byte blocks. First byte of each text block is 0xE3.

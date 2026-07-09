@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.60`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.61`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.61 — QWK packet format cleanup for better reader compatibility (July 2026)
+
+- FIX: cleaned up a few spots in the QWK packet writers/readers where fields weren't laid out quite right, which could affect compatibility with some third-party QWK reader software. No changes needed on the sysop side. 4 new tests.
 
 ## v1.0b2.60 — Updated handshake/CMD_EOB for older bink clients (July 2026)
 

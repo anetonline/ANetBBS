@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.61 — QWK packet format cleanup for better reader compatibility (July 2026)
+
+- FIX: cleaned up a few spots in the QWK packet writers/readers where fields weren't laid out quite right, which could affect compatibility with some third-party QWK reader software. No changes needed on the sysop side. 4 new tests.
+
+---
+
 # ANetBBS v1.0b2.60 — Updated handshake/CMD_EOB for older bink clients (July 2026)
 
 - FIX: BinkP session close-out could end a bit too early for some strict FTN mailers, causing a successful file transfer to still be reported as failed on the other end. Adjusted the M_EOB handshake and connection close-out on both the client and server side to match. Also switched outbound packet filenames to the conventional FTN naming style. 6 new tests.
