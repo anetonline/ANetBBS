@@ -623,6 +623,16 @@ class BinkPClient:
 
     def _disconnect(self):
         if self._sock:
+            # Brief drain before closing: an immediate close() while the
+            # peer still has trailing bytes in flight (e.g. its own
+            # final M_EOB) can register on their end as an abrupt,
+            # unexpected disconnect rather than a clean session end.
+            try:
+                self._sock.settimeout(2.0)
+                while self._sock.recv(4096):
+                    pass
+            except Exception:
+                pass
             try:
                 self._sock.close()
             except Exception:
@@ -763,7 +773,12 @@ class BinkPClient:
         if not messages:
             return 0
         pkt_data = _build_ftn_packet(messages, self.our_address, self.hub_address)
-        filename = f'out_{datetime.utcnow().strftime("%Y%m%d%H%M%S")}.pkt'
+        # Conventional FTN packet-naming style (8-hex-digit timestamp,
+        # e.g. binkd/SBBSecho/Mystic all use this) rather than a
+        # decimal, prefixed name -- purely cosmetic/compliance, flagged
+        # by a real FTN sysop reviewing a session log, unrelated to any
+        # functional bug.
+        filename = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
         size = len(pkt_data)
         mtime = int(datetime.utcnow().timestamp())
 
@@ -809,12 +824,27 @@ class BinkPClient:
 
         After our M_EOB the hub may reply M_EOB or close immediately;
         both are clean (no poll-failure signal).
+
+        binkp/1.1 (which our own VER line advertises) expects a
+        two-round M_EOB handshake, not a single exchange: once each
+        side has both sent and received at least one M_EOB, it
+        acknowledges with a second M_EOB before the session is
+        considered done. A strict, spec-compliant peer (real binkd
+        confirmed live) waits for that second round and treats an
+        early close as an unexpected mid-session disconnect -- even
+        though the file transfer itself completed -- rather than a
+        clean end. sent_eob/got_eob track this; a lenient peer that
+        only ever sends one M_EOB and then closes is handled fine too,
+        since the resulting connection-close is still caught below as
+        clean.
         """
         import io as _io
         import os as _os
         import zipfile as _zipfile
 
         parsed = []
+        sent_eob = 1
+        got_eob = 0
         self._send_cmd(CMD_EOB)
 
         pending_file = None
@@ -914,8 +944,13 @@ class BinkPClient:
                         pending_file, pending_size)
 
                 elif cmd == CMD_EOB:
-                    logger.info("BinkP: end of batch from hub")
-                    break
+                    got_eob += 1
+                    logger.info("BinkP: end of batch from hub (%d/2)", got_eob)
+                    if sent_eob < 2:
+                        self._send_cmd(CMD_EOB)
+                        sent_eob += 1
+                    if got_eob >= 2:
+                        break
 
                 elif cmd == CMD_ERR:
                     logger.error("BinkP: session error: %s", text)

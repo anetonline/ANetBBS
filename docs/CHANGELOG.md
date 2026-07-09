@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.59`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.60`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.60 — Updated handshake/CMD_EOB for older bink clients (July 2026)
+
+- FIX: BinkP session close-out could end a bit too early for some strict FTN mailers, causing a successful file transfer to still be reported as failed on the other end. Adjusted the M_EOB handshake and connection close-out on both the client and server side to match. Also switched outbound packet filenames to the conventional FTN naming style.
 
 ## v1.0b2.59 — Fix BinkP handshake announcing a hardcoded, permanently-stale version (July 2026)
 

@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.60 — Updated handshake/CMD_EOB for older bink clients (July 2026)
+
+- FIX: BinkP session close-out could end a bit too early for some strict FTN mailers, causing a successful file transfer to still be reported as failed on the other end. Adjusted the M_EOB handshake and connection close-out on both the client and server side to match. Also switched outbound packet filenames to the conventional FTN naming style. 6 new tests.
+
+---
+
 # ANetBBS v1.0b2.59 — Fix BinkP handshake announcing a hardcoded, stale version (July 2026)
 
 - FIX: the BinkP handshake's `VER` line was a hardcoded literal (`ANetBBS/1.0a binkp/1.1`) in both the client and server handshake code, unrelated to the actual running version — it's said `1.0a` since this code was first written, on every release since. Found while investigating a real FTN interop report. Now pulls from `anetbbs.__version__`. 2 new tests.

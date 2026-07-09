@@ -409,7 +409,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             outbound = get_pending_for_node(downstream_node_id)
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
-                fname = f'{datetime.utcnow().strftime("%H%M%S")}.pkt'
+                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
                 accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
                 if accepted:
                     mark_sent_for_node(downstream_node_id,
@@ -427,7 +427,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             ).all()
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
-                fname = f'{datetime.utcnow().strftime("%H%M%S")}.pkt'
+                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
                 accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
                 if accepted:
                     now = datetime.utcnow()
@@ -439,9 +439,49 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     logger.warning('Outbound .pkt was not accepted by %s — '
                                    'leaving in queue for retry', remote_addr)
 
-    # 8. End of batch
+    # 8. End of batch.
+    await _finish_session(reader, writer, peer, inbound_files, sent_count)
+
+
+async def _finish_session(reader, writer, peer, inbound_files, sent_count):
+    """Send our final M_EOB, complete binkp/1.1's two-round handshake,
+    briefly drain any trailing bytes, then close.
+
+    binkp/1.1 (which our own VER line advertises) expects a two-round
+    M_EOB handshake: since we already received the client's first
+    M_EOB in _receive_files(), a spec-compliant peer (real binkd,
+    confirmed live) now expects one more EOB round-trip before
+    treating the session as cleanly finished -- closing right after
+    our own single M_EOB reads as an unexpected mid-session disconnect
+    on their end, even though every file transferred successfully.
+    Wait briefly for their second M_EOB and answer it; a lenient peer
+    that just closes instead is still handled cleanly below.
+
+    Also does a brief drain before closing: an immediate close() while
+    the peer still has trailing bytes in flight can register on their
+    end as an abrupt disconnect rather than a clean session end.
+    """
     await _send_cmd(writer, CMD_EOB)
+    try:
+        is_cmd, payload = await asyncio.wait_for(_recv_frame(reader), timeout=10)
+        if is_cmd and payload and payload[0] == CMD_EOB:
+            await _send_cmd(writer, CMD_EOB)
+    except Exception:
+        pass
+
     logger.info('BinkP %s: done — received=%d sent=%d', peer, len(inbound_files), sent_count)
+
+    try:
+        drain_deadline = asyncio.get_event_loop().time() + 2.0
+        while True:
+            remaining = drain_deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+            if not chunk:
+                break
+    except Exception:
+        pass
 
     try:
         writer.close()
