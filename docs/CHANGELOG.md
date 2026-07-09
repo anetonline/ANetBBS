@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.61`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.62`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.62 — InterBBS Game Score Sharing (July 2026)
+
+- FEATURE: door/web game high scores can now be shared with other ANetBBS installs, the same InterBBS pattern as the Graffiti Wall and Last Callers (riding echomail, opt-in, one BinkP network at a time). Only *new personal bests* relay, not every submission — a game's first score is trivially a personal best; after that, only a strictly higher score relays again. Each game has its own on/off switch (Admin → Games → edit a game, defaults on), plus the install-wide switch at Admin → Games → InterBBS Scores (now linked from the main admin dashboard, along with the previously-unlinked InterBBS Wall and Last Callers pages). Casino games (Blackjack/Slots/Video Poker/Hold'em) are included, tracked as "highest weekly balance" and shown as a dollar amount rather than a bare number, both locally and for synced entries. Enabling score sharing resets the four casino weekly starting balances to a shared standard value across every participating install (so a "$50,000 peak" means the same thing everywhere); changing any of those four afterward automatically turns score sharing back off rather than letting the numbers silently drift out of sync. 20 new tests.
 
 ## v1.0b2.61 — QWK packet format cleanup for better reader compatibility (July 2026)
 

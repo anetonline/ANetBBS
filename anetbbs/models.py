@@ -280,6 +280,13 @@ class Game(db.Model):
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # InterBBS score sharing (anetbbs/echomail/interbbs_sync.py): opt-in
+    # per game, defaults on so the feature works day one once the
+    # install-wide GAMES_INTERBBS_ENABLED switch is flipped. A sysop can
+    # turn off relaying for one specific game without disabling the
+    # whole feature.
+    share_scores_interbbs = db.Column(db.Boolean, default=True)
+
     # Relationships
     sessions = db.relationship('GameSession', backref='game', lazy='dynamic')
     scores = db.relationship('GameScore', backref='game', lazy='dynamic')
@@ -318,7 +325,33 @@ class GameScore(db.Model):
     details = db.Column(db.Text)  # JSON with extra score data
     achieved_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # InterBBS score sharing (anetbbs/echomail/interbbs_sync.py): NULL =
+    # earned locally on this install. Non-NULL = imported from another
+    # ANetBBS system over echomail -- origin_bbs is the sending system's
+    # name, remote_msg_id is the source EchomailMessage.msg_id (dedup
+    # key, and the load-bearing check that prevents this score from
+    # ever being relayed back out again, which would bounce forever).
+    #
+    # user_id is a hard NOT NULL FK (unlike WallPost.username, a plain
+    # string) -- imported rows point at a lazily-created ghost User
+    # (username='__interbbs_import__', is_active=False) rather than
+    # loosening the column, since SQLite can't relax an existing NOT
+    # NULL via ALTER TABLE and this codebase's migration helper only
+    # ever adds columns. The real remote player name lives in
+    # remote_username instead; display_username below picks the right
+    # one so callers never need their own fallback logic.
+    origin_bbs = db.Column(db.String(100), nullable=True)
+    remote_msg_id = db.Column(db.String(100), nullable=True, index=True, unique=True)
+    remote_username = db.Column(db.String(100), nullable=True)
+
     user = db.relationship('User', backref='game_scores')
+
+    @property
+    def display_username(self):
+        """Real username, or remote_username if this is an imported row."""
+        if self.origin_bbs is not None and self.remote_username:
+            return self.remote_username
+        return self.user.username if self.user else self.remote_username
 
     def __repr__(self):
         return f'<GameScore {self.score} game={self.game_id} user={self.user_id}>'

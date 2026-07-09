@@ -66,8 +66,12 @@
                         {% for score in top_scores %}
                         <tr>
                             <td>{{ loop.index }}</td>
-                            <td>{{ score.user.username }}</td>
-                            <td>{{ score.score }}</td>
+                            <td>{{ score.display_username }}
+                                {% if score.origin_bbs %}
+                                <span class="badge bg-secondary" title="Imported via InterBBS score sharing">{{ score.origin_bbs }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{% if is_casino %}${{ '{:,}'.format(score.score) }}{% else %}{{ score.score }}{% endif %}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

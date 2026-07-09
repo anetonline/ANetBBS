@@ -34,6 +34,21 @@ logger = logging.getLogger(__name__)
 
 WALL_AREA_TAG = 'ANET_WALL'
 LASTCALLERS_AREA_TAG = 'ANET_LASTCALLERS'
+GAMES_AREA_TAG = 'ANET_GAMESCORES'
+
+# InterBBS score sharing fairness lock: different installs can configure
+# different CASINO_*_START values, so a "$50,000 peak" isn't earned under
+# identical odds on two different BBSes. While score sharing is enabled,
+# these four settings are locked to these standard values (current
+# defaults) -- anetbbs/web/games_interbbs_admin.py force-writes them on
+# enable, and anetbbs/web/admin.py's general settings route auto-disables
+# the feature if a sysop changes any of them afterward.
+CASINO_INTERBBS_STANDARD_STARTS = {
+    'CASINO_BLACKJACK_START': '500',
+    'CASINO_SLOTS_START': '200',
+    'CASINO_VIDEOPOKER_START': '200',
+    'CASINO_HOLDEM_START': '1000',
+}
 
 
 def ensure_special_area(network, tag):
@@ -312,4 +327,172 @@ def sync_lastcallers_inbound(app, params):
     except Exception as exc:
         db.session.rollback()
         logger.exception('sync_lastcallers_inbound failed')
+        return False, str(exc)
+
+
+def _get_or_create_interbbs_score_user():
+    """Lazily get-or-create the ghost placeholder User every imported
+    GameScore.user_id points at. GameScore.user_id is a hard NOT NULL
+    FK (unlike WallPost.username, a plain denormalized string), and
+    making it nullable isn't viable -- SQLite can't relax an existing
+    NOT NULL via ALTER TABLE, and this codebase's migration helper
+    only ever adds columns, never loosens constraints. The real remote
+    player name lives in GameScore.remote_username instead."""
+    from ..models import db, User
+
+    user = User.query.filter_by(username='__interbbs_import__').first()
+    if user is None:
+        user = User(
+            username='__interbbs_import__',
+            email='__interbbs_import__@localhost.invalid',
+            password_hash='!',
+            is_active=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+    return user
+
+
+def post_score_to_interbbs(game_score_row):
+    """Relay a freshly-created local GameScore out to the configured
+    ANET_GAMESCORES area -- but ONLY if it's a new personal best for
+    this user+game, not every submission (the first score for any
+    user+game is trivially a personal best, since there's nothing
+    prior to beat). No-op unless GAMES_INTERBBS_ENABLED, a network is
+    configured, the specific game has opted in
+    (Game.share_scores_interbbs) -- and, critically, no-op if this
+    score itself came from another BBS (origin_bbs set). That last
+    check is the loop-prevention gate; never remove it."""
+    from flask import current_app
+    if not current_app.config.get('GAMES_INTERBBS_ENABLED'):
+        return
+    if game_score_row.origin_bbs is not None:
+        return
+
+    from ..models import db, Game, GameScore
+
+    game = game_score_row.game or Game.query.get(game_score_row.game_id)
+    if game is None or not game.share_scores_interbbs:
+        return
+
+    network = _configured_network(current_app.config.get('GAMES_INTERBBS_NETWORK_ID'))
+    if network is None:
+        return
+
+    # Only relay new personal bests. Excludes imported rows (origin_bbs
+    # IS NOT NULL) from the comparison -- defensive/documentation, since
+    # imported rows carry the ghost user's id, not the real submitter's,
+    # so they'd never match this user_id anyway.
+    prior_best = (db.session.query(db.func.max(GameScore.score))
+                  .filter(GameScore.user_id == game_score_row.user_id,
+                          GameScore.game_id == game_score_row.game_id,
+                          GameScore.id != game_score_row.id,
+                          GameScore.origin_bbs.is_(None))
+                  .scalar())
+    if prior_best is not None and game_score_row.score <= prior_best:
+        return
+
+    from ..models import EchomailMessage
+    from . import tosser
+
+    display_name = (game_score_row.display_username or '?')[:100]
+    body = f'{game.slug}\n{game_score_row.score}\n{display_name}'
+    try:
+        area = ensure_special_area(network, GAMES_AREA_TAG)
+        msg = EchomailMessage(
+            area_id=area.id, network_id=network.id,
+            from_name=display_name,
+            from_address=(network.our_address or '')[:60],
+            to_name='All', subject='ANET-GAMESCORE',
+            body=body, direction='outbound',
+        )
+        db.session.add(msg)
+        db.session.commit()
+        tosser.toss_message(msg.id)
+    except Exception:
+        db.session.rollback()
+        logger.exception('interbbs_sync: failed to relay game score %s', game_score_row.id)
+
+
+def sync_scores_inbound(app, params):
+    """ScheduledEvent handler: materialize new inbound ANET_GAMESCORES
+    messages into local GameScore rows. See sync_wall_inbound's
+    docstring for the shared dedup/loop-prevention reasoning.
+
+    Cross-install game identity is a double gate: the sender already
+    only relays for a game it has opted in (share_scores_interbbs); the
+    RECEIVER separately only materializes a score if it ALSO has a
+    local Game with the same slug AND that local game is ALSO opted
+    in -- a receiving install with no matching game, or one where that
+    specific game is opted out, silently skips (never gets a
+    remote_msg_id, so it's correctly re-evaluated -- not re-imported
+    -- on every later scan, same as a NULL-msg_id row: if the sysop
+    later adds/opts in that game, a future scan will pick it up).
+
+    Inserts GameScore directly via db.session.add() -- NEVER through
+    games.py's submit_score(), since that carries both the
+    outbound-relay hook and the local play_count increment; routing an
+    imported score through it would defeat the loop-prevention gate
+    AND misrepresent local play activity (materializing a remote score
+    is not a local play -- play_count must never be touched here).
+    """
+    from ..models import db, EchoArea, EchomailMessage, Game, GameScore
+
+    imported = 0
+    skipped_no_msgid = 0
+    skipped_no_local_game = 0
+    try:
+        area_ids = [a.id for a in EchoArea.query.filter_by(tag=GAMES_AREA_TAG).all()]
+        if not area_ids:
+            return True, 'no ANET_GAMESCORES areas configured'
+
+        known_ids = {
+            r[0] for r in db.session.query(GameScore.remote_msg_id)
+            .filter(GameScore.remote_msg_id.isnot(None)).all()
+        }
+        rows = (EchomailMessage.query
+                .filter(EchomailMessage.area_id.in_(area_ids),
+                        EchomailMessage.direction == 'inbound')
+                .all())
+        for msg in rows:
+            if not msg.msg_id:
+                skipped_no_msgid += 1
+                continue
+            if msg.msg_id in known_ids:
+                continue
+
+            body_lines = (msg.body or '').split('\n')
+            if len(body_lines) < 2:
+                continue
+            slug = body_lines[0].strip()
+            try:
+                score = int(body_lines[1].strip())
+            except (ValueError, IndexError):
+                continue
+            remote_username = (body_lines[2].strip()[:100] if len(body_lines) > 2
+                               else (msg.from_name or '?')[:100])
+
+            game = Game.query.filter_by(slug=slug).first()
+            if game is None or not game.share_scores_interbbs:
+                skipped_no_local_game += 1
+                continue
+
+            ghost = _get_or_create_interbbs_score_user()
+            gs = GameScore(
+                game_id=game.id,
+                user_id=ghost.id,
+                score=score,
+                origin_bbs=_origin_from_message(msg),
+                remote_msg_id=msg.msg_id,
+                remote_username=remote_username,
+            )
+            db.session.add(gs)
+            db.session.commit()
+            known_ids.add(msg.msg_id)
+            imported += 1
+        return True, (f'imported {imported}, skipped {skipped_no_msgid} (no msg_id), '
+                      f'skipped {skipped_no_local_game} (no local game / opted out)')
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception('sync_scores_inbound failed')
         return False, str(exc)

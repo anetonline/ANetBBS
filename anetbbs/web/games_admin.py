@@ -87,6 +87,8 @@ class GameForm(FlaskForm):
     is_multiplayer = BooleanField('Multiplayer', default=False)
     web_enabled = BooleanField('Web enabled', default=True)
     terminal_enabled = BooleanField('Terminal enabled', default=True)
+    share_scores_interbbs = BooleanField(
+        'Share high scores via InterBBS score sharing', default=True)
 
     # Door game fields
     executable_path = StringField('Executable Path', validators=[Optional(), Length(max=500)])
@@ -351,6 +353,7 @@ def _populate_game(game, form):
     game.is_multiplayer = form.is_multiplayer.data
     game.web_enabled = form.web_enabled.data
     game.terminal_enabled = form.terminal_enabled.data
+    game.share_scores_interbbs = form.share_scores_interbbs.data
     game.executable_path = form.executable_path.data
     game.working_directory = form.working_directory.data
     game.command_line_args = form.command_line_args.data

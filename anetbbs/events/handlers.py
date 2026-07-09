@@ -286,6 +286,14 @@ def sync_lastcallers_inbound(app, params):
     return _impl(app, params)
 
 
+def sync_scores_inbound(app, params):
+    """Materialize new inbound InterBBS game-score messages into local
+    GameScore rows. Thin wrapper -- see
+    anetbbs/echomail/interbbs_sync.py."""
+    from ..echomail.interbbs_sync import sync_scores_inbound as _impl
+    return _impl(app, params)
+
+
 def shell(app, params):
     """Run an arbitrary shell command. Dangerous — only for sysops who
     know what they're typing. Runs as the service user (no sudo).
@@ -323,6 +331,7 @@ REGISTRY: Dict[str, HandlerFn] = {
     'hub_generate_nodelist': hub_generate_nodelist,
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
+    'sync_scores_inbound':   sync_scores_inbound,
     'shell':                shell,
 }
 
@@ -336,6 +345,7 @@ HANDLER_META = {
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
+    'sync_scores_inbound': ('InterBBS Game Scores: import inbound scores', 'Materialize new ANET_GAMESCORES echomail into local game high scores. Auto-created when InterBBS Score Sharing is enabled.'),
     'shell':          ('Shell command',          'Run an arbitrary command as the service user. Params: command, timeout.'),
 }
 

@@ -17,8 +17,12 @@
         <ol class="list-group list-group-numbered list-group-flush">
             {% for r in rows %}
                 <li class="list-group-item d-flex justify-content-between">
-                    <span>{{ r.username }}</span>
-                    <span><strong>{{ r.score }}</strong>
+                    <span>{{ r.username }}
+                        {% if r.origin_bbs %}
+                        <span class="badge bg-secondary" title="Imported via InterBBS score sharing">{{ r.origin_bbs }}</span>
+                        {% endif %}
+                    </span>
+                    <span><strong>{% if r.is_casino %}${{ '{:,}'.format(r.score) }}{% else %}{{ r.score }}{% endif %}</strong>
                         <small class="text-muted ms-2">{{ r.when.strftime('%Y-%m-%d') }}</small></span>
                 </li>
             {% endfor %}

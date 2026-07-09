@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.62 — InterBBS Game Score Sharing (July 2026)
+
+- FEATURE: door/web game high scores can now be shared with other ANetBBS installs, the same pattern as the Graffiti Wall and Last Callers. Only new personal bests relay, not every submission. Per-game opt-in (Admin → Games, defaults on) plus an install-wide switch at Admin → Games → InterBBS Scores. Casino games are included and shown as dollar amounts; enabling the feature locks the four casino starting balances to a shared standard so scores are comparable across installs, and changing any of them afterward automatically disables sharing again. 20 new tests.
+
+---
+
 # ANetBBS v1.0b2.61 — QWK packet format cleanup for better reader compatibility (July 2026)
 
 - FIX: cleaned up a few spots in the QWK packet writers/readers where fields weren't laid out quite right, which could affect compatibility with some third-party QWK reader software. No changes needed on the sysop side. 4 new tests.

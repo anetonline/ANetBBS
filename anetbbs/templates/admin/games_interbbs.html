@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}InterBBS Game Scores Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-trophy"></i> InterBBS Game Scores</h1>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-12">
+        <div class="card p-3">
+            <h6 class="mb-2">InterBBS Sharing</h6>
+            <form method="post" action="{{ url_for('games_interbbs_admin.settings') }}" class="d-flex gap-2 align-items-center flex-wrap">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="interbbs_enabled"
+                           id="interbbs_enabled" {{ 'checked' if interbbs_enabled }}>
+                    <label class="form-check-label" for="interbbs_enabled">
+                        Enable InterBBS Score Sharing — relay new personal-best door/web game high scores with other ANetBBS installs over echomail
+                    </label>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label for="interbbs_network_id" class="form-label mb-0">Network:</label>
+                    <select class="form-select form-select-sm w-auto" name="interbbs_network_id" id="interbbs_network_id">
+                        <option value="">— pick a network —</option>
+                        {% for net in networks %}
+                        <option value="{{ net.id }}" {{ 'selected' if interbbs_network_id|string == net.id|string }}>{{ net.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary ms-2">Apply</button>
+            </form>
+            <div class="form-text mt-1">
+                BinkP networks only — QWK areas are identified by conference number, not by name, so a QWK network can never carry the InterBBS score data area.
+                Only <em>new personal bests</em> get relayed, not every submission. Each game has its own on/off switch too (Admin → Games → edit a game).
+                Enabling this resets the four casino weekly starting balances (Blackjack/Slots/Video Poker/Hold'em) to a shared standard, so a "peak balance"
+                score means the same thing on every participating install — changing any of those four afterward automatically turns this feature back off
+                until you re-enable it (Admin → Settings).
+            </div>
+        </div>
+    </div>
+</div>
+
+<h6 class="mb-2">Recently Imported Scores</h6>
+{% if pagination.items %}
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Player</th>
+            <th>Game</th>
+            <th>Score</th>
+            <th>Source</th>
+            <th>When</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in pagination.items %}
+        <tr>
+            <td>{{ s.id }}</td>
+            <td>{{ s.display_username }}</td>
+            <td>{{ s.game.name if s.game else s.game_id }}</td>
+            <td>{{ s.score }}</td>
+            <td><span class="badge bg-info text-dark" title="Imported via InterBBS score sharing">{{ s.origin_bbs }}</span></td>
+            <td><small>{{ s.achieved_at.strftime('%Y-%m-%d %H:%M') if s.achieved_at else '?' }}</small></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav>
+    <ul class="pagination pagination-sm">
+        {% for p in pagination.iter_pages() %}
+            {% if p %}
+            <li class="page-item {{ 'active' if p == pagination.page }}">
+                <a class="page-link" href="{{ url_for('games_interbbs_admin.index', page=p) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<p class="text-muted">No scores imported yet.</p>
+{% endif %}
+{% endblock %}

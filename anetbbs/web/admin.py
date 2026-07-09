@@ -1192,6 +1192,31 @@ def settings():
                 updates[key] = new_val
                 if restart_flag:
                     needs_restart = True
+
+        # InterBBS score-sharing fairness lock: different installs can
+        # configure different CASINO_*_START values, so a "peak
+        # balance" score isn't earned under identical odds on two
+        # different BBSes. If a sysop genuinely changes one of the
+        # four casino starting balances away from what's currently
+        # saved (not just re-submitting the same value) while score
+        # sharing is on, turn score sharing back off in the same
+        # write rather than silently letting the numbers drift out of
+        # sync with other participating installs.
+        casino_fairness_broken = False
+        if current_app.config.get('GAMES_INTERBBS_ENABLED'):
+            from ..echomail.interbbs_sync import CASINO_INTERBBS_STANDARD_STARTS
+            current_env = _read_env_file(env_path)
+            for casino_key in CASINO_INTERBBS_STANDARD_STARTS:
+                if casino_key not in updates:
+                    continue
+                current_val = current_env.get(
+                    casino_key, str(current_app.config.get(casino_key, '')))
+                if str(updates[casino_key]).strip() != str(current_val).strip():
+                    casino_fairness_broken = True
+                    break
+        if casino_fairness_broken:
+            updates['GAMES_INTERBBS_ENABLED'] = 'false'
+
         if updates:
             try:
                 _write_env_keys(env_path, updates)
@@ -1199,6 +1224,20 @@ def settings():
                 for k, v in updates.items():
                     if k in current_app.config:
                         current_app.config[k] = v
+                if casino_fairness_broken:
+                    # GAMES_INTERBBS_ENABLED is a real boolean everywhere
+                    # else it's read (games_interbbs_admin.py sets it
+                    # with a real True/False) -- the generic per-key
+                    # sync loop just above writes the raw string 'false'
+                    # instead, which is truthy in Python and would leave
+                    # the feature looking still-enabled in the running
+                    # process until the next restart. Fix up explicitly,
+                    # after the generic loop so it isn't clobbered back.
+                    current_app.config['GAMES_INTERBBS_ENABLED'] = False
+                    flash('InterBBS score sharing was turned off because a casino '
+                          'starting balance changed — re-enable it from Admin -> '
+                          'Games -> InterBBS Scores once you\'re ready, which will '
+                          'reset these back to the shared standard values.', 'warning')
                 if needs_restart:
                     flash('Settings saved. Some changes require a service '
                           'restart: sudo systemctl restart anetbbs.service '

@@ -275,6 +275,13 @@ class Config:
         'LASTCALLERS_INTERBBS_ENABLED', 'false').lower() == 'true'
     LASTCALLERS_INTERBBS_NETWORK_ID = os.environ.get('LASTCALLERS_INTERBBS_NETWORK_ID') or None
 
+    # InterBBS door-game score sharing -- opt-in relay of new personal-best
+    # GameScore rows with other ANetBBS installs, same pattern as Wall/Last
+    # Callers above (dedicated echomail area, one specific network only).
+    GAMES_INTERBBS_ENABLED = os.environ.get(
+        'GAMES_INTERBBS_ENABLED', 'false').lower() == 'true'
+    GAMES_INTERBBS_NETWORK_ID = os.environ.get('GAMES_INTERBBS_NETWORK_ID') or None
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""

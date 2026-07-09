@@ -351,6 +351,7 @@ def create_app(config_name=None):
     from .web.login_modules_admin import login_modules_admin_bp
     from .web.wall_admin import wall_admin_bp
     from .web.lastcallers_admin import lastcallers_admin_bp
+    from .web.games_interbbs_admin import games_interbbs_admin_bp
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
@@ -454,6 +455,7 @@ def create_app(config_name=None):
     app.register_blueprint(login_modules_admin_bp)
     app.register_blueprint(wall_admin_bp)
     app.register_blueprint(lastcallers_admin_bp)
+    app.register_blueprint(games_interbbs_admin_bp)
 
     # Public downloads — auto-listing of the sysop's release directory.
     # No DB rows; scans DOWNLOADS_DIR on each (cached) request.
@@ -774,6 +776,12 @@ def _lightweight_migrate(app):
     # Optional short domain-suffix override -- see the field's own comment
     # in models.py. NULL for existing networks preserves current behavior.
     _ensure_column('echomail_networks', 'ftn_domain', 'VARCHAR(8)')
+    # InterBBS score sharing: per-game opt-in, defaults on (needs an
+    # explicit boolean default like the other flags above -- the
+    # generic nullable-column auto-sweep below only synthesizes
+    # permissive, no-default DDL).
+    _ensure_column('games', 'share_scores_interbbs',
+                   'BOOLEAN NOT NULL DEFAULT 1')
 
     # ------------------------------------------------------------------
     # Auto-sweep: any model column that the DB is missing — add it.
@@ -810,7 +818,8 @@ def _lightweight_migrate(app):
     # column on an upgrading install.
     for _idx_table, _idx_col, _idx_name in (
             ('wall_posts', 'remote_msg_id', 'ix_wall_posts_remote_msg_id_unique'),
-            ('caller_log', 'remote_msg_id', 'ix_caller_log_remote_msg_id_unique')):
+            ('caller_log', 'remote_msg_id', 'ix_caller_log_remote_msg_id_unique'),
+            ('game_scores', 'remote_msg_id', 'ix_game_scores_remote_msg_id_unique')):
         try:
             if _idx_col not in {c['name'] for c in insp.get_columns(_idx_table)}:
                 continue

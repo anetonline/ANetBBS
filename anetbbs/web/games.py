@@ -97,6 +97,7 @@ def detail(slug):
         game=game,
         top_scores=top_scores,
         active_sessions=active_sessions,
+        is_casino=game.slug in CASINO_SLUGS,
     )
 
 
@@ -171,6 +172,12 @@ def submit_score(slug):
     game.play_count = (game.play_count or 0) + 1
     db.session.commit()
 
+    try:
+        from ..echomail.interbbs_sync import post_score_to_interbbs
+        post_score_to_interbbs(entry)
+    except Exception:
+        logger.exception('post_score_to_interbbs failed for score %s', entry.id)
+
     return {'status': 'ok', 'score': score_value}
 
 
@@ -197,6 +204,7 @@ def scores():
         all_games=all_games,
         period=period,
         game_id=game_id,
+        casino_slugs=CASINO_SLUGS,
     )
 
 
@@ -501,6 +509,7 @@ def update_wallet(slug):
     week = _week_start()
     start = _casino_start_bal(slug)
 
+    entry = None
     wallet = WebGameWallet.query.filter_by(
         user_id=current_user.id, game_slug=slug).first()
     if wallet is None:
@@ -532,13 +541,21 @@ def update_wallet(slug):
             )
             db.session.add(entry)
     db.session.commit()
+
+    if entry is not None:
+        try:
+            from ..echomail.interbbs_sync import post_score_to_interbbs
+            post_score_to_interbbs(entry)
+        except Exception:
+            logger.exception('post_score_to_interbbs failed for score %s', entry.id)
+
     return _wallet_json(wallet)
 
 
 @games_bp.route('/scoreboard')
 def scoreboard():
     """Cross-game leaderboard — top scores per game."""
-    from ..models import db as _db, GameScore as _GS, Game as _G, User as _U
+    from ..models import db as _db, GameScore as _GS, Game as _G
     by_game = {}
     try:
         games = _G.query.filter_by(is_active=True).order_by(_G.name).all()
@@ -548,10 +565,14 @@ def scoreboard():
                    .limit(10).all())
             rows = []
             for s in top:
-                u = _U.query.get(s.user_id)
+                # display_username picks the right name whether this
+                # score was earned locally or imported via InterBBS
+                # score sharing (see GameScore.display_username).
                 rows.append({
-                    'username': u.username if u else '?',
+                    'username': s.display_username,
                     'score': s.score, 'when': s.achieved_at,
+                    'origin_bbs': s.origin_bbs,
+                    'is_casino': g.slug in CASINO_SLUGS,
                 })
             if rows:
                 by_game[g] = rows

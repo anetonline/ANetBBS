@@ -456,6 +456,354 @@ class InterbbsLastCallersTests(unittest.TestCase):
                               'a NULL msg_id row must not be materialized')
 
 
+class InterbbsScoresTests(unittest.TestCase):
+    """InterBBS door/web game score sharing -- same loop-prevention/dedup
+    shape as Wall/Last Callers, plus properties unique to scores: only
+    NEW PERSONAL BESTS relay (not every submission), a double opt-in
+    gate (sender's Game.share_scores_interbbs AND the receiver's own
+    matching Game must both be opted in), a ghost placeholder User for
+    the hard NOT NULL user_id FK, and play_count must never be touched
+    by inbound sync (materializing a remote score is not a local play).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_app(str(Path(self._tmp.name) / 'scores.db'))
+        with self.app.app_context():
+            from anetbbs.models import db
+            db.create_all()
+
+    def _network(self, network_type='binkp'):
+        from anetbbs.models import db, EchomailNetwork
+        net = EchomailNetwork(name='ANotherNetwork', network_type=network_type,
+                              our_address='1:2/3.4')
+        db.session.add(net)
+        db.session.commit()
+        return net
+
+    def _game(self, slug='zztestgame', share=True):
+        from anetbbs.models import db, Game
+        game = Game(name=slug.title(), slug=slug, game_type='builtin_web',
+                   share_scores_interbbs=share)
+        db.session.add(game)
+        db.session.commit()
+        return game
+
+    def _user(self, username='jerry'):
+        from anetbbs.models import db, User
+        user = User(username=username, email=f'{username}@example.com',
+                   password_hash='x')
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    def _score(self, game, user, value):
+        from anetbbs.models import db, GameScore
+        gs = GameScore(game_id=game.id, user_id=user.id, score=value)
+        db.session.add(gs)
+        db.session.commit()
+        return gs
+
+    # ------------------------------------------------------------------
+    # Outbound: personal-best gating
+    # ------------------------------------------------------------------
+
+    def test_first_score_relays_as_personal_best(self):
+        """The first score for any user+game is trivially a personal
+        best -- nothing prior to beat -- so it relays immediately."""
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            gs = self._score(game, user, 100)
+            post_score_to_interbbs(gs)
+
+            msgs = EchomailMessage.query.filter_by(direction='outbound').all()
+            self.assertEqual(len(msgs), 1)
+            self.assertEqual(msgs[0].subject, 'ANET-GAMESCORE')
+            self.assertIn('zztestgame', msgs[0].body)
+            self.assertIn('100', msgs[0].body)
+
+    def test_lower_or_equal_score_does_not_relay(self):
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            post_score_to_interbbs(self._score(game, user, 100))
+            post_score_to_interbbs(self._score(game, user, 100))  # tied
+            post_score_to_interbbs(self._score(game, user, 50))   # lower
+
+            msgs = EchomailMessage.query.filter_by(direction='outbound').all()
+            self.assertEqual(len(msgs), 1, 'only the first (personal-best) score should relay')
+
+    def test_higher_score_relays_again(self):
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            post_score_to_interbbs(self._score(game, user, 100))
+            post_score_to_interbbs(self._score(game, user, 50))    # lower, no relay
+            post_score_to_interbbs(self._score(game, user, 200))   # new best, relays
+
+            msgs = EchomailMessage.query.filter_by(direction='outbound').all()
+            self.assertEqual(len(msgs), 2)
+            bodies = [m.body for m in msgs]
+            self.assertTrue(any('100' in b for b in bodies))
+            self.assertTrue(any('200' in b for b in bodies))
+
+    def test_opted_out_game_never_relays(self):
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game(share=False)
+            user = self._user()
+
+            post_score_to_interbbs(self._score(game, user, 100))
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_imported_score_never_relays_back_out(self):
+        """THE critical loop-prevention test -- mirrors WallPost's."""
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import db, GameScore, EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            gs = GameScore(game_id=game.id, user_id=user.id, score=999,
+                          origin_bbs='OtherBBS', remote_msg_id='ABC123')
+            db.session.add(gs)
+            db.session.commit()
+            post_score_to_interbbs(gs)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_disabled_feature_never_relays(self):
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = False
+            net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            post_score_to_interbbs(self._score(game, user, 100))
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_qwk_configured_network_never_relays(self):
+        from anetbbs.echomail.interbbs_sync import post_score_to_interbbs
+        from anetbbs.models import EchomailMessage, EchoArea
+        with self.app.app_context():
+            self.app.config['GAMES_INTERBBS_ENABLED'] = True
+            net = self._network(network_type='qwk')
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
+            game = self._game()
+            user = self._user()
+
+            post_score_to_interbbs(self._score(game, user, 100))
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+            self.assertEqual(EchoArea.query.filter_by(network_id=net.id).count(), 0)
+
+    # ------------------------------------------------------------------
+    # Inbound: double opt-in gate, ghost user, play_count invariant
+    # ------------------------------------------------------------------
+
+    def test_inbound_sync_materializes_for_opted_in_game(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, GameScore
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            game = self._game(slug='zztestgame', share=True)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-1',
+                from_name='Firehawke', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nFirehawke', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_scores_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            scores = GameScore.query.all()
+            self.assertEqual(len(scores), 1)
+            self.assertEqual(scores[0].game_id, game.id)
+            self.assertEqual(scores[0].score, 500)
+            self.assertEqual(scores[0].remote_msg_id, 'MSG-1')
+            self.assertIsNotNone(scores[0].origin_bbs)
+
+    def test_inbound_sync_skips_when_local_game_opted_out(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, GameScore
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            self._game(slug='zztestgame', share=False)  # opted OUT locally
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-2',
+                from_name='Firehawke', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nFirehawke', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_scores_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(GameScore.query.count(), 0)
+
+    def test_inbound_sync_skips_when_no_local_game_matches_slug(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, GameScore
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            # No local 'zztestgame' game exists at all in this test.
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-3',
+                from_name='Firehawke', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nFirehawke', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_scores_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(GameScore.query.count(), 0)
+
+    def test_inbound_sync_uses_ghost_user_and_remote_username(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, GameScore, User
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            self._game(slug='zztestgame', share=True)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-4',
+                from_name='Firehawke', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nFirehawke', direction='inbound',
+            ))
+            db.session.commit()
+
+            sync_scores_inbound(self.app, {})
+
+            score = GameScore.query.first()
+            ghost = User.query.get(score.user_id)
+            self.assertEqual(ghost.username, '__interbbs_import__')
+            self.assertFalse(ghost.is_active)
+            self.assertEqual(score.remote_username, 'Firehawke')
+            self.assertEqual(score.display_username, 'Firehawke')
+            # Only one ghost user ever, even across multiple imports.
+            self.assertEqual(User.query.filter_by(username='__interbbs_import__').count(), 1)
+
+    def test_inbound_sync_does_not_increment_play_count(self):
+        """Materializing an imported score is not a local play --
+        play_count must only ever reflect actual local play activity."""
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            game = self._game(slug='zztestgame', share=True)
+            before = game.play_count or 0
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-5',
+                from_name='Firehawke', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nFirehawke', direction='inbound',
+            ))
+            db.session.commit()
+
+            sync_scores_inbound(self.app, {})
+
+            db.session.refresh(game)
+            self.assertEqual(game.play_count or 0, before,
+                             'inbound sync must never touch play_count')
+
+    def test_inbound_sync_dedup_is_global(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, EchoArea, GameScore
+        with self.app.app_context():
+            net = self._network()
+            area1 = ensure_special_area(net, GAMES_AREA_TAG)
+            area2 = EchoArea(network_id=net.id, tag='ANET_GAMESCORES_DUP',
+                             name='dup', is_active=True, is_subscribed=True)
+            db.session.add(area2)
+            db.session.commit()
+            self._game(slug='zztestgame', share=True)
+
+            for area in (area1, area2):
+                db.session.add(EchomailMessage(
+                    area_id=area.id, network_id=net.id, msg_id='SAME-ID',
+                    from_name='X', to_name='All', subject='ANET-GAMESCORE',
+                    body='zztestgame\n500\nX', direction='inbound',
+                ))
+            db.session.commit()
+            area2.tag = GAMES_AREA_TAG
+            db.session.commit()
+
+            ok, out = sync_scores_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(GameScore.query.count(), 1)
+
+    def test_inbound_sync_skips_null_msg_id(self):
+        from anetbbs.echomail.interbbs_sync import (
+            sync_scores_inbound, ensure_special_area, GAMES_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage, GameScore
+        with self.app.app_context():
+            net = self._network()
+            area = ensure_special_area(net, GAMES_AREA_TAG)
+            self._game(slug='zztestgame', share=True)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id=None,
+                from_name='X', to_name='All', subject='ANET-GAMESCORE',
+                body='zztestgame\n500\nX', direction='inbound',
+            ))
+            db.session.commit()
+
+            ok, out = sync_scores_inbound(self.app, {})
+            self.assertTrue(ok, out)
+            self.assertEqual(GameScore.query.count(), 0)
+            self.assertIn('skipped 1 (no msg_id)', out)
+
+
 class TransportInvariantTests(unittest.TestCase):
     """This whole design's loop-safety depends on one transport-layer
     fact: relaying a message never silently regenerates a msg_id that
