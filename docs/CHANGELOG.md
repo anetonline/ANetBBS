@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.58`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.59`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.59 — Fix BinkP handshake announcing a hardcoded, permanently-stale version (July 2026)
+
+- FIX: found while diagnosing a real FTN interop report — a peer's binkd log showed our BinkP handshake announcing `VER ANetBBS/1.0a binkp/1.1`, which looked like evidence of a stale install on the far end, except the reporting sysop confirmed they were already fully up to date. The version in that line was a literal, hardcoded string in both `binkp.py` (client handshake) and `binkp_server.py` (server handshake) — it has said `1.0a` since this code was first written, regardless of which release is actually running, making it useless for diagnosing what version a peer is on from their own connection logs (and actively misleading in this specific investigation). Fixed by pulling the real version from `anetbbs.__version__` in both places. 2 new tests.
 
 ## v1.0b2.58 — Fix session disconnect right after a telnet transfer completes (July 2026)
 

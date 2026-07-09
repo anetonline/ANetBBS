@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.59 — Fix BinkP handshake announcing a hardcoded, stale version (July 2026)
+
+- FIX: the BinkP handshake's `VER` line was a hardcoded literal (`ANetBBS/1.0a binkp/1.1`) in both the client and server handshake code, unrelated to the actual running version — it's said `1.0a` since this code was first written, on every release since. Found while investigating a real FTN interop report where the stale string looked like evidence of an out-of-date install, but wasn't. Now pulls from `anetbbs.__version__`. 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.58 — Fix session disconnect right after a telnet transfer completes (July 2026)
 
 - FIX (live-caught testing v1.0b2.57): a telnet ZMODEM download worked correctly but the session disconnected to the goodbye screen the instant it finished. The transfer's own reader (which consumes the client's telnet-negotiation replies) was cancelled before the post-transfer "turn BINARY back off" command was sent, so the client's reply to that sat unconsumed in the socket buffer and got misread as a disconnect by the next normal prompt. Fixed by not sending that command — leaving a session in BINARY mode for the rest of the connection is standard, harmless practice. Same feature as v1.0b2.57; see that entry for credit to andy5995's original PR #6 diagnosis.

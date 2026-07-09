@@ -72,7 +72,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     # routing decisions off these fields recognise us as a real BBS.
     sysop_name = os.environ.get('SYSOP_NAME', 'sysop')
     location = os.environ.get('BBS_LOCATION', 'Earth')
-    full_ver = 'ANetBBS/1.0a binkp/1.1'
+    from .. import __version__ as _anetbbs_version
+    full_ver = f'ANetBBS/{_anetbbs_version} binkp/1.1'
     await _send_cmd(writer, CMD_NUL, f'SYS {system_name}')
     await _send_cmd(writer, CMD_NUL, f'ZYZ {sysop_name}')
     await _send_cmd(writer, CMD_NUL, f'LOC {location}')

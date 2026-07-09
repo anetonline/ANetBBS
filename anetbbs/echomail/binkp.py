@@ -681,7 +681,8 @@ class BinkPClient:
         self._send_cmd(CMD_NUL, 'NDL 115200,TCP,BINKP')
         self._send_cmd(CMD_NUL,
                        f'TIME {_dt.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}')
-        self._send_cmd(CMD_NUL, 'VER ANetBBS/1.0a binkp/1.1')
+        from .. import __version__ as _anetbbs_version
+        self._send_cmd(CMD_NUL, f'VER ANetBBS/{_anetbbs_version} binkp/1.1')
         self._send_cmd(CMD_NUL, 'OPT CRAM-MD5')
         # Send ONE address per M_ADR -- qualified (`addr@domain`) when we
         # have a domain, bare otherwise. Previously sent BOTH forms as a
