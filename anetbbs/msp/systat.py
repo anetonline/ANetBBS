@@ -18,6 +18,7 @@ closely enough to be parsed by their client):
     Total active: 2
 """
 import logging
+import re
 import socket
 import threading
 from datetime import datetime, timedelta
@@ -204,3 +205,52 @@ def query_systat(host: str, port: int = 11, timeout: float = 5.0) -> str:
     except (socket.timeout, OSError) as exc:
         logger.info('SYSTAT query to %s:%s failed: %s', host, port, exc)
         return ''
+
+
+_SEPARATOR_RE = re.compile(r'^-{2,}(\s+-{2,})*$')
+
+
+def parse_systat_response(text: str) -> list:
+    """Parse a query_systat() reply into a list of
+    {'node': str, 'user': str, 'action': str, 'idle': str} dicts.
+
+    Matches our own _build_response() format (a "Node  User  Action
+    Idle" header + dashed separator, then one fixed-width-ish line per
+    active user) closely enough to also handle real Synchronet peers,
+    which use the same convention. Splits each data line on runs of 2+
+    spaces rather than fixed column offsets, so small width differences
+    from a peer's implementation don't break parsing. Returns [] for an
+    empty reply, "No users currently active.", or anything that doesn't
+    contain a recognizable header -- callers should treat an empty
+    result as "probe succeeded but nothing to show" and fall back to
+    manual entry, same as a failed/timed-out probe.
+    """
+    if not text:
+        return []
+    rows = []
+    seen_header = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        low = stripped.lower()
+        if low.startswith('total active') or low.startswith('no users'):
+            continue
+        if _SEPARATOR_RE.match(stripped):
+            continue
+        if not seen_header:
+            if low.startswith('node') and 'user' in low:
+                seen_header = True
+            # Anything before the header (the "<software> <host> - <bbs
+            # name>" banner line) is noise, not data -- skip either way.
+            continue
+        parts = re.split(r'\s{2,}', stripped)
+        if len(parts) < 2 or not parts[1].strip():
+            continue
+        rows.append({
+            'node': parts[0].strip(),
+            'user': parts[1].strip(),
+            'action': parts[2].strip() if len(parts) > 2 else '',
+            'idle': parts[3].strip() if len(parts) > 3 else '',
+        })
+    return rows

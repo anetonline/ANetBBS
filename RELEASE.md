@@ -1,3 +1,14 @@
+# ANetBBS v1.0b2.64 — Terminal sysop tools: Node Monitor, broadened Sysop menu, MSP picker, profile redesign (July 2026)
+
+- FEATURE: new terminal **Node Monitor** (Sysop Tools → Node Monitor) — scrollable live node list (slot/user/protocol/page/action/idle), with Kick and Message actions. Same live data source as the web NodeSpy panel.
+- FEATURE: the terminal **Sysop Tools menu** grew from 3 items to 14 scrollable categories, bringing most of the terminal-feasible web admin UI into telnet/SSH/rlogin: Users, Boards/Bulletins, Echomail/Hub, Games, Wall, File Upload Queue, Scheduled Events, RSS Feeds, Login/Logoff Modules, Notifications, Registry/Peers, Caller Log, Node Monitor, Server Status.
+- FEATURE: sending an Inter-BBS Instant Message from the terminal no longer requires knowing the exact `user@host` — browse a BBS directory, live-probe who's online there, and pick a name. Manual entry still available as a fallback.
+- FEATURE: **Edit Profile** in the terminal is now one summary screen of all current settings plus a picker for which to change, instead of a blind sequential walk. Added tagline, show-email, and date-of-birth (previously web-only), plus codepage and language (previously unreachable anywhere). Password still never shown.
+- FIX: AreaFix log Tags column no longer overflows its table cell on long area lists.
+- 30+ new tests.
+
+---
+
 # ANetBBS v1.0b2.63 — Option to hide sysop from Last Callers (July 2026)
 
 - FEATURE: new "Hide sysop logins from the Last Callers displays" toggle at Admin → Last Callers, off by default. Keeps a sysop who logs in several times a day from flooding the user-facing Last Callers list with themselves instead of real users. The admin audit list always shows everyone; InterBBS-shared entries from other BBSes are never affected. 7 new tests.

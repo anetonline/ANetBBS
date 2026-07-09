@@ -1,7 +1,16 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.63`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.64`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.64 — Terminal sysop tools: Node Monitor, broadened Sysop menu, MSP picker, profile redesign (July 2026)
+
+- FEATURE: new terminal (telnet/SSH/rlogin) **Node Monitor** at Sysop Tools → Node Monitor — a scrollable, Synchronet-UNIX-Monitor-style live list of connected nodes (slot/user/protocol/current page+action/idle time), with per-node **Kick** and **Message** actions. Data comes from `NodeActivity` (already updated on every menu render/action), the same source the web NodeSpy panel uses, so both views stay in sync. Kick sets the same DB flag NodeSpy's kick button does, picked up by the existing 5-second watchdog. Messaging a node reuses the existing sysop-reply inbox; a gap where a pushed message would never surface for installs still on the legacy hard-coded main menu (as opposed to the data-driven `BbsMenu` one) was closed at the same time.
+- FEATURE: the terminal **Sysop Tools menu** was 3 static items (Manage Users, Manage Boards, Server Status) — now a scrollable menu of 14 categories, bringing most of the terminal-feasible slice of the web admin UI into telnet/SSH/rlogin for the first time: Users, Boards/Bulletins, Echomail/Hub (networks & areas, QWK node-request approval, bad-area review), Games (active session disconnect, Trade Wars 2002 universe reset), Wall moderation, File Upload Queue (approve/reject), Scheduled Events (cron-style maintenance jobs), RSS Feeds, Login/Logoff Modules, Notifications (Webhooks, Sysop Broadcast, Message of the Day, Sysop Pages), Registry/Peers (federation applicant approval, peer probes), Caller Log, Node Monitor, and Server Status. Deliberately left web-only: the ANSI art editor/theme builder, file/avatar upload, backup restore, in-place upgrades, and full network-join applicant approval (creates multiple node records and emails credentials).
+- FEATURE: sending an Inter-BBS Instant Message from the terminal (`New PM`) no longer requires already knowing the exact `user@host` to type — it now offers a scrollable BBS directory, live-probes the picked BBS over SYSTAT for who's currently online there, and lets you pick a name from that list. Manual `user@host` entry is still available at every step (empty directory, failed/empty probe, or just backing out).
+- FEATURE: **Edit Profile** in the terminal was a blind sequential prompt-per-field walk (easy to miss settings like Sixel mode entirely). Replaced with a single summary screen showing every current setting plus a scrollable picker for which one to change. Also added three settings that existed on the web profile editor but were unreachable from the terminal: FTN tagline, "show email publicly", and date of birth, plus two that weren't editable from *either* front end yet (codepage, language preference — currently unused by anything else in the codebase, but now at least settable). Password is never shown or editable here, same as before.
+- FIX: the AreaFix log's Tags column could overflow its table cell on long comma-separated area lists — now wraps.
+- 30+ new tests across `tests/test_terminal_node_monitor.py`, `tests/test_terminal_sysop_menu.py`, `tests/test_systat_parser.py`, and `tests/test_terminal_profile_redesign.py`.
 
 ## v1.0b2.63 — Option to hide sysop from Last Callers (July 2026)
 

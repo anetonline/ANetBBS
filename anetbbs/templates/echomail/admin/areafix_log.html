@@ -65,7 +65,7 @@
                     <td>{{ networks[row.network_id].name if row.network_id in networks else '?' }}</td>
                     <td><code>{{ row.from_address or '' }}</code></td>
                     <td><span class="badge bg-secondary">{{ row.request_type }}</span></td>
-                    <td><small><code>{{ row.area_tags or '' }}</code></small></td>
+                    <td><small><code style="display:inline-block; max-width:400px; white-space:normal; word-break:break-word;">{{ row.area_tags or '' }}</code></small></td>
                     <td>
                         {% if row.success %}
                             <span class="badge bg-success">OK</span>

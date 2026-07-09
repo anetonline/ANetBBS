@@ -577,21 +577,140 @@ class BBSMenuUI:
                 await self.session.write(
                     "\r\nSent.\r\n" if ok else "\r\nDelivery failed.\r\n")
 
+    async def _msp_pick_directory_bbs(self):
+        """BBS directory lightbar picker. Returns the picked dict (with
+        hostname/name/sysop/location/systat_port keys), or None on an
+        empty directory or the user backing out -- both are meant to
+        fall through to manual user@host entry, not dead-end."""
+        from anetbbs.models import BbsDirectoryEntry
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        with _app().app_context():
+            entries = BbsDirectoryEntry.query.order_by(BbsDirectoryEntry.name).all()
+            rows = [{'hostname': e.hostname, 'name': e.name or e.hostname,
+                     'sysop': e.sysop or '', 'location': e.location or '',
+                     'systat_port': e.systat_port or 11} for e in entries]
+        if not rows:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Pick a BBS', ui_width(self.session)))
+            await self.session.write(
+                f"  {FG['gry']}No BBSes in the directory yet.{RESET}\r\n")
+            await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+            return None
+
+        async def render_header():
+            _w = ui_width(self.session)
+            await self.session.write(banner('Pick a BBS', _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Name':<24}  {'Sysop':<18}  {'Location':<16}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+        def render_row(idx, row, selected):
+            return (f"  {FG['grn']}{idx+1:>2}{RESET}  {row['name'][:24]:<24}  "
+                    f"{FG['dim']}{row['sysop'][:18]:<18}{RESET}  {row['location'][:16]:<16}")
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                    f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=pick  "
+                    f"{FG['cyan']}Q{RESET}=type user@host manually")
+
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] == 'enter':
+            return rows[result[1]]
+        return None
+
+    async def _msp_pick_online_user(self, bbs_row):
+        """Live-SYSTAT-probe bbs_row and let the sysop/user pick a
+        currently-online user there. Returns the picked username, or
+        None to fall back to manual entry (probe failed/empty/timed
+        out, or the user picked the manual-entry row, or backed out)."""
+        from anetbbs.msp.systat import query_systat, parse_systat_response
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        await self.session.write(
+            f"\r\n{FG['cyan']}Probing {bbs_row['hostname']}...{RESET}\r\n")
+        loop = asyncio.get_running_loop()
+        # query_systat() is a blocking socket call (up to 5s) -- offload
+        # it so it doesn't stall every other node in this process, same
+        # idiom as games/builtin_runner.py's run_in_executor use.
+        text = await loop.run_in_executor(
+            None, query_systat, bbs_row['hostname'], bbs_row['systat_port'], 5.0)
+        online = parse_systat_response(text) if text else []
+        if not online:
+            await self.session.write(
+                f"{FG['dim']}No reply, or nobody online there -- "
+                f"switching to manual entry.{RESET}\r\n")
+            await self.session.read_line("Press Enter...")
+            return None
+
+        MANUAL = object()  # sentinel row for the injected manual-entry option
+        display_rows = [MANUAL] + online
+
+        async def render_header():
+            _w = ui_width(self.session)
+            await self.session.write(banner(f"Online at {bbs_row['hostname']}", _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'User':<22}  {'Action':<24}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+        def render_row(idx, row, selected):
+            if row is MANUAL:
+                return f"  {FG['yel']}[Manual entry -- type user@host]{RESET}"
+            return (f"  {FG['grn']}{row['user'][:22]:<22}{RESET}  "
+                    f"{FG['dim']}{row['action'][:24]}{RESET}")
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                    f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=pick  "
+                    f"{FG['cyan']}Q{RESET}=cancel")
+
+        result = await self._rss_lightbar(display_rows, render_header, render_row, render_hint)
+        if result[0] != 'enter':
+            return None
+        picked = display_rows[result[1]]
+        return None if picked is MANUAL else picked['user']
+
+    async def _msp_pick_recipient(self):
+        """Directory -> live-probe -> online-user picker, in one flow.
+        Returns (username, host) or None if the whole flow fell through
+        (empty directory, failed/empty probe, or cancelled) -- callers
+        must fall back to their own manual user@host prompt on None."""
+        bbs_row = await self._msp_pick_directory_bbs()
+        if not bbs_row:
+            return None
+        username = await self._msp_pick_online_user(bbs_row)
+        if not username:
+            return None
+        return (username, bbs_row['hostname'])
+
     async def send_imsg(self):
-        """Compose a fresh InterBBS IM from the terminal."""
+        """Compose a fresh InterBBS IM from the terminal. Tries the BBS
+        directory + live-online picker first; falls back to manual
+        user@host entry if the directory is empty, the probe finds
+        nobody, or the sysop/user cancels out of either picker."""
         from anetbbs.msp.client import send_msp
         from anetbbs.msp.protocol import MSP_DEFAULT_PORT
         from .ansi_ui import banner, FG, RESET, ui_width
-        _w = ui_width(self.session)
-        await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner('Send Inter-BBS Instant Message', _w))
-        dest = (await self.session.read_line(
-            f"  {FG['cyan']}Destination (user@host):{RESET} ") or '').strip()
-        if '@' not in dest:
+
+        picked = await self._msp_pick_recipient()
+        if picked:
+            target_user, target_host = picked
+            _w = ui_width(self.session)
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Send Inter-BBS Instant Message', _w))
             await self.session.write(
-                f"\r\n{FG['red']}Need user@host format.{RESET}\r\n")
-            return
-        target_user, target_host = dest.rsplit('@', 1)
+                f"  {FG['cyan']}To:{RESET} {target_user}@{target_host}\r\n")
+        else:
+            _w = ui_width(self.session)
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Send Inter-BBS Instant Message', _w))
+            dest = (await self.session.read_line(
+                f"  {FG['cyan']}Destination (user@host):{RESET} ") or '').strip()
+            if '@' not in dest:
+                await self.session.write(
+                    f"\r\n{FG['red']}Need user@host format.{RESET}\r\n")
+                return
+            target_user, target_host = dest.rsplit('@', 1)
         msg = (await self.session.read_line(
             f"  {FG['cyan']}Message:{RESET} ") or '').strip()
         if not msg:
@@ -2035,7 +2154,105 @@ class BBSMenuUI:
                 return ('quit',)
 
             else:
-                return ('key', key)
+                # 3rd element (current selection index) is new -- existing
+                # callers only ever index result[0]/result[1], never
+                # tuple-unpack a fixed count, so this is backward compatible.
+                return ('key', key, sel)
+
+    # ── Generic sysop list+action screen ─────────────────────────────
+    async def _sysop_record_list(self, title, fetch_rows, render_row,
+                                  render_hint_extra, actions,
+                                  empty_msg='Nothing here yet.'):
+        """Generic sysop list+action screen built on _rss_lightbar.
+
+        fetch_rows()   — sync, called fresh inside its own app_context
+                         every time the list is (re)drawn. Must return a
+                         plain list of tuples/dicts, never live ORM rows
+                         (they aren't safe to hold across an await).
+        render_row(idx, row, selected) — sync, same contract as
+                         _rss_lightbar.
+        render_hint_extra(sel, total)  — sync, returns the hotkey legend
+                         suffix, e.g. "A=approve  X=reject  Enter=edit".
+        actions: dict[str, async fn(self, row) -> bool | None], keyed by
+                 the same uppercase letters advertised in
+                 render_hint_extra, plus the special key 'ENTER' for the
+                 Enter action. A handler returning False exits the whole
+                 screen; anything else (including None) re-fetches and
+                 redraws the list. Row-independent actions (e.g. "N" for
+                 new, which doesn't need a selected record) also fire
+                 when the list is empty -- their handler is called with
+                 row=None, so they must tolerate that.
+        """
+        from .ansi_ui import banner, FG, RESET, ui_width
+
+        while True:
+            rows = fetch_rows()
+            if not rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner(title, ui_width(self.session)))
+                await self.session.write(f"  {FG['gry']}{empty_msg}{RESET}\r\n")
+                key = (await self.session.read_line(
+                    f"  {FG['cyan']}Press Enter, or a hotkey: {RESET}") or '').strip().upper()
+                if key and key in actions:
+                    cont = await actions[key](self, None)
+                    if cont is False:
+                        return
+                    continue
+                return
+
+            async def render_header():
+                await self.session.write(banner(title, ui_width(self.session)))
+
+            def render_hint(sel, total):
+                return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=move  "
+                        + render_hint_extra(sel, total))
+
+            result = await self._rss_lightbar(rows, render_header, render_row,
+                                              render_hint)
+
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                handler = actions.get('ENTER')
+                if handler:
+                    cont = await handler(self, rows[result[1]])
+                    if cont is False:
+                        return
+            elif result[0] == 'key':
+                k = (result[1] or '').upper()
+                handler = actions.get(k)
+                if handler:
+                    sel_idx = result[2] if len(result) > 2 else 0
+                    cont = await handler(self, rows[sel_idx])
+                    if cont is False:
+                        return
+
+    # ── Generic choice picker ─────────────────────────────────────────
+    async def _pick_choice(self, title, choices):
+        """Generic lightbar picker over (label, value) tuples.
+
+        Returns (True, value) if something was picked, (False, None) if
+        cancelled -- the bool distinguishes "cancelled" from "picked a
+        row whose value is legitimately None" (e.g. a 'Default theme'
+        choice), which a bare return value can't.
+        """
+        from .ansi_ui import banner, FG, RESET, ui_width
+
+        async def render_header():
+            await self.session.write(banner(title, ui_width(self.session)))
+
+        def render_row(idx, row, selected):
+            return f"  {FG['grn']}{row[0]}{RESET}"
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                    f"{FG['cyan']}Enter{RESET}=pick  {FG['cyan']}Q{RESET}=cancel")
+
+        result = await self._rss_lightbar(choices, render_header, render_row, render_hint)
+        if result[0] == 'enter':
+            return True, choices[result[1]][1]
+        return False, None
 
     # ── RSS article pager ────────────────────────────────────────────
     async def _rss_pager(self, lines, header_lines, hint_str):
@@ -3506,44 +3723,172 @@ async def _compose_echomail(self):
 BBSMenuUI.compose_echomail = _compose_echomail
 
 
-async def _edit_profile(self):
-    from anetbbs.models import db, User
-    fields = [
-        ('display_name', 'Display name', 100),
-        ('email', 'Email', 120),
-        ('location', 'Location', 100),
-        ('website', 'Website', 255),
-        ('bio', 'Bio (one line)', 500),
-        ('signature', 'Signature (one line)', 500),
-    ]
-    with _app().app_context():
-        u = User.query.get(self.session.user['id'])
-        if not u:
-            return
-        await self.session.write("\r\n=== Edit Profile (blank = keep) ===\r\n\r\n")
-        for attr, label, maxlen in fields:
-            current = getattr(u, attr, '') or ''
-            new = await self.session.read_line(f"{label} [{current[:30]}]: ")
-            if new and new.strip():
-                setattr(u, attr, new.strip()[:maxlen])
+_PROFILE_TEXT_FIELDS = (
+    ('display_name', 'Display name', 100),
+    ('email', 'Email', 120),
+    ('location', 'Location', 100),
+    ('website', 'Website', 255),
+    ('bio', 'Bio (one line)', 500),
+    ('signature', 'Signature (one line)', 500),
+    ('tagline', 'FTN tagline', 160),
+)
+_PROFILE_SIXEL_CHOICES = (('Automatic (detect)', 'auto'),
+                          ('Always on', 'forced_on'),
+                          ('Always off', 'forced_off'))
+_PROFILE_CODEPAGE_CHOICES = (('CP437 (DOS classic)', 'cp437'), ('UTF-8', 'utf8'))
 
-        cur_sixel = u.sixel_mode or 'auto'
-        await self.session.write(
-            "\r\nSixel Graphics: auto (detect) / on (always) / off (never)\r\n"
-            "  'on' is for terminals that support sixel but don't self-report\r\n"
-            "  it via DA1 (e.g. Windows Terminal over SSH).\r\n")
-        new_sixel = await self.session.read_line(
-            f"Sixel mode [auto/on/off, blank = keep '{cur_sixel}']: ")
-        new_sixel = (new_sixel or '').strip().lower()
-        if new_sixel in ('a', 'auto'):
-            u.sixel_mode = 'auto'
-        elif new_sixel in ('on', 'forced_on'):
-            u.sixel_mode = 'forced_on'
-        elif new_sixel in ('off', 'forced_off'):
-            u.sixel_mode = 'forced_off'
-        db.session.commit()
-    await self.session.write("\r\nProfile saved.\r\n")
-    await self.session.read_line("Press Enter...")
+
+async def _edit_profile_field(self, kind, attr, label):
+    """Edit one profile field, dispatched by kind. Never touches
+    password_hash -- change_password() is the separate dedicated flow."""
+    from anetbbs.models import db, User, Theme
+    from .ansi_ui import FG, RESET
+
+    _maxlen = dict((a, m) for a, _l, m in _PROFILE_TEXT_FIELDS)
+
+    if kind == 'text':
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            current = getattr(u, attr, '') or ''
+        new = (await self.session.read_line(
+            f"\r\n{label} [{current[:40]}]: ") or '').strip()
+        if new:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                setattr(u, attr, new[:_maxlen.get(attr, 255)])
+                db.session.commit()
+
+    elif kind == 'bool':
+        picked, value = await self._pick_choice(label, [('Yes', True), ('No', False)])
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                setattr(u, attr, value)
+                db.session.commit()
+
+    elif kind == 'date':
+        new = (await self.session.read_line(
+            f"\r\n{label} (YYYY-MM-DD, blank = clear): ") or '').strip()
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            if not new:
+                u.date_of_birth = None
+                db.session.commit()
+                return
+            try:
+                u.date_of_birth = datetime.strptime(new, '%Y-%m-%d').date()
+                db.session.commit()
+            except ValueError:
+                await self.session.write(f"\r\n{FG['red']}Bad date -- use YYYY-MM-DD.{RESET}\r\n")
+                await self.session.read_line("Press Enter...")
+
+    elif kind == 'theme':
+        with _app().app_context():
+            themes = Theme.query.filter_by(is_active=True).order_by(Theme.name).all()
+            choices = [('Default (Classic Green)', None)] + [
+                (t.display_name, t.id) for t in themes]
+        picked, value = await self._pick_choice('Pick a Theme', choices)
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.theme_id = value
+                db.session.commit()
+
+    elif kind == 'sixel':
+        picked, value = await self._pick_choice('Sixel Graphics', list(_PROFILE_SIXEL_CHOICES))
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.sixel_mode = value
+                db.session.commit()
+
+    elif kind == 'codepage':
+        picked, value = await self._pick_choice('Codepage', list(_PROFILE_CODEPAGE_CHOICES))
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.codepage = value
+                db.session.commit()
+
+    elif kind == 'lang':
+        # No enforced list of valid language codes exists anywhere in
+        # this codebase (MenuTranslation's docstring only gives
+        # illustrative examples) -- light validation only, matching the
+        # field's current unenforced state on the web side too.
+        new = (await self.session.read_line(
+            "\r\nLanguage code (2 lowercase letters, e.g. en/es/fr): ") or '').strip().lower()
+        if new:
+            if len(new) == 2 and new.isalpha():
+                with _app().app_context():
+                    u = User.query.get(self.session.user['id'])
+                    u.language = new
+                    db.session.commit()
+            else:
+                await self.session.write(
+                    f"\r\n{FG['red']}Must be exactly 2 letters (ISO-639-1).{RESET}\r\n")
+                await self.session.read_line("Press Enter...")
+BBSMenuUI._edit_profile_field = _edit_profile_field
+
+
+async def _edit_profile(self):
+    """Single summary screen (all current settings) + a lightbar picker
+    for which field to change -- replaces the old blind sequential
+    prompt-per-field loop. Loops back to the picker after each edit so
+    multiple fields can be changed in one visit; Q/Esc exits. Password
+    is never shown here (change_password() is the separate flow)."""
+    from anetbbs.models import db, User, Theme
+    from .ansi_ui import banner, ui_width
+
+    def _fetch_rows():
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            if not u:
+                return None
+            theme_name = 'Default (Classic Green)'
+            if u.theme_id:
+                t = Theme.query.get(u.theme_id)
+                if t:
+                    theme_name = t.display_name
+            rows = [('text', attr, label, getattr(u, attr, '') or '')
+                    for attr, label, _maxlen in _PROFILE_TEXT_FIELDS]
+            rows.append(('bool', 'show_email', 'Show email publicly',
+                        'Yes' if u.show_email else 'No'))
+            rows.append(('date', 'date_of_birth', 'Date of birth',
+                        u.date_of_birth.isoformat() if u.date_of_birth else '(not set)'))
+            rows.append(('theme', 'theme_id', 'Theme', theme_name))
+            rows.append(('sixel', 'sixel_mode', 'Sixel graphics',
+                        dict((v, l) for l, v in _PROFILE_SIXEL_CHOICES).get(
+                            u.sixel_mode or 'auto', u.sixel_mode)))
+            rows.append(('codepage', 'codepage', 'Codepage',
+                        dict((v, l) for l, v in _PROFILE_CODEPAGE_CHOICES).get(
+                            u.codepage or 'cp437', u.codepage)))
+            rows.append(('lang', 'language', 'Language code', u.language or 'en'))
+            return rows
+
+    while True:
+        rows = _fetch_rows()
+        if rows is None:
+            return
+
+        async def render_header():
+            await self.session.write(banner('Edit Profile', ui_width(self.session)))
+
+        def render_row(idx, row, selected):
+            from .ansi_ui import FG, RESET
+            _kind, _attr, label, value = row
+            return f"  {FG['cyan']}{label:<24}{RESET} {FG['grn']}{str(value)[:40]}{RESET}"
+
+        def render_hint(sel, total):
+            from .ansi_ui import FG, RESET
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                    f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=edit  "
+                    f"{FG['cyan']}Q{RESET}=done")
+
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] != 'enter':
+            return
+        kind, attr, label, _value = rows[result[1]]
+        await self._edit_profile_field(kind, attr, label)
 BBSMenuUI.edit_profile = _edit_profile
 
 
@@ -3673,33 +4018,63 @@ BBSMenuUI.read_thread_v2 = _read_thread_v2
 # ---------------------------------------------------------------------------
 
 async def _sysop_menu(self):
-    """Top-level sysop menu — only shown to is_admin users."""
+    """Top-level sysop menu — only shown to is_admin users.
+
+    Scrollable category picker (each category is its own sub-screen
+    built on _sysop_record_list) covering most of the terminal-feasible
+    slice of the web admin surface. Deliberately does not attempt: the
+    ANSI art editor/theme builder (rich canvas UI), file/avatar upload,
+    backup restore, in-place upgrades, or the full network-join
+    applicant-approval flow (multi-node-type creation + email) -- those
+    stay web-only.
+    """
     if not self.session.user.get('is_admin'):
         await self.session.write("\r\nSysop access required.\r\n")
         await self.session.read_line("Press Enter...")
         return
-    from .ansi_ui import (write_menu_art, banner, menu_item, footer,
-                          prompt as _prompt, FG, RESET, ui_width)
+    from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+    categories = [
+        ('U', 'Users',            self.sysop_users),
+        ('B', 'Boards/Bulletins', self.sysop_boards),
+        ('E', 'Echomail/Hub',     self.sysop_echomail),
+        ('G', 'Games',            self.sysop_games),
+        ('W', 'Wall',             self.sysop_wall),
+        ('F', 'File Queue',       self.sysop_file_queue),
+        ('V', 'Events',           self.sysop_events),
+        ('R', 'RSS Feeds',        self.sysop_rss_admin),
+        ('L', 'Login Modules',    self.sysop_login_modules),
+        ('N', 'Notifications',    self.sysop_notifications),
+        ('P', 'Registry/Peers',   self.sysop_registry),
+        ('C', 'Caller Log',       self.sysop_callers),
+        ('M', 'Node Monitor',     self.sysop_node_monitor),
+        ('S', 'Server Status',    self.sysop_status),
+    ]
+
+    async def render_header():
+        await self.session.write(banner('Sysop Tools', ui_width(self.session)))
+
+    def render_row(idx, row, selected):
+        hk, label, _fn = row
+        return f"  {FG['yel']}{BOLD}[{hk}]{RESET} {FG['grn']}{label}{RESET}"
+
+    def render_hint(sel, total):
+        return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=open  "
+                f"{FG['cyan']}Q{RESET}=exit")
+
     while True:
-        if not await write_menu_art(self.session, 'sysop_menu'):
-            _w = ui_width(self.session)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Sysop Tools', _w))
-            for hk, lbl in (('U', 'Manage users'),
-                            ('B', 'Manage boards'),
-                            ('S', 'Server status'),
-                            ('Q', 'Return')):
-                await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
-            await self.session.write('\r\n' + footer(_w) + '\r\n')
-        choice = (await self.session.read_line(_prompt('Choice: ')) or '').upper()
-        if choice == 'Q' or not choice:
+        result = await self._rss_lightbar(categories, render_header, render_row,
+                                          render_hint)
+        if result[0] == 'quit':
             return
-        elif choice == 'U':
-            await self.sysop_users()
-        elif choice == 'B':
-            await self.sysop_boards()
-        elif choice == 'S':
-            await self.sysop_status()
+        elif result[0] == 'enter':
+            await categories[result[1]][2]()
+        elif result[0] == 'key':
+            k = (result[1] or '').upper()
+            match = next((c for c in categories if c[0] == k), None)
+            if match:
+                await match[2]()
 BBSMenuUI.sysop_menu = _sysop_menu
 
 
@@ -3828,6 +4203,7 @@ async def _sysop_boards(self):
                 await self.session.write(f"          {FG['dim']}{desc[:_desc_w]}{RESET}\r\n")
         await self.session.write('\r\n')
         await self.session.write(menu_item('N', 'New board', _w) + '\r\n')
+        await self.session.write(menu_item('M', 'Bulletins', _w) + '\r\n')
         await self.session.write(menu_item('Q', 'Back', _w) + '\r\n')
         await self.session.write(f"  {FG['dim']}Or enter a board ID to edit{RESET}\r\n")
         await self.session.write('\r\n' + footer(_w) + '\r\n')
@@ -3835,6 +4211,9 @@ async def _sysop_boards(self):
         u = choice.upper()
         if u == 'Q' or not choice:
             return
+        if u == 'M':
+            await self.sysop_bulletins()
+            continue
         if u == 'N':
             name = (await self.session.read_line("Board name: ") or '').strip()
             if not name:
@@ -3877,6 +4256,1309 @@ async def _sysop_boards(self):
                     await self.session.write(f"\r\n{FG['red']}Deleted.{RESET}\r\n")
             db.session.commit()
 BBSMenuUI.sysop_boards = _sysop_boards
+
+
+async def _sysop_bulletins(self):
+    from anetbbs.models import db, Message as Bulletin
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = Bulletin.query.order_by(Bulletin.created_at.desc()).limit(100).all()
+            return [(b.id, b.title, b.is_pinned, b.created_at, b.expires_at) for b in rows]
+
+    def render_row(idx, row, selected):
+        bid, title, pinned, created, expires = row
+        pin = f"{FG['yel']}PIN{RESET}" if pinned else '   '
+        ts = created.strftime('%Y-%m-%d') if created else '?'
+        return f"  {pin} {FG['wht']}{bid:>4}{RESET}  {ts}  {FG['grn']}{title[:50]}{RESET}"
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}P{RESET}=toggle pin  {FG['cyan']}X{RESET}=purge expired  "
+                f"{FG['cyan']}D{RESET}=delete  {FG['cyan']}Q{RESET}=back")
+
+    async def _toggle_pin(ui, row):
+        bid = row[0]
+        with _app().app_context():
+            b = Bulletin.query.get(bid)
+            if b:
+                b.is_pinned = not b.is_pinned
+                db.session.commit()
+
+    async def _purge_expired(ui, row):
+        with _app().app_context():
+            n = Bulletin.query.filter(
+                Bulletin.expires_at.isnot(None),
+                Bulletin.expires_at < datetime.utcnow()).delete()
+            db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Purged {n} expired bulletin(s).{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _delete(ui, row):
+        bid, title = row[0], row[1]
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to remove '{title[:40]}': {RESET}")
+        if confirm == 'DELETE':
+            with _app().app_context():
+                b = Bulletin.query.get(bid)
+                if b:
+                    db.session.delete(b)
+                    db.session.commit()
+
+    await self._sysop_record_list(
+        'Bulletins', _fetch_rows, render_row, render_hint_extra,
+        actions={'P': _toggle_pin, 'X': _purge_expired, 'D': _delete},
+        empty_msg='No bulletins yet.')
+BBSMenuUI.sysop_bulletins = _sysop_bulletins
+
+
+# ---------------------------------------------------------------------------
+# Echomail/Hub — networks, areas, QWK node requests, bad areas
+# ---------------------------------------------------------------------------
+
+async def _sysop_echomail_networks(self):
+    from anetbbs.models import db, EchomailNetwork
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            nets = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+            return [(n.id, n.name, n.network_type, n.is_active) for n in nets]
+
+    def render_row(idx, row, selected):
+        nid, name, ntype, active = row
+        mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        return f"  [{mark}] {FG['wht']}{nid:>3}{RESET}  {FG['grn']}{name[:30]:<30}{RESET} {FG['dim']}{ntype}{RESET}"
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}T{RESET}=toggle active  {FG['cyan']}Enter{RESET}=areas  {FG['cyan']}Q{RESET}=back"
+
+    async def _toggle(ui, row):
+        nid = row[0]
+        with _app().app_context():
+            n = EchomailNetwork.query.get(nid)
+            if n:
+                n.is_active = not n.is_active
+                db.session.commit()
+
+    async def _open_areas(ui, row):
+        await ui._sysop_echomail_areas(row[0], row[1])
+
+    await self._sysop_record_list(
+        'Echomail Networks', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'ENTER': _open_areas},
+        empty_msg='No echomail networks configured.')
+BBSMenuUI.sysop_echomail_networks = _sysop_echomail_networks
+
+
+async def _sysop_echomail_areas(self, network_id, network_name):
+    from anetbbs.models import db, EchoArea
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            areas = (EchoArea.query.filter_by(network_id=network_id)
+                     .order_by(EchoArea.tag).all())
+            return [(a.id, a.tag, a.is_active, a.is_subscribed, a.total_messages)
+                    for a in areas]
+
+    def render_row(idx, row, selected):
+        aid, tag, active, subbed, total = row
+        a_mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        s_mark = f"{FG['cyan']}S{RESET}" if subbed else f"{FG['gry']}-{RESET}"
+        return (f"  [{a_mark}{s_mark}] {FG['wht']}{aid:>4}{RESET}  "
+                f"{FG['grn']}{tag[:35]:<35}{RESET} {FG['dim']}{total:>6} msgs{RESET}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle active  {FG['cyan']}S{RESET}=toggle subscribed  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _toggle_active(ui, row):
+        aid = row[0]
+        with _app().app_context():
+            a = EchoArea.query.get(aid)
+            if a:
+                a.is_active = not a.is_active
+                db.session.commit()
+
+    async def _toggle_sub(ui, row):
+        aid = row[0]
+        with _app().app_context():
+            a = EchoArea.query.get(aid)
+            if a:
+                a.is_subscribed = not a.is_subscribed
+                db.session.commit()
+
+    await self._sysop_record_list(
+        f'Areas: {network_name}', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle_active, 'S': _toggle_sub},
+        empty_msg='No areas on this network.')
+BBSMenuUI._sysop_echomail_areas = _sysop_echomail_areas
+
+
+async def _sysop_qwk_requests(self):
+    from anetbbs.models import db, QWKNodeRequest, QWKNode
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            reqs = (QWKNodeRequest.query.filter_by(status='pending')
+                    .order_by(QWKNodeRequest.created_at.asc()).all())
+            return [(r.id, r.bbs_name, r.packet_id, r.sysop_name or '',
+                     r.email or '') for r in reqs]
+
+    def render_row(idx, row, selected):
+        rid, bbs, pid, sysop, email = row
+        return (f"  {FG['wht']}{rid:>4}{RESET}  {FG['grn']}{bbs[:24]:<24}{RESET} "
+                f"{FG['cyan']}{pid:<8}{RESET} {FG['dim']}{sysop[:20]}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}A{RESET}=approve  {FG['cyan']}X{RESET}=deny  {FG['cyan']}Q{RESET}=back"
+
+    async def _approve(ui, row):
+        import secrets, string
+        rid = row[0]
+        with _app().app_context():
+            req = QWKNodeRequest.query.get(rid)
+            if not req or req.status != 'pending':
+                return
+            pid = req.packet_id.upper()
+            if QWKNode.query.filter_by(packet_id=pid).first():
+                await ui.session.write(
+                    f"\r\n{FG['red']}Packet ID {pid} already taken.{RESET}\r\n")
+                await ui.session.read_line("Press Enter...")
+                return
+            alphabet = string.ascii_letters + string.digits
+            password = ''.join(secrets.choice(alphabet) for _ in range(16))
+            node = QWKNode(packet_id=pid, name=req.bbs_name, sysop=req.sysop_name,
+                           email=req.email, password=password, is_active=True,
+                           notes=f"Auto-created from node request #{req.id}.")
+            db.session.add(node)
+            db.session.flush()
+            req.status = 'approved'
+            req.reviewed_at = datetime.utcnow()
+            req.reviewed_by = ui.session.user.get('username', 'sysop')
+            req.generated_password = password
+            req.node_id = node.id
+            db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Approved. QWK node {pid} created.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _deny(ui, row):
+        rid, bbs = row[0], row[1]
+        reason = (await ui.session.read_line(f"\r\nDeny reason for {bbs}: ") or '').strip()
+        with _app().app_context():
+            req = QWKNodeRequest.query.get(rid)
+            if req and req.status == 'pending':
+                req.status = 'denied'
+                req.reviewed_at = datetime.utcnow()
+                req.reviewed_by = ui.session.user.get('username', 'sysop')
+                req.deny_reason = reason or None
+                db.session.commit()
+
+    await self._sysop_record_list(
+        'QWK Node Requests', _fetch_rows, render_row, render_hint_extra,
+        actions={'A': _approve, 'X': _deny},
+        empty_msg='No pending QWK node requests.')
+BBSMenuUI.sysop_qwk_requests = _sysop_qwk_requests
+
+
+async def _sysop_bad_areas(self):
+    from anetbbs.models import db, BadAreaLog
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = (BadAreaLog.query.order_by(BadAreaLog.count.desc())
+                    .limit(100).all())
+            return [(r.id, r.tag, r.network_id, r.count, r.sample_from or '')
+                    for r in rows]
+
+    def render_row(idx, row, selected):
+        rid, tag, net_id, count, sample = row
+        return (f"  {FG['wht']}{rid:>4}{RESET}  {FG['yel']}{tag[:30]:<30}{RESET} "
+                f"{FG['cyan']}x{count:<4}{RESET} {FG['dim']}{sample[:20]}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}D{RESET}=dismiss  {FG['cyan']}Q{RESET}=back"
+
+    async def _dismiss(ui, row):
+        rid = row[0]
+        with _app().app_context():
+            r = BadAreaLog.query.get(rid)
+            if r:
+                db.session.delete(r)
+                db.session.commit()
+
+    await self._sysop_record_list(
+        'Bad Areas (unrecognized tags)', _fetch_rows, render_row, render_hint_extra,
+        actions={'D': _dismiss},
+        empty_msg='No bad-area reports.')
+BBSMenuUI.sysop_bad_areas = _sysop_bad_areas
+
+
+async def _sysop_echomail(self):
+    """Echomail/Hub sub-menu: Networks/Areas, QWK Node Requests, Bad Areas.
+
+    Deliberately out of scope: full NetworkJoinRequest applicant approval
+    (creates multiple node types + emails credentials -- web-only) and
+    BinkP/QWK hub peer node CRUD (many fields, edit on web).
+    """
+    from .ansi_ui import banner, FG, RESET, ui_width
+    # No hotkey letters shown/handled here -- _rss_lightbar reserves 'Q'
+    # itself as the universal quit key, so a displayed "[Q]" hotkey would
+    # be misleading (pressing Q always exits, never opens a row). Enter
+    # + arrow navigation only, same convention as _ebook_pick_from_list.
+    rows = [
+        ('Networks / Areas', self.sysop_echomail_networks),
+        ('QWK Node Requests', self.sysop_qwk_requests),
+        ('Bad Areas', self.sysop_bad_areas),
+    ]
+
+    async def render_header():
+        await self.session.write(banner('Echomail / Hub', ui_width(self.session)))
+
+    def render_row(idx, row, selected):
+        label, _fn = row
+        return f"  {FG['grn']}{idx+1}. {label}{RESET}"
+
+    def render_hint(sel, total):
+        return (f"  {FG['cyan']}{sel+1}/{total}{RESET} {FG['cyan']}Enter{RESET}=open  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    while True:
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] == 'quit':
+            return
+        elif result[0] == 'enter':
+            await rows[result[1]][1]()
+BBSMenuUI.sysop_echomail = _sysop_echomail
+
+
+async def _sysop_games(self):
+    """Active game session list (disconnect) + TW2002 universe reset.
+
+    Door executable-path CRUD (Game.add/edit) is left web-only -- many
+    fields, low sysop-facing value from a terminal.
+    """
+    from anetbbs.models import db, GameSession, Game
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            sessions = (GameSession.query.filter_by(status='active')
+                       .order_by(GameSession.started_at.desc()).all())
+            out = []
+            for s in sessions:
+                game = Game.query.get(s.game_id)
+                out.append((s.id, game.name if game else '?', s.user_id,
+                            s.node_number, s.started_at))
+            return out
+
+    def render_row(idx, row, selected):
+        sid, gname, uid, node, started = row
+        ts = started.strftime('%H:%M') if started else '?'
+        return (f"  {FG['wht']}{sid:>4}{RESET}  {FG['grn']}{gname[:24]:<24}{RESET} "
+                f"node {FG['cyan']}{node}{RESET}  since {FG['dim']}{ts}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}D{RESET}=disconnect  {FG['cyan']}R{RESET}=reset TW2002 universe  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _disconnect(ui, row):
+        sid = row[0]
+        from anetbbs.games.door_runner import terminate_session
+        terminate_session(sid)
+        with _app().app_context():
+            gs = GameSession.query.get(sid)
+            if gs:
+                gs.status = 'completed'
+                gs.ended_at = datetime.utcnow()
+                db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Session terminated.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _reset_tw2(ui, row):
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to wipe the TW2002 universe: {RESET}")
+        if confirm != 'DELETE':
+            return
+        import os as _os
+        from anetbbs.web.games_admin import _tw2_db_dir, _tw2_legacy_db_dir, _tw2_game_ini
+        with _app().app_context():
+            wiped = []
+            for d in (_tw2_db_dir(), _tw2_legacy_db_dir()):
+                if not _os.path.isdir(d):
+                    continue
+                for f in _os.listdir(d):
+                    if f.endswith(('.json', '.json.tmp')):
+                        try:
+                            _os.remove(_os.path.join(d, f))
+                            wiped.append(f)
+                        except OSError:
+                            pass
+            ini = _tw2_game_ini()
+            if _os.path.isfile(ini):
+                try:
+                    _os.remove(ini)
+                    wiped.append(ini)
+                except OSError:
+                    pass
+        await ui.session.write(
+            f"\r\n{FG['grn']}Universe reset -- {len(wiped)} file(s) removed.{RESET}\r\n"
+            if wiped else f"\r\n{FG['dim']}Nothing to reset.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    # TW2002 reset doesn't depend on any session being selected (or even
+    # existing), so it can't be a row-relative _sysop_record_list action
+    # -- that helper's empty-state path returns immediately with no
+    # chance to press a hotkey when there are zero rows, which would
+    # make reset unreachable on an install with nobody currently playing.
+    # Offer it as its own prompt every time this screen is entered.
+    resp = (await self.session.read_line(
+        f"\r\n{FG['cyan']}R{RESET}=reset TW2002 universe, "
+        f"{FG['cyan']}Enter{RESET}=view active sessions: ") or '').strip().upper()
+    if resp == 'R':
+        await _reset_tw2(self, None)
+        return
+    await self._sysop_record_list(
+        'Active Game Sessions', _fetch_rows, render_row, render_hint_extra,
+        actions={'D': _disconnect, 'R': _reset_tw2},
+        empty_msg='No active game sessions.')
+BBSMenuUI.sysop_games = _sysop_games
+
+
+async def _sysop_wall(self):
+    from anetbbs.models import db, WallPost
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            posts = (WallPost.query.filter_by(is_deleted=False)
+                    .order_by(WallPost.created_at.desc()).limit(100).all())
+            return [(p.id, p.username, p.line1, p.origin_bbs) for p in posts]
+
+    def render_row(idx, row, selected):
+        pid, uname, line1, origin = row
+        tag = f" {FG['cyan']}[{origin}]{RESET}" if origin else ''
+        clean = re.sub(r'\|\d{2}', '', line1 or '')
+        return f"  {FG['wht']}{pid:>4}{RESET}  {FG['grn']}{uname[:15]:<15}{RESET}{tag} {clean[:40]}"
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}D{RESET}=delete  {FG['cyan']}Q{RESET}=back"
+
+    async def _delete(ui, row):
+        pid = row[0]
+        with _app().app_context():
+            p = WallPost.query.get(pid)
+            if p:
+                p.is_deleted = True
+                db.session.commit()
+
+    await self._sysop_record_list(
+        'Wall Moderation', _fetch_rows, render_row, render_hint_extra,
+        actions={'D': _delete},
+        empty_msg='No wall posts.')
+BBSMenuUI.sysop_wall = _sysop_wall
+
+
+async def _sysop_file_queue(self):
+    from anetbbs.models import db, FileQueueEntry, FileArea
+    from .ansi_ui import FG, RESET
+    import os as _os
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = (FileQueueEntry.query.filter_by(status='pending')
+                    .order_by(FileQueueEntry.created_at.asc()).all())
+            return [(e.id, e.filename, e.file_area_id, e.size_bytes or 0,
+                     e.user_id) for e in rows]
+
+    def render_row(idx, row, selected):
+        eid, fname, area_id, size, uid = row
+        kb = (size or 0) // 1024
+        return f"  {FG['wht']}{eid:>4}{RESET}  {FG['grn']}{fname[:40]:<40}{RESET} {FG['dim']}{kb:>6} KB{RESET}"
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}A{RESET}=approve  {FG['cyan']}X{RESET}=reject  {FG['cyan']}Q{RESET}=back"
+
+    async def _approve(ui, row):
+        eid = row[0]
+        with _app().app_context():
+            entry = FileQueueEntry.query.get(eid)
+            if not entry or entry.status != 'pending':
+                return
+            area = FileArea.query.get(entry.file_area_id)
+            if not area or not area.storage_path:
+                await ui.session.write(f"\r\n{FG['red']}Area has no storage path.{RESET}\r\n")
+                await ui.session.read_line("Press Enter...")
+                return
+            try:
+                _os.makedirs(area.storage_path, exist_ok=True)
+                safe_name = _os.path.basename(entry.filename)
+                dest = _os.path.join(area.storage_path, safe_name)
+                if _os.path.exists(dest):
+                    base, ext = _os.path.splitext(safe_name)
+                    dest = _os.path.join(area.storage_path, f'{base}-{entry.id}{ext}')
+                _os.rename(entry.quarantine_path, dest)
+            except OSError as exc:
+                await ui.session.write(f"\r\n{FG['red']}Approve failed: {exc}{RESET}\r\n")
+                await ui.session.read_line("Press Enter...")
+                return
+            entry.status = 'approved'
+            entry.reviewed_by_id = ui.session.user.get('id')
+            entry.reviewed_at = datetime.utcnow()
+            db.session.commit()
+            if area.network_id is not None:
+                try:
+                    from anetbbs.echomail.tic import hatch_local_file
+                    hatch_local_file(area, dest, safe_name, entry.description or '')
+                except Exception:
+                    logger.exception('hatch_local_file failed for %s', safe_name)
+        await ui.session.write(f"\r\n{FG['grn']}Approved.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _reject(ui, row):
+        eid = row[0]
+        reason = (await ui.session.read_line("\r\nReject reason: ") or '').strip()
+        with _app().app_context():
+            entry = FileQueueEntry.query.get(eid)
+            if not entry or entry.status != 'pending':
+                return
+            try:
+                if entry.quarantine_path and _os.path.isfile(entry.quarantine_path):
+                    _os.remove(entry.quarantine_path)
+            except OSError:
+                logger.exception('Failed to delete quarantine file')
+            entry.status = 'rejected'
+            entry.rejection_reason = reason or None
+            entry.reviewed_by_id = ui.session.user.get('id')
+            entry.reviewed_at = datetime.utcnow()
+            db.session.commit()
+
+    await self._sysop_record_list(
+        'File Upload Queue', _fetch_rows, render_row, render_hint_extra,
+        actions={'A': _approve, 'X': _reject},
+        empty_msg='No files pending review.')
+BBSMenuUI.sysop_file_queue = _sysop_file_queue
+
+
+def _schedule_to_text(sched):
+    kind = (sched or {}).get('kind', 'daily')
+    if kind == 'daily':
+        return f"daily {sched.get('time', '03:00')}"
+    if kind == 'hourly':
+        return f"hourly {int(sched.get('minute', 0)):02d}"
+    if kind == 'weekly':
+        return f"weekly {int(sched.get('day', 6))} {sched.get('time', '04:00')}"
+    if kind == 'interval':
+        return f"interval {sched.get('minutes', 60)}"
+    return f"unknown ({kind})"
+
+
+def _parse_schedule_text(text):
+    """Parse 'daily HH:MM' / 'hourly MM' / 'weekly D HH:MM' / 'interval N'.
+    Returns (schedule_dict, error_or_None)."""
+    parts = (text or '').strip().split()
+    if not parts:
+        return None, 'empty'
+    kind = parts[0].lower()
+    try:
+        if kind == 'daily' and len(parts) == 2:
+            return {'kind': 'daily', 'time': parts[1]}, None
+        if kind == 'hourly' and len(parts) == 2:
+            m = int(parts[1])
+            return ({'kind': 'hourly', 'minute': m}, None) if 0 <= m < 60 else (None, 'minute must be 0..59')
+        if kind == 'weekly' and len(parts) == 3:
+            d = int(parts[1])
+            return ({'kind': 'weekly', 'day': d, 'time': parts[2]}, None) if 0 <= d < 7 else (None, 'day must be 0..6 (0=Mon)')
+        if kind == 'interval' and len(parts) == 2:
+            n = int(parts[1])
+            return ({'kind': 'interval', 'minutes': n}, None) if n >= 1 else (None, 'minutes must be >= 1')
+    except ValueError:
+        return None, 'bad number'
+    return None, "format: 'daily HH:MM' / 'hourly MM' / 'weekly D HH:MM' / 'interval N'"
+
+
+async def _sysop_events(self):
+    """ScheduledEvent CRUD -- cron-style maintenance jobs (ScheduledEvent),
+    not the user-facing CalendarEvent (that stays web-only)."""
+    import json as _json
+    from anetbbs.models import db, ScheduledEvent
+    from anetbbs.events.handlers import REGISTRY, HANDLER_META
+    from anetbbs.events.runner import fire
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            evs = ScheduledEvent.query.order_by(ScheduledEvent.name).all()
+            return [(e.id, e.name, e.handler_key, e.is_enabled,
+                     e.last_status or '-', e.schedule_json) for e in evs]
+
+    def render_row(idx, row, selected):
+        eid, name, hkey, enabled, status, _sched = row
+        mark = f"{FG['grn']}*{RESET}" if enabled else f"{FG['red']}X{RESET}"
+        st_color = FG['grn'] if status == 'ok' else (FG['red'] if status == 'fail' else FG['dim'])
+        label = HANDLER_META.get(hkey, (hkey, ''))[0]
+        return (f"  [{mark}] {FG['wht']}{eid:>3}{RESET}  {FG['grn']}{name[:26]:<26}{RESET} "
+                f"{FG['cyan']}{label[:22]:<22}{RESET} {st_color}{status}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle  {FG['cyan']}G{RESET}=run now  "
+                f"{FG['cyan']}N{RESET}=new  {FG['cyan']}X{RESET}=delete  "
+                f"{FG['cyan']}Enter{RESET}=edit  {FG['cyan']}Q{RESET}=back")
+
+    async def _toggle(ui, row):
+        eid = row[0]
+        with _app().app_context():
+            e = ScheduledEvent.query.get(eid)
+            if e:
+                e.is_enabled = not e.is_enabled
+                db.session.commit()
+
+    async def _run_now(ui, row):
+        eid, name = row[0], row[1]
+        app = _app()
+        with app.app_context():
+            ok, out = fire(app, eid)
+        await ui.session.write(
+            f"\r\n{FG['grn'] if ok else FG['red']}{'OK' if ok else 'FAILED'}{RESET}: "
+            f"{(out or '')[:300]}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _delete(ui, row):
+        eid, name = row[0], row[1]
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to remove '{name[:30]}': {RESET}")
+        if confirm == 'DELETE':
+            with _app().app_context():
+                e = ScheduledEvent.query.get(eid)
+                if e:
+                    db.session.delete(e)
+                    db.session.commit()
+
+    async def _pick_handler(ui):
+        keys = list(HANDLER_META.keys())
+        rows = [(k, HANDLER_META[k][0], HANDLER_META[k][1]) for k in keys]
+
+        async def render_header():
+            from .ansi_ui import banner, ui_width
+            await ui.session.write(banner('Pick a Handler', ui_width(ui.session)))
+
+        def render_row2(idx, row, selected):
+            k, label, desc = row
+            return f"  {FG['grn']}{label[:28]:<28}{RESET} {FG['dim']}{desc[:40]}{RESET}"
+
+        def render_hint2(sel, total):
+            return f"  {FG['cyan']}{sel+1}/{total}{RESET} {FG['cyan']}Enter{RESET}=pick  {FG['cyan']}Q{RESET}=cancel"
+
+        result = await ui._rss_lightbar(rows, render_header, render_row2, render_hint2)
+        if result[0] == 'enter':
+            return rows[result[1]][0]
+        return None
+
+    async def _new_or_edit(ui, row):
+        eid = row[0] if row else None
+        with _app().app_context():
+            e = ScheduledEvent.query.get(eid) if eid else None
+            cur_name = e.name if e else ''
+            cur_hkey = e.handler_key if e else ''
+            cur_sched = _json.loads(e.schedule_json) if e else {'kind': 'daily', 'time': '03:00'}
+            cur_params = e.params_json if e else '{}'
+
+        name = (await ui.session.read_line(
+            f"Name [{cur_name}]: ") or '').strip() or cur_name
+        if not name:
+            return
+        handler_key = await _pick_handler(ui)
+        if not handler_key:
+            handler_key = cur_hkey
+        if not handler_key or handler_key not in REGISTRY:
+            await ui.session.write(f"\r\n{FG['red']}A handler is required.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        sched_text = (await ui.session.read_line(
+            f"Schedule [{_schedule_to_text(cur_sched)}]: ") or '').strip()
+        sched, err = _parse_schedule_text(sched_text) if sched_text else (cur_sched, None)
+        if err:
+            await ui.session.write(f"\r\n{FG['red']}{err}{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        params_text = (await ui.session.read_line(
+            f"Params JSON [{cur_params}]: ") or '').strip() or cur_params
+        try:
+            parsed = _json.loads(params_text or '{}')
+            if not isinstance(parsed, dict):
+                raise ValueError
+        except (ValueError, _json.JSONDecodeError):
+            await ui.session.write(f"\r\n{FG['red']}Params must be a JSON object.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        with _app().app_context():
+            if eid:
+                e = ScheduledEvent.query.get(eid)
+            else:
+                e = ScheduledEvent(is_enabled=True)
+                db.session.add(e)
+            e.name = name[:120]
+            e.handler_key = handler_key
+            e.schedule_json = _json.dumps(sched)
+            e.params_json = _json.dumps(parsed)
+            db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Saved.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Scheduled Events', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'G': _run_now, 'X': _delete,
+                 'N': lambda ui, row: _new_or_edit(ui, None),
+                 'ENTER': _new_or_edit},
+        empty_msg='No scheduled events. Press N to create one.')
+BBSMenuUI.sysop_events = _sysop_events
+
+
+async def _sysop_rss_admin(self):
+    from anetbbs.models import db, RssFeed
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            feeds = RssFeed.query.order_by(RssFeed.sort_order, RssFeed.name).all()
+            return [(f.id, f.name, f.url, f.category, f.is_active) for f in feeds]
+
+    def render_row(idx, row, selected):
+        fid, name, url, cat, active = row
+        mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        return f"  [{mark}] {FG['wht']}{fid:>3}{RESET}  {FG['grn']}{name[:28]:<28}{RESET} {FG['dim']}{cat}{RESET}"
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle  {FG['cyan']}F{RESET}=refresh now  "
+                f"{FG['cyan']}N{RESET}=new  {FG['cyan']}X{RESET}=delete  "
+                f"{FG['cyan']}Enter{RESET}=edit  {FG['cyan']}Q{RESET}=back")
+
+    async def _toggle(ui, row):
+        fid = row[0]
+        with _app().app_context():
+            f = RssFeed.query.get(fid)
+            if f:
+                f.is_active = not f.is_active
+                db.session.commit()
+
+    async def _refresh(ui, row):
+        fid = row[0]
+        # _import_one_feed() pushes its own app_context internally --
+        # don't wrap it in another one here.
+        from anetbbs.rss.poller import _import_one_feed
+        try:
+            n = _import_one_feed(_app(), fid)
+        except Exception as exc:
+            await ui.session.write(f"\r\n{FG['red']}Refresh failed: {exc}{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        await ui.session.write(f"\r\n{FG['grn']}{n} new item(s) fetched.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _delete(ui, row):
+        fid, name = row[0], row[1]
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to remove '{name[:30]}': {RESET}")
+        if confirm == 'DELETE':
+            with _app().app_context():
+                f = RssFeed.query.get(fid)
+                if f:
+                    db.session.delete(f)
+                    db.session.commit()
+
+    async def _new_or_edit(ui, row):
+        fid = row[0] if row else None
+        with _app().app_context():
+            f = RssFeed.query.get(fid) if fid else None
+            cur_name, cur_url = (f.name, f.url) if f else ('', '')
+            cur_cat = f.category if f else 'general'
+
+        name = (await ui.session.read_line(f"Name [{cur_name}]: ") or '').strip() or cur_name
+        url = (await ui.session.read_line(f"Feed URL [{cur_url}]: ") or '').strip() or cur_url
+        if not name or not url:
+            await ui.session.write(f"\r\n{FG['red']}Name and URL are required.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        cat = (await ui.session.read_line(f"Category [{cur_cat}]: ") or '').strip() or cur_cat
+        with _app().app_context():
+            if not fid and RssFeed.query.filter_by(url=url).first():
+                await ui.session.write(f"\r\n{FG['red']}That URL is already subscribed.{RESET}\r\n")
+                await ui.session.read_line("Press Enter...")
+                return
+            if fid:
+                f = RssFeed.query.get(fid)
+            else:
+                f = RssFeed(url=url, is_active=True)
+                db.session.add(f)
+            f.name = name[:120]
+            f.url = url[:500]
+            f.category = cat[:60]
+            db.session.commit()
+            new_id = f.id
+        await ui.session.write(f"\r\n{FG['grn']}Saved.{RESET}\r\n")
+        try:
+            from anetbbs.rss.poller import _import_one_feed
+            _import_one_feed(_app(), new_id)
+        except Exception:
+            pass
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'RSS Feeds', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'F': _refresh, 'X': _delete,
+                 'N': lambda ui, row: _new_or_edit(ui, None),
+                 'ENTER': _new_or_edit},
+        empty_msg='No RSS feeds yet. Press N to add one.')
+BBSMenuUI.sysop_rss_admin = _sysop_rss_admin
+
+
+async def _sysop_login_modules(self):
+    from anetbbs.models import db, LoginModule
+    from .ansi_ui import FG, RESET
+
+    _MODULE_TYPES = ('wall', 'ansi', 'shell', 'door_native', 'door_python')
+
+    def _fetch_rows():
+        with _app().app_context():
+            mods = LoginModule.query.order_by(LoginModule.sort_order).all()
+            return [(m.id, m.name, m.event_type, m.module_type, m.is_active)
+                    for m in mods]
+
+    def render_row(idx, row, selected):
+        mid, name, ev, mtype, active = row
+        mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        return (f"  [{mark}] {FG['wht']}{mid:>3}{RESET}  {FG['grn']}{name[:24]:<24}{RESET} "
+                f"{FG['cyan']}{ev:<7}{RESET} {FG['dim']}{mtype}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle  {FG['cyan']}N{RESET}=new  "
+                f"{FG['cyan']}X{RESET}=delete  {FG['cyan']}Enter{RESET}=edit  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _toggle(ui, row):
+        mid = row[0]
+        with _app().app_context():
+            m = LoginModule.query.get(mid)
+            if m:
+                m.is_active = not m.is_active
+                db.session.commit()
+
+    async def _delete(ui, row):
+        mid, name = row[0], row[1]
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to remove '{name[:30]}': {RESET}")
+        if confirm == 'DELETE':
+            with _app().app_context():
+                m = LoginModule.query.get(mid)
+                if m:
+                    db.session.delete(m)
+                    db.session.commit()
+
+    async def _new_or_edit(ui, row):
+        mid = row[0] if row else None
+        with _app().app_context():
+            m = LoginModule.query.get(mid) if mid else None
+            cur_name = m.name if m else ''
+            cur_ev = m.event_type if m else 'logon'
+            cur_mtype = m.module_type if m else 'wall'
+            cur_params = m.params_json if m else '{}'
+
+        name = (await ui.session.read_line(f"Name [{cur_name}]: ") or '').strip() or cur_name
+        if not name:
+            return
+        ev = (await ui.session.read_line(
+            f"Event type [logon/logoff] [{cur_ev}]: ") or '').strip().lower() or cur_ev
+        if ev not in ('logon', 'logoff'):
+            await ui.session.write(f"\r\n{FG['red']}Must be logon or logoff.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        mtype = (await ui.session.read_line(
+            f"Module type [{'/'.join(_MODULE_TYPES)}] [{cur_mtype}]: ")
+            or '').strip().lower() or cur_mtype
+        if mtype not in _MODULE_TYPES:
+            await ui.session.write(f"\r\n{FG['red']}Unknown module type.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        params = (await ui.session.read_line(
+            f"Params JSON [{cur_params}]: ") or '').strip() or cur_params
+        import json as _json
+        try:
+            parsed = _json.loads(params or '{}')
+            if not isinstance(parsed, dict):
+                raise ValueError
+        except (ValueError, _json.JSONDecodeError):
+            await ui.session.write(f"\r\n{FG['red']}Params must be a JSON object.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        with _app().app_context():
+            if mid:
+                m = LoginModule.query.get(mid)
+            else:
+                m = LoginModule(is_active=True)
+                db.session.add(m)
+            m.name = name[:100]
+            m.event_type = ev
+            m.module_type = mtype
+            m.params_json = _json.dumps(parsed)
+            db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Saved.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Login/Logoff Modules', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'X': _delete,
+                 'N': lambda ui, row: _new_or_edit(ui, None),
+                 'ENTER': _new_or_edit},
+        empty_msg='No login/logoff modules yet. Press N to add one.')
+BBSMenuUI.sysop_login_modules = _sysop_login_modules
+
+
+_WEBHOOK_EVENTS = ('shout', 'post', 'bulletin', 'login', 'achievement',
+                   'broadcast', 'sysop_page', 'echomail')
+
+
+async def _sysop_webhooks(self):
+    from anetbbs.models import db, Webhook
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            hooks = Webhook.query.order_by(Webhook.name).all()
+            return [(w.id, w.name, w.event, w.url, w.is_active, w.last_status)
+                    for w in hooks]
+
+    def render_row(idx, row, selected):
+        wid, name, event, url, active, last_status = row
+        mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        st = f"{FG['dim']}{last_status or '-'}{RESET}"
+        return (f"  [{mark}] {FG['wht']}{wid:>3}{RESET}  {FG['grn']}{name[:20]:<20}{RESET} "
+                f"{FG['cyan']}{event:<11}{RESET} {st}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle  {FG['cyan']}N{RESET}=new  "
+                f"{FG['cyan']}X{RESET}=delete  {FG['cyan']}Enter{RESET}=edit  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _toggle(ui, row):
+        wid = row[0]
+        with _app().app_context():
+            w = Webhook.query.get(wid)
+            if w:
+                w.is_active = not w.is_active
+                db.session.commit()
+
+    async def _delete(ui, row):
+        wid, name = row[0], row[1]
+        confirm = await ui.session.read_line(
+            f"\r\n{FG['red']}Type DELETE to remove '{name[:30]}': {RESET}")
+        if confirm == 'DELETE':
+            with _app().app_context():
+                w = Webhook.query.get(wid)
+                if w:
+                    db.session.delete(w)
+                    db.session.commit()
+
+    async def _new_or_edit(ui, row):
+        wid = row[0] if row else None
+        with _app().app_context():
+            w = Webhook.query.get(wid) if wid else None
+            cur_name = w.name if w else ''
+            cur_url = w.url if w else ''
+            cur_event = w.event if w else 'shout'
+            cur_secret = w.secret if w else ''
+
+        name = (await ui.session.read_line(f"Name [{cur_name}]: ") or '').strip() or cur_name
+        url = (await ui.session.read_line(f"POST URL [{cur_url}]: ") or '').strip() or cur_url
+        if not name or not url:
+            await ui.session.write(f"\r\n{FG['red']}Name and URL are required.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        event = (await ui.session.read_line(
+            f"Event [{'/'.join(_WEBHOOK_EVENTS)}] [{cur_event}]: ")
+            or '').strip().lower() or cur_event
+        if event not in _WEBHOOK_EVENTS:
+            await ui.session.write(f"\r\n{FG['red']}Unknown event type.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        secret = (await ui.session.read_line(
+            f"Bearer secret (blank = keep current): ") or '').strip() or cur_secret
+        with _app().app_context():
+            if wid:
+                w = Webhook.query.get(wid)
+            else:
+                w = Webhook(is_active=True)
+                db.session.add(w)
+            w.name = name[:120]
+            w.url = url[:500]
+            w.event = event
+            w.secret = secret[:120] if secret else None
+            db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Saved.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Webhooks', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'X': _delete,
+                 'N': lambda ui, row: _new_or_edit(ui, None),
+                 'ENTER': _new_or_edit},
+        empty_msg='No webhooks configured. Press N to add one.')
+BBSMenuUI.sysop_webhooks = _sysop_webhooks
+
+
+async def _sysop_broadcast_compose(self):
+    from anetbbs.models import db, SysopBroadcast
+    from .ansi_ui import banner, FG, RESET, ui_width
+    _w = ui_width(self.session)
+    await self.session.write('\x1b[2J\x1b[H')
+    await self.session.write(banner('Sysop Broadcast', _w))
+    text = (await self.session.read_line(
+        f"  {FG['cyan']}One-line broadcast:{RESET} ") or '').strip()
+    if not text:
+        return
+    ttl = (await self.session.read_line(
+        f"  {FG['cyan']}Expires in N minutes (blank = never):{RESET} ") or '').strip()
+    expires = None
+    if ttl:
+        try:
+            expires = datetime.utcnow() + timedelta(minutes=int(ttl))
+        except ValueError:
+            pass
+    with _app().app_context():
+        bcast = SysopBroadcast(sender_id=self.session.user.get('id'),
+                               text=text[:2000], expires_at=expires)
+        db.session.add(bcast)
+        db.session.commit()
+        bcast_id, created = bcast.id, bcast.created_at
+    # Live push to web sysop tabs, mirroring admin.py:broadcast() -- only
+    # actually delivers if this process also has web_app/socketio loaded,
+    # same guard sysop_paging.py uses.
+    try:
+        import sys as _sys
+        if 'anetbbs.web_app' in _sys.modules:
+            socketio = _sys.modules['anetbbs.web_app'].socketio
+            socketio.emit('sysop_broadcast', {
+                'id': bcast_id, 'sender': self.session.user.get('username'),
+                'text': text, 'when': created.isoformat() + 'Z'}, namespace='/')
+    except Exception:
+        pass
+    await self.session.write(f"\r\n{FG['grn']}Broadcast sent.{RESET}\r\n")
+    await self.session.read_line("Press Enter...")
+BBSMenuUI.sysop_broadcast_compose = _sysop_broadcast_compose
+
+
+async def _sysop_motd(self):
+    from anetbbs.models import db, MotdEntry
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = MotdEntry.query.order_by(MotdEntry.id).all()
+            return [(m.id, m.text, m.weight, m.is_active) for m in rows]
+
+    def render_row(idx, row, selected):
+        mid, text, weight, active = row
+        mark = f"{FG['grn']}*{RESET}" if active else f"{FG['red']}X{RESET}"
+        clean = (text or '').replace('\n', ' ')
+        return f"  [{mark}] {FG['wht']}{mid:>3}{RESET}  w{weight}  {FG['grn']}{clean[:45]}{RESET}"
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}T{RESET}=toggle  {FG['cyan']}N{RESET}=new  "
+                f"{FG['cyan']}X{RESET}=delete  {FG['cyan']}Q{RESET}=back")
+
+    async def _toggle(ui, row):
+        mid = row[0]
+        with _app().app_context():
+            m = MotdEntry.query.get(mid)
+            if m:
+                m.is_active = not m.is_active
+                db.session.commit()
+
+    async def _delete(ui, row):
+        mid = row[0]
+        with _app().app_context():
+            m = MotdEntry.query.get(mid)
+            if m:
+                db.session.delete(m)
+                db.session.commit()
+
+    async def _new(ui, row):
+        text = (await ui.session.read_line("New MOTD text: ") or '').strip()
+        if not text:
+            return
+        with _app().app_context():
+            db.session.add(MotdEntry(text=text[:2000], weight=1, is_active=True))
+            db.session.commit()
+
+    await self._sysop_record_list(
+        'Message of the Day', _fetch_rows, render_row, render_hint_extra,
+        actions={'T': _toggle, 'X': _delete,
+                 'N': lambda ui, row: _new(ui, None)},
+        empty_msg='No MOTD entries yet. Press N to add one.')
+BBSMenuUI.sysop_motd = _sysop_motd
+
+
+async def _sysop_pages(self):
+    from anetbbs.models import db, SysopPage
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = (SysopPage.query.order_by(SysopPage.created_at.desc())
+                   .limit(100).all())
+            return [(p.id, p.user_id, p.service, p.message or '', p.answered,
+                     p.created_at) for p in rows]
+
+    def render_row(idx, row, selected):
+        pid, uid, service, msg, answered, created = row
+        mark = f"{FG['dim']}done{RESET}" if answered else f"{FG['yel']}NEW{RESET}"
+        ts = created.strftime('%m-%d %H:%M') if created else '?'
+        clean = (msg or '').replace('\n', ' ')
+        return f"  [{mark}] {FG['wht']}{pid:>4}{RESET}  {ts}  {FG['grn']}{clean[:40]}{RESET}"
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}A{RESET}=mark answered  {FG['cyan']}R{RESET}=reply  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _mark_answered(ui, row):
+        pid = row[0]
+        with _app().app_context():
+            p = SysopPage.query.get(pid)
+            if p:
+                p.answered = True
+                p.answered_at = datetime.utcnow()
+                db.session.commit()
+
+    async def _reply(ui, row):
+        pid, uid = row[0], row[1]
+        if not uid:
+            await ui.session.write(f"\r\n{FG['red']}No user to reply to.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        text = (await ui.session.read_line("Reply: ") or '').strip()
+        if not text:
+            return
+        from .sysop_paging import push_message
+        push_message(uid, ui.session.user.get('username') or 'sysop', text)
+        with _app().app_context():
+            p = SysopPage.query.get(pid)
+            if p:
+                p.answered = True
+                p.answered_at = datetime.utcnow()
+                db.session.commit()
+        await ui.session.write(f"\r\n{FG['grn']}Reply queued.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Sysop Pages', _fetch_rows, render_row, render_hint_extra,
+        actions={'A': _mark_answered, 'R': _reply},
+        empty_msg='No sysop pages.')
+BBSMenuUI.sysop_pages = _sysop_pages
+
+
+async def _sysop_notifications(self):
+    """Notifications sub-menu: Webhooks, Broadcast, MOTD, Sysop Pages."""
+    from .ansi_ui import banner, FG, RESET, ui_width
+    rows = [
+        ('Webhooks',            self.sysop_webhooks),
+        ('Send Broadcast',      self.sysop_broadcast_compose),
+        ('Message of the Day',  self.sysop_motd),
+        ('Sysop Pages',         self.sysop_pages),
+    ]
+
+    async def render_header():
+        await self.session.write(banner('Notifications', ui_width(self.session)))
+
+    def render_row(idx, row, selected):
+        label, _fn = row
+        return f"  {FG['grn']}{idx+1}. {label}{RESET}"
+
+    def render_hint(sel, total):
+        return (f"  {FG['cyan']}{sel+1}/{total}{RESET} {FG['cyan']}Enter{RESET}=open  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    while True:
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] == 'quit':
+            return
+        elif result[0] == 'enter':
+            await rows[result[1]][1]()
+BBSMenuUI.sysop_notifications = _sysop_notifications
+
+
+async def _sysop_registry(self):
+    """Registry/Peers sub-menu: RegistryEntry approve/reject (hub-mode
+    federation applicants) + PeerBbs probe-now."""
+    from anetbbs.models import db, RegistryEntry, PeerBbs
+    from .ansi_ui import banner, FG, RESET, ui_width
+
+    async def _registry_entries(ui):
+        def _fetch_rows():
+            with _app().app_context():
+                rows = (RegistryEntry.query
+                       .order_by(RegistryEntry.is_approved.asc(),
+                                RegistryEntry.registered_at.desc())
+                       .limit(100).all())
+                return [(r.id, r.host, r.name, r.is_verified, r.is_approved,
+                         r.is_listed) for r in rows]
+
+        def render_row(idx, row, selected):
+            rid, host, name, verified, approved, listed = row
+            v = f"{FG['grn']}V{RESET}" if verified else f"{FG['gry']}-{RESET}"
+            a = f"{FG['grn']}A{RESET}" if approved else f"{FG['gry']}-{RESET}"
+            return f"  [{v}{a}] {FG['wht']}{rid:>4}{RESET}  {FG['grn']}{host[:28]:<28}{RESET} {FG['dim']}{name[:20]}{RESET}"
+
+        def render_hint_extra(sel, total):
+            return (f"{FG['cyan']}A{RESET}=approve  {FG['cyan']}X{RESET}=reject  "
+                    f"{FG['cyan']}D{RESET}=delete  {FG['cyan']}Q{RESET}=back")
+
+        async def _approve(u, row):
+            rid = row[0]
+            with _app().app_context():
+                r = RegistryEntry.query.get(rid)
+                if r:
+                    r.is_approved = True
+                    r.is_listed = r.is_verified and r.is_approved and r.is_active
+                    db.session.commit()
+
+        async def _reject(u, row):
+            rid = row[0]
+            with _app().app_context():
+                r = RegistryEntry.query.get(rid)
+                if r:
+                    r.is_approved = False
+                    r.is_listed = False
+                    db.session.commit()
+
+        async def _delete(u, row):
+            rid, host = row[0], row[1]
+            confirm = await u.session.read_line(
+                f"\r\n{FG['red']}Type DELETE to remove '{host}': {RESET}")
+            if confirm == 'DELETE':
+                with _app().app_context():
+                    r = RegistryEntry.query.get(rid)
+                    if r:
+                        db.session.delete(r)
+                        db.session.commit()
+
+        await ui._sysop_record_list(
+            'Registry Entries', _fetch_rows, render_row, render_hint_extra,
+            actions={'A': _approve, 'X': _reject, 'D': _delete},
+            empty_msg='No registry entries (this install may not be a hub).')
+
+    async def _peer_probes(ui):
+        def _fetch_rows():
+            with _app().app_context():
+                peers = PeerBbs.query.order_by(PeerBbs.name).all()
+                return [(p.id, p.name, p.hostname, p.online_count, p.last_error)
+                        for p in peers]
+
+        def render_row(idx, row, selected):
+            pid, name, host, online, last_err = row
+            err = f" {FG['red']}!{RESET}" if last_err else ''
+            return (f"  {FG['wht']}{pid:>4}{RESET}  {FG['grn']}{name[:24]:<24}{RESET} "
+                    f"{FG['dim']}{host[:24]}{RESET} {FG['cyan']}{online} online{RESET}{err}")
+
+        def render_hint_extra(sel, total):
+            return f"{FG['cyan']}P{RESET}=probe now  {FG['cyan']}Q{RESET}=back"
+
+        async def _probe(u, row):
+            pid, name, host = row[0], row[1], row[2]
+            from anetbbs.web.peer_health import _systat_probe
+            with _app().app_context():
+                p = PeerBbs.query.get(pid)
+                if not p:
+                    return
+                ok, ms, detail = _systat_probe(p.hostname, p.finger_port or 79)
+                p.last_polled_at = datetime.utcnow()
+                p.last_response = detail if ok else None
+                p.last_error = None if ok else detail
+                db.session.commit()
+            await u.session.write(
+                f"\r\n{FG['grn'] if ok else FG['red']}"
+                f"{'OK' if ok else 'FAILED'} ({ms:.0f}ms): {detail[:120]}{RESET}\r\n")
+            await u.session.read_line("Press Enter...")
+
+        await ui._sysop_record_list(
+            'Peer BBSes', _fetch_rows, render_row, render_hint_extra,
+            actions={'P': _probe},
+            empty_msg='No peer BBSes configured.')
+
+    rows = [
+        ('Registry Entries (federation applicants)', _registry_entries),
+        ('Peer BBSes (probe now)',                    _peer_probes),
+    ]
+
+    async def render_header():
+        await self.session.write(banner('Registry / Peers', ui_width(self.session)))
+
+    def render_row(idx, row, selected):
+        label, _fn = row
+        return f"  {FG['grn']}{idx+1}. {label}{RESET}"
+
+    def render_hint(sel, total):
+        return (f"  {FG['cyan']}{sel+1}/{total}{RESET} {FG['cyan']}Enter{RESET}=open  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    while True:
+        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+        if result[0] == 'quit':
+            return
+        elif result[0] == 'enter':
+            await rows[result[1]][1](self)
+BBSMenuUI.sysop_registry = _sysop_registry
+
+
+async def _sysop_callers(self):
+    """Read-only Last-Callers view + the one simple settings toggle
+    (hide_sysop). InterBBS enable/network-picker stays web-only -- it
+    also creates a ScheduledEvent + echomail area as a side effect,
+    more than a single terminal toggle should silently trigger."""
+    from anetbbs.models import CallerLog
+    from .ansi_ui import FG, RESET
+
+    def _fetch_rows():
+        with _app().app_context():
+            rows = (CallerLog.query.order_by(CallerLog.started_at.desc())
+                   .limit(200).all())
+            return [(c.id, c.username or '?', c.service or '?',
+                     c.started_at, c.origin_bbs) for c in rows]
+
+    def render_row(idx, row, selected):
+        cid, uname, service, started, origin = row
+        ts = started.strftime('%m-%d %H:%M') if started else '?'
+        tag = f" {FG['cyan']}[{origin}]{RESET}" if origin else ''
+        return f"  {FG['dim']}{ts}{RESET}  {FG['grn']}{uname[:18]:<18}{RESET} {FG['gry']}{service}{RESET}{tag}"
+
+    def render_hint_extra(sel, total):
+        return f"{FG['cyan']}H{RESET}=toggle hide-sysop setting  {FG['cyan']}Q{RESET}=back"
+
+    async def _toggle_hide_sysop(ui, row):
+        import os
+        from anetbbs.web.admin import _write_env_keys
+        app = _app()
+        with app.app_context():
+            cur = bool(app.config.get('LASTCALLERS_HIDE_SYSOP', False))
+            app.config['LASTCALLERS_HIDE_SYSOP'] = not cur
+            env_path = os.path.abspath(os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                '..', '.env'))
+            try:
+                _write_env_keys(env_path, {
+                    'LASTCALLERS_HIDE_SYSOP': 'true' if not cur else 'false'})
+            except Exception:
+                pass
+        await ui.session.write(
+            f"\r\n{FG['grn']}Hide-sysop is now {'ON' if not cur else 'OFF'}.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Caller Log', _fetch_rows, render_row, render_hint_extra,
+        actions={'H': _toggle_hide_sysop},
+        empty_msg='No caller log entries yet.')
+BBSMenuUI.sysop_callers = _sysop_callers
 
 
 async def _sysop_status(self):
@@ -3922,6 +5604,95 @@ async def _sysop_status(self):
 BBSMenuUI.sysop_status = _sysop_status
 
 
+async def _sysop_node_monitor(self):
+    """Scrollable live node monitor (Synchronet UNIX-Monitor style).
+
+    Data source is NodeActivity, not multinode._NODES -- the latter is
+    an in-process dict invisible across the telnet vs web process split,
+    while NodeActivity is DB-backed and already the source the web
+    NodeSpy panel (anetbbs/web/control.py:nodespy_json) uses. Kick uses
+    the same DB flag NodeSpy's kick button sets (kick_requested/
+    kick_reason), picked up by the existing 5s watchdog in
+    core/session.py -- no session.py changes needed. Message uses
+    sysop_paging.push_message directly since both ends of a "message a
+    node" action are guaranteed to be terminal sessions in this same
+    process (unlike a web-originated page reply, which is not).
+    """
+    from anetbbs.models import db, NodeActivity, UserActivity
+    from .ansi_ui import FG, RESET, BOLD
+
+    def _fetch_rows():
+        with _app().app_context():
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            live = (NodeActivity.query
+                    .filter(NodeActivity.last_seen >= cutoff)
+                    .order_by(NodeActivity.slot).all())
+            return [(r.slot, r.user_id, r.username or '?', r.protocol or '?',
+                     r.page or '', r.action or '', r.last_seen)
+                    for r in live]
+
+    def render_row(idx, row, selected):
+        slot, _uid, uname, proto, page, action, last_seen = row
+        idle = datetime.utcnow() - last_seen
+        secs = max(0, int(idle.total_seconds()))
+        idle_s = f"{secs // 60}:{secs % 60:02d}"
+        return (f"  {FG['wht']}{slot:>3}{RESET}  "
+                f"{FG['grn']}{uname[:15]:<15}{RESET} "
+                f"{FG['dim']}{proto[:6]:<6}{RESET} "
+                f"{FG['cyan']}{page[:11]:<11}{RESET} "
+                f"{FG['yel']}{action[:24]:<24}{RESET} "
+                f"{FG['gry']}{idle_s:>6}{RESET}")
+
+    def render_hint_extra(sel, total):
+        return (f"{FG['cyan']}K{RESET}=kick  {FG['cyan']}M{RESET}=message  "
+                f"{FG['cyan']}Q{RESET}=back")
+
+    async def _do_kick(ui, row):
+        slot, uid, uname, *_ = row
+        reason = (await ui.session.read_line(
+            f"\r\nKick reason [Disconnected by sysop]: ") or '').strip()
+        reason = (reason or 'Disconnected by sysop')[:200]
+        with _app().app_context():
+            live = NodeActivity.query.filter_by(slot=slot).first()
+            if live:
+                live.kick_requested = True
+                live.kick_reason = reason
+                db.session.add(UserActivity(
+                    user_id=ui.session.user.get('id'),
+                    activity_type='kick_node',
+                    details=f'slot {slot} ({uname}): {reason}',
+                    service=ui.session.user.get('service') or 'telnet'))
+                db.session.commit()
+                await ui.session.write(
+                    f"\r\n{FG['grn']}Kick requested for {uname} "
+                    f"(slot {slot}) -- disconnects within ~5s.{RESET}\r\n")
+            else:
+                await ui.session.write(
+                    f"\r\n{FG['red']}Node no longer live.{RESET}\r\n")
+        await ui.session.read_line("Press Enter...")
+
+    async def _do_message(ui, row):
+        slot, uid, uname, *_ = row
+        if not uid:
+            await ui.session.write(
+                f"\r\n{FG['red']}Can't message an unauthenticated node.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+            return
+        text = (await ui.session.read_line(
+            f"\r\nMessage to {uname} (slot {slot}): ") or '').strip()
+        if text:
+            from .sysop_paging import push_message
+            push_message(uid, ui.session.user.get('username') or 'sysop', text)
+            await ui.session.write(f"\r\n{FG['grn']}Sent.{RESET}\r\n")
+            await ui.session.read_line("Press Enter...")
+
+    await self._sysop_record_list(
+        'Node Monitor', _fetch_rows, render_row, render_hint_extra,
+        actions={'K': _do_kick, 'M': _do_message},
+        empty_msg='No live nodes right now.')
+BBSMenuUI.sysop_node_monitor = _sysop_node_monitor
+
+
 # ---------------------------------------------------------------------------
 # Re-wire the main BBS menu to add Send PM, Compose Echomail, Edit profile,
 # Change password, and Sysop menu (admin-gated).
@@ -3929,6 +5700,21 @@ BBSMenuUI.sysop_status = _sysop_status
 
 async def _show_main_v2(self):
     while True:
+        # Drain any sysop replies/Node-Monitor messages before drawing the
+        # next menu -- same block as menu_engine.py:run_menu(). Installs
+        # with an empty BbsMenu table fall back to this loop instead of
+        # run_menu(), and without this they'd never see a pushed message.
+        try:
+            from .sysop_paging import pop_messages
+            pending = pop_messages(self.session.user.get('id'))
+            if pending:
+                await self.session.write('\r\n\x1b[1;31m=== Sysop Reply ===\x1b[0m\r\n')
+                for m in pending:
+                    await self.session.write(
+                        f'\x1b[31m[{m["sender"]}]\x1b[0m {m["text"]}\r\n')
+                await self.session.write('\r\n')
+        except Exception:
+            pass
         is_sysop = self.session.user.get('is_admin')
         sysop_line = "║  S. Sysop tools                          ║\r\n" if is_sysop else ""
         with _app().app_context():
