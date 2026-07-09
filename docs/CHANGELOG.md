@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.65`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.67`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.67 — Fix netmail import crash on duplicate-check (CI-caught) (July 2026)
+
+- FIX (caught by GitHub Actions CI, not local testing — no Flask available in the sandbox this was built in): `anetbbs/echomail/poller.py`'s `_import_netmail()` — used whenever inbound netmail is imported via the poll-response path — queried `NetmailMessage.query.filter_by(msg_id=msg_id)` for its duplicate-message check, but the model's actual column is `msgid` (no underscore, confirmed by the very next line's constructor call using it correctly). This raised `AttributeError` unconditionally any time an inbound netmail carried a MSGID kludge — which is virtually all real FTN netmail — meaning this function crashed before importing the message at all, on this specific path, whenever a MSGID was present. Pre-existing bug (not introduced by v1.0b2.65's notification fix, which touched the same function but not this line) — first actually exercised by the new regression test added for that release, and the crash only surfaced once that test ran somewhere with pytest/Flask installed (the CI Docker image), not in this sandbox. Fixed to query the correct `msgid` column. Full local test suite (434 tests) now verified green in a real venv with Flask installed, not just `py_compile`.
+
+## v1.0b2.66 — ClamAV scan timeout now sysop-configurable (July 2026)
+
+- FEATURE: the ClamAV scan timeout (how long `anetbbs/features/virus_scan.py`'s `scan_path()` waits for `clamscan` on one file before giving up and letting it through) was a hardcoded 30 seconds with no way to change it short of editing source. Added `CLAMSCAN_TIMEOUT` — a new field at Admin → Settings (and the matching env var), defaulting to 60 seconds, same pattern as the existing `IDLE_TIMEOUT_SECONDS`/`BOT_GATE_TIMEOUT` settings. Takes effect immediately on save, no service restart needed — every scan call site (per-upload scanning in the file areas and file-queue routes, plus the Admin → Bulk Virus Scan page) already re-reads it per call. 7 new tests in `tests/test_clamscan_timeout.py`.
 
 ## v1.0b2.65 — Fix missing notification for inbound netmail (July 2026)
 

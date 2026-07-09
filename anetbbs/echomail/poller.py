@@ -617,7 +617,14 @@ def _import_netmail(network, msg_data: dict) -> int:
 
     msg_id = msg_data.get('msg_id') or ''
     if msg_id:
-        existing = NetmailMessage.query.filter_by(msg_id=msg_id).first()
+        # NetmailMessage's actual column is `msgid` (no underscore) --
+        # filter_by(msg_id=...) raised AttributeError unconditionally
+        # whenever msg_id was truthy (i.e. on essentially every real
+        # inbound netmail carrying a MSGID kludge), crashing this
+        # function before it ever got to import the message. Pre-
+        # existing bug, caught by CI (not local testing -- no Flask in
+        # this sandbox) when adding netmail notification support.
+        existing = NetmailMessage.query.filter_by(msgid=msg_id).first()
         if existing:
             return 0
 

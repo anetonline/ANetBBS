@@ -1,3 +1,15 @@
+# ANetBBS v1.0b2.67 — Fix netmail import crash on duplicate-check (CI-caught) (July 2026)
+
+- FIX: inbound netmail import (`_import_netmail`, poll-response path) crashed with `AttributeError` on any message carrying a MSGID kludge — virtually all real FTN netmail — due to a duplicate-check query using the wrong column name (`msg_id` vs the model's actual `msgid`). Pre-existing bug, caught by GitHub Actions CI after the new netmail-notification tests actually exercised this path. Full local test suite (434 tests) now verified green in a real environment, not just syntax-checked.
+
+---
+
+# ANetBBS v1.0b2.66 — ClamAV scan timeout now sysop-configurable (July 2026)
+
+- FEATURE: the ClamAV scan timeout was a hardcoded 30 seconds. New `CLAMSCAN_TIMEOUT` field at Admin → Settings (default 60s), same pattern as the existing idle/bot-gate timeouts. Takes effect immediately, no restart needed. 7 new tests.
+
+---
+
 # ANetBBS v1.0b2.65 — Fix missing notification for inbound netmail (July 2026)
 
 - FIX: new inbound netmail never triggered a notification (web bell or terminal "You have new mail" banner). Two gaps: the poll-response import path resolved a recipient but never notified them, and the real-time BinkP listener path never resolved a recipient at all, so live-received netmail wasn't linked to a user account. Both paths now share one recipient-resolution helper and both notify correctly. 8 new tests.

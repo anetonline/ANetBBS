@@ -1079,6 +1079,7 @@ EDITABLE_SETTINGS = [
     ('RATIO_MIN', 'File ratio min (0.05 = 5%, 0 = off)', 'text', False),
     ('IDLE_TIMEOUT_SECONDS', 'Terminal idle timeout (sec, 0 = never)', 'text', True),
     ('BOT_GATE_TIMEOUT', 'Bot-gate timeout (sec) — pre-login challenge wait', 'text', True),
+    ('CLAMSCAN_TIMEOUT', 'ClamAV scan timeout (sec) per file', 'text', False),
     ('LOG_LEVEL', 'Log Level (DEBUG/INFO/WARNING/ERROR)', 'text', False),
     ('TELNET_ENABLED', 'Telnet Enabled (true/false)', 'text', True),
     ('TELNET_PORT', 'Telnet Port', 'text', True),

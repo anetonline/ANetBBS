@@ -169,7 +169,12 @@ class Config:
     # Idle disconnect for terminal menus (seconds). 0 = never idle out.
     # IRC/MRC are web features and unaffected.
     IDLE_TIMEOUT_SECONDS = int(os.environ.get('IDLE_TIMEOUT_SECONDS', '1800'))
-    
+    # ClamAV scan timeout (seconds) — how long anetbbs/features/virus_scan.py's
+    # scan_path() waits for `clamscan` on one file before giving up. On
+    # timeout the file passes through as clean (fail-open, same as a
+    # missing/uninstalled scanner) rather than being rejected.
+    CLAMSCAN_TIMEOUT = int(os.environ.get('CLAMSCAN_TIMEOUT', '60'))
+
     # Data directory
     DATA_DIR = os.path.join(BASE_DIR, 'data')
 

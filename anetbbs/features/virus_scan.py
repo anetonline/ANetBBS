@@ -26,8 +26,13 @@ ScanResult = namedtuple(
     ['infected', 'signature', 'message', 'scanner_available'])
 
 
-def scan_path(filepath, timeout=30):
+def scan_path(filepath, timeout=None):
     """Scan a file with the system clamscan (or whatever CLAMSCAN_PATH points to).
+
+    timeout defaults to the sysop-configurable CLAMSCAN_TIMEOUT setting
+    (Admin -> Settings, env var CLAMSCAN_TIMEOUT, default 60s) when
+    called from inside a Flask app context; falls back to a plain 60 if
+    called from somewhere without one (e.g. a standalone script).
 
     Returns a ScanResult with:
         infected           = True if a signature was matched
@@ -35,6 +40,13 @@ def scan_path(filepath, timeout=30):
         message            = human-readable status text
         scanner_available  = False if clamscan isn't installed
     """
+    if timeout is None:
+        try:
+            from flask import current_app
+            timeout = current_app.config.get('CLAMSCAN_TIMEOUT', 60)
+        except Exception:
+            timeout = 60
+
     scanner = os.environ.get('CLAMSCAN_PATH', 'clamscan')
     if not os.path.isfile(filepath):
         return ScanResult(False, '', 'file not found', True)
