@@ -23,7 +23,6 @@ Auth model:
   - Admins can lock, delete, rename slugs, and edit locked pages.
 """
 import difflib
-from functools import wraps
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, request, redirect,
@@ -43,14 +42,7 @@ wiki_bp = Blueprint('wiki', __name__, url_prefix='/wiki')
 # Helpers
 # ----------------------------------------------------------------------
 
-def _admin_required(f):
-    @wraps(f)
-    def w(*a, **kw):
-        if not (current_user.is_authenticated
-                and getattr(current_user, 'is_admin', False)):
-            abort(403)
-        return f(*a, **kw)
-    return w
+from .access_control import require_admin as _admin_required
 
 
 def _all_slugs():

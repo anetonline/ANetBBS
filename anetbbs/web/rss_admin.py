@@ -1,21 +1,12 @@
 """Admin CRUD for RSS feeds — sysop adds/edits/removes feeds."""
-from functools import wraps
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, abort)
+                   flash)
 from flask_login import login_required, current_user
 
 from ..models import db, RssFeed, RssItem
+from .access_control import require_admin as _admin_required
 
 rss_admin_bp = Blueprint('rss_admin', __name__, url_prefix='/admin/rss')
-
-
-def _admin_required(f):
-    @wraps(f)
-    def w(*a, **kw):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            abort(403)
-        return f(*a, **kw)
-    return w
 
 
 @rss_admin_bp.route('/')

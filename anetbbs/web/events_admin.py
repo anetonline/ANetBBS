@@ -22,7 +22,7 @@ import logging
 from datetime import datetime
 
 from flask import (Blueprint, flash, redirect, render_template, request,
-                   url_for, current_app, jsonify, abort)
+                   url_for, current_app, jsonify)
 from flask_login import current_user, login_required
 
 from ..models import db, ScheduledEvent
@@ -34,9 +34,7 @@ logger = logging.getLogger(__name__)
 events_admin_bp = Blueprint('events_admin', __name__, url_prefix='/admin/events')
 
 
-def _admin_required():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        abort(403)
+from .access_control import require_admin_or_403 as _admin_required
 
 
 def _row_view(ev: ScheduledEvent) -> dict:

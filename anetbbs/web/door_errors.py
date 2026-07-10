@@ -18,7 +18,7 @@ import os
 import re
 from datetime import datetime
 
-from flask import (Blueprint, abort, current_app, flash,
+from flask import (Blueprint, current_app, flash,
                    redirect, render_template, url_for)
 from flask_login import current_user, login_required
 
@@ -28,9 +28,7 @@ door_errors_bp = Blueprint('door_errors', __name__,
                            url_prefix='/admin/door-errors')
 
 
-def _admin_required():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        abort(403)
+from .access_control import require_admin_or_403 as _admin_required
 
 
 def _log_path() -> str:

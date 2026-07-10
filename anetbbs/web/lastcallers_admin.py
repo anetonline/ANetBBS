@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from flask import (Blueprint, abort, current_app, flash, redirect,
+from flask import (Blueprint, current_app, flash, redirect,
                    render_template, request, url_for)
 from flask_login import current_user, login_required
 
@@ -20,9 +20,7 @@ lastcallers_admin_bp = Blueprint('lastcallers_admin', __name__, url_prefix='/adm
 PER_PAGE = 30
 
 
-def _admin_required():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        abort(403)
+from .access_control import require_admin_or_403 as _admin_required
 
 
 def _env_path():

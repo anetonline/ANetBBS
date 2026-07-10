@@ -13,8 +13,12 @@ import logging
 import os
 import tarfile
 import zipfile
+from collections import namedtuple
 
 logger = logging.getLogger(__name__)
+
+# Mirrors virus_scan.py's ScanResult shape.
+ArchiveTestResult = namedtuple('ArchiveTestResult', ['ok', 'message'])
 
 # Filenames searched in priority order. Case-insensitive.
 DESCRIPTION_CANDIDATES = (
@@ -65,6 +69,90 @@ def extract_archive_description(path):
     except Exception:
         logger.exception('archive description extraction failed for %s', path)
     return ''
+
+
+def test_archive_integrity(path):
+    """Test whether the archive at *path* is internally consistent.
+
+    Returns an ArchiveTestResult. `ok=True` covers three distinct cases a
+    caller should treat the same way (let the upload through): the
+    archive tested clean, the format has no test API to run at all (lha),
+    or the format's optional library isn't installed (7z/rar) -- fail
+    open on anything we can't actually check, same philosophy as
+    virus_scan.py ("better to allow than to silently swallow uploads on
+    a misconfig"). Only a *confirmed* bad archive gets `ok=False`.
+    """
+    if not os.path.isfile(path):
+        return ArchiveTestResult(True, 'file not found')
+    name_lower = path.lower()
+    try:
+        if zipfile.is_zipfile(path):
+            return _test_zip(path)
+        if tarfile.is_tarfile(path) or name_lower.endswith(
+                ('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2',
+                 '.tar.xz', '.txz')):
+            return _test_tar(path)
+        if name_lower.endswith('.7z'):
+            return _test_7z(path)
+        if name_lower.endswith('.rar'):
+            return _test_rar(path)
+        if name_lower.endswith(('.lzh', '.lha')):
+            return ArchiveTestResult(True, 'not tested (lha has no test API)')
+    except Exception as exc:
+        logger.exception('archive integrity test crashed for %s', path)
+        return ArchiveTestResult(True, f'test crashed, allowing through: {exc}')
+    return ArchiveTestResult(True, 'not a recognized archive format')
+
+
+def _test_zip(path):
+    with zipfile.ZipFile(path, 'r') as zf:
+        bad = zf.testzip()
+    if bad is not None:
+        return ArchiveTestResult(False, f'corrupt member: {bad}')
+    return ArchiveTestResult(True, 'clean')
+
+
+def _test_tar(path):
+    """tar has no CRC/testzip()-equivalent -- best-effort by reading
+    every regular-file member through to completion."""
+    with tarfile.open(path, 'r:*') as tf:
+        for member in tf.getmembers():
+            if not member.isfile():
+                continue
+            fh = tf.extractfile(member)
+            if fh is None:
+                continue
+            try:
+                while fh.read(65536):
+                    pass
+            except (tarfile.TarError, OSError) as exc:
+                return ArchiveTestResult(False, f'corrupt member {member.name}: {exc}')
+    return ArchiveTestResult(True, 'clean (best-effort read-through, tar has no CRC test)')
+
+
+def _test_7z(path):
+    try:
+        import py7zr
+    except ImportError:
+        return ArchiveTestResult(True, 'not tested (py7zr not installed)')
+    try:
+        with py7zr.SevenZipFile(path, 'r') as zf:
+            zf.test()
+    except Exception as exc:
+        return ArchiveTestResult(False, f'corrupt: {exc}')
+    return ArchiveTestResult(True, 'clean')
+
+
+def _test_rar(path):
+    try:
+        import rarfile
+    except ImportError:
+        return ArchiveTestResult(True, 'not tested (rarfile not installed)')
+    with rarfile.RarFile(path) as rf:
+        bad = rf.testrar()
+    if bad is not None:
+        return ArchiveTestResult(False, f'corrupt member: {bad}')
+    return ArchiveTestResult(True, 'clean')
 
 
 # ---------------------------------------------------------------------------

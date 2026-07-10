@@ -5,7 +5,6 @@ import sys
 import os
 import json
 from datetime import datetime, timedelta
-from functools import wraps
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, current_app
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField, BooleanField, PasswordField, IntegerField
@@ -20,16 +19,10 @@ from ..models import (db, User, Board, Post, Message, Theme, UserSession,
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
-
-def admin_required(f):
-    """Decorator to require admin access"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            flash('Admin access required.', 'danger')
-            return redirect(url_for('main.index'))
-        return f(*args, **kwargs)
-    return decorated_function
+# Standardized on abort(403) along with every other admin blueprint (see
+# access_control.py) -- this used to flash + redirect to the dashboard
+# instead, the one outlier among 21 near-identical local implementations.
+from .access_control import require_admin as admin_required
 
 
 # ---- Forms ----

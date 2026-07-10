@@ -257,11 +257,12 @@ def _fetch_upstream(cfg, force: bool = False):
     return data, err
 
 
-def _require_admin():
-    if not current_user.is_authenticated:
-        abort(401)
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+# Same shared gate every other admin blueprint uses. The old local version
+# had an abort(401) branch for unauthenticated users, but every call site
+# here is also @login_required (runs first, redirects before this is ever
+# reached) -- that branch was dead code, not a reachable behavior, so this
+# is a true no-op refactor for this file.
+from .access_control import require_admin_or_403 as _require_admin
 
 
 def _local_releases(cfg):

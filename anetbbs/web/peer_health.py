@@ -22,17 +22,12 @@ from flask import (Blueprint, current_app, jsonify, render_template)
 from flask_login import current_user, login_required
 
 from ..models import db, RegistryEntry
+from .access_control import require_admin_or_403 as _require_admin
 
 
 logger = logging.getLogger(__name__)
 peers_health_bp = Blueprint('peers_health', __name__,
                             url_prefix='/admin/peers')
-
-
-def _require_admin():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        from flask import abort
-        abort(403)
 
 
 def _relative_age(dt):

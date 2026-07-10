@@ -12,18 +12,14 @@ import os
 from datetime import datetime
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
-                   abort, request, current_app)
+                   request, current_app)
 from flask_login import login_required, current_user
 
 from ..models import db, FileQueueEntry, FileArea
+from .access_control import require_admin_or_403 as _require_admin
 
 
 queue_bp = Blueprint('file_queue', __name__, url_prefix='/admin/file-queue')
-
-
-def _require_admin():
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
 
 
 @queue_bp.route('/')

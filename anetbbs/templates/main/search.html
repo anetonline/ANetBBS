@@ -123,6 +123,25 @@
 </div>
 {% endif %}
 
+{% if results.files %}
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-file-earmark"></i> Files ({{ results.files | length }})</div>
+    <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+            {% for f in results.files %}
+            <a href="{{ url_for('files.download', file_id=f.id) }}" class="list-group-item list-group-item-action">
+                <strong>{{ f.original_filename }}</strong>
+                <small class="text-muted ms-2">{{ f.created_at.strftime('%Y-%m-%d') }}</small>
+                {% if f.description %}
+                <p class="mb-0 small">{{ f.description[:150] }}{% if f.description|length > 150 %}...{% endif %}</p>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% if results.shouts %}
 <div class="card mb-3">
     <div class="card-header"><i class="bi bi-megaphone"></i> Shouts ({{ results.shouts | length }})</div>

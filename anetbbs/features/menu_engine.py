@@ -380,6 +380,44 @@ def _user_access_level(user):
     return user.get('access_level') or 10
 
 
+def _apply_menu_translations(menu_name, title, item_list, lang):
+    """Look up MenuTranslation overrides for one menu render and return
+    (translated_title, translated_item_list). No-op (returns the inputs
+    unchanged) for 'en' or a falsy lang, so the common case does zero
+    extra queries.
+
+    Keys are derived from menu_name + hotkey (f'menu.{menu_name}.title',
+    f'menu.{menu_name}.item.{hotkey}') rather than a dedicated column --
+    BbsMenu.name is DB-unique so there's no cross-menu collision. Falls
+    back to the source text when no translation row exists for a given
+    key, matching MenuTranslation's own docstring. One batched query for
+    the whole menu, not one per item.
+
+    Must be called inside an app context (queries MenuTranslation).
+    Pulled out of run_menu() as its own function so it's testable without
+    driving the full async menu-render loop.
+    """
+    if not lang or lang == 'en':
+        return title, item_list
+
+    from anetbbs.models import MenuTranslation
+
+    title_key = f'menu.{menu_name}.title'
+    item_keys = [f'menu.{menu_name}.item.{hk}' for hk, _l, _a, _ar in item_list]
+    rows = (MenuTranslation.query
+           .filter_by(lang=lang)
+           .filter(MenuTranslation.key.in_([title_key] + item_keys))
+           .all())
+    translations = {r.key: r.text for r in rows}
+
+    new_title = translations.get(title_key, title)
+    new_item_list = [
+        (hk, translations.get(f'menu.{menu_name}.item.{hk}', label), action_type, action_args)
+        for hk, label, action_type, action_args in item_list
+    ]
+    return new_title, new_item_list
+
+
 async def run_menu(session, start='main'):
     """Run the data-driven menu loop starting at *start* menu name.
     Falls back to BBSMenuUI.show_main() if no menus exist in the DB."""
@@ -430,6 +468,11 @@ async def run_menu(session, start='main'):
             prompt = menu.prompt or 'Choice: '
             item_list = [(it.hotkey.upper(), it.label, it.action_type, it.action_args)
                          for it in items]
+
+            # Menu translation overrides (MenuTranslation) -- previously
+            # defined in the schema but never read anywhere.
+            lang = (session.user.get('language') or 'en') if isinstance(session.user, dict) else 'en'
+            title, item_list = _apply_menu_translations(menu.name, title, item_list, lang)
             # Mode-aware screen content lookup.
             # wide : data/text/menus/{name}132.ans → {name}.ans → DB ANSI field
             # ansi : data/text/menus/{name}.ans → DB ANSI field

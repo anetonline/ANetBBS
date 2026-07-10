@@ -40,14 +40,7 @@ def _require_hub_mode():
         abort(404)
 
 
-def _admin_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            abort(403)
-        return f(*args, **kwargs)
-    return decorated
+from .access_control import require_admin as _admin_required
 
 
 # ---------------------------------------------------------------------------

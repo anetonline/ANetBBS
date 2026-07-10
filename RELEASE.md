@@ -1,3 +1,67 @@
+# ANetBBS v1.0b2.76 — Diagnostics missed the inbound-listener path entirely (July 2026)
+
+- DIAGNOSTIC: found the real reason the manifest stayed empty — `binkp_server.py` (the separate `anetbbs-binkp` inbound-listener service, for when a hub calls *us*) has its own independent packet-receive chain that never touched any of the diagnostics added so far. The actual parsing fixes already covered it (shared `_parse_ftn_packet()`), but the capture didn't. Now instrumented identically, prefixed `SRV:` to distinguish it from the outbound-poll path's captures.
+
+---
+
+# ANetBBS v1.0b2.75 — Manifest diagnostic: log-based capture confirmed unreliable in production (July 2026)
+
+- DIAGNOSTIC: a different article still corrupts on rescan, and the existing packet-dump diagnostic isn't catching the actual bulk delivery. Found that production's `LOG_LEVEL` silently swallows every log line from this module — confirmed zero `"BinkP"` matches in the entire gunicorn error log despite live traffic. Added a plain-file-I/O manifest (bypasses `logging` entirely) recording every file handed to the packet dispatcher, so nothing can hide from it. No behavior change unless `BINKP_DEBUG_DUMP_DIR` is set.
+
+---
+
+# ANetBBS v1.0b2.74 — Chain-validate packet boundaries; fix a second desync vector found while testing (July 2026)
+
+- FIX: v1.0b2.73's marker+date check could still be fooled by a real message body containing quoted old FTN content that happened to form a fully well-formed date+time+null field. Now validates a short chain of subsequent messages (rejecting if any header field along the way contains a raw control character) before trusting a boundary.
+- FIX: also closed a related gap found while building the above — a rejected candidate's own routing-header bytes (attr=0/cost=0, very common) could produce a coincidental zero-byte pair mistaken for the packet's real end-of-data marker, silently dropping everything after it. Now requires that marker to actually be at the buffer's tail. 2 new tests, both reproducing the real structures found live.
+
+---
+
+# ANetBBS v1.0b2.73 — Close the remaining inbound packet-record parser desync (July 2026)
+
+- FIX: the v1.0b2.70 desync fix only checked 2 bytes after a candidate null for the message-type marker. A real captured packet (via the v1.0b2.71/72 diagnostic capture) showed a message body containing that exact 2-byte sequence by coincidence, fooling the check and corrupting that message and the next. Now also requires a date-shaped string right where the packed header's date field belongs — a real message boundary always has one, a coincidental byte match essentially never does. Traced byte-for-byte against the actual production packet, not inferred from DB fallout. 1 new test, confirmed to fail against v1.0b2.70-72 and pass against this fix.
+
+---
+
+# ANetBBS v1.0b2.72 — Widen diagnostic capture to cover arcmail-bundled packets (July 2026)
+
+- DIAGNOSTIC: the bulk rescan traffic actually arrives as ZIP-compressed arcmail bundles (`.fr7`/`.fr8`), not bare `.pkt` files — v1.0b2.71's capture missed that entirely. Now covers both paths. No behavior change unless `BINKP_DEBUG_DUMP_DIR` is set.
+
+---
+
+# ANetBBS v1.0b2.71 — Diagnostic capture for the still-open inbound packet desync (July 2026)
+
+- DIAGNOSTIC: v1.0b2.70's embedded-null fix reduced but didn't eliminate the inbound packet desync — confirmed live after deploying it and re-running `%RESCAN`. Set `BINKP_DEBUG_DUMP_DIR` on the server to capture raw inbound `.pkt` bytes to disk before parsing, for byte-level root-causing instead of guessing from already-corrupted DB rows. No effect unless the env var is set.
+
+---
+
+# ANetBBS v1.0b2.70 — Fix inbound FTS-0001 packet-record parser desync on embedded null bytes (July 2026)
+
+- FIX: the inbound packet parser located each message's end by scanning for the first `0x00` byte after its header fields. A real `[ANSI]`-tagged post's raw art body contained an embedded null partway through, which truncated that message and desynced the parser for everything after it in the same packet — producing fabricated "messages" with header fields built from fragments of real body text (confirmed live: raw `\r` bytes inside From/Subject columns). This surfaced only now because the v1.0b2.69 capValidate fix let a hub's `%RESCAN` reply — thousands of backlogged messages — actually land for the first time. Fix: only treat a candidate null as the real terminator if what follows it looks like a genuine message/packet boundary. 3 new tests, one confirmed to fail against the pre-fix parser.
+
+---
+
+# ANetBBS v1.0b2.69 — Fix malformed FTS-0001 packet header rejected by strict tossers (July 2026)
+
+- FIX: every outbound FTN packet (netmail and echomail, all paths — one shared packet writer) had a malformed Type-2+ header field. `capValidate` must hold `capWord`'s value byte-swapped, not a plain copy — confirmed against the `hpt` tosser's own source after a real external sysop reported their tosser rejecting our packets outright. This likely also explains inbound mail silently stopping from any hub whose tosser validates the same way but doesn't surface as clear an error. 5 new tests.
+
+---
+
+# ANetBBS v1.0b2.68 — Close the confirmed gaps from the Synchronet/Mystic comparison (July 2026)
+
+Follow-up to a competitive gap analysis against Synchronet and Mystic BBS. Ships the 5 tactical gaps plus a unified access-control helper.
+
+- FEATURE: unified read-access check (`evaluate_access()`) replacing scattered per-feature comparisons — fixed two real gaps along the way: the web file-area browser never checked an area's access level at all, and `/search` returned sysop-only boards and access-gated echomail to any user.
+- FEATURE: consolidated 21 duplicated admin-only route gates into one shared helper, standardized on `abort(403)` everywhere (a deliberate UX change for `admin.py`'s routes, which used to flash + redirect).
+- FEATURE: file search added to `/search`.
+- FEATURE: duplicate-file detection on upload (notice, not a hard block).
+- FEATURE: archive integrity testing on upload, all four upload routes — fails open on anything untestable.
+- FEATURE: FileFix bot — file-echo counterpart to AreaFix, lets downstream peers self-service file-echo subscriptions via netmail.
+- FEATURE: menu translation wiring — `User.language`/`MenuTranslation` existed as unused schema, now actually consulted for the terminal menu system.
+- 51 new tests.
+
+---
+
 # ANetBBS v1.0b2.67 — Fix netmail import crash on duplicate-check (CI-caught) (July 2026)
 
 - FIX: inbound netmail import (`_import_netmail`, poll-response path) crashed with `AttributeError` on any message carrying a MSGID kludge — virtually all real FTN netmail — due to a duplicate-check query using the wrong column name (`msg_id` vs the model's actual `msgid`). Pre-existing bug, caught by GitHub Actions CI after the new netmail-notification tests actually exercised this path. Full local test suite (434 tests) now verified green in a real environment, not just syntax-checked.

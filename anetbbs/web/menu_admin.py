@@ -2,22 +2,13 @@
 Web admin pages to CRUD the data-driven BBS menus.
 Routes mounted under /admin/bbs-menus/.
 """
-from functools import wraps
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 
 from ..models import db, BbsMenu, BbsMenuItem, BbsAnsiScreen
+from .access_control import require_admin as _admin_required
 
 menu_admin_bp = Blueprint('menu_admin', __name__, url_prefix='/admin/bbs-menus')
-
-
-def _admin_required(f):
-    @wraps(f)
-    def wrap(*a, **kw):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            abort(403)
-        return f(*a, **kw)
-    return wrap
 
 
 # Action types known to the menu engine — keep in sync with menu_engine._ACTIONS

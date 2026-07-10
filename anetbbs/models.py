@@ -441,6 +441,10 @@ class FileUpload(db.Model):
     file_area_id = db.Column(db.Integer, db.ForeignKey('file_areas.id'),
                              index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # sha256 hex digest of the file's contents — dupe-check within the
+    # same file_area_id scope (anetbbs/features/file_dedup.py). Nullable:
+    # rows created before this column existed simply never match.
+    content_hash = db.Column(db.String(64), index=True)
 
     uploader = db.relationship('User', backref='uploads', lazy=True)
     file_area = db.relationship('FileArea')
@@ -930,6 +934,13 @@ class AreafixLog(db.Model):
     response = db.Column(db.Text)                    # what we replied with
     success = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    # Which robot handled this request. Reused (not a separate FileFixLog
+    # table) for the filefix bot too -- these columns are already generic
+    # to "a robot processed a subscription request via netmail", nothing
+    # here is message-echo-specific except this table's name/docstring.
+    # Default 'areafix' so pre-existing rows (all message-echo requests,
+    # from before this column existed) read correctly without a backfill.
+    bot = db.Column(db.String(20), default='areafix')
 
     def __repr__(self):
         return f'<AreafixLog {self.from_address} {self.request_type}>'

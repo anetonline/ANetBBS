@@ -44,6 +44,15 @@ def lobby():
     category_filter = request.args.get('category', '')
     search = request.args.get('q', '').strip()
 
+    # Filter mirrors evaluate_access(current_user, game.min_access_level,
+    # bypass_admin=False) -- kept as a SQL predicate, not a per-item
+    # Python call (bulk listing query). bypass_admin=False preserves
+    # existing behavior: this route has no @login_required, and an
+    # anonymous visitor here defaults to access_level 0 (not
+    # evaluate_access()'s own default of 10 for a None user) -- a real,
+    # deliberate difference from echomail.py's convention, not something
+    # this migration should silently unify. Game has no is_sysop_only
+    # column to gate on separately.
     user_access = 0
     if current_user.is_authenticated:
         user_access = getattr(current_user, 'access_level', 10) or 10

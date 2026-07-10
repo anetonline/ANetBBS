@@ -24,6 +24,7 @@ from flask_login import login_required, current_user
 
 from ..models import db, FileArea, TicFile, SharedFileLink
 from ..features.archive_meta import extract_archive_description
+from ..features.access_control import evaluate_access
 from .list_pagination import ListPagination
 
 
@@ -38,12 +39,19 @@ file_areas_bp = Blueprint('file_areas', __name__, url_prefix='/file-areas')
 
 
 def _visible_to(user, area):
-    """Is this area browseable by this user?"""
+    """Is this area browseable by this user?
+
+    Scoped bug-fix (confirmed): this used to check only is_active +
+    is_sysop_only, never area.min_access_level -- even though that column
+    exists, defaults to 10, and is already enforced identically in the
+    terminal client (bbs_ui.py). Left unfixed, the new file-search feature
+    would inherit the same gap into new code.
+    """
     if not area.is_active:
         return False
-    if area.is_sysop_only and not getattr(user, 'is_admin', False):
-        return False
-    return True
+    return evaluate_access(user, area.min_access_level,
+                           is_sysop_only=area.is_sysop_only,
+                           bypass_admin=True)
 
 
 def _hatch_if_network_area(area, dest_path, filename, description=None):
@@ -103,6 +111,62 @@ def _clear_desc_cache(area):
             os.remove(path)
         except OSError:
             pass
+
+
+# Duplicate-content detection for this blueprint's three upload routes.
+# There's no per-file DB row here (files are listed by scanning the
+# directory at request time, see the module docstring), so this mirrors
+# the ..descriptions.json cache above exactly, just keyed hash->filename
+# instead of filename->description.
+_HASH_CACHE_FILENAME = '.hashes.json'
+
+
+def _hash_cache_path(area):
+    if not area.storage_path:
+        return None
+    return os.path.join(area.storage_path, _HASH_CACHE_FILENAME)
+
+
+def _load_hash_cache(area):
+    path = _hash_cache_path(area)
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_hash_cache(area, cache):
+    path = _hash_cache_path(area)
+    if not path:
+        return
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(cache, fh)
+    except OSError:
+        pass
+
+
+def _check_and_record_dupe(area, dest, filename):
+    """Hash *dest* (already saved), check the area's hash cache for a
+    match, record the new hash either way. Returns the filename of an
+    existing duplicate, or None. Best-effort -- never raises, a dedup
+    failure should never block an upload."""
+    try:
+        from ..features.file_dedup import hash_file
+        h = hash_file(dest)
+        cache = _load_hash_cache(area)
+        existing = cache.get(h)
+        cache[h] = filename
+        _save_hash_cache(area, cache)
+        return existing if existing != filename else None
+    except Exception:
+        current_app.logger.exception('dedup hash failed for %s in area %s',
+                                     filename, area.tag)
+        return None
 
 
 def _scan_area(area):
@@ -420,6 +484,25 @@ def upload(area_id):
         except Exception:
             current_app.logger.exception('virus scan crashed; allowing upload')
 
+        # Archive integrity test (optional — silently skipped for formats
+        # with no test API, or a missing optional library).
+        try:
+            from ..features.archive_meta import test_archive_integrity
+            result = test_archive_integrity(dest)
+            if not result.ok:
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+                flash(f'Upload rejected: corrupt archive ({result.message}).',
+                      'danger')
+                return redirect(url_for('file_areas.view_area', area_id=area.id))
+        except Exception:
+            current_app.logger.exception('archive integrity test crashed; allowing upload')
+
+        # Duplicate-content notice (not a block -- see _check_and_record_dupe).
+        dupe_of = _check_and_record_dupe(area, dest, safe_name)
+
         # Bump upload ratio counter.
         try:
             from ..models import FileRatio
@@ -434,7 +517,11 @@ def upload(area_id):
             db.session.rollback()
         _hatch_if_network_area(area, dest, safe_name,
                                request.form.get('description'))
-        flash(f'Uploaded {safe_name}.', 'success')
+        if dupe_of:
+            flash(f'Uploaded {safe_name} (note: identical to existing "{dupe_of}").',
+                  'warning')
+        else:
+            flash(f'Uploaded {safe_name}.', 'success')
     except OSError as exc:
         flash(f'Save failed: {exc}', 'danger')
     return redirect(url_for('file_areas.view_area', area_id=area.id))
@@ -635,6 +722,37 @@ def manage_upload(area_id):
         os.makedirs(area.storage_path, exist_ok=True)
         dest = os.path.join(area.storage_path, safe_name)
         f.save(dest)
+
+        # This route had neither a virus scan nor an archive-integrity
+        # test before -- adding both together while touching it, same
+        # reject pattern used by upload()/smart_upload() above.
+        try:
+            from ..features.virus_scan import scan_path
+            vr = scan_path(dest)
+            if vr.infected:
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+                flash(f'Upload rejected: virus detected ({vr.signature}).', 'danger')
+                return redirect(url_for('file_areas.manage_files', area_id=area.id))
+        except Exception:
+            current_app.logger.exception('virus scan crashed; allowing upload')
+        try:
+            from ..features.archive_meta import test_archive_integrity
+            ar = test_archive_integrity(dest)
+            if not ar.ok:
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+                flash(f'Upload rejected: corrupt archive ({ar.message}).', 'danger')
+                return redirect(url_for('file_areas.manage_files', area_id=area.id))
+        except Exception:
+            current_app.logger.exception('archive integrity test crashed; allowing upload')
+
+        dupe_of = _check_and_record_dupe(area, dest, safe_name)
+
         if description:
             st = os.stat(dest)
             cache = _load_desc_cache(area)
@@ -645,7 +763,11 @@ def manage_upload(area_id):
             }
             _save_desc_cache(area, cache)
         _hatch_if_network_area(area, dest, safe_name, description)
-        flash(f'Uploaded {safe_name}.', 'success')
+        if dupe_of:
+            flash(f'Uploaded {safe_name} (note: identical to existing "{dupe_of}").',
+                  'warning')
+        else:
+            flash(f'Uploaded {safe_name}.', 'success')
     except OSError as exc:
         flash(f'Upload failed: {exc}', 'danger')
     return redirect(url_for('file_areas.manage_files', area_id=area.id))
@@ -717,9 +839,25 @@ def smart_upload():
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
                 pass
+            # Optional archive integrity test
+            try:
+                from ..features.archive_meta import test_archive_integrity
+                ar = test_archive_integrity(dest)
+                if not ar.ok:
+                    try: os.remove(dest)
+                    except OSError: pass
+                    flash(f'Rejected: corrupt archive ({ar.message}).', 'danger')
+                    return redirect(url_for('file_areas.smart_upload'))
+            except Exception:
+                pass
+            dupe_of = _check_and_record_dupe(target, dest, safe)
             _hatch_if_network_area(target, dest, safe,
                                    request.form.get('description'))
-            flash(f'Uploaded {safe} to {target.tag}.', 'success')
+            if dupe_of:
+                flash(f'Uploaded {safe} to {target.tag} '
+                      f'(note: identical to existing "{dupe_of}").', 'warning')
+            else:
+                flash(f'Uploaded {safe} to {target.tag}.', 'success')
             return redirect(url_for('file_areas.view_area', area_id=target.id))
         except OSError as exc:
             flash(f'Save failed: {exc}', 'danger')

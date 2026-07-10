@@ -3,11 +3,13 @@
 Main blueprint for home page and general views
 """
 from flask import Blueprint, render_template, request
+from flask_login import current_user
 from datetime import datetime, timedelta
 
 from ..models import (db, Board, Post, Message, UserSession, User,
                        ShoutboxPost, SysopBroadcast, EchomailMessage,
-                       FileArea)
+                       EchoArea, FileArea, FileUpload)
+from ..features.access_control import evaluate_access
 
 main_bp = Blueprint('main', __name__)
 
@@ -275,14 +277,23 @@ def search():
         dt_ = dt_ + timedelta(days=1)  # inclusive
 
     results = {'posts': [], 'users': [], 'boards': [],
-               'echomail': [], 'shouts': []}
+               'echomail': [], 'shouts': [], 'files': []}
 
+    # Every category below that can return access-gated content is
+    # filtered through evaluate_access() after fetch. Confirmed pre-
+    # existing gap fixed here: this route used to return sysop-only
+    # boards, their posts, and access-gated echomail to any user
+    # (including logged-out) -- neither branch checked min_access_level /
+    # is_sysop_only / is_admin at all. Filtering post-fetch (not at the
+    # SQL level) means a gated result can shrink a capped .limit(N)
+    # batch below N accessible items -- acceptable for a search box,
+    # not worth the extra per-category SQL-predicate complexity here.
     if q and len(q) >= 2:
         like = f'%{q}%'
-        from ..models import Post, Board
         try:
-            qry = Post.query.filter(
-                (Post.subject.ilike(like)) | (Post.content.ilike(like)))
+            qry = (Post.query
+                   .join(Board, Post.board_id == Board.id)
+                   .filter((Post.subject.ilike(like)) | (Post.content.ilike(like))))
             if df is not None:
                 qry = qry.filter(Post.created_at >= df)
             if dt_ is not None:
@@ -295,7 +306,9 @@ def search():
                     qry = qry.filter(Post.author_id == u.id)
                 else:
                     qry = qry.filter(db.false())
-            results['posts'] = qry.order_by(Post.created_at.desc()).limit(40).all()
+            posts = qry.order_by(Post.created_at.desc()).limit(40).all()
+            results['posts'] = [p for p in posts if evaluate_access(
+                current_user, p.board.min_access_level, bypass_admin=True)]
         except Exception:
             db.session.rollback()
         try:
@@ -304,13 +317,16 @@ def search():
         except Exception:
             db.session.rollback()
         try:
-            results['boards'] = Board.query.filter(
+            boards = Board.query.filter(
                 (Board.name.ilike(like)) | (Board.description.ilike(like))
             ).filter_by(is_active=True).limit(10).all()
+            results['boards'] = [b for b in boards if evaluate_access(
+                current_user, b.min_access_level, bypass_admin=True)]
         except Exception:
             db.session.rollback()
         try:
             qry = (EchomailMessage.query
+                   .join(EchoArea, EchomailMessage.area_id == EchoArea.id)
                    .filter((EchomailMessage.subject.ilike(like)) |
                            (EchomailMessage.body.ilike(like)) |
                            (EchomailMessage.from_name.ilike(like))))
@@ -318,8 +334,11 @@ def search():
                 qry = qry.filter(EchomailMessage.created_at >= df)
             if dt_ is not None:
                 qry = qry.filter(EchomailMessage.created_at < dt_)
-            results['echomail'] = (qry.order_by(EchomailMessage.created_at.desc())
-                                   .limit(20).all())
+            echomail = (qry.order_by(EchomailMessage.created_at.desc())
+                       .limit(20).all())
+            results['echomail'] = [m for m in echomail if evaluate_access(
+                current_user, m.area.min_access_level,
+                is_sysop_only=m.area.is_sysop_only, bypass_admin=True)]
         except Exception:
             db.session.rollback()
         try:
@@ -332,6 +351,29 @@ def search():
                 qry = qry.filter(ShoutboxPost.created_at < dt_)
             results['shouts'] = (qry.order_by(ShoutboxPost.created_at.desc())
                                  .limit(20).all())
+        except Exception:
+            db.session.rollback()
+        try:
+            # Scoped to the DB-backed FileUpload gallery (anetbbs/web/files.py)
+            # only -- the FTN-style file-area browser (file_areas.py) has no
+            # per-file DB rows to query cheaply, see its module docstring.
+            files = (FileUpload.query
+                    .filter((FileUpload.filename.ilike(like)) |
+                            (FileUpload.original_filename.ilike(like)) |
+                            (FileUpload.description.ilike(like)))
+                    .filter_by(is_public=True)
+                    .order_by(FileUpload.created_at.desc())
+                    .limit(20).all())
+
+            def _file_visible(upload):
+                if upload.file_area_id is None:
+                    return True
+                area = upload.file_area
+                return area is not None and evaluate_access(
+                    current_user, area.min_access_level,
+                    is_sysop_only=area.is_sysop_only, bypass_admin=True)
+
+            results['files'] = [f for f in files if _file_visible(f)]
         except Exception:
             db.session.rollback()
 

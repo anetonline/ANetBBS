@@ -32,7 +32,7 @@ import subprocess
 from datetime import datetime
 from typing import List, Optional
 
-from flask import (Blueprint, abort, current_app, flash,
+from flask import (Blueprint, current_app, flash,
                    redirect, render_template, request, url_for)
 from flask_login import current_user, login_required
 
@@ -46,9 +46,7 @@ _BACKUP_GLOB = re.compile(r'^anetbbs-backup-(\d{14})$')
 _BACKUP_ROOT = '/tmp'
 
 
-def _admin_required():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        abort(403)
+from .access_control import require_admin_or_403 as _admin_required
 
 
 def _parse_manifest(path: str) -> dict:

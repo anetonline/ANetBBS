@@ -7,7 +7,6 @@ gallery blueprint — no DB schema changes.
 """
 
 import re
-from functools import wraps
 from pathlib import Path
 from flask import (
     Blueprint, render_template, request, redirect, url_for, flash,
@@ -20,18 +19,10 @@ from .gallery import (
     _load_config, _save_config, _list_images, _get_gallery_by_slug,
     IMAGE_EXTS,
 )
+from .access_control import require_admin as _admin_required
 
 gallery_admin_bp = Blueprint('gallery_admin', __name__,
                              url_prefix='/admin/galleries')
-
-
-def _admin_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            abort(403)
-        return fn(*args, **kwargs)
-    return wrapper
 
 
 def _slugify(s):

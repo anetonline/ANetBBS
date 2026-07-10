@@ -12,6 +12,7 @@ Handles:
 import struct
 import socket
 import logging
+import re
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,97 @@ CMD_NAMES = {
 
 # FTS-0001 packed-message types
 MSG_TYPE_2 = b'\x02\x00'
+
+# Matches the FTS-0001 packed-message date field, e.g. "10 Jul 26  10:39:20"
+# -- used as a second, independent signal (beyond the 2-byte MSG_TYPE_2
+# marker) that a candidate message boundary is real and not a coincidental
+# byte match inside embedded binary content. See the long comment at the
+# body-end scan in _parse_ftn_packet() for why 2 bytes alone isn't enough.
+# Requires the FULL date+time+terminator shape, not just "DD Mon YY" --
+# that shorter pattern turned out to occur naturally in ordinary English
+# prose (a real message body quoting a source dated "30 Nov 99") often
+# enough to produce false positives on real production traffic.
+_DATE_FIELD_RE = re.compile(rb'^\d{2} [A-Za-z]{3} \d{2}\s{1,2}\d{2}:\d{2}:\d{2}\x00')
+
+# Real FTS-0001 header text fields (to/from/subject) are always plain
+# text -- no legitimate one ever contains a raw control character. Used
+# to reject a candidate boundary whose marker+date pattern matched by
+# coincidence: see _chain_looks_like_real_messages() below.
+_HAS_CONTROL_CHAR_RE = re.compile(rb'[\x00-\x1f]')
+
+
+def _is_real_packet_end(data, candidate):
+    """A packet's own end-of-data marker (0x00 0x00) is, by
+    construction, always the literal final bytes of the buffer -- the
+    last message's own closing null immediately followed by the
+    packet-level trailer. Trusting *any* adjacent zero-byte pair as
+    "the packet ends here" is unsafe: once an earlier candidate
+    boundary has been correctly rejected (see
+    _chain_looks_like_real_messages), its own raw bytes get treated as
+    unparsed body content -- and a routing header with attr=0 and
+    cost=0 (the overwhelmingly common case in real traffic) produces
+    exactly this adjacent-zero pattern nowhere near the real end.
+    Require the candidate to actually be at the buffer's tail instead.
+    """
+    return candidate + 3 >= len(data)
+
+
+def _chain_looks_like_real_messages(data, start, depth=3):
+    """Tentatively parse up to `depth` message records starting at
+    `start` and verify every to/from/subject field along the chain is
+    free of raw control characters -- something no genuine header field
+    ever contains.
+
+    Confirmed necessary against a real inbound packet (captured via
+    BINKP_DEBUG_DUMP_DIR): a message body happened to contain an
+    embedded byte sequence that was not just MSG_TYPE_2 by coincidence,
+    but a FULLY well-formed date+time+null field too -- almost
+    certainly quoted/reposted old FidoNet message content inside the
+    article's own prose, not random binary noise. That candidate's own
+    immediate to/from/subject already contained a raw '\\r', which a
+    single-level check catches -- but scanning past it lands on a
+    *second* coincidental match whose own immediate fields look clean;
+    the corruption only becomes visible one level further into the
+    chain. Hence checking several levels deep rather than just one.
+    Returns True (treat as plausible) whenever there isn't enough
+    remaining data to disprove the chain -- this is a rejection filter
+    for candidates that are provably bad, not a positive assertion that
+    an accepted one is definitely correct.
+    """
+    pos = start
+    for _ in range(depth):
+        if pos >= len(data) - 1:
+            return True
+        if data[pos:pos + 2] == b'\x00\x00':
+            return True
+        if data[pos:pos + 2] != MSG_TYPE_2:
+            return False
+        pos += 2 + 12
+        for max_len in (20, 36, 36, 72):
+            end = data.find(b'\x00', pos, pos + max_len)
+            if end == -1:
+                end = pos + max_len
+            if _HAS_CONTROL_CHAR_RE.search(data[pos:end]):
+                return False
+            pos = end + 1
+        search_from = pos
+        body_end = None
+        while True:
+            candidate = data.find(b'\x00', search_from)
+            if candidate == -1:
+                return True
+            nxt = data[candidate + 1:candidate + 3]
+            if _is_real_packet_end(data, candidate) or candidate + 1 >= len(data):
+                body_end = candidate
+                break
+            if nxt == MSG_TYPE_2:
+                date_pos = candidate + 1 + 2 + 12
+                if _DATE_FIELD_RE.match(data[date_pos:date_pos + 21]):
+                    body_end = candidate
+                    break
+            search_from = candidate + 1
+        pos = body_end + 1
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +228,15 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
     #   34   2     orig_zone
     #   36   2     dest_zone
     #   38   2     aux_net          ┐
-    #   40   2     cap_validate     │  Type-2+ extension (FSC-0048).
-    #   42   1     prod_code (high) │  cap_validate must equal cap_word
-    #   43   1     prod_rev_minor   │  for the receiver to accept Type-2+.
-    #   44   2     cap_word         ┘  Set both to 0x0001 (basic).
+    #   40   2     cap_validate     │  Type-2+ extension (FSC-0048). cap_word
+    #   42   1     prod_code (high) │  is 0x0001 (FSC-0039 "packet type 2+"
+    #   43   1     prod_rev_minor   │  flag), written little-endian like every
+    #   44   2     cap_word         ┘  other field here. cap_validate holds the
+    #   SAME value BYTE-SWAPPED (big-endian) -- not a plain copy -- see the
+    #   struct.pack('>H', ...) fixup right after this header is built, and
+    #   its comment, for why a naive identical copy silently fails strict
+    #   tossers for any non-palindromic capWord value (confirmed against
+    #   husky/hpt's real pktread.c/pktwrite.c source).
     #   46   2     orig_zone_copy
     #   48   2     dest_zone_copy
     #   50   2     orig_point
@@ -172,6 +269,24 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
     if len(header) != FTN_PKT_HEADER_SIZE:
         # Pad / trim to exactly 58 bytes so downstream parsing offsets match.
         header = header.ljust(FTN_PKT_HEADER_SIZE, b'\x00')[:FTN_PKT_HEADER_SIZE]
+
+    # FSC-0048 Type-2+ capValidate/capWord relationship, confirmed against
+    # husky/hpt's actual source (src/pktread.c:openPkt, src/pktwrite.c:
+    # createPkt): capValidate (offset 40-41) is NOT a plain copy of
+    # capWord (offset 44-45) -- it must hold the SAME integer's bytes
+    # BYTE-SWAPPED (big-endian) relative to capWord's own little-endian
+    # encoding, which is the convention every other multi-byte field in
+    # this header uses. Packing both as plain little-endian (this format
+    # string's default, via the two `CAP_WORD` args above) only
+    # accidentally produces a matching pair for palindromic values (high
+    # byte == low byte); for CAP_WORD=0x0001 specifically it does not,
+    # and hpt (and likely other strict tossers) rejects the packet
+    # outright: "CapabilityWord error in following pkt! rtfm:
+    # IgnoreCapWord." -- root-caused from a real rejected-packet report
+    # from an external sysop (SmallTime BBS / hpt), not a hypothetical.
+    header = bytearray(header)
+    header[40:42] = struct.pack('>H', CAP_WORD)
+    header = bytes(header)
 
     from .kludges import build_message, make_msgid, kludges_from_json
     import json as _json
@@ -359,8 +474,55 @@ def _parse_ftn_packet(data: bytes):
         from_name, pos = read_cstr(data, pos, 36)
         subject, pos = read_cstr(data, pos, 72)
 
-        body_end = data.find(b'\x00', pos)
-        if body_end == -1:
+        # The message text is null-terminated (FTS-0001 has no explicit
+        # length field) -- but real-world posts, especially raw ANSI-art
+        # content, can legitimately contain an embedded 0x00 byte before
+        # the true end-of-message null. Naively stopping at the FIRST
+        # null truncates the body there and permanently desyncs this
+        # cursor for every message record after it in the packet: each
+        # subsequent read starts mid-body instead of at a real message
+        # boundary, producing one bogus "message" (garbled header
+        # fields pulled from what should still be body text) before the
+        # cursor happens to re-align on a genuine MSG_TYPE_2 boundary.
+        # Confirmed against a real inbound rescan packet: an "[ANSI]"
+        # post's body was truncated to 3 bytes ("Esc"), and the very
+        # next parsed "message" was pure garbage lifted from that same
+        # post's remaining body text.
+        #
+        # Defend against this by only accepting a candidate null as the
+        # real terminator if what immediately follows it looks like a
+        # valid boundary: the packet's own end-of-data marker (0x00
+        # 0x00), the end of the buffer, or another message's MSG_TYPE_2
+        # marker *and* a plausible date field right where one should be
+        # (14 bytes further in, past the 2-byte marker + 12-byte
+        # routing header). The 2-byte marker alone isn't a reliable
+        # enough signal: a real inbound packet (confirmed via a
+        # BINKP_DEBUG_DUMP_DIR capture) contained a message whose body
+        # had embedded binary content that happened to contain the
+        # exact byte sequence 0x00 0x02 0x00 by pure chance, which the
+        # marker-only check falsely accepted as a message boundary.
+        # Requiring a date-shaped string immediately after makes a
+        # coincidental match astronomically less likely without
+        # weakening detection of genuine boundaries (every real
+        # FTS-0001 message record has this field by definition).
+        search_from = pos
+        body_end = None
+        while True:
+            candidate = data.find(b'\x00', search_from)
+            if candidate == -1:
+                break
+            nxt = data[candidate + 1:candidate + 3]
+            if _is_real_packet_end(data, candidate) or candidate + 1 >= len(data):
+                body_end = candidate
+                break
+            if nxt == MSG_TYPE_2:
+                date_pos = candidate + 1 + 2 + 12
+                if _DATE_FIELD_RE.match(data[date_pos:date_pos + 21]) and \
+                        _chain_looks_like_real_messages(data, candidate + 1):
+                    body_end = candidate
+                    break
+            search_from = candidate + 1
+        if body_end is None:
             body_bytes = data[pos:]
             pos = len(data)
         else:
@@ -861,10 +1023,63 @@ class BinkPClient:
         def _is_zip(buf):
             return len(buf) >= 4 and buf[:4] == b'PK\x03\x04'
 
+        def _debug_dump_packet(name, data):
+            """Diagnostic-only, opt-in via env var, no effect unless set:
+            dump the raw bytes of an inbound FTS-0001 packet -- whether
+            received directly or extracted from an arcmail ZIP bundle --
+            before parsing. Added to forensically diagnose a
+            packet-record parser desync (embedded-null bodies truncating
+            a message and misaligning everything after it) that a first
+            fix attempt (v1.0b2.70) reduced but did not fully eliminate.
+            By the time a corrupted message reaches the DB, the true
+            byte layout that caused the misparse is already gone, so
+            root-causing the remainder needs the actual wire bytes, not
+            another guess. Safe to leave in permanently: zero cost
+            unless BINKP_DEBUG_DUMP_DIR is explicitly set."""
+            debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
+            if not debug_dir:
+                return
+            try:
+                _os.makedirs(debug_dir, exist_ok=True)
+                dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_{name}'
+                with open(_os.path.join(debug_dir, dump_name), 'wb') as fh:
+                    fh.write(data)
+                logger.info('BinkP: dumped raw packet %s (%d bytes) to %s',
+                           dump_name, len(data), debug_dir)
+            except OSError as exc:
+                logger.warning('BinkP: failed to dump debug packet %s: %s',
+                               name, exc)
+
+        def _debug_manifest(fname, buf):
+            """Unconditional companion to _debug_dump_packet: appends one
+            line per file handed to _import_completed, regardless of
+            whether it's recognized as an FTS-0001 packet, a ZIP bundle,
+            or neither. Uses plain file I/O, not the `logging` module --
+            confirmed on the live server that production's LOG_LEVEL
+            silently swallows this module's INFO-level messages entirely
+            (zero "BinkP" lines found in gunicorn-error.log despite real
+            traffic flowing through it), so a log-based diagnostic can't
+            be trusted to be visible. Same opt-in, zero-cost-unless-set
+            gating as _debug_dump_packet."""
+            debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
+            if not debug_dir:
+                return
+            try:
+                _os.makedirs(debug_dir, exist_ok=True)
+                kind = 'fts' if _is_fts_packet(buf) else (
+                    'zip' if _is_zip(buf) else 'other')
+                line = f'{datetime.utcnow().isoformat()} {fname} {len(buf)} {kind}\n'
+                with open(_os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
+                    fh.write(line)
+            except OSError:
+                pass
+
         def _import_completed(fname, buf):
             """Dispatch a fully-received file. Returns a list of parsed
             messages (may be empty for non-mail content like TICs)."""
+            _debug_manifest(fname, buf)
             if _is_fts_packet(buf):
+                _debug_dump_packet(fname, buf)
                 try:
                     return _parse_ftn_packet(buf)
                 except Exception:
@@ -886,6 +1101,8 @@ class BinkPClient:
                                     info.filename, fname, exc)
                                 continue
                             if _is_fts_packet(inner):
+                                _debug_dump_packet(
+                                    f'{fname}__{info.filename}', inner)
                                 try:
                                     out.extend(_parse_ftn_packet(inner))
                                 except Exception:

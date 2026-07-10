@@ -114,6 +114,43 @@ def upload():
             current_app.logger.exception(
                 'virus scan crashed during user upload; allowing file')
 
+        # Optional archive integrity test. Same reject pattern as the
+        # virus scan above; fails open on anything we can't actually
+        # check (missing optional library, unrecognized format).
+        try:
+            from ..features.archive_meta import test_archive_integrity
+            result = test_archive_integrity(filepath)
+            if not result.ok:
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                flash(f'Upload rejected: corrupt archive ({result.message}).',
+                      'danger')
+                return redirect(url_for('files.upload'))
+        except Exception:
+            current_app.logger.exception(
+                'archive integrity test crashed during user upload; allowing file')
+
+        # Duplicate-content check, scoped to the same file area (a
+        # top-level upload only dupe-checks against other top-level
+        # uploads). A notice, not a hard block -- the upload still
+        # succeeds, since a sysop/user might genuinely want two copies
+        # under different names/descriptions.
+        try:
+            from ..features.file_dedup import hash_file
+            content_hash = hash_file(filepath)
+            existing = FileUpload.query.filter_by(
+                file_area_id=chosen_area.id if chosen_area else None,
+                content_hash=content_hash).first()
+            if existing:
+                flash(f'Note: identical file already uploaded as '
+                      f'"{existing.original_filename}".', 'warning')
+        except Exception:
+            current_app.logger.exception(
+                'dedup hash failed during user upload; continuing without it')
+            content_hash = None
+
         mime_type = mimetypes.guess_type(f.filename)[0] or 'application/octet-stream'
 
         # Auto-pull a description from the archive if the user didn't type one.
@@ -135,6 +172,7 @@ def upload():
             mime_type=mime_type,
             description=description,
             file_area_id=chosen_area.id if chosen_area else None,
+            content_hash=content_hash,
         )
         db.session.add(upload_obj)
         db.session.commit()

@@ -352,13 +352,51 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 os.path.splitext(name)[1]):
             yield (name, payload)
 
+    def _debug_manifest(fname, buf):
+        """Same purpose as binkp.py's _debug_manifest, duplicated here
+        because this is a genuinely separate inbound path: the answering
+        side (this file, when a hub connects TO us) never routed through
+        binkp.py's _import_completed()/_debug_dump_packet() at all, so
+        every diagnostic added there was blind to traffic arriving this
+        way. Confirmed on the live server: real messages kept landing in
+        the DB with zero corresponding manifest entries, which is what
+        led to finding this second, uninstrumented code path. Opt-in via
+        the same BINKP_DEBUG_DUMP_DIR env var, zero cost unless set."""
+        debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
+        if not debug_dir:
+            return
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+            kind = 'fts' if _is_fts_packet(buf) else (
+                'zip' if _is_zip(buf) else 'other')
+            line = f'{datetime.utcnow().isoformat()} SRV:{fname} {len(buf)} {kind}\n'
+            with open(os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
+                fh.write(line)
+        except OSError:
+            pass
+
+    def _debug_dump_packet(name, data):
+        debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
+        if not debug_dir:
+            return
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+            dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_srv_{name}'
+            with open(os.path.join(debug_dir, dump_name), 'wb') as fh:
+                fh.write(data)
+        except OSError as exc:
+            logger.warning('BinkP server: failed to dump debug packet %s: %s',
+                           name, exc)
+
     if inbound_files:
         with app.app_context():
             inbound_dir = None
             for fname, payload in inbound_files:
+                _debug_manifest(fname, payload)
                 extracted = list(_extract_packets(fname, payload))
                 if extracted:
                     for inner_name, inner_payload in extracted:
+                        _debug_dump_packet(inner_name, inner_payload)
                         _import_pkt_payload(inner_payload, net_id, inner_name)
                 else:
                     # Non-packet files (TIC manifests, hatched binaries, etc.)
@@ -572,7 +610,8 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
     Routes by AREA: kludge:
       - present → echomail → EchomailMessage (with kludges, seenby, path)
       - absent  → netmail  → NetmailMessage (with kludges, all attribute flags)
-    Triggers areafix bot if a netmail's to_name matches 'areafix' (any case).
+    Triggers the areafix bot if a netmail's to_name matches 'areafix' (any
+    case), or the filefix bot for 'filefix' (any case).
     """
     import json
     from ..models import db, EchomailMessage, EchoArea, NetmailMessage, EchomailNetwork
@@ -698,6 +737,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
     # (in-app bell + terminal "You have new" banner) -- this listener
     # path never notified the recipient of new netmail at all before.
     from .areafix import handle_areafix_netmail
+    from .filefix import handle_filefix_netmail
     from ..features.notify import notify
     for nm_id, to_lower, to_uid, from_name, subject in netmails_to_process:
         if to_lower in ('areafix', 'area fix', 'areamgr'):
@@ -705,6 +745,11 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                 handle_areafix_netmail(nm_id)
             except Exception:
                 logger.exception('Areafix bot failed for netmail %d', nm_id)
+        elif to_lower in ('filefix', 'file fix', 'filemgr'):
+            try:
+                handle_filefix_netmail(nm_id)
+            except Exception:
+                logger.exception('FileFix bot failed for netmail %d', nm_id)
         elif to_uid:
             try:
                 notify(to_uid, 'netmail', title=f'Netmail from {from_name}',

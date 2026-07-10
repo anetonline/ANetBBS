@@ -39,10 +39,7 @@ logger = logging.getLogger(__name__)
 preflight_bp = Blueprint('preflight', __name__, url_prefix='/admin/preflight')
 
 
-def _admin_required():
-    if not current_user.is_authenticated or not getattr(current_user, 'is_admin', False):
-        from flask import abort
-        abort(403)
+from .access_control import require_admin_or_403 as _admin_required
 
 
 # ── Individual checks ──────────────────────────────────────────────────────

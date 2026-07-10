@@ -151,10 +151,7 @@ KNOWN_UNITS = [
 
 VALID_ACTIONS = ('start', 'stop', 'restart', 'reload')
 
-
-def _require_admin():
-    if not current_user.is_authenticated or not current_user.is_admin:
-        abort(403)
+from .access_control import require_admin_or_403 as _require_admin
 
 
 def _systemctl_read(*args):

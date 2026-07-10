@@ -11,18 +11,16 @@ from sqlalchemy.exc import OperationalError
 
 from ..models import (db, EchoArea, EchomailMessage, EchomailReadStatus,
                        EchomailNetwork, EchomailLastRead)
+from ..features.access_control import evaluate_access
 
 echomail_bp = Blueprint('echomail', __name__, url_prefix='/echomail')
 
 
 def _check_area_access(echo_area):
     """Abort 403 if the current user cannot access this echo area."""
-    if getattr(current_user, 'is_admin', False):
-        return
-    if echo_area.is_sysop_only:
-        abort(403)
-    user_lvl = getattr(current_user, 'access_level', 10) or 10
-    if (echo_area.min_access_level or 0) > user_lvl:
+    if not evaluate_access(current_user, echo_area.min_access_level,
+                           is_sysop_only=echo_area.is_sysop_only,
+                           bypass_admin=True):
         abort(403)
 
 
@@ -47,7 +45,15 @@ class NetmailForm(FlaskForm):
 
 
 def _accessible_areas_query(network_id):
-    """Return a filtered EchoArea query for the current user on one network."""
+    """Return a filtered EchoArea query for the current user on one network.
+
+    Same predicate as evaluate_access(), kept as a SQL-level filter rather
+    than a per-row Python call -- this backs area-listing pages, and
+    downgrading a set-based .filter() into N evaluate_access() calls after
+    fetching every row would be a real (if usually small) perf regression
+    for no behavior change. _check_area_access() above is the single-item
+    equivalent and does use evaluate_access() directly.
+    """
     q = EchoArea.query.filter_by(
         network_id=network_id, is_active=True, is_subscribed=True)
     if not getattr(current_user, 'is_admin', False):

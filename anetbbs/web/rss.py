@@ -104,7 +104,16 @@ def index():
 @rss_bp.route('/all')
 @login_required
 def river():
-    """Combined river — newest items across all active feeds."""
+    """Combined river — newest items across all active feeds.
+
+    Filter mirrors evaluate_access(current_user, feed.min_access_level,
+    bypass_admin=False) -- kept as a SQL predicate (paginated query, can't
+    correctly filter after LIMIT/OFFSET) rather than a per-item Python
+    call. bypass_admin=False here is a deliberate preservation of existing
+    behavior, not a new decision: an admin below a feed's min_access_level
+    was already excluded from this page before this file was touched, and
+    RssFeed has no is_sysop_only column to gate on separately.
+    """
     page = max(1, int(request.args.get('page', 1) or 1))
     per_page = 30
     pagination = (RssItem.query

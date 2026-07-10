@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 from flask import (Blueprint, render_template, redirect, url_for,
-                   flash, abort, current_app)
+                   flash, current_app)
 from flask_login import login_required, current_user
 from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, SelectField, IntegerField,
@@ -19,18 +19,7 @@ logger = logging.getLogger(__name__)
 
 games_admin_bp = Blueprint('games_admin', __name__, url_prefix='/admin/games')
 
-
-def _admin_required(fn):
-    """Decorator — admins only. Replaces an older in-body abort() pattern
-    that ran AFTER the view body had started executing (a window where a
-    non-admin authenticated user could trigger DB reads before the abort)."""
-    from functools import wraps
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            abort(403)
-        return fn(*args, **kwargs)
-    return wrapper
+from .access_control import require_admin as _admin_required
 
 
 # ---------------------------------------------------------------------------

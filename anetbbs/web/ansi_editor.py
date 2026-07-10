@@ -16,10 +16,11 @@ import re
 from datetime import datetime
 
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, abort, Response, jsonify)
+                   flash, Response, jsonify)
 from flask_login import login_required, current_user
 
 from ..models import db, AnsiArt
+from .access_control import require_admin_or_403
 
 
 ansi_bp = Blueprint('ansi_editor', __name__, url_prefix='/admin/ansi')
@@ -226,8 +227,7 @@ def render_ansi_text(grid):
 @ansi_bp.route('/')
 @login_required
 def index():
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     arts = AnsiArt.query.order_by(AnsiArt.updated_at.desc()).all()
     return render_template('ansi_editor/index.html', arts=arts)
 
@@ -235,8 +235,7 @@ def index():
 @ansi_bp.route('/new', methods=['GET', 'POST'])
 @login_required
 def create():
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip() or 'Untitled'
         width = max(20, min(132, request.form.get('width', type=int) or 80))
@@ -262,8 +261,7 @@ def create():
 @login_required
 def import_ans():
     """Upload an existing .ans file and load it into a new AnsiArt row."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     if request.method == 'POST':
         upload = request.files.get('ans_file')
         name = (request.form.get('name') or '').strip()
@@ -326,8 +324,7 @@ def import_ans():
 @ansi_bp.route('/<int:art_id>/edit')
 @login_required
 def edit(art_id):
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     from ..models import BbsMenu
     art = AnsiArt.query.get_or_404(art_id)
     grid = json.loads(art.grid_json or '{}')
@@ -344,8 +341,7 @@ def edit(art_id):
 @ansi_bp.route('/<int:art_id>/save', methods=['POST'])
 @login_required
 def save(art_id):
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     art = AnsiArt.query.get_or_404(art_id)
     payload = request.get_json(silent=True) or {}
     grid = payload.get('grid')
@@ -365,8 +361,7 @@ def save(art_id):
 @ansi_bp.route('/<int:art_id>/delete', methods=['POST'])
 @login_required
 def delete(art_id):
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     art = AnsiArt.query.get_or_404(art_id)
     name = art.name
     db.session.delete(art)
@@ -383,8 +378,7 @@ def preview(art_id):
     Renders the grid with HTML spans (cells coloured from grid_json) so
     the sysop can see what the terminal will render without actually
     opening a telnet client."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     art = AnsiArt.query.get_or_404(art_id)
     grid = json.loads(art.grid_json or '{}')
     return render_template('ansi_editor/preview.html', art=art, grid=grid)
@@ -418,8 +412,7 @@ def _build_sauce(art):
 @login_required
 def duplicate(art_id):
     """Save-as-copy."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     src = AnsiArt.query.get_or_404(art_id)
     new_slug = _slugify(src.name + '-copy') + '-' + datetime.utcnow().strftime('%H%M%S')
     new_art = AnsiArt(
@@ -439,8 +432,7 @@ def duplicate(art_id):
 def raw_ansi(art_id):
     """Download the rendered ANSI text + SAUCE trailer (compatible with
     Pablo Draw / Moebius / SyncTERM)."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     art = AnsiArt.query.get_or_404(art_id)
     body = (art.ansi_text or '').encode('cp437', errors='replace')
     sauce = _build_sauce(art)
@@ -455,8 +447,7 @@ def raw_ansi(art_id):
 @login_required
 def apply_to_menu():
     """Set this AnsiArt as the ansi_screen of a BbsMenu."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     from ..models import BbsMenu
     art = AnsiArt.query.get_or_404(request.form.get('art_id', type=int))
     menu = BbsMenu.query.get_or_404(request.form.get('menu_id', type=int))
@@ -470,8 +461,7 @@ def apply_to_menu():
 @login_required
 def apply_to_screen():
     """Set this AnsiArt as a BbsAnsiScreen slot (welcome, goodbye, newuser)."""
-    if not getattr(current_user, 'is_admin', False):
-        abort(403)
+    require_admin_or_403()
     from ..models import BbsAnsiScreen
     art = AnsiArt.query.get_or_404(request.form.get('art_id', type=int))
     slot = (request.form.get('slot') or '').strip()
