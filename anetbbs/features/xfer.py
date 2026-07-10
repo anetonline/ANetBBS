@@ -8,10 +8,16 @@ Requires lrzsz on the server: apt install lrzsz
   sx / rx  — XMODEM send / receive
 
 ZMODEM sends use --binary to prevent newline translation of binary data.
---escape is intentionally omitted: it causes sz to send ZSINIT to negotiate
-extended escaping, but many terminal emulators (including SyncTERM) respond
-with ZRINIT instead of ZACK, breaking the handshake. XON/XOFF/DLE are still
-escaped by default without the flag.
+--escape is intentionally omitted on both send AND receive: on sz it causes
+sz to send ZSINIT to negotiate extended escaping, but many terminal
+emulators (including SyncTERM) respond with ZRINIT instead of ZACK,
+breaking the handshake. rz's --escape has the same failure mode in the
+opposite direction -- it sets the ESCCTL bit in our ZRINIT, requesting the
+sender escape control characters, and SyncTERM's sender (confirmed live:
+every upload failed identically with "UNEXPECTED ZRPOS received instead of
+ZRINIT" after repeated ZRQINIT retries) doesn't handle that request
+cleanly either. XON/XOFF/DLE are still escaped by default without the
+flag on both ends.
 
 Reading from session.reader directly (not through handle_telnet_command)
 preserves the raw binary stream needed for protocol transfers.
@@ -31,7 +37,7 @@ _PROTOCOLS = {
         'send_bin':   'sz',
         'recv_bin':   'rz',
         'send_flags': ['--binary'],
-        'recv_flags': ['--escape'],
+        'recv_flags': [],
     },
     'ymodem': {
         'name':       'YMODEM',

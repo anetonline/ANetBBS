@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.77 — Fix ZMODEM upload handshake failure with SyncTERM (July 2026)
+
+- FIX: every SSH ZMODEM upload from SyncTERM failed with a broken handshake (`UNEXPECTED ZRPOS received instead of ZRINIT`). Same root cause class as an already-fixed send-side bug in this file: `rz --escape` triggers the same SyncTERM negotiation failure that `sz --escape` did. Removed `--escape` from ZMODEM's receive flags to match. 3 new tests.
+
+---
+
 # ANetBBS v1.0b2.76 — Diagnostics missed the inbound-listener path entirely (July 2026)
 
 - DIAGNOSTIC: found the real reason the manifest stayed empty — `binkp_server.py` (the separate `anetbbs-binkp` inbound-listener service, for when a hub calls *us*) has its own independent packet-receive chain that never touched any of the diagnostics added so far. The actual parsing fixes already covered it (shared `_parse_ftn_packet()`), but the capture didn't. Now instrumented identically, prefixed `SRV:` to distinguish it from the outbound-poll path's captures.

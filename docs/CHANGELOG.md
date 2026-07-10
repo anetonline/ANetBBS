@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.76`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.77`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.77 — Fix ZMODEM upload handshake failure with SyncTERM (July 2026)
+
+- FIX: every terminal file upload via ZMODEM over SSH from SyncTERM failed identically — the client logged `UNEXPECTED ZRPOS received instead of ZRINIT` after repeated `ZRQINIT` retries, then cancelled. 100% reproducible (confirmed live), which pointed at a protocol/flag mismatch rather than a timing race. This codebase already had a proven fix for the mirror-image bug on the *send* side (`anetbbs/features/xfer.py`): `sz --escape` causes `sz` to send `ZSINIT` to negotiate extended escaping, and SyncTERM replies with `ZRINIT` instead of the expected `ZACK`, breaking the handshake — so `--escape` was deliberately omitted from ZMODEM's outbound flags. The *receive* side (`rz --escape`, which sets the `ESCCTL` bit in our `ZRINIT` to request the sender escape control characters) turned out to trigger the same class of SyncTERM handshake failure in the opposite direction. Removed `--escape` from ZMODEM's `recv_flags` to mirror the already-proven send-side fix. XMODEM has no escape flag (not part of the ZMODEM family, no `ZSINIT`/`ZRINIT` negotiation); YMODEM's `--escape` was left untouched — no live report of a YMODEM failure, and changing it wouldn't be justified by evidence. 3 new tests.
 
 ## v1.0b2.76 — Diagnostics missed the inbound-listener path entirely (July 2026)
 
