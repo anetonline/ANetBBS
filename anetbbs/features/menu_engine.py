@@ -105,6 +105,7 @@ async def _act_passwd(ui, args):  await ui.session.write(_CLR); await ui.change_
 async def _act_sysop(ui, args):   await ui.session.write(_CLR); await ui.sysop_menu();       return None
 async def _act_chat(ui, args):    await ui.session.write(_CLR); await ui.session.chat.show_menu(); return None
 async def _act_rss(ui, args):     await ui.session.write(_CLR); await ui.show_rss();           return None
+async def _act_guru(ui, args):    await ui.session.write(_CLR); await ui.show_guru();          return None
 
 async def _act_ebooks(ui, args):
     """Ebook reader -- gated by the ebooks Game row's terminal_enabled
@@ -359,6 +360,7 @@ _ACTIONS = {
     'sysop': _act_sysop,
     'chat': _act_chat,
     'rss': _act_rss,
+    'guru': _act_guru,
     'ebooks': _act_ebooks,
     'games': _act_games,
     'page': _act_page,
@@ -691,6 +693,7 @@ DEFAULT_MENUS = [
             {'hotkey': 'H', 'label': 'Chat', 'action_type': 'chat', 'sort_order': 70},
             {'hotkey': 'R', 'label': 'RSS News Reader', 'action_type': 'rss', 'sort_order': 75},
             {'hotkey': 'K', 'label': 'Ebook Reader', 'action_type': 'ebooks', 'sort_order': 76},
+            {'hotkey': 'L', 'label': 'Ask Anet (Help Guru)', 'action_type': 'guru', 'sort_order': 77},
             {'hotkey': 'U', 'label': "Who's Online", 'action_type': 'who', 'sort_order': 80},
             {'hotkey': 'A', 'label': 'Page Sysop', 'action_type': 'page', 'sort_order': 85},
             {'hotkey': 'D', 'label': 'Dial Out (visit other BBSes)', 'action_type': 'dialout', 'sort_order': 86},

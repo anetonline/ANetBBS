@@ -355,6 +355,7 @@ def create_app(config_name=None):
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
+    from .web.guru import guru_bp
     from .web.hub_admin import hub_admin_bp
     from .web.qwk_hub import qwk_hub_bp
     from .web.network_join import network_join_bp
@@ -451,6 +452,7 @@ def create_app(config_name=None):
     app.register_blueprint(pages_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(wiki_bp)
+    app.register_blueprint(guru_bp)
     # Logon/logoff modules and graffiti wall admin.
     app.register_blueprint(login_modules_admin_bp)
     app.register_blueprint(wall_admin_bp)
@@ -830,6 +832,17 @@ def _lightweight_migrate(app):
         except Exception as exc:
             app.logger.warning('Could not create %s.%s unique index: %s',
                                _idx_table, _idx_col, exc)
+
+    # Ask Anet guru door: FTS5 search index over wiki_pages (SQLite only —
+    # see anetbbs/guru/fts.py). Created empty here; fresh installs populate
+    # it naturally when seed_initial_pages() inserts wiki rows later in
+    # startup (fires the AFTER INSERT trigger), upgrading installs get a
+    # one-time backfill inside ensure_fts_index() itself.
+    try:
+        from .guru.fts import ensure_fts_index
+        ensure_fts_index(engine, _sa.text, app.logger)
+    except Exception as exc:
+        app.logger.warning('Could not create/sync guru FTS5 index: %s', exc)
 
 
 def _create_default_data():

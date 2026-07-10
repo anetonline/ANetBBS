@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Ask Anet — Help Guru{% endblock %}
+{% block content %}
+
+<div class="bbs-header">
+    <h1><i class="bi bi-question-circle"></i> Ask Anet</h1>
+</div>
+
+<div class="alert alert-secondary" role="note">
+    {{ disclosure }}
+</div>
+
+{% if not q %}
+<p class="text-muted">{{ intro }}</p>
+{% endif %}
+
+<form method="get" action="{{ url_for('guru.index') }}" class="mb-3">
+    <div class="input-group">
+        <input type="text" name="q" value="{{ q }}" class="form-control"
+               placeholder="e.g. where can I view netmail?" autofocus>
+        <button class="btn btn-primary">Ask</button>
+    </div>
+</form>
+
+{% if q %}
+    {% if results %}
+        <p class="text-muted">{{ results|length }} result{{ '' if results|length == 1 else 's' }} for <strong>{{ q }}</strong></p>
+        <ul class="list-group">
+        {% for r in results %}
+            <li class="list-group-item">
+                <a href="{{ url_for('wiki.view', slug=r.slug) }}"><strong>{{ r.title }}</strong></a>
+                {% if r.snippet %}<br><small class="text-muted">{{ r.snippet }}</small>{% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <div class="alert alert-info">{{ not_found }}</div>
+    {% endif %}
+{% endif %}
+{% endblock %}

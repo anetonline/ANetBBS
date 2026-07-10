@@ -2653,6 +2653,82 @@ class BBSMenuUI:
                             db.session.commit()
                 # loop to refresh counts
 
+    async def show_guru(self):
+        """Ask Anet -- the in-BBS help guru. Retrieval only (FTS5 search
+        over the wiki + a fixed personality template), see
+        anetbbs/guru/personality.py's DISCLOSURE -- shown here first,
+        every time, so this is never mistaken for a live AI chatbot."""
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+        from anetbbs.guru import search as guru_search, personality
+        from anetbbs.guru.render_plain import markdown_to_plain
+        from anetbbs.models import WikiPage
+
+        _w = ui_width(self.session)
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner('Ask Anet', _w))
+        for line in self._wrap_text(personality.DISCLOSURE, max(60, _w - 4)):
+            await self.session.write(f"  {FG['gry']}{line}{RESET}\r\n")
+        await self.session.write(f"\r\n  {personality.intro()}\r\n\r\n")
+
+        while True:
+            q = await self.session.read_line(
+                f"  {FG['cyan']}Ask a question (blank to leave):{RESET} ")
+            q = (q or '').strip()
+            if not q:
+                return
+
+            with _app().app_context():
+                results = guru_search.search(q, limit=8)
+
+            if not results:
+                await self.session.write(f"\r\n  {personality.not_found()}\r\n\r\n")
+                continue
+
+            await self.session.write(f"\r\n  {personality.found_lead_in()}\r\n\r\n")
+
+            # Fixed cols: indent(2)+title(28)+sp(2) = 32; snippet gets the
+            # rest, so results still line up cleanly on an 80-col terminal
+            # and use the extra room on a 132-col widescreen session.
+            _gw       = ui_width(self.session)
+            _title_w  = 28
+            _snippet_w = max(20, _gw - 32)
+
+            def _truncate(s, width):
+                if len(s) <= width:
+                    return s
+                cut = s[:width - 3].rsplit(' ', 1)[0]
+                return f'{cut}...' if cut else s[:width - 3] + '...'
+
+            async def render_header():
+                await self.session.write(banner('Ask Anet - results', ui_width(self.session)))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'Page':<{_title_w}}{'Match':<{_snippet_w}}{RESET}\r\n")
+
+            def render_row(idx, row, selected):
+                title = _truncate(row['title'], _title_w - 2)
+                snip = _truncate(row['snippet'], _snippet_w - 1)
+                return f"  {title:<{_title_w}}{snip:<{_snippet_w}}"
+
+            def render_hint(sel, total):
+                return (f"  {FG['cyan']}Enter{RESET}=read  "
+                        f"{FG['cyan']}Q{RESET}=new question   {sel + 1}/{total}")
+
+            result = await self._rss_lightbar(results, render_header, render_row, render_hint)
+            if result[0] == 'enter':
+                page = results[result[1]]
+                with _app().app_context():
+                    wp = WikiPage.query.filter_by(slug=page['slug'], is_deleted=False).first()
+                if wp:
+                    _art_w = max(72, _w - 4)
+                    body_lines = []
+                    for para in markdown_to_plain(wp.body).split('\n'):
+                        body_lines.extend(self._wrap_text(para, _art_w) if para.strip() else [''])
+                    hdr = [f"  {FG['cyan']}{BOLD}{wp.title}{RESET}",
+                           f"  {FG['gry']}{'-' * _art_w}{RESET}"]
+                    hint = f"  {FG['cyan']}Up/Dn{RESET}=scroll  {FG['cyan']}Q/Enter{RESET}=back"
+                    await self._rss_pager(body_lines, hdr, hint)
+            await self.session.write(f"\r\n  {personality.OUTRO}\r\n")
+
     async def _rss_feed_items(self, feed_id, feed_name):
         """Item list for one feed — arrow-key lightbar."""
         from anetbbs.models import RssItem, RssReadStatus, db

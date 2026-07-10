@@ -28,6 +28,7 @@ ACTION_TYPES = [
     ('files', 'File library'),
     ('games', 'Game center'),
     ('rss', 'RSS news reader'),
+    ('guru', 'Ask Anet (help guru search)'),
     ('chat', 'Chat menu'),
     ('multinode', 'Multinode chat (between connected terminal nodes)'),
     ('oneliners', 'Show one-liners + last 10 callers'),
