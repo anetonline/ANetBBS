@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.78 — Terminal uploads into disk-backed file areas never showed on the web (July 2026)
+
+- FIX: a terminal ZMODEM upload into a file area with a configured storage_path saved into a generic fallback directory instead of the area's own disk path — the web file-area page (and the terminal's own primary listing) only ever scans the area's real storage_path, so the uploaded file was invisible everywhere except the terminal's DB-fallback listing. Now saves directly under the area's storage_path with no DB row, matching the web upload route exactly. 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.77 — Fix ZMODEM upload handshake failure with SyncTERM (July 2026)
 
 - FIX: every SSH ZMODEM upload from SyncTERM failed with a broken handshake (`UNEXPECTED ZRPOS received instead of ZRINIT`). Same root cause class as an already-fixed send-side bug in this file: `rz --escape` triggers the same SyncTERM negotiation failure that `sz --escape` did. Removed `--escape` from ZMODEM's receive flags to match. 3 new tests.

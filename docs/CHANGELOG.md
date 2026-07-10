@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.77`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.78`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.78 — Terminal uploads into disk-backed file areas never showed on the web (July 2026)
+
+- FIX: a file uploaded via the terminal's ZMODEM upload (`anetbbs/features/bbs_ui.py:_upload_terminal_file()`) into a file area with a configured `FileArea.storage_path` showed up correctly in the terminal's own file listing but never appeared on the web UI's file-area page for the same area — confirmed live immediately after the v1.0b2.77 ZMODEM handshake fix let an upload actually succeed. Root cause: the terminal upload always saved into a single generic `uploads_dir` (creating a `FileUpload` DB row), regardless of which area was selected — the area's own `storage_path` was computed by the caller but never passed down or used. Meanwhile `anetbbs/web/file_areas.py`'s `_scan_area()` — which both the terminal's own primary listing branch (when a storage_path exists) and the web view use — only ever scans `area.storage_path` on disk and has no `FileUpload` DB fallback at all. The file existed; it just wasn't where either of them ever looked. Fixed by branching on whether a storage_path was supplied: if so, save directly under it with the real filename and create no DB row (matching `file_areas.py`'s own web upload route, and every other file already in that area); otherwise, the original uuid-named-file-plus-`FileUpload`-row behavior is preserved unchanged for areas with no disk storage at all (the "General / Top-level" case). 2 new tests — and along the way, found and worked around a real `IsolatedAsyncioTestCase` hang (near-zero CPU, no progress) triggered specifically by creating a Flask app inside one of its tests; a bare `asyncio.run()` of the identical coroutine in the identical process completes in under a second, so the tests use that instead, matching how `tests/test_terminal_node_monitor.py` already avoids this same class of problem.
 
 ## v1.0b2.77 — Fix ZMODEM upload handshake failure with SyncTERM (July 2026)
 

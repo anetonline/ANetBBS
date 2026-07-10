@@ -1649,7 +1649,8 @@ class BBSMenuUI:
             if cu == 'P' and page > 0:
                 page -= 1; continue
             if cu == 'U' and can_upload and protos:
-                await self._upload_terminal_file(area_id, uploads_dir, protos)
+                await self._upload_terminal_file(
+                    area_id, uploads_dir, protos, storage_path)
                 continue
 
             # V# — view extended description
@@ -1919,8 +1920,20 @@ class BBSMenuUI:
             pass
         await self.session.read_line("Press Enter...")
 
-    async def _upload_terminal_file(self, area_id, uploads_dir, protos):
-        """Receive a file upload from the user via ZMODEM/YMODEM/XMODEM."""
+    async def _upload_terminal_file(self, area_id, uploads_dir, protos,
+                                    storage_path=''):
+        """Receive a file upload from the user via ZMODEM/YMODEM/XMODEM.
+
+        *uploads_dir* is the generic fallback directory for areas with no
+        disk storage configured (DB-backed FileUpload rows, matches the
+        DB-fallback branch in _file_area_browse). *storage_path* is the
+        area's own on-disk directory when it has one -- confirmed live
+        that this was previously being ignored entirely: uploads always
+        went into uploads_dir regardless of area, so a file uploaded
+        into a disk-backed area got a FileUpload DB row pointing at
+        uploads_dir, but the web view for that area (file_areas.py's
+        _scan_area()) only ever scans area.storage_path and has no DB
+        fallback -- the file existed, just never where the web looked."""
         from anetbbs.models import db, FileUpload
         from .xfer import recv_file
         import uuid, mimetypes, shutil as _shutil
@@ -1958,7 +1971,14 @@ class BBSMenuUI:
             await self.session.read_line("Press Enter...")
             return
 
-        os.makedirs(uploads_dir, exist_ok=True)
+        # Disk-backed area (has its own storage_path): save the file
+        # there under its real name, matching file_areas.py's web upload
+        # route exactly. No FileUpload DB row -- _scan_area() has no DB
+        # fallback and only ever lists what's physically on disk under
+        # storage_path, same as every other file already in this area.
+        use_disk_area = bool(storage_path)
+        target_dir = storage_path if use_disk_area else uploads_dir
+        os.makedirs(target_dir, exist_ok=True)
 
         app = _app()
         uid = self.session.user.get('id')
@@ -1966,39 +1986,49 @@ class BBSMenuUI:
 
         for orig_name, tmp_path in received:
             try:
-                ext = orig_name.rsplit('.', 1)[-1].lower() \
-                      if '.' in orig_name else ''
-                stored = f"{uuid.uuid4().hex}.{ext}" if ext \
-                         else uuid.uuid4().hex
-                dest = os.path.join(uploads_dir, stored)
-                _shutil.move(tmp_path, dest)
-                size = os.path.getsize(dest)
-                mime = mimetypes.guess_type(orig_name)[0] \
-                       or 'application/octet-stream'
+                if use_disk_area:
+                    safe_name = os.path.basename(orig_name)
+                    if not safe_name or safe_name.startswith('.'):
+                        await self.session.write(
+                            f"\r\nSkipped {orig_name!r}: invalid filename.\r\n")
+                        continue
+                    dest = os.path.join(target_dir, safe_name)
+                    _shutil.move(tmp_path, dest)
+                    saved.append(orig_name)
+                else:
+                    ext = orig_name.rsplit('.', 1)[-1].lower() \
+                          if '.' in orig_name else ''
+                    stored = f"{uuid.uuid4().hex}.{ext}" if ext \
+                             else uuid.uuid4().hex
+                    dest = os.path.join(uploads_dir, stored)
+                    _shutil.move(tmp_path, dest)
+                    size = os.path.getsize(dest)
+                    mime = mimetypes.guess_type(orig_name)[0] \
+                           or 'application/octet-stream'
 
-                # Auto-extract FILE_ID.DIZ if user left desc blank
-                file_desc = desc
-                if not file_desc:
-                    try:
-                        file_desc = extract_archive_description(dest) or ''
-                    except Exception:
-                        pass
+                    # Auto-extract FILE_ID.DIZ if user left desc blank
+                    file_desc = desc
+                    if not file_desc:
+                        try:
+                            file_desc = extract_archive_description(dest) or ''
+                        except Exception:
+                            pass
 
-                with app.app_context():
-                    fu = FileUpload(
-                        uploader_id=uid,
-                        filename=stored,
-                        original_filename=orig_name,
-                        file_path=dest,
-                        file_size=size,
-                        mime_type=mime,
-                        description=file_desc,
-                        file_area_id=area_id,
-                        is_public=True,
-                    )
-                    db.session.add(fu)
-                    db.session.commit()
-                saved.append(orig_name)
+                    with app.app_context():
+                        fu = FileUpload(
+                            uploader_id=uid,
+                            filename=stored,
+                            original_filename=orig_name,
+                            file_path=dest,
+                            file_size=size,
+                            mime_type=mime,
+                            description=file_desc,
+                            file_area_id=area_id,
+                            is_public=True,
+                        )
+                        db.session.add(fu)
+                        db.session.commit()
+                    saved.append(orig_name)
             except Exception as exc:
                 await self.session.write(f"\r\nFailed to save {orig_name}: {exc}\r\n")
             finally:
