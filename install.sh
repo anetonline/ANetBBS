@@ -1470,7 +1470,7 @@ server {
 
     location /mrcws {
         auth_request /mrc-auth-check;
-        proxy_pass         http://127.0.0.1:8080/ws;
+        proxy_pass         http://127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade    \$http_upgrade;
         proxy_set_header   Connection "upgrade";
@@ -1671,6 +1671,12 @@ if [[ "$INSTALL_MODE" == "test" ]]; then
     [[ "$ENABLE_MSP"    != "y" ]] && echo -e "  ${DIM}- Inter-BBS IM (MSP/SYSTAT) disabled — re-enable in .env once you have a public IP${NC}"
     [[ "$ENABLE_FINGER" != "y" ]] && echo -e "  ${DIM}- Finger disabled — re-enable in .env + restart anetbbs-finger when going public${NC}"
     [[ "$ENABLE_BINKP"  != "y" ]] && echo -e "  ${DIM}- BinkP listener disabled — outbound netmail/echomail still works, inbound from FidoNet doesn't${NC}"
+    if [[ "$ENABLE_MRC" == "y" ]]; then
+        echo -e "  ${DIM}- Web MRC chat will NOT connect in this mode: /mrcws is proxied${NC}"
+        echo -e "  ${DIM}  by nginx only, and this mode has no nginx. Terminal MRC (SSH/telnet)${NC}"
+        echo -e "  ${DIM}  is unaffected. Fixed by going to production mode, or by manually${NC}"
+        echo -e "  ${DIM}  proxying /mrcws to 127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT} yourself.${NC}"
+    fi
     echo -e "  ${DIM}- To go production later: re-run install.sh with mode=production${NC}"
 elif [[ "$INSTALL_MODE" == "behind" ]]; then
     echo ""
@@ -1684,6 +1690,12 @@ elif [[ "$INSTALL_MODE" == "behind" ]]; then
     echo -e "  ${DIM}        proxy_set_header Connection \"upgrade\"; proxy_read_timeout 86400; }${NC}"
     echo -e "  ${DIM}    }${NC}"
     echo -e "  ${DIM}- Then run certbot --nginx -d bbs.example.com on YOUR nginx for HTTPS${NC}"
+    if [[ "$ENABLE_MRC" == "y" ]]; then
+        echo -e "  ${DIM}- Web MRC chat needs two MORE locations (/mrc-auth-check,${NC}"
+        echo -e "  ${DIM}  /mrcws) proxying to the bridge on port ${MRC_BRIDGE_PORT_DEFAULT} —${NC}"
+        echo -e "  ${DIM}  the example above alone does NOT cover it. Copy those blocks${NC}"
+        echo -e "  ${DIM}  from deploy/anetbbs-nginx.conf.template into your server block.${NC}"
+    fi
 fi
 
 echo ""

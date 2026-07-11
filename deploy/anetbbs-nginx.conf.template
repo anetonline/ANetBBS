@@ -61,7 +61,11 @@ server {
 
     location /mrcws {
         auth_request /mrc-auth-check;
-        proxy_pass         http://127.0.0.1:8080/ws;
+        # Must match the MRC bridge's own web_listen_port in
+        # mrc/bridge/config.json (install.sh derives it as WEB_PORT+1,
+        # so 5001 here matches this template's WEB_PORT of 5000 above --
+        # update both together if you customize WEB_PORT).
+        proxy_pass         http://127.0.0.1:5001/ws;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";

@@ -1165,6 +1165,33 @@ if [[ -f "$NGINX_AVAIL" ]]; then
         ok "nginx: MRC bridge proxy path fixed"
     fi
 
+    # Fix: MRC bridge proxy_pass port didn't match the bridge's actual
+    # listen port. install.sh derives the bridge's real port as
+    # WEB_PORT+1 (MRC_BRIDGE_PORT_DEFAULT) and writes it correctly to
+    # .env and the bridge's own config.json, but the nginx /mrcws
+    # location was a hardcoded literal 8080 until this was caught — on
+    # any install where the real bridge port differs (e.g. production
+    # mode's default WEB_PORT=5000 -> bridge on 5001), nginx silently
+    # proxied MRC traffic to a port nothing was listening on. The
+    # bridge itself ran with zero errors, so this was invisible outside
+    # of the browser's own WebSocket ever actually connecting — no
+    # installer or health check caught it. Read the real port from
+    # .env (which install.sh already writes correctly) and patch nginx
+    # to match, so an install that's carrying this bug self-heals here
+    # without needing a fresh reinstall.
+    REAL_MRC_PORT="$(grep -E '^MRC_BRIDGE_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')"
+    # Extract just the port digits after the colon immediately before
+    # /ws -- grep -oE '[0-9]+' alone would match "127" from the IP's
+    # own octets first, since head -1 takes whichever numeric group
+    # comes first in the string, not the actual port.
+    CURRENT_MRC_PORT="$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | grep -oE ':[0-9]+/ws;' | grep -oE '[0-9]+')"
+    if [[ -n "$REAL_MRC_PORT" && -n "$CURRENT_MRC_PORT" && "$CURRENT_MRC_PORT" != "$REAL_MRC_PORT" ]]; then
+        info "Patching nginx: MRC bridge proxy port $CURRENT_MRC_PORT → $REAL_MRC_PORT (matching the bridge's actual listen port)"
+        sed -i "s|127.0.0.1:${CURRENT_MRC_PORT}/ws;|127.0.0.1:${REAL_MRC_PORT}/ws;|g" "$NGINX_AVAIL"
+        NGINX_CHANGED=true
+        ok "nginx: MRC bridge proxy port fixed"
+    fi
+
     # Fix: 'immutable' Cache-Control caused browsers to permanently cache
     # 404 responses from old installs (before anetbbs/static/mrc/ existed).
     # Replace with a 1-day max-age without immutable so forced-refresh works.
@@ -1204,15 +1231,22 @@ if idx != -1:
 
     # Fix: Add /mrcws and /mrc-auth-check locations if entirely absent.
     # Without them requests fall through to gunicorn (404) instead of the
-    # MRC bridge on port 8080.  Sysops who installed before MRC web was added
+    # MRC bridge.  Sysops who installed before MRC web was added
     # (pre-v1.0a2.76) or whose config was generated from an old template never
-    # got these blocks.
+    # got these blocks. Read the real web/bridge ports from .env instead of
+    # hardcoding 5000/8080 -- those were stale literals that caused the
+    # exact "MRC bridge proxy port" bug fixed just above; falls back to the
+    # install.sh defaults only if .env is somehow missing the keys.
     if ! grep -q 'location /mrcws' "$NGINX_AVAIL" 2>/dev/null; then
         info "Adding /mrcws location to nginx config (missing from this install)..."
+        REAL_WEB_PORT="$(grep -E '^WEB_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')"
+        REAL_WEB_PORT="${REAL_WEB_PORT:-5000}"
+        REAL_MRC_PORT="${REAL_MRC_PORT:-$(grep -E '^MRC_BRIDGE_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')}"
+        REAL_MRC_PORT="${REAL_MRC_PORT:-8080}"
         MRC_BLOCK="
     location = /mrc-auth-check {
         internal;
-        proxy_pass http://127.0.0.1:5000/mrc/auth-check;
+        proxy_pass http://127.0.0.1:${REAL_WEB_PORT}/mrc/auth-check;
         proxy_pass_request_body off;
         proxy_set_header Content-Length \"\";
         proxy_set_header X-Original-URI \$request_uri;
@@ -1221,7 +1255,7 @@ if idx != -1:
 
     location /mrcws {
         auth_request /mrc-auth-check;
-        proxy_pass         http://127.0.0.1:8080/ws;
+        proxy_pass         http://127.0.0.1:${REAL_MRC_PORT}/ws;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade    \$http_upgrade;
         proxy_set_header   Connection \"upgrade\";
