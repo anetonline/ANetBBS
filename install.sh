@@ -1490,6 +1490,26 @@ NGINXEOF
     ln -sf "$NGINX_AVAIL" "$NGINX_ENABLED" 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
+    # SELinux (Fedora/RHEL/CentOS default): nginx's proxy_pass to backend
+    # ports is blocked by policy unless httpd_can_network_connect is on --
+    # confirmed live on a fresh Fedora install: nginx's own error log showed
+    # "connect() to 127.0.0.1:5000 failed (13: Permission denied)" for
+    # EVERY proxied backend (the main app AND the MRC bridge), even though
+    # nginx itself started cleanly and `nginx -t` passed. Debian/Ubuntu
+    # don't have SELinux at all, so this only ever fires where it's
+    # actually needed -- getenforce simply doesn't exist there.
+    if command -v getenforce &>/dev/null && [[ "$(getenforce 2>/dev/null)" == "Enforcing" ]]; then
+        if command -v setsebool &>/dev/null; then
+            if setsebool -P httpd_can_network_connect 1 2>/dev/null; then
+                ok "SELinux: httpd_can_network_connect enabled (nginx can now reach the app/MRC bridge)"
+            else
+                warn "SELinux is enforcing but 'setsebool -P httpd_can_network_connect 1' failed — nginx will NOT be able to reach the app. Run it manually (as root) and restart nginx."
+            fi
+        else
+            warn "SELinux is enforcing but setsebool isn't installed — nginx will NOT be able to reach the app until you: sudo dnf install policycoreutils-python-utils && sudo setsebool -P httpd_can_network_connect 1"
+        fi
+    fi
+
     if nginx -t 2>/dev/null; then
         systemctl enable nginx 2>/dev/null || true
         systemctl restart nginx 2>/dev/null || true

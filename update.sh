@@ -1274,6 +1274,26 @@ if idx != -1:
         warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
     fi
 
+    # SELinux (Fedora/RHEL/CentOS default): nginx's proxy_pass to backend
+    # ports is blocked by policy unless httpd_can_network_connect is on --
+    # confirmed live on a fresh Fedora install (nginx's own error log:
+    # "connect() to 127.0.0.1:5000 failed (13: Permission denied)", for
+    # every proxied backend, main app AND the MRC bridge alike). install.sh
+    # now sets this boolean on fresh installs; this is the matching
+    # self-heal for installs that predate that fix. Debian/Ubuntu don't
+    # have SELinux at all, so getenforce simply won't exist there and this
+    # is a no-op.
+    if command -v getenforce &>/dev/null && [[ "$(getenforce 2>/dev/null)" == "Enforcing" ]]; then
+        if [[ "$(getsebool httpd_can_network_connect 2>/dev/null)" != *"--> on"* ]] && \
+           command -v setsebool &>/dev/null; then
+            if setsebool -P httpd_can_network_connect 1 2>/dev/null; then
+                ok "SELinux: httpd_can_network_connect enabled (nginx can now reach the app/MRC bridge)"
+            else
+                warn "SELinux is enforcing but 'setsebool -P httpd_can_network_connect 1' failed — nginx cannot reach the app. Run it manually (as root)."
+            fi
+        fi
+    fi
+
     if [[ "$NGINX_CHANGED" == "true" ]]; then
         if nginx -t 2>/dev/null; then
             if nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null; then
