@@ -770,6 +770,26 @@ def _join_dir():
         os.path.join(current_app.config['DATA_DIR'], 'network_join'))
 
 
+def _join_archive_dir():
+    return current_app.config.get(
+        'NETWORK_JOIN_ARCHIVE_DIR',
+        os.path.join(current_app.config['DATA_DIR'], 'network_join_archive'))
+
+
+def _next_binkp_node_address(zone, net):
+    """1200:1/2, then /3, ... Node 1 is the hub itself (see nodelist()'s
+    hardcoded hub_node=1 below -- same convention), so numbering starts
+    at 2 when no downstream nodes exist yet in this zone:net."""
+    from ..echomail.routing import parse_address, format_address
+
+    highest = 1
+    for (addr,) in db.session.query(BinkPNode.ftn_address).all():
+        parsed = parse_address(addr)
+        if parsed and parsed[0] == zone and parsed[1] == net:
+            highest = max(highest, parsed[2])
+    return format_address(zone, net, highest + 1)
+
+
 @hub_admin_bp.route('/join/config', methods=['POST'])
 @login_required
 @_admin_required
@@ -778,6 +798,10 @@ def join_config_save():
     cfg.enabled = bool(request.form.get('enabled'))
     cfg.network_name = (request.form.get('network_name') or '').strip()[:100]
     cfg.intro_text = (request.form.get('intro_text') or '').strip()
+    zone_raw = (request.form.get('binkp_zone') or '').strip()
+    net_raw = (request.form.get('binkp_net') or '').strip()
+    cfg.binkp_zone = int(zone_raw) if zone_raw.isdigit() else None
+    cfg.binkp_net = int(net_raw) if net_raw.isdigit() else None
     db.session.commit()
     flash('Join form settings saved.', 'success')
     return redirect(url_for('hub_admin.index', gen_tab='join'))
@@ -866,6 +890,89 @@ def join_requests():
                            pending=pending, reviewed=reviewed)
 
 
+@hub_admin_bp.route('/join/requests/<int:req_id>')
+@login_required
+@_admin_required
+def join_request_detail(req_id):
+    """Full detail view of a single application -- every submitted
+    field, generated credentials once approved, and Approve/Deny
+    actions available directly from this page."""
+    req = NetworkJoinRequest.query.get_or_404(req_id)
+    return render_template('echomail/admin/hub/join_request_detail.html', req=req)
+
+
+@hub_admin_bp.route('/join/requests/<int:req_id>/archive', methods=['POST'])
+@login_required
+@_admin_required
+def archive_join_request(req_id):
+    """Snapshot the full application to a JSON file under
+    DATA_DIR/network_join_archive/ -- a deliberate, sysop-triggered
+    action, not automatic. That directory has no web route pointing at
+    it (unlike NETWORK_JOIN_DIR's infopack, which is served through
+    network_join.download_infopack), so it's unreachable from outside
+    -- see _join_archive_dir()."""
+    import json
+    import datetime
+    from werkzeug.utils import secure_filename
+
+    req = NetworkJoinRequest.query.get_or_404(req_id)
+
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+
+    payload = {
+        'id': req.id,
+        'status': req.status,
+        'applicant': {
+            'name': req.name,
+            'location': req.location,
+            'email': req.email,
+            'bbs_name': req.bbs_name,
+            'bbs_software': req.bbs_software,
+            'bbs_os': req.bbs_os,
+            'telnet_address': req.telnet_address,
+            'website_url': req.website_url,
+        },
+        'binkp': {
+            'ftn_address_requested': req.binkp_ftn_address,
+            'crash_or_hold': req.binkp_crash_or_hold,
+            'assigned_node_id': req.binkp_node_id,
+            'generated_password': req.generated_binkp_password,
+        },
+        'qwk': {
+            'packet_id': req.qwk_packet_id,
+            'assigned_node_id': req.qwk_node_id,
+            'generated_password': req.generated_qwk_password,
+        },
+        'notes': req.notes,
+        'rules_ack': req.rules_ack,
+        'submission_meta': {
+            'ip_address': req.ip_address,
+            'user_agent': req.user_agent,
+            'created_at': _iso(req.created_at),
+        },
+        'review': {
+            'reviewed_at': _iso(req.reviewed_at),
+            'reviewed_by': req.reviewed_by,
+            'deny_reason': req.deny_reason,
+        },
+        'archived_at': _iso(datetime.datetime.utcnow()),
+        'archived_by': current_user.username,
+    }
+
+    archive_dir = _join_archive_dir()
+    os.makedirs(archive_dir, exist_ok=True)
+    stamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    safe_name = secure_filename(req.bbs_name) or 'application'
+    filename = f'{req.id:05d}_{safe_name}_{stamp}.json'
+    dest = os.path.join(archive_dir, filename)
+    with open(dest, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=2)
+
+    flash(f'Application archived to {filename}.', 'success')
+    return redirect(url_for('hub_admin.join_request_detail', req_id=req.id))
+
+
 @hub_admin_bp.route('/join/requests/<int:req_id>/approve', methods=['POST'])
 @login_required
 @_admin_required
@@ -891,11 +998,16 @@ def approve_join_request(req_id):
 
     alphabet = string.ascii_letters + string.digits
 
-    if req.binkp_ftn_address and BinkPNode.query.filter_by(
-            ftn_address=req.binkp_ftn_address).first():
-        flash(f'BinkP address {req.binkp_ftn_address} is already taken '
-              f'-- deny this request or edit first.', 'danger')
-        return redirect(url_for('hub_admin.join_requests'))
+    cfg = NetworkJoinConfig.get()
+    binkp_address = None
+    if req.binkp_ftn_address:
+        binkp_address = (_next_binkp_node_address(cfg.binkp_zone, cfg.binkp_net)
+                          if cfg.binkp_zone and cfg.binkp_net
+                          else req.binkp_ftn_address.strip())
+        if BinkPNode.query.filter_by(ftn_address=binkp_address).first():
+            flash(f'BinkP address {binkp_address} is already taken '
+                  f'-- deny this request or edit first.', 'danger')
+            return redirect(url_for('hub_admin.join_requests'))
     if req.qwk_packet_id and QWKNode.query.filter_by(
             packet_id=req.qwk_packet_id).first():
         flash(f'QWK packet ID {req.qwk_packet_id} is already taken '
@@ -907,7 +1019,7 @@ def approve_join_request(req_id):
         binkp_password = ''.join(secrets.choice(alphabet) for _ in range(16))
         binkp_node = BinkPNode(
             name=req.bbs_name,
-            ftn_address=req.binkp_ftn_address,
+            ftn_address=binkp_address,
             password=binkp_password,
             sysop=req.name,
             system_name=req.bbs_name,
@@ -949,7 +1061,7 @@ def approve_join_request(req_id):
         lines = [f'Hi {req.name},', '',
                  f'Your application to join as {req.bbs_name} has been approved!', '']
         if binkp_password:
-            lines += [f'BinkP address: {req.binkp_ftn_address}',
+            lines += [f'BinkP address: {binkp_address}',
                       f'BinkP session password: {binkp_password}', '']
         if qwk_password:
             lines += [f'QWK packet ID: {req.qwk_packet_id}',

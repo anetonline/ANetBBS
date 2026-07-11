@@ -243,6 +243,20 @@
                         <input type="text" name="network_name" class="form-control"
                                value="{{ join_cfg.network_name or '' }}" placeholder="e.g. ANotherNetwork">
                     </div>
+                    <div class="col-md-3">
+                        <label class="form-label">BinkP Zone</label>
+                        <input type="number" name="binkp_zone" class="form-control"
+                               value="{{ join_cfg.binkp_zone or '' }}" placeholder="e.g. 1200">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">BinkP Net</label>
+                        <input type="number" name="binkp_net" class="form-control"
+                               value="{{ join_cfg.binkp_net or '' }}" placeholder="e.g. 1">
+                        <div class="form-text">Both set: auto-assign sequential node numbers
+                            ({{ join_cfg.binkp_zone or 'Z' }}:{{ join_cfg.binkp_net or 'N' }}/2, /3, ...)
+                            at approval, node 1 reserved for the hub. Leave blank to use
+                            whatever BinkP address the applicant typed in, unchanged.</div>
+                    </div>
                     <div class="col-12">
                         <label class="form-label">Intro Text (shown above the rules)</label>
                         <textarea name="intro_text" class="form-control" rows="2">{{ join_cfg.intro_text or '' }}</textarea>

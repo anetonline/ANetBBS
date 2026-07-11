@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Application: {{ req.bbs_name }} — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-file-earmark-person"></i> {{ req.bbs_name }}</h1>
+        <p>Applied {{ req.created_at.strftime('%Y-%m-%d %H:%M UTC') if req.created_at else '?' }}
+           {% if req.status == 'pending' %}<span class="badge bg-warning text-dark">pending</span>
+           {% elif req.status == 'approved' %}<span class="badge bg-success">approved</span>
+           {% else %}<span class="badge bg-danger">denied</span>{% endif %}
+        </p>
+    </div>
+    <a href="{{ url_for('hub_admin.join_requests') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Requests
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">Applicant / BBS Info</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><th>Name</th><td>{{ req.name or '—' }}</td></tr>
+          <tr><th>Location</th><td>{{ req.location or '—' }}</td></tr>
+          <tr><th>Email</th><td>{{ req.email }}</td></tr>
+          <tr><th>BBS Name</th><td>{{ req.bbs_name }}</td></tr>
+          <tr><th>BBS Software</th><td>{{ req.bbs_software or '—' }}</td></tr>
+          <tr><th>BBS OS</th><td>{{ req.bbs_os or '—' }}</td></tr>
+          <tr><th>Telnet Address</th><td>{{ req.telnet_address or '—' }}</td></tr>
+          <tr><th>Website</th><td>{{ req.website_url or '—' }}</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">Requested Transports</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><th>BinkP Address</th><td class="font-monospace">{{ req.binkp_ftn_address or '—' }}</td></tr>
+          <tr><th>Crash/Hold</th><td>{{ req.binkp_crash_or_hold or '—' }}</td></tr>
+          <tr><th>QWK Packet ID</th><td class="font-monospace">{{ req.qwk_packet_id or '—' }}</td></tr>
+        </table>
+        {% if req.status == 'approved' %}
+        <hr>
+        <table class="table table-sm mb-0">
+          {% if req.binkp_node_id %}
+          <tr><th>BinkP Node</th><td>
+            <a href="{{ url_for('hub_admin.binkp_node_detail', node_id=req.binkp_node_id) }}">view node</a>
+            — pwd: <code>{{ req.generated_binkp_password }}</code>
+          </td></tr>
+          {% endif %}
+          {% if req.qwk_node_id %}
+          <tr><th>QWK Node</th><td>
+            <a href="{{ url_for('hub_admin.qwk_node_detail', node_id=req.qwk_node_id) }}">view node</a>
+            — pwd: <code>{{ req.generated_qwk_password }}</code>
+          </td></tr>
+          {% endif %}
+        </table>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Notes</div>
+      <div class="card-body"><p class="mb-0" style="white-space:pre-wrap;">{{ req.notes or '—' }}</p></div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Submission Metadata</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><th>Rules Acknowledged</th><td>{{ 'Yes' if req.rules_ack else 'No' }}</td></tr>
+          <tr><th>IP Address</th><td class="font-monospace">{{ req.ip_address or '—' }}</td></tr>
+          <tr><th>User Agent</th><td class="small">{{ req.user_agent or '—' }}</td></tr>
+          {% if req.status != 'pending' %}
+          <tr><th>Reviewed</th><td>{{ req.reviewed_at.strftime('%Y-%m-%d %H:%M UTC') if req.reviewed_at else '?' }} by {{ req.reviewed_by or '—' }}</td></tr>
+          {% if req.status == 'denied' %}
+          <tr><th>Deny Reason</th><td>{{ req.deny_reason or '—' }}</td></tr>
+          {% endif %}
+          {% endif %}
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if req.status == 'pending' %}
+<div class="d-flex gap-2 mb-3">
+  <form method="POST" action="{{ url_for('hub_admin.approve_join_request', req_id=req.id) }}"
+        onsubmit="return confirm('Approve {{ req.bbs_name }} and create their node account(s)?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-success"><i class="bi bi-check-circle"></i> Approve</button>
+  </form>
+  <button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#denyModal">
+    <i class="bi bi-x-circle"></i> Deny
+  </button>
+</div>
+
+<div class="modal fade" id="denyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('hub_admin.deny_join_request', req_id=req.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Deny {{ req.bbs_name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label">Reason (emailed to applicant if SMTP is set up, optional)</label>
+          <input type="text" name="reason" class="form-control"
+            placeholder="e.g. Address already taken, try a different one">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">Deny Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="mb-4">
+  <form method="POST" action="{{ url_for('hub_admin.archive_join_request', req_id=req.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-archive"></i> Archive Application to Disk
+    </button>
+  </form>
+</div>
+{% endblock %}

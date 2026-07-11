@@ -23,6 +23,9 @@ import os
 import logging
 import asyncio
 import struct
+import hashlib
+import hmac
+import secrets
 from datetime import datetime
 
 from .binkp import (
@@ -59,6 +62,41 @@ async def _send_data(writer, data):
     await writer.drain()
 
 
+def _inbound_poll_type(imported_total, sent_count):
+    """EchomailPollLog.poll_type for an inbound-initiated session, given
+    how many messages were actually imported/sent during it."""
+    if imported_total and sent_count:
+        return 'both'
+    if sent_count:
+        return 'send'
+    return 'receive'
+
+
+def _verify_binkp_password(stored_password, remote_pwd, challenge_bytes):
+    """Verify a caller's M_PWD against our stored password.
+
+    Supports both legacy plaintext and CRAM-MD5 (FTS-1027) responses --
+    we (the answering side) offer a CRAM-MD5 challenge in the M_NUL
+    preamble (see _handle_connection), but still accept a plain-text
+    M_PWD from callers that don't speak CRAM-MD5, so this doesn't break
+    older peers. Before this, the listener only ever compared remote_pwd
+    against the stored password as a literal string -- a caller that
+    correctly responded to our challenge (or, before this fix, that
+    never got a challenge to respond to at all, since we never sent one)
+    had no way to authenticate via CRAM-MD5 at all. Real-world case: a
+    binkd peer polling in reported "CRAM-MD5 is not supported by
+    remote" because this listener never advertised the OPT CRAM-MD5-...
+    line an answering side is supposed to send."""
+    stored = stored_password or ''
+    remote = remote_pwd or ''
+    if remote.upper().startswith('CRAM-MD5-'):
+        digest = remote[len('CRAM-MD5-'):]
+        expected = hmac.new(stored.encode('latin-1'), challenge_bytes,
+                            hashlib.md5).hexdigest()
+        return digest.lower() == expected.lower()
+    return stored == remote
+
+
 # ---------------------------------------------------------------------------
 # Per-connection session
 # ---------------------------------------------------------------------------
@@ -66,6 +104,7 @@ async def _send_data(writer, data):
 async def _handle_connection(reader, writer, our_address: str, system_name: str):
     peer = writer.get_extra_info('peername')
     logger.info('BinkP inbound from %s', peer)
+    session_started_at = datetime.utcnow()
 
     # 1. Send our M_NUL info + M_ADR.  Match Synchronet binkit's
     # preamble (SYS / ZYZ / LOC / NDL / TIME / VER) so peers that key
@@ -80,6 +119,18 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     await _send_cmd(writer, CMD_NUL, 'NDL 115200,TCP,BINKP')
     await _send_cmd(writer, CMD_NUL, f'TIME {datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}')
     await _send_cmd(writer, CMD_NUL, f'VER {full_ver}')
+
+    # Advertise CRAM-MD5 support as the answering side (FTS-1027) -- a
+    # random challenge callers can hash their password against instead
+    # of sending it in plain text. Without this line, a caller that
+    # expects/requires CRAM-MD5 (e.g. real-world binkd peers) sees no
+    # challenge offered and reports "CRAM-MD5 is not supported by
+    # remote" -- confirmed live against a real peer (Nicholas Boel /
+    # pharcyde.org) polling in. See _verify_binkp_password() below for
+    # the matching verification side; plain-text M_PWD is still
+    # accepted for callers that don't speak CRAM-MD5.
+    cram_challenge_bytes = secrets.token_bytes(32)
+    await _send_cmd(writer, CMD_NUL, f'OPT CRAM-MD5-{cram_challenge_bytes.hex()}')
 
     akas = []
     try:
@@ -231,7 +282,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                    .filter(EchomailNetwork.hub_address.in_(candidates))
                    .first()) if candidates else None
         if network and network.network_type == 'binkp':
-            if (network.binkp_password or '') != (remote_pwd or ''):
+            if not _verify_binkp_password(network.binkp_password, remote_pwd,
+                                          cram_challenge_bytes):
                 logger.warning('BinkP %s: bad password for upstream %s', peer, remote_addr)
                 await _send_cmd(writer, CMD_ERR, 'bad password')
                 writer.close()
@@ -245,7 +297,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     .filter_by(is_active=True)
                     .first()) if candidates else None
             if node:
-                if (node.password or '') != (remote_pwd or ''):
+                if not _verify_binkp_password(node.password, remote_pwd,
+                                              cram_challenge_bytes):
                     logger.warning('BinkP %s: bad password for downstream node %s',
                                    peer, remote_addr)
                     await _send_cmd(writer, CMD_ERR, 'bad password')
@@ -388,6 +441,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             logger.warning('BinkP server: failed to dump debug packet %s: %s',
                            name, exc)
 
+    imported_total = 0
     if inbound_files:
         with app.app_context():
             inbound_dir = None
@@ -397,7 +451,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 if extracted:
                     for inner_name, inner_payload in extracted:
                         _debug_dump_packet(inner_name, inner_payload)
-                        _import_pkt_payload(inner_payload, net_id, inner_name)
+                        imported_total += _import_pkt_payload(
+                            inner_payload, net_id, inner_name)
                 else:
                     # Non-packet files (TIC manifests, hatched binaries, etc.)
                     # get written to inbound for later processing.
@@ -476,6 +531,37 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 else:
                     logger.warning('Outbound .pkt was not accepted by %s — '
                                    'leaving in queue for retry', remote_addr)
+
+        # Record this inbound-initiated session in the same Poll Log a
+        # sysop already checks for outbound polls. Before this, ONLY
+        # anetbbs/echomail/poller.py (which dials OUT) ever wrote an
+        # EchomailPollLog row -- when a remote hub calls IN and
+        # delivers mail (exactly how tqwnet/sp00knet actually work:
+        # they push to us rather than waiting to be polled), the real
+        # imported-message count computed above was discarded, and the
+        # sysop's own subsequent outbound poll of that same network
+        # legitimately found nothing left to pull (the hub already
+        # pushed it here) and logged 0 -- real mail was arriving the
+        # whole time, just never reflected in this log. Only written
+        # for upstream-hub sessions (net_id set); a downstream node
+        # polling US as ITS hub has no EchomailNetwork row to log
+        # against (EchomailPollLog.network_id is NOT NULL).
+        if net_id is not None:
+            try:
+                from ..models import EchomailPollLog
+                db.session.add(EchomailPollLog(
+                    network_id=net_id,
+                    poll_type=_inbound_poll_type(imported_total, sent_count),
+                    started_at=session_started_at,
+                    completed_at=datetime.utcnow(),
+                    status='success',
+                    messages_sent=sent_count,
+                    messages_received=imported_total,
+                ))
+                db.session.commit()
+            except Exception:
+                logger.exception('BinkP %s: failed to write poll log for '
+                                 'inbound session (net_id=%s)', peer, net_id)
 
     # 8. End of batch.
     await _finish_session(reader, writer, peer, inbound_files, sent_count)

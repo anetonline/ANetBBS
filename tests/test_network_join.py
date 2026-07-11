@@ -185,6 +185,8 @@ class NetworkJoinRouteTests(unittest.TestCase):
 
         cls.join_dir = tempfile.mkdtemp()
         cfg_mod.TestingConfig.NETWORK_JOIN_DIR = cls.join_dir
+        cls.join_archive_dir = tempfile.mkdtemp()
+        cfg_mod.TestingConfig.NETWORK_JOIN_ARCHIVE_DIR = cls.join_archive_dir
 
         from anetbbs.web_app import create_app
         from anetbbs.models import db
@@ -192,6 +194,7 @@ class NetworkJoinRouteTests(unittest.TestCase):
         cls.app.config['TESTING'] = True
         cls.app.config['REGISTRY_MODE_ENABLED'] = True
         cls.app.config['NETWORK_JOIN_DIR'] = cls.join_dir
+        cls.app.config['NETWORK_JOIN_ARCHIVE_DIR'] = cls.join_archive_dir
         with cls.app.app_context():
             db.create_all()
 
@@ -204,6 +207,7 @@ class NetworkJoinRouteTests(unittest.TestCase):
                 os.remove(path)
         import shutil
         shutil.rmtree(cls.join_dir, ignore_errors=True)
+        shutil.rmtree(cls.join_archive_dir, ignore_errors=True)
 
     def _admin_client(self, username='route_admin'):
         from anetbbs.models import db, User
@@ -504,6 +508,156 @@ class NetworkJoinRouteTests(unittest.TestCase):
             binkp_node = BinkPNode.query.filter_by(ftn_address='1:1/666').first()
             self.assertIsNone(binkp_node, 'BinkP node should not exist -- '
                               'whole approval was rejected due to QWK collision')
+
+    def test_next_binkp_node_address_starts_at_2_when_none_exist(self):
+        from anetbbs.web.hub_admin import _next_binkp_node_address
+        with self.app.app_context():
+            self.assertEqual(_next_binkp_node_address(1200, 42), '1200:42/2')
+
+    def test_next_binkp_node_address_takes_max_plus_one(self):
+        from anetbbs.models import db, BinkPNode
+        from anetbbs.web.hub_admin import _next_binkp_node_address
+        with self.app.app_context():
+            db.session.add(BinkPNode(name='A', ftn_address='1200:43/2',
+                                     password='x', is_active=True))
+            db.session.add(BinkPNode(name='B', ftn_address='1200:43/5',
+                                     password='x', is_active=True))
+            db.session.commit()
+            self.assertEqual(_next_binkp_node_address(1200, 43), '1200:43/6')
+
+    def test_next_binkp_node_address_ignores_other_zone_net_and_nonnumeric(self):
+        from anetbbs.models import db, BinkPNode
+        from anetbbs.web.hub_admin import _next_binkp_node_address
+        with self.app.app_context():
+            db.session.add(BinkPNode(name='OtherZone', ftn_address='2:44/99',
+                                     password='x', is_active=True))
+            db.session.add(BinkPNode(name='Domain', ftn_address='some.domain.bbs',
+                                     password='x', is_active=True))
+            db.session.commit()
+            # Neither the other zone:net node nor the non-numeric address
+            # should influence numbering for zone 1200 net 44 -- still
+            # starts fresh at 2.
+            self.assertEqual(_next_binkp_node_address(1200, 44), '1200:44/2')
+
+    def test_approve_with_zone_net_configured_auto_assigns_address(self):
+        from anetbbs.models import db, NetworkJoinRequest, NetworkJoinConfig, BinkPNode
+        with self.app.app_context():
+            cfg = NetworkJoinConfig.get()
+            cfg.binkp_zone = 1200
+            cfg.binkp_net = 50
+            db.session.commit()
+
+            # Applicant proposes an address that should be IGNORED in
+            # favor of the auto-assigned one.
+            req = NetworkJoinRequest(
+                bbs_name='AutoNumberedBBS', name='Auto', email='auto@example.com',
+                binkp_ftn_address='9:9/9999', rules_ack=True)
+            db.session.add(req)
+            db.session.commit()
+            req_id = req.id
+
+        client = self._admin_client('approver_autonum')
+        client.post(f'/admin/echomail/hub/join/requests/{req_id}/approve',
+                    follow_redirects=True)
+        with self.app.app_context():
+            req = NetworkJoinRequest.query.get(req_id)
+            self.assertEqual(req.status, 'approved')
+            node = BinkPNode.query.get(req.binkp_node_id)
+            self.assertEqual(node.ftn_address, '1200:50/2')
+            self.assertNotEqual(node.ftn_address, req.binkp_ftn_address)
+            # Reset for other tests in this class that assume unset zone/net.
+            cfg = NetworkJoinConfig.get()
+            cfg.binkp_zone = None
+            cfg.binkp_net = None
+            db.session.commit()
+
+    def test_join_request_detail_shows_full_fields(self):
+        from anetbbs.models import db, NetworkJoinRequest
+        with self.app.app_context():
+            req = NetworkJoinRequest(
+                bbs_name='DetailViewBBS', name='Detail Person',
+                email='detail@example.com', bbs_software='Synchronet',
+                telnet_address='detail.example.com:23',
+                notes='Some notes only visible on the detail page.',
+                binkp_ftn_address='1:1/888', rules_ack=True)
+            db.session.add(req)
+            db.session.commit()
+            req_id = req.id
+
+        client = self._admin_client('detail_viewer')
+        resp = client.get(f'/admin/echomail/hub/join/requests/{req_id}')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn('Synchronet', body)
+        self.assertIn('detail.example.com:23', body)
+        self.assertIn('Some notes only visible on the detail page.', body)
+
+    def test_join_requests_list_links_to_detail_view(self):
+        from anetbbs.models import db, NetworkJoinRequest
+        with self.app.app_context():
+            req = NetworkJoinRequest(
+                bbs_name='LinkedFromListBBS', name='Linker',
+                email='linker@example.com', binkp_ftn_address='1:1/889',
+                rules_ack=True)
+            db.session.add(req)
+            db.session.commit()
+            req_id = req.id
+
+        client = self._admin_client('list_linker')
+        resp = client.get('/admin/echomail/hub/join/requests')
+        body = resp.get_data(as_text=True)
+        self.assertIn(f'/admin/echomail/hub/join/requests/{req_id}', body)
+
+    def test_reviewed_table_shows_generated_password(self):
+        from anetbbs.models import db, NetworkJoinRequest
+        with self.app.app_context():
+            req = NetworkJoinRequest(
+                bbs_name='PasswordShownBBS', name='Pwd', email='pwd@example.com',
+                binkp_ftn_address='1:1/890', rules_ack=True)
+            db.session.add(req)
+            db.session.commit()
+            req_id = req.id
+
+        client = self._admin_client('pwd_shower')
+        client.post(f'/admin/echomail/hub/join/requests/{req_id}/approve',
+                    follow_redirects=True)
+        with self.app.app_context():
+            req = NetworkJoinRequest.query.get(req_id)
+            pwd = req.generated_binkp_password
+        resp = client.get('/admin/echomail/hub/join/requests')
+        self.assertIn(pwd, resp.get_data(as_text=True))
+
+    def test_archive_writes_json_file_not_web_reachable(self):
+        from anetbbs.models import db, NetworkJoinRequest
+        with self.app.app_context():
+            req = NetworkJoinRequest(
+                bbs_name='ArchiveMeBBS', name='Archiver',
+                email='archiver@example.com', binkp_ftn_address='1:1/891',
+                notes='Archive this note.', rules_ack=True)
+            db.session.add(req)
+            db.session.commit()
+            req_id = req.id
+
+        client = self._admin_client('archiver1')
+        resp = client.post(f'/admin/echomail/hub/join/requests/{req_id}/archive',
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+        with self.app.app_context():
+            from anetbbs.web.hub_admin import _join_archive_dir
+            archive_dir = _join_archive_dir()
+        files = [f for f in os.listdir(archive_dir) if f.startswith(f'{req_id:05d}_')]
+        self.assertEqual(len(files), 1)
+        import json
+        with open(os.path.join(archive_dir, files[0])) as f:
+            payload = json.load(f)
+        self.assertEqual(payload['applicant']['bbs_name'], 'ArchiveMeBBS')
+        self.assertEqual(payload['notes'], 'Archive this note.')
+
+        # Not reachable from the web -- no route serves this directory.
+        anon_resp = self.app.test_client().get(
+            f'/network_join_archive/{files[0]}')
+        self.assertEqual(anon_resp.status_code, 404)
 
     def test_deny_sets_reason_no_nodes_created(self):
         from anetbbs.models import db, NetworkJoinRequest

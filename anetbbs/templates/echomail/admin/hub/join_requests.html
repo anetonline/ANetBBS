@@ -47,7 +47,9 @@
   <tbody>
     {% for r in pending %}
     <tr>
-      <td class="fw-bold">{{ r.bbs_name }}</td>
+      <td class="fw-bold">
+        <a href="{{ url_for('hub_admin.join_request_detail', req_id=r.id) }}">{{ r.bbs_name }}</a>
+      </td>
       <td>{{ r.name }}{% if r.location %}<br><span class="small text-muted">{{ r.location }}</span>{% endif %}</td>
       <td class="small">{{ r.email }}</td>
       <td class="small font-monospace">{{ r.binkp_ftn_address or '—' }}</td>
@@ -124,7 +126,7 @@
   <tbody>
     {% for r in reviewed %}
     <tr>
-      <td>{{ r.bbs_name }}</td>
+      <td><a href="{{ url_for('hub_admin.join_request_detail', req_id=r.id) }}">{{ r.bbs_name }}</a></td>
       <td>
         {% if r.status == 'approved' %}
           <span class="badge bg-success">Approved</span>
@@ -140,10 +142,12 @@
         {% if r.status == 'approved' %}
           {% if r.binkp_node_id %}
             BinkP: <a href="{{ url_for('hub_admin.binkp_node_detail', node_id=r.binkp_node_id) }}">view node</a>
+            (<code>{{ r.generated_binkp_password }}</code>)
           {% endif %}
           {% if r.qwk_node_id %}
             {% if r.binkp_node_id %}·{% endif %}
             QWK: <a href="{{ url_for('hub_admin.qwk_node_detail', node_id=r.qwk_node_id) }}">view node</a>
+            (<code>{{ r.generated_qwk_password }}</code>)
           {% endif %}
         {% else %}
           {{ r.deny_reason or '—' }}

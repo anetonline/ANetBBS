@@ -31,6 +31,7 @@
                     <tr><th>System</th><td>{{ node.system_name or '—' }}</td></tr>
                     <tr><th>Location</th><td>{{ node.location or '—' }}</td></tr>
                     <tr><th>Email</th><td>{{ node.email or '—' }}</td></tr>
+                    <tr><th>Password</th><td><code>{{ node.password }}</code></td></tr>
                     <tr><th>Status</th><td>
                         {% if node.is_active %}<span class="badge bg-success">active</span>
                         {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}

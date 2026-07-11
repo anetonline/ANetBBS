@@ -2988,6 +2988,14 @@ class NetworkJoinConfig(db.Model):
     enabled = db.Column(db.Boolean, default=False, nullable=False)
     network_name = db.Column(db.String(100), default='')
     intro_text = db.Column(db.Text)
+    # BinkP sequential node numbering (optional). When both are set, node
+    # approval auto-assigns the next unused {zone}:{net}/N address instead
+    # of trusting the applicant-submitted binkp_ftn_address verbatim. Leave
+    # unset (either/both NULL) to keep the legacy behavior: use whatever
+    # the applicant typed in as-is. QWK packet_id is never auto-numbered --
+    # that stays fully applicant/sysop-chosen regardless of this setting.
+    binkp_zone = db.Column(db.Integer)
+    binkp_net = db.Column(db.Integer)
     infopack_filename = db.Column(db.String(255))
     infopack_original_filename = db.Column(db.String(255))
     infopack_uploaded_at = db.Column(db.DateTime)
