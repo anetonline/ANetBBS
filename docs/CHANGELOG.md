@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.89`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.90`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.90 — Configurable Last Callers row count + screen clear (July 2026)
+
+- FEATURE: the terminal Last Callers screen (`anetbbs/features/lastcallers.py`, `show_last_callers()`) always fetched and paginated a hardcoded 200 rows, which made for a long scroll on a busy install — the sysop reported the list had grown too long. Added `LASTCALLERS_DISPLAY_COUNT` (5/10/15/20/25/30/50/100, default 20), configurable from `/admin/lastcallers/` alongside the existing InterBBS/hide-sysop settings, following the same `.env`-persisted `current_app.config` pattern as `LASTCALLERS_HIDE_SYSOP`. Only the full terminal screen is affected — the admin audit list (`/admin/lastcallers/`) and the web one-liners page's fixed "Last 10" preview both keep their own independent limits, since neither was the thing the sysop was looking at.
+- FIX: the same terminal screen never cleared before drawing, unlike every other full-screen terminal view in the app (`\x1b[2J\x1b[H`). Now clears first.
+- 3 new tests: display-count persists a valid choice, an out-of-range/tampered value snaps to the nearest offered choice rather than becoming an arbitrary unbounded limit, and the default (no value submitted) is 20.
 
 ## v1.0b2.89 — Move pre-update backups off /tmp onto persistent disk (July 2026)
 

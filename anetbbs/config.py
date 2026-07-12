@@ -287,6 +287,10 @@ class Config:
     # admin audit view, which always shows everything.
     LASTCALLERS_HIDE_SYSOP = os.environ.get(
         'LASTCALLERS_HIDE_SYSOP', 'false').lower() == 'true'
+    # How many rows the terminal Last Callers screen shows, sysop-configurable
+    # (5/10/15/20/... in the admin UI) -- was a hardcoded 200, which made for
+    # an unusably long list on a busy install.
+    LASTCALLERS_DISPLAY_COUNT = int(os.environ.get('LASTCALLERS_DISPLAY_COUNT', 20))
 
     # InterBBS door-game score sharing -- opt-in relay of new personal-best
     # GameScore rows with other ANetBBS installs, same pattern as Wall/Last

@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.90 — Configurable Last Callers row count + screen clear (July 2026)
+
+- FEATURE: the terminal Last Callers screen always fetched and paginated 200 rows, which made for a long scroll on a busy install. Added a sysop-configurable row count (`/admin/lastcallers/` — 5/10/15/20/25/30/50/100, default 20) that controls how many entries the terminal screen actually fetches; the admin audit list and the web one-liners page's fixed "Last 10" preview are unaffected. Also fixed the terminal screen not clearing before drawing — it now clears first like every other full-screen terminal view in the app. 3 new tests.
+
+---
+
 # ANetBBS v1.0b2.89 — Move pre-update backups off /tmp onto persistent disk (July 2026)
 
 - FIX: a real Pi install had 108GB free on its actual disk, but `update.sh`'s new (v1.0b2.87) disk-space check still refused to proceed with "only 442MB free" — because the pre-update backup was written to `/tmp`, and on this system `/tmp` is a RAM-backed tmpfs, completely separate from and much smaller than the real disk. Moved backups from `/tmp/anetbbs-backup-*` to `INSTALL_DIR/data/backups/anetbbs-backup-*` — real, persistent disk, already excluded from the update's own file-sync step, and immune to distros that clear `/tmp` on reboot. Updated the admin Backups page (`anetbbs/web/backups_admin.py`) to browse the new location, and carefully re-anchored the privileged restore helper's (`deploy/run_restore.sh`) security path-allowlist to match — verified the path-traversal rejection still works exactly as before, just pointed at the new trusted location instead of the old one. The disk-space pre-flight check itself no longer needs to check `/tmp` separately, since the backup and the update both now live on the same filesystem the check already verifies.

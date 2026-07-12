@@ -191,6 +191,33 @@ class LastCallersAdminSettingsTests(unittest.TestCase):
         client.post('/admin/lastcallers/settings', data={})
         self.assertFalse(self.app.config.get('LASTCALLERS_HIDE_SYSOP'))
 
+    def test_settings_persists_display_count(self):
+        client = self.app.test_client()
+        self._login_as_admin(client)
+
+        resp = client.post('/admin/lastcallers/settings', data={
+            'display_count': '10',
+        }, follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.app.config.get('LASTCALLERS_DISPLAY_COUNT'), 10)
+
+    def test_settings_invalid_display_count_snaps_to_nearest_choice(self):
+        """Only 5/10/15/20/25/30/50/100 are offered in the admin UI --
+        a tampered or stale form value must not silently become an
+        unbounded/arbitrary limit on the terminal screen."""
+        client = self.app.test_client()
+        self._login_as_admin(client)
+
+        client.post('/admin/lastcallers/settings', data={'display_count': '17'})
+        self.assertEqual(self.app.config.get('LASTCALLERS_DISPLAY_COUNT'), 15)
+
+    def test_settings_missing_display_count_defaults_to_20(self):
+        client = self.app.test_client()
+        self._login_as_admin(client)
+
+        client.post('/admin/lastcallers/settings', data={})
+        self.assertEqual(self.app.config.get('LASTCALLERS_DISPLAY_COUNT'), 20)
+
     def test_admin_index_shows_everyone_regardless_of_setting(self):
         """The admin audit list is not filtered -- only the user-facing
         displays are."""

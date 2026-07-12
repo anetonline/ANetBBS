@@ -50,14 +50,18 @@ async def show_last_callers(session, args=None):
     to pull .session off of) and login_modules.py's _dispatch (which
     only ever has `session`, no `ui`)."""
     with _app().app_context():
-        callers = recent_callers_query(200).all()
+        from flask import current_app
+        display_count = current_app.config.get('LASTCALLERS_DISPLAY_COUNT', 20)
+        callers = recent_callers_query(display_count).all()
         rows = [
             (c.username or '?', c.service or '?', c.started_at, c.origin_bbs)
             for c in callers
         ]
 
+    await session.write('\x1b[2J\x1b[H')
+
     if not rows:
-        await session.write("\r\n\x1b[1;36m=== Last Callers ===\x1b[0m\r\n"
+        await session.write("\x1b[1;36m=== Last Callers ===\x1b[0m\r\n"
                             "  (none yet)\r\n")
         await session.read_line("\r\nPress Enter...")
         return

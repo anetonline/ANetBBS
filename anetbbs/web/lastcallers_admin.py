@@ -18,6 +18,7 @@ from .admin import _write_env_keys
 lastcallers_admin_bp = Blueprint('lastcallers_admin', __name__, url_prefix='/admin/lastcallers')
 
 PER_PAGE = 30
+DISPLAY_COUNT_CHOICES = (5, 10, 15, 20, 25, 30, 50, 100)
 
 
 from .access_control import require_admin_or_403 as _admin_required
@@ -40,6 +41,7 @@ def index():
                            interbbs_enabled=current_app.config.get('LASTCALLERS_INTERBBS_ENABLED', False),
                            interbbs_network_id=current_app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'),
                            hide_sysop=current_app.config.get('LASTCALLERS_HIDE_SYSOP', False),
+                           display_count=current_app.config.get('LASTCALLERS_DISPLAY_COUNT', 20),
                            # BinkP only -- see wall_admin.py's identical
                            # filter for why (QWK areas are numeric
                            # conferences, not symbolic tags).
@@ -55,6 +57,9 @@ def settings():
     interbbs_enabled = request.form.get('interbbs_enabled') == 'on'
     network_id = (request.form.get('interbbs_network_id') or '').strip()
     hide_sysop = request.form.get('hide_sysop') == 'on'
+    display_count = request.form.get('display_count', type=int) or 20
+    if display_count not in DISPLAY_COUNT_CHOICES:
+        display_count = min(DISPLAY_COUNT_CHOICES, key=lambda c: abs(c - display_count))
     if interbbs_enabled and not network_id:
         flash('Pick a network before enabling InterBBS Last Callers sharing.', 'danger')
         return redirect(url_for('.index'))
@@ -69,12 +74,14 @@ def settings():
     current_app.config['LASTCALLERS_INTERBBS_ENABLED'] = interbbs_enabled
     current_app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = network_id or None
     current_app.config['LASTCALLERS_HIDE_SYSOP'] = hide_sysop
+    current_app.config['LASTCALLERS_DISPLAY_COUNT'] = display_count
 
     try:
         _write_env_keys(_env_path(), {
             'LASTCALLERS_INTERBBS_ENABLED': 'true' if interbbs_enabled else 'false',
             'LASTCALLERS_INTERBBS_NETWORK_ID': network_id,
             'LASTCALLERS_HIDE_SYSOP': 'true' if hide_sysop else 'false',
+            'LASTCALLERS_DISPLAY_COUNT': str(display_count),
         })
     except Exception as e:
         flash(f'Settings updated in memory but could not save to .env: {e}', 'warning')

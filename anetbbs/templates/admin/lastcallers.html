@@ -42,6 +42,16 @@
                 </div>
                 <div class="form-text mt-1 mb-3">Keeps a frequently-logged-in sysop from flooding the user-facing Last Callers list (terminal screen, terminal inline block, and the web one-liners page) — this admin list below always shows everything regardless of this setting.</div>
 
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <label for="display_count" class="form-label mb-0">Rows to show:</label>
+                    <select class="form-select form-select-sm w-auto" name="display_count" id="display_count">
+                        {% for n in [5, 10, 15, 20, 25, 30, 50, 100] %}
+                        <option value="{{ n }}" {{ 'selected' if display_count == n }}>{{ n }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-text mt-1 mb-3">How many entries the terminal Last Callers screen shows. Does not affect this admin list, or the web one-liners page's "Last 10" preview.</div>
+
                 <button type="submit" class="btn btn-sm btn-primary">Apply</button>
             </form>
         </div>
