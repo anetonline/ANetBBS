@@ -2,13 +2,18 @@
 # Privileged restore helper for ANetBBS pre-update snapshots.
 #
 # Invoked by the admin "Restore" buttons in /admin/backups/:
-#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh env  /tmp/anetbbs-backup-YYYYMMDDHHMMSS
-#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh db   /tmp/anetbbs-backup-YYYYMMDDHHMMSS
+#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh env  INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
+#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh db   INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
 #
 # Restores `.env` or the SQLite production DB from the snapshot,
 # preserving ownership. Refuses to operate on anything outside the
-# expected /tmp/anetbbs-backup-* path so a malicious caller can't
-# point us at arbitrary disk locations.
+# expected INSTALL_DIR/data/backups/anetbbs-backup-* path so a
+# malicious caller can't point us at arbitrary disk locations.
+#
+# Backups moved here from /tmp after a real incident: on a Pi where
+# /tmp is a RAM-backed tmpfs (separate from, and much smaller than,
+# the actual disk), backups routinely couldn't fit even with the disk
+# itself nowhere near full. INSTALL_DIR/data/ is real, persistent disk.
 
 set -eu -o pipefail
 log()  { printf '[restore] %s\n' "$*"; }
@@ -18,17 +23,9 @@ fail() { printf '[restore] FAIL: %s\n' "$*" >&2; exit 1; }
 KIND="$1"
 BACKUP="$2"
 
-# Path validation.
-case "$BACKUP" in
-    /tmp/anetbbs-backup-*) ;;
-    *) fail "backup path must be /tmp/anetbbs-backup-… (got $BACKUP)" ;;
-esac
-case "$BACKUP" in
-    *..*|*';'*|*'&'*|*'|'*) fail "backup path contains forbidden chars" ;;
-esac
-[ -d "$BACKUP" ] || fail "not a directory: $BACKUP"
-
-# Resolve install dir from the sentinel update.sh drops.
+# Resolve install dir from the sentinel update.sh drops. Must happen
+# BEFORE path validation below, since the allowlisted prefix is now
+# anchored to INSTALL_DIR rather than a fixed literal like /tmp was.
 INSTALL_DIR=""
 SERVICE_USER=""
 if [ -r /etc/anetbbs.install ]; then
@@ -39,12 +36,25 @@ fi
 [ -n "${SERVICE_USER:-}" ] || SERVICE_USER=anetbbs
 log "install dir: $INSTALL_DIR  service user: $SERVICE_USER"
 
+# Path validation. INSTALL_DIR itself comes from a root-written sentinel
+# file, not caller input, so anchoring the allowlist to it doesn't
+# weaken this check -- a malicious BACKUP argument still can't point
+# outside INSTALL_DIR/data/backups/ no matter what INSTALL_DIR resolves to.
+case "$BACKUP" in
+    "$INSTALL_DIR"/data/backups/anetbbs-backup-*) ;;
+    *) fail "backup path must be $INSTALL_DIR/data/backups/anetbbs-backup-… (got $BACKUP)" ;;
+esac
+case "$BACKUP" in
+    *..*|*';'*|*'&'*|*'|'*) fail "backup path contains forbidden chars" ;;
+esac
+[ -d "$BACKUP" ] || fail "not a directory: $BACKUP"
+
 case "$KIND" in
     delete)
         # Wipe a backup dir wholesale. Used by /admin/backups/ when the
         # dir is root-owned (created before update.sh started chowning
         # backups to the service user). Strict path check is already
-        # above — only accepts /tmp/anetbbs-backup-*.
+        # above — only accepts INSTALL_DIR/data/backups/anetbbs-backup-*.
         log "rm -rf $BACKUP"
         rm -rf "$BACKUP"
         log "delete: ok"

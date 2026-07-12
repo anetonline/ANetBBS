@@ -125,10 +125,6 @@ step "Step 2/8: Creating pre-update backup"
 # zero mid-update and corrupted the install beyond recovery -- and the
 # backup this step is about to create couldn't have protected against
 # that anyway, since nothing checked available space before starting.
-# Require a real margin on BOTH filesystems that matter: /tmp (where
-# the backup lands) and INSTALL_DIR (where the update itself writes) --
-# on most single-disk VPS installs these are the same filesystem, but
-# checking both costs nothing and covers the split case too.
 MIN_FREE_KB=512000  # 500MB
 _check_free_space() {
     local path="$1" label="$2"
@@ -147,10 +143,20 @@ _check_free_space() {
     fi
     ok "$label: $((avail_kb / 1024))MB free"
 }
-_check_free_space "/tmp" "backup filesystem"
 _check_free_space "$INSTALL_DIR" "install filesystem"
 
-BACKUP_DIR="/tmp/anetbbs-backup-$(date +%Y%m%d%H%M%S)"
+# Backups live under INSTALL_DIR/data/backups/, NOT /tmp. Real-world
+# incident: on a Pi where /tmp is a RAM-backed tmpfs (separate from,
+# and much smaller than, the actual disk), the disk-space check above
+# would pass fine (108GB free on the real filesystem) while backups
+# still couldn't fit in /tmp's much smaller RAM allocation -- update.sh
+# refused to proceed despite the disk itself being nowhere near full.
+# INSTALL_DIR/data/ is already excluded from the file-sync step (Step 4
+# below, --exclude='/data/'), so it's safe from being overwritten, and
+# it's on the same filesystem the disk-space check above just verified
+# has room. It also survives a reboot, unlike /tmp on distros that
+# clear it at boot.
+BACKUP_DIR="$INSTALL_DIR/data/backups/anetbbs-backup-$(date +%Y%m%d%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
 # Every backup step below is now checked -- a failure here (near-certainly
@@ -245,7 +251,7 @@ ok "Backup stored at $BACKUP_DIR (was $OLD_VERSION → $NEW_VERSION)"
 # bounded retention -- 3 covers "I need to roll back one or two
 # versions" without growing forever. Sorted by name, which sorts
 # chronologically since the timestamp format is YYYYMMDDHHMMSS.
-mapfile -t _old_backups < <(ls -1d /tmp/anetbbs-backup-* 2>/dev/null | sort | head -n -3)
+mapfile -t _old_backups < <(ls -1d "$INSTALL_DIR/data/backups/anetbbs-backup-"* 2>/dev/null | sort | head -n -3)
 for _old in "${_old_backups[@]:-}"; do
     [[ -n "$_old" && -d "$_old" ]] || continue
     rm -rf "$_old" && info "Pruned old backup: $_old"

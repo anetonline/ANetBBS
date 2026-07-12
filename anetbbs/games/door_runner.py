@@ -50,6 +50,11 @@ class DoorSession:
         # right after construction for door_dos game type. None otherwise.
         self.dos_bridge = None
         self.startup_delay_secs = 0.0
+        # Temp files (currently: Synchronet Node.js compat script + combined
+        # run script) that must persist on disk for the life of the game
+        # process, and so can't self-delete at creation time -- cleaned up
+        # in close(). Empty for game types that don't create any.
+        self.temp_files = []
 
     def write(self, data):
         """Write raw bytes to the door (user → game)."""
@@ -125,6 +130,12 @@ class DoorSession:
             except OSError:
                 pass
             self.pts_path = None
+        for _tf in self.temp_files:
+            try:
+                os.unlink(_tf)
+            except OSError:
+                pass
+        self.temp_files = []
 
 
 def _js_str(s):
@@ -259,11 +270,20 @@ def _ensure_mps_compiled(mps_path, cwd):
 
 
 def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
-                   token_ctx=None, bridge_port=None):
+                   token_ctx=None, bridge_port=None, temp_files_out=None):
     """
     Build the command list for launching a door game.
     Returns a (cmd_list, cwd) tuple. Raises descriptive errors on
     misconfiguration so the user sees what's wrong instead of a blank fail.
+
+    `temp_files_out`: an optional list the caller provides. If the game
+    type creates temp files that must persist on disk for the life of
+    the game process (currently: the Synchronet Node.js compat path's
+    two generated .js files), their paths are appended here so the
+    caller can delete them once the session ends. Without this, every
+    Synchronet-JS door launch orphaned two files in /tmp forever —
+    confirmed live: hundreds had accumulated on a real install over
+    the project's lifetime, contributing to a disk-full incident.
 
     `user`: the BBS user launching the game. Threaded through so the
     Synchronet compat script can populate user.alias / user.name correctly
@@ -462,6 +482,9 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
                                           prefix='anetbbs_', delete=False)
         tmp.write(combined)
         tmp.close()
+        if temp_files_out is not None:
+            temp_files_out.append(compat_path)
+            temp_files_out.append(tmp.name)
         sn_cwd = os.path.dirname(script)
 
         # Server-side door-crash log. The embedded catch handler appends
@@ -1158,15 +1181,20 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         _dosemu_pts_path = None
         _dosemu_conf_path = None
 
+    _door_temp_files = []
     try:
         cmd, cwd = _build_command(game, node, bbs_name, user=user,
                                   token_ctx=token_ctx,
-                                  bridge_port=bridge_port)
+                                  bridge_port=bridge_port,
+                                  temp_files_out=_door_temp_files)
         logger.info('Launching game %s (type=%s, node=%d): %s',
                     game.slug, game.game_type, node,
                     ' '.join(str(c) for c in cmd))
     except Exception as exc:  # pylint: disable=broad-except
         logger.error('Failed to build command for game %s: %s', game.slug, exc)
+        for _tf in _door_temp_files:
+            try: os.unlink(_tf)
+            except OSError: pass
         if dos_bridge:
             try: dos_bridge.stop()
             except Exception: pass
@@ -1212,6 +1240,9 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
             logger.warning('PTY initial winsize set failed: %s', exc)
     except OSError as exc:
         logger.error('Failed to open PTY for game %s: %s', game.slug, exc)
+        for _tf in _door_temp_files:
+            try: os.unlink(_tf)
+            except OSError: pass
         gs.status = 'crashed'
         gs.ended_at = datetime.utcnow()
         db.session.commit()
@@ -1224,6 +1255,9 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         logger.error('Failed to fork process for game %s: %s', game.slug, exc)
         os.close(master_fd)
         os.close(slave_fd)
+        for _tf in _door_temp_files:
+            try: os.unlink(_tf)
+            except OSError: pass
         if dos_bridge:
             try: dos_bridge.stop()
             except Exception: pass
@@ -1375,6 +1409,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
 
     door_session = DoorSession(gs.id, master_fd, pid)
     door_session.dos_bridge = dos_bridge   # None for non-door_dos sessions
+    door_session.temp_files = _door_temp_files
 
     # door_dosemu pts COM1: poll for the symlink dosemu2 creates at startup,
     # then open the slave fd.  dosemu2 creates it before FreeDOS boots, so
@@ -1729,12 +1764,27 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
             return False
 
         # Validate the command BEFORE launching so we can show a clear error.
+        # This is a dry run purely to surface config problems early -- the
+        # built command/cwd are never actually used to launch anything here
+        # (the real launch below rebuilds its own via launch_door_game).
+        # Any temp files this creates (Synchronet Node.js compat path) are
+        # therefore immediately orphaned unless cleaned up right here --
+        # previously they weren't, doubling the leak rate for every
+        # Synchronet-JS game launch attempt from a terminal session.
+        _validate_temp_files = []
         try:
-            _build_command(live_game, 1, bbs_name, user=user)
+            _build_command(live_game, 1, bbs_name, user=user,
+                           temp_files_out=_validate_temp_files)
         except Exception as exc:
             await session.write(f"\r\nLaunch failed:\r\n  {exc}\r\n")
             await session.read_line("\r\nPress Enter...")
             return False
+        finally:
+            for _tf in _validate_temp_files:
+                try:
+                    os.unlink(_tf)
+                except OSError:
+                    pass
 
         sid = launch_door_game(live_game, live_user, _emit_to_queue,
                                bbs_name=bbs_name,

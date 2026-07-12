@@ -2,12 +2,22 @@
 
 Every upgrade snapshots `.env`, the production + dev SQLite DBs,
 systemd unit files, and an `anetbbs-nginx` config (if present) into
-``/tmp/anetbbs-backup-YYYYMMDDHHMMSS/`` and drops a ``MANIFEST`` file
-recording the version transition. update.sh keeps only the 3 most
-recent (auto-pruning older ones after each successful backup) --
-before this, they accumulated forever, which is exactly how a real
-sysop ended up with a dozen of them silently eating disk space until
-an update ran the filesystem out of room and corrupted the install.
+``INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS/`` and drops a
+``MANIFEST`` file recording the version transition. update.sh keeps
+only the 3 most recent (auto-pruning older ones after each successful
+backup) -- before this, they accumulated forever, which is exactly how
+a real sysop ended up with a dozen of them silently eating disk space
+until an update ran the filesystem out of room and corrupted the
+install.
+
+Backups used to live under /tmp -- moved to INSTALL_DIR/data/backups/
+after a second real incident: on a Pi where /tmp is a RAM-backed tmpfs
+(separate from, and much smaller than, the actual disk), update.sh's
+disk-space check correctly reported the real disk had 108GB free while
+still refusing to proceed, because the backup itself couldn't fit in
+/tmp's much smaller RAM allocation. INSTALL_DIR/data/ is real disk,
+already excluded from update.sh's file-sync step, and survives a
+reboot (unlike /tmp on distros that clear it at boot).
 
 This page lists them, lets the sysop delete old ones, and offers a
 "restore" path that's intentionally narrow:
@@ -44,9 +54,18 @@ logger = logging.getLogger(__name__)
 backups_bp = Blueprint('backups_admin', __name__,
                        url_prefix='/admin/backups')
 
-# Backups land under /tmp by update.sh; same naming convention every time.
 _BACKUP_GLOB = re.compile(r'^anetbbs-backup-(\d{14})$')
-_BACKUP_ROOT = '/tmp'
+
+
+def _backup_root() -> str:
+    """INSTALL_DIR/data/backups -- matches update.sh's BACKUP_DIR. Lazily
+    resolved (not a module-level constant) since INSTALL_DIR only exists
+    once a Flask app context is active; falls back to computing the
+    install root relative to this file, same pattern as
+    _restore_helper() below."""
+    install_root = current_app.config.get('INSTALL_DIR') or os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(install_root, 'data', 'backups')
 
 
 from .access_control import require_admin_or_403 as _admin_required
@@ -86,12 +105,13 @@ def _dir_size(p: str) -> int:
 
 def _scan() -> List[dict]:
     rows = []
+    backup_root = _backup_root()
     try:
-        for name in os.listdir(_BACKUP_ROOT):
+        for name in os.listdir(backup_root):
             m = _BACKUP_GLOB.match(name)
             if not m:
                 continue
-            full = os.path.join(_BACKUP_ROOT, name)
+            full = os.path.join(backup_root, name)
             if not os.path.isdir(full):
                 continue
             try:
@@ -119,7 +139,7 @@ def _scan() -> List[dict]:
                 'files': present_files,
             })
     except OSError as exc:
-        logger.warning('cannot scan %s: %s', _BACKUP_ROOT, exc)
+        logger.warning('cannot scan %s: %s', backup_root, exc)
     rows.sort(key=lambda r: r['created_at'] or datetime.min, reverse=True)
     return rows
 
@@ -139,8 +159,9 @@ def _safe_backup_dir(name: str) -> Optional[str]:
     check we use elsewhere to prevent ../ escapes."""
     if not _BACKUP_GLOB.match(name):
         return None
-    p = os.path.realpath(os.path.join(_BACKUP_ROOT, name))
-    if not p.startswith(_BACKUP_ROOT + os.sep):
+    backup_root = _backup_root()
+    p = os.path.realpath(os.path.join(backup_root, name))
+    if not p.startswith(backup_root + os.sep):
         return None
     return p if os.path.isdir(p) else None
 
