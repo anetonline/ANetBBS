@@ -3,8 +3,11 @@
 Every upgrade snapshots `.env`, the production + dev SQLite DBs,
 systemd unit files, and an `anetbbs-nginx` config (if present) into
 ``/tmp/anetbbs-backup-YYYYMMDDHHMMSS/`` and drops a ``MANIFEST`` file
-recording the version transition. Those dirs accumulate forever
-because we don't trust ourselves to GC them automatically.
+recording the version transition. update.sh keeps only the 3 most
+recent (auto-pruning older ones after each successful backup) --
+before this, they accumulated forever, which is exactly how a real
+sysop ended up with a dozen of them silently eating disk space until
+an update ran the filesystem out of room and corrupted the install.
 
 This page lists them, lets the sysop delete old ones, and offers a
 "restore" path that's intentionally narrow:

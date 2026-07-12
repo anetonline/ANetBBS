@@ -121,11 +121,50 @@ ok "Installation found at $INSTALL_DIR (user: $SERVICE_USER)"
 # ─── Step 2: Pre-update backup ────────────────────────────────────────────────
 step "Step 2/8: Creating pre-update backup"
 
+# Disk-space pre-flight check. Real-world incident: a sysop's disk hit
+# zero mid-update and corrupted the install beyond recovery -- and the
+# backup this step is about to create couldn't have protected against
+# that anyway, since nothing checked available space before starting.
+# Require a real margin on BOTH filesystems that matter: /tmp (where
+# the backup lands) and INSTALL_DIR (where the update itself writes) --
+# on most single-disk VPS installs these are the same filesystem, but
+# checking both costs nothing and covers the split case too.
+MIN_FREE_KB=512000  # 500MB
+_check_free_space() {
+    local path="$1" label="$2"
+    local avail_kb
+    avail_kb=$(df -Pk "$path" 2>/dev/null | tail -1 | awk '{print $4}')
+    if [[ -z "$avail_kb" ]]; then
+        warn "Could not determine free space on $label ($path) — proceeding without this check"
+        return 0
+    fi
+    if (( avail_kb < MIN_FREE_KB )); then
+        fail "Only $((avail_kb / 1024))MB free on $label ($path) — need at least $((MIN_FREE_KB / 1024))MB."
+        echo "  Free up space first (check Admin → Backups for old snapshots to delete,"
+        echo "  or clear old logs/uploads), then re-run update.sh. Refusing to proceed:"
+        echo "  running out of space mid-update can corrupt the install past recovery."
+        exit 1
+    fi
+    ok "$label: $((avail_kb / 1024))MB free"
+}
+_check_free_space "/tmp" "backup filesystem"
+_check_free_space "$INSTALL_DIR" "install filesystem"
+
 BACKUP_DIR="/tmp/anetbbs-backup-$(date +%Y%m%d%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-cp "$ENV_FILE" "$BACKUP_DIR/.env.bak"
-ok "Backed up .env"
+# Every backup step below is now checked -- a failure here (near-certainly
+# meaning the disk filled up despite the check above, e.g. a concurrent
+# process ate the space between the check and now) aborts the update
+# rather than silently proceeding with no real safety net. Previously the
+# .env backup in particular printed "Backed up .env" unconditionally, even
+# if the cp itself had failed.
+if cp "$ENV_FILE" "$BACKUP_DIR/.env.bak"; then
+    ok "Backed up .env"
+else
+    fail "Could not back up .env to $BACKUP_DIR — aborting before touching anything live."
+    exit 1
+fi
 
 # Database backup — use sqlite3's `.backup` rather than cp(1). The
 # services aren't stopped yet (that's Step 3) so the DB might be
@@ -133,6 +172,14 @@ ok "Backed up .env"
 # "database disk image is malformed", while .backup uses the WAL to
 # produce a consistent snapshot under concurrent writes. Fall back to
 # cp only if sqlite3(1) isn't installed.
+#
+# Returns 0 if the source doesn't exist (nothing to back up, not a
+# failure) or the backup succeeded; 1 only when the source file exists
+# but every backup method failed -- the caller aborts on that, since a
+# DB that exists but couldn't be backed up means no real rollback
+# point exists for it. Doesn't try to guess which of anetbbs.db /
+# anetbbs_dev.db is the "real" one in use (some installs run against
+# either via DATABASE_URL) -- both are treated as equally critical.
 backup_sqlite() {
     local src="$1" dst="$2" label="$3"
     [[ -f "$src" ]] || return 0
@@ -143,10 +190,20 @@ backup_sqlite() {
         fi
         warn "sqlite3 .backup of $label failed — falling back to cp"
     fi
-    cp "$src" "$dst" && ok "Backed up $label (cp)"
+    if cp "$src" "$dst"; then
+        ok "Backed up $label (cp)"
+        return 0
+    fi
+    return 1
 }
-backup_sqlite "$INSTALL_DIR/data/anetbbs.db" "$BACKUP_DIR/anetbbs.db.bak" "production DB"
-backup_sqlite "$INSTALL_DIR/data/anetbbs_dev.db" "$BACKUP_DIR/anetbbs_dev.db.bak" "dev DB"
+if ! backup_sqlite "$INSTALL_DIR/data/anetbbs.db" "$BACKUP_DIR/anetbbs.db.bak" "production DB"; then
+    fail "Could not back up data/anetbbs.db — aborting before touching anything live."
+    exit 1
+fi
+if ! backup_sqlite "$INSTALL_DIR/data/anetbbs_dev.db" "$BACKUP_DIR/anetbbs_dev.db.bak" "dev DB"; then
+    fail "Could not back up data/anetbbs_dev.db — aborting before touching anything live."
+    exit 1
+fi
 
 DB_FILE="$INSTALL_DIR/data/anetbbs.db"  # kept for the failure-rollback block at end-of-script
 
@@ -178,6 +235,21 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$BACKUP_DIR" 2>/dev/null || true
 chmod 0700 "$BACKUP_DIR" 2>/dev/null || true
 
 ok "Backup stored at $BACKUP_DIR (was $OLD_VERSION → $NEW_VERSION)"
+
+# Prune old backups -- keep the 3 most recent (including the one just
+# created). Real-world incident: backups were never auto-deleted by
+# design ("we don't trust ourselves to GC them automatically"), and a
+# sysop who wasn't watching accumulated a dozen of them, silently
+# eating disk space until an update ran the filesystem to zero and
+# corrupted the install. Unbounded accumulation is a worse default than
+# bounded retention -- 3 covers "I need to roll back one or two
+# versions" without growing forever. Sorted by name, which sorts
+# chronologically since the timestamp format is YYYYMMDDHHMMSS.
+mapfile -t _old_backups < <(ls -1d /tmp/anetbbs-backup-* 2>/dev/null | sort | head -n -3)
+for _old in "${_old_backups[@]:-}"; do
+    [[ -n "$_old" && -d "$_old" ]] || continue
+    rm -rf "$_old" && info "Pruned old backup: $_old"
+done
 
 # ─── Step 3: Stop services ─────────────────────────────────────────────────────
 step "Step 3/8: Stopping services"
