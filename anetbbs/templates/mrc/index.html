@@ -302,6 +302,17 @@
     .mention-item:hover { background: var(--panel-bg2); }
     .mention-meta  { color: var(--accent); }
     .mention-empty { color: #555; padding: 6px; }
+    .twit-list { border: 1px solid var(--border); background: var(--bg); padding: 6px; max-height: 160px; overflow: auto; margin-top: 4px; }
+    .twit-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--panel-bg2);
+    }
+    .twit-item:last-child { border-bottom: none; }
+    .twit-item button { font-size: 11px; padding: 1px 6px; }
+    .twit-empty { color: #555; padding: 6px; }
     .panel-header.attn { color: var(--mention); box-shadow: inset 0 0 0 1px rgba(255,255,120,.4); }
     
     body.crt-on .main-container::before {
@@ -723,6 +734,57 @@
         </div>
       </div>
 
+      <div class="panel" id="prefs-panel" style="display:none;">
+        <div class="panel-header" id="prefs-header">
+          <span>Chat Prefs</span>
+          <span class="chev" id="prefs-chev">[+]</span>
+        </div>
+        <div class="panel-body" id="prefs-body">
+          <div class="toggle-row">
+            <input type="checkbox" id="shield-toggle" />
+            <label for="shield-toggle" style="margin:0;">Broadcast shield</label>
+          </div>
+          <div class="help-hint" style="padding-bottom:6px;">
+            Blocks outgoing broadcasts and hides incoming ones
+            (<span id="shield-blocked-count">0</span> blocked this session).
+          </div>
+          <label for="twit-input">Twit / ignore list</label>
+          <div class="panel-row">
+            <input type="text" id="twit-input" maxlength="32" placeholder="username" />
+            <button id="twit-add">Add</button>
+          </div>
+          <div class="twit-list" id="twit-list"></div>
+          <div class="help-hint" style="padding-top:4px;padding-bottom:6px;">
+            Messages from twitted users are hidden, not deleted
+            (<span id="twit-blocked-count">0</span> blocked this session).
+          </div>
+          <hr style="border:0;border-top:1px solid var(--border);opacity:.35;margin:10px 0;">
+          <div class="toggle-row">
+            <input type="checkbox" id="ticker-toggle" checked />
+            <label for="ticker-toggle" style="margin:0;">Scrolling ticker/banner</label>
+          </div>
+          <label for="entermsg-input">Enter-chat message (<code>{handle}</code> placeholder)</label>
+          <div class="panel-row">
+            <input type="text" id="entermsg-input" maxlength="200" placeholder="e.g. - {handle} has arrived." />
+          </div>
+          <label for="leavemsg-input">Leave-chat message (<code>{handle}</code> placeholder)</label>
+          <div class="panel-row">
+            <input type="text" id="leavemsg-input" maxlength="200" placeholder="e.g. - {handle} has left chat." />
+          </div>
+          <label for="quitmsg-input">Quit message (appended in parens on /quit)</label>
+          <div class="panel-row">
+            <input type="text" id="quitmsg-input" maxlength="200" placeholder="e.g. gone fishing" />
+          </div>
+          <div class="panel-row" style="margin-top:4px;">
+            <button id="prefs-msgs-apply">Apply</button>
+          </div>
+          <hr style="border:0;border-top:1px solid var(--border);opacity:.35;margin:10px 0;">
+          <div class="panel-row">
+            <button id="dlchatlog-btn">Download chat log</button>
+          </div>
+        </div>
+      </div>
+
       <h3>Users</h3>
       <div class="sidebar-item" style="padding:0;margin:0 0 6px 0;color:#555;">
         Click a name to DM-sticky toggle (<code>/t user</code>). Click again to stop. Tab autocompletes.
@@ -869,6 +931,13 @@
       if (window.SUPPRESS_UNKNOWN_COMMAND  === undefined) window.SUPPRESS_UNKNOWN_COMMAND  = true;
       if (window.SUPPRESS_USERLIST_LINES   === undefined) window.SUPPRESS_USERLIST_LINES   = true;
       if (window.SUPPRESS_ROOMTOPIC_LINES  === undefined) window.SUPPRESS_ROOMTOPIC_LINES  = true;
+      // Phase G parity audit finding: the terminal client silences raw
+      // STATS: lines (v1.0b2.102, "this is popping up on screen" --
+      // reported live once STATS started feeding the terminal's
+      // ticker, making the old inline copy pure noise) but web never
+      // got the matching fix, since it has no ticker to have prompted
+      // the same complaint. Same noise either way -- suppress here too.
+      if (window.SUPPRESS_STATS_LINES      === undefined) window.SUPPRESS_STATS_LINES      = true;
     })();
 
     const WS_PING_INTERVAL_MS = 25000;
@@ -948,6 +1017,16 @@
     let currentHandle = '';
     let currentRoom   = '';
     let knownUsers    = [];
+
+    // Twit/ignore list + broadcast shield (see mrc/bridge/main.py's
+    // set_prefs/prefs_updated + _session_prefs) -- server-persisted,
+    // shared with the terminal client via the same handle-keyed
+    // profile. Filtered-but-counted, not silently invisible -- matches
+    // the terminal client's model (anetbbs/features/mrc_chat.py).
+    let twitList          = new Set();
+    let broadcastShield   = false;
+    let twitBlockedCount  = 0;
+    let shieldBlockedCount = 0;
 
     let stickyDmUser  = null;
     let stickyDmNodes = new Map();
@@ -1037,6 +1116,21 @@
     const mentionsList     = document.getElementById('mentions-list');
     const mentionsClear    = document.getElementById('mentions-clear');
     const mentionsTest     = document.getElementById('mentions-test');
+    const prefsPanel       = document.getElementById('prefs-panel');
+    const prefsHeader      = document.getElementById('prefs-header');
+    const prefsChev        = document.getElementById('prefs-chev');
+    const shieldToggle     = document.getElementById('shield-toggle');
+    const shieldBlockedEl  = document.getElementById('shield-blocked-count');
+    const twitInput        = document.getElementById('twit-input');
+    const twitAddBtn       = document.getElementById('twit-add');
+    const twitListEl       = document.getElementById('twit-list');
+    const twitBlockedEl    = document.getElementById('twit-blocked-count');
+    const tickerToggle     = document.getElementById('ticker-toggle');
+    const entermsgInput    = document.getElementById('entermsg-input');
+    const leavemsgInput    = document.getElementById('leavemsg-input');
+    const quitmsgInput     = document.getElementById('quitmsg-input');
+    const prefsMsgsApply   = document.getElementById('prefs-msgs-apply');
+    const dlChatLogBtn     = document.getElementById('dlchatlog-btn');
 
     // -----------------------------------------------------------------------
     // Utility
@@ -1211,6 +1305,25 @@
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
+    function downloadChatLog() {
+      // Client-side only -- terminal's /dlchatlog equivalent goes through
+      // a real ZMODEM send since there's no browser download API there;
+      // here the scrollback is already in the DOM, so just read it back
+      // out (innerText collapses markup to plain text same as the
+      // terminal side strips ANSI/pipe codes) and hand the browser a Blob.
+      const lines = messageNodes.map(el => el.innerText || el.textContent || '');
+      const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `mrc_chatlog_${stamp}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
     function updateStatus(text, color) {
       statusText.textContent = text;
       statusText.style.color = color || '';
@@ -1295,6 +1408,10 @@
 
       setUsers(users);
       return true;
+    }
+
+    function isStatsServerMessage(msg) {
+      return /^(?:SERVER:\s*)?STATS\s*:/i.test(String(msg || '').trim());
     }
 
     function tryParseRoomTopicFromServerMessage(msg) {
@@ -1665,6 +1782,10 @@
       }
 
       if (parsed.kind === 'server_cmd') {
+        if (broadcastShield && /^broadcast\b/i.test(parsed.value)) {
+          addMessage('Broadcast shield is on -- disable it in Chat Prefs to send one.', 'error', true);
+          messageInput.value = ''; secureMode = null; return;
+        }
         addMessage('> ' + maskSensitiveCommandForEcho(parsed.value), 'info');
         client.sendServerCommand('/' + parsed.value);
         messageInput.value = ''; secureMode = null; return;
@@ -1746,6 +1867,61 @@
       addMessage(styledHandleString() + ' This is a local style test (not sent)', 'info', true);
     }
 
+    function sendPrefsUpdate(partial) {
+      if (!client || !client.ws || client.ws.readyState !== 1) return;
+      client.ws.send(JSON.stringify(Object.assign({ type: 'set_prefs' }, partial)));
+    }
+
+    function applyPrefs(prefs) {
+      if (!prefs || typeof prefs !== 'object') return;
+      if (Array.isArray(prefs.twit_list)) {
+        twitList = new Set(prefs.twit_list.map(u => String(u).trim().toLowerCase()).filter(Boolean));
+      }
+      if (typeof prefs.broadcast_shield === 'boolean') {
+        broadcastShield = prefs.broadcast_shield;
+      }
+      shieldToggle.checked = broadcastShield;
+      renderTwitList();
+
+      if (typeof prefs.ticker_enabled === 'boolean') tickerToggle.checked = prefs.ticker_enabled;
+      if (typeof prefs.enter_msg_tpl === 'string')   entermsgInput.value = prefs.enter_msg_tpl;
+      if (typeof prefs.leave_msg_tpl === 'string')   leavemsgInput.value = prefs.leave_msg_tpl;
+      if (typeof prefs.quit_msg === 'string')        quitmsgInput.value  = prefs.quit_msg;
+    }
+
+    function updatePrefsCounts() {
+      twitBlockedEl.textContent   = String(twitBlockedCount);
+      shieldBlockedEl.textContent = String(shieldBlockedCount);
+    }
+
+    function renderTwitList() {
+      twitListEl.innerHTML = '';
+      const users = Array.from(twitList).sort();
+      if (!users.length) {
+        const empty = document.createElement('div');
+        empty.className = 'twit-empty';
+        empty.textContent = '(empty)';
+        twitListEl.appendChild(empty);
+        return;
+      }
+      users.forEach(u => {
+        const row = document.createElement('div');
+        row.className = 'twit-item';
+        const name = document.createElement('span');
+        name.textContent = u;
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          const next = new Set(twitList);
+          next.delete(u);
+          sendPrefsUpdate({ twit_list: Array.from(next) });
+        });
+        row.appendChild(name);
+        row.appendChild(removeBtn);
+        twitListEl.appendChild(row);
+      });
+    }
+
     function applyThemeClass(themeClass) {
       document.body.classList.remove('theme-green','theme-amber','theme-cyan','theme-ibmblue','theme-mono');
       document.body.classList.add(themeClass || 'theme-green');
@@ -1806,6 +1982,7 @@
       stylePanel.style.display    = inRoom ? 'block' : 'none';
       mentionsPanel.style.display = inRoom ? 'block' : 'none';
       helpersPanel.style.display  = inRoom ? 'block' : 'none';
+      prefsPanel.style.display    = inRoom ? 'block' : 'none';
       joinPanel.style.display     = inRoom ? 'none'  : 'block';
       chatPanel.style.display     = inRoom ? 'block' : 'none';
       // Restore interactivity whenever we toggle UI state
@@ -1859,6 +2036,23 @@
           break;
         }
 
+        case 'userlist': {
+          // Phase G parity audit finding: the bridge has sent this
+          // structured event (alongside the existing raw-text path,
+          // see mrc/bridge/main.py's _send_userlist_control) since
+          // Phase A specifically so both clients could stop depending
+          // on tryParseUserListFromServerMessage's regex against
+          // free-text mrc_message bodies -- the terminal client
+          // migrated to it in Phase B, but web never did. Wiring it up
+          // here doesn't remove the regex fallback above (still needed
+          // for any USERLIST/CHATTERS text that arrives without a
+          // fresh structured event alongside it) -- this is strictly
+          // additive, a more robust source layered on top.
+          const r = (data.room || '').toLowerCase();
+          if (!currentRoom || r === currentRoom) setUsers(data.users || []);
+          break;
+        }
+
         case 'joined': {
           currentHandle = data.handle || '';
           currentRoom   = (data.room  || '').toLowerCase();
@@ -1882,9 +2076,15 @@
           selTypingColor.value = st.typing_color || '10';
           updateStylePreview();
 
+          twitBlockedCount = 0;
+          shieldBlockedCount = 0;
+          updatePrefsCounts();
+          applyPrefs(data.prefs);
+
           togglePanel(stylePanel,    styleChev,    false);
           togglePanel(mentionsPanel, mentionsChev, false);
           togglePanel(helpersPanel,  helpersChev,  false);
+          togglePanel(prefsPanel,    prefsChev,    false);
           renderMentions();
           renderHistoryList();
           renderStickyStatus();
@@ -1916,18 +2116,45 @@
           break;
         }
 
+        case 'prefs_updated': {
+          applyPrefs(data.prefs);
+          addMessage('✓ ' + (data.message || 'Preferences updated'), 'system');
+          break;
+        }
+
         case 'info':
           addMessage('ℹ ' + (data.message || ''), 'notice');
           break;
 
         case 'mrc_message': {
+          // Twit/ignore filter -- dropped silently but counted, matches
+          // the terminal client (anetbbs/features/mrc_chat.py). Checked
+          // for ALL from_user traffic in this bucket, not just plain chat.
+          const fromLowerEarly = (data.from_user || '').toLowerCase();
+          if (fromLowerEarly && twitList.has(fromLowerEarly)) {
+            twitBlockedCount++;
+            updatePrefsCounts();
+            break;
+          }
+
+          // Broadcast shield -- a true network-wide broadcast has no
+          // specific to_user AND no specific to_room (both blank on the
+          // wire, forwarded verbatim by the bridge).
+          if (broadcastShield && !data.to_user && !data.to_room) {
+            shieldBlockedCount++;
+            updatePrefsCounts();
+            break;
+          }
+
           const isServer = (data.from_user || '').toUpperCase() === 'SERVER';
           if (isServer) {
             const msg        = data.message || '';
             const isUserlist = tryParseUserListFromServerMessage(msg);
             const isTopic    = tryParseRoomTopicFromServerMessage(msg);
+            const isStats    = isStatsServerMessage(msg);
             if (window.SUPPRESS_USERLIST_LINES  && isUserlist) break;
             if (window.SUPPRESS_ROOMTOPIC_LINES && isTopic)    break;
+            if (window.SUPPRESS_STATS_LINES     && isStats)    break;
           }
 
           const line = formatLine(data);
@@ -2087,6 +2314,30 @@
     styleHeader.addEventListener('click',    () => togglePanel(stylePanel,    styleChev));
     mentionsHeader.addEventListener('click', () => togglePanel(mentionsPanel, mentionsChev));
     helpersHeader.addEventListener('click',  () => togglePanel(helpersPanel,  helpersChev));
+    prefsHeader.addEventListener('click',    () => togglePanel(prefsPanel,    prefsChev));
+
+    shieldToggle.addEventListener('change', () => sendPrefsUpdate({ broadcast_shield: shieldToggle.checked }));
+    twitAddBtn.addEventListener('click', () => {
+      const name = twitInput.value.trim().toLowerCase();
+      if (!name) return;
+      if (['server', 'client', 'notme'].includes(name)) {
+        addMessage('Cannot twit a reserved name.', 'error', true);
+        return;
+      }
+      const next = new Set(twitList);
+      next.add(name);
+      sendPrefsUpdate({ twit_list: Array.from(next) });
+      twitInput.value = '';
+    });
+    twitInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') twitAddBtn.click(); });
+
+    tickerToggle.addEventListener('change', () => sendPrefsUpdate({ ticker_enabled: tickerToggle.checked }));
+    prefsMsgsApply.addEventListener('click', () => sendPrefsUpdate({
+      enter_msg_tpl: entermsgInput.value,
+      leave_msg_tpl: leavemsgInput.value,
+      quit_msg:      quitmsgInput.value,
+    }));
+    dlChatLogBtn.addEventListener('click', downloadChatLog);
 
     stylePrefix.addEventListener('input',     updateStylePreview);
     styleSuffix.addEventListener('input',     updateStylePreview);

@@ -31,7 +31,7 @@ import logging
 import re
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .base_chat import BaseChatSystem
 from ..core.protocols import SessionProtocol
@@ -41,12 +41,31 @@ MAX_OUTGOING_CHARS = 140        # MRC hub hard limit
 SCROLLBACK_LINES   = 500        # local ring buffer
 PING_INTERVAL      = 60         # seconds between WS pings
 AWAY_AFTER         = 600        # seconds idle before IAMHERE AWAY
+TICKER_TICK_SECONDS = 1.5       # ticker redraw/advance interval
+
+# Static fallback content for the scrolling ticker (see _ticker_items) --
+# always in rotation alongside any live hub-pushed BANNER:/STATS: text,
+# so the ticker is never empty on a quiet install with no live banners.
+TICKER_TIPS = (
+    'Tip: /helpserver shows the full command list.',
+    'Tip: Tab-complete a nick while typing.',
+    'Tip: /mentions shows who mentioned you.',
+    'Tip: [<] [>] arrows cycle your outgoing text color.',
+    'Tip: /r replies to the last direct message you received.',
+)
 
 logger = logging.getLogger(__name__)
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
 
-_ANSI_SEQ_RE = re.compile(r'\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[78])')
+# Also matches a bare BEL (\x07, prepended ahead of mention/DM alerts --
+# see _handle_event) -- zero-width on a real terminal (it just rings the
+# bell) but was being counted as one visible column by _visible_len,
+# throwing the sidebar/status-bar/ticker border one column out of
+# alignment on exactly the rows that happened to bell. Reported live on
+# the Pi as one specific row still misaligned after the other border
+# fixes, on a message that happened to mention the caller's own handle.
+_ANSI_SEQ_RE = re.compile(r'\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[78])|\x07')
 
 # Pipe-color → ANSI SGR (Synchronet/MRC |NN convention)
 _PIPE_COLORS = {
@@ -63,6 +82,24 @@ _PIPE_RE = re.compile(r'\|(\d{2})')
 # ← → arrow keys cycle through these pipe codes for outgoing text color
 _COLOR_SEQ = ['07','15','14','13','12','11','10','09',
               '08','06','05','04','03','02','01','00']
+
+# /set palette -- a light, cosmetic-only recolor of the chrome elements
+# that are drawn from one centralized place each (status-bar room tag +
+# clock, sidebar header/nicks, ticker line), mirroring the scope of the
+# web client's 5 CSS themes (mrc/index.html's theme-* classes) without
+# attempting their broader page-wide effect -- there's no CSS cascade in
+# a terminal, so recoloring every individual hardcoded escape sequence
+# scattered across chat-message rendering (CTCP formatting, /set output,
+# per-message-type colors, etc.) would be a much larger, riskier rewrite
+# than what "light picker" was scoped for. 'default' preserves this
+# file's original hardcoded colors byte-for-byte.
+_TERM_PALETTES = {
+    'default': {'accent': '36', 'accent_b': '1;96', 'dim': '2;36'},
+    'green':   {'accent': '32', 'accent_b': '1;32', 'dim': '2;32'},
+    'amber':   {'accent': '33', 'accent_b': '1;33', 'dim': '2;33'},
+    'cyan':    {'accent': '36', 'accent_b': '1;36', 'dim': '2;36'},
+    'mono':    {'accent': '37', 'accent_b': '1;37', 'dim': '2;37'},
+}
 
 
 def _pipe_to_ansi(s: str) -> str:
@@ -176,6 +213,55 @@ def _split_for_wire(text: str, cap: int = MAX_OUTGOING_CHARS) -> list:
     return [f'({i+1}/{t}) {c}' for i, c in enumerate(chunks)]
 
 
+_TZ_OFFSET_RE = re.compile(r'^([+-]?)(\d{1,2})(?::?(\d{2}))?$')
+
+# Common named-zone shortcuts for /set tz -- fixed offsets, not DST-aware
+# (this feature is deliberately a plain UTC-offset, per the locked-in
+# design decision; a caller observing daylight time picks the *DT name,
+# not the *ST one, same as anyone reading a timezone abbreviation table).
+# Requested directly (a raw "+/-5" offset was reported as "confusing"
+# live on the Pi) -- North America is the primary set given this is a
+# US-hosted BBS network, plus a handful of the other most common ones.
+_TZ_ALIASES = {
+    'UTC': 0, 'GMT': 0, 'Z': 0,
+    'EST': -300, 'EDT': -240,
+    'CST': -360, 'CDT': -300,
+    'MST': -420, 'MDT': -360,
+    'PST': -480, 'PDT': -420,
+    'AKST': -540, 'AKDT': -480,
+    'HST': -600,
+    'AST': -240, 'ADT': -180,
+    'BST': 60, 'CET': 60, 'CEST': 120,
+    'EET': 120, 'EEST': 180,
+    'IST': 330, 'JST': 540,
+    'AWST': 480, 'ACST': 570, 'ACDT': 630,
+    'AEST': 600, 'AEDT': 660,
+    'NZST': 720, 'NZDT': 780,
+}
+
+
+def _parse_tz_offset(value: str):
+    """Parse a /set tz value -- a named zone ('EST', 'PDT', 'UTC', ...,
+    see _TZ_ALIASES) or a raw offset ('-5', '+05:30', '0530') -- into
+    minutes from UTC, or None if unparseable/out of range."""
+    v = (value or '').strip()
+    if not v:
+        return None
+    alias = _TZ_ALIASES.get(v.upper())
+    if alias is not None:
+        return alias
+    m = _TZ_OFFSET_RE.match(v)
+    if not m:
+        return None
+    sign = -1 if m.group(1) == '-' else 1
+    hours = int(m.group(2))
+    minutes = int(m.group(3)) if m.group(3) else 0
+    if hours > 14 or minutes > 59:
+        return None
+    total = sign * (hours * 60 + minutes)
+    return total if -720 <= total <= 840 else None
+
+
 # ── MRCChat class ───────────────────────────────────────────────────────────
 
 class MRCChat(BaseChatSystem):
@@ -189,6 +275,7 @@ class MRCChat(BaseChatSystem):
         self._aiohttp_session  = None
         self._recv_task        = None
         self._ping_task        = None
+        self._clock_task       = None
         self._connected        = False
         self._handle           = ''
         self._room             = self.DEFAULT_ROOM
@@ -196,6 +283,22 @@ class MRCChat(BaseChatSystem):
         self._mention_count    = 0
         self._mention_log      = deque(maxlen=50)
         self._known_users      = set()
+        self._last_dm_from     = ''  # for /r (reply-to-last-DM), see _handle_event
+
+        # Input-history recall on Ctrl+Up/Down (locked-in keybinding --
+        # plain Up/Down stay bound to chat-scroll, this file's existing,
+        # already-shipped convention). _history_pos is None when not
+        # currently navigating (i.e. sitting on a fresh, unsent line);
+        # _history_draft holds whatever the user had typed before the
+        # first Ctrl+Up, restored on Ctrl+Down past the newest entry.
+        self._input_history    = deque(maxlen=50)
+        self._history_pos      = None
+        self._history_draft    = ''
+
+        # /set palette -- see _TERM_PALETTES. Local-only (like /set
+        # clock), not persisted via set_prefs: purely a per-session
+        # display preference, nothing another client needs to see.
+        self._palette_name    = 'default'
         # Wire chars the bridge prepends before the typed message (styled
         # display handle for room chat, DM wrapper prefix for /t) -- sent by
         # the bridge on 'joined' (see mrc/bridge/main.py
@@ -224,6 +327,68 @@ class MRCChat(BaseChatSystem):
         self._scroll_top   = 2
         self._scroll_bottom = 23
         self._input_row    = 24
+
+        # Nick-list sidebar (see _enter_split_screen/_sidebar_lines) --
+        # only enabled on wide-enough terminals (matches the >=100-col
+        # threshold this file already uses for the CPR terminal-size
+        # probe). _chat_width is what _emit()'s word-wrap and
+        # _redraw_chat_area actually target; it's the full terminal
+        # width when no sidebar, or narrowed to leave room for it.
+        self._sidebar_enabled = False
+        self._sidebar_width   = 20
+        self._chat_width      = 80
+        self._show_clock      = True
+
+        # Scrolling ticker/banner (see _draw_ticker_line/_ticker_loop) --
+        # a second fixed row, above the chat scroll region, rotating
+        # through static tips + live hub-pushed BANNER: text + STATS:
+        # text (both previously discarded/inert client-side -- see the
+        # Phase A bridge notes on why STATS is opaque text, not
+        # structured fields). Toggle wired to a real persisted pref in
+        # a later phase; defaults on for now.
+        self._show_ticker      = True
+        self._ticker_row       = None   # set by _enter_split_screen
+        self._ticker_task      = None
+        self._ticker_pool      = deque(maxlen=20)
+        self._ticker_idx       = 0
+        self._ticker_scroll_pos = 0
+        self._ticker_dwell     = 0
+
+        # Twit/ignore list + broadcast shield (see mrc/bridge/main.py's
+        # set_prefs/prefs_updated + _session_prefs) -- initialized from
+        # the 'joined' event's prefs field, kept in sync via
+        # prefs_updated after any /twit or future /set change.
+        # Filtered-but-counted, not silently invisible -- matches the
+        # reference client's model.
+        self._twit_list             = set()
+        self._broadcast_shield      = False
+        self._twit_blocked_count    = 0
+        self._shield_blocked_count  = 0
+
+        # Remaining Phase A profile fields, surfaced via /set (see
+        # _handle_slash's 'set' branch) -- local mirrors for /set list
+        # display, kept in sync the same way as twit/shield above.
+        self._enter_msg_tpl = ''
+        self._leave_msg_tpl = ''
+        self._quit_msg      = ''
+
+        # Minutes offset from UTC for the clock widget + message
+        # timestamps, settable via /set tz. All server-side timestamps in
+        # this file are computed in UTC (see _local_now()) rather than
+        # datetime.now(), which silently used the *server's* system
+        # timezone -- correct on nobody's terminal except a caller who
+        # happens to share the server's TZ (found live: server on UTC,
+        # sysop on US Central, clock off by 5-6 hours). Defaults to 0
+        # (UTC) until the caller sets their own offset; persisted via
+        # set_prefs like the other /set fields above.
+        self._tz_offset_minutes = 0
+
+        # Full nick-style dict (prefix/suffix/colors), see mrc/bridge/
+        # main.py's _session_style. Previously the terminal only ever
+        # extracted typing_color out of this and discarded the rest --
+        # /set prefix|suffix|color (below) needed somewhere to read
+        # current values back from for /set list.
+        self._style = {}
 
     # ── Menu entry point ────────────────────────────────────────────────────
 
@@ -316,9 +481,19 @@ class MRCChat(BaseChatSystem):
                 'Type /helpserver for commands, /quit to leave.')
             await self._emit(
                 '\x1b[33mTip:\x1b[0m use [<] [>] arrow keys to change outgoing text color.')
+            # Matches the reference client's own permanent, non-blocking
+            # connect notice ("Use /identify password for MRC Trust",
+            # helper_protocol.c) -- purely informational; a registered
+            # handle's trust status lapses after a stretch of weeks on
+            # the real network, so it's worth surfacing even though
+            # chat is never gated on it.
+            await self._emit(
+                '\x1b[33mTip:\x1b[0m /identify <pass> if your handle is registered (MRC Trust).')
 
             self._recv_task = asyncio.create_task(self._recv_loop())
             self._ping_task = asyncio.create_task(self._ping_loop())
+            self._clock_task = asyncio.create_task(self._clock_loop())
+            self._ticker_task = asyncio.create_task(self._ticker_loop())
             await self._chat_loop()
         finally:
             await self._exit_split_screen()
@@ -353,6 +528,46 @@ class MRCChat(BaseChatSystem):
             pass
         except Exception:
             logger.debug('MRC ping loop error', exc_info=True)
+
+    async def _clock_loop(self):
+        """Redraws the status bar every 30s so the clock widget (see
+        _draw_status_line) doesn't go stale during a quiet room --
+        every OTHER status-bar redraw is reactive (fires on state
+        changes: a message arrives, mentions change, etc.), so without
+        this a genuinely idle session would show the same HH:MM
+        forever."""
+        try:
+            while self._connected:
+                await asyncio.sleep(30)
+                if not self._connected:
+                    break
+                if self._show_clock:
+                    async with self._input_lock:
+                        await self._draw_status_line()
+                        await self.session.write(f'\x1b[{self._input_row};3H')
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug('MRC clock loop error', exc_info=True)
+
+    async def _ticker_loop(self):
+        """Advances and redraws the ticker row every TICKER_TICK_SECONDS.
+        See _advance_ticker for the dwell/scroll state machine."""
+        try:
+            while self._connected:
+                await asyncio.sleep(TICKER_TICK_SECONDS)
+                if not self._connected:
+                    break
+                if not self._show_ticker or not self._ticker_row:
+                    continue
+                self._advance_ticker()
+                async with self._input_lock:
+                    await self._draw_ticker_line()
+                    await self.session.write(f'\x1b[{self._input_row};3H')
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug('MRC ticker loop error', exc_info=True)
 
     # ── Split-screen helpers ─────────────────────────────────────────────────
 
@@ -393,9 +608,28 @@ class MRCChat(BaseChatSystem):
         self._term_columns  = max(64, min(240, cols))
         self._term_lines    = max(10, min(120, lines))
         self._status_row    = 1
-        self._scroll_top    = 2
+
+        # Ticker gets its own fixed row directly below the status bar,
+        # shrinking the chat scroll region by one row -- same technique
+        # as the status bar itself (a plain redrawn row, not a second
+        # DECSTBM region; a terminal only gets one scroll region).
+        if self._show_ticker:
+            self._ticker_row = 2
+            self._scroll_top = 3
+        else:
+            self._ticker_row = None
+            self._scroll_top = 2
         self._scroll_bottom = self._term_lines - 1
         self._input_row     = self._term_lines
+
+        # Sidebar only on wide-enough terminals -- same >=100-col
+        # threshold this function already treats as "wide" above.
+        # Below that, a fixed-width nick column would eat too much of
+        # an 80-col chat line to be worth it.
+        self._sidebar_enabled = self._term_columns >= 100
+        self._chat_width = (
+            self._term_columns - self._sidebar_width - 1
+            if self._sidebar_enabled else self._term_columns)
 
         await self.session.write(
             '\x1b[r'                                              # reset DECSTBM
@@ -403,6 +637,7 @@ class MRCChat(BaseChatSystem):
             f'\x1b[{self._scroll_top};{self._scroll_bottom}r'    # set scroll region
         )
         await self._draw_status_line()
+        await self._draw_ticker_line()
         await self._draw_input_line()
 
     async def _exit_split_screen(self):
@@ -421,7 +656,7 @@ class MRCChat(BaseChatSystem):
     async def _draw_status_line(self):
         if not self._split_screen:
             return
-        room_s = f'\x1b[1;96m[#{self._room}]\x1b[0m'
+        room_s = f'\x1b[{self._pal("accent_b")}m[#{self._room}]\x1b[0m'
         topic_s = f' \x1b[1;36m{self._topic}\x1b[0m' if self._topic else ''
 
         right_bits = []
@@ -468,21 +703,49 @@ class MRCChat(BaseChatSystem):
             right_bits.append(f'\x1b[2;37m{self._latency_ms}ms\x1b[0m')
         if self._is_away:
             right_bits.append('\x1b[1;33mAWAY\x1b[0m')
+        if self._show_clock:
+            right_bits.append(f'\x1b[2;37m{self._local_now().strftime("%H:%M")}\x1b[0m')
         right = '  '.join(right_bits)
+
+        # When the sidebar is up, this bar was previously drawn full
+        # terminal-width -- blue background running straight across
+        # where every row below it has a '│' border + nick column,
+        # with no matching border of its own. Reported live on the Pi
+        # as the status row being "the one spot" the border looked
+        # broken at. Pad/measure against chat_width instead so the
+        # bar's own content stops at the same column as the border,
+        # then draw a matching border + blank nick-column-width gap.
+        width = self._chat_width if self._sidebar_enabled else self._term_columns
 
         left_v  = _visible_len(room_s) + _visible_len(topic_s)
         right_v = _visible_len(right)
-        gap = max(0, self._term_columns - left_v - right_v)
+        gap = max(0, width - left_v - right_v)
 
-        overflow = (left_v + right_v) - self._term_columns
+        overflow = (left_v + right_v) - width
         if overflow > 0 and self._topic:
             cut = max(1, len(self._topic) - overflow - 1)
             topic_s = f' \x1b[1;36m{self._topic[:cut]}>\x1b[0m'
             gap = 0
 
+        if self._sidebar_enabled:
+            # Border color matches the literal '\x1b[2;37m│' every chat
+            # row draws in _redraw_chat_area (not palette-driven -- that
+            # border was never part of /set palette's scope either) so
+            # this row's border lines up in color as well as column.
+            tail = (
+                '\x1b[0m\x1b[2;37m│\x1b[0m'
+                + (' ' * self._sidebar_width)
+                + '\x1b[0m\x1b[K'
+            )
+        else:
+            # room_s, topic_s, and right all contain \x1b[0m resets which kill
+            # the background color.  Re-assert \x1b[44m before the final
+            # \x1b[K so those cells get blue background.
+            tail = '\x1b[44m\x1b[K'
+
         # room_s, topic_s, and right all contain \x1b[0m resets which kill the
-        # background color.  Re-assert \x1b[44m before the gap and before the
-        # final \x1b[K so those cells get blue background.
+        # background color.  Re-assert \x1b[44m before the gap so those cells
+        # get blue background.
         await self.session.write(
             '\x1b[1;1H'
             '\x1b[44m'
@@ -490,9 +753,92 @@ class MRCChat(BaseChatSystem):
             + '\x1b[44m'        # restore blue bg after \x1b[0m inside room_s/topic_s
             + ' ' * gap
             + right
-            + '\x1b[44m\x1b[K'  # restore blue bg, then erase to EOL fills the rest blue
+            + tail
             + '\x1b[0m'
         )
+
+    def _ticker_items(self) -> list:
+        """Live pool (hub-pushed BANNER:/STATS: text, see _add_ticker_text)
+        plus the static TICKER_TIPS fallback -- always non-empty, so the
+        ticker still has something to show on a quiet install with no
+        live banners yet."""
+        return list(self._ticker_pool) + list(TICKER_TIPS)
+
+    def _add_ticker_text(self, text: str):
+        text = _strip_pipe(_ANSI_SEQ_RE.sub('', text or '')).strip()
+        if not text:
+            return
+        # Skip an exact immediate repeat (e.g. an unchanged STATS reply
+        # every refresh interval) rather than letting the pool fill up
+        # with duplicates of the same line -- it can still reappear
+        # later if the pool rotates past other content and back.
+        if self._ticker_pool and self._ticker_pool[-1] == text:
+            return
+        self._ticker_pool.append(text)
+
+    def _advance_ticker(self):
+        """Advance ticker state by one tick -- called right before each
+        redraw. Short items (fit within the terminal width) just dwell
+        for a few ticks before rotating to the next item; long items
+        scroll a few characters per tick until they've fully passed,
+        then rotate. Not async: pure state mutation, no I/O."""
+        items = self._ticker_items()
+        if not items:
+            return
+        cur = items[self._ticker_idx % len(items)]
+        width = max(10, self._term_columns)
+        if len(cur) <= width:
+            self._ticker_dwell += 1
+            if self._ticker_dwell >= 4:  # ~4 ticks * TICKER_TICK_SECONDS dwell
+                self._ticker_dwell = 0
+                self._ticker_scroll_pos = 0
+                self._ticker_idx = (self._ticker_idx + 1) % len(items)
+        else:
+            self._ticker_scroll_pos += 4
+            if self._ticker_scroll_pos >= len(cur) + 8:
+                self._ticker_scroll_pos = 0
+                self._ticker_dwell = 0
+                self._ticker_idx = (self._ticker_idx + 1) % len(items)
+
+    async def _draw_ticker_line(self):
+        if not self._split_screen or not self._ticker_row:
+            return
+        items = self._ticker_items()
+        # Same border-alignment fix as _draw_status_line: this row was
+        # previously scrolled/measured against the full terminal width
+        # with no border of its own, so it had nothing lining up with
+        # the '|' every chat/status row draws when the sidebar is up --
+        # "border still has one spot" reported live on the Pi, on this
+        # exact row (the "Explore the many new commands..." tip line).
+        width = self._chat_width if self._sidebar_enabled else self._term_columns
+        if not items:
+            text = ''
+        else:
+            cur = items[self._ticker_idx % len(items)]
+            if len(cur) <= width:
+                text = cur
+            else:
+                # 8-space gap before the same text loops back around,
+                # so a long banner reads as a continuous scroll rather
+                # than an abrupt jump-cut back to its own start.
+                padded  = cur + (' ' * 8)
+                doubled = padded * 2
+                pos = self._ticker_scroll_pos % len(padded)
+                text = doubled[pos:pos + width]
+
+        if self._sidebar_enabled:
+            pad = max(0, width - _visible_len(text))
+            tail = (
+                (' ' * pad)
+                + '\x1b[0m\x1b[2;37m│\x1b[0m'
+                + (' ' * self._sidebar_width)
+            )
+        else:
+            tail = ''
+
+        await self.session.write(
+            f'\x1b[{self._ticker_row};1H\x1b[2K'
+            f'\x1b[{self._pal("dim")}m{text}\x1b[0m{tail}')
 
     async def _draw_input_line(self):
         if not self._split_screen:
@@ -564,7 +910,7 @@ class MRCChat(BaseChatSystem):
             await self.session.write(text + '\r\n')
             return
 
-        ts     = datetime.now().strftime('%H:%M ')
+        ts     = self._local_now().strftime('%H:%M ')
         ts_len = len(ts)                     # always 6 "HH:MM "
         # extra_indent goes on BOTH the first-line prefix and the
         # continuation indent -- not prepended to *text* itself, since
@@ -574,7 +920,7 @@ class MRCChat(BaseChatSystem):
         # prepended indent otherwise.
         pfx0   = f'\x1b[2;37m{ts}\x1b[0m' + extra_indent  # first line
         indent = ' ' * ts_len + extra_indent  # alignment for continuation lines
-        max_w  = max(20, self._term_columns - ts_len - len(extra_indent))
+        max_w  = max(20, self._chat_width - ts_len - len(extra_indent))
 
         new_lines = 0
         for i, wline in enumerate(_word_wrap(text, max_w, indent=indent)):
@@ -590,6 +936,35 @@ class MRCChat(BaseChatSystem):
             self._scroll_offset = min(max_off, self._scroll_offset + new_lines)
 
         await self._redraw_chat_area()
+
+    def _sidebar_lines(self, n_rows: int) -> list:
+        """Pre-formatted, width-bounded strings for the nick-list
+        sidebar -- a header line, then one nick per row, with a final
+        '+N more' line if the roster doesn't fit. Always returns
+        exactly n_rows entries (blank-padded) so callers can index by
+        row directly against the chat scroll region's rows."""
+        if n_rows <= 0:
+            return []
+        users = sorted(self._known_users, key=str.lower)
+        lines = [_truncate_visible(
+            f'\x1b[{self._pal("accent_b")}mUsers ({len(users)})\x1b[0m', self._sidebar_width)]
+        avail = n_rows - 1
+        if avail > 0:
+            if len(users) <= avail:
+                for u in users:
+                    lines.append(_truncate_visible(
+                        f'\x1b[{self._pal("accent")}m{u}\x1b[0m', self._sidebar_width))
+            else:
+                shown = users[:max(0, avail - 1)]
+                for u in shown:
+                    lines.append(_truncate_visible(
+                        f'\x1b[{self._pal("accent")}m{u}\x1b[0m', self._sidebar_width))
+                remaining = len(users) - len(shown)
+                lines.append(_truncate_visible(
+                    f'\x1b[2m+{remaining} more\x1b[0m', self._sidebar_width))
+        while len(lines) < n_rows:
+            lines.append('')
+        return lines[:n_rows]
 
     async def _redraw_chat_area(self):
         """Redraw the scroll region from _display_lines and restore status bar.
@@ -614,14 +989,37 @@ class MRCChat(BaseChatSystem):
 
         pad = scroll_rows - len(visible)
 
+        # Sidebar rows are computed once per redraw and merged onto the
+        # SAME row writes as the chat text below -- DECSTBM only
+        # constrains vertical scrolling, there's no separate
+        # left/right scroll-region concept, so the sidebar has to ride
+        # along on each chat row's own \x1b[2K-clear-then-write rather
+        # than being its own independently redrawn region.
+        sidebar = self._sidebar_lines(scroll_rows) if self._sidebar_enabled else None
+
         out = []
         for idx in range(scroll_rows):
             row = self._scroll_top + idx
             out.append(f'\x1b[{row};1H\x1b[2K')
-            if idx >= pad:
-                line = visible[idx - pad]
-                if line:
-                    out.append(line)
+            line = visible[idx - pad] if idx >= pad else ''
+            if sidebar is not None:
+                # Stored lines are word-wrapped against _chat_width at emit
+                # time, but that width can change afterward (sidebar
+                # toggled on mid-session, terminal resize) without
+                # re-wrapping already-buffered lines -- an over-width line
+                # here would push the border past its column, and on a
+                # real terminal can even auto-wrap onto the next physical
+                # row and corrupt that row's redraw. Truncate defensively
+                # so the border always lands in the same column regardless
+                # of what width a given line was originally wrapped for.
+                if line and _visible_len(line) > self._chat_width:
+                    line = _truncate_visible(line, self._chat_width)
+                fill = max(0, self._chat_width - _visible_len(line))
+                out.append(line + (' ' * fill))
+                out.append('\x1b[2;37m│\x1b[0m ')
+                out.append(sidebar[idx])
+            elif line:
+                out.append(line)
         # After drawing chat rows, position cursor at input row so the
         # status-bar write (which moves cursor to row 1) is the last
         # cursor move before we hand control back.
@@ -661,6 +1059,101 @@ class MRCChat(BaseChatSystem):
         except Exception:
             logger.exception('MRC recv loop crashed')
             self._connected = False
+
+    def _local_now(self) -> datetime:
+        """Current time adjusted by the caller's /set tz offset. Base is
+        UTC (not datetime.now()) so the offset is meaningful regardless
+        of what timezone the server's own system clock happens to be
+        set to -- see _tz_offset_minutes for the bug this replaced."""
+        return datetime.utcnow() + timedelta(minutes=self._tz_offset_minutes)
+
+    def _pal(self, key: str) -> str:
+        return _TERM_PALETTES.get(self._palette_name, _TERM_PALETTES['default'])[key]
+
+    def _format_tz_offset(self) -> str:
+        sign = '-' if self._tz_offset_minutes < 0 else '+'
+        h, m = divmod(abs(self._tz_offset_minutes), 60)
+        return f'UTC{sign}{h:02d}:{m:02d}'
+
+    def _apply_style(self, style):
+        """Sync local style state (prefix/suffix/colors) from a
+        'joined' or 'style_updated' event's style field (see
+        mrc/bridge/main.py's _session_style). Not async: pure state
+        mutation, no I/O."""
+        if not isinstance(style, dict):
+            return
+        self._style = style
+        tc = style.get('typing_color')
+        if tc in _COLOR_SEQ:
+            self._color_idx = _COLOR_SEQ.index(tc)
+
+    def _style_payload(self, **overrides) -> dict:
+        """A full set_style request built from the last-known style
+        (self._style, kept in sync by _apply_style) with specific
+        fields overridden. ALWAYS use this to send set_style, never a
+        bare partial dict -- see _cycle_color's comment for why: the
+        bridge hard-defaults prefix/suffix to '' when the field is
+        simply absent from the request, unlike every other style field
+        (which correctly falls back to the existing session value)."""
+        st = self._style or {}
+        base = st.get('color', '07')
+        payload = {
+            'type':         'set_style',
+            'prefix':       st.get('prefix', ''),
+            'suffix':       st.get('suffix', ''),
+            'color':        base,
+            'prefix_color': st.get('prefix_color', base),
+            'handle_color': st.get('handle_color', base),
+            'suffix_color': st.get('suffix_color', base),
+            'typing_color': st.get('typing_color', '10'),
+        }
+        payload.update(overrides)
+        return payload
+
+    async def _apply_prefs(self, prefs):
+        """Sync local state from a 'joined' or 'prefs_updated' event's
+        prefs field (see mrc/bridge/main.py's _session_prefs).
+
+        Async (unlike a plain state-sync would need to be) because
+        ticker_enabled needs special handling: _enter_split_screen()
+        already ran once by the time 'joined' arrives (it fires before
+        the bridge round-trip completes, see _connect_and_chat), using
+        the hardcoded self._show_ticker default -- so a persisted
+        "ticker off" preference wouldn't actually take effect until
+        this re-runs the same split-screen layout negotiation with the
+        correct value and repaints the chat history into the
+        (possibly resized) scroll region.
+        """
+        if not isinstance(prefs, dict):
+            return
+        twit_list = prefs.get('twit_list')
+        if isinstance(twit_list, list):
+            self._twit_list = {str(t).strip().lower() for t in twit_list if str(t).strip()}
+        shield = prefs.get('broadcast_shield')
+        if isinstance(shield, bool):
+            self._broadcast_shield = shield
+        for key, attr in (('enter_msg_tpl', '_enter_msg_tpl'),
+                          ('leave_msg_tpl', '_leave_msg_tpl'),
+                          ('quit_msg', '_quit_msg')):
+            val = prefs.get(key)
+            if isinstance(val, str):
+                setattr(self, attr, val)
+
+        tz = prefs.get('tz_offset')
+        if isinstance(tz, (int, float)):
+            self._tz_offset_minutes = int(tz)
+
+        ticker = prefs.get('ticker_enabled')
+        if isinstance(ticker, bool) and ticker != self._show_ticker and self._split_screen:
+            self._show_ticker = ticker
+            # NOT wrapped in _input_lock here: _redraw_chat_area()
+            # already acquires it internally, and asyncio.Lock is NOT
+            # reentrant in this codebase's own established experience
+            # (a prior real deadlock came from exactly this mistake) --
+            # double-acquiring here would hang the whole session.
+            # _enter_split_screen() itself never touches the lock.
+            await self._enter_split_screen()
+            await self._redraw_chat_area()
 
     async def _handle_event(self, data: dict):
         evt  = data.get('type', '')
@@ -747,9 +1240,28 @@ class MRCChat(BaseChatSystem):
                     self._known_users.add(new_nick)
                 return
 
+            if head.startswith('BANNER:'):
+                # Previously fully discarded, no ticker existed yet to
+                # feed. Now captured into the ticker pool (see
+                # _add_ticker_text) instead of shown inline -- matches
+                # its old fully-silent inline behavior, just usefully
+                # captured now rather than thrown away.
+                self._add_ticker_text(body_raw.split(':', 1)[1] if ':' in body_raw else '')
+                return
+
+            if head.startswith('STATS:'):
+                # Originally left showing inline as ordinary text (see
+                # git history) since it predated the ticker and there
+                # was nowhere else to put it. Now that the ticker pool
+                # captures it (_add_ticker_text), the inline copy is
+                # just noise -- reported live on the Pi as a raw
+                # "STATS:175 15 39 2 170 34.0" line popping up mid-chat.
+                # Silenced the same way BANNER: already is, above.
+                self._add_ticker_text(body_raw.split(':', 1)[1] if ':' in body_raw else '')
+                return
+
             if head.startswith(('USERIP:', 'TYPING:', 'CAPABILITIES:',
-                                  'NEWROOM:', 'NEWTOPIC:', 'KEEPALIVE:',
-                                  'BANNER:')):
+                                  'NEWROOM:', 'NEWTOPIC:', 'KEEPALIVE:')):
                 return
 
         if evt == 'error':
@@ -775,11 +1287,18 @@ class MRCChat(BaseChatSystem):
             # color style loaded correctly, since those live in a
             # different part of the same 'joined' payload this handler
             # was already ignoring wholesale before now.
-            style = data.get('style')
-            if isinstance(style, dict):
-                tc = style.get('typing_color')
-                if tc in _COLOR_SEQ:
-                    self._color_idx = _COLOR_SEQ.index(tc)
+            self._apply_style(data.get('style'))
+            await self._apply_prefs(data.get('prefs'))
+            return
+
+        if evt == 'style_updated':
+            self._apply_style(data.get('style'))
+            await self._emit('\x1b[1;36m(style updated)\x1b[0m')
+            return
+
+        if evt == 'prefs_updated':
+            await self._apply_prefs(data.get('prefs'))
+            await self._emit('\x1b[1;36m(preferences updated)\x1b[0m')
             return
 
         if evt == 'system':
@@ -808,6 +1327,28 @@ class MRCChat(BaseChatSystem):
             uname = data.get('from_user') or data.get('user') or ''
             if uname and uname not in ('?', 'SERVER', 'CLIENT', 'NOTME'):
                 self._known_users.add(uname)
+
+            # Twit/ignore filter -- dropped silently but counted (see
+            # __init__), matches the reference client's model. Checked
+            # for every message type in this bucket (not just plain
+            # chat) since a twitted user's CTCP/notice/etc. traffic is
+            # just as unwanted.
+            if uname and uname.lower() in self._twit_list:
+                self._twit_blocked_count += 1
+                return
+
+            # Broadcast shield -- a true network-wide broadcast has no
+            # specific to_user AND no specific to_room (both blank on
+            # the wire, forwarded verbatim by the bridge in the
+            # mrc_message payload) -- matches the reference client's
+            # own definition of a broadcast.
+            if evt == 'mrc_message' and self._broadcast_shield:
+                to_user = data.get('to_user') or ''
+                to_room = data.get('to_room') or ''
+                if not to_user and not to_room:
+                    self._shield_blocked_count += 1
+                    return
+
             # Format CTCP lines
             plain = _strip_pipe(_ANSI_SEQ_RE.sub('', body))
             if plain.startswith('[CTCP] '):
@@ -866,10 +1407,15 @@ class MRCChat(BaseChatSystem):
                 mentioned = (evt == 'mrc_message' and not is_server
                             and not is_from_me
                             and (self._was_mentioned(plain) or is_dm))
+                # Track the most recent inbound DM's sender for /r
+                # (reply-to-last-DM) -- never from yourself/SERVER, same
+                # guards as the mention log above.
+                if is_dm and not is_server and not is_from_me and uname:
+                    self._last_dm_from = uname
                 if mentioned:
                     self._mention_count += 1
                     self._mention_log.append({
-                        'time': datetime.utcnow().strftime('%H:%M'),
+                        'time': self._local_now().strftime('%H:%M'),
                         'room': f"#{data.get('from_room')}" if data.get('from_room') else '',
                         'from': f"{uname}@{data.get('from_site', '')}" if uname else 'someone',
                         'body': ('[DM] ' if is_dm else '') + plain[:200],
@@ -893,7 +1439,7 @@ class MRCChat(BaseChatSystem):
         if evt == 'private':
             self._mention_count += 1
             self._mention_log.append({
-                'time': datetime.utcnow().strftime('%H:%M'),
+                'time': self._local_now().strftime('%H:%M'),
                 'room': '(PM)',
                 'from': f'{user}@{bbs}',
                 'body': plain_body[:200],
@@ -909,7 +1455,7 @@ class MRCChat(BaseChatSystem):
             if mentioned:
                 self._mention_count += 1
                 self._mention_log.append({
-                    'time': datetime.utcnow().strftime('%H:%M'),
+                    'time': self._local_now().strftime('%H:%M'),
                     'room': f'#{room}' if room else '',
                     'from': f'{user}@{bbs}',
                     'body': f'* {plain_body[:200]}',
@@ -925,7 +1471,7 @@ class MRCChat(BaseChatSystem):
             if mentioned:
                 self._mention_count += 1
                 self._mention_log.append({
-                    'time': datetime.utcnow().strftime('%H:%M'),
+                    'time': self._local_now().strftime('%H:%M'),
                     'room': f'#{room}' if room else '',
                     'from': f'{user}@{bbs}',
                     'body': plain_body[:200],
@@ -957,6 +1503,18 @@ class MRCChat(BaseChatSystem):
             line = (line or '').strip()
             if not line:
                 continue
+
+            # Record every submitted line (commands and chat alike -- the
+            # reference client's history recall doesn't distinguish) for
+            # Ctrl+Up/Down recall. Skip an exact repeat of the last entry
+            # so repeatedly hitting enter on the same line doesn't pad
+            # the history with duplicates. Recall state resets on submit
+            # regardless of what was being navigated.
+            if not self._input_history or self._input_history[-1] != line:
+                self._input_history.append(line)
+            self._history_pos = None
+            self._history_draft = ''
+
             # Any keypress resets AFK timer and clears away state locally.
             # Do NOT send STATUS AFK here — sending two rate-limited packets
             # back-to-back (this + the message) trips the bridge rate limiter.
@@ -999,7 +1557,11 @@ class MRCChat(BaseChatSystem):
 
                 if ch == b'\x1b':
                     seq = await self._read_escape_seq(reader)
-                    if seq in (b'[D', b'OD'):    # ← left arrow: cycle color left
+                    if seq.endswith(b'A') and b';5' in seq:   # Ctrl+Up: older input-history entry
+                        await self._history_recall(older=True)
+                    elif seq.endswith(b'B') and b';5' in seq:  # Ctrl+Down: newer input-history entry
+                        await self._history_recall(older=False)
+                    elif seq in (b'[D', b'OD'):    # ← left arrow: cycle color left
                         await self._cycle_color(-1)
                     elif seq in (b'[C', b'OC'):  # → right arrow: cycle color right
                         await self._cycle_color(+1)
@@ -1053,10 +1615,15 @@ class MRCChat(BaseChatSystem):
         """Read the bytes after ESC.  Returns the sequence without the leading ESC.
 
         Handles:
-          ESC [ A          → b'[A'   (cursor keys, single letter)
-          ESC O A          → b'OA'   (alternate cursor keys)
-          ESC [ 5 ~        → b'[5'   (PgUp — trailing ~ consumed and discarded)
-          ESC [ 1 ; 2 A    → b'[1'   (shifted cursor — rest consumed)
+          ESC [ A          → b'[A'      (cursor keys, single letter)
+          ESC O A          → b'OA'      (alternate cursor keys)
+          ESC [ 5 ~        → b'[5'      (PgUp — trailing ~ consumed and discarded)
+          ESC [ 1 ; 5 A    → b'[1;5A'   (modified cursor, e.g. Ctrl+Up — kept
+                                          in full so callers can tell modified
+                                          arrows apart from plain ones and
+                                          from each other; see Ctrl+Up/Down
+                                          input-history recall in
+                                          _read_chat_line)
         """
         try:
             second = await asyncio.wait_for(reader.read(1), timeout=timeout)
@@ -1073,16 +1640,28 @@ class MRCChat(BaseChatSystem):
         if not third:
             return second
         seq = second + third
-        # If third is a digit, this is a multi-byte sequence like ESC [ 5 ~
-        # Drain remaining bytes (up to 4) until we hit a non-digit/letter
+        # If third is a digit, this is a multi-byte sequence like
+        # ESC [ 5 ~ (PgUp/PgDn/Del/...) or ESC [ 1 ; 5 A (modified cursor
+        # key). Drain remaining bytes (up to 6) until we hit a byte that's
+        # neither a digit nor ';'; that terminating byte tells them apart:
+        # '~' means the legacy PgUp/PgDn-style form (return just the
+        # original 2 bytes, matching prior behavior/existing callers), a
+        # letter means a modified cursor key (return the full sequence so
+        # the modifier is not lost).
         if third and third[0:1].isdigit():
-            for _ in range(4):
+            collected = b''
+            for _ in range(6):
                 try:
                     extra = await asyncio.wait_for(reader.read(1), timeout=timeout)
-                    if not extra or extra[0:1] not in b'0123456789;':
-                        break
                 except (asyncio.TimeoutError, Exception):
                     break
+                if not extra:
+                    break
+                collected += extra
+                if extra[0:1] not in b'0123456789;':
+                    break
+            if collected[-1:].isalpha():
+                seq = second + third + collected
         return seq
 
     _TAB_MATCH_DISPLAY_CAP = 12  # don't flood the screen with every candidate
@@ -1162,10 +1741,45 @@ class MRCChat(BaseChatSystem):
         # Persist to the profile (same 'typing_color' field the web
         # client's style dropdown reads/writes) so it's restored on the
         # next 'joined' event instead of resetting to default every
-        # reconnect. Omitting prefix/suffix/handle_color leaves those
-        # fields untouched server-side -- _handle_set_style falls back to
-        # the existing session/profile value for anything not sent.
-        await self._send_json({'type': 'set_style', 'typing_color': code})
+        # reconnect. Must go through _style_payload(), NOT a bare
+        # {'typing_color': code} dict: mrc/bridge/main.py's
+        # _handle_set_style falls back to the existing session value
+        # for every OTHER field except prefix/suffix, which it hard-
+        # defaults to '' when absent from the request -- sending only
+        # typing_color here used to silently wipe any prefix/suffix
+        # decoration the user had set via the web style panel, every
+        # single time they cycled their outgoing color with the arrows.
+        await self._send_json(self._style_payload(typing_color=code))
+
+    async def _history_recall(self, older: bool):
+        """Ctrl+Up/Down input-history recall. Plain Up/Down stay bound to
+        chat-scroll (this file's existing convention) -- Ctrl+Up/Down was
+        chosen instead of reusing them so the two don't collide.
+        _history_pos is None while sitting on a fresh, not-yet-navigated
+        line; the first Ctrl+Up stashes that line as _history_draft and
+        jumps to the newest history entry, and stepping past the newest
+        entry with Ctrl+Down restores the stashed draft."""
+        if not self._input_history:
+            return
+        n = len(self._input_history)
+        if self._history_pos is None:
+            if not older:
+                return
+            self._history_draft = ''.join(self._input_buf)
+            self._history_pos = n - 1
+        elif older:
+            if self._history_pos > 0:
+                self._history_pos -= 1
+        else:
+            if self._history_pos < n - 1:
+                self._history_pos += 1
+            else:
+                self._history_pos = None
+                self._input_buf = list(self._history_draft)
+                await self._draw_input_line()
+                return
+        self._input_buf = list(self._input_history[self._history_pos])
+        await self._draw_input_line()
 
     def _current_color_ansi(self) -> str:
         return f'\x1b[{_PIPE_COLORS.get(_COLOR_SEQ[self._color_idx], "37")}m'
@@ -1224,6 +1838,12 @@ class MRCChat(BaseChatSystem):
         if self._ping_task and not self._ping_task.done():
             self._ping_task.cancel()
         self._ping_task = None
+        if self._clock_task and not self._clock_task.done():
+            self._clock_task.cancel()
+        self._clock_task = None
+        if self._ticker_task and not self._ticker_task.done():
+            self._ticker_task.cancel()
+        self._ticker_task = None
         if self._connected:
             try:
                 await self._send_json({'type': 'leave_room'})
@@ -1254,6 +1874,64 @@ class MRCChat(BaseChatSystem):
         except Exception:
             self._connected = False
 
+    async def _send_dm(self, target: str, body: str):
+        """Send a direct message and locally echo it. Shared by /msg
+        (and its aliases) and /r (reply-to-last-DM)."""
+        for chunk in _split_for_wire(body, cap=self._dm_wire_cap()):
+            await self._send_json({
+                'type': 'direct_message',
+                'to_user': target,
+                'message': chunk,
+            })
+        # Local echo so sender sees their own DM in the chat + scrollback
+        await self._emit(
+            f'\x1b[1;35m[DM \x1b[0m\x1b[1;95m-> {target}\x1b[0m\x1b[1;35m] '
+            f'\x1b[0m{body}\x1b[0m'
+        )
+
+    async def _download_chat_log(self):
+        """/dlchatlog -- send the session's scrollback as a text file via
+        whatever ZMODEM-family protocol is available, mirroring
+        BBSMenuUI._ebook_download's tempfile-then-send_file pattern
+        (anetbbs/features/bbs_ui.py). Exits split-screen for the
+        transfer (a raw file-transfer handshake sharing the screen with
+        an active DECSTBM scroll region + status/ticker/input rows is
+        asking for visual corruption) and re-enters it afterward,
+        repainting the chat history the same way _apply_prefs already
+        does after a live ticker-toggle relayout."""
+        import os
+        import tempfile
+        from .xfer import send_file, available_protocols
+
+        protocols = available_protocols()
+        if not protocols:
+            await self._emit(
+                '\x1b[33mNo file-transfer protocol available on this server '
+                '(sysop needs to install lrzsz).\x1b[0m')
+            return
+
+        lines = [_strip_pipe(_ANSI_SEQ_RE.sub('', ln)) for ln in self._scrollback]
+        content = '\r\n'.join(lines) + '\r\n'
+
+        fd, path = tempfile.mkstemp(suffix='.txt', prefix='mrc_chatlog_')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            was_split = self._split_screen
+            if was_split:
+                await self._exit_split_screen()
+            await self.session.write(
+                f'\r\nStarting {protocols[0]} download: mrc_chatlog.txt\r\n')
+            await send_file(self.session, path, protocol=protocols[0])
+            if was_split:
+                await self._enter_split_screen()
+                await self._redraw_chat_area()
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
     # ── Slash commands ───────────────────────────────────────────────────────
 
     async def _handle_slash(self, line: str) -> bool:
@@ -1279,6 +1957,7 @@ class MRCChat(BaseChatSystem):
                 '',
                 '\x1b[1mMessaging\x1b[0m',
                 '  /msg user text      private message  (aliases: /t /pm /dm /tell /w)',
+                '  /r text             reply to your last received DM',
                 '  /me action          emote (*action*)',
                 '  /broadcast text     broadcast to all rooms (sysop)',
                 '  /ctcp user CMD      CTCP query (VERSION/TIME/PING/CLIENTINFO)',
@@ -1314,12 +1993,18 @@ class MRCChat(BaseChatSystem):
                 '\x1b[1mClient\x1b[0m',
                 '  [<]/[>] arrows       cycle outgoing text color',
                 '  [up]/[dn] arrows     scroll chat 1 line',
+                '  Ctrl+[up]/[dn]       recall previous/next sent line',
                 '  Tab                 nick autocomplete',
                 '  /mentions           show & clear mention log',
                 '  /scroll [n]         scroll up n lines (default 5)',
                 '  /scroll down [n]    scroll down n lines',
                 '  /scroll 0           scroll to bottom (live view)',
                 '  /clear              clear chat area',
+                '  /twit add|del|list|clear [user]   ignore-list management',
+                '  /shield [on|off]    broadcast shield (blocks /broadcast)',
+                '  /set [field value]  nick style, enter/leave/quit msgs, ticker, clock, tz',
+                '  /set list           show current /set values',
+                '  /dlchatlog          download this session\'s scrollback as text',
                 '  /termsize w,h       report terminal size to server',
                 '  /raw text           raw server command',
                 '  /quit               leave MRC',
@@ -1334,17 +2019,24 @@ class MRCChat(BaseChatSystem):
                 await self._emit(f'Usage: /{cmd} user text')
                 return True
             target, body = parts2
-            for chunk in _split_for_wire(body, cap=self._dm_wire_cap()):
-                await self._send_json({
-                    'type': 'direct_message',
-                    'to_user': target,
-                    'message': chunk,
-                })
-            # Local echo so sender sees their own DM in the chat + scrollback
-            await self._emit(
-                f'\x1b[1;35m[DM \x1b[0m\x1b[1;95m-> {target}\x1b[0m\x1b[1;35m] '
-                f'\x1b[0m{body}\x1b[0m'
-            )
+            await self._send_dm(target, body)
+            return True
+
+        if cmd == 'r':
+            if not rest:
+                await self._emit('Usage: /r <text>  (reply to last DM)')
+                return True
+            if not self._last_dm_from:
+                await self._emit('\x1b[33mNo DM to reply to yet.\x1b[0m')
+                return True
+            await self._send_dm(self._last_dm_from, rest)
+            return True
+
+        if cmd in ('dlchatlog', 'dlchat', 'transcript'):
+            if not self._scrollback:
+                await self._emit('\x1b[33mNothing to download yet.\x1b[0m')
+                return True
+            await self._download_chat_log()
             return True
 
         if cmd == 'me':
@@ -1363,11 +2055,176 @@ class MRCChat(BaseChatSystem):
             if not rest:
                 await self._emit('Usage: /broadcast text  (sysop only)')
                 return True
+            if self._broadcast_shield:
+                await self._emit(
+                    '\x1b[33mBroadcast shield is on -- /shield off to send one.\x1b[0m')
+                return True
             for chunk in _split_for_wire(rest):
                 await self._send_json({
                     'type': 'server_cmd',
                     'command': f'BROADCAST {chunk}',
                 })
+            return True
+
+        if cmd == 'twit':
+            sub_parts = rest.split(None, 1)
+            sub = sub_parts[0].lower() if sub_parts else ''
+            arg = sub_parts[1].strip() if len(sub_parts) > 1 else ''
+
+            if sub in ('list', ''):
+                users = sorted(self._twit_list)
+                await self._emit(
+                    f'\x1b[1;36mTwit list ({len(users)}):\x1b[0m '
+                    + (', '.join(users) if users else '(empty)')
+                    + f'  \x1b[2m[{self._twit_blocked_count} blocked this session]\x1b[0m')
+                return True
+
+            if sub == 'clear':
+                await self._send_json({'type': 'set_prefs', 'twit_list': []})
+                return True
+
+            if sub in ('add', 'del', 'remove') and arg:
+                target = arg.strip().lower()
+                if target.upper() in ('SERVER', 'CLIENT', 'NOTME'):
+                    await self._emit('\x1b[33mCannot twit a reserved name.\x1b[0m')
+                    return True
+                new_list = set(self._twit_list)
+                if sub == 'add':
+                    new_list.add(target)
+                else:
+                    new_list.discard(target)
+                await self._send_json({
+                    'type': 'set_prefs', 'twit_list': sorted(new_list)})
+                return True
+
+            await self._emit('Usage: /twit add|del|list|clear [user]')
+            return True
+
+        if cmd == 'shield':
+            arg = (rest or '').strip().lower()
+            if arg in ('on', 'off'):
+                await self._send_json({
+                    'type': 'set_prefs', 'broadcast_shield': arg == 'on'})
+            else:
+                state = 'on' if self._broadcast_shield else 'off'
+                await self._emit(
+                    f'\x1b[1;36mBroadcast shield:\x1b[0m {state}  '
+                    f'\x1b[2m[{self._shield_blocked_count} blocked this session]\x1b[0m'
+                    '  (usage: /shield on|off)')
+            return True
+
+        if cmd == 'set':
+            parts2 = rest.split(None, 1)
+            field = parts2[0].lower() if parts2 else ''
+            value = parts2[1].strip() if len(parts2) > 1 else ''
+
+            if field in ('', 'help'):
+                for ln in (
+                    '',
+                    '\x1b[1m/set <field> <value>\x1b[0m   (also: /set list)',
+                    '  prefix <text>       nick prefix decoration (max 16 chars)',
+                    '  suffix <text>       nick suffix decoration (max 16 chars)',
+                    '  color <00-15>       nick color (pipe code)',
+                    '  entermsg <text>     shown on chat entry; {handle} placeholder',
+                    '  leavemsg <text>     shown on chat leave; {handle} placeholder',
+                    '  quitmsg <text>      appended to your leave message on /quit',
+                    '  ticker <on|off>     scrolling ticker/banner (saved)',
+                    '  clock <on|off>      status-bar clock (local only, not saved)',
+                    '  tz <zone|offset>    timestamp timezone: EST/CDT/PST/UTC/etc, or -5, +5:30',
+                    '  palette <name>      chrome color scheme (local only, not saved): '
+                        + ', '.join(sorted(_TERM_PALETTES)),
+                    '',
+                ):
+                    await self._emit(ln)
+                return True
+
+            if field == 'list':
+                st = self._style
+                for ln in (
+                    f'\x1b[1;36mprefix:\x1b[0m {st.get("prefix") or "(none)"}',
+                    f'\x1b[1;36msuffix:\x1b[0m {st.get("suffix") or "(none)"}',
+                    f'\x1b[1;36mcolor:\x1b[0m {st.get("color") or "07"}',
+                    f'\x1b[1;36mentermsg:\x1b[0m {self._enter_msg_tpl or "(default)"}',
+                    f'\x1b[1;36mleavemsg:\x1b[0m {self._leave_msg_tpl or "(default)"}',
+                    f'\x1b[1;36mquitmsg:\x1b[0m {self._quit_msg or "(none)"}',
+                    f'\x1b[1;36mticker:\x1b[0m {"on" if self._show_ticker else "off"}',
+                    f'\x1b[1;36mclock:\x1b[0m {"on" if self._show_clock else "off"}',
+                    f'\x1b[1;36mtz:\x1b[0m {self._format_tz_offset()}',
+                    f'\x1b[1;36mpalette:\x1b[0m {self._palette_name}',
+                ):
+                    await self._emit(ln)
+                return True
+
+            if field in ('prefix', 'suffix'):
+                if not value:
+                    await self._emit(f'Usage: /set {field} <text>')
+                    return True
+                await self._send_json(self._style_payload(**{field: value[:16]}))
+                return True
+
+            if field == 'color':
+                if not value.isdigit() or not (0 <= int(value) <= 15):
+                    await self._emit('Usage: /set color 00-15')
+                    return True
+                cc = value.zfill(2)
+                await self._send_json(self._style_payload(
+                    color=cc, prefix_color=cc, handle_color=cc, suffix_color=cc))
+                return True
+
+            if field in ('entermsg', 'leavemsg', 'quitmsg'):
+                prefs_key = {'entermsg': 'enter_msg_tpl',
+                            'leavemsg': 'leave_msg_tpl',
+                            'quitmsg':  'quit_msg'}[field]
+                await self._send_json({'type': 'set_prefs', prefs_key: value[:200]})
+                return True
+
+            if field == 'ticker':
+                if value.lower() not in ('on', 'off'):
+                    await self._emit('Usage: /set ticker on|off')
+                    return True
+                await self._send_json({
+                    'type': 'set_prefs', 'ticker_enabled': value.lower() == 'on'})
+                return True
+
+            if field == 'clock':
+                if value.lower() not in ('on', 'off'):
+                    await self._emit('Usage: /set clock on|off')
+                    return True
+                self._show_clock = value.lower() == 'on'
+                await self._emit(f'\x1b[1;36mClock:\x1b[0m {value.lower()}')
+                return True
+
+            if field == 'tz':
+                offset = _parse_tz_offset(value)
+                if offset is None:
+                    await self._emit(
+                        'Usage: /set tz <zone|offset>  e.g. EST, CDT, PST, UTC, or -5, +5:30')
+                    return True
+                await self._send_json({'type': 'set_prefs', 'tz_offset': offset})
+                return True
+
+            if field == 'palette':
+                name = value.lower()
+                if not name:
+                    names = ', '.join(sorted(_TERM_PALETTES))
+                    await self._emit(f'Usage: /set palette <name>  ({names})')
+                    return True
+                if name not in _TERM_PALETTES:
+                    await self._emit(
+                        f'\x1b[33mUnknown palette:\x1b[0m {name}. '
+                        f'Try: {", ".join(sorted(_TERM_PALETTES))}')
+                    return True
+                self._palette_name = name
+                # _emit() below already cascades into a full
+                # _redraw_chat_area() -> _draw_status_line(), recoloring
+                # the room tag/clock/sidebar -- only the ticker line
+                # needs an explicit redraw here since it's driven by its
+                # own periodic loop, not touched by that cascade.
+                await self._draw_ticker_line()
+                await self._emit(f'\x1b[1;36mPalette:\x1b[0m {name}')
+                return True
+
+            await self._emit(f'\x1b[33mUnknown /set field:\x1b[0m {field}. Try /set help.')
             return True
 
         if cmd == 'join':

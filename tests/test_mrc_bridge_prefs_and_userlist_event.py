@@ -17,7 +17,9 @@ from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mrc.bridge.main import BridgeApp, _parse_userlist_text, _resolve_message_template
+from mrc.bridge.main import (
+    BridgeApp, _parse_userlist_text, _resolve_message_template, _clamp_tz_offset,
+)
 from mrc.bridge.db import BridgeDB
 
 
@@ -193,6 +195,56 @@ class SetPrefsTests(unittest.TestCase):
         sess2 = self.app.db.get_session(str(ws_id2))
         self.assertEqual(sess2["twit_list"], ["Mallory"])
         self.assertTrue(sess2["broadcast_shield"])
+
+
+class ClampTzOffsetTests(unittest.TestCase):
+    def test_valid_offset_passes_through(self):
+        self.assertEqual(_clamp_tz_offset(-300), -300)
+
+    def test_out_of_range_clamped(self):
+        self.assertEqual(_clamp_tz_offset(-9999), -720)
+        self.assertEqual(_clamp_tz_offset(9999), 840)
+
+    def test_non_numeric_defaults_to_zero(self):
+        self.assertEqual(_clamp_tz_offset("garbage"), 0)
+        self.assertEqual(_clamp_tz_offset(None), 0)
+
+
+class TzOffsetPrefsTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_bridge(self._tmp.name)
+        self.ws_id = 444
+        self.ws = _FakeWs()
+        self.app.websockets[self.ws_id] = self.ws
+        self.app.db.save_session(str(self.ws_id), {
+            "handle": "Alice", "nick": "Alice", "room": "lobby", "in_room": True,
+        })
+
+    def test_set_prefs_persists_tz_offset(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"tz_offset": -300}))
+        self.assertEqual(self.ws.sent[0]["prefs"]["tz_offset"], -300)
+        sess = self.app.db.get_session(str(self.ws_id))
+        self.assertEqual(sess["tz_offset"], -300)
+        prof = self.app.db.get_profile("Alice")
+        self.assertEqual(prof["tz_offset"], -300)
+
+    def test_set_prefs_clamps_out_of_range_tz_offset(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"tz_offset": 99999}))
+        self.assertEqual(self.ws.sent[0]["prefs"]["tz_offset"], 840)
+
+    def test_join_room_loads_persisted_tz_offset(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"tz_offset": -300}))
+        ws_id2 = 555
+        ws2 = _FakeWs()
+        self.app.websockets[ws_id2] = ws2
+        _run(self.app._handle_join_room(ws_id2, {"handle": "Alice", "room": "lobby"}))
+        sess2 = self.app.db.get_session(str(ws_id2))
+        self.assertEqual(sess2["tz_offset"], -300)
+
+    def test_default_tz_offset_is_zero(self):
+        self.assertEqual(self.app._session_prefs({})["tz_offset"], 0)
 
 
 class LeaveRoomQuitMessageTests(unittest.TestCase):

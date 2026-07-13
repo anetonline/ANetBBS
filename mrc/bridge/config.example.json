@@ -11,5 +11,7 @@
   "message_rate_seconds": 0.5,
   "iamhere_interval_seconds": 60,
   "log_level": "INFO",
-  "data_dir": "data"
+  "data_dir": "data",
+  "identify_required_mode": false,
+  "post_identify_auto_join": false
 }

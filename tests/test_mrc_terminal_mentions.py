@@ -171,6 +171,71 @@ class MentionDetectionTests(unittest.TestCase):
         self.assertIn('!3', joined)
 
 
+class ReplyToLastDmTests(unittest.TestCase):
+    """Tests for /r (reply-to-last-DM), MRC Phase F. Tracks the most
+    recent inbound DM's sender the same way the mention log does (see
+    _handle_event's is_dm/is_from_me/is_server guards just above the
+    mention-log append)."""
+
+    def _chat_with_sent(self, handle='StingRay'):
+        chat = _make_chat(handle)
+        chat.sent = []
+
+        async def _fake_send_json(obj):
+            chat.sent.append(obj)
+        chat._send_json = _fake_send_json
+        return chat
+
+    def test_incoming_dm_sets_last_dm_from(self):
+        chat = self._chat_with_sent()
+        _run(chat._handle_event({
+            'type': 'mrc_message',
+            'from_user': 'Wanderer',
+            'from_site': 'otherbbs',
+            'message': '|15* |08(|15Wanderer|08/|14DirectMsg|08) |07hello there',
+        }))
+        self.assertEqual(chat._last_dm_from, 'Wanderer')
+
+    def test_own_dm_echo_does_not_set_last_dm_from(self):
+        chat = self._chat_with_sent()
+        _run(chat._handle_event({
+            'type': 'mrc_message',
+            'from_user': 'StingRay',
+            'message': '|15* |08(|15StingRay|08/|14DirectMsg|08) |07to myself',
+        }))
+        self.assertEqual(chat._last_dm_from, '')
+
+    def test_r_with_no_prior_dm_shows_error_no_wire_traffic(self):
+        chat = self._chat_with_sent()
+        _run(chat._handle_slash('/r hello'))
+        self.assertEqual(chat.sent, [])
+
+    def test_r_no_args_shows_usage(self):
+        chat = self._chat_with_sent()
+        chat._last_dm_from = 'Wanderer'
+        _run(chat._handle_slash('/r'))
+        self.assertEqual(chat.sent, [])
+
+    def test_r_replies_to_last_dm_sender(self):
+        chat = self._chat_with_sent()
+        chat._last_dm_from = 'Wanderer'
+        _run(chat._handle_slash('/r good to hear from you'))
+        self.assertEqual(len(chat.sent), 1)
+        self.assertEqual(chat.sent[0]['type'], 'direct_message')
+        self.assertEqual(chat.sent[0]['to_user'], 'Wanderer')
+        self.assertEqual(chat.sent[0]['message'], 'good to hear from you')
+
+    def test_full_dm_reply_round_trip(self):
+        chat = self._chat_with_sent()
+        _run(chat._handle_event({
+            'type': 'mrc_message',
+            'from_user': 'Wanderer',
+            'message': '|15* |08(|15Wanderer|08/|14DirectMsg|08) |07hi',
+        }))
+        _run(chat._handle_slash('/r hi back'))
+        self.assertEqual(chat.sent[0]['to_user'], 'Wanderer')
+
+
 class MessageLengthTests(unittest.TestCase):
     def test_chat_wire_cap_accounts_for_handle_overhead(self):
         chat = _make_chat('StingRay')
@@ -365,14 +430,27 @@ class TypingColorPersistenceTests(unittest.TestCase):
         self.assertEqual(sent[0]['type'], 'set_style')
         self.assertEqual(sent[0]['typing_color'], _COLOR_SEQ[chat._color_idx])
 
-    def test_cycling_color_does_not_touch_prefix_suffix_fields(self):
-        # Only typing_color should be sent -- the bridge's
-        # _handle_set_style falls back to the existing session/profile
-        # value for anything omitted, so sending prefix/suffix here would
-        # risk clobbering them with blanks if the fallback behavior ever
-        # changed. Confirms the payload stays minimal on purpose.
+    def test_cycling_color_preserves_prefix_and_suffix(self):
+        # Regression test for a real bug found during the MRC Phase E
+        # work: _cycle_color used to send only {'type': 'set_style',
+        # 'typing_color': code} -- but the bridge's _handle_set_style
+        # (mrc/bridge/main.py) hard-defaults prefix/suffix to '' when
+        # the field is simply absent from the request, unlike every
+        # other style field (which correctly falls back to the
+        # existing session value). That silently wiped any prefix/
+        # suffix decoration the user had set via the web style panel,
+        # every single time they cycled their outgoing color with the
+        # arrow keys. Fixed via _style_payload(), which always sends
+        # the full last-known style with just the changed field(s)
+        # overridden -- see also _apply_style, which keeps self._style
+        # in sync from 'joined'/'style_updated' events.
         chat = _make_chat('StingRay')
         chat._split_screen = False
+        chat._style = {
+            'prefix': '!', 'suffix': '|12>', 'color': '05',
+            'prefix_color': '05', 'handle_color': '05',
+            'suffix_color': '05', 'typing_color': '07',
+        }
         sent = []
 
         async def fake_send_json(obj):
@@ -380,7 +458,11 @@ class TypingColorPersistenceTests(unittest.TestCase):
         chat._send_json = fake_send_json
 
         _run(chat._cycle_color(-1))
-        self.assertEqual(set(sent[0].keys()), {'type', 'typing_color'})
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]['type'], 'set_style')
+        self.assertEqual(sent[0]['prefix'], '!')
+        self.assertEqual(sent[0]['suffix'], '|12>')
+        self.assertEqual(sent[0]['typing_color'], _COLOR_SEQ[chat._color_idx])
 
 
 _ROOM_USERS = ['<bby', 'Rixter', 'phigan', 'johnny5', 'Sulf', 'Firehawke',
@@ -515,6 +597,30 @@ class TabCompleteDeadlockRegressionTests(unittest.TestCase):
         chat._known_users = {f'S{letter}user' for letter in string.ascii_lowercase[:20]}
         chat._input_buf = list('S')
         _run(self._with_timeout(chat._tab_complete()))
+
+
+class WelcomeEventCoverageTests(unittest.TestCase):
+    """MRC Phase F review item: does the terminal have any equivalent of
+    the reference client's first-connect welcome screen? Answer: yes,
+    already -- the bridge sends a real 'welcome' event on WS connect
+    (mrc/bridge/main.py: {"type": "welcome", "message": "Connected to
+    MRC Bridge", ...}), which the web client handles explicitly
+    (mrc/index.html's `case 'welcome':`) and the terminal client
+    surfaces through its generic unknown-event fallback (the final
+    `if body:` branch in _handle_event) since 'welcome' isn't in any of
+    the specific-event-type buckets above it. Confirmed here rather than
+    adding a redundant dedicated handler."""
+
+    def test_welcome_event_reaches_the_generic_fallback_display(self):
+        chat = _make_chat('StingRay')
+        _run(chat._handle_event({
+            'type': 'welcome',
+            'message': 'Connected to MRC Bridge',
+            'server': 'hub.example',
+        }))
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('welcome', joined)
+        self.assertIn('Connected to MRC Bridge', joined)
 
 
 class KnownUsersRosterSourceTests(unittest.TestCase):

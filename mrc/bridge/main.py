@@ -112,6 +112,17 @@ def _sanitize_no_tilde(s: str, max_len: int) -> str:
     return (s or "").replace("~", "")[:max_len]
 
 
+def _clamp_tz_offset(value) -> int:
+    """Minutes-from-UTC client display offset, clamped to the real range
+    of UTC offsets in use (UTC-12 .. UTC+14) so a bad client payload can't
+    push every rendered timestamp off into nonsense."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(-720, min(840, v))
+
+
 def _parse_userlist_text(msg: str) -> list:
     """Parse a `USERLIST:user1,user2@site,...` reply into a plain nick
     list. Wire format confirmed by two independent working parsers
@@ -411,7 +422,20 @@ class BridgeApp:
         self.websockets:   Dict[int, web.WebSocketResponse] = {}
         self.rate_limiter: Dict[int, float]                 = {}
 
-        self.identify_required_mode  = bool(self.config.get("identify_required_mode", True))
+        # Default False: verified against the real reference client
+        # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
+        # joins the room unconditionally right after the handshake,
+        # never waiting on identify; /identify is purely optional
+        # ("MRC Trust" for a registered handle), never a requirement to
+        # participate. This bridge's identify-gate defaulted to True
+        # with no documented way to discover or disable it (not even in
+        # config.example.json), silently blocking every caller on every
+        # install from chatting at all -- including unregistered/casual
+        # handles, which the real network lets chat freely -- until they
+        # identified with a registered account. Reported live as "I
+        # still have to identify every single time" / "blocked from
+        # chatting entirely until identified".
+        self.identify_required_mode  = bool(self.config.get("identify_required_mode", False))
         self.post_identify_auto_join = bool(self.config.get("post_identify_auto_join", False))
 
         self.announce_join_part                = bool(self.config.get("announce_join_part", True))
@@ -477,6 +501,11 @@ class BridgeApp:
             "enter_msg_tpl":    (sess.get("enter_msg_tpl") or "").strip(),
             "leave_msg_tpl":    (sess.get("leave_msg_tpl") or "").strip(),
             "quit_msg":         (sess.get("quit_msg") or "").strip(),
+            # Minutes offset from UTC for client-side timestamp display
+            # (e.g. -300 for US Eastern). Purely a client rendering hint --
+            # the bridge never interprets it, only stores/echoes it, same
+            # as the message templates above.
+            "tz_offset":        _clamp_tz_offset(sess.get("tz_offset", 0)),
         }
 
     def _session_display_handle(self, sess: dict) -> str:
@@ -793,14 +822,34 @@ class BridgeApp:
                     for ws_id_str, sess in self.db.list_sessions().items():
                         if (sess.get("handle") or "").strip().lower() != identified_handle.lower():
                             continue
-                        if not sess.get("waiting_for_identify"):
-                            continue
-                        if self.post_identify_auto_join:
-                            await self._complete_join_after_identify(ws_id_str, sess)
+                        if sess.get("waiting_for_identify"):
+                            # Strict mode (identify_required_mode=True):
+                            # unchanged, existing behavior.
+                            if self.post_identify_auto_join:
+                                await self._complete_join_after_identify(ws_id_str, sess)
+                            else:
+                                sess["waiting_for_identify"] = False
+                                self.db.save_session(ws_id_str, sess)
+                                await self._broadcast_info("Identified. Now use /join <room> to enter chat.")
                         else:
-                            sess["waiting_for_identify"] = False
-                            self.db.save_session(ws_id_str, sess)
-                            await self._broadcast_info("Identified. Now use /join <room> to enter chat.")
+                            # Default (non-strict) mode: the session's
+                            # initial optimistic join (_handle_join_room
+                            # calling _complete_join_after_identify
+                            # immediately) can be silently rejected by
+                            # the hub for a REGISTERED-but-unidentified
+                            # handle -- confirmed live: hub replies
+                            # "Cannot join ROOM, please IDENTIFY to use
+                            # this handle", and the bridge, still
+                            # believing in_room=True, goes on to forward
+                            # chat sends that the hub then bounces back
+                            # with "No route to a room from your user,
+                            # /join a room first." Re-send the join now
+                            # that identify actually succeeded, so the
+                            # caller doesn't also have to remember to
+                            # manually /join again. Harmless no-op
+                            # re-announce for a session whose join
+                            # already genuinely succeeded.
+                            await self._complete_join_after_identify(ws_id_str, sess)
 
         if from_user == "SERVER" and to_user == "CLIENT":
             u = msg.upper()
@@ -1073,11 +1122,21 @@ class BridgeApp:
             "enter_msg_tpl":        _sanitize_no_tilde(prof.get("enter_msg_tpl") or "", 200),
             "leave_msg_tpl":        _sanitize_no_tilde(prof.get("leave_msg_tpl") or "", 200),
             "quit_msg":             _sanitize_no_tilde(prof.get("quit_msg") or "", 200),
+            "tz_offset":            _clamp_tz_offset(prof.get("tz_offset", 0)),
         }
         self.db.save_session(str(ws_id), sess)
 
-        if not self.identify_required_mode and self.post_identify_auto_join:
+        # Normal case (identify_required_mode=False, the default): join
+        # immediately, same as the reference client -- no reason to make
+        # every caller wait on an optional trust check. post_identify_
+        # auto_join only matters in the opt-in strict mode below, where
+        # it decides whether a *successful* /identify auto-completes the
+        # join or just clears the wait state and expects an explicit
+        # /join (see _on_upstream_packet's "successfully identified"
+        # handler).
+        if not self.identify_required_mode:
             await self._complete_join_after_identify(str(ws_id), sess)
+            sess = self.db.get_session(str(ws_id)) or sess
 
         await ws.send_json({
             "type":            "joined",
@@ -1085,16 +1144,28 @@ class BridgeApp:
             "room":            room,
             "display_handle":  self._session_display_handle(sess),
             "style":           self._session_style(sess),
+            "prefs":           self._session_prefs(sess),
             "handle_overhead": self._session_display_handle_wire_len(sess),
             "dm_overhead":     self._session_dm_overhead(sess),
-            "message":         f"Ready as {handle}. If registered: /identify <pass> then /join {room}."
+            # The immediate-join message still mentions /identify --
+            # purely informational, matching the reference client's own
+            # permanent (never-blocking) "Use /identify password for MRC
+            # Trust" connect notice (helper_protocol.c). A registered
+            # handle's trust status isn't a one-time thing on the real
+            # network -- it lapses after a stretch of weeks per real
+            # user experience, so periodically re-running /identify
+            # still matters even though it's never required to chat.
+            "message":         (f"Joined #{room} as {handle}. Use /identify <pass> for MRC Trust."
+                                 if not self.identify_required_mode
+                                 else f"Ready as {handle}. If registered: /identify <pass> then /join {room}.")
         })
 
-        # Only send userlist if the user is being placed into the room immediately
-        # (identify_required_mode=True means they are NOT in the room yet — the
-        # userlist will be requested by _send_join_payloads after identification).
-        if not self.identify_required_mode:
-            await self._send_userlist_control(room)
+        # No separate userlist request here: in the immediate-join case
+        # above, _complete_join_after_identify already sent one via
+        # _send_join_payloads -- requesting it again would be a
+        # duplicate. In strict mode (identify_required_mode=True) the
+        # user isn't in the room yet; _send_join_payloads sends it once
+        # they actually identify.
 
     # ------------------------------------------------------------------
     # set_style
@@ -1191,6 +1262,9 @@ class BridgeApp:
 
         if "quit_msg" in data:
             updates["quit_msg"] = _sanitize_no_tilde(data.get("quit_msg") or "", 200)
+
+        if "tz_offset" in data:
+            updates["tz_offset"] = _clamp_tz_offset(data.get("tz_offset"))
 
         if not updates:
             await ws.send_json({"type": "error", "message": "No recognized preference fields in request."})
