@@ -22,12 +22,13 @@ from flask import (Blueprint, render_template, redirect, url_for,
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, IntegerField,
                      BooleanField, PasswordField, SelectMultipleField)
-from wtforms.validators import DataRequired, Length, Optional, NumberRange
+from wtforms.validators import DataRequired, Length, Optional, NumberRange, Regexp
 from flask_wtf import FlaskForm
 
 from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNode, QWKNodeLastSent, EchoArea, EchomailNetwork,
-                       QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest)
+                       QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest,
+                       HubIdentity)
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -70,6 +71,35 @@ class BinkPNodeForm(FlaskForm):
     is_active = BooleanField('Active', default=True)
     notes = TextAreaField('Notes', validators=[Optional()])
     submit = SubmitField('Save Node')
+
+
+class HubIdentityForm(FlaskForm):
+    """A distinct echomail/QWK hub identity this install operates -- see
+    models.HubIdentity. Most sysops only ever have the one default row
+    created automatically by the multi-hub-identity migration and never
+    see this form; it exists for sysops who run more than one real hub
+    network (own zone:net, own QWK hub ID, own downstream node pool)."""
+    name = StringField('Name', validators=[DataRequired(), Length(max=100)])
+    slug = StringField('URL slug (e.g. mynet)',
+                       validators=[DataRequired(), Length(max=50),
+                                  Regexp(r'^[a-z0-9][a-z0-9-]*$',
+                                         message='Lowercase letters, digits, and hyphens only.')])
+    qwk_hub_id = StringField('QWK Hub ID (e.g. ANET)',
+                             validators=[Optional(), Length(max=16)])
+    binkp_zone = IntegerField('BinkP Zone', validators=[Optional(), NumberRange(min=1)])
+    binkp_net = IntegerField('BinkP Net', validators=[Optional(), NumberRange(min=1)])
+    binkp_hub_node = IntegerField('BinkP Hub Node #', default=1,
+                                  validators=[Optional(), NumberRange(min=1)])
+    binkp_domain = StringField('FTN Domain Suffix (e.g. anet)',
+                               validators=[Optional(), Length(max=8)])
+    nodelist_sysop = StringField('Nodelist Sysop Name', validators=[Optional(), Length(max=100)])
+    nodelist_location = StringField('Nodelist Location', validators=[Optional(), Length(max=100)])
+    nodelist_phone = StringField('Nodelist Phone', validators=[Optional(), Length(max=50)])
+    nodelist_speed = IntegerField('Nodelist Speed', default=115200,
+                                  validators=[Optional(), NumberRange(min=300)])
+    is_active = BooleanField('Active', default=True)
+    is_default = BooleanField('Default identity')
+    submit = SubmitField('Save Hub Identity')
 
 
 class QWKNodeForm(FlaskForm):
@@ -152,6 +182,147 @@ def nodelist_generate_now():
     flash(('Nodelist generated: ' if ok else 'Nodelist generation failed: ') + out,
           'success' if ok else 'danger')
     return redirect(url_for('hub_admin.index'))
+
+
+# ---------------------------------------------------------------------------
+# Hub identity management
+#
+# Most installs have exactly one HubIdentity (created automatically by
+# the multi-hub-identity migration -- see _default_hub_identity_id in
+# models.py) and sysops never need to visit these screens at all. This
+# CRUD exists for sysops who run more than one real hub network, each
+# with its own zone:net, QWK hub ID, downstream node pool, nodelist, and
+# join form.
+# ---------------------------------------------------------------------------
+
+@hub_admin_bp.route('/identities/')
+@login_required
+@_admin_required
+def hub_identities():
+    identities = HubIdentity.query.order_by(HubIdentity.name).all()
+    return render_template('echomail/admin/hub/hub_identities.html', identities=identities)
+
+
+@hub_admin_bp.route('/identities/new', methods=['GET', 'POST'])
+@login_required
+@_admin_required
+def new_hub_identity():
+    form = HubIdentityForm()
+    if form.validate_on_submit():
+        slug = form.slug.data.strip().lower()
+        if HubIdentity.query.filter_by(slug=slug).first():
+            flash('That URL slug is already in use by another hub identity.', 'danger')
+            return render_template('echomail/admin/hub/hub_identity_form.html',
+                                   form=form, identity=None)
+        identity = HubIdentity(
+            name=form.name.data.strip(),
+            slug=slug,
+            qwk_hub_id=(form.qwk_hub_id.data or '').strip().upper() or None,
+            binkp_zone=form.binkp_zone.data,
+            binkp_net=form.binkp_net.data,
+            binkp_hub_node=form.binkp_hub_node.data or 1,
+            binkp_domain=(form.binkp_domain.data or '').strip().lower() or None,
+            nodelist_sysop=(form.nodelist_sysop.data or '').strip() or None,
+            nodelist_location=(form.nodelist_location.data or '').strip() or None,
+            nodelist_phone=(form.nodelist_phone.data or '').strip() or None,
+            nodelist_speed=form.nodelist_speed.data or 115200,
+            is_active=form.is_active.data,
+            is_default=False,
+        )
+        db.session.add(identity)
+        db.session.commit()
+        if form.is_default.data:
+            _set_default_hub_identity(identity)
+        flash(f'Hub identity {identity.name!r} created.', 'success')
+        return redirect(url_for('hub_admin.hub_identities'))
+    return render_template('echomail/admin/hub/hub_identity_form.html',
+                           form=form, identity=None)
+
+
+@hub_admin_bp.route('/identities/<int:identity_id>/edit', methods=['GET', 'POST'])
+@login_required
+@_admin_required
+def edit_hub_identity(identity_id):
+    identity = HubIdentity.query.get_or_404(identity_id)
+    form = HubIdentityForm(obj=identity)
+    if request.method == 'GET':
+        form.is_default.data = identity.is_default
+    if form.validate_on_submit():
+        slug = form.slug.data.strip().lower()
+        existing = HubIdentity.query.filter(
+            HubIdentity.slug == slug, HubIdentity.id != identity.id).first()
+        if existing:
+            flash('That URL slug is already in use by another hub identity.', 'danger')
+            return render_template('echomail/admin/hub/hub_identity_form.html',
+                                   form=form, identity=identity)
+        identity.name = form.name.data.strip()
+        identity.slug = slug
+        identity.qwk_hub_id = (form.qwk_hub_id.data or '').strip().upper() or None
+        identity.binkp_zone = form.binkp_zone.data
+        identity.binkp_net = form.binkp_net.data
+        identity.binkp_hub_node = form.binkp_hub_node.data or 1
+        identity.binkp_domain = (form.binkp_domain.data or '').strip().lower() or None
+        identity.nodelist_sysop = (form.nodelist_sysop.data or '').strip() or None
+        identity.nodelist_location = (form.nodelist_location.data or '').strip() or None
+        identity.nodelist_phone = (form.nodelist_phone.data or '').strip() or None
+        identity.nodelist_speed = form.nodelist_speed.data or 115200
+        identity.is_active = form.is_active.data
+        db.session.commit()
+        if form.is_default.data and not identity.is_default:
+            _set_default_hub_identity(identity)
+        flash(f'Hub identity {identity.name!r} updated.', 'success')
+        return redirect(url_for('hub_admin.hub_identities'))
+    return render_template('echomail/admin/hub/hub_identity_form.html',
+                           form=form, identity=identity)
+
+
+def _set_default_hub_identity(identity):
+    """Enforce the is_default invariant: exactly one HubIdentity row has
+    it set. Not a DB constraint (this codebase's SQLite migration helper
+    only ever adds columns, never adds/loosens real constraints on an
+    existing table) -- enforced here, the one place a row can become
+    the default."""
+    HubIdentity.query.filter(HubIdentity.id != identity.id).update({'is_default': False})
+    identity.is_default = True
+    db.session.commit()
+
+
+@hub_admin_bp.route('/identities/<int:identity_id>/set-default', methods=['POST'])
+@login_required
+@_admin_required
+def set_default_hub_identity(identity_id):
+    identity = HubIdentity.query.get_or_404(identity_id)
+    _set_default_hub_identity(identity)
+    flash(f'{identity.name!r} is now the default hub identity.', 'success')
+    return redirect(url_for('hub_admin.hub_identities'))
+
+
+@hub_admin_bp.route('/identities/<int:identity_id>/delete', methods=['POST'])
+@login_required
+@_admin_required
+def delete_hub_identity(identity_id):
+    identity = HubIdentity.query.get_or_404(identity_id)
+    if HubIdentity.query.count() <= 1:
+        flash('Cannot delete the only hub identity.', 'danger')
+        return redirect(url_for('hub_admin.hub_identities'))
+    if identity.is_default:
+        flash('Cannot delete the default hub identity — set another one as '
+              'default first.', 'danger')
+        return redirect(url_for('hub_admin.hub_identities'))
+    in_use = (
+        EchomailNetwork.query.filter_by(hub_identity_id=identity.id).count()
+        or BinkPNode.query.filter_by(hub_identity_id=identity.id).count()
+        or QWKNode.query.filter_by(hub_identity_id=identity.id).count()
+    )
+    if in_use:
+        flash('Cannot delete a hub identity that still has networks or '
+              'downstream nodes assigned to it — reassign or remove those '
+              'first.', 'danger')
+        return redirect(url_for('hub_admin.hub_identities'))
+    db.session.delete(identity)
+    db.session.commit()
+    flash(f'Hub identity {identity.name!r} deleted.', 'success')
+    return redirect(url_for('hub_admin.hub_identities'))
 
 
 # ---------------------------------------------------------------------------

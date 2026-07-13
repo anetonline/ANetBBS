@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.91`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.92`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.92 — Terminal MRC never actually read its configured bridge port (July 2026)
+
+- FIX: a sysop reported MRC chat working fine in the web UI but never connecting over the terminal (SSH/telnet) client, with only a brief, unreadable error flash on screen. Root cause: `MRCChat.show_menu()` (`anetbbs/features/mrc_chat.py`) read `current_app.config` with no Flask app context active — unlike `_chat_flags()` a few lines above it in `chat.py`, which correctly scopes its own DB read in one. Every config lookup therefore raised `RuntimeError: Working outside of application context`, silently swallowed by a bare `except: pass`, so terminal MRC always fell back to the hardcoded `DEFAULT_BRIDGE_URL` (port 8080) — regardless of the real bridge port (`WEB_PORT+1`, 5001 by default). This wasn't specific to one install; it silently broke terminal MRC on every install, unnoticed until now. Fixed by wrapping the lookup in `with _app().app_context():`, the same pattern already used elsewhere in the file. Also added `logger.warning(...)` to the connect-failure path, which previously only ever wrote to the failing user's own terminal screen and vanished on redraw — the exact reason the error was unreadable and left no trace to investigate afterward. 1 new regression test.
 
 ## v1.0b2.91 — BinkP: unhandled send-side disconnect during EOB/GOT handshake (July 2026)
 

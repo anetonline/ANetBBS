@@ -844,6 +844,65 @@ def _lightweight_migrate(app):
     except Exception as exc:
         app.logger.warning('Could not create/sync guru FTS5 index: %s', exc)
 
+    # Multi-hub-identity support (see models.HubIdentity): must run AFTER
+    # the auto-sweep above, which is what actually adds the
+    # hub_identity_id column to echomail_networks/binkp_nodes/qwk_nodes/
+    # network_join_config/network_join_requests on an upgrading install.
+    _seed_default_hub_identity(app, engine, _sa)
+
+
+def _seed_default_hub_identity(app, engine, _sa):
+    """Idempotent one-time seed for multi-hub-identity support.
+
+    hub_identity_id's Python-side default (models._default_hub_identity_id)
+    needs exactly one HubIdentity row with is_default=True to resolve
+    against, or every newly-constructed EchomailNetwork/BinkPNode/QWKNode/
+    NetworkJoinConfig/NetworkJoinRequest would get hub_identity_id=None.
+    Creates that row on first run (reading zone/net from the pre-existing
+    NetworkJoinConfig singleton if a sysop had already customized it, else
+    the zone=1200/net=1/hub_node=1/'ANotherNetwork' values this project
+    has always hardcoded), then backfills every hub_identity_id IS NULL
+    row left over from before the column existed -- ALTER TABLE ADD
+    COLUMN always gives existing rows a literal NULL regardless of the
+    ORM-side default, which only governs new INSERTs, not rows that
+    already existed when the column was added.
+    """
+    from .models import HubIdentity, NetworkJoinConfig
+    try:
+        default_row = HubIdentity.query.filter_by(is_default=True).first()
+        if default_row is None:
+            # Raw query, not NetworkJoinConfig.get() -- .get() itself now
+            # depends on a default HubIdentity existing, which is exactly
+            # what we're in the middle of creating.
+            legacy_cfg = NetworkJoinConfig.query.first()
+            zone = (legacy_cfg.binkp_zone if legacy_cfg and legacy_cfg.binkp_zone else 1200)
+            net = (legacy_cfg.binkp_net if legacy_cfg and legacy_cfg.binkp_net else 1)
+            default_row = HubIdentity(
+                name='ANotherNetwork', slug='anothernetwork',
+                qwk_hub_id=os.environ.get('QWK_HUB_ID', '') or 'ANET',
+                binkp_zone=zone, binkp_net=net, binkp_hub_node=1,
+                is_active=True, is_default=True,
+            )
+            db.session.add(default_row)
+            db.session.commit()
+            app.logger.info(
+                'Seeded default HubIdentity %r (zone=%s net=%s) for '
+                'multi-hub-identity support', default_row.name, zone, net)
+
+        default_id = default_row.id
+        for _table in ('echomail_networks', 'binkp_nodes', 'qwk_nodes',
+                       'network_join_config', 'network_join_requests'):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(_sa.text(
+                        f'UPDATE {_table} SET hub_identity_id = :hid '
+                        f'WHERE hub_identity_id IS NULL'), {'hid': default_id})
+            except Exception as exc:
+                app.logger.warning(
+                    'Could not backfill %s.hub_identity_id: %s', _table, exc)
+    except Exception as exc:
+        app.logger.warning('Could not seed default HubIdentity: %s', exc)
+
 
 def _create_default_data():
     """Create default boards and admin user if they don't exist"""

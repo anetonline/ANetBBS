@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Hub Identities — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-diagram-3"></i> Hub Identities</h1>
+        <p>Distinct echomail/QWK hub networks this install operates. Most sysops only need the one default identity below — this only matters if you run more than one real hub network (own zone:net, own QWK hub ID, own downstream nodes).</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('hub_admin.new_hub_identity') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add Hub Identity
+        </a>
+        <a href="{{ url_for('hub_admin.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Hub Overview
+        </a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Slug</th>
+                    <th>Zone:Net/Hub</th>
+                    <th>QWK Hub ID</th>
+                    <th>Networks</th>
+                    <th>BinkP Nodes</th>
+                    <th>QWK Nodes</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for identity in identities %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('hub_admin.edit_hub_identity', identity_id=identity.id) }}">{{ identity.name }}</a>
+                        {% if identity.is_default %}<span class="badge bg-primary ms-1">default</span>{% endif %}
+                    </td>
+                    <td><code>{{ identity.slug }}</code></td>
+                    <td>
+                        {% if identity.binkp_zone and identity.binkp_net %}
+                        {{ identity.binkp_zone }}:{{ identity.binkp_net }}/{{ identity.binkp_hub_node or 1 }}
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>{{ identity.qwk_hub_id or '—' }}</td>
+                    <td>{{ identity.networks.count() }}</td>
+                    <td>{{ identity.binkp_nodes.count() }}</td>
+                    <td>{{ identity.qwk_nodes.count() }}</td>
+                    <td>
+                        {% if identity.is_active %}<span class="badge bg-success">active</span>
+                        {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if not identity.is_default %}
+                        <form method="POST" action="{{ url_for('hub_admin.set_default_hub_identity', identity_id=identity.id) }}" class="d-inline">
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Make Default</button>
+                        </form>
+                        {% endif %}
+                        <a href="{{ url_for('hub_admin.edit_hub_identity', identity_id=identity.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -228,20 +228,35 @@ class MRCChat(BaseChatSystem):
     # ── Menu entry point ────────────────────────────────────────────────────
 
     async def show_menu(self):
-        from flask import current_app
+        # Called from ChatManager.show_menu() with no Flask app context
+        # active (unlike _chat_flags() a few lines above it in chat.py,
+        # which correctly scopes its own DB read in one) -- current_app
+        # access here always raised RuntimeError, silently swallowed by
+        # the bare except below, so this NEVER actually read
+        # MRC_BRIDGE_PORT/MRC_BRIDGE_WS_URL from real config on any
+        # install: every terminal MRC session silently fell back to the
+        # hardcoded DEFAULT_BRIDGE_URL (port 8080) regardless of the
+        # real bridge port (WEB_PORT+1, 5001 by default) -- a permanent,
+        # silent connection failure for anyone actually using terminal
+        # MRC, root-caused against a live sysop report of "connects on
+        # web, not on terminal."
+        from .bbs_ui import _app
         bridge_url = self.DEFAULT_BRIDGE_URL
         try:
-            url = current_app.config.get('MRC_BRIDGE_WS_URL')
-            if url:
-                bridge_url = url
-            else:
-                host   = current_app.config.get('MRC_BRIDGE_HOST', 'localhost')
-                port   = current_app.config.get('MRC_BRIDGE_PORT', 8080)
-                path   = current_app.config.get('MRC_BRIDGE_WS_PATH', '/ws')
-                scheme = 'wss' if current_app.config.get('MRC_BRIDGE_USE_SSL', False) else 'ws'
-                bridge_url = f'{scheme}://{host}:{port}{path.lstrip("/") and "/" + path.lstrip("/")}'
+            with _app().app_context():
+                from flask import current_app
+                url = current_app.config.get('MRC_BRIDGE_WS_URL')
+                if url:
+                    bridge_url = url
+                else:
+                    host   = current_app.config.get('MRC_BRIDGE_HOST', 'localhost')
+                    port   = current_app.config.get('MRC_BRIDGE_PORT', 8080)
+                    path   = current_app.config.get('MRC_BRIDGE_WS_PATH', '/ws')
+                    scheme = 'wss' if current_app.config.get('MRC_BRIDGE_USE_SSL', False) else 'ws'
+                    bridge_url = f'{scheme}://{host}:{port}{path.lstrip("/") and "/" + path.lstrip("/")}'
         except Exception:
-            pass
+            logger.warning('MRC terminal: could not resolve bridge URL from '
+                           'config, falling back to %s', bridge_url, exc_info=True)
 
         username = (self.session.user.get('username')
                     if isinstance(self.session.user, dict)
@@ -272,6 +287,14 @@ class MRCChat(BaseChatSystem):
                 self._ws = await asyncio.wait_for(
                     self._aiohttp_session.ws_connect(bridge_url), timeout=10)
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+                # This message only ever reached the user's own terminal
+                # screen -- gone the instant the menu redraws, and
+                # invisible to the sysop entirely. Log it too so a
+                # persistent connect failure (wrong port, bridge down)
+                # shows up in the journal instead of only ever being
+                # described secondhand as "an error that flashed by."
+                logger.warning('MRC terminal: bridge connect to %s failed: %s',
+                               bridge_url, exc)
                 await self.session.write(
                     f'\x1b[31mBridge connect failed: {exc}\x1b[0m\r\n'
                     'Is the anetbbs-mrc-bridge service running?\r\n')

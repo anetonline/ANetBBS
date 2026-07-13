@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{% if identity %}Edit{% else %}Add{% endif %} Hub Identity — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1><i class="bi bi-diagram-3"></i> {% if identity %}Edit Hub Identity — {{ identity.name }}{% else %}Add Hub Identity{% endif %}</h1>
+    <a href="{{ url_for('hub_admin.hub_identities') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Hub Identities
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>{% endfor %}{% endwith %}
+
+<div class="card" style="max-width:640px;">
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.name.label(class="form-label") }}
+                {{ form.name(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.slug.label(class="form-label") }}
+                {{ form.slug(class="form-control") }}
+                <div class="form-text">Used in the public join-form URL (/join/&lt;slug&gt;/) and the per-identity nodelist download link.</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    {{ form.binkp_zone.label(class="form-label") }}
+                    {{ form.binkp_zone(class="form-control") }}
+                </div>
+                <div class="col-md-4 mb-3">
+                    {{ form.binkp_net.label(class="form-label") }}
+                    {{ form.binkp_net(class="form-control") }}
+                </div>
+                <div class="col-md-4 mb-3">
+                    {{ form.binkp_hub_node.label(class="form-label") }}
+                    {{ form.binkp_hub_node(class="form-control") }}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.qwk_hub_id.label(class="form-label") }}
+                    {{ form.qwk_hub_id(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.binkp_domain.label(class="form-label") }}
+                    {{ form.binkp_domain(class="form-control") }}
+                </div>
+            </div>
+            <hr>
+            <p class="text-muted small mb-2">Nodelist metadata — falls back to the install's generic sysop name/location when blank.</p>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.nodelist_sysop.label(class="form-label") }}
+                    {{ form.nodelist_sysop(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.nodelist_location.label(class="form-label") }}
+                    {{ form.nodelist_location(class="form-control") }}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.nodelist_phone.label(class="form-label") }}
+                    {{ form.nodelist_phone(class="form-control", placeholder="-Unpublished-") }}
+                </div>
+                <div class="col-md-6 mb-3">
+                    {{ form.nodelist_speed.label(class="form-label") }}
+                    {{ form.nodelist_speed(class="form-control") }}
+                </div>
+            </div>
+            <div class="mb-2">
+                <div class="form-check">
+                    {{ form.is_active(class="form-check-input") }}
+                    {{ form.is_active.label(class="form-check-label") }}
+                </div>
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    {{ form.is_default(class="form-check-input") }}
+                    {{ form.is_default.label(class="form-check-label") }}
+                </div>
+                <div class="form-text">The default identity is what every new network/node/join-request lands under unless explicitly assigned elsewhere.</div>
+            </div>
+            <div class="d-flex gap-2">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('hub_admin.hub_identities') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if identity and not identity.is_default %}
+<div class="card mt-4 border-danger" style="max-width:640px;">
+    <div class="card-header text-danger">Danger Zone</div>
+    <div class="card-body">
+        <p>Deleting this hub identity is only possible while it has no networks or downstream nodes assigned to it.</p>
+        <form method="POST" action="{{ url_for('hub_admin.delete_hub_identity', identity_id=identity.id) }}"
+              onsubmit="return confirm('Delete hub identity {{ identity.name }}?');">
+            {{ form.hidden_tag() }}
+            <button type="submit" class="btn btn-danger btn-sm">Delete Hub Identity</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

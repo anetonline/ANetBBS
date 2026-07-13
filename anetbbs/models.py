@@ -35,6 +35,22 @@ def _sqlite_pragmas(dbapi_connection, connection_record):
         cursor.close()
 
 
+def _default_hub_identity_id():
+    """Column default for hub_identity_id FKs (see HubIdentity below) --
+    resolves to the install's default hub identity at flush time. This
+    means every existing call site that constructs an EchomailNetwork,
+    BinkPNode, QWKNode, NetworkJoinConfig, or NetworkJoinRequest directly
+    (admin routes, terminal QWK approval, seed data, tests) needs no
+    changes -- new rows land on the default identity automatically.
+    Rows that predate the hub_identity_id column are backfilled
+    separately, once, in web_app.py's _lightweight_migrate() (a bare
+    ALTER TABLE ADD COLUMN always gives existing rows a literal NULL
+    regardless of this default -- it only governs new INSERTs).
+    """
+    row = HubIdentity.query.filter_by(is_default=True).first()
+    return row.id if row else None
+
+
 class Theme(db.Model):
     """User interface theme model"""
     __tablename__ = 'themes'
@@ -509,8 +525,17 @@ class EchomailNetwork(db.Model):
     cram_md5 = db.Column(db.Boolean, default=True)
     binkp_tls = db.Column(db.Boolean, default=False)
 
+    # Which real-world hub identity this transport row belongs to, if
+    # any (see HubIdentity). Only meaningful for networks that represent
+    # THIS install acting as a hub -- a plain leaf/spoke network (polling
+    # someone else's hub) has no hub identity of its own and this stays
+    # on whatever the default identity happens to be, unused.
+    hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                default=_default_hub_identity_id, nullable=True, index=True)
+
     areas = db.relationship('EchoArea', backref='network', lazy='dynamic', cascade='all, delete-orphan')
     poll_logs = db.relationship('EchomailPollLog', backref='network', lazy='dynamic', cascade='all, delete-orphan')
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('networks', lazy='dynamic'))
 
     def __repr__(self):
         return f'<EchomailNetwork {self.name}>'
@@ -2785,6 +2810,57 @@ def get_builtin_field_config():
 # outbound hold queue, and QWK node registry.
 # ---------------------------------------------------------------------------
 
+class HubIdentity(db.Model):
+    """A distinct echomail/QWK hub identity this install operates.
+
+    Most installs have exactly one (is_default=True), and nothing else
+    in the app needs to know multi-hub identities exist at all --
+    hub_identity_id FKs elsewhere default to this row automatically (see
+    _default_hub_identity_id near the top of this file). A sysop running
+    more than one real hub network -- own zone:net, own QWK hub ID, own
+    downstream node pool, own nodelist, own join form -- creates
+    additional rows via the admin HubIdentity CRUD.
+
+    EchomailNetwork rows remain the *transport* config (BinkP or QWK) for
+    a real-world hub; one HubIdentity can have a BinkP-transport row and
+    a QWK-transport row both pointing at it here, mirroring how a hub's
+    BinkP and QWK sides already share one real-world join process (see
+    NetworkJoinConfig).
+    """
+    __tablename__ = 'hub_identities'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    # URL-safe, used in /join/<slug>/ and the per-identity nodelist route.
+    slug = db.Column(db.String(50), nullable=False, unique=True, index=True)
+    # Short QWK system ID (e.g. 'ANET') -- qnet-ftp convention: download
+    # <hub_id>.qwk, upload <packet_id>.rep. Formalizes the previously
+    # undocumented QWK_HUB_ID env var as this identity's value.
+    qwk_hub_id = db.Column(db.String(16))
+    binkp_zone = db.Column(db.Integer)
+    binkp_net = db.Column(db.Integer)
+    binkp_hub_node = db.Column(db.Integer, default=1)
+    # Qualified-address domain suffix for this identity's nodelist/AKA
+    # (see EchomailNetwork.ftn_domain for the same FSP-1028 constraint).
+    binkp_domain = db.Column(db.String(8))
+    # Nodelist metadata -- falls back to the install's generic
+    # SYSOP_NAME/BBS_LOCATION config when blank.
+    nodelist_sysop = db.Column(db.String(100))
+    nodelist_location = db.Column(db.String(100))
+    nodelist_phone = db.Column(db.String(50))
+    nodelist_speed = db.Column(db.Integer, default=115200)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    # Exactly one row should have this set -- an application-level
+    # invariant enforced in the admin CRUD form, not a DB constraint
+    # (this codebase's SQLite migration helper only ever adds columns,
+    # never adds/loosens real constraints on an existing table).
+    is_default = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<HubIdentity {self.name!r} ({self.slug})>'
+
+
 class BinkPNode(db.Model):
     """A downstream BinkP node that polls us as a hub.
 
@@ -2809,10 +2885,18 @@ class BinkPNode(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     notes = db.Column(db.Text)
 
+    # Which hub identity this downstream peer belongs to (see
+    # HubIdentity). Scopes inbound BinkP auth and outbound packet
+    # sender-stamping so nodes of different hub identities can't
+    # authenticate against each other's AKA.
+    hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                default=_default_hub_identity_id, nullable=True, index=True)
+
     subscriptions = db.relationship('EchoAreaNode', backref='node',
                                     lazy='dynamic', cascade='all, delete-orphan')
     hold_queue = db.relationship('BinkPHoldQueue', backref='node',
                                  lazy='dynamic', cascade='all, delete-orphan')
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('binkp_nodes', lazy='dynamic'))
 
     def __repr__(self):
         return f'<BinkPNode {self.ftn_address}>'
@@ -2893,8 +2977,17 @@ class QWKNode(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     notes = db.Column(db.Text)
 
+    # Which hub identity this downstream peer belongs to (see
+    # HubIdentity). Resolves this node's QWK hub ID (packet filename
+    # convention) -- packet_id itself stays globally unique across all
+    # hub identities (not per-identity; a deliberate simplification, see
+    # docs/CHANGELOG.md for the multi-hub-identity feature).
+    hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                default=_default_hub_identity_id, nullable=True, index=True)
+
     last_sent = db.relationship('QWKNodeLastSent', backref='node',
                                 lazy='dynamic', cascade='all, delete-orphan')
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('qwk_nodes', lazy='dynamic'))
 
     def __repr__(self):
         return f'<QWKNode {self.packet_id}>'
@@ -2975,16 +3068,26 @@ class QWKNodeRequest(db.Model):
 
 
 class NetworkJoinConfig(db.Model):
-    """Singleton config for the public "apply to join this network" page
-    (anetbbs/web/network_join.py). One config per hub install, not per
+    """Config for the public "apply to join this network" page
+    (anetbbs/web/network_join.py). One config per HubIdentity, not per
     EchomailNetwork row -- a hub's BinkP and QWK EchomailNetwork rows
     share one set of areas and one real-world join process (a real
     applicant's infopack has a single application template covering
-    both transports), so one join-form config covers both.
+    both transports), so one join-form config covers both transports of
+    one hub identity.
+
+    Was a true install-wide singleton before multi-hub-identity support;
+    now there is one row per HubIdentity, addressed via
+    NetworkJoinConfig.get(hub_identity_id) -- the classmethod's default
+    argument resolves to the install's default identity, so the many
+    existing zero-arg call sites keep working unchanged for installs
+    with only one hub identity (the common case).
     """
     __tablename__ = 'network_join_config'
 
     id = db.Column(db.Integer, primary_key=True)
+    hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                default=_default_hub_identity_id, nullable=True, index=True)
     enabled = db.Column(db.Boolean, default=False, nullable=False)
     network_name = db.Column(db.String(100), default='')
     intro_text = db.Column(db.Text)
@@ -3006,12 +3109,19 @@ class NetworkJoinConfig(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow)
 
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('join_configs', lazy='dynamic'))
+
     @classmethod
-    def get(cls):
-        """Return the singleton config row, creating it (disabled) if absent."""
-        row = cls.query.first()
+    def get(cls, hub_identity_id=None):
+        """Return this hub identity's join-form config row, creating it
+        (disabled) if absent. hub_identity_id=None resolves to the
+        install's default identity -- every pre-multi-hub call site
+        keeps working unchanged for installs with only one identity."""
+        if hub_identity_id is None:
+            hub_identity_id = _default_hub_identity_id()
+        row = cls.query.filter_by(hub_identity_id=hub_identity_id).first()
         if row is None:
-            row = cls()
+            row = cls(hub_identity_id=hub_identity_id)
             db.session.add(row)
             db.session.commit()
         return row
@@ -3033,6 +3143,13 @@ class NetworkJoinRequest(db.Model):
     __tablename__ = 'network_join_requests'
 
     id = db.Column(db.Integer, primary_key=True)
+    # Which hub identity this application was submitted to -- set
+    # explicitly by the /join/ (default identity) or /join/<slug>/
+    # (a specific identity) route at submission time, so approval reads
+    # NetworkJoinConfig.get(request.hub_identity_id) instead of always
+    # the default identity's zone:net auto-numbering.
+    hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                default=_default_hub_identity_id, nullable=True, index=True)
     # Applicant-supplied, general info
     name = db.Column(db.String(100))
     location = db.Column(db.String(150))
@@ -3066,6 +3183,8 @@ class NetworkJoinRequest(db.Model):
     qwk_node_id = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'), nullable=True)
     generated_binkp_password = db.Column(db.String(50))
     generated_qwk_password = db.Column(db.String(50))
+
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('join_requests', lazy='dynamic'))
 
     def __repr__(self):
         return f'<NetworkJoinRequest {self.bbs_name} [{self.status}]>'
