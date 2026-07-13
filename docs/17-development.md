@@ -308,9 +308,10 @@ for the full list.
 ## MRC integration
 
 The MRC bridge runs as a **separate aiohttp daemon** (`mrc/bridge/`)
-on its own port (default 8080) and is reverse-proxied at `/mrcws`
-and `/mrcweb/`. The web BBS talks to it via socket.io at
-`/mrc/`.
+on its own port (`WEB_PORT + 1` — 5001 on the standard `WEB_PORT=5000`,
+derived and written to `mrc/bridge/config.json` by `install.sh`; see
+`docs/PORTS.md`) and is reverse-proxied at `/mrcws` and `/mrcweb/`. The
+web BBS talks to it via socket.io at `/mrc/`.
 
 If you want to add a slash-command, capability, or output format:
 
