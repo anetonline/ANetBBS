@@ -12,7 +12,16 @@
 | 18    | TCP   | yes     | MSP            | Inter-BBS Instant Message inbound (RFC 1312)     | `MSP_PORT`          |
 | 11    | UDP   | yes     | SYSTAT         | "Who's online" lookup from peer BBSes (Finger-style) | `SYSTAT_PORT`   |
 | 79    | TCP   | yes     | Finger         | RFC 1288 Finger — per-user info queries          | `FINGER_LISTEN_PORT`|
-| 8080  | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | `MRC_BRIDGE_PORT`   |
+| 5001* | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | `MRC_BRIDGE_PORT`   |
+
+\* `install.sh` always derives `MRC_BRIDGE_PORT` as `WEB_PORT + 1` (5001
+on the standard `WEB_PORT=5000`) and writes it to both `.env` and
+`mrc/bridge/config.json`'s `web_listen_port` — the `8080` seen as a
+fallback constant in the code and in `mrc/bridge/config.example.json`
+never applies on a real install and should not be treated as the
+actual default. `mrc/bridge/main.py` reads its port from
+`config.json`, not directly from the `.env` var, so if you ever hand-
+edit one, update the other to match.
 
 ## Listening interface
 
