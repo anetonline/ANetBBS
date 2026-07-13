@@ -1164,8 +1164,14 @@ class BinkPClient:
                     got_eob += 1
                     logger.info("BinkP: end of batch from hub (%d/2)", got_eob)
                     if sent_eob < 2:
-                        self._send_cmd(CMD_EOB)
-                        sent_eob += 1
+                        try:
+                            self._send_cmd(CMD_EOB)
+                            sent_eob += 1
+                        except OSError as exc:
+                            logger.info(
+                                "BinkP: hub closed before second EOB (clean): %s",
+                                exc)
+                            break
                     if got_eob >= 2:
                         break
 
@@ -1188,7 +1194,12 @@ class BinkPClient:
                         logger.info(
                             "BinkP: imported %d msg(s) from %s",
                             len(msgs), pending_file)
-                    self._send_cmd(CMD_GOT, pending_file)
+                    try:
+                        self._send_cmd(CMD_GOT, pending_file)
+                    except OSError as exc:
+                        logger.info(
+                            "BinkP: hub closed before GOT ack (clean): %s", exc)
+                        break
                     pending_file = None
                     pending_size = 0
                     pending_data = b''

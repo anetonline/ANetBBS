@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.91 — BinkP: unhandled send-side disconnect during EOB/GOT handshake (July 2026)
+
+- FIX: a sysop reported a BinkP poll to one particular hub failing and repeating on every scheduled poll, while two other hubs on the same install worked fine. Root cause: `_receive_messages()` already treats the hub closing the connection during our *receive* calls as a clean, expected end of session (added in the v1.0b2.57-60 two-round-EOB work) — but the two acknowledgement sends right next to it, the second `M_EOB` and the per-file `M_GOT`, had no equivalent guard. If the hub closes its side of the socket in the narrow window before either of those sends goes out, `sendall()` raises an uncaught `OSError`, which unwinds out of `poll()` and gets logged as a genuine poll failure even though the file transfer itself completed successfully. Wrapped both sends in the same log-and-break pattern already used for the receive side. Separately: polling that one hub on a 1-minute interval is a very plausible reason only it triggers this — if its mailer has any connection-rate throttling, frequent polling could be causing it to abort sessions mid-handshake, which is exactly the trigger condition here. Slower polling (30-60 min, standard FTN practice) should reduce how often this is hit regardless of this fix.
+
+---
+
 # ANetBBS v1.0b2.90 — Configurable Last Callers row count + screen clear (July 2026)
 
 - FEATURE: the terminal Last Callers screen always fetched and paginated 200 rows, which made for a long scroll on a busy install. Added a sysop-configurable row count (`/admin/lastcallers/` — 5/10/15/20/25/30/50/100, default 20) that controls how many entries the terminal screen actually fetches; the admin audit list and the web one-liners page's fixed "Last 10" preview are unaffected. Also fixed the terminal screen not clearing before drawing — it now clears first like every other full-screen terminal view in the app. 3 new tests.
