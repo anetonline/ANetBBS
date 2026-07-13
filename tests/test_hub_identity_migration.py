@@ -51,6 +51,13 @@ class HubIdentityMigrationTests(unittest.TestCase):
             self.assertEqual(len(defaults), 1)
             self.assertEqual(defaults[0].name, 'ANotherNetwork')
             self.assertEqual(defaults[0].binkp_zone, 1200)
+            self.assertFalse(
+                defaults[0].is_active,
+                'seeded default identity must start inactive -- turning on '
+                'REGISTRY_MODE_ENABLED alone must not make ANotherNetwork '
+                'look like a live, configured hub. Matches the seeded '
+                'ANotherNetwork EchomailNetwork rows, which also start '
+                'is_active=False until the sysop configures real credentials.')
             self.assertEqual(defaults[0].binkp_net, 1)
             self.assertEqual(defaults[0].binkp_hub_node, 1)
 

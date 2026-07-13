@@ -881,7 +881,13 @@ def _seed_default_hub_identity(app, engine, _sa):
                 name='ANotherNetwork', slug='anothernetwork',
                 qwk_hub_id=os.environ.get('QWK_HUB_ID', '') or 'ANET',
                 binkp_zone=zone, binkp_net=net, binkp_hub_node=1,
-                is_active=True, is_default=True,
+                # Starts inactive, matching the seeded ANotherNetwork
+                # EchomailNetwork rows (web_app.py's _create_default_data,
+                # both start is_active=False) -- turning on
+                # REGISTRY_MODE_ENABLED alone must not make this identity
+                # look live; the sysop activates it deliberately once
+                # they've actually configured it as their real hub.
+                is_active=False, is_default=True,
             )
             db.session.add(default_row)
             db.session.commit()

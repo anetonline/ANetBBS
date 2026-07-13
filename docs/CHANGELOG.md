@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.92`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.93`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.93 — Hub identity seeded active by default (July 2026)
+
+- FIX: the default `HubIdentity` row (see v1.0b2.92's multi-hub-identity foundation) was seeded with `is_active=True`, so simply turning on `REGISTRY_MODE_ENABLED` made ANotherNetwork look like a live, fully-configured hub — before the sysop had touched anything. Doesn't match the existing convention: the seeded ANotherNetwork `EchomailNetwork` rows (both BinkP and QWK) have always started `is_active=False`, requiring the sysop to fill in real node address/packet-id/password before flipping them on. Fixed the seed to match (`is_active=False`), and changed the admin "Add Hub Identity" form's default to unchecked for the same reason — a freshly created identity shouldn't look live until deliberately activated.
 
 ## v1.0b2.92 — Terminal MRC never actually read its configured bridge port (July 2026)
 

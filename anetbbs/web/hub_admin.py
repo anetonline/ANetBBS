@@ -97,7 +97,12 @@ class HubIdentityForm(FlaskForm):
     nodelist_phone = StringField('Nodelist Phone', validators=[Optional(), Length(max=50)])
     nodelist_speed = IntegerField('Nodelist Speed', default=115200,
                                   validators=[Optional(), NumberRange(min=300)])
-    is_active = BooleanField('Active', default=True)
+    # Starts unchecked -- same reasoning as the seeded default identity
+    # (see _seed_default_hub_identity in web_app.py): a freshly created
+    # identity shouldn't look live until the sysop has actually
+    # confirmed its zone:net/QWK hub ID are correct and deliberately
+    # flips it on.
+    is_active = BooleanField('Active', default=False)
     is_default = BooleanField('Default identity')
     submit = SubmitField('Save Hub Identity')
 
