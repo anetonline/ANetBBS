@@ -83,6 +83,20 @@ def _format_template(tpl: str, **kwargs) -> str:
     return out
 
 
+def _resolve_message_template(sess: dict, tpl_key: str, global_default: str,
+                              handle: str, extra: str = "") -> str:
+    """Per-user enter/leave message template (see BridgeApp._session_prefs),
+    falling back to the install-wide default when the user hasn't set
+    their own. `extra`, if given (e.g. an explicit /quit message),
+    is appended in parens -- matches the reference MRC client's
+    "Name has left chat (message)" convention."""
+    tpl = (sess.get(tpl_key) or "").strip() or global_default
+    msg = _format_template(tpl, handle=handle)
+    if extra:
+        msg = f"{msg} ({extra})"
+    return _truncate_wire_message(msg)
+
+
 def _dm_wrapper(sender_display: str, message: str) -> str:
     sender_display = sender_display.strip()
     message        = message.strip()
@@ -96,6 +110,27 @@ def _dm_wrapper_prefix(sender_display: str) -> str:
 
 def _sanitize_no_tilde(s: str, max_len: int) -> str:
     return (s or "").replace("~", "")[:max_len]
+
+
+def _parse_userlist_text(msg: str) -> list:
+    """Parse a `USERLIST:user1,user2@site,...` reply into a plain nick
+    list. Wire format confirmed by two independent working parsers
+    already in production against a real hub: the web client's
+    tryParseUserListFromServerMessage (anetbbs/static/mrc/client.js/
+    index.html) and the terminal client's own USERLIST:/CHATTERS:
+    handling (anetbbs/features/mrc_chat.py) -- comma-separated, no
+    whitespace, optional "@site" suffix per entry."""
+    if ":" not in msg:
+        return []
+    raw = msg.split(":", 1)[1].strip()
+    seen = set()
+    users = []
+    for entry in raw.split(","):
+        nick = entry.split("@", 1)[0].strip()
+        if nick and nick not in seen:
+            seen.add(nick)
+            users.append(nick)
+    return users
 
 
 def _norm_pipe_color(code: str) -> str:
@@ -428,6 +463,22 @@ class BridgeApp:
             "color":        base,
         }
 
+    def _session_prefs(self, sess: dict) -> dict:
+        """Chat preferences distinct from nick style (see _session_style) --
+        kept as a separate request/response pair (set_prefs/prefs_updated,
+        mirroring set_style/style_updated) rather than folded into style,
+        since these are conceptually different settings groups, same as
+        the reference MRC client's /SET splits fields into logical groups
+        rather than one flat bag."""
+        return {
+            "twit_list":        list(sess.get("twit_list") or []),
+            "broadcast_shield": bool(sess.get("broadcast_shield", False)),
+            "ticker_enabled":   bool(sess.get("ticker_enabled", True)),
+            "enter_msg_tpl":    (sess.get("enter_msg_tpl") or "").strip(),
+            "leave_msg_tpl":    (sess.get("leave_msg_tpl") or "").strip(),
+            "quit_msg":         (sess.get("quit_msg") or "").strip(),
+        }
+
     def _session_display_handle(self, sess: dict) -> str:
         nick = self._session_effective_nick(sess)
         st   = self._session_style(sess)
@@ -479,7 +530,12 @@ class BridgeApp:
             if _casefold(self._session_effective_nick(sess)) != key:
                 return
             if self.announce_join_part and eff_nick:
-                exit_msg = _truncate_wire_message(_format_template(self.exit_message_tpl, handle=eff_nick))
+                # No `extra` message here -- this is an abrupt-disconnect
+                # grace-timeout path, not an explicit /quit, so there's no
+                # user-supplied quit message to append. A saved default
+                # quit_msg still isn't appropriate here either: that's for
+                # a deliberate /quit, not a dropped connection.
+                exit_msg = _resolve_message_template(sess, "leave_msg_tpl", self.exit_message_tpl, eff_nick)
                 await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
             if eff_nick and room:
                 await self.mrc.send_packet(MRCProtocol.create_logoff(eff_nick, self.config["bridge_bbs"], room))
@@ -585,6 +641,23 @@ class BridgeApp:
         )
         await self.mrc.send_packet(pkt)
 
+    async def _send_stats_control(self, room: str):
+        """Request server STATS -- mirrors _send_userlist_control's
+        "as CLIENT" addressing exactly (proven to route/broadcast
+        correctly for USERLIST; unlike USERLIST, the STATS reply text
+        is NOT parsed into fields -- see the note on the ticker/banner
+        text-feed plan for why: no reference implementation (the C
+        client, the Mystic multiplexer's OWN upstream requests) parses
+        a STATS reply into structured fields, it's opaque display text
+        same as MOTD/BANNERS/CHANGELOG/ROUTING."""
+        pkt = MRCProtocol.create_control_command(
+            "STATS",
+            user="CLIENT",
+            bbs=self.config["bridge_bbs"],
+            room=room,
+        )
+        await self.mrc.send_packet(pkt)
+
     async def _send_join_payloads(self, eff_nick: str, room: str, remote_ip: str = ""):
         if remote_ip:
             await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, f"USERIP:{remote_ip}"))
@@ -607,7 +680,7 @@ class BridgeApp:
             return
 
         if self.announce_join_part:
-            join_msg = _truncate_wire_message(_format_template(self.join_message_tpl, handle=eff_nick))
+            join_msg = _resolve_message_template(sess, "enter_msg_tpl", self.join_message_tpl, eff_nick)
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", join_msg))
             await self._sleep_delay()
 
@@ -760,10 +833,24 @@ class BridgeApp:
         if special == "CLIENT":
             room = MRCProtocol.norm_room(to_room or from_room)
             if room:
-                await self._send_to_sessions(self._sessions_in_room(room), payload)
+                targets = self._sessions_in_room(room)
             else:
-                safe = {sid for sid, s in self.db.list_sessions().items() if s.get("in_room")}
-                await self._send_to_sessions(safe, payload)
+                targets = {sid for sid, s in self.db.list_sessions().items() if s.get("in_room")}
+            await self._send_to_sessions(targets, payload)
+
+            # Structured userlist event alongside the raw mrc_message
+            # above -- both clients keep working off the raw text until
+            # they migrate to consuming this (Phase B/D of the MRC
+            # parity rework), it's purely additive. See
+            # _parse_userlist_text for the wire-format justification.
+            if from_user == "SERVER" and msg.upper().startswith("USERLIST:"):
+                users = _parse_userlist_text(msg)
+                if users:
+                    await self._send_to_sessions(targets, {
+                        "type":  "userlist",
+                        "room":  room,
+                        "users": users,
+                    })
             return
 
         if special == "NOTME":
@@ -808,7 +895,7 @@ class BridgeApp:
 
     def _rate_limit_ok(self, ws_id: int, msg_type: str) -> bool:
         # Control / housekeeping messages are never rate-limited
-        if msg_type in ("ping", "pong", "join_room", "leave_room", "set_style"):
+        if msg_type in ("ping", "pong", "join_room", "leave_room", "set_style", "set_prefs"):
             return True
         # Only rate-limit actual outgoing user content
         if msg_type not in ("send_message", "server_cmd", "direct_message"):
@@ -923,7 +1010,8 @@ class BridgeApp:
             "direct_message": self._handle_direct_message,
             "server_cmd":     self._handle_server_cmd,
             "set_style":      self._handle_set_style,
-            "leave_room":     lambda wid, _d: self._handle_leave_room(wid),
+            "set_prefs":      self._handle_set_prefs,
+            "leave_room":     self._handle_leave_room,
         }
         handler = handlers.get(msg_type)
         if handler:
@@ -957,6 +1045,14 @@ class BridgeApp:
         style_suffix_color = _norm_pipe_color(prof.get("style_suffix_color",   style_color))
         typing_color       = _norm_pipe_color(prof.get("typing_color",         "10"))
 
+        # Chat prefs (see _session_prefs) -- loaded from the profile same
+        # as style fields above, so per-user enter/leave/quit templates
+        # and twit/shield settings are available without an extra DB
+        # round-trip on every join/leave/disconnect.
+        raw_twits    = prof.get("twit_list") or []
+        twit_list    = [str(t).strip() for t in raw_twits if str(t).strip()][:64] \
+                       if isinstance(raw_twits, list) else []
+
         sess = {
             "handle":               handle,
             "nick":                 handle,
@@ -971,6 +1067,12 @@ class BridgeApp:
             "style_handle_color":   style_handle_color,
             "style_suffix_color":   style_suffix_color,
             "typing_color":         typing_color,
+            "twit_list":            twit_list,
+            "broadcast_shield":     bool(prof.get("broadcast_shield", False)),
+            "ticker_enabled":       bool(prof.get("ticker_enabled", True)),
+            "enter_msg_tpl":        _sanitize_no_tilde(prof.get("enter_msg_tpl") or "", 200),
+            "leave_msg_tpl":        _sanitize_no_tilde(prof.get("leave_msg_tpl") or "", 200),
+            "quit_msg":             _sanitize_no_tilde(prof.get("quit_msg") or "", 200),
         }
         self.db.save_session(str(ws_id), sess)
 
@@ -1044,6 +1146,69 @@ class BridgeApp:
             "handle_overhead": self._session_display_handle_wire_len(sess),
             "dm_overhead":     self._session_dm_overhead(sess),
             "message":         "Style updated (applies to messages others see)."
+        })
+
+    # ------------------------------------------------------------------
+    # set_prefs -- chat prefs distinct from nick style (see
+    # _session_prefs): twit/ignore list, broadcast shield, ticker
+    # toggle, custom enter/leave/quit messages. Same request/response
+    # shape as set_style/style_updated, kept as a separate pair rather
+    # than merged into style since they're a different settings group.
+    # ------------------------------------------------------------------
+
+    async def _handle_set_prefs(self, ws_id: int, data: dict):
+        ws   = self.websockets.get(ws_id)
+        sess = self.db.get_session(str(ws_id))
+        if not ws or not sess:
+            return
+
+        updates = {}
+
+        if "twit_list" in data:
+            raw = data.get("twit_list")
+            if isinstance(raw, list):
+                seen = set()
+                twits = []
+                for entry in raw:
+                    t = _casefold(str(entry).strip())
+                    if not t or t.upper() in MRCProtocol.RESERVED_HANDLES or t in seen:
+                        continue
+                    seen.add(t)
+                    twits.append(str(entry).strip()[:32])
+                updates["twit_list"] = twits[:64]
+
+        if "broadcast_shield" in data:
+            updates["broadcast_shield"] = bool(data.get("broadcast_shield"))
+
+        if "ticker_enabled" in data:
+            updates["ticker_enabled"] = bool(data.get("ticker_enabled"))
+
+        if "enter_msg_tpl" in data:
+            updates["enter_msg_tpl"] = _sanitize_no_tilde(data.get("enter_msg_tpl") or "", 200)
+
+        if "leave_msg_tpl" in data:
+            updates["leave_msg_tpl"] = _sanitize_no_tilde(data.get("leave_msg_tpl") or "", 200)
+
+        if "quit_msg" in data:
+            updates["quit_msg"] = _sanitize_no_tilde(data.get("quit_msg") or "", 200)
+
+        if not updates:
+            await ws.send_json({"type": "error", "message": "No recognized preference fields in request."})
+            return
+
+        sess.update(updates)
+        self.db.save_session(str(ws_id), sess)
+
+        handle = (sess.get("handle") or "").strip()
+        if handle:
+            existing = self.db.get_profile(handle) or {}
+            existing.update(updates)
+            self.db.save_profile(handle, existing)
+
+        await ws.send_json({
+            "type":    "prefs_updated",
+            "prefs":   self._session_prefs(sess),
+            "message": "Preferences updated.",
         })
 
     # ------------------------------------------------------------------
@@ -1199,7 +1364,8 @@ class BridgeApp:
     # leave_room
     # ------------------------------------------------------------------
 
-    async def _handle_leave_room(self, ws_id: int):
+    async def _handle_leave_room(self, ws_id: int, data: dict = None):
+        data = data or {}
         ws   = self.websockets.get(ws_id)
         sess = self.db.get_session(str(ws_id))
         if not ws or not sess:
@@ -1208,8 +1374,16 @@ class BridgeApp:
         eff_nick = self._session_effective_nick(sess)
         room     = self._session_room(sess)
 
+        # Explicit per-quit message (client's /quit <message>) takes
+        # priority over the saved default quit_msg pref, which in turn
+        # only applies to a deliberate leave -- never the abrupt-
+        # disconnect grace path in _delayed_session_logoff.
+        quit_override = _sanitize_no_tilde((data.get("message") or "").strip(), 100) \
+                       or (sess.get("quit_msg") or "").strip()
+
         if self.announce_join_part and eff_nick and room and sess.get("in_room"):
-            exit_msg = _truncate_wire_message(_format_template(self.exit_message_tpl, handle=eff_nick))
+            exit_msg = _resolve_message_template(
+                sess, "leave_msg_tpl", self.exit_message_tpl, eff_nick, extra=quit_override)
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
             await self._sleep_delay()
 
@@ -1251,10 +1425,29 @@ class BridgeApp:
                 if room:
                     await self._send_userlist_control(room)
 
+    async def _periodic_stats_refresh(self):
+        """Feeds the ticker/banner text pool (see _send_stats_control's
+        docstring for why this isn't parsed into structured fields).
+        One request per room-with-active-sessions, same shape as
+        _periodic_userlist_refresh, just a longer default interval --
+        stats are far less time-sensitive than a room's user list."""
+        interval = float(self.config.get("stats_refresh_interval_seconds", 120))
+        while True:
+            await asyncio.sleep(interval)
+            if not self.mrc.connected:
+                continue
+            for _, sess in self.db.list_sessions().items():
+                if not sess.get("in_room"):
+                    continue
+                room = self._session_room(sess)
+                if room:
+                    await self._send_stats_control(room)
+
     async def start_background_tasks(self, app):
         await self.mrc.start()
         self.tasks.append(asyncio.create_task(self.keepalive_loop()))
         self.tasks.append(asyncio.create_task(self._periodic_userlist_refresh()))
+        self.tasks.append(asyncio.create_task(self._periodic_stats_refresh()))
 
     async def cleanup_background_tasks(self, app):
         for t in self.tasks:

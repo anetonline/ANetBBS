@@ -1,7 +1,16 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.93`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.94`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.94 — MRC feature-parity rework, Phase A: bridge protocol + prefs (July 2026)
+
+- FEATURE: first phase of a multi-phase MRC (Multi Relay Chat) rework bringing ANetBBS's terminal and web clients toward full feature parity with the wider MRC ecosystem. This phase is bridge-only (`mrc/bridge/main.py`, `mrc/bridge/db.py`) and lays the foundation the rest builds on:
+  - New structured `userlist` WebSocket event, sent alongside the existing raw-text `USERLIST:` relay whenever the bridge already refreshes a room's roster (on join, periodically, or on certain server-text triggers) — a real, independently-verified wire format (matches the web client's existing parser and the terminal client's own USERLIST:/CHATTERS: handling), not a guess.
+  - Periodic `STATS` request added, feeding future ticker/banner work as opaque display text — deliberately **not** parsed into structured fields. An earlier draft of this phase assumed a structured `bbs_count`/`room_count`/`activity_level` format based on the Mystic BBS multiplexer's own internal file-protocol; checking the actual reference C client that talks to a real MRC hub showed no evidence real hubs send anything but free text for STATS (same as MOTD/BANNERS), so the fabricated field parsing was dropped before shipping.
+  - New `set_prefs`/`prefs_updated` request/response pair (mirrors the existing `set_style`/`style_updated` pattern): persists twit/ignore list, broadcast shield toggle, ticker toggle, and custom enter/leave/quit message templates per MRC handle.
+  - Per-user enter/leave message templates now actually apply (previously the bridge only ever had one global template for every user); explicit `/quit <message>` is now threaded through end-to-end instead of being silently discarded by the bridge's `leave_room` handler.
+  - 19 new tests.
 
 ## v1.0b2.93 — Hub identity seeded active by default (July 2026)
 
