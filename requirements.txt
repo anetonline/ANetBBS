@@ -37,7 +37,7 @@ simple-websocket>=1.0.0
 eventlet>=0.38.0
 
 # SSH server
-asyncssh>=2.14.0
+asyncssh>=2.24.0
 cryptography>=42.0.0
 
 # MRC web bridge (standalone aiohttp service)
