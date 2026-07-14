@@ -32,7 +32,7 @@ greenlet>=3.0.0
 # upgrades against modern gevent. Pinned to eventlet until flask-socketio
 # offers a maintained gevent path.
 python-socketio>=5.10.0
-python-engineio>=4.10.0
+python-engineio>=4.13.3
 simple-websocket>=1.0.0
 eventlet>=0.38.0
 
