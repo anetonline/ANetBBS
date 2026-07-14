@@ -8,7 +8,7 @@ python-dotenv>=1.0.0
 # Web framework (Flask app)
 Flask>=3.1.0
 Flask-Login>=0.6.3
-Flask-SocketIO>=5.5.0
+Flask-SocketIO>=5.6.1
 Flask-WTF>=1.2.0
 Flask-SQLAlchemy>=3.1.0
 Flask-Migrate>=4.0.0
