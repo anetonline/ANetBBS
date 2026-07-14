@@ -1,0 +1,20 @@
+# .github/dependabot.yml
+#
+# Proactive counterpart to .github/workflows/pip-audit.yml: instead of
+# only failing loudly when a currently-pinned dependency turns out to
+# be vulnerable, this opens a PR whenever a newer version is available
+# at all, so version bumps happen on a normal reviewed schedule instead
+# of only in response to a CVE. Targets requirements.txt (the curated
+# dependency list every install resolves against, see requirements.txt's
+# own header comment) with `>=` minimums -- Dependabot bumps the lower
+# bound when a new release lands.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"

@@ -1,3 +1,10 @@
+# Reference template only -- install.sh and update.sh both generate the
+# real unit file inline (heredoc) with the actual $SERVICE_USER/
+# $INSTALL_DIR substituted for this install, and neither script ever
+# copies this file directly. If you're installing manually on a
+# non-default user/path, replace every `anetbbs`/`/opt/anetbbs` below
+# with your own values before installing this -- using it as-is only
+# matches the documented defaults.
 [Unit]
 Description=ANetBBS BinkP Inbound Listener
 After=network.target

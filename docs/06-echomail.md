@@ -215,6 +215,20 @@ flooded the Poll Logs page with dozens of identical entries within
 about 20 minutes of uptime and drowned out real poll activity. See
 `_self_referential_reason()` in `anetbbs/echomail/poller.py`.
 
+### Don't poll too aggressively
+
+`poll_interval_minutes` defaults to 60 and is hard-floored at 5 (set
+below that and it's silently clamped back up) — but the floor existing
+doesn't mean polling every 5 minutes is a good idea for a real remote
+uplink. Some hubs rate-limit or temporarily block a peer that connects
+too frequently, which then makes the *original* problem (a genuinely
+failed poll) harder to recover from, not easier. A standard interval
+(30–60 minutes) is normal for most FTN/QWK links; only go tighter if
+the hub's own docs say it's fine. Separately: a poll that fails no
+longer retries on the very next scheduler tick (fixed in v1.0b2.114) —
+it correctly waits out the configured interval before trying again,
+same as a successful poll would.
+
 ## Hub Management — running ANetBBS as a network hub
 
 If this install is the designated hub for a network (`.env`:

@@ -207,6 +207,12 @@ paths, symlink to `sites-enabled`, `nginx -t && systemctl reload nginx`.
 This puts TLS in front of the Flask app and isolates the web socket from
 the privileged ports.
 
+**If your install directory isn't `/opt/anetbbs`**, also edit the
+`location /static/ { alias ... }` line in the copied config — it's
+hardcoded to `/opt/anetbbs/anetbbs/static/` in the template (`install.sh`
+substitutes this automatically when it writes nginx's config for you;
+only a manual template copy needs the edit).
+
 ## 8. Inbound BinkP / FTN
 
 If you participate in FidoNet, install + enable `anetbbs-binkp.service`
@@ -252,6 +258,21 @@ port table and firewall rules.
 
 ## Troubleshooting
 
+- **MRC (or other static assets) 404/fails to load through nginx, but
+  works fine going straight to the Flask port** and the `/static/`
+  `alias` path and file permissions all look correct → if your install
+  directory is under a user's home directory (e.g.
+  `/home/sysopname/anetbbs` instead of `/opt/anetbbs`), Ubuntu/Debian
+  gives new home directories `750` permissions by default — that blocks
+  nginx's worker user from even traversing into the home directory to
+  reach the static files, regardless of what the files themselves are
+  set to. Root-caused live against a real sysop's broken MRC web
+  client. Fix:
+  ```bash
+  sudo chmod o+x /home/sysopname
+  ```
+  (Only adds "can traverse" for others, not "can list/read" — nginx
+  doesn't need more than that to serve files under it.)
 - **`MSP: cannot bind ... Permission denied`** in bbs.log → see step 6.
 - **`SECRET_KEY is the dev default`** warning → set `SECRET_KEY` env var
   (or `RuntimeError` will hit you in production mode).
@@ -279,3 +300,49 @@ port table and firewall rules.
 - **MRC `<no name>` in Synchronet's IM display** → Synchronet IDENTs
   (RFC 1413) the sender to look up "real name". ANetBBS doesn't ship
   an identd; this is a known cosmetic-only limitation.
+- **nginx returns a blank page / 502, its own error log shows
+  `connect() to 127.0.0.1:5000 failed (13: Permission denied)`
+  repeating for every request** even though `nginx -t` passes clean and
+  the service is "active (running)" → SELinux enforcing mode (the
+  default on Fedora/RHEL/CentOS) blocks nginx from making outbound
+  connections to backend ports unless explicitly allowed. `install.sh`/
+  `update.sh` set this automatically, but if you set up nginx manually,
+  or `setsebool` wasn't installed at the time, fix it directly:
+  ```bash
+  sudo setsebool -P httpd_can_network_connect 1
+  ```
+  (needs `policycoreutils-python-utils` on Fedora/RHEL if `setsebool`
+  itself is missing).
+- **BBS info fields (telnet/ssh/website/description/sysop) never show
+  up when other MRC clients look this BBS up** (`/bbses` + `/info <n>`
+  on another client), even with a correctly-filled-in
+  `mrc/bridge/config.json` and zero errors anywhere → check whether the
+  MRC bridge's systemd unit sets a custom `MRC_BRIDGE_CONFIG`
+  environment variable pointing at a different path than the one
+  you're editing (`systemctl show anetbbs-mrc-bridge -p Environment`).
+  If it does, edit that file instead — the running service never reads
+  the default path once an override is in place. More generally: if a
+  config file looks correct and nothing is logging an error, but the
+  feature still doesn't reflect your changes, suspect an environment
+  variable silently redirecting where that service actually reads its
+  config from.
+- **On a Raspberry Pi (or other low-RAM board), something reports
+  "disk full" even though `df -h /` shows plenty of free space** →
+  check `df -h /tmp` separately. On many Pi images `/tmp` is a small
+  RAM-backed `tmpfs` (often under 500MB, sized off available memory),
+  completely separate from the real disk `/` lives on — filling it up
+  has nothing to do with how much storage the SD card/USB drive
+  actually has left.
+- **FTPS (`AUTH TLS`) worked when you set it up, then stopped working
+  weeks later** with no config change on your end → certbot resets
+  `/etc/letsencrypt/archive/` to `0700 root:root` on every certificate
+  renewal by default, which revokes the service user's read access to
+  the cert/key it was using. `install.sh` (when it obtains a cert via
+  certbot) and `update.sh` (whenever `FTP_TLS_CERTFILE` in `.env`
+  points at `/etc/letsencrypt/...`) both install a renewal hook
+  (`/etc/letsencrypt/renewal-hooks/deploy/anetbbs-ssl-cert-perms.sh`)
+  that restores the correct permissions after every renewal, so this
+  should now be handled automatically whether or not FTPS was already
+  turned on at install time. If you're on an install that predates
+  this and hit the problem, re-run `sudo bash update.sh` to get the
+  hook installed retroactively.

@@ -71,14 +71,27 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # Snapshot which optional services are CURRENTLY active before we stop anything.
-# update.sh only restarts optional services (mrc-bridge, finger) if they were
-# running before the update — this prevents force-starting a service that the
-# sysop had stopped or that never successfully ran on this install.
+# update.sh only restarts optional services (mrc-bridge, finger, binkp) if
+# they were running before the update — this prevents force-starting a
+# service that the sysop had stopped.
+#
+# SERVICES_PREVIOUSLY_EXISTED (separate from _ACTIVE above) records
+# whether the unit *file* was present at all, active or not, before this
+# run touches anything. This exists to fix a real bug: a unit that gets
+# freshly created later in THIS SAME RUN (e.g. a sysop upgrading from a
+# version that never wrote anetbbs-binkp.service) can never appear in
+# SERVICES_PREVIOUSLY_ACTIVE — it didn't exist yet to test is-active
+# against — so it was written to disk but never enabled/started, staying
+# dormant until someone started it by hand. See the restart-decision
+# logic near the end of this script for the actual fix.
 SERVICES_PREVIOUSLY_ACTIVE=()
+SERVICES_PREVIOUSLY_EXISTED=()
 for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
-    if [[ -f "/etc/systemd/system/${svc}.service" ]] && \
-       systemctl is-active --quiet "$svc" 2>/dev/null; then
-        SERVICES_PREVIOUSLY_ACTIVE+=("$svc")
+    if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
+        SERVICES_PREVIOUSLY_EXISTED+=("$svc")
+        if systemctl is-active --quiet "$svc" 2>/dev/null; then
+            SERVICES_PREVIOUSLY_ACTIVE+=("$svc")
+        fi
     fi
 done
 
@@ -1112,6 +1125,35 @@ SVCEOF
     ok "anetbbs-binkp.service installed"
 fi
 
+# Finger had a creation block in install.sh but never got one here, so an
+# existing install missing anetbbs-finger.service (e.g. upgrading from a
+# version that predates Finger support, or one where the install-time
+# step failed) had no self-heal path at all. Mirrors
+# deploy/anetbbs-finger.service / install.sh's own Finger block exactly.
+if [[ ! -f /etc/systemd/system/anetbbs-finger.service ]]; then
+    info "Installing anetbbs-finger.service ..."
+    cat > /etc/systemd/system/anetbbs-finger.service << SVCEOF
+[Unit]
+Description=ANetBBS Finger Server (RFC 1288)
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=$VENV_DIR/bin/python -m anetbbs.core.finger_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    ok "anetbbs-finger.service installed"
+fi
+
 # Ensure MRC bridge config.json exists
 if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     info "Generating MRC bridge config.json ..."
@@ -1396,22 +1438,54 @@ step "Step 8/8: Restarting services"
 
 # Build the restart list:
 #   anetbbs-web and anetbbs are always restarted (core services).
-#   anetbbs-mrc-bridge, anetbbs-finger, and anetbbs-binkp are optional: only restart them
-#   if they were already running before the update. Sysops who don't use
-#   MRC (or who have it in a failed/stopped state) should not have it
-#   force-started during an update — that would create a loud failure
-#   in the log and could delay the web service health check.
+#   anetbbs-mrc-bridge, anetbbs-finger, and anetbbs-binkp are optional,
+#   decided per service by a three-way check:
+#     - previously ACTIVE            -> restart (proven-correct, unchanged)
+#     - previously EXISTED but stopped -> skip (respects a sysop's
+#       deliberate stop; don't second-guess it just because we can)
+#     - freshly created THIS RUN, and the sysop's own .env says this
+#       feature should be on (*_ENABLED=true) -> enable + start now.
+#       Fixes a real bug: SERVICES_PREVIOUSLY_ACTIVE is snapshotted
+#       before this run creates the unit, so a brand-new unit could
+#       never appear in it — it was written to disk and daemon-reloaded
+#       but never actually enabled/started, staying dormant until a
+#       sysop noticed and started it by hand.
+#     - freshly created THIS RUN, flag absent (a legacy .env from before
+#       the *_ENABLED keys existed, hitting this self-heal for the very
+#       first time) -> do NOT auto-start (never guess and force-open a
+#       live listener on production without the sysop's own opt-in);
+#       print exact remediation instead. Step 6 already backfilled the
+#       flag as "false" onto disk by now, so the *next* run of update.sh
+#       resolves deterministically and silently either way.
 SERVICES_TO_START=()
 for svc in anetbbs-web anetbbs; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && SERVICES_TO_START+=("$svc")
 done
 for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
-    if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
-        if printf '%s\n' "${SERVICES_PREVIOUSLY_ACTIVE[@]}" | grep -qx "$svc" 2>/dev/null; then
-            SERVICES_TO_START+=("$svc")
-        else
-            skip "$svc was not active before the update — skipping restart (start it manually if needed)"
-        fi
+    [[ -f "/etc/systemd/system/${svc}.service" ]] || continue
+
+    if printf '%s\n' "${SERVICES_PREVIOUSLY_ACTIVE[@]}" | grep -qx "$svc" 2>/dev/null; then
+        SERVICES_TO_START+=("$svc")
+        continue
+    fi
+
+    if printf '%s\n' "${SERVICES_PREVIOUSLY_EXISTED[@]}" | grep -qx "$svc" 2>/dev/null; then
+        skip "$svc was not active before the update — skipping restart (start it manually if needed)"
+        continue
+    fi
+
+    # Freshly created this run -- map unit name to its .env flag.
+    case "$svc" in
+        anetbbs-mrc-bridge) _enabled_flag="MRC_BRIDGE_ENABLED" ;;
+        anetbbs-finger)     _enabled_flag="FINGER_ENABLED" ;;
+        anetbbs-binkp)      _enabled_flag="BINKP_ENABLED" ;;
+    esac
+    if [[ "${EXISTING_ENV[$_enabled_flag]:-}" == "true" ]]; then
+        info "$svc was just created and $_enabled_flag=true in .env — enabling and starting it now"
+        SERVICES_TO_START+=("$svc")
+    else
+        skip "$svc was just created but $_enabled_flag is not set to true in .env yet — not auto-starting." \
+             "Set $_enabled_flag=true in $ENV_FILE and re-run update.sh, or: systemctl enable --now $svc"
     fi
 done
 

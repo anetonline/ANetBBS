@@ -1,3 +1,17 @@
+# ANetBBS v1.0b2.116 — install.sh: FTPS cert-renewal fix; expanded troubleshooting docs (July 2026)
+
+- Fixed a gap where FTPS certificate permissions could silently break after the first Let's Encrypt renewal on a fresh install (only `update.sh` had the fix before).
+- Added several new troubleshooting entries to `docs/INSTALL.md`/`docs/INSTALL-PI.md`/`docs/06-echomail.md` covering common newer-sysop pain points (SELinux blocking nginx, MRC config path overrides, Pi `/tmp` confusion, FTPS renewal, BinkP poll intervals).
+
+---
+
+# ANetBBS v1.0b2.115 — install.sh/update.sh: better distro detection, dependency update checks, extra verification (July 2026)
+
+- Improved Linux distro detection and package handling in `install.sh`/`update.sh` (openSUSE, dosemu2 support, clearer firewall guidance where automation isn't available).
+- Added automated dependency update/security checks (`pip-audit` + Dependabot) so outdated or vulnerable packages get flagged instead of going unnoticed.
+
+---
+
 # ANetBBS v1.0b2.114 — Echomail poller: back off after a failed poll instead of retrying every tick (July 2026)
 
 - FIX: `EchomailNetwork.last_poll_at` was only ever stamped after a

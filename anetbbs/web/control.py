@@ -184,7 +184,7 @@ def _systemctl_change(*args):
     """Run a state-changing systemctl command (start/stop/restart) via
     sudo so the gunicorn worker can do it without root. Requires the
     NOPASSWD entries in /etc/sudoers.d/anetbbs (auto-installed by
-    update.sh)."""
+    install.sh/update.sh)."""
     cmd = ['sudo', '-n', 'systemctl'] + list(args)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

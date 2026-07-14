@@ -63,7 +63,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     [[ "${CONFIRM,,}" != "y" ]] && { echo "Aborted."; exit 0; }
 
     info "Stopping and removing services..."
-    for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+    for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
         systemctl stop    "$svc" 2>/dev/null || true
         systemctl disable "$svc" 2>/dev/null || true
         rm -f "/etc/systemd/system/${svc}.service"
@@ -375,6 +375,7 @@ fi
 echo ""
 echo -e "${BOLD}  ── Optional Components ──${NC}"
 ask_yn INSTALL_DOSBOX "Install DOSBox-staging for DOS door games? (y/n)"      "n"
+ask_yn INSTALL_DOSEMU "Install dosemu2 for door_dosemu game type (e.g. TW2002-style doors needing a real FOSSIL/COM1)? (y/n)" "n"
 ask_yn INSTALL_CLAMAV "Install ClamAV for upload virus scanning? (y/n)"        "n"
 ask_yn INSTALL_LHASA  "Install lhasa for .lzh archive description extraction? (y/n)" "n"
 ask_yn INSTALL_SIXEL  "Install libsixel-bin for sixel images in terminal RSS reader? (y/n)" "n"
@@ -527,6 +528,33 @@ pkg_name() {
                 *)               echo "$generic" ;;
             esac
             ;;
+        zypper)
+            # openSUSE/SLES. Previously fell through to the generic
+            # Debian-style names below (wrong on every entry that
+            # actually differs) -- these package names are best-effort,
+            # not verified against a real openSUSE box in this
+            # environment; report any mismatch upstream.
+            case "$generic" in
+                python3)         echo "python3" ;;
+                python3-venv)    echo "python3" ;;
+                python3-pip)     echo "python3-pip" ;;
+                python3-dev)     echo "python3-devel" ;;
+                build-essential) echo "gcc gcc-c++ make" ;;
+                rsync)           echo "rsync" ;;
+                git)             echo "git" ;;
+                curl)            echo "curl" ;;
+                nodejs)          echo "nodejs" ;;
+                npm)             echo "npm" ;;
+                nginx)           echo "nginx" ;;
+                certbot)         echo "certbot" ;;
+                certbot-nginx)   echo "python3-certbot-nginx" ;;
+                dosbox)          echo "dosbox" ;;
+                openssh-client)  echo "openssh" ;;
+                libffi-dev)      echo "libffi-devel" ;;
+                libsixel-bin)    echo "libsixel" ;;
+                *)               echo "$generic" ;;
+            esac
+            ;;
         *)
             echo "$generic"
             ;;
@@ -559,6 +587,14 @@ case "$PKG_MANAGER" in
         info "Refreshing pacman databases..."
         pacman -Sy --noconfirm 2>/dev/null || true
         ok "Pacman ready"
+        ;;
+    zypper)
+        info "Refreshing zypper repositories..."
+        zypper --non-interactive refresh 2>/dev/null || true
+        ok "Zypper ready"
+        ;;
+    *)
+        warn "Unrecognized package manager ($PKG_MANAGER) — skipping cache refresh."
         ;;
 esac
 
@@ -600,10 +636,32 @@ if [[ ${#REQUIRED_FAILED[@]} -gt 0 ]]; then
     done
     echo ""
     fail "Please fix your system package manager and try again."
-    echo -e "  On Ubuntu/Debian try:"
-    echo -e "    ${CYAN}sudo dpkg --configure -a${NC}"
-    echo -e "    ${CYAN}sudo apt --fix-broken install${NC}"
-    echo -e "    ${CYAN}sudo apt update${NC}"
+    case "$PKG_MANAGER" in
+        apt)
+            echo -e "  On Ubuntu/Debian try:"
+            echo -e "    ${CYAN}sudo dpkg --configure -a${NC}"
+            echo -e "    ${CYAN}sudo apt --fix-broken install${NC}"
+            echo -e "    ${CYAN}sudo apt update${NC}"
+            ;;
+        dnf|yum)
+            echo -e "  On Fedora/RHEL try:"
+            echo -e "    ${CYAN}sudo $PKG_MANAGER clean all${NC}"
+            echo -e "    ${CYAN}sudo $PKG_MANAGER makecache${NC}"
+            ;;
+        pacman)
+            echo -e "  On Arch try:"
+            echo -e "    ${CYAN}sudo pacman -Syyu${NC}"
+            ;;
+        zypper)
+            echo -e "  On openSUSE try:"
+            echo -e "    ${CYAN}sudo zypper refresh${NC}"
+            echo -e "    ${CYAN}sudo zypper --non-interactive install -y${NC}"
+            ;;
+        *)
+            echo -e "  Unrecognized package manager ($PKG_MANAGER) — fix your system"
+            echo -e "  package manager manually, then re-run this installer."
+            ;;
+    esac
     echo -e "  Then re-run: ${CYAN}sudo bash install.sh${NC}"
     exit 1
 fi
@@ -688,6 +746,42 @@ if [[ "$INSTALL_DOSBOX" == "y" ]]; then
         ok "dosbox (vanilla)"
     else
         skip "DOSBox — door games using DOSBox won't work"
+    fi
+fi
+
+if [[ "$INSTALL_DOSEMU" == "y" ]]; then
+    # dosemu2 is natively apt-packageable on Debian/Ubuntu. It is NOT in
+    # Fedora/RHEL's default repos (needs RPM Fusion or a COPR), is
+    # AUR-only on Arch (not in the official repos at all), and its
+    # openSUSE packaging status is unclear. Rather than silently doing
+    # nothing or claiming success it didn't achieve, this always
+    # attempts the native package name first (works on apt, predictably
+    # fails elsewhere) and, on failure, prints exact per-distro
+    # follow-up guidance instead of a generic "skip" -- a sysop on
+    # Fedora/Arch/openSUSE needs to know WHERE to get it, not just that
+    # this installer couldn't. Deliberately does NOT attempt to build an
+    # AUR package as root inside an unattended installer.
+    if install_one_pkg "dosemu2" 2>/dev/null; then
+        ok "dosemu2"
+    else
+        case "$PKG_MANAGER" in
+            dnf|yum)
+                skip "dosemu2 — not in Fedora/RHEL default repos. Enable RPM Fusion" \
+                     "or a COPR providing dosemu2, then: sudo $PKG_MANAGER install dosemu2"
+                ;;
+            pacman)
+                skip "dosemu2 — AUR-only on Arch, not in the official repos. Install" \
+                     "an AUR helper (yay/paru) then: yay -S dosemu2"
+                ;;
+            zypper)
+                skip "dosemu2 — not confirmed in openSUSE default repos. Check the" \
+                     "Packman repo, or build from source: https://github.com/dosemu2/dosemu2"
+                ;;
+            *)
+                skip "dosemu2 — door_dosemu games (e.g. TW2002-style doors) won't work" \
+                     "until it's installed manually for your distro"
+                ;;
+        esac
     fi
 fi
 
@@ -1014,6 +1108,14 @@ MRC_BRIDGE_HOST=localhost
 MRC_BRIDGE_PORT=$MRC_BRIDGE_PORT_DEFAULT
 MRC_BRIDGE_USE_SSL=false
 MRC_BRIDGE_WS_PATH=/mrcws
+# Bookkeeping only for install.sh/update.sh -- not read by the app itself.
+# The standalone binkp/finger/mrc-bridge processes are gated purely by
+# whether their systemd unit exists and is enabled, not by this value;
+# it exists so update.sh can tell, on a self-heal run, whether a
+# freshly-created unit should actually be started (see update.sh).
+BINKP_ENABLED=$([[ "$ENABLE_BINKP" == "y" ]] && echo true || echo false)
+FINGER_ENABLED=$([[ "$ENABLE_FINGER" == "y" ]] && echo true || echo false)
+MRC_BRIDGE_ENABLED=$([[ "$ENABLE_MRC" == "y" ]] && echo true || echo false)
 ENVEOF
 
 chown "$SERVICE_USER":"$SERVICE_USER" "$ENV_FILE"
@@ -1213,7 +1315,7 @@ info "Cleaning up stale service files..."
 # a single anetbbs.service that reads .env and starts whichever of
 # telnet/ssh/rlogin are enabled. Stop+disable+remove the legacy units
 # on every install so the migration is clean.
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     systemctl stop "$svc" 2>/dev/null || true
     systemctl disable "$svc" 2>/dev/null || true
     rm -f "/etc/systemd/system/${svc}.service"
@@ -1333,6 +1435,36 @@ SVCEOF
 ok "anetbbs-finger.service"
 fi
 
+# ─── BinkP inbound listener service ────────────────────────────────────────────
+# FidoNet-style inbound mail (port 24554). Was asked about by the wizard,
+# shown as "Enabled" in the install summary, and had its firewall port
+# opened -- but the unit file itself was never actually written here,
+# only by update.sh's self-heal block (which this mirrors verbatim). A
+# sysop who answered "y" to BinkP got a summary saying "Enabled" and a
+# UFW hole for 24554, but no listener process at all until they
+# separately ran update.sh once.
+if [[ "$ENABLE_BINKP" == "y" ]]; then
+cat > /etc/systemd/system/anetbbs-binkp.service << SVCEOF
+[Unit]
+Description=ANetBBS BinkP Inbound Listener
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$VENV_DIR/bin/python -m anetbbs.echomail.binkp_server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+ok "anetbbs-binkp.service"
+fi
+
 # ─── Reload and start ─────────────────────────────────────────────────────────
 systemctl daemon-reload
 
@@ -1351,6 +1483,7 @@ SERVICES_TO_START=(anetbbs-web)
 [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]] && SERVICES_TO_START+=(anetbbs)
 [[ "$ENABLE_MRC" == "y" ]]    && SERVICES_TO_START+=(anetbbs-mrc-bridge)
 [[ "$ENABLE_FINGER" == "y" ]] && SERVICES_TO_START+=(anetbbs-finger)
+[[ "$ENABLE_BINKP" == "y" ]]  && SERVICES_TO_START+=(anetbbs-binkp)
 
 for svc in "${SERVICES_TO_START[@]}"; do
     systemctl enable "$svc" 2>/dev/null || true
@@ -1401,10 +1534,78 @@ if [[ "$CONFIGURE_UFW" == "y" ]]; then
             warn "  UFW is inactive — rules added but firewall not enabled."
             warn "  Run 'sudo ufw enable' when ready (after verifying SSH access works)."
         fi
+    elif command -v firewall-cmd &>/dev/null; then
+        # firewalld is the default on Fedora/RHEL/openSUSE -- this
+        # installer only automates UFW today (real cross-distro firewall
+        # automation is out of scope for this pass), but printing
+        # correct per-port firewall-cmd commands instead of a bare "not
+        # UFW, skipping" at least tells the sysop exactly what to run.
+        warn "UFW is not installed, but firewalld is — this installer doesn't"
+        warn "automate firewalld yet. Open the needed ports yourself:"
+        if [[ "$ENABLE_NGINX" == "y" ]]; then
+            warn "  sudo firewall-cmd --permanent --add-port=80/tcp --add-port=443/tcp"
+        else
+            warn "  sudo firewall-cmd --permanent --add-port=$WEB_PORT/tcp"
+        fi
+        [[ "$ENABLE_TELNET" == "y" ]] && warn "  sudo firewall-cmd --permanent --add-port=$TELNET_PORT/tcp"
+        [[ "$ENABLE_SSH" == "y" ]]    && warn "  sudo firewall-cmd --permanent --add-port=$SSH_PORT/tcp"
+        [[ "$ENABLE_MSP" == "y" ]]    && warn "  sudo firewall-cmd --permanent --add-port=18/tcp --add-port=11/udp"
+        [[ "$ENABLE_FINGER" == "y" ]] && warn "  sudo firewall-cmd --permanent --add-port=79/tcp"
+        [[ "$ENABLE_BINKP" == "y" ]]  && warn "  sudo firewall-cmd --permanent --add-port=24554/tcp"
+        warn "  sudo firewall-cmd --reload"
     else
         warn "UFW is not installed — skipping firewall config."
     fi
 fi
+
+# ─── sudoers + install sentinel ────────────────────────────────────────────────
+# Grants the service user passwordless sudo for exactly the systemctl/
+# journalctl/upgrade-wrapper commands the Service Control Center and the
+# web-triggered "Check for Updates" flow need. Previously ONLY update.sh
+# wrote this -- meaning on every fresh install, until the sysop
+# separately ran update.sh once, the SCC's Start/Stop/Restart buttons and
+# the web auto-update both failed with a bare "no sudo rights"-style
+# error. Mirrors update.sh's own block verbatim (same substitution +
+# visudo -cf validation before install).
+SUDOERS_SRC="$SOURCE_DIR/deploy/sudoers.anetbbs"
+SUDOERS_DST="/etc/sudoers.d/anetbbs"
+if [[ -f "$SUDOERS_SRC" ]]; then
+    info "Installing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
+    UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
+    RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
+    sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
+        -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
+        -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
+        "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
+    if visudo -cf "$SUDOERS_DST.tmp" >/dev/null 2>&1; then
+        mv "$SUDOERS_DST.tmp" "$SUDOERS_DST"
+        chmod 0440 "$SUDOERS_DST"
+        ok "sudoers installed (SCC restart + Check-for-Updates auto-install will work)"
+    else
+        rm -f "$SUDOERS_DST.tmp"
+        warn "sudoers syntax check failed — Service Control Center buttons and web auto-update will not work until this is fixed manually."
+    fi
+else
+    warn "deploy/sudoers.anetbbs not found — skipping sudoers install."
+fi
+
+# Sentinel so the privileged upgrade wrapper (and any other future root
+# helper) can discover the install root without hardcoding a path.
+cat > /etc/anetbbs.install <<EOF
+# Written by install.sh — used by deploy/run_upgrade.sh to locate the
+# install root when invoked under sudo. Do not edit by hand; rerun
+# install.sh or update.sh to refresh.
+INSTALL_DIR=$INSTALL_DIR
+SERVICE_USER=$SERVICE_USER
+EOF
+chmod 0644 /etc/anetbbs.install
+
+# Tarballs built from FAT source trees lose the +x bit on these.
+for w in run_upgrade.sh run_restore.sh; do
+    if [[ -f "$INSTALL_DIR/deploy/$w" ]]; then
+        chmod 0755 "$INSTALL_DIR/deploy/$w"
+    fi
+done
 
 # ═══════════════════════════════════════════════════════════════════════════��═══
 # STEP 9: NGINX & SSL
@@ -1558,6 +1759,74 @@ NGINXEOF
              -m "admin@${DOMAIN}" --redirect 2>/dev/null; then
             ok "SSL certificate obtained"
             STATUS[ssl]="ok"
+
+            # Wire up FTPS cert access + a certbot renewal hook, same as
+            # update.sh's own self-heal block -- previously ONLY update.sh
+            # did this, so a sysop who set FTP_TLS_CERTFILE right after a
+            # fresh install (without ever running update.sh) would have
+            # working FTPS today that silently breaks at the FIRST cert
+            # renewal (~90 days out): certbot resets
+            # /etc/letsencrypt/archive to 0700 root:root on every renewal,
+            # which the anetbbs service user then can't read. Pre-staging
+            # this now means FTPS works correctly whenever the sysop later
+            # sets FTP_TLS_CERTFILE, with no separate update.sh run needed.
+            info "Wiring up FTPS cert access (ssl-cert group + renewal hook)..."
+            if ! getent group ssl-cert >/dev/null 2>&1; then
+                groupadd --system ssl-cert 2>/dev/null && \
+                    info "  created ssl-cert system group" || \
+                    warn "  could not create ssl-cert group"
+            fi
+            if ! id -nG "$SERVICE_USER" 2>/dev/null | tr ' ' '\n' | grep -qx ssl-cert; then
+                if usermod -aG ssl-cert "$SERVICE_USER" 2>/dev/null; then
+                    ok "  added $SERVICE_USER to ssl-cert group"
+                else
+                    warn "  could not add $SERVICE_USER to ssl-cert"
+                fi
+            fi
+            if [[ -d /etc/letsencrypt/archive ]]; then
+                chgrp -R ssl-cert /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+                chmod g+rX /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+                find /etc/letsencrypt/archive -name 'privkey*.pem' -exec chmod 640 {} \; 2>/dev/null || true
+                find /etc/letsencrypt/archive -name '*.pem' ! -name 'privkey*' -exec chmod 644 {} \; 2>/dev/null || true
+                ok "  /etc/letsencrypt perms set for ssl-cert group access"
+            fi
+            HOOK_DIR=/etc/letsencrypt/renewal-hooks/deploy
+            HOOK=$HOOK_DIR/anetbbs-ssl-cert-perms.sh
+            if [[ -d /etc/letsencrypt ]]; then
+                mkdir -p "$HOOK_DIR" 2>/dev/null || true
+                cat > "$HOOK" << 'HOOKEOF'
+#!/bin/bash
+# Installed by anetbbs install.sh.
+#
+# Certbot resets /etc/letsencrypt/archive perms to 0700 root:root on
+# every cert renewal, which silently breaks anetbbs FTPS (and any
+# other non-root service reading the cert). This deploy-hook fires
+# after each successful renewal and restores ssl-cert group access.
+chgrp -R ssl-cert /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+chmod g+rX /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null || true
+find /etc/letsencrypt/archive -name 'privkey*.pem' -exec chmod 640 {} \; 2>/dev/null || true
+find /etc/letsencrypt/archive -name '*.pem' ! -name 'privkey*' -exec chmod 644 {} \; 2>/dev/null || true
+HOOKEOF
+                chmod 0755 "$HOOK"
+                ok "  certbot renewal hook installed ($HOOK)"
+            fi
+            # anetbbs.service was already written earlier in Step 8 --
+            # patch it for SupplementaryGroups=ssl-cert the same way
+            # update.sh patches an existing unit, rather than duplicating
+            # the whole heredoc here. Harmless no-op if telnet/ssh/rlogin
+            # (and therefore this unit) weren't enabled.
+            ANETBBS_UNIT_FOR_SSL=/etc/systemd/system/anetbbs.service
+            if [[ -f "$ANETBBS_UNIT_FOR_SSL" ]] && \
+               ! grep -q '^SupplementaryGroups=.*ssl-cert' "$ANETBBS_UNIT_FOR_SSL"; then
+                if grep -q '^EnvironmentFile=' "$ANETBBS_UNIT_FOR_SSL"; then
+                    sed -i.bak '/^EnvironmentFile=/a SupplementaryGroups=ssl-cert' "$ANETBBS_UNIT_FOR_SSL"
+                else
+                    sed -i.bak '/^ExecStart=/i SupplementaryGroups=ssl-cert' "$ANETBBS_UNIT_FOR_SSL"
+                fi
+                systemctl daemon-reload 2>/dev/null || true
+                systemctl restart anetbbs 2>/dev/null || true
+                ok "  anetbbs.service patched (FTPS cert will be readable)"
+            fi
         else
             warn "certbot failed. Common causes:"
             warn "  • Port 80 not forwarded from your router to this box"

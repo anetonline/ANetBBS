@@ -504,7 +504,12 @@ python3 tools/prepare_dos_games.py \
   sudo snap remove dosbox dosbox-staging dosbox-x   # whichever is installed
   sudo apt install dosbox                            # apt vanilla works for BBS doors
   # OR install dosbox-staging from a GitHub release tarball into /opt/dosbox-staging
-  # OR change the Game type to door_dosemu and `apt install dosemu2`
+  # OR change the Game type to door_dosemu and install dosemu2:
+  #   Debian/Ubuntu: sudo apt install dosemu2
+  #   Fedora/RHEL:   enable RPM Fusion or a COPR providing dosemu2, then dnf install dosemu2
+  #   Arch:          AUR-only — yay -S dosemu2 (or paru)
+  #   openSUSE:      check the Packman repo, or build from source
+  #                  (https://github.com/dosemu2/dosemu2)
   ```
   As of v278, the BBS auto-rejects snap-packaged binaries up front
   with this exact message instead of letting you discover it the hard

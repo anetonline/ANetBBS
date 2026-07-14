@@ -109,6 +109,12 @@ sudo bash install.sh
 > **Install to your home directory, not `/opt/anetbbs`.**  
 > `/opt` is owned by root and can cause permission edge cases on Raspbian.
 > Using `/home/<user>/anetbbs` means the service user already owns the whole tree.
+>
+> If you later add nginx (§7) and static assets/MRC fail to load through
+> it even though everything looks correctly configured, see the home-
+> directory-permissions note in `docs/INSTALL.md`'s Troubleshooting
+> section — Raspbian's default home directory permissions (`750`) block
+> nginx from traversing in, same as on Ubuntu/Debian.
 
 ### Known Python 3.13 / eventlet issue on ARM
 

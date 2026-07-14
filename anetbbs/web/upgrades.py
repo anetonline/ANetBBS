@@ -41,6 +41,7 @@ from flask import (Blueprint, abort, current_app, jsonify, redirect,
 from flask_login import current_user, login_required
 
 from ..version import VERSION
+from .preflight import _check_sudo_escalation
 
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,13 @@ def install():
         return jsonify({'ok': False,
                         'error': f'upgrade wrapper missing: {wrapper}'}), 500
 
+    sudo_check = _check_sudo_escalation(cfg)
+    if sudo_check['status'] == 'fail':
+        error = sudo_check['detail']
+        if sudo_check.get('fix'):
+            error += ' — ' + sudo_check['fix']
+        return jsonify({'ok': False, 'error': error}), 409
+
     sha256 = upstream.get('sha256') or ''
     url = upstream.get('url') or ''
     if not re.fullmatch(r'[0-9a-fA-F]{64}', sha256):
@@ -583,6 +591,13 @@ def rollback():
     if not os.path.isfile(wrapper):
         return jsonify({'ok': False,
                         'error': f'upgrade wrapper missing: {wrapper}'}), 500
+
+    sudo_check = _check_sudo_escalation(cfg)
+    if sudo_check['status'] == 'fail':
+        error = sudo_check['detail']
+        if sudo_check.get('fix'):
+            error += ' — ' + sudo_check['fix']
+        return jsonify({'ok': False, 'error': error}), 409
 
     with _INSTALL_LOCK:
         if _install_state['running']:

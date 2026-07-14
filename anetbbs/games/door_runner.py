@@ -22,6 +22,20 @@ from .node_paths import build_token_context, expand_tokens
 
 logger = logging.getLogger(__name__)
 
+# dosemu2 packaging varies a lot by distro -- natively apt-packageable on
+# Debian/Ubuntu, needs a third-party repo (RPM Fusion or a COPR) on
+# Fedora/RHEL, AUR-only on Arch (not in the official repos at all), and
+# openSUSE's status is unclear. A bare "sudo apt install dosemu2" was
+# wrong/useless for anyone not on Debian/Ubuntu -- this covers all four.
+DOSEMU2_INSTALL_HINT = (
+    "Install dosemu2: Debian/Ubuntu: sudo apt install dosemu2 | "
+    "Fedora/RHEL: enable RPM Fusion or a COPR providing dosemu2, then "
+    "sudo dnf install dosemu2 | "
+    "Arch: AUR-only (yay -S dosemu2 or paru -S dosemu2) | "
+    "openSUSE: check the Packman repo or build from source "
+    "(https://github.com/dosemu2/dosemu2)"
+)
+
 # session_id -> DoorSession
 _sessions = {}
 _sessions_lock = threading.Lock()
@@ -333,8 +347,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
                   or shutil.which('dosemu2-bin') or shutil.which('dosemu.bin'))
         if not dosemu:
             raise FileNotFoundError(
-                'dosemu2 not found on this server. '
-                'Install with: sudo apt install dosemu2'
+                f'dosemu2 not found on this server. {DOSEMU2_INSTALL_HINT}'
             )
         return _build_dosemu_command(game, node_number, dosemu,
                                      token_ctx=token_ctx)
@@ -640,7 +653,7 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
             '  sudo apt install dosbox-x                        # preferred (more compatible)',
             '  sudo apt install dosbox                          # vanilla — also works for BBS doors via TCP nullmodem',
             '  # OR install dosbox-staging from GitHub release tarball into /opt/dosbox-staging',
-            '  # OR set game type to door_dosemu if you have dosemu2 (apt install dosemu2)',
+            f'  # OR set game type to door_dosemu if you have dosemu2 ({DOSEMU2_INSTALL_HINT})',
         ])
         raise FileNotFoundError('\n'.join(msg_lines))
 

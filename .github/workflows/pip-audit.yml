@@ -1,0 +1,67 @@
+# .github/workflows/pip-audit.yml
+#
+# requirements.txt pins everything with `>=` minimums, so a fresh
+# `pip install -e .` always picks up the latest compatible release --
+# but nothing was actually checking whether "latest compatible" is also
+# "free of known CVEs." This workflow closes that gap: installs the
+# package exactly the way a real install would (`pip install -e .`,
+# resolving against setup.py's install_requires -- the actual
+# authoritative dependency list, requirements.txt is a curated/
+# documentation copy per its own header comment) and runs pip-audit
+# against the resolved environment.
+#
+# Runs weekly (catches a CVE published against an already-pinned
+# version, not just new PRs) and on any PR touching the dependency
+# manifests. Fails the job (visibly, in the Actions tab / PR checks) on
+# any known vulnerability -- does not auto-fix anything; a maintainer
+# decides how to respond (bump a minimum version, or in the rare case
+# of a false positive / no fix available yet, note why).
+#
+# Complementary to .github/dependabot.yml, which proactively opens PRs
+# for available version bumps -- this workflow is the "is anything
+# currently vulnerable" check, Dependabot is the "here's an update you
+# could take" proposal. Deliberately does NOT add `--upgrade` to
+# update.sh's own dependency step -- see the multi-hub-identity plan
+# file / release notes for why that's a separate, deliberate decision.
+
+name: pip-audit
+
+on:
+  schedule:
+    # Mondays 09:00 UTC -- arbitrary but consistent; not tied to any
+    # release cadence.
+    - cron: '0 9 * * 1'
+  push:
+    branches: [main]
+    paths:
+      - 'requirements.txt'
+      - 'setup.py'
+      - '.github/workflows/pip-audit.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'requirements.txt'
+      - 'setup.py'
+  workflow_dispatch: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ANetBBS (same as a real install would)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit against the resolved environment
+        run: pip-audit --strict
