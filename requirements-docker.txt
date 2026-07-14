@@ -12,4 +12,4 @@ docker>=7.0.0
 # tests/test_mrc_integration.py is written against real pytest fixtures
 # (@pytest.fixture), so pytest itself has to actually be installed
 # somewhere for a full `python -m pytest tests/` run to work at all.
-pytest>=7.0.0
+pytest>=9.1.1

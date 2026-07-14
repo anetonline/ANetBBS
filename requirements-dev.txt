@@ -7,4 +7,4 @@
 # so pytest itself has to be installed for that file to even be
 # importable -- `python -m unittest discover` fails on it too, not
 # just `pytest tests/`.
-pytest>=7.0.0
+pytest>=9.1.1
