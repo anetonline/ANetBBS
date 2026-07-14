@@ -3,16 +3,23 @@
 # requirements.txt pins everything with `>=` minimums, so a fresh
 # `pip install -e .` always picks up the latest compatible release --
 # but nothing was actually checking whether "latest compatible" is also
-# "free of known CVEs." This workflow closes that gap: installs the
-# package exactly the way a real install would (`pip install -e .`,
-# resolving against setup.py's install_requires -- the actual
-# authoritative dependency list, requirements.txt is a curated/
-# documentation copy per its own header comment) and runs pip-audit
-# against the resolved environment.
+# "free of known CVEs." This workflow closes that gap.
+#
+# Audits requirements.txt directly (`pip-audit -r requirements.txt`)
+# rather than installing the app and auditing the resolved environment.
+# The first version of this workflow did the latter (`pip install -e .`
+# then bare `pip-audit`) and always failed: pip-audit audits every
+# installed distribution, including the local editable `anetbbs`
+# package itself -- which isn't published to PyPI, so pip-audit can't
+# look up version/vulnerability info for it and errors out under
+# --strict ("Dependency not found on PyPI and could not be audited").
+# Auditing the requirements file directly sidesteps this entirely: pip-
+# audit resolves it in its own isolated environment, no local install
+# needed at all.
 #
 # Runs weekly (catches a CVE published against an already-pinned
 # version, not just new PRs) and on any PR touching the dependency
-# manifests. Fails the job (visibly, in the Actions tab / PR checks) on
+# manifest. Fails the job (visibly, in the Actions tab / PR checks) on
 # any known vulnerability -- does not auto-fix anything; a maintainer
 # decides how to respond (bump a minimum version, or in the rare case
 # of a false positive / no fix available yet, note why).
@@ -35,13 +42,11 @@ on:
     branches: [main]
     paths:
       - 'requirements.txt'
-      - 'setup.py'
       - '.github/workflows/pip-audit.yml'
   pull_request:
     branches: [main]
     paths:
       - 'requirements.txt'
-      - 'setup.py'
   workflow_dispatch: {}
 
 jobs:
@@ -55,13 +60,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install ANetBBS (same as a real install would)
+      - name: Install pip-audit
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install pip-audit
 
-      - name: Install pip-audit
-        run: pip install pip-audit
-
-      - name: Run pip-audit against the resolved environment
-        run: pip-audit --strict
+      - name: Audit requirements.txt
+        run: pip-audit -r requirements.txt --strict
