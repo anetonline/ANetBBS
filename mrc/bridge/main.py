@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import ssl
 import time
 from collections import deque
@@ -159,6 +160,18 @@ def _casefold(s: str) -> str:
     return (s or "").strip().casefold()
 
 
+_PIPE_CODE_RE = re.compile(r'\|\d{2}')
+
+
+def _strip_pipe_codes(s: str) -> str:
+    """Strip MRC |NN pipe-color codes. The hub decorates its own notice
+    text with these (e.g. "welcome back |10StingRay|07") -- confirmed
+    live via a real capture -- so any text pulled out of a server
+    notice for comparison against a plain stored value (a handle, a
+    room name, ...) needs this first or it will never match."""
+    return _PIPE_CODE_RE.sub('', s or '')
+
+
 def _local_time_hhmm() -> str:
     return datetime.now().strftime("%m/%d/%y %H:%M")
 
@@ -272,6 +285,8 @@ class MRCConnection:
             logger.info("Connected to MRC server")
 
             await self.send_capabilities()
+            await self.send_bbsmeta()
+            await self.send_info_fields()
 
             if not self._io_task or self._io_task.done():
                 self._io_task = asyncio.create_task(self.receive_loop())
@@ -304,6 +319,79 @@ class MRCConnection:
         cmd     = f"CAPABILITIES:{cap_str}" if cap_str else "CAPABILITIES:"
         pkt     = MRCProtocol.create_control_command(cmd, bbs=self.config["bridge_bbs"])
         await self.send_packet(pkt)
+
+    async def send_bbsmeta(self):
+        """Announce security level + sysop, matching the reference
+        client's own connect sequence (mrc_send_bbsmeta, sent right
+        before mrc_send_info_fields -- helper_protocol.c). ANetBBS never
+        sent this at all. Added alongside the send_info_fields fixes
+        above since both were live-suspected contributors to the BBS
+        directory staying blank and couldn't be isolated without
+        another live round-trip -- SecLevel(100) matches the reference
+        client's own hardcoded constant, not sourced from config.
+        Sysop name is sent with any pipe-color codes intact -- see
+        send_info_fields for why this isn't stripped."""
+        sysop = (self.config.get("bbs_sysop", "") or "").strip() or "SysOp"
+        body = f"BBSMETA: SecLevel(100) Sysop({sysop})"
+        pkt = MRCProtocol.create_packet(
+            "CLIENT", self.config["bridge_bbs"], "", "SERVER",
+            str(time.time()), "", body)
+        logger.info("MRC outgoing BBSMETA packet: %r", pkt)
+        await self.send_packet(pkt)
+
+    async def send_info_fields(self):
+        """Broadcast this BBS's own description/telnet/ssh/website/sysop
+        so other clients on the network can look up "BBS info" for us --
+        verified against the real reference C client
+        (anetmrc_v1.3.9/src/helper_protocol.c's mrc_send_info_fields).
+        ANetBBS never sent any of these fields at all, so this info was
+        always empty for anyone looking us up from another client, even
+        ones (like the Mystic Python client) that surface it -- reported
+        live by the sysop as "the BBS info that is not shown with
+        ANetBBS but is with the mystic mrc client." Each field is only
+        sent if configured, matching the reference client's own
+        per-field `if (...[0])` guards -- an unconfigured field is
+        simply omitted, not sent blank.
+
+        Pipe-color codes in these values are sent through untouched --
+        confirmed with the sysop (2 years running this exact hub/
+        protocol before ANetBBS existed) that coloring these fields is
+        expected and supported, same as the BBS name itself (`bbs`
+        below, from `bridge_bbs`) was never stripped either. An earlier
+        version of this method defensively stripped pipe codes here,
+        reasoning from the reference client's own plain-text MRCBBS.DAT
+        example -- that was the wrong call; the identify-handle
+        extraction fix (_extract_identified_handle) is the unrelated,
+        still-necessary one (an internal string comparison against a
+        plain-text stored handle, not anything ever displayed)."""
+        bbs = self.config["bridge_bbs"]
+        fields = (
+            ("INFODSC", self.config.get("bbs_description", "")),
+            ("INFOTEL", self.config.get("bbs_telnet", "")),
+            ("INFOSSH", self.config.get("bbs_ssh", "")),
+            ("INFOWEB", self.config.get("bbs_website", "")),
+            ("INFOSYS", self.config.get("bbs_sysop", "")),
+        )
+        for prefix, value in fields:
+            value = (value or "").strip()
+            if not value:
+                continue
+            # Field order matches the reference client's actual sent
+            # bytes exactly (helper_protocol.c's mrc_send_info_fields:
+            # `"CLIENT", bbs_name, "", "SERVER", "ALL", msgext, body`) --
+            # "ALL" in the msg_ext wire position, the epoch timestamp in
+            # the to_room wire position, backwards from every other
+            # broadcast in this protocol. NOTE: this alone did NOT fix
+            # the live symptom (entry stayed blank even after this
+            # shipped) -- kept as still-plausibly-correct since it
+            # matches the reference byte-for-byte, but the real root
+            # cause is still unconfirmed. See the logged raw packet
+            # below for direct wire-level debugging.
+            pkt = MRCProtocol.create_packet(
+                "CLIENT", bbs, "", "SERVER", "ALL", str(time.time()),
+                f"{prefix}: {value}")
+            logger.info("MRC outgoing %s packet: %r", prefix, pkt)
+            await self.send_packet(pkt)
 
     def _queue_packet(self, packet: str):
         if len(self._send_queue) >= self._send_queue_max:
@@ -732,7 +820,15 @@ class BridgeApp:
 
     @staticmethod
     def _extract_identified_handle(server_msg: str) -> Optional[str]:
-        msg = (server_msg or "").strip()
+        # The hub decorates this notice with pipe-color codes around the
+        # handle itself -- confirmed live: "...Successfully identified,
+        # welcome back |10StingRay|07". Strip them before searching, or
+        # the extracted "handle" comes out as "|10StingRay|07" and never
+        # matches any real session's plain-text handle, silently
+        # breaking both the strict-mode auto-join and the default-mode
+        # self-heal that depend on this. Root cause of "still have to
+        # identify" surviving the earlier fixes on the live server.
+        msg = _strip_pipe_codes((server_msg or "").strip()).strip()
         low = msg.lower()
         idx = low.rfind("welcome back ")
         if idx == -1:
@@ -816,11 +912,32 @@ class BridgeApp:
 
         if from_user == "SERVER":
             low = msg.lower()
+            # Temporary diagnostic: the "successfully identified"/
+            # "welcome back " detection below predates this session and
+            # has no confirmed-against-a-real-hub-reply verification --
+            # log the raw text of anything identify/join-rejection
+            # shaped so the actual wire wording can be confirmed rather
+            # than assumed. Safe to remove once confirmed correct.
+            if any(kw in low for kw in ("identif", "cannot join", "no route")):
+                logger.info("MRC identify/join-related SERVER text: %r", msg)
             if "successfully identified" in low:
                 identified_handle = self._extract_identified_handle(msg)
                 if identified_handle:
                     for ws_id_str, sess in self.db.list_sessions().items():
                         if (sess.get("handle") or "").strip().lower() != identified_handle.lower():
+                            continue
+                        # Only act on sessions with a genuinely live
+                        # WebSocket right now. self.db's session records
+                        # can outlive the actual connection -- a hard
+                        # process restart (systemctl restart, common
+                        # during troubleshooting) doesn't run the
+                        # graceful WS-close cleanup path, so stale
+                        # records for the same handle can pile up across
+                        # restarts. Without this check, one real
+                        # /identify replayed the join for every stale
+                        # record too -- reported live as MOTD/CHATTERS
+                        # showing up 4 times after a single /identify.
+                        if int(ws_id_str) not in self.websockets:
                             continue
                         if sess.get("waiting_for_identify"):
                             # Strict mode (identify_required_mode=True):

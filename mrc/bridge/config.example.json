@@ -13,5 +13,10 @@
   "log_level": "INFO",
   "data_dir": "data",
   "identify_required_mode": false,
-  "post_identify_auto_join": false
+  "post_identify_auto_join": false,
+  "bbs_description": "",
+  "bbs_telnet": "",
+  "bbs_ssh": "",
+  "bbs_website": "",
+  "bbs_sysop": ""
 }
