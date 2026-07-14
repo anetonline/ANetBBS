@@ -911,6 +911,19 @@ class BBSMenuUI:
             from flask import current_app
             is_hub = bool(current_app.config.get('REGISTRY_MODE_ENABLED'))
             registry_url = (current_app.config.get('REGISTRY_URL') or '').rstrip('/')
+            # Terminal wizard is default-hub-identity-only by design (see
+            # HubIdentity) -- an install running more than one hub
+            # identity still only offers ITS default identity's network
+            # from this screen; extra identities are web-admin-only.
+            # Previously hardcoded "bbs.a-net.fyi" / "ANET.qwk" regardless
+            # of what REGISTRY_URL/QWK_HUB_ID this particular install
+            # actually had configured.
+            hub_hostname = (registry_url.split('//', 1)[-1] or 'the hub') if registry_url else 'the hub'
+            if is_hub:
+                from anetbbs.echomail.qwk_hub_ftp import resolve_hub_id
+                poll_hint = f'download {resolve_hub_id(None)}.qwk  /  upload <YOURID>.rep'
+            else:
+                poll_hint = "download the hub's QWK packet  /  upload <YOURID>.rep"
             existing = None
             if user_id:
                 existing = (QWKNodeRequest.query
@@ -944,8 +957,8 @@ class BBSMenuUI:
             f"  {FG['wht']}ANotherNetwork (Zone 1200) connects BBS systems via QWK echomail.{RESET}\r\n"
             f"  {FG['wht']}Register as a QWK node to exchange messages with other systems.{RESET}\r\n"
             f"\r\n"
-            f"  {FG['cyan']}Hub  : bbs.a-net.fyi  (FTP port 21){RESET}\r\n"
-            f"  {FG['cyan']}Poll : download ANET.qwk  /  upload <YOURID>.rep{RESET}\r\n"
+            f"  {FG['cyan']}Hub  : {hub_hostname}  (FTP port 21){RESET}\r\n"
+            f"  {FG['cyan']}Poll : {poll_hint}{RESET}\r\n"
             f"\r\n"
             f"  {FG['gry']}Fill in the details below. The hub sysop will review your{RESET}\r\n"
             f"  {FG['gry']}application and post your credentials here when approved.{RESET}\r\n"
@@ -1139,6 +1152,14 @@ class BBSMenuUI:
         from anetbbs.models import db, QWKNodeRequest as _QNR
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
+        hub_hostname = (registry_url.split('//', 1)[-1] or 'the hub') if registry_url else 'the hub'
+        if is_hub:
+            from anetbbs.echomail.qwk_hub_ftp import resolve_hub_id
+            with _app().app_context():
+                download_hint = f'{resolve_hub_id(None)}.qwk'
+        else:
+            download_hint = "the hub's QWK packet"
+
         stale_note = ''
         with _app().app_context():
             req = _QNR.query.get(req_id)
@@ -1204,8 +1225,8 @@ class BBSMenuUI:
                 f"\r\n"
                 f"  {FG['cyan']}Packet ID : {FG['grn']}{BOLD}{packet_id}{RESET}\r\n"
                 f"  {FG['cyan']}Password  : {FG['grn']}{BOLD}{generated_password or '(contact hub sysop)'}{RESET}\r\n"
-                f"  {FG['cyan']}Hub FTP   : {FG['wht']}bbs.a-net.fyi  port 21{RESET}\r\n"
-                f"  {FG['cyan']}Download  : {FG['wht']}ANET.qwk{RESET}\r\n"
+                f"  {FG['cyan']}Hub FTP   : {FG['wht']}{hub_hostname}  port 21{RESET}\r\n"
+                f"  {FG['cyan']}Download  : {FG['wht']}{download_hint}{RESET}\r\n"
                 f"  {FG['cyan']}Upload    : {FG['wht']}{packet_id}.rep{RESET}\r\n"
                 f"\r\n"
                 f"  {FG['gry']}Set BOTH \"QWK Username\" and \"QWK Packet ID\" to "
@@ -4536,8 +4557,10 @@ async def _sysop_qwk_requests(self):
                 return
             alphabet = string.ascii_letters + string.digits
             password = ''.join(secrets.choice(alphabet) for _ in range(16))
+            from anetbbs.models import _default_hub_identity_id
             node = QWKNode(packet_id=pid, name=req.bbs_name, sysop=req.sysop_name,
                            email=req.email, password=password, is_active=True,
+                           hub_identity_id=req.hub_identity_id or _default_hub_identity_id(),
                            notes=f"Auto-created from node request #{req.id}.")
             db.session.add(node)
             db.session.flush()
@@ -4609,15 +4632,31 @@ async def _sysop_echomail(self):
     Deliberately out of scope: full NetworkJoinRequest applicant approval
     (creates multiple node types + emails credentials -- web-only) and
     BinkP/QWK hub peer node CRUD (many fields, edit on web).
+
+    Also deliberately out of scope, by the same design as the two
+    items above: multi-hub-identity awareness. QWK Node Requests here
+    always targets the install's DEFAULT hub identity (both this
+    screen's approval and the terminal application wizard,
+    _apply_qwk_node) -- a sysop running more than one hub identity
+    manages the extra ones only through the web admin (Hub Management ->
+    Hub Identities). See models.HubIdentity.
     """
     from .ansi_ui import banner, FG, RESET, ui_width
     # No hotkey letters shown/handled here -- _rss_lightbar reserves 'Q'
     # itself as the universal quit key, so a displayed "[Q]" hotkey would
     # be misleading (pressing Q always exits, never opens a row). Enter
     # + arrow navigation only, same convention as _ebook_pick_from_list.
+    qwk_requests_label = 'QWK Node Requests'
+    try:
+        with _app().app_context():
+            from anetbbs.models import HubIdentity
+            if HubIdentity.query.count() > 1:
+                qwk_requests_label = 'QWK Node Requests (default hub identity only)'
+    except Exception:
+        pass
     rows = [
         ('Networks / Areas', self.sysop_echomail_networks),
-        ('QWK Node Requests', self.sysop_qwk_requests),
+        (qwk_requests_label, self.sysop_qwk_requests),
         ('Bad Areas', self.sysop_bad_areas),
     ]
 

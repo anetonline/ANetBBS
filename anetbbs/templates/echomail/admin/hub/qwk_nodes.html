@@ -31,6 +31,7 @@
                 <tr>
                     <th>Packet ID</th>
                     <th>BBS Name</th>
+                    {% if identity_count > 1 %}<th>Identity</th>{% endif %}
                     <th>Sysop</th>
                     <th>Confs</th>
                     <th>Status</th>
@@ -43,6 +44,7 @@
                 <tr>
                     <td><a href="{{ url_for('hub_admin.qwk_node_detail', node_id=node.id) }}"><code>{{ node.packet_id }}</code></a></td>
                     <td>{{ node.name }}</td>
+                    {% if identity_count > 1 %}<td class="small">{{ node.hub_identity.name if node.hub_identity else '—' }}</td>{% endif %}
                     <td>{{ node.sysop or '—' }}</td>
                     <td>{{ node.last_sent.count() }}</td>
                     <td>
@@ -88,8 +90,10 @@
             </tr>
         </table>
         <p class="text-muted mb-0" style="font-size:0.85rem;">
-            The hub system ID (the QWK filename the node downloads) is set by the <code>QWK_HUB_ID</code>
-            setting in Admin → Settings. Set it to something short like <code>ANET</code>.
+            The hub system ID (the QWK filename the node downloads) defaults to the
+            <code>QWK_HUB_ID</code> setting in Admin → Settings. A node assigned to a
+            non-default Hub Identity instead uses that identity's own QWK Hub ID
+            (set on the Hub Identity itself) — see Hub Identities.
         </p>
     </div>
 </div>

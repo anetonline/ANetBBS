@@ -1,3 +1,95 @@
+# ANetBBS v1.0b2.114 — Echomail poller: back off after a failed poll instead of retrying every tick (July 2026)
+
+- FIX: `EchomailNetwork.last_poll_at` was only ever stamped after a
+  *successful* poll — a failed poll left it untouched, so the poller's
+  own "is this network due yet?" check saw it as still due on the very
+  next scheduler tick (60 seconds later) and retried immediately,
+  regardless of the network's configured poll interval. Reported via
+  an external GitHub issue: some upstream hubs started blocking the
+  repeated rapid-fire attempts, which only made the original failure
+  harder to recover from. Fixed by moving the `last_poll_at` stamp into
+  `_do_poll()`'s `finally` block so it's set exactly once per attempt,
+  success or failure — a failed poll now waits out the normal interval
+  before retrying, same as a successful one. (Longer-term, a real
+  configurable back-off curve — short retry, growing toward the full
+  interval — would degrade more gracefully than an all-or-nothing wait;
+  noted as a possible follow-up, not needed to fix the reported
+  problem.) 3 new tests in `tests/test_poller_backoff_on_failure.py`.
+
+---
+
+# ANetBBS v1.0b2.113 — Multi-hub-identity: join form, nodelist, QWK hub, and BinkP auth all made identity-aware (July 2026)
+
+Completes the multi-hub-identity feature (Phases 2-7; Phases 0-1 —
+the `HubIdentity` model, its `hub_identity_id` foreign keys, and the
+admin CRUD — shipped in v1.0b2.92-93). Every install still has exactly
+one hub identity by default and sees **zero behavior change** — this
+phase is about making the FK columns that already existed actually do
+something, for a sysop who wants one install to operate as the
+designated hub for more than one real echomail/QWK network at once.
+
+- FEATURE: the public "apply to join this network" form now has a
+  second URL, `/join/<slug>/`, for any non-default hub identity
+  (`/join/` alone still means the default identity, unchanged) — each
+  identity gets its own config, infopack storage, and application
+  queue. Approving an application now stamps the created BinkP/QWK
+  node with the identity the application was actually submitted to,
+  and BinkP node auto-numbering is scoped per identity so two
+  identities reusing the same zone:net (unusual, but not disallowed)
+  don't collide on each other's node numbers.
+- FEATURE: nodelist generation (`generate_nodelist()` and its two
+  callers — the public HTTP route and the scheduled file-echo
+  publisher) is now identity-aware: a non-default identity's nodelist
+  lists only its own downstream nodes and uses its own zone/net/hub-node/
+  name instead of always the hardcoded defaults. The scheduled
+  file-echo auto-publish stays default-identity-only (no per-identity
+  file-area assignment exists yet); every identity's nodelist is still
+  directly downloadable via its own URL.
+- FEATURE: QWK hub packet generation collapses three previously
+  independent, undocumented "what's our hub system ID" resolvers (the
+  web download/upload routes, the FTP-side packet writer, and the FTP
+  login handler) into one shared, identity-aware resolver — a node on
+  a non-default identity gets its own `<HUBID>.QWK`/`<HUBID>.MSG`
+  filenames instead of always the install's single global
+  `QWK_HUB_ID`. QWK/BinkP node admin forms grow a Hub Identity picker,
+  node/request lists grow an Identity column (only shown once a second
+  identity actually exists), and cross-identity QWK area subscriptions
+  are refused.
+- FIX (real bug, not just a missing feature): the inbound BinkP
+  listener's auth/matching queries were always safe (address-uniqueness-
+  backed, unscoped by identity on purpose — adding a stricter filter
+  here was the one thing this whole phase deliberately avoided, to
+  never risk locking out a real peer mid-migration), but outbound mail
+  to a downstream node was always stamped with the single process-wide
+  `BINKP_OUR_ADDRESS`, regardless of which hub identity that node
+  actually belonged to. A peer on a second hub identity got outbound
+  mail stamped with the *default* identity's AKA. Now resolves the
+  matched node's own hub identity (via its BinkP network's own
+  configured address, or a zone:net/hub-node reconstruction) and fails
+  open — logs a warning and falls back to the previous default-address
+  behavior — if that identity has nothing configured, rather than ever
+  rejecting an otherwise-valid, already-password-verified connection.
+- DOCS: terminal QWK-application wizard screens no longer hardcode a
+  literal hub hostname/QWK-hub-ID in their help text — now reflect
+  whatever `REGISTRY_URL`/`QWK_HUB_ID` this particular install actually
+  has configured. Hub Management dashboard grows a per-identity
+  node-count breakdown once a second identity exists. Terminal QWK
+  Node Requests screen labels itself "(default hub identity only)"
+  once a second identity exists, since the terminal stays
+  default-identity-only by design (same precedent as BinkP/QWK peer
+  node CRUD already being web-only) — extra identities are managed
+  through the web admin. New wiki section under Sysop Control Panel
+  explaining the feature for other sysops.
+- 786 passed, 2 skipped total — full suite, including 47 new tests
+  across five new test files covering each phase (join/nodelist/QWK/
+  BinkP/admin-UI), plus a from-scratch characterization harness for
+  the BinkP listener's auth path, which had zero real test coverage
+  before this (the two pre-existing BinkP server test files short-
+  circuit before reaching it, and their query fakes silently ignored
+  filter kwargs entirely).
+
+---
+
 # ANetBBS v1.0b2.112 — MRC bridge: root cause was a config-path mismatch, not code — plus pipe colors restored (July 2026)
 
 - RESOLVED: the BBS-info-fields saga (v1.0b2.107-111) is now fully confirmed working live, and the real root cause turns out to have never been a code bug at all. One sysop's install had its bridge service pointed at a non-default `MRC_BRIDGE_CONFIG` path (in a `config/` subdirectory) via an environment variable — a leftover from running his own MRC bridge for two years before ANetBBS was built around it. He'd been editing the default `mrc/bridge/config.json` path the entire time, a file his own service never actually reads. Every fix shipped in v1.0b2.107-111 (the `send_info_fields()`/`BBSMETA` additions, the field-order correction, the stale-session dedup) was correct and necessary — none of them had anything to verify against until this was found via the raw packet logging added in v1.0b2.111 finally showing default/empty values despite a correctly-edited file. No install/deploy tooling changes needed — this is a one-off historical artifact of that specific install, not something fresh installs or the Pi3 hit.

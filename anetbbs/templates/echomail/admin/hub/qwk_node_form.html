@@ -38,6 +38,12 @@
                     {{ form.email(class="form-control") }}
                 </div>
             </div>
+            {% if form.hub_identity_id.choices|length > 1 %}
+            <div class="mb-3">
+                {{ form.hub_identity_id.label(class="form-label") }}
+                {{ form.hub_identity_id(class="form-select") }}
+            </div>
+            {% endif %}
             <div class="mb-3">
                 {{ form.password.label(class="form-label") }}
                 {{ form.password(class="form-control", autocomplete="new-password") }}

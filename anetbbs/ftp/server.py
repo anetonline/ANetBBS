@@ -241,13 +241,12 @@ class AnetbbsFTPHandler(FTPHandler):
         try:
             with self.app.app_context():
                 from ..models import QWKNode
-                from ..echomail.qwk_hub_ftp import generate_node_packet
+                from ..echomail.qwk_hub_ftp import generate_node_packet, resolve_hub_id
                 node = QWKNode.query.get(self._qwk_node_id)
                 if node:
                     cfg = self.app.config
                     data_dir = cfg.get('DATA_DIR', 'data')
-                    hub_id = (os.environ.get('QWK_HUB_ID', '')
-                              or cfg.get('QWK_HUB_ID', 'ANET'))
+                    hub_id = resolve_hub_id(node)
                     generate_node_packet(node, data_dir, hub_id)
         except Exception:
             logger.exception('FTP: QWK packet generation failed for %s',

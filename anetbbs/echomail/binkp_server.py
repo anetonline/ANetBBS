@@ -275,6 +275,17 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     net_id = None
     net_name = None
     downstream_node_id = None   # set when caller is a downstream BinkPNode
+    # Outbound FROM-address for THIS session's .pkt -- defaults to the
+    # single process-wide address (BINKP_OUR_ADDRESS), same as before
+    # multi-hub-identity support existed. Resolved to the matched
+    # network's/node's own hub identity below when possible -- a peer
+    # belonging to a non-default hub identity must get its outbound
+    # mail stamped with THAT identity's AKA, not always the default's.
+    # Fail-open by design (per the multi-hub-identity plan): identity
+    # resolution can only IMPROVE this value from the fallback, never
+    # block or reject an otherwise-valid, already-password-verified
+    # connection.
+    matched_our_address = our_address
 
     with app.app_context():
         # 3a. Check upstream networks first.
@@ -290,6 +301,10 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 return
             net_id = network.id
             net_name = network.name
+            # The matched network row already carries its own AKA --
+            # no identity lookup needed for this branch.
+            if (network.our_address or '').strip():
+                matched_our_address = network.our_address.strip()
         else:
             # 3b. Check downstream nodes registered with us as hub.
             node = (BinkPNode.query
@@ -309,6 +324,34 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 # Update last-seen timestamp.
                 node.last_seen_at = datetime.utcnow()
                 db.session.commit()
+
+                identity = node.hub_identity
+                if identity is None:
+                    logger.warning(
+                        'BinkP %s: downstream node %s (id=%s) has no '
+                        'resolvable hub identity -- outbound mail will be '
+                        'stamped with the process-wide default address %s',
+                        peer, remote_addr, node.id, our_address)
+                else:
+                    identity_net = (EchomailNetwork.query
+                                    .filter_by(hub_identity_id=identity.id,
+                                              network_type='binkp')
+                                    .filter(EchomailNetwork.our_address.isnot(None))
+                                    .first())
+                    if identity_net and (identity_net.our_address or '').strip():
+                        matched_our_address = identity_net.our_address.strip()
+                    elif identity.binkp_zone and identity.binkp_net:
+                        matched_our_address = (
+                            f'{identity.binkp_zone}:{identity.binkp_net}/'
+                            f'{identity.binkp_hub_node or 1}')
+                    else:
+                        logger.warning(
+                            'BinkP %s: downstream node %s belongs to hub '
+                            'identity %r, which has no BinkP network or '
+                            'zone:net configured -- outbound mail will be '
+                            'stamped with the process-wide default address '
+                            '%s instead of that identity\'s own AKA',
+                            peer, remote_addr, identity.name, our_address)
             else:
                 logger.warning('BinkP %s: unknown remote address %s (tried: %s)',
                                peer, remote_addr, ', '.join(candidates))
@@ -501,7 +544,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             from .tosser import get_pending_for_node, mark_sent_for_node
             outbound = get_pending_for_node(downstream_node_id)
             if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
+                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
                 accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
                 if accepted:
@@ -519,7 +562,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 sent_at=None,
             ).all()
             if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, our_address, remote_addr)
+                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
                 accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
                 if accepted:

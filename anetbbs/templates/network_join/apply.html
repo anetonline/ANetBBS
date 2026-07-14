@@ -19,7 +19,7 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-file-earmark-text"></i> Rules &amp; Info</span>
                 {% if cfg.infopack_filename %}
-                <a href="{{ url_for('network_join.download_infopack') }}" class="btn btn-sm btn-outline-primary">
+                <a href="{{ url_for('network_join.download_infopack', slug=(identity.slug if identity and not identity.is_default else None)) }}" class="btn btn-sm btn-outline-primary">
                     <i class="bi bi-download"></i> Download Full Infopack
                 </a>
                 {% endif %}
@@ -36,7 +36,7 @@
         <div class="card">
             <div class="card-header"><i class="bi bi-pencil-square"></i> Application</div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('network_join.apply') }}">
+                <form method="POST" action="{{ url_for('network_join.apply', slug=(identity.slug if identity and not identity.is_default else None)) }}">
                     {{ form.hidden_tag() }}
 
                     {% for field in [form.name, form.location, form.bbs_name, form.bbs_software,

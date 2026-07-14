@@ -33,6 +33,12 @@
                 {{ form.password(class="form-control", autocomplete="new-password") }}
                 {% if node %}<div class="form-text">Leave blank to keep current password.</div>{% endif %}
             </div>
+            {% if form.hub_identity_id.choices|length > 1 %}
+            <div class="mb-3">
+                {{ form.hub_identity_id.label(class="form-label") }}
+                {{ form.hub_identity_id(class="form-select") }}
+            </div>
+            {% endif %}
             <div class="row">
                 <div class="col-md-6 mb-3">
                     {{ form.sysop.label(class="form-label") }}

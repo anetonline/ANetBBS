@@ -27,6 +27,36 @@ logger = logging.getLogger(__name__)
 _HUB_ID = 'ANET'
 
 
+def resolve_hub_id(node=None):
+    """Resolve the QWK system ID (e.g. 'ANET') a node's packets should
+    use -- the filename of the <HUBID>.QWK the node downloads and the
+    <HUBID>.MSG a valid REP upload must contain.
+
+    Collapses what used to be three independently-duplicated resolvers
+    (anetbbs/web/qwk_hub.py's own _hub_id(), this module's _HUB_ID
+    default arg, and anetbbs/ftp/server.py's on_login) into one shared
+    function, now identity-aware: a node belonging to a non-default
+    HubIdentity uses THAT identity's own qwk_hub_id, so two hub
+    networks on the same install never collide on the same <HUBID>.QWK
+    filename. A node on the default identity -- or no node at all
+    (e.g. building a generic/preview packet) -- falls back to the
+    legacy QWK_HUB_ID env var / BBS_NAME derivation exactly as before,
+    so every existing single-hub install needs zero config changes.
+    """
+    identity = getattr(node, 'hub_identity', None) if node is not None else None
+    if identity is not None and not identity.is_default and identity.qwk_hub_id:
+        return identity.qwk_hub_id.strip().upper()
+
+    val = os.environ.get('QWK_HUB_ID', '').strip().upper()
+    if val:
+        return val
+    if identity is not None and identity.qwk_hub_id:
+        return identity.qwk_hub_id.strip().upper()
+    bbs = os.environ.get('BBS_NAME', 'ANET')
+    import re as _re
+    return _re.sub(r'[^A-Z0-9]', '', bbs.upper())[:8] or 'ANET'
+
+
 def ensure_node_dir(packet_id: str, data_dir: str) -> str:
     path = os.path.join(data_dir, 'qwk-hub', packet_id.upper())
     os.makedirs(path, exist_ok=True)

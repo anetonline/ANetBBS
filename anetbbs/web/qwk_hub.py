@@ -27,6 +27,7 @@ from flask import (Blueprint, request, abort, send_file,
 from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)
 from ..echomail.qwk import _parse_messages_dat, QWK_HEADER_SIZE, QWK_BLOCK_SIZE
+from ..echomail.qwk_hub_ftp import resolve_hub_id
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +58,15 @@ def _auth_node():
 # ---------------------------------------------------------------------------
 
 def _hub_id():
-    """Return the configured hub system ID (e.g. 'ANET')."""
-    import os
-    val = os.environ.get('QWK_HUB_ID', '').strip().upper()
-    if not val:
-        # Fall back to first 8 chars of BBS_NAME.
-        bbs = os.environ.get('BBS_NAME', 'ANET')
-        import re as _re
-        val = _re.sub(r'[^A-Z0-9]', '', bbs.upper())[:8] or 'ANET'
-    return val
+    """Return the install's default-identity hub system ID (e.g. 'ANET').
+
+    Thin wrapper around the shared, identity-aware resolve_hub_id() with
+    no node -- kept for call sites that don't have a specific node to
+    resolve against (e.g. building a generic/preview packet). Call
+    sites that DO have a node (the common case) should call
+    resolve_hub_id(node) directly instead, so a node on a non-default
+    hub identity gets its own identity's QWK system ID."""
+    return resolve_hub_id(None)
 
 
 def _build_qwk_hub_packet(node: QWKNode) -> bytes:
@@ -76,7 +77,7 @@ def _build_qwk_hub_packet(node: QWKNode) -> bytes:
     Updates last_message_id for each area (committed after caller verifies
     the send succeeded — caller should call mark_qwk_sent()).
     """
-    hub_id = _hub_id()
+    hub_id = resolve_hub_id(node)
 
     # Gather subscriptions.
     subs = (QWKNodeLastSent.query
@@ -218,7 +219,7 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
     Imports each message into the EchoArea mapped by conf_number.
     Returns the number of messages imported.
     """
-    hub_id = _hub_id()
+    hub_id = resolve_hub_id(node)
     msg_filename = f'{hub_id}.MSG'
 
     try:
@@ -298,9 +299,9 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
 @qwk_hub_bp.route('/<packet_id_qwk>', methods=['GET'])
 def download_qwk(packet_id_qwk: str):
     """GET /qwkhub/<nodeid>.qwk — serve a fresh QWK packet for the node."""
-    hub_id = _hub_id()
     # Accept both <nodeid>.qwk and <hubid>.qwk (some clients download using hub ID).
     node = _auth_node()
+    hub_id = resolve_hub_id(node)
 
     packet_data, new_hwm, total_msgs = _build_qwk_hub_packet(node)
 

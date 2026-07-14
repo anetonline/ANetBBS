@@ -3062,6 +3062,16 @@ class QWKNodeRequest(db.Model):
     # its own request via GET /qwkhub/status/<token> without needing
     # one -- see anetbbs/web/qwk_hub.py.
     request_token       = db.Column(db.String(64), unique=True, index=True, nullable=True)
+    # Which hub identity this application targets -- always the
+    # install's default identity in practice today (the terminal
+    # wizard and the /qwkhub/apply API are both default-identity-only
+    # by design; see HubIdentity), but stamped explicitly so
+    # approve_qwk_request() can propagate it onto the created QWKNode
+    # without guessing.
+    hub_identity_id     = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
+                                    default=_default_hub_identity_id, nullable=True, index=True)
+
+    hub_identity = db.relationship('HubIdentity', backref=db.backref('qwk_node_requests', lazy='dynamic'))
 
     def __repr__(self):
         return f'<QWKNodeRequest {self.packet_id} [{self.status}]>'

@@ -350,13 +350,22 @@ def search(query, domain=None, limit=200):
 def generate_nodelist(zone: int, net: int, hub_node: int,
                       hub_name: str, hub_location: str,
                       hub_sysop: str, hub_phone: str = '-Unpublished-',
-                      hub_speed: int = 115200) -> str:
+                      hub_speed: int = 115200,
+                      hub_identity_id: int = None) -> str:
     """Generate a NODELIST.XXX text file for the hub's network.
 
     Includes the hub itself (as Host) and all registered BinkPNode downstream
     nodes.  Returns the nodelist as a string (UTF-8, CR+LF line endings).
 
     zone:net/hub_node is the hub's FTN address (e.g. 99:1/1 for ANotherNetwork).
+
+    hub_identity_id, when given, scopes the downstream-node listing to
+    just that HubIdentity -- a sysop running more than one hub network
+    gets a distinct nodelist per identity instead of one list mixing
+    every identity's nodes together. None (the default) preserves the
+    original behavior of listing every active node regardless of which
+    identity it belongs to -- callers that predate multi-hub-identity
+    support need no changes.
     """
     from ..models import BinkPNode
 
@@ -393,7 +402,10 @@ def generate_nodelist(zone: int, net: int, hub_node: int,
     )
 
     # Downstream nodes registered with us.
-    nodes = BinkPNode.query.filter_by(is_active=True).order_by(BinkPNode.ftn_address).all()
+    node_q = BinkPNode.query.filter_by(is_active=True)
+    if hub_identity_id is not None:
+        node_q = node_q.filter_by(hub_identity_id=hub_identity_id)
+    nodes = node_q.order_by(BinkPNode.ftn_address).all()
     for node in nodes:
         # Parse node number from ftn_address (zone:net/node).
         try:
@@ -412,13 +424,24 @@ def generate_nodelist(zone: int, net: int, hub_node: int,
     return '\r\n'.join(lines) + '\r\n'
 
 
-def write_nodelist_to_area() -> str:
-    """Generate the ANotherNetwork nodelist and publish it into the
+def write_nodelist_to_area(hub_identity=None) -> str:
+    """Generate a hub identity's nodelist and publish it into the
     ANN.FILES.NODELIST file area's storage, replacing any prior
     NODELIST.* file there so exactly one copy exists at a time -- this
     makes the nodelist a real file peers can pull via BinkP/FTP/web like
     any other file-area entry, instead of only the existing public HTTP
     link (still served separately by hub_admin.nodelist()).
+
+    hub_identity=None (the default) publishes the install's default
+    HubIdentity's nodelist -- the only one wired to this scheduled
+    file-area auto-publish path today. A sysop running additional hub
+    identities still gets each one's nodelist via the already
+    identity-aware HTTP route (hub_admin.nodelist / /admin/echomail/
+    hub/nodelist/<slug>); auto-publishing every identity into a file
+    echo area would need a per-identity FileArea assignment this schema
+    doesn't have, so extra identities stay web-route-only for now, same
+    "extra identities are the web admin's job" precedent used elsewhere
+    in the multi-hub-identity work (see hub_admin.py's terminal-UI note).
 
     Returns a one-line summary string; raises on failure so a
     ScheduledEvent handler wrapping this can report the error.
@@ -426,24 +449,34 @@ def write_nodelist_to_area() -> str:
     import os
     import datetime as _dt
     from flask import current_app
-    from ..models import FileArea, BinkPNode
+    from ..models import FileArea, BinkPNode, HubIdentity
 
     area = FileArea.query.filter_by(tag='ANN.FILES.NODELIST').first()
     if area is None:
         raise RuntimeError(
             'ANN.FILES.NODELIST file area not found -- is ANotherNetwork seeded?')
 
+    if hub_identity is None:
+        hub_identity = HubIdentity.query.filter_by(is_default=True).first()
+    if hub_identity is None:
+        raise RuntimeError('No default hub identity configured.')
+
     cfg = current_app.config
-    sysop = cfg.get('SYSOP_NAME') or 'SysOp'
-    location = cfg.get('BBS_LOCATION') or 'Internet'
+    sysop = hub_identity.nodelist_sysop or cfg.get('SYSOP_NAME') or 'SysOp'
+    location = hub_identity.nodelist_location or cfg.get('BBS_LOCATION') or 'Internet'
+    phone = hub_identity.nodelist_phone or '-Unpublished-'
+    speed = hub_identity.nodelist_speed or 115200
 
     content = generate_nodelist(
-        zone=1200, net=1, hub_node=1,
-        hub_name='ANotherNetwork',
+        zone=hub_identity.binkp_zone or 1200,
+        net=hub_identity.binkp_net or 1,
+        hub_node=hub_identity.binkp_hub_node or 1,
+        hub_name=hub_identity.name,
         hub_location=location,
         hub_sysop=sysop,
-        hub_phone='-Unpublished-',
-        hub_speed=115200,
+        hub_phone=phone,
+        hub_speed=speed,
+        hub_identity_id=hub_identity.id,
     )
 
     today = _dt.date.today()
@@ -465,6 +498,7 @@ def write_nodelist_to_area() -> str:
     with open(dest, 'w', encoding='utf-8', newline='') as f:
         f.write(content)
 
-    node_count = BinkPNode.query.filter_by(is_active=True).count()
+    node_count = BinkPNode.query.filter_by(
+        is_active=True, hub_identity_id=hub_identity.id).count()
     return (f'Wrote {filename} ({len(content)} bytes, {node_count} '
             f'downstream node(s)) to {storage_path}')

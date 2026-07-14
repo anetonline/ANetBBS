@@ -7,10 +7,21 @@
     <p>Applications submitted through the public "apply to join" web form.</p>
 </div>
 
-<div class="mb-3">
+<div class="mb-3 d-flex align-items-center gap-2">
     <a href="{{ url_for('hub_admin.index', gen_tab='join') }}" class="btn btn-primary btn-sm">
         <i class="bi bi-arrow-left"></i> Hub Admin
     </a>
+    {% if identities|length > 1 %}
+    <form method="GET" class="d-inline-flex align-items-center gap-2 ms-2">
+        <label class="form-label mb-0 small">Hub Identity:</label>
+        <select name="identity" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for i in identities %}
+            <option value="{{ i.id }}" {% if identity_filter == i.id %}selected{% endif %}>{{ i.name }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% endif %}
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -35,6 +46,7 @@
   <thead class="table-dark">
     <tr>
       <th>BBS Name</th>
+      {% if identities|length > 1 %}<th>Identity</th>{% endif %}
       <th>Applicant</th>
       <th>Email</th>
       <th>BinkP</th>
@@ -50,6 +62,7 @@
       <td class="fw-bold">
         <a href="{{ url_for('hub_admin.join_request_detail', req_id=r.id) }}">{{ r.bbs_name }}</a>
       </td>
+      {% if identities|length > 1 %}<td class="small">{{ r.hub_identity.name if r.hub_identity else '—' }}</td>{% endif %}
       <td>{{ r.name }}{% if r.location %}<br><span class="small text-muted">{{ r.location }}</span>{% endif %}</td>
       <td class="small">{{ r.email }}</td>
       <td class="small font-monospace">{{ r.binkp_ftn_address or '—' }}</td>
@@ -117,6 +130,7 @@
   <thead class="table-secondary">
     <tr>
       <th>BBS Name</th>
+      {% if identities|length > 1 %}<th>Identity</th>{% endif %}
       <th>Status</th>
       <th>Reviewed</th>
       <th>Reviewed by</th>
@@ -127,6 +141,7 @@
     {% for r in reviewed %}
     <tr>
       <td><a href="{{ url_for('hub_admin.join_request_detail', req_id=r.id) }}">{{ r.bbs_name }}</a></td>
+      {% if identities|length > 1 %}<td class="small">{{ r.hub_identity.name if r.hub_identity else '—' }}</td>{% endif %}
       <td>
         {% if r.status == 'approved' %}
           <span class="badge bg-success">Approved</span>

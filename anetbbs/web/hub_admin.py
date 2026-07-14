@@ -21,14 +21,14 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    flash, request, abort, jsonify, current_app)
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, IntegerField,
-                     BooleanField, PasswordField, SelectMultipleField)
+                     BooleanField, PasswordField, SelectMultipleField, SelectField)
 from wtforms.validators import DataRequired, Length, Optional, NumberRange, Regexp
 from flask_wtf import FlaskForm
 
 from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNode, QWKNodeLastSent, EchoArea, EchomailNetwork,
                        QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest,
-                       HubIdentity)
+                       HubIdentity, _default_hub_identity_id)
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -42,6 +42,21 @@ def _require_hub_mode():
 
 
 from .access_control import require_admin as _admin_required
+
+
+def _resolve_admin_identity(identity_id):
+    """Resolve a hub_identity_id form/query param (string, int, or
+    blank/missing) to a HubIdentity row, falling back to the install's
+    default identity -- every admin route using this needs no changes
+    for single-hub installs (the common case)."""
+    if identity_id:
+        try:
+            identity = HubIdentity.query.get(int(identity_id))
+        except (TypeError, ValueError):
+            identity = None
+        if identity:
+            return identity
+    return HubIdentity.query.filter_by(is_default=True).first()
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +84,12 @@ class BinkPNodeForm(FlaskForm):
     baud = IntegerField('Baud Rate (for nodelist)', default=115200,
                         validators=[Optional(), NumberRange(min=300)])
     is_active = BooleanField('Active', default=True)
+    # Populated dynamically in the route (SelectField needs live choices,
+    # not a class-body constant) -- see _populate_identity_choices().
+    # Only rendered/shown when more than one HubIdentity exists; a
+    # single-hub install's one-and-only default identity is always
+    # used with no picker in the way.
+    hub_identity_id = SelectField('Hub Identity', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes', validators=[Optional()])
     submit = SubmitField('Save Node')
 
@@ -117,8 +138,22 @@ class QWKNodeForm(FlaskForm):
     # why (same bug, same fix, same reasoning).
     password = PasswordField('Download Password', validators=[Optional(), Length(max=255)])
     is_active = BooleanField('Active', default=True)
+    # See BinkPNodeForm.hub_identity_id above -- same pattern.
+    hub_identity_id = SelectField('Hub Identity', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes', validators=[Optional()])
     submit = SubmitField('Save Node')
+
+
+def _populate_identity_choices(form):
+    """Fill in a form's hub_identity_id SelectField with every active
+    HubIdentity, defaulting the selection to the install's default
+    identity. Shared by BinkPNodeForm/QWKNodeForm's new/edit routes."""
+    identities = HubIdentity.query.filter_by(is_active=True).order_by(HubIdentity.name).all()
+    form.hub_identity_id.choices = [(i.id, i.name) for i in identities]
+    if form.hub_identity_id.data in (None, 0, ''):
+        default = HubIdentity.query.filter_by(is_default=True).first()
+        if default:
+            form.hub_identity_id.data = default.id
 
 
 # ---------------------------------------------------------------------------
@@ -140,14 +175,16 @@ def index():
     nodelist_event  = _row_view(nodelist_ev_row) if nodelist_ev_row else None
     hatch_pending   = HatchQueue.query.filter_by(status='pending').count()
     hatch_failed    = HatchQueue.query.filter_by(status='failed').count()
-    join_cfg        = NetworkJoinConfig.get()
+
+    identities      = HubIdentity.query.order_by(HubIdentity.name).all()
+    join_identity   = _resolve_admin_identity(request.args.get('join_identity'))
+    join_cfg        = NetworkJoinConfig.get(hub_identity_id=join_identity.id)
     pending_join_requests = NetworkJoinRequest.query.filter_by(status='pending').count()
-    from ..echomail.network_join import list_txt_members
+    from ..echomail.network_join import list_txt_members, join_dir_for_identity
     join_txt_members = []
     if join_cfg.infopack_filename:
         join_zip_path = os.path.join(
-            current_app.config.get('NETWORK_JOIN_DIR',
-                                   os.path.join(current_app.config['DATA_DIR'], 'network_join')),
+            join_dir_for_identity(current_app.config, join_identity),
             join_cfg.infopack_filename)
         join_txt_members = list_txt_members(join_zip_path)
     gen_tab = request.args.get('gen_tab', 'nodelist')
@@ -162,6 +199,8 @@ def index():
         nodelist_event=nodelist_event,
         hatch_pending=hatch_pending,
         hatch_failed=hatch_failed,
+        identities=identities,
+        join_identity=join_identity,
         join_cfg=join_cfg,
         pending_join_requests=pending_join_requests,
         join_txt_members=join_txt_members,
@@ -339,7 +378,9 @@ def delete_hub_identity(identity_id):
 @_admin_required
 def binkp_nodes():
     nodes = BinkPNode.query.order_by(BinkPNode.ftn_address).all()
-    return render_template('echomail/admin/hub/binkp_nodes.html', nodes=nodes)
+    identity_count = HubIdentity.query.count()
+    return render_template('echomail/admin/hub/binkp_nodes.html', nodes=nodes,
+                           identity_count=identity_count)
 
 
 @hub_admin_bp.route('/binkp/new', methods=['GET', 'POST'])
@@ -347,6 +388,7 @@ def binkp_nodes():
 @_admin_required
 def new_binkp_node():
     form = BinkPNodeForm()
+    _populate_identity_choices(form)
     if form.validate_on_submit():
         if not form.password.data:
             flash('Session password is required when creating a new node.', 'danger')
@@ -369,6 +411,7 @@ def new_binkp_node():
             phone=form.phone.data.strip() or None,
             baud=form.baud.data or 115200,
             is_active=form.is_active.data,
+            hub_identity_id=form.hub_identity_id.data or None,
             notes=form.notes.data.strip() or None,
         )
         db.session.add(node)
@@ -420,6 +463,7 @@ def binkp_node_detail(node_id):
 def edit_binkp_node(node_id):
     node = BinkPNode.query.get_or_404(node_id)
     form = BinkPNodeForm(obj=node)
+    _populate_identity_choices(form)
     if form.validate_on_submit():
         node.name = form.name.data.strip()
         node.ftn_address = form.ftn_address.data.strip()
@@ -432,6 +476,7 @@ def edit_binkp_node(node_id):
         node.phone = form.phone.data.strip() or None
         node.baud = form.baud.data or 115200
         node.is_active = form.is_active.data
+        node.hub_identity_id = form.hub_identity_id.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()
         flash('Node updated.', 'success')
@@ -554,7 +599,9 @@ def binkp_flush_queue(node_id):
 @_admin_required
 def qwk_nodes():
     nodes = QWKNode.query.order_by(QWKNode.packet_id).all()
-    return render_template('echomail/admin/hub/qwk_nodes.html', nodes=nodes)
+    identity_count = HubIdentity.query.count()
+    return render_template('echomail/admin/hub/qwk_nodes.html', nodes=nodes,
+                           identity_count=identity_count)
 
 
 @hub_admin_bp.route('/qwk/new', methods=['GET', 'POST'])
@@ -562,6 +609,7 @@ def qwk_nodes():
 @_admin_required
 def new_qwk_node():
     form = QWKNodeForm()
+    _populate_identity_choices(form)
     if form.validate_on_submit():
         if not form.password.data:
             flash('Download password is required when creating a new node.', 'danger')
@@ -579,6 +627,7 @@ def new_qwk_node():
             email=form.email.data.strip() or None,
             password=form.password.data,
             is_active=form.is_active.data,
+            hub_identity_id=form.hub_identity_id.data or None,
             notes=form.notes.data.strip() or None,
         )
         db.session.add(node)
@@ -627,6 +676,7 @@ def qwk_node_detail(node_id):
 def edit_qwk_node(node_id):
     node = QWKNode.query.get_or_404(node_id)
     form = QWKNodeForm(obj=node)
+    _populate_identity_choices(form)
     if form.validate_on_submit():
         pid = form.packet_id.data.strip().upper()
         conflict = QWKNode.query.filter(
@@ -642,6 +692,7 @@ def edit_qwk_node(node_id):
         if form.password.data:
             node.password = form.password.data
         node.is_active = form.is_active.data
+        node.hub_identity_id = form.hub_identity_id.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()
         flash('QWK node updated.', 'success')
@@ -710,6 +761,13 @@ def qwk_subscribe(node_id):
         abort(400)
     area = EchoArea.query.get_or_404(area_id)
 
+    if (action == 'subscribe' and node.hub_identity_id is not None
+            and area.network.hub_identity_id is not None
+            and area.network.hub_identity_id != node.hub_identity_id):
+        flash(f'{area.tag} belongs to a different hub identity than '
+              f'{node.packet_id} -- refusing to cross-subscribe.', 'danger')
+        return redirect(url_for('hub_admin.qwk_node_detail', node_id=node_id))
+
     if action == 'subscribe':
         existing = QWKNodeLastSent.query.filter_by(
             node_id=node_id, echo_area_id=area_id).first()
@@ -755,13 +813,21 @@ def qwk_subscribe_all(node_id):
 
     already = {s.echo_area_id for s in
               QWKNodeLastSent.query.filter_by(node_id=node_id).all()}
-    areas = (EchoArea.query
+    area_q = (EchoArea.query
              .join(EchomailNetwork, EchoArea.network_id == EchomailNetwork.id)
              .filter(EchoArea.is_active == True,
                      EchomailNetwork.network_type == 'qwk',
-                     EchomailNetwork.id.in_(network_ids))
-             .order_by(EchoArea.tag)
-             .all())
+                     EchomailNetwork.id.in_(network_ids)))
+    if node.hub_identity_id is not None:
+        # Same-identity-only, matching qwk_subscribe()'s single-area
+        # guard -- a node has no business receiving areas that belong
+        # to a different hub identity's network. Networks with no
+        # identity set (hub_identity_id NULL, a pre-migration edge
+        # case) are treated as identity-agnostic and always included.
+        area_q = area_q.filter(db.or_(
+            EchomailNetwork.hub_identity_id == node.hub_identity_id,
+            EchomailNetwork.hub_identity_id.is_(None)))
+    areas = area_q.order_by(EchoArea.tag).all()
     added = 0
     for area in areas:
         if area.id in already:
@@ -806,13 +872,14 @@ def qwk_preview(node_id):
     includes everything shown here."""
     import io
     from flask import send_file
-    from ..web.qwk_hub import _build_qwk_hub_packet, _hub_id
+    from ..web.qwk_hub import _build_qwk_hub_packet
+    from ..echomail.qwk_hub_ftp import resolve_hub_id
 
     node = QWKNode.query.get_or_404(node_id)
     packet_data, _new_hwm, total_msgs = _build_qwk_hub_packet(node)
     flash(f'Preview built: {total_msgs} message(s) -- this download does '
           f'NOT mark them as sent to {node.packet_id}.', 'info')
-    filename = f'{_hub_id()}-preview.QWK'
+    filename = f'{resolve_hub_id(node)}-preview.QWK'
     return send_file(
         io.BytesIO(packet_data),
         mimetype='application/zip',
@@ -895,6 +962,7 @@ def approve_qwk_request(req_id):
         email=req.email,
         password=password,
         is_active=True,
+        hub_identity_id=req.hub_identity_id or _default_hub_identity_id(),
         notes=(f"Auto-created from node request #{req.id}. "
                f"BBS address: {req.bbs_address or 'not provided'}"),
     )
@@ -940,26 +1008,26 @@ def deny_qwk_request(req_id):
 # public-facing side.
 # ---------------------------------------------------------------------------
 
-def _join_dir():
-    return current_app.config.get(
-        'NETWORK_JOIN_DIR',
-        os.path.join(current_app.config['DATA_DIR'], 'network_join'))
-
-
 def _join_archive_dir():
     return current_app.config.get(
         'NETWORK_JOIN_ARCHIVE_DIR',
         os.path.join(current_app.config['DATA_DIR'], 'network_join_archive'))
 
 
-def _next_binkp_node_address(zone, net):
+def _next_binkp_node_address(zone, net, hub_identity_id=None):
     """1200:1/2, then /3, ... Node 1 is the hub itself (see nodelist()'s
     hardcoded hub_node=1 below -- same convention), so numbering starts
-    at 2 when no downstream nodes exist yet in this zone:net."""
+    at 2 when no downstream nodes exist yet in this zone:net. Scoped to
+    hub_identity_id when given, so two different hub identities that
+    happen to reuse the same zone:net (unusual, but not disallowed)
+    don't collide on each other's node numbering."""
     from ..echomail.routing import parse_address, format_address
 
+    q = db.session.query(BinkPNode.ftn_address)
+    if hub_identity_id is not None:
+        q = q.filter(BinkPNode.hub_identity_id == hub_identity_id)
     highest = 1
-    for (addr,) in db.session.query(BinkPNode.ftn_address).all():
+    for (addr,) in q.all():
         parsed = parse_address(addr)
         if parsed and parsed[0] == zone and parsed[1] == net:
             highest = max(highest, parsed[2])
@@ -970,7 +1038,8 @@ def _next_binkp_node_address(zone, net):
 @login_required
 @_admin_required
 def join_config_save():
-    cfg = NetworkJoinConfig.get()
+    identity = _resolve_admin_identity(request.form.get('hub_identity_id'))
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity.id)
     cfg.enabled = bool(request.form.get('enabled'))
     cfg.network_name = (request.form.get('network_name') or '').strip()[:100]
     cfg.intro_text = (request.form.get('intro_text') or '').strip()
@@ -980,7 +1049,7 @@ def join_config_save():
     cfg.binkp_net = int(net_raw) if net_raw.isdigit() else None
     db.session.commit()
     flash('Join form settings saved.', 'success')
-    return redirect(url_for('hub_admin.index', gen_tab='join'))
+    return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
 
 @hub_admin_bp.route('/join/upload', methods=['POST'])
@@ -989,20 +1058,23 @@ def join_config_save():
 def join_upload_infopack():
     import datetime
     from werkzeug.utils import secure_filename
-    from ..echomail.network_join import auto_pick_rules_member, extract_member_text
+    from ..echomail.network_join import (auto_pick_rules_member,
+                                         extract_member_text, join_dir_for_identity)
+
+    identity = _resolve_admin_identity(request.form.get('hub_identity_id'))
 
     f = request.files.get('infopack')
     if not f or not f.filename:
         flash('No file selected.', 'warning')
-        return redirect(url_for('hub_admin.index', gen_tab='join'))
+        return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
     if not f.filename.lower().endswith('.zip'):
         flash('Infopack must be a .zip file.', 'danger')
-        return redirect(url_for('hub_admin.index', gen_tab='join'))
+        return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
-    cfg = NetworkJoinConfig.get()
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity.id)
     original_name = f.filename
     stored_name = secure_filename(f.filename) or 'infopack.zip'
-    join_dir = _join_dir()
+    join_dir = join_dir_for_identity(current_app.config, identity)
     os.makedirs(join_dir, exist_ok=True)
     dest = os.path.join(join_dir, stored_name)
     f.save(dest)
@@ -1025,7 +1097,7 @@ def join_upload_infopack():
         flash('Infopack uploaded, but it has no .txt files inside — '
               'pick a rules file manually is not possible without one.', 'warning')
     db.session.commit()
-    return redirect(url_for('hub_admin.index', gen_tab='join'))
+    return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
 
 @hub_admin_bp.route('/join/rules-file', methods=['POST'])
@@ -1033,37 +1105,44 @@ def join_upload_infopack():
 @_admin_required
 def join_pick_rules_file():
     import datetime
-    from ..echomail.network_join import extract_member_text
-    cfg = NetworkJoinConfig.get()
+    from ..echomail.network_join import extract_member_text, join_dir_for_identity
+    identity = _resolve_admin_identity(request.form.get('hub_identity_id'))
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity.id)
     member = (request.form.get('member_name') or '').strip()
     if not cfg.infopack_filename or not member:
         flash('No infopack uploaded yet.', 'warning')
-        return redirect(url_for('hub_admin.index', gen_tab='join'))
+        return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
-    zip_path = os.path.join(_join_dir(), cfg.infopack_filename)
+    zip_path = os.path.join(join_dir_for_identity(current_app.config, identity), cfg.infopack_filename)
     text = extract_member_text(zip_path, member)
     if text is None:
         flash(f'Could not extract "{member}" from the infopack.', 'danger')
-        return redirect(url_for('hub_admin.index', gen_tab='join'))
+        return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
     cfg.rules_member_name = member
     cfg.rules_text = text
     cfg.rules_text_extracted_at = datetime.datetime.utcnow()
     db.session.commit()
     flash(f'Rules text now sourced from "{member}".', 'success')
-    return redirect(url_for('hub_admin.index', gen_tab='join'))
+    return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 
 
 @hub_admin_bp.route('/join/requests')
 @login_required
 @_admin_required
 def join_requests():
-    pending  = (NetworkJoinRequest.query.filter_by(status='pending')
-               .order_by(NetworkJoinRequest.created_at.asc()).all())
-    reviewed = (NetworkJoinRequest.query.filter(NetworkJoinRequest.status != 'pending')
-               .order_by(NetworkJoinRequest.reviewed_at.desc()).limit(50).all())
+    identity_filter = request.args.get('identity', type=int)
+    pending_q = NetworkJoinRequest.query.filter_by(status='pending')
+    reviewed_q = NetworkJoinRequest.query.filter(NetworkJoinRequest.status != 'pending')
+    if identity_filter:
+        pending_q = pending_q.filter_by(hub_identity_id=identity_filter)
+        reviewed_q = reviewed_q.filter_by(hub_identity_id=identity_filter)
+    pending  = pending_q.order_by(NetworkJoinRequest.created_at.asc()).all()
+    reviewed = reviewed_q.order_by(NetworkJoinRequest.reviewed_at.desc()).limit(50).all()
+    identities = HubIdentity.query.order_by(HubIdentity.name).all()
     return render_template('echomail/admin/hub/join_requests.html',
-                           pending=pending, reviewed=reviewed)
+                           pending=pending, reviewed=reviewed,
+                           identities=identities, identity_filter=identity_filter)
 
 
 @hub_admin_bp.route('/join/requests/<int:req_id>')
@@ -1174,10 +1253,12 @@ def approve_join_request(req_id):
 
     alphabet = string.ascii_letters + string.digits
 
-    cfg = NetworkJoinConfig.get()
+    identity_id = req.hub_identity_id or _default_hub_identity_id()
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity_id)
     binkp_address = None
     if req.binkp_ftn_address:
-        binkp_address = (_next_binkp_node_address(cfg.binkp_zone, cfg.binkp_net)
+        binkp_address = (_next_binkp_node_address(cfg.binkp_zone, cfg.binkp_net,
+                                                   hub_identity_id=identity_id)
                           if cfg.binkp_zone and cfg.binkp_net
                           else req.binkp_ftn_address.strip())
         if BinkPNode.query.filter_by(ftn_address=binkp_address).first():
@@ -1202,6 +1283,7 @@ def approve_join_request(req_id):
             location=req.location,
             email=req.email,
             is_active=True,
+            hub_identity_id=identity_id,
             notes=f'Auto-created from network join request #{req.id}.',
         )
         db.session.add(binkp_node)
@@ -1218,6 +1300,7 @@ def approve_join_request(req_id):
             email=req.email,
             password=qwk_password,
             is_active=True,
+            hub_identity_id=identity_id,
             notes=f'Auto-created from network join request #{req.id}.',
         )
         db.session.add(qwk_node)
@@ -1288,30 +1371,51 @@ def deny_join_request(req_id):
 # Public nodelist endpoint — no login required; BBS software fetches this
 # ---------------------------------------------------------------------------
 
-@hub_admin_bp.route('/nodelist')
-def nodelist():
-    """Serve the ANotherNetwork NODELIST as a plain-text download."""
+def _resolve_public_identity(slug):
+    """Same resolution rule as anetbbs/web/network_join.py's
+    _resolve_identity (kept as a small local duplicate rather than a
+    cross-blueprint import): None -> the default identity, a slug ->
+    that specific active identity, or None (caller 404s) otherwise."""
+    if slug is None:
+        return HubIdentity.query.filter_by(is_default=True).first()
+    return HubIdentity.query.filter_by(slug=slug, is_active=True).first()
+
+
+@hub_admin_bp.route('/nodelist', defaults={'slug': None})
+@hub_admin_bp.route('/nodelist/<slug>')
+def nodelist(slug):
+    """Serve a hub identity's NODELIST as a plain-text download. No
+    slug -> the install's default identity (the common case, matching
+    this route's original single-hub behavior byte-for-byte when the
+    default identity still has its seeded zone/net/hub_node/name)."""
     import datetime
-    from flask import current_app, Response
+    from flask import current_app, Response, abort
     from ..echomail.nodelist import generate_nodelist
 
+    identity = _resolve_public_identity(slug)
+    if identity is None:
+        abort(404)
+
     cfg = current_app.config
-    sysop = cfg.get('SYSOP_NAME') or 'SysOp'
-    location = cfg.get('BBS_LOCATION') or 'Internet'
+    sysop = identity.nodelist_sysop or cfg.get('SYSOP_NAME') or 'SysOp'
+    location = identity.nodelist_location or cfg.get('BBS_LOCATION') or 'Internet'
+    phone = identity.nodelist_phone or '-Unpublished-'
+    speed = identity.nodelist_speed or 115200
 
     today = datetime.date.today()
     day_of_year = today.timetuple().tm_yday
     filename = f'NODELIST.{day_of_year:03d}'
 
     content = generate_nodelist(
-        zone=1200,
-        net=1,
-        hub_node=1,
-        hub_name='ANotherNetwork',
+        zone=identity.binkp_zone or 1200,
+        net=identity.binkp_net or 1,
+        hub_node=identity.binkp_hub_node or 1,
+        hub_name=identity.name,
         hub_location=location,
         hub_sysop=sysop,
-        hub_phone='-Unpublished-',
-        hub_speed=115200,
+        hub_phone=phone,
+        hub_speed=speed,
+        hub_identity_id=identity.id,
     )
     return Response(
         content,

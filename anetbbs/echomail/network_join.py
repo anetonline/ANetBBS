@@ -10,9 +10,26 @@ member inside it is "the rules" to display inline on the public page,
 not just offer the whole zip as a download.
 """
 import logging
+import os
 import zipfile
 
 logger = logging.getLogger(__name__)
+
+
+def join_dir_for_identity(config, identity):
+    """Where this hub identity's join-form uploads (infopack.zip) live.
+
+    The default identity keeps the original flat NETWORK_JOIN_DIR
+    (uploaded infopacks predate multi-hub-identity support -- an
+    existing install's already-uploaded infopack.zip must keep working
+    at its current path, unmoved). Every other identity gets its own
+    subdirectory keyed by id, since two identities could otherwise
+    upload identically-named files."""
+    base = config.get('NETWORK_JOIN_DIR',
+                      os.path.join(config['DATA_DIR'], 'network_join'))
+    if identity is None or identity.is_default:
+        return base
+    return os.path.join(base, str(identity.id))
 
 
 def list_txt_members(zip_path):

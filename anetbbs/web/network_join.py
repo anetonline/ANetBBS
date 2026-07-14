@@ -2,13 +2,20 @@
 """
 Public "apply to join this network" page.
 
-GET/POST /join/               -- the application form
+GET/POST /join/               -- the application form (default hub identity)
 GET      /join/infopack.zip   -- download the sysop-uploaded infopack
+GET/POST /join/<slug>/               -- same, for a non-default HubIdentity
+GET      /join/<slug>/infopack.zip   -- ditto
 
 Only exists on the designated hub install (REGISTRY_MODE_ENABLED) AND
 only once the sysop has enabled + configured it via Hub Management's
 "Join Form" tab (anetbbs/web/hub_admin.py) -- same _require_hub_mode()
 gating convention as anetbbs/web/qwk_hub.py and anetbbs/web/registry.py.
+
+Most installs only ever have one HubIdentity, so /join/ (no slug) is
+all they'll ever use -- see models.HubIdentity. The slugged routes
+exist for a sysop running more than one real hub network to give each
+its own application form/URL.
 
 This is a real browser form (not a machine/API client like qwk_hub.py
 or registry.py), so it uses normal Flask-WTF CSRF tokens rather than
@@ -16,7 +23,6 @@ being csrf-exempted -- anonymous Flask sessions still get a session
 cookie for CSRF token storage fine.
 """
 import logging
-import os
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, render_template, redirect, url_for,
@@ -25,7 +31,8 @@ from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, BooleanField, SubmitField)
 from wtforms.validators import DataRequired, Length, Optional, Email
 
-from ..models import db, NetworkJoinConfig, NetworkJoinRequest
+from ..models import db, NetworkJoinConfig, NetworkJoinRequest, HubIdentity
+from ..echomail.network_join import join_dir_for_identity
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +47,15 @@ def _require_hub_mode():
 def _peer_ip():
     fwd = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
     return fwd or (request.remote_addr or '')
+
+
+def _resolve_identity(slug):
+    """None -> the install's default hub identity. A slug -> that
+    specific *active* identity, or None if it doesn't exist / isn't
+    active (callers 404 on None, same as an unconfigured join form)."""
+    if slug is None:
+        return HubIdentity.query.filter_by(is_default=True).first()
+    return HubIdentity.query.filter_by(slug=slug, is_active=True).first()
 
 
 class JoinApplicationForm(FlaskForm):
@@ -102,10 +118,14 @@ def _ratelimit_check(source_ip):
     return None
 
 
-@network_join_bp.route('/', methods=['GET', 'POST'])
-def apply():
+@network_join_bp.route('/', methods=['GET', 'POST'], defaults={'slug': None})
+@network_join_bp.route('/<slug>/', methods=['GET', 'POST'])
+def apply(slug):
     _require_hub_mode()
-    cfg = NetworkJoinConfig.get()
+    identity = _resolve_identity(slug)
+    if identity is None:
+        abort(404)
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity.id)
     if not cfg.enabled:
         abort(404)
 
@@ -114,9 +134,10 @@ def apply():
         rl = _ratelimit_check(_peer_ip())
         if rl:
             flash(rl, 'danger')
-            return render_template('network_join/apply.html', cfg=cfg, form=form)
+            return render_template('network_join/apply.html', cfg=cfg, form=form, identity=identity)
 
         req = NetworkJoinRequest(
+            hub_identity_id=identity.id,
             name=form.name.data.strip(),
             location=(form.location.data or '').strip() or None,
             bbs_name=form.bbs_name.data.strip(),
@@ -145,20 +166,22 @@ def apply():
                  f'Review under Admin -> Echomail -> Hub -> Join Requests.',
             target_url='/admin/echomail/hub/join/requests')
 
-        return render_template('network_join/submitted.html', cfg=cfg, req=req)
+        return render_template('network_join/submitted.html', cfg=cfg, req=req, identity=identity)
 
-    return render_template('network_join/apply.html', cfg=cfg, form=form)
+    return render_template('network_join/apply.html', cfg=cfg, form=form, identity=identity)
 
 
-@network_join_bp.route('/infopack.zip')
-def download_infopack():
+@network_join_bp.route('/infopack.zip', defaults={'slug': None})
+@network_join_bp.route('/<slug>/infopack.zip')
+def download_infopack(slug):
     _require_hub_mode()
-    cfg = NetworkJoinConfig.get()
+    identity = _resolve_identity(slug)
+    if identity is None:
+        abort(404)
+    cfg = NetworkJoinConfig.get(hub_identity_id=identity.id)
     if not cfg.enabled or not cfg.infopack_filename:
         abort(404)
-    join_dir = current_app.config.get(
-        'NETWORK_JOIN_DIR',
-        os.path.join(current_app.config['DATA_DIR'], 'network_join'))
+    join_dir = join_dir_for_identity(current_app.config, identity)
     return send_from_directory(
         join_dir, cfg.infopack_filename, as_attachment=True,
         download_name=cfg.infopack_original_filename or cfg.infopack_filename)

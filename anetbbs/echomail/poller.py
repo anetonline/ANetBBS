@@ -313,8 +313,6 @@ def _do_poll(app, network):
             nm.status = 'sent'
             nm.is_sent = True
 
-        network.last_poll_at = datetime.utcnow()
-        db.session.commit()
         logger.info("Poller: %s — sent=%d received=%d",
                     network.name, log.messages_sent, log.messages_received)
 
@@ -345,6 +343,16 @@ def _do_poll(app, network):
         logger.error("Poller: poll failed for %s: %s", network.name, exc)
         raise
     finally:
+        # Stamp last_poll_at unconditionally (success or failure) --
+        # previously only the success path set this, so a failed poll
+        # left it stale and _is_poll_due() saw the network as still
+        # "due" on the very next scheduler tick (60s later), retrying
+        # in a tight loop regardless of the configured poll interval
+        # instead of backing off. Reported live by a real sysop
+        # (external GitHub issue #8): some upstream hubs started
+        # blocking the repeated attempts, which only made the original
+        # failure worse.
+        network.last_poll_at = datetime.utcnow()
         log.completed_at = datetime.utcnow()
         if transcript_lines:
             log.transcript = _format_transcript(transcript_lines)

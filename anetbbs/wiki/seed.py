@@ -1777,6 +1777,39 @@ New applications on either queue send you a [[Notifications|notification]]
 See [[ANotherNetwork]] for what this network actually is, and
 [[QWK]] / [[TIC Processor]] for the mechanics each panel is managing.
 
+### Running more than one hub identity
+
+Almost every install has exactly one **hub identity** — its own
+zone:net, QWK hub ID, downstream node pool, nodelist, and join form —
+and never needs to think about this section at all. It exists for a
+sysop whose single install is designated the hub for more than one
+real network at once (own zone:net, own QWK hub ID, separate
+downstream node pools) rather than running a second physical install
+per network.
+
+- **Hub Identities** (`/admin/echomail/hub/identities/`) is the CRUD
+  for these — name, URL slug, QWK Hub ID, BinkP zone/net/hub-node,
+  nodelist metadata. Exactly one identity is flagged **default**; every
+  existing single-hub install's one identity is that default, created
+  automatically, so upgrading changes nothing until you deliberately
+  add a second one.
+- Once a second identity exists, BinkP/QWK node forms grow a **Hub
+  Identity** picker, node/request lists grow an **Identity** column,
+  and the join form gets a second URL: `/join/<slug>/` alongside the
+  default `/join/`. Each identity's nodelist is served separately too
+  (`/admin/echomail/hub/nodelist/<slug>`).
+- BinkP auth resolves a downstream node's identity automatically once
+  matched by address/password — it never rejects a connection over
+  identity resolution (fails open to the default identity, logged, if
+  something's misconfigured), and stamps outbound mail with that
+  identity's own AKA so two identities' peers never get cross-stamped
+  mail.
+- **The terminal (tUI) only ever manages the default identity** —
+  QWK Node Requests and the node-application wizard have no identity
+  picker by design (same reasoning as BinkP/QWK peer node CRUD above:
+  many fields, edit on web). Use the web admin for every identity
+  beyond the first.
+
 ## See also
 
 - [[NodeSpy]]

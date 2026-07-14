@@ -31,6 +31,7 @@
                 <tr>
                     <th>FTN Address</th>
                     <th>Name</th>
+                    {% if identity_count > 1 %}<th>Identity</th>{% endif %}
                     <th>Sysop</th>
                     <th>Areas</th>
                     <th>Pending</th>
@@ -44,6 +45,7 @@
                 <tr>
                     <td><a href="{{ url_for('hub_admin.binkp_node_detail', node_id=node.id) }}">{{ node.ftn_address }}</a></td>
                     <td>{{ node.name }}</td>
+                    {% if identity_count > 1 %}<td class="small">{{ node.hub_identity.name if node.hub_identity else '—' }}</td>{% endif %}
                     <td>{{ node.sysop or '—' }}</td>
                     <td>{{ node.subscriptions.count() }}</td>
                     <td>{{ node.hold_queue.filter_by(status='pending').count() }}</td>

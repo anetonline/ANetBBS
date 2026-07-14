@@ -28,6 +28,9 @@
       <div class="card-header">Applicant / BBS Info</div>
       <div class="card-body">
         <table class="table table-sm mb-0">
+          {% if req.hub_identity and not req.hub_identity.is_default %}
+          <tr><th>Hub Identity</th><td>{{ req.hub_identity.name }}</td></tr>
+          {% endif %}
           <tr><th>Name</th><td>{{ req.name or '—' }}</td></tr>
           <tr><th>Location</th><td>{{ req.location or '—' }}</td></tr>
           <tr><th>Email</th><td>{{ req.email }}</td></tr>

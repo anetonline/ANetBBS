@@ -847,7 +847,8 @@ def _lightweight_migrate(app):
     # Multi-hub-identity support (see models.HubIdentity): must run AFTER
     # the auto-sweep above, which is what actually adds the
     # hub_identity_id column to echomail_networks/binkp_nodes/qwk_nodes/
-    # network_join_config/network_join_requests on an upgrading install.
+    # network_join_config/network_join_requests/qwk_node_requests on an
+    # upgrading install.
     _seed_default_hub_identity(app, engine, _sa)
 
 
@@ -857,7 +858,8 @@ def _seed_default_hub_identity(app, engine, _sa):
     hub_identity_id's Python-side default (models._default_hub_identity_id)
     needs exactly one HubIdentity row with is_default=True to resolve
     against, or every newly-constructed EchomailNetwork/BinkPNode/QWKNode/
-    NetworkJoinConfig/NetworkJoinRequest would get hub_identity_id=None.
+    NetworkJoinConfig/NetworkJoinRequest/QWKNodeRequest would get
+    hub_identity_id=None.
     Creates that row on first run (reading zone/net from the pre-existing
     NetworkJoinConfig singleton if a sysop had already customized it, else
     the zone=1200/net=1/hub_node=1/'ANotherNetwork' values this project
@@ -897,7 +899,8 @@ def _seed_default_hub_identity(app, engine, _sa):
 
         default_id = default_row.id
         for _table in ('echomail_networks', 'binkp_nodes', 'qwk_nodes',
-                       'network_join_config', 'network_join_requests'):
+                       'network_join_config', 'network_join_requests',
+                       'qwk_node_requests'):
             try:
                 with engine.begin() as conn:
                     conn.execute(_sa.text(
