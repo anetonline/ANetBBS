@@ -250,6 +250,20 @@ class MRCConnection:
         for t in (self._reconnector_task, self._io_task):
             if t:
                 t.cancel()
+        # Graceful shutdown notice, matching the reference multiplexer's
+        # own send_shutdown() on exit -- lets the hub clean up our side
+        # immediately (release the connection slot, drop any per-user
+        # room state) instead of waiting out its own dead-peer timeout.
+        # Best-effort: if the write itself fails because the socket is
+        # already gone, disconnect() right after still runs regardless.
+        if self.connected and self.writer:
+            try:
+                pkt = MRCProtocol.create_control_command(
+                    "SHUTDOWN", bbs=self.config.get("bridge_bbs", ""))
+                self.writer.write(pkt.encode())
+                await self.writer.drain()
+            except Exception:
+                pass
         await self.disconnect()
 
     async def _set_connected(self, value: bool):
@@ -466,6 +480,42 @@ class MRCConnection:
             logger.error(f"Error parsing packet: {e}")
             return
 
+        # Hub-pushed version-enforcement notices. Confirmed against the
+        # reference Python multiplexer (mrc_client.py's deliver_mrc):
+        # these arrive from_user=SERVER with no particular to_user, and
+        # were never handled here at all -- they used to fall straight
+        # through to message_callbacks and get broadcast into chat as
+        # if they were regular room text. NEWUPDATE is informational
+        # (a newer client exists); OLDVERSION means the hub has judged
+        # our advertised platform_info too old and is about to drop
+        # this connection -- log it loudly rather than let it become a
+        # silent reconnect-every-few-seconds loop with zero diagnostic,
+        # since every such reconnect starts a brand-new upstream
+        # session and could plausibly look like "trust" lapsing far
+        # more often than the real weeks-long window.
+        if parsed.get("from_user") == "SERVER":
+            top_msg = (parsed.get("message") or "").strip()
+            if top_msg.upper().startswith("NEWUPDATE:"):
+                logger.warning(
+                    "MRC hub reports a newer client version is available: %s "
+                    "(we advertise: %s)",
+                    top_msg.split(":", 1)[1].strip() if ":" in top_msg else "",
+                    self.config.get("platform_info", ""))
+                return
+            if top_msg.upper().startswith("OLDVERSION:"):
+                logger.error(
+                    "MRC hub says our advertised version (%s) is too old and "
+                    "is disconnecting us -- hub wants: %s. The bridge will "
+                    "keep retrying per its normal reconnect backoff, but the "
+                    "hub will keep rejecting every attempt until "
+                    "platform_info in mrc/bridge/config.json is updated. "
+                    "This is a likely cause of chat trust seeming to lapse "
+                    "far more often than expected -- every rejected "
+                    "reconnect starts a brand-new upstream session.",
+                    self.config.get("platform_info", ""),
+                    top_msg.split(":", 1)[1].strip() if ":" in top_msg else "")
+                return
+
         if parsed.get("from_user") == "SERVER" and parsed.get("to_user") == "CLIENT":
             msg = (parsed.get("message") or "").strip()
             if msg.upper() == "PING":
@@ -583,17 +633,27 @@ class BridgeApp:
         the reference MRC client's /SET splits fields into logical groups
         rather than one flat bag."""
         return {
-            "twit_list":        list(sess.get("twit_list") or []),
-            "broadcast_shield": bool(sess.get("broadcast_shield", False)),
-            "ticker_enabled":   bool(sess.get("ticker_enabled", True)),
-            "enter_msg_tpl":    (sess.get("enter_msg_tpl") or "").strip(),
-            "leave_msg_tpl":    (sess.get("leave_msg_tpl") or "").strip(),
-            "quit_msg":         (sess.get("quit_msg") or "").strip(),
+            "twit_list":          list(sess.get("twit_list") or []),
+            "twit_filter_enabled": bool(sess.get("twit_filter_enabled", True)),
+            "broadcast_shield":   bool(sess.get("broadcast_shield", False)),
+            "ticker_enabled":     bool(sess.get("ticker_enabled", True)),
+            "enter_msg_tpl":      (sess.get("enter_msg_tpl") or "").strip(),
+            "leave_msg_tpl":      (sess.get("leave_msg_tpl") or "").strip(),
+            "quit_msg":           (sess.get("quit_msg") or "").strip(),
+            # Room a client should land in on its *next* connect -- purely
+            # a client-applied hint (see mrc_chat.py's _apply_prefs
+            # auto-/join-on-initial-join logic), same as tz_offset below;
+            # the bridge itself always still honors whatever room a
+            # join_room message explicitly asks for.
+            "default_room":       (sess.get("default_room") or "").strip(),
+            # '12' or '24' -- purely a client rendering hint, same as
+            # tz_offset; the bridge never interprets it.
+            "clock_format":       (sess.get("clock_format") or "24").strip(),
             # Minutes offset from UTC for client-side timestamp display
             # (e.g. -300 for US Eastern). Purely a client rendering hint --
             # the bridge never interprets it, only stores/echoes it, same
             # as the message templates above.
-            "tz_offset":        _clamp_tz_offset(sess.get("tz_offset", 0)),
+            "tz_offset":          _clamp_tz_offset(sess.get("tz_offset", 0)),
         }
 
     def _session_display_handle(self, sess: dict) -> str:
@@ -686,6 +746,27 @@ class BridgeApp:
                 out.add(ws_id_str)
         return out
 
+    @staticmethod
+    async def _safe_send(ws, payload: dict):
+        """Every ws.send_json() call must go through this. A client can
+        close its socket (browser tab closed, terminal door killed) in
+        the brief window between us receiving its message and sending a
+        reply -- aiohttp then raises ClientConnectionResetError out of
+        send_json() itself (web_ws.py's _write_websocket_frame). Left
+        unguarded, that exception propagates out of handle_websocket's
+        `async for msg in ws:` loop and aiohttp logs it as "Error
+        handling request" for that connection -- confirmed live via a
+        real production traceback (_handle_leave_room's "left" reply
+        during a race with the client already disconnecting). Harmless
+        to the rest of the process either way (aiohttp catches it at the
+        per-request level, it doesn't crash the whole service), but it's
+        needless log noise and violates the guard pattern already used
+        by the handful of call sites that happened to remember it."""
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            pass
+
     async def _send_to_session(self, ws_id_str: str, payload: dict):
         try:
             ws_id = int(ws_id_str)
@@ -694,10 +775,7 @@ class BridgeApp:
         ws = self.websockets.get(ws_id)
         if not ws:
             return
-        try:
-            await ws.send_json(payload)
-        except Exception:
-            pass
+        await self._safe_send(ws, payload)
 
     async def _send_to_sessions(self, ws_ids: Set[str], payload: dict):
         for ws_id_str in ws_ids:
@@ -710,10 +788,7 @@ class BridgeApp:
     async def _broadcast_bridge_status(self, status: str):
         payload = {"type": "bridge_status", "status": status}
         for ws in list(self.websockets.values()):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                pass
+            await self._safe_send(ws, payload)
         if status == "upstream_connected":
             await self._rejoin_all_sessions()
 
@@ -813,10 +888,7 @@ class BridgeApp:
     async def _broadcast_info(self, message: str):
         payload = {"type": "info", "message": message}
         for ws in list(self.websockets.values()):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                pass
+            await self._safe_send(ws, payload)
 
     @staticmethod
     def _extract_identified_handle(server_msg: str) -> Optional[str]:
@@ -1124,15 +1196,15 @@ class BridgeApp:
         logger.info(f"WebSocket connected: {ws_id}")
 
         try:
-            await ws.send_json({"type": "welcome", "message": "Connected to MRC Bridge", "server": self.config["mrc_host"]})
-            await ws.send_json({"type": "bridge_status", "status": "upstream_connected" if self.mrc.connected else "upstream_disconnected"})
+            await self._safe_send(ws, {"type": "welcome", "message": "Connected to MRC Bridge", "server": self.config["mrc_host"]})
+            await self._safe_send(ws, {"type": "bridge_status", "status": "upstream_connected" if self.mrc.connected else "upstream_disconnected"})
 
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)
                     except json.JSONDecodeError:
-                        await ws.send_json({"type": "error", "message": "Invalid JSON"})
+                        await self._safe_send(ws, {"type": "error", "message": "Invalid JSON"})
                         continue
                     await self.handle_ws_message(ws_id, data)
         finally:
@@ -1163,11 +1235,11 @@ class BridgeApp:
 
         msg_type = data.get("type")
         if not self._rate_limit_ok(ws_id, msg_type):
-            await ws.send_json({"type": "error", "message": "Rate limit: please slow down."})
+            await self._safe_send(ws, {"type": "error", "message": "Rate limit: please slow down."})
             return
 
         if msg_type == "ping":
-            await ws.send_json({"type": "pong", "t": data.get("t")})
+            await self._safe_send(ws, {"type": "pong", "t": data.get("t")})
             return
 
         handlers = {
@@ -1183,7 +1255,7 @@ class BridgeApp:
         if handler:
             await handler(ws_id, data)
         else:
-            await ws.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
+            await self._safe_send(ws, {"type": "error", "message": f"Unknown message type: {msg_type}"})
 
     # ------------------------------------------------------------------
     # join_room
@@ -1198,7 +1270,7 @@ class BridgeApp:
         if not ws:
             return
         if not MRCProtocol.validate_handle(handle):
-            await ws.send_json({"type": "error", "message": "Invalid handle."})
+            await self._safe_send(ws, {"type": "error", "message": "Invalid handle."})
             return
 
         prof = self.db.get_profile(handle) or {}
@@ -1234,11 +1306,14 @@ class BridgeApp:
             "style_suffix_color":   style_suffix_color,
             "typing_color":         typing_color,
             "twit_list":            twit_list,
+            "twit_filter_enabled":  bool(prof.get("twit_filter_enabled", True)),
             "broadcast_shield":     bool(prof.get("broadcast_shield", False)),
             "ticker_enabled":       bool(prof.get("ticker_enabled", True)),
             "enter_msg_tpl":        _sanitize_no_tilde(prof.get("enter_msg_tpl") or "", 200),
             "leave_msg_tpl":        _sanitize_no_tilde(prof.get("leave_msg_tpl") or "", 200),
             "quit_msg":             _sanitize_no_tilde(prof.get("quit_msg") or "", 200),
+            "default_room":         MRCProtocol.norm_room(_sanitize_no_tilde(prof.get("default_room") or "", 20)),
+            "clock_format":         "12" if str(prof.get("clock_format", "24")).strip() == "12" else "24",
             "tz_offset":            _clamp_tz_offset(prof.get("tz_offset", 0)),
         }
         self.db.save_session(str(ws_id), sess)
@@ -1255,7 +1330,7 @@ class BridgeApp:
             await self._complete_join_after_identify(str(ws_id), sess)
             sess = self.db.get_session(str(ws_id)) or sess
 
-        await ws.send_json({
+        await self._safe_send(ws, {
             "type":            "joined",
             "handle":          handle,
             "room":            room,
@@ -1327,7 +1402,7 @@ class BridgeApp:
             })
             self.db.save_profile(handle, existing)
 
-        await ws.send_json({
+        await self._safe_send(ws, {
             "type":            "style_updated",
             "style":           self._session_style(sess),
             "display_handle":  self._session_display_handle(sess),
@@ -1365,6 +1440,9 @@ class BridgeApp:
                     twits.append(str(entry).strip()[:32])
                 updates["twit_list"] = twits[:64]
 
+        if "twit_filter_enabled" in data:
+            updates["twit_filter_enabled"] = bool(data.get("twit_filter_enabled"))
+
         if "broadcast_shield" in data:
             updates["broadcast_shield"] = bool(data.get("broadcast_shield"))
 
@@ -1380,11 +1458,18 @@ class BridgeApp:
         if "quit_msg" in data:
             updates["quit_msg"] = _sanitize_no_tilde(data.get("quit_msg") or "", 200)
 
+        if "default_room" in data:
+            updates["default_room"] = MRCProtocol.norm_room(
+                _sanitize_no_tilde(data.get("default_room") or "", 20))
+
+        if "clock_format" in data:
+            updates["clock_format"] = "12" if str(data.get("clock_format")).strip() == "12" else "24"
+
         if "tz_offset" in data:
             updates["tz_offset"] = _clamp_tz_offset(data.get("tz_offset"))
 
         if not updates:
-            await ws.send_json({"type": "error", "message": "No recognized preference fields in request."})
+            await self._safe_send(ws, {"type": "error", "message": "No recognized preference fields in request."})
             return
 
         sess.update(updates)
@@ -1396,7 +1481,7 @@ class BridgeApp:
             existing.update(updates)
             self.db.save_profile(handle, existing)
 
-        await ws.send_json({
+        await self._safe_send(ws, {
             "type":    "prefs_updated",
             "prefs":   self._session_prefs(sess),
             "message": "Preferences updated.",
@@ -1413,7 +1498,7 @@ class BridgeApp:
             return
 
         if not sess.get("in_room"):
-            await ws.send_json({"type": "error", "message": "Not in a room yet. If registered: /identify <pass> then /join <room>."})
+            await self._safe_send(ws, {"type": "error", "message": "Not in a room yet. If registered: /identify <pass> then /join <room>."})
             return
 
         nick    = self._session_effective_nick(sess)
@@ -1449,7 +1534,7 @@ class BridgeApp:
         message = (data.get("message")  or "").strip()
 
         if not to_user or not message:
-            await ws.send_json({"type": "error", "message": "Usage: /t <user> <message>"})
+            await self._safe_send(ws, {"type": "error", "message": "Usage: /t <user> <message>"})
             return
 
         body = _truncate_wire_message(_dm_wrapper(self._session_display_handle(sess), message))
@@ -1501,15 +1586,15 @@ class BridgeApp:
             rest  = normalized[5:].strip()
             parts = rest.split(None, 1)
             if len(parts) < 2:
-                await ws.send_json({"type": "error", "message": "Usage: /ctcp <target> <command> (VERSION/TIME/PING/CLIENTINFO)"})
+                await self._safe_send(ws, {"type": "error", "message": "Usage: /ctcp <target> <command> (VERSION/TIME/PING/CLIENTINFO)"})
                 return
             target = parts[0].strip()
             if _casefold(target) == _casefold(eff_nick):
-                await ws.send_json({"type": "error", "message": "CTCP to yourself is not supported."})
+                await self._safe_send(ws, {"type": "error", "message": "CTCP to yourself is not supported."})
                 return
             ok = await self._send_ctcp_request(eff_nick, target, parts[1].strip())
             if not ok:
-                await ws.send_json({"type": "error", "message": "CTCP failed."})
+                await self._safe_send(ws, {"type": "error", "message": "CTCP failed."})
             return
 
         new_room = None
@@ -1583,7 +1668,7 @@ class BridgeApp:
             await self._sleep_delay()
 
         self.db.delete_session(str(ws_id))
-        await ws.send_json({"type": "left", "message": "Left the room"})
+        await self._safe_send(ws, {"type": "left", "message": "Left the room"})
 
     # ------------------------------------------------------------------
     # Background tasks

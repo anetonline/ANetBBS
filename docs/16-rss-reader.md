@@ -20,12 +20,22 @@ on first run so a fresh install ships with at least one feed populated.
 - "Mark all read" button per-feed and global.
 
 ### Terminal (telnet/SSH)
+
+Same arrow-key lightbar pattern used throughout the terminal UI — no
+numeric selection.
+
 - Press `R` from the Main BBS Menu.
-- Feed list shows item count and unread count per feed.
-- `A` = combined river of all feeds.
-- Numeric choice = open that feed.
-- Inside a feed: numeric = read item, `N`/`P` paginate, `Q` returns.
-- `*` marker = unread; reading clears it.
+- **Feed list**: shows a numeric unread count per feed. Up/Dn (also
+  PgUp/PgDn/Home/End) to move, **Enter** to open a feed, **A** =
+  combined river of all feeds, **M** = mark every feed's items read,
+  **Q** back to the main menu.
+- **Inside a feed**: Up/Dn to move, **Enter** to read the selected
+  item, **M** = mark this feed's items read, **Q** back to the feed
+  list. Unread items show a yellow `*` and brighter title text; the
+  selected item's hint line shows `[NEW]` if it's unread.
+- **Reading an item**: Up/Dn scrolls a line, PgUp/PgDn a page,
+  Home/End jump to top/bottom, **Q** or **Enter** returns to the item
+  list (there's nothing further to drill into from an article).
 
 ## How the poller works
 

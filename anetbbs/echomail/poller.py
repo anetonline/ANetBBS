@@ -304,14 +304,31 @@ def _do_poll(app, network):
                 err_bits.append(f'{dropped} dropped (loop/unknown/unsub)')
             log.error_message = ', '.join(err_bits)
 
-        # Stamp outbound messages as sent
-        now = datetime.utcnow()
-        for msg in outbound_echo:
-            msg.sent_at = now
-        for nm in outbound_nm:
-            nm.sent_at = now
-            nm.status = 'sent'
-            nm.is_sent = True
+        # Stamp outbound messages as sent -- ONLY if the hub actually
+        # acknowledged the packet (result['sent'] nonzero). _send_messages()
+        # bundles the whole outbound_echo+outbound_nm batch into one .pkt
+        # and sends it as a single BinkP file transfer, accepted or
+        # rejected as a unit (no partial ack) -- so "sent" here is really
+        # "all-or-nothing for this batch". Confirmed real bug found in a
+        # full-subsystem audit: this loop used to run unconditionally,
+        # so a busy/unstable hub replying M_SKIP or M_ERR (both normal,
+        # spec-legal responses) still got every queued message marked
+        # sent/delivered here, even though _send_messages had already
+        # correctly reported 0 sent -- messages were silently lost with
+        # no retry, and the poll log still read "success".
+        if result.get('sent', 0):
+            now = datetime.utcnow()
+            for msg in outbound_echo:
+                msg.sent_at = now
+            for nm in outbound_nm:
+                nm.sent_at = now
+                nm.status = 'sent'
+                nm.is_sent = True
+        elif outbound:
+            logger.warning(
+                "Poller: %s — hub did not acknowledge outbound batch, "
+                "%d message(s) left queued for retry next poll",
+                network.name, len(outbound))
 
         logger.info("Poller: %s — sent=%d received=%d",
                     network.name, log.messages_sent, log.messages_received)

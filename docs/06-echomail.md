@@ -357,3 +357,11 @@ also emailed if SMTP is working.
 This feature isn't hardcoded to ANotherNetwork — it's meant to be
 usable by any sysop running their own ANetBBS hub for their own
 network. ANotherNetwork is simply the first real network to use it.
+
+If your install is the hub for *more than one* real network at once —
+own zone:net, own QWK hub ID, separate downstream node pools — see the
+**Hub Identities** admin page (`/admin/echomail/hub/identities/`),
+which gives each network its own `/join/<slug>/` and node forms grow
+an identity picker once a second one exists. Almost no install needs
+this; single-network installs never see it. Full writeup: the
+[[Sysop Guide]] wiki page, "Running more than one hub identity."

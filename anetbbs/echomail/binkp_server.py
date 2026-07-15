@@ -33,6 +33,7 @@ from .binkp import (
     CMD_GOT, CMD_ERR, CMD_SKIP,
     _build_cmd, _build_data,
     _build_ftn_packet, _parse_ftn_packet,
+    _sanitize_inbound_filename,
 )
 
 logger = logging.getLogger(__name__)
@@ -367,7 +368,71 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     # 5. Receive inbound files until M_EOB. Then send outbound. Then M_EOB.
     inbound_files = await _receive_files(reader, writer, peer)
 
-    # 6. Import inbound packets + scan for .tic file echoes.
+    # 6. Send queued outbound messages -- moved ahead of importing what
+    #    we just received (see the note above _finish_session's call
+    #    below) so the peer's own session completes promptly instead of
+    #    sitting through however long parsing/importing a large catch-up
+    #    takes.
+    #    For upstream hub sessions: flush outbound EchomailMessages for that network.
+    #    For downstream node sessions: flush the BinkPHoldQueue for that node.
+    sent_count = 0
+    with app.app_context():
+        if downstream_node_id is not None:
+            from .tosser import get_pending_for_node, mark_sent_for_node
+            outbound = get_pending_for_node(downstream_node_id)
+            if outbound:
+                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
+                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                if accepted:
+                    mark_sent_for_node(downstream_node_id,
+                                       [m.id for m in outbound])
+                    sent_count = len(outbound)
+                else:
+                    logger.warning('Hold-queue .pkt not accepted by %s — '
+                                   'leaving pending for retry', remote_addr)
+        elif net_id is not None:
+            from ..models import EchomailMessage
+            outbound = EchomailMessage.query.filter_by(
+                network_id=net_id,
+                direction='outbound',
+                sent_at=None,
+            ).all()
+            if outbound:
+                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
+                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                if accepted:
+                    now = datetime.utcnow()
+                    for m in outbound:
+                        m.sent_at = now
+                    db.session.commit()
+                    sent_count = len(outbound)
+                else:
+                    logger.warning('Outbound .pkt was not accepted by %s — '
+                                   'leaving in queue for retry', remote_addr)
+
+    # 7. End of batch -- complete the BinkP protocol handshake NOW,
+    #    before importing what we just received below. A real peer
+    #    report (a 100+-link hub) traced a mail-loop straight back to
+    #    the OLD ordering here: a large historical catch-up (tens of
+    #    thousands of messages across ~100 bundles) took long enough to
+    #    parse+import+toss that the peer's own connection gave up
+    #    waiting mid-import and the session ended without ever reaching
+    #    this handshake -- every file had already been individually
+    #    M_GOT-acknowledged, but because the session itself never closed
+    #    cleanly, the peer's own bookkeeping never marked those bundles
+    #    delivered and resent all of them on the next connection,
+    #    compounding with every new bundle created in between. Finishing
+    #    the handshake here means the peer's session completes in
+    #    roughly the time it takes to exchange files, regardless of how
+    #    large the resulting import turns out to be.
+    await _finish_session(reader, writer, peer, inbound_files, sent_count)
+
+    # 8. NOW import inbound packets + scan for .tic file echoes. The
+    #    socket is already closed at this point (see above) -- however
+    #    long this takes has no further bearing on the peer's own
+    #    session/protocol timing.
     #
     # FidoNet hubs deliver mail in several wrappers:
     #
@@ -484,98 +549,82 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             logger.warning('BinkP server: failed to dump debug packet %s: %s',
                            name, exc)
 
-    imported_total = 0
-    if inbound_files:
-        with app.app_context():
-            inbound_dir = None
-            for fname, payload in inbound_files:
-                _debug_manifest(fname, payload)
-                extracted = list(_extract_packets(fname, payload))
-                if extracted:
-                    for inner_name, inner_payload in extracted:
-                        _debug_dump_packet(inner_name, inner_payload)
-                        imported_total += _import_pkt_payload(
-                            inner_payload, net_id, inner_name)
-                else:
-                    # Non-packet files (TIC manifests, hatched binaries, etc.)
-                    # get written to inbound for later processing.
-                    # Default landed in /tmp/ which is tmpfs on most distros
-                    # — files vanish on service restart. Default to data/
-                    # so the sysop can recover from a tossing miss.
-                    inbound_dir = inbound_dir or (
-                        os.environ.get('BINKP_INBOUND_DIR')
-                        or os.path.join(
-                            app.config.get('DATA_DIR') or 'data',
-                            'binkp', 'inbound'))
+    # Steps 8-9 run in a background thread via asyncio.to_thread(), NOT
+    # inline on this coroutine. Confirmed real gap found while
+    # investigating a second peer sysop's report of multi-minute stalls
+    # on BRAND NEW connections (including tiny, sub-3KB pushes that
+    # never got so much as a M_GOT before the peer gave up and
+    # disconnected): this server runs ONE asyncio event loop
+    # (asyncio.start_server in _serve() below) shared by EVERY inbound
+    # connection. Moving import to run after THIS session's own socket
+    # close (the fix directly above, at "7.") only protects THIS
+    # session's own protocol timing -- it does nothing to stop the
+    # import's synchronous DB writes / ZIP extraction / regex parsing
+    # (potentially thousands of messages during a large catch-up) from
+    # monopolizing the single-threaded event loop and starving EVERY
+    # OTHER concurrent connection, including ones that haven't even
+    # finished their handshake yet. asyncio.to_thread() runs this
+    # synchronous work on a worker thread instead, so the event loop
+    # stays free to service other sessions the moment THIS session's
+    # own _finish_session() above returns, regardless of how long the
+    # import takes. Flask's app.app_context() is designed to be entered
+    # fresh from any thread (already used this way at steps 3o/6 above,
+    # just always from the event-loop thread until now), so no new
+    # threading primitive is needed here beyond to_thread() itself.
+    def _import_and_log():
+        imported_total = 0
+        if inbound_files:
+            with app.app_context():
+                inbound_dir = None
+                for fname, payload in inbound_files:
+                    _debug_manifest(fname, payload)
+                    extracted = list(_extract_packets(fname, payload))
+                    if extracted:
+                        for inner_name, inner_payload in extracted:
+                            _debug_dump_packet(inner_name, inner_payload)
+                            imported_total += _import_pkt_payload(
+                                inner_payload, net_id, inner_name)
+                    else:
+                        # Non-packet files (TIC manifests, hatched binaries, etc.)
+                        # get written to inbound for later processing.
+                        # Default landed in /tmp/ which is tmpfs on most distros
+                        # — files vanish on service restart. Default to data/
+                        # so the sysop can recover from a tossing miss.
+                        inbound_dir = inbound_dir or (
+                            os.environ.get('BINKP_INBOUND_DIR')
+                            or os.path.join(
+                                app.config.get('DATA_DIR') or 'data',
+                                'binkp', 'inbound'))
+                        try:
+                            safe_name = _sanitize_inbound_filename(fname)
+                            os.makedirs(inbound_dir, exist_ok=True)
+                            with open(os.path.join(inbound_dir, safe_name), 'wb') as f:
+                                f.write(payload)
+                            # Visible-by-default log so the sysop can spot
+                            # mystery files that don't match the regex /
+                            # magic bytes — easier diagnosis than digging
+                            # at DEBUG level.
+                            logger.info(
+                                'BinkP: stored unrecognised file %s '
+                                '(%d bytes) in %s — neither ZIP nor FTS-0001 '
+                                'packet, scanning for TIC manifest',
+                                safe_name, len(payload), inbound_dir)
+                        except OSError as exc:
+                            logger.warning('Failed to write inbound file %s: %s',
+                                           fname, exc)
+                # After dropping any non-.pkt files into inbound, run the TIC scan
+                # so file-echo distributions get filed automatically.
+                if inbound_dir and os.path.isdir(inbound_dir):
                     try:
-                        os.makedirs(inbound_dir, exist_ok=True)
-                        with open(os.path.join(inbound_dir, fname), 'wb') as f:
-                            f.write(payload)
-                        # Visible-by-default log so the sysop can spot
-                        # mystery files that don't match the regex /
-                        # magic bytes — easier diagnosis than digging
-                        # at DEBUG level.
-                        logger.info(
-                            'BinkP: stored unrecognised file %s '
-                            '(%d bytes) in %s — neither ZIP nor FTS-0001 '
-                            'packet, scanning for TIC manifest',
-                            fname, len(payload), inbound_dir)
-                    except OSError as exc:
-                        logger.warning('Failed to write inbound file %s: %s',
-                                       fname, exc)
-            # After dropping any non-.pkt files into inbound, run the TIC scan
-            # so file-echo distributions get filed automatically.
-            if inbound_dir and os.path.isdir(inbound_dir):
-                try:
-                    from .tic import scan_inbound
-                    n = scan_inbound(inbound_dir)
-                    if n:
-                        logger.info('Processed %d TIC files from %s',
-                                    n, inbound_dir)
-                except Exception:
-                    logger.exception('TIC scan failed')
+                        from .tic import scan_inbound
+                        n = scan_inbound(inbound_dir)
+                        if n:
+                            logger.info('Processed %d TIC files from %s',
+                                        n, inbound_dir)
+                    except Exception:
+                        logger.exception('TIC scan failed')
 
-    # 7. Send queued outbound messages.
-    #    For upstream hub sessions: flush outbound EchomailMessages for that network.
-    #    For downstream node sessions: flush the BinkPHoldQueue for that node.
-    sent_count = 0
-    with app.app_context():
-        if downstream_node_id is not None:
-            from .tosser import get_pending_for_node, mark_sent_for_node
-            outbound = get_pending_for_node(downstream_node_id)
-            if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
-                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
-                if accepted:
-                    mark_sent_for_node(downstream_node_id,
-                                       [m.id for m in outbound])
-                    sent_count = len(outbound)
-                else:
-                    logger.warning('Hold-queue .pkt not accepted by %s — '
-                                   'leaving pending for retry', remote_addr)
-        elif net_id is not None:
-            from ..models import EchomailMessage
-            outbound = EchomailMessage.query.filter_by(
-                network_id=net_id,
-                direction='outbound',
-                sent_at=None,
-            ).all()
-            if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
-                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
-                if accepted:
-                    now = datetime.utcnow()
-                    for m in outbound:
-                        m.sent_at = now
-                    db.session.commit()
-                    sent_count = len(outbound)
-                else:
-                    logger.warning('Outbound .pkt was not accepted by %s — '
-                                   'leaving in queue for retry', remote_addr)
-
-        # Record this inbound-initiated session in the same Poll Log a
+        # 9. Record this inbound-initiated session in the same Poll Log a
         # sysop already checks for outbound polls. Before this, ONLY
         # anetbbs/echomail/poller.py (which dials OUT) ever wrote an
         # EchomailPollLog row -- when a remote hub calls IN and
@@ -590,24 +639,24 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         # polling US as ITS hub has no EchomailNetwork row to log
         # against (EchomailPollLog.network_id is NOT NULL).
         if net_id is not None:
-            try:
-                from ..models import EchomailPollLog
-                db.session.add(EchomailPollLog(
-                    network_id=net_id,
-                    poll_type=_inbound_poll_type(imported_total, sent_count),
-                    started_at=session_started_at,
-                    completed_at=datetime.utcnow(),
-                    status='success',
-                    messages_sent=sent_count,
-                    messages_received=imported_total,
-                ))
-                db.session.commit()
-            except Exception:
-                logger.exception('BinkP %s: failed to write poll log for '
-                                 'inbound session (net_id=%s)', peer, net_id)
+            with app.app_context():
+                try:
+                    from ..models import EchomailPollLog
+                    db.session.add(EchomailPollLog(
+                        network_id=net_id,
+                        poll_type=_inbound_poll_type(imported_total, sent_count),
+                        started_at=session_started_at,
+                        completed_at=datetime.utcnow(),
+                        status='success',
+                        messages_sent=sent_count,
+                        messages_received=imported_total,
+                    ))
+                    db.session.commit()
+                except Exception:
+                    logger.exception('BinkP %s: failed to write poll log for '
+                                     'inbound session (net_id=%s)', peer, net_id)
 
-    # 8. End of batch.
-    await _finish_session(reader, writer, peer, inbound_files, sent_count)
+    await asyncio.to_thread(_import_and_log)
 
 
 async def _finish_session(reader, writer, peer, inbound_files, sent_count):

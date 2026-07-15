@@ -129,6 +129,57 @@ class InterbbsSyncTests(unittest.TestCase):
             self.assertEqual(NetmailMessage.query.count(), 1,
                               'a BinkP spoke should request the area via AreaFix')
 
+    def test_ensure_special_area_does_not_resend_areafix_once_already_correct(self):
+        """Regression test for a real bug found in a full echomail-
+        subsystem audit: this AreaFix request used to fire
+        unconditionally on EVERY call to ensure_special_area(), not
+        just when the area was actually just created/repaired. Since
+        this function runs on every single Wall post, logged caller,
+        and new personal-best game score, a moderately active install
+        flooded its upstream hub's AreaFix bot with a redundant
+        subscribe request (plus a synchronous DB commit) on every one
+        of those events, even though the very first call already
+        subscribed successfully."""
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import NetmailMessage
+        with self.app.app_context():
+            net = self._network(network_type='binkp', hub_address='hub.example.com')
+            ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(NetmailMessage.query.count(), 1)
+
+            # Simulate what post_wall_to_interbbs/post_lastcaller_to_interbbs/
+            # post_score_to_interbbs actually do: call this on every event,
+            # not just once.
+            for _ in range(5):
+                ensure_special_area(net, WALL_AREA_TAG)
+
+            self.assertEqual(
+                NetmailMessage.query.count(), 1,
+                'repeat calls once the area is already correct must not '
+                'send additional redundant AreaFix requests')
+
+    def test_ensure_special_area_resends_areafix_if_repaired(self):
+        """The gate must not be so broad it silently stops requesting
+        AreaFix forever -- if a sysop's own edit knocks the area out of
+        the expected state (covered by test_ensure_special_area_
+        reasserts_sysop_only_flag), the repair should still trigger a
+        fresh AreaFix request, same as the original creation did."""
+        from anetbbs.echomail.interbbs_sync import ensure_special_area, WALL_AREA_TAG
+        from anetbbs.models import db, NetmailMessage
+        with self.app.app_context():
+            net = self._network(network_type='binkp', hub_address='hub.example.com')
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(NetmailMessage.query.count(), 1)
+
+            area.is_subscribed = False
+            db.session.commit()
+
+            ensure_special_area(net, WALL_AREA_TAG)
+            self.assertEqual(
+                NetmailMessage.query.count(), 2,
+                'repairing a knocked-out area should still trigger a '
+                'fresh AreaFix request')
+
     # ------------------------------------------------------------------
     # Loop prevention
     # ------------------------------------------------------------------

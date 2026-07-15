@@ -68,6 +68,7 @@ def ensure_special_area(network, tag):
     from ..models import db, EchoArea
 
     area = EchoArea.query.filter_by(network_id=network.id, tag=tag).first()
+    needs_areafix_request = False
     if area is None:
         area = EchoArea(
             network_id=network.id, tag=tag, name=tag,
@@ -75,6 +76,7 @@ def ensure_special_area(network, tag):
         )
         db.session.add(area)
         db.session.commit()
+        needs_areafix_request = True
     else:
         changed = False
         if not area.is_active:
@@ -88,8 +90,21 @@ def ensure_special_area(network, tag):
             changed = True
         if changed:
             db.session.commit()
+            needs_areafix_request = True
 
-    if network.hub_address and network.network_type == 'binkp':
+    # Real bug found in a full echomail-subsystem audit: this AreaFix
+    # request used to run unconditionally on EVERY call to
+    # ensure_special_area(), not just when the area was actually just
+    # created or repaired above -- and this function is called from
+    # post_wall_to_interbbs/post_lastcaller_to_interbbs/
+    # post_score_to_interbbs, i.e. on every single Wall post, logged
+    # caller, and new personal-best game score. A moderately active
+    # install flooded its upstream hub's AreaFix bot with a redundant
+    # subscribe request (plus its own AreafixLog row and a synchronous
+    # DB commit) every time any of those happened, even though we're
+    # almost certainly already subscribed after the very first one.
+    # Now only fires when this call actually changed something.
+    if needs_areafix_request and network.hub_address and network.network_type == 'binkp':
         try:
             from .areafix import send_areafix_request
             send_areafix_request(network, plus_tags=[tag])

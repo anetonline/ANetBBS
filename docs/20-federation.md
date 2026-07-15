@@ -286,6 +286,19 @@ peer installs never see it. It covers:
     the wrong file, without re-uploading. The full zip is also served
     as a public, no-login download link.
 
+### Running more than one network from this install
+
+Everything above assumes one hub identity — ANotherNetwork's own
+zone:net, QWK hub ID, and node pool. If you want this same install to
+also be the designated hub for a *second*, unrelated network (rather
+than standing up a second physical install just to keep the two
+networks' addressing and node pools from colliding), that's the
+**Hub Identities** feature — CRUD at
+`/admin/echomail/hub/identities/`, giving the second network its own
+`/join/<slug>/` and `/admin/echomail/hub/nodelist/<slug>`. Almost no
+install ever needs this — see the [[Sysop Guide]] wiki page's
+"Running more than one hub identity" section for the full writeup.
+
 ## REGISTRY_MODE_ENABLED gates two roles
 
 **One flag, two separate hub roles activate together.** Setting

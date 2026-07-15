@@ -86,9 +86,15 @@ def _help_text():
     )
 
 
-def process_request(network, from_address, body):
+def process_request(network, from_address, subject, body):
     """Leaf side: mirrors areafix.process_request, on FileArea.is_subscribed
     (via network.file_areas) instead of EchoArea.is_subscribed.
+
+    `subject` carries the AreaFix/FileFix password per FTS-0024 (FileFix
+    reuses the same network-level password fields as AreaFix -- see
+    areafix.process_request's docstring for the security gap this check
+    closes; the same gap existed here, unfixed independently, since
+    handle_filefix_netmail() never passed the subject through either).
 
     Returns (reply_body_str, log_kwargs) -- caller writes the reply
     netmail and the AreafixLog row (bot='filefix').
@@ -97,6 +103,16 @@ def process_request(network, from_address, body):
         return ("Network not configured.", {
             'from_address': from_address, 'request_type': 'error',
             'response': 'no network', 'success': False, 'bot': 'filefix'})
+
+    expected_pw = (getattr(network, 'areafix_password', None)
+                  or getattr(network, 'binkp_password', None) or '').strip()
+    provided_pw = (subject or '').strip()
+    if expected_pw and expected_pw != provided_pw:
+        return ("FileFix: password incorrect or missing — no changes made.\n", {
+            'network_id': network.id,
+            'from_address': from_address, 'request_type': 'badpw',
+            'area_tags': '', 'response': 'bad filefix password',
+            'success': False, 'bot': 'filefix'})
 
     cmds = parse_request(body)
     if not cmds:
@@ -159,14 +175,25 @@ def process_request(network, from_address, body):
     })
 
 
-def _process_node_request(peer_address, from_address, body):
+def _process_node_request(peer_address, from_address, subject, body,
+                          node_password):
     """Hub side. Unlike areafix's EchoAreaNode (FK-keyed to BinkPNode.id),
     FileEchoSubscription is keyed by a raw peer_address string -- no
     BinkPNode row lookup needed for the subscription row itself, only for
-    the leaf-vs-hub routing decision (done by the caller).
+    the leaf-vs-hub routing decision (done by the caller, which is also
+    where node_password comes from -- see areafix._process_node_request's
+    docstring for why a From: address alone isn't proof of identity).
 
     Returns (reply_body_str, log_kwargs), same shape as process_request().
     """
+    expected_pw = (node_password or '').strip()
+    provided_pw = (subject or '').strip()
+    if expected_pw and expected_pw != provided_pw:
+        return ("FileFix: password incorrect or missing — no changes made.\n", {
+            'from_address': from_address, 'request_type': 'badpw',
+            'area_tags': '', 'response': 'bad filefix password',
+            'success': False, 'bot': 'filefix'})
+
     cmds = parse_request(body)
     if not cmds:
         return (_help_text(), {
@@ -293,11 +320,13 @@ def handle_filefix_netmail(netmail_id):
     network = None
     if downstream_node:
         response, log_kwargs = _process_node_request(
-            downstream_node.ftn_address, nm.from_address, nm.body)
+            downstream_node.ftn_address, nm.from_address, nm.subject,
+            nm.body, downstream_node.password)
     else:
         network = (EchomailNetwork.query.get(nm.network_id)
                    if nm.network_id else None)
-        response, log_kwargs = process_request(network, nm.from_address, nm.body)
+        response, log_kwargs = process_request(
+            network, nm.from_address, nm.subject, nm.body)
 
     if network is not None:
         reply = NetmailMessage(

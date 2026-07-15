@@ -11,7 +11,8 @@ committed to the DB.  The tosser:
   1. Finds all BinkPNode rows subscribed to the message's area via EchoAreaNode.
   2. Skips nodes that already have a BinkPHoldQueue entry for this message
      (idempotent — safe to call more than once).
-  3. Skips the node that *sent* the message (detected via SEEN-BY / from_address).
+  3. Skips any node already listed in the message's SEEN-BY (FTS-0004) —
+     they already have a copy, and re-sending is how mail loops start.
   4. Creates BinkPHoldQueue rows for every remaining subscriber.
   5. Returns the count of new queue entries created.
 
@@ -41,12 +42,39 @@ def toss_message(message_id: int) -> int:
 
     # Collect FTN addresses already in the SEEN-BY for this message.
     # We don't re-forward to nodes that already have a copy.
+    #
+    # Real bug found in a full echomail-subsystem audit: this loop-
+    # prevention check never actually fired. Two compounding reasons:
+    #  1. Raw SEEN-BY lines as stored (binkp.py's inbound parser,
+    #     `seenby.append(line[8:].strip())`) are NOT tokenized -- a
+    #     single JSON list entry can be a whole "SEEN-BY: 234/567
+    #     234/568 235/1"-style line with several space-separated
+    #     addresses on it, per standard FTN convention. A plain `set()`
+    #     over the raw JSON list treats each whole line as ONE opaque
+    #     string, so nothing downstream ever matched a single address
+    #     against it.
+    #  2. Even ignoring (1), entries are always bare `net/node` (no
+    #     zone) -- confirmed against binkp.py's own outbound packer,
+    #     which writes `our_short = f'{on}/{oo}'` -- while the
+    #     candidate node's own `ftn_address` is a full
+    #     `zone:net/node[.point]` string. Comparing the two directly
+    #     ("1:234/567" vs "234/567") can never match.
+    # Net effect: a hub that imports echomail from downstream node A,
+    # where A is ALSO subscribed to receive that same area back (a
+    # completely normal bidirectional echo relationship), would
+    # unconditionally queue the message right back to A -- a bounce/
+    # duplicate-delivery bug and a contributor to mail loops. Fixed by
+    # tokenizing every stored entry on whitespace and stripping the
+    # zone from the comparison, matching how the addresses were
+    # actually written on the wire.
     seenby_entries = set()
     if msg.seenby:
         try:
-            seenby_entries = set(json.loads(msg.seenby))
-        except Exception:
-            pass
+            for entry in json.loads(msg.seenby):
+                seenby_entries.update((entry or '').split())
+        except Exception as exc:
+            logger.warning('tosser: msg %d has malformed seenby JSON, '
+                           'loop-prevention check skipped: %s', message_id, exc)
 
     # Find all active downstream nodes subscribed to this area.
     subs = (
@@ -75,8 +103,13 @@ def toss_message(message_id: int) -> int:
         node = sub.node
         if node.id in existing_node_ids:
             continue
-        # Skip if this node's address appears in SEEN-BY — they already have it.
+        # Skip if this node's address appears in SEEN-BY — they already
+        # have it. seenby_entries holds bare net/node strings (no zone,
+        # no @domain -- see the comment above), so the comparison value
+        # must be reduced the same way: strip the zone: prefix as well
+        # as any @domain suffix.
         addr_bare = (node.ftn_address or '').split('@', 1)[0].strip()
+        addr_bare = addr_bare.split(':', 1)[-1]
         if addr_bare and addr_bare in seenby_entries:
             logger.debug('tosser: skipping %s (in SEEN-BY for msg %d)',
                          node.ftn_address, message_id)

@@ -168,24 +168,34 @@ literal `%X` in a path stays as `%X`.
 
 ## DOS emulator drive layout
 
-`door_dos` (DOSBox) and `door_dosemu` (dosemu2) use the same drive
-layout, so a Game row that works on one usually works on the other.
+`door_dos` (DOSBox) and `door_dosemu` (dosemu2) mount the same three
+roles — game dir, FOSSIL bundle, per-node scratch — but at
+**different drive letters**, because dosemu2's FreeDOS boot layer
+(FDPP) reserves `C:`–`F:` for itself before any of your mounts land,
+while DOSBox's `mount` command puts your drives exactly where you
+tell it to.
 
-| DOS drive | Host path                                                      | What lives there |
-|-----------|----------------------------------------------------------------|------------------|
-| `C:` (DOSBox) / `D:` (dosemu) | `Game.working_directory` (or dir of `executable_path` if blank) | The door's own `.exe` and data files |
-| `D:` (DOSBox) / preserved (dosemu) | `anetbbs/games/dos_runtime/` (read-only)                       | `BNU.COM` FOSSIL driver — pre-loaded on COM1 by autoexec |
-| `E:` (both)   | `<install>/data/temp/nodeN/`                                   | Per-caller scratch — drop file goes here, isolated per node |
+| Role | `door_dos` (DOSBox) | `door_dosemu` (dosemu2) | Host path |
+|------|----------------------|---------------------------|-----------|
+| Game working dir  | `C:` | `H:` | `Game.working_directory` (or dir of `executable_path` if blank) |
+| FOSSIL bundle      | `D:` | `G:` | `anetbbs/games/dos_runtime/` (read-only) |
+| Per-node scratch   | `E:` | `I:` | `<install>/data/temp/nodeN/` — drop file goes here, isolated per node |
 
-(In dosemu2 the lettering shifts because FreeDOS's boot drives sit in
-front of the user mounts, but the convention `E:` = per-node scratch
-holds. See `_build_dosemu_command` if you need the exact mapping.)
+**Drop file path differs by emulator.** In **LORDCFG**, **TWCFG**,
+etc., point the dropfile path at `E:\` for a DOSBox (`door_dos`) game,
+or `I:\` for a dosemu2 (`door_dosemu`) game. The BBS writes the drop
+file to the right host path automatically
+(`<install>/data/temp/nodeN/DOOR.SYS`); each emulator's generated
+autoexec/batch step copies it from the scratch drive into the game
+drive before launch, so the door finds it in its own working
+directory either way. Multi-node Just Works.
 
-**Drop file convention is the same:** in **LORDCFG**, **TWCFG**, etc.,
-set the dropfile path to `E:\` (with trailing backslash). The BBS
-writes the drop file to the right host path automatically
-(`<install>/data/temp/nodeN/DOOR.SYS`); the emulator sees it appear at
-`E:\DOOR.SYS`. Multi-node Just Works.
+**FOSSIL loading also differs.** DOSBox always loads `BNU.COM` on
+COM1 via its autoexec, unconditionally. dosemu2 only loads a FOSSIL
+driver if the game's **"Requires FOSSIL Driver"** checkbox is on —
+this is deliberate, not a bug: dosemu2's own virtual COM1 (what
+TW2002-style doors expect) conflicts with a FOSSIL driver, so leave
+that checkbox off unless your specific door genuinely needs one.
 
 ## LORD (Legend of the Red Dragon) — bundled, plays out of the box
 
@@ -638,7 +648,18 @@ client-name first). The fix is in `anetbbs/games/rlogin_bridge.py:RloginConnecti
 
 ### Abort + idle timeout
 
-Same as DOS doors: **Ctrl+]q** aborts the session immediately,
-returns to the BBS menu. The 60-second idle timeout (configurable via
-`DOOR_IDLE_TIMEOUT`) auto-closes the connection if no traffic flows
-in either direction.
+**Ctrl+]q** aborts the session immediately and returns to the BBS
+menu, on every path. Idle-timeout behavior, however, is **not** the
+same everywhere:
+
+- **DOS doors** (`door_dos`/`door_dosemu`): 60-second idle timeout
+  (configurable via `DOOR_IDLE_TIMEOUT`), auto-closes if no traffic
+  flows in either direction.
+- **Web rlogin play**: 300-second idle timeout, same `DOOR_IDLE_TIMEOUT`
+  variable, different default for this path.
+- **Terminal (telnet/SSH) rlogin play** — the path used for A-Net
+  Online's own game server above: **no idle timeout at all**. A
+  session that goes silent (remote end hangs without closing the
+  socket) will sit there until the caller sends Ctrl+]q or the remote
+  socket actually closes/EOFs. If you hit a door that can go quiet
+  mid-session, budget for this — nothing will auto-recover it.

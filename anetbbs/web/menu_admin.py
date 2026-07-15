@@ -2,6 +2,8 @@
 Web admin pages to CRUD the data-driven BBS menus.
 Routes mounted under /admin/bbs-menus/.
 """
+import json
+import os
 from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 
@@ -23,10 +25,12 @@ ACTION_TYPES = [
     ('imsg', 'InterBBS IM inbox (MSP)'),
     ('imsg_send', 'Send InterBBS IM (MSP)'),
     ('bulletins', 'Bulletins'),
+    ('wall', 'Graffiti wall'),
     ('echo', 'Echomail areas'),
     ('echo_post', 'Compose echomail'),
     ('files', 'File library'),
     ('games', 'Game center'),
+    ('ebooks', 'Ebook reader'),
     ('rss', 'RSS news reader'),
     ('guru', 'Ask Anet (help guru search)'),
     ('chat', 'Chat menu'),
@@ -263,6 +267,8 @@ def seed_samples():
     Currently adds:
       * A 'weather' exec item to the main menu (uses wttr.in via curl)
       * A 'show welcome' ansi item that re-shows the welcome screen
+      * An 'image gallery' exec item, if install.sh/update.sh placed
+        anet-gallery.sh at the install root
     Idempotent — won't add duplicates.
     """
     main = BbsMenu.query.filter_by(name='main').first()
@@ -289,6 +295,23 @@ def seed_samples():
             action_type='ansi',
             action_args='welcome',
             sort_order=88, is_visible=True))
+        added += 1
+    # Terminal image gallery — only if install.sh/update.sh actually
+    # placed the script (it's not part of the git-tracked release tree,
+    # so it may be absent on an install that predates its introduction
+    # and hasn't been through update.sh yet).
+    from ..config import get_config
+    base_dir = str(getattr(get_config(), 'BASE_DIR', None) or '')
+    gallery_script = os.path.join(base_dir, 'anet-gallery.sh') if base_dir else ''
+    if gallery_script and os.path.isfile(gallery_script) and \
+            not BbsMenuItem.query.filter_by(menu_id=main.id, hotkey='3').first():
+        db.session.add(BbsMenuItem(
+            menu_id=main.id, hotkey='3',
+            label='Image Gallery (sample exec door)',
+            action_type='exec',
+            action_args=json.dumps(
+                {'name': 'Image Gallery', 'cmd': gallery_script}),
+            sort_order=89, is_visible=True))
         added += 1
 
     db.session.commit()

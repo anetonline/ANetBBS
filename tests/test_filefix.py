@@ -68,7 +68,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = process_request(
-                net, '1:1/2', '-FF.SUBBED\n+FF.NOTSUBBED\n')
+                net, '1:1/2', '', '-FF.SUBBED\n+FF.NOTSUBBED\n')
 
             self.assertIn('-FF.SUBBED : unsubscribed', response)
             self.assertIn('+FF.NOTSUBBED : subscribed', response)
@@ -93,7 +93,7 @@ class FilefixTests(unittest.TestCase):
                                     is_active=True, is_subscribed=True))
             db.session.commit()
 
-            response, _ = process_request(net, '1:1/2', '%LIST\n')
+            response, _ = process_request(net, '1:1/2', '', '%LIST\n')
             self.assertIn('FF.LISTED', response)
 
     def test_hub_side_subscribe_creates_file_echo_subscription_not_echoareanode(self):
@@ -107,7 +107,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                '2:2/2', '2:2/2', '+FF.HUBTEST\n')
+                '2:2/2', '2:2/2', '', '+FF.HUBTEST\n', '')
 
             self.assertIn('+FF.HUBTEST : subscribed', response)
             sub = FileEchoSubscription.query.filter_by(
@@ -131,7 +131,8 @@ class FilefixTests(unittest.TestCase):
                 file_area_id=area.id, peer_address='3:3/3', is_active=True))
             db.session.commit()
 
-            response, _ = _process_node_request('3:3/3', '3:3/3', '-FF.HUBUNSUB\n')
+            response, _ = _process_node_request(
+                '3:3/3', '3:3/3', '', '-FF.HUBUNSUB\n', '')
             self.assertIn('-FF.HUBUNSUB : unsubscribed', response)
             self.assertIsNone(FileEchoSubscription.query.filter_by(
                 file_area_id=area.id, peer_address='3:3/3').first())
@@ -191,7 +192,7 @@ class FilefixTests(unittest.TestCase):
 
             inbound = NetmailMessage(
                 network_id=net.id, from_address='4:4/2', to_address='4:4/1',
-                from_name='Downstream', to_name='filefix', subject='filefix',
+                from_name='Downstream', to_name='filefix', subject='x',
                 body='+FF.E2EHUB\n', direction='inbound', status='received')
             db.session.add(inbound)
             db.session.commit()
@@ -219,6 +220,118 @@ class FilefixTests(unittest.TestCase):
         src = inspect.getsource(binkp_server._import_pkt_payload)
         self.assertIn("'filefix', 'file fix', 'filemgr'", src)
         self.assertIn('handle_filefix_netmail', src)
+
+    def test_leaf_side_wrong_password_rejects_without_applying_changes(self):
+        """Regression test for a real security gap found in a full
+        echomail-subsystem audit: process_request()/_process_node_request()
+        used to apply subscription changes from ANY inbound netmail
+        addressed to filefix/areafix, with no password verification at
+        all -- despite send_areafix_request() carefully placing the
+        password in the Subject line on the way out. Confirms the fix:
+        a wrong (or missing) password now rejects the request and makes
+        NO changes, matching Synchronet sbbsecho.c's own behaviour."""
+        from anetbbs.models import db, EchomailNetwork, FileArea
+        from anetbbs.echomail.filefix import process_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixPwNet', network_type='binkp',
+                                  our_address='1:1/1',
+                                  areafix_password='correcthorse')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.PWTEST', name='Pw Test', network_id=net.id,
+                            is_active=True, is_subscribed=False)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = process_request(
+                net, '1:1/2', 'wrongpassword', '+FF.PWTEST\n')
+
+            self.assertFalse(log_kwargs['success'])
+            self.assertEqual(log_kwargs['request_type'], 'badpw')
+            self.assertIn('password', response.lower())
+
+            refreshed = FileArea.query.filter_by(tag='FF.PWTEST').first()
+            self.assertFalse(refreshed.is_subscribed,
+                             'a bad password must not apply any changes')
+
+    def test_leaf_side_correct_password_still_applies_changes(self):
+        from anetbbs.models import db, EchomailNetwork, FileArea
+        from anetbbs.echomail.filefix import process_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixPwOkNet', network_type='binkp',
+                                  our_address='1:1/1',
+                                  areafix_password='correcthorse')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.PWOK', name='Pw Ok', network_id=net.id,
+                            is_active=True, is_subscribed=False)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = process_request(
+                net, '1:1/2', 'correcthorse', '+FF.PWOK\n')
+
+            self.assertTrue(log_kwargs['success'])
+            refreshed = FileArea.query.filter_by(tag='FF.PWOK').first()
+            self.assertTrue(refreshed.is_subscribed)
+
+    def test_hub_side_wrong_node_password_rejects_without_applying_changes(self):
+        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            area = FileArea(tag='FF.HUBPW', name='Hub Pw',
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                '5:5/5', '5:5/5', 'wrongpassword', '+FF.HUBPW\n', 'realpassword')
+
+            self.assertFalse(log_kwargs['success'])
+            self.assertEqual(log_kwargs['request_type'], 'badpw')
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=area.id, peer_address='5:5/5').first())
+
+    def test_handle_filefix_netmail_hub_path_wrong_password_makes_no_changes(self):
+        """End-to-end: a forged From: address matching a real downstream
+        node, but without that node's real password, must not be able to
+        alter that node's subscriptions -- the exact attack the fix in
+        this session closes (a message's From: header alone was
+        previously sufficient, with no tie to the actual authenticated
+        BinkP session)."""
+        from anetbbs.models import (db, EchomailNetwork, FileArea, NetmailMessage,
+                                    BinkPNode, FileEchoSubscription)
+        from anetbbs.echomail.filefix import handle_filefix_netmail
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixE2EHubBadPw', network_type='binkp',
+                                  our_address='6:6/1')
+            db.session.add(net)
+            node = BinkPNode(name='Downstream', ftn_address='6:6/2',
+                             password='realsecret', is_active=True)
+            db.session.add(node)
+            area = FileArea(tag='FF.E2EHUBPW', name='E2E Hub Pw',
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.flush()
+
+            inbound = NetmailMessage(
+                network_id=net.id, from_address='6:6/2', to_address='6:6/1',
+                from_name='Forger', to_name='filefix', subject='guessedwrong',
+                body='+FF.E2EHUBPW\n', direction='inbound', status='received')
+            db.session.add(inbound)
+            db.session.commit()
+            nm_id = inbound.id
+
+            response = handle_filefix_netmail(nm_id)
+            self.assertIn('password', response.lower())
+
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=area.id, peer_address='6:6/2').first(),
+                'wrong password must not create a subscription')
 
     def test_areafix_log_bot_column_defaults_to_areafix(self):
         """Pre-existing rows (all message-echo requests, from before this

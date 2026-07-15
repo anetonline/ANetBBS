@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.116`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.119`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.116.tar.gz
-cd ANetBBS-v1.0b2.116
+tar xzf ANetBBS-v1.0b2.119.tar.gz
+cd ANetBBS-v1.0b2.119
 sudo bash install.sh
 ```
 
@@ -103,7 +103,7 @@ buildx` once there's a registry to publish to.
 - Full collaborative wiki at `/wiki/` with markdown bodies, `[[Page]]`
   cross-links, per-page revision history, unified-diff compare,
   revert, full-text search, recent changes, wanted/orphan pages
-- 43 seeded pages cover connecting, every messaging subsystem, doors
+- 46 seeded pages cover connecting, every messaging subsystem, doors
   (including a LORD recipe + the DosBridge), echomail/BinkP setup,
   NodeSpy, backup, full architecture, sysop guide, glossary, FAQ
 - Anyone can read; logged-in users can edit (configurable minimum post count + account age); admins can lock/delete/rename
@@ -111,7 +111,7 @@ buildx` once there's a registry to publish to.
 ### RSS Reader
 - Built-in feed aggregator for BBS-scene news + anything else
 - Web at `/rss/` (river or per-feed), terminal main-menu **R**
-- Background poller with per-feed cadence, sanitized HTML via bleach
+- Background poller on a single shared interval, sanitized HTML via bleach
 - Per-user unread state; X-News (`x-bit.org`) seeded by default
 
 ### Files

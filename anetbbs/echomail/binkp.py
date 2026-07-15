@@ -186,6 +186,26 @@ def _recv_exactly(sock: socket.socket, n: int) -> bytes:
 
 FTN_PKT_HEADER_SIZE = 58  # Type-2+ header
 
+
+def _sanitize_inbound_filename(raw: str) -> str:
+    """Reduce a peer-supplied CMD_FILE filename to a bare basename before
+    it's ever used in a local os.path.join() write. Confirmed real gap:
+    nothing anywhere in this file (or binkp_server.py's own equivalent
+    fallback-write path) called os.path.basename() or rejected a
+    traversal/absolute path -- an authenticated-but-malicious or
+    misconfigured peer could supply e.g. '/etc/cron.d/x' (os.path.join
+    with an absolute second argument silently DISCARDS the first, per
+    Python's own documented join() semantics) or '../../x' to write
+    outside the intended inbound directory. Falls back to a fixed safe
+    name if sanitizing leaves nothing usable."""
+    import os as _os
+    name = _os.path.basename((raw or '').strip().replace('\\', '/'))
+    name = name.lstrip('.').strip()
+    if not name:
+        name = 'unnamed.bin'
+    return name
+
+
 def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
     """
     Produce a minimal FTS-0001 Type-2+ .pkt file containing *messages*.
@@ -199,6 +219,14 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
             point = node_point.split('.')[1] if '.' in node_point else '0'
             return int(zone), int(net), int(node), int(point)
         except Exception:
+            # Silent fallback used to mask malformed addresses reaching
+            # the wire as a plausible-looking but WRONG 1:1/1.0 -- a
+            # sysop debugging misrouted mail had no signal this ever
+            # happened. Logged now per the "logs for send and receive"
+            # correctness pass.
+            logger.warning(
+                "BinkP: could not parse FTN address %r, using 1:1/1.0",
+                addr)
             return 1, 1, 1, 0
 
     oz, on, oo, op = _parse_ftn(our_addr)
@@ -377,7 +405,16 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
             try:
                 seenby_existing = _json.loads(msg.seenby) if msg.seenby else []
                 path_existing = _json.loads(msg.path) if msg.path else []
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as exc:
+                # Silent swallow used to mean a message with corrupted
+                # SEEN-BY/PATH JSON would quietly restart its routing
+                # history from empty here -- no loop-detection signal to
+                # the next hop, and no sysop-visible sign why. Logged now
+                # per the "logs for send and receive" correctness pass.
+                logger.warning(
+                    "BinkP: msg %s has malformed seenby/path JSON, "
+                    "restarting routing history: %s",
+                    getattr(msg, 'id', '?'), exc)
                 seenby_existing, path_existing = [], []
             our_short = f'{on}/{oo}'  # net/node form for SEEN-BY/PATH
             if our_short not in (seenby_existing[-1] if seenby_existing else ''):
@@ -676,6 +713,17 @@ class BinkPClient:
         # got captured up to the failure point, since the BinkPClient
         # instance itself goes out of scope with the exception.
         self._transcript = transcript if transcript is not None else []
+        # Set for real at the top of poll(); placeholders here so
+        # _consume_inbound_file_frame() has somewhere valid to write to
+        # even if ever called outside a poll() (e.g. directly in a test).
+        self._inbound_dir = None
+        # Messages parsed from a file the peer interleaves while we're
+        # waiting for our OWN outbound ack (_wait_got/_send_messages),
+        # as opposed to during our own dedicated _receive_messages
+        # phase -- folded into poll()'s 'received' result at the end.
+        # See _consume_inbound_file_frame's docstring for why this can
+        # legitimately happen with a spec-compliant peer.
+        self._interleaved_received = []
 
     def _log_transcript(self, line: str):
         ts = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
@@ -701,7 +749,15 @@ class BinkPClient:
                       'sent' (count of outbound messages sent),
                       'hatched_ids' (HatchQueue ids successfully shipped).
         """
+        import os as _os
         result = {'received': [], 'sent': 0, 'hatched_ids': []}
+        # Persistent inbound path — the prior /tmp default was tmpfs on
+        # most distros so anything stashed vanished on restart. Computed
+        # once here since _wait_got()/_send_messages() may now also need
+        # to stash an interleaved file, not just _receive_messages().
+        self._inbound_dir = _os.environ.get('BINKP_INBOUND_DIR') or _os.path.join(
+            (data_dir or 'data'), 'binkp', 'inbound')
+        self._interleaved_received = []
         self._connect()
         try:
             self._handshake()
@@ -710,6 +766,8 @@ class BinkPClient:
             if hatch_items:
                 result['hatched_ids'] = self._send_hatch(hatch_items)
             result['received'] = self._receive_messages(data_dir)
+            if self._interleaved_received:
+                result['received'].extend(self._interleaved_received)
         finally:
             self._disconnect()
         return result
@@ -755,16 +813,212 @@ class BinkPClient:
         return sent_ids
 
     def _wait_got(self, max_frames: int = 20) -> bool:
-        """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail)."""
+        """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail).
+
+        Any CMD_FILE the peer interleaves while we wait is received and
+        GOT-acknowledged inline via _consume_inbound_file_frame instead
+        of being silently discarded -- a spec-compliant peer can and
+        does offer a file at any point in the session (confirmed
+        against Synchronet's own binkp.js reference implementation,
+        which handles M_FILE/M_GOT/M_SKIP/M_EOB together in one
+        unified read loop rather than separate send-then-receive
+        phases). Discarding such a frame used to permanently lose that
+        file with no diagnostic at all.
+        """
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
         for _ in range(max_frames):
             is_cmd, data = self._recv_frame_logged()
-            if is_cmd:
+            if is_cmd and data:
                 cmd = data[0]
                 if cmd == CMD_GOT:
                     return True
                 if cmd in (CMD_SKIP, CMD_ERR):
                     return False
+            self._consume_inbound_file_frame(is_cmd, data, state)
         return False
+
+    # ------------------------------------------------------------------
+    # Inbound-file dispatch -- shared by _receive_messages' own read
+    # loop AND the ack-wait loops above/below (_wait_got, the tail of
+    # _send_messages), since a peer may interleave a file offer at any
+    # point in the session, not just during our dedicated receive phase.
+    # ------------------------------------------------------------------
+
+    def _is_fts_packet(self, buf):
+        return len(buf) >= 60 and buf[18:20] in (b'\x02\x00', b'\x02\x01')
+
+    def _is_zip(self, buf):
+        return len(buf) >= 4 and buf[:4] == b'PK\x03\x04'
+
+    def _debug_dump_packet(self, name, data):
+        """Diagnostic-only, opt-in via env var, no effect unless set:
+        dump the raw bytes of an inbound FTS-0001 packet -- whether
+        received directly or extracted from an arcmail ZIP bundle --
+        before parsing. Added to forensically diagnose a
+        packet-record parser desync (embedded-null bodies truncating
+        a message and misaligning everything after it) that a first
+        fix attempt (v1.0b2.70) reduced but did not fully eliminate.
+        By the time a corrupted message reaches the DB, the true
+        byte layout that caused the misparse is already gone, so
+        root-causing the remainder needs the actual wire bytes, not
+        another guess. Safe to leave in permanently: zero cost
+        unless BINKP_DEBUG_DUMP_DIR is explicitly set."""
+        import os as _os
+        debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
+        if not debug_dir:
+            return
+        try:
+            _os.makedirs(debug_dir, exist_ok=True)
+            dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_{name}'
+            with open(_os.path.join(debug_dir, dump_name), 'wb') as fh:
+                fh.write(data)
+            logger.info('BinkP: dumped raw packet %s (%d bytes) to %s',
+                       dump_name, len(data), debug_dir)
+        except OSError as exc:
+            logger.warning('BinkP: failed to dump debug packet %s: %s',
+                           name, exc)
+
+    def _debug_manifest(self, fname, buf):
+        """Unconditional companion to _debug_dump_packet: appends one
+        line per file handed to _import_completed, regardless of
+        whether it's recognized as an FTS-0001 packet, a ZIP bundle,
+        or neither. Uses plain file I/O, not the `logging` module --
+        confirmed on the live server that production's LOG_LEVEL
+        silently swallows this module's INFO-level messages entirely
+        (zero "BinkP" lines found in gunicorn-error.log despite real
+        traffic flowing through it), so a log-based diagnostic can't
+        be trusted to be visible. Same opt-in, zero-cost-unless-set
+        gating as _debug_dump_packet."""
+        import os as _os
+        debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
+        if not debug_dir:
+            return
+        try:
+            _os.makedirs(debug_dir, exist_ok=True)
+            kind = 'fts' if self._is_fts_packet(buf) else (
+                'zip' if self._is_zip(buf) else 'other')
+            line = f'{datetime.utcnow().isoformat()} {fname} {len(buf)} {kind}\n'
+            with open(_os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
+                fh.write(line)
+        except OSError:
+            pass
+
+    def _import_completed(self, fname, buf, inbound_dir):
+        """Dispatch a fully-received file. Returns a list of parsed
+        messages (may be empty for non-mail content like TICs)."""
+        import io as _io
+        import os as _os
+        import zipfile as _zipfile
+
+        self._debug_manifest(fname, buf)
+        if self._is_fts_packet(buf):
+            self._debug_dump_packet(fname, buf)
+            try:
+                return _parse_ftn_packet(buf)
+            except Exception:
+                logger.exception('BinkP: failed parsing %s as FTS-0001',
+                                 fname)
+                return []
+        if self._is_zip(buf):
+            out = []
+            try:
+                with _zipfile.ZipFile(_io.BytesIO(buf)) as zf:
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        try:
+                            inner = zf.read(info.filename)
+                        except Exception as exc:
+                            logger.warning(
+                                'BinkP: zip member %s in %s unreadable: %s',
+                                info.filename, fname, exc)
+                            continue
+                        if self._is_fts_packet(inner):
+                            self._debug_dump_packet(
+                                f'{fname}__{info.filename}', inner)
+                            try:
+                                out.extend(_parse_ftn_packet(inner))
+                            except Exception:
+                                logger.exception(
+                                    'BinkP: failed parsing %s inside %s',
+                                    info.filename, fname)
+                        else:
+                            logger.info(
+                                'BinkP: zip member %s in %s is not a '
+                                'FTS-0001 packet — skipped',
+                                info.filename, fname)
+            except _zipfile.BadZipFile as exc:
+                logger.warning('BinkP: bad ZIP %s: %s', fname, exc)
+            if out:
+                return out
+            # ZIP contained no mail packets — it's a hatched file binary
+            # (e.g. a nodelist .zip delivered via TIC). Fall through to
+            # write it to inbound so the TIC scanner can find it.
+        # Anything else → file for TIC scanner
+        try:
+            safe_name = _sanitize_inbound_filename(fname)
+            _os.makedirs(inbound_dir, exist_ok=True)
+            with open(_os.path.join(inbound_dir, safe_name), 'wb') as fh:
+                fh.write(buf)
+            logger.info(
+                'BinkP: stored unrecognised file %s (%d bytes) in %s '
+                '— neither ZIP nor FTS-0001 packet, scanning for TIC',
+                safe_name, len(buf), inbound_dir)
+        except OSError as exc:
+            logger.warning('BinkP: could not stash %s in %s: %s',
+                           fname, inbound_dir, exc)
+        return []
+
+    def _consume_inbound_file_frame(self, is_cmd, data, state):
+        """Feed one already-read frame into an in-progress inbound-file
+        receive, mutating `state` (a dict with pending_file/pending_size/
+        pending_data keys) in place. Uses self._inbound_dir and appends
+        any parsed messages to self._interleaved_received (both set at
+        the top of poll()). Returns True if this frame was consumed as
+        part of a file transfer (a CMD_FILE header, or a DATA frame for
+        a file already in progress), False if the caller should handle
+        the frame itself (e.g. a command the caller is specifically
+        waiting for, like GOT/SKIP/ERR/EOB).
+        """
+        if is_cmd:
+            if not data:
+                return False
+            cmd = data[0]
+            if cmd == CMD_FILE:
+                text = data[1:].decode('latin-1', errors='replace')
+                parts = text.split()
+                state['pending_file'] = parts[0] if parts else 'unknown.pkt'
+                try:
+                    state['pending_size'] = int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    state['pending_size'] = 0
+                state['pending_data'] = b''
+                logger.debug(
+                    "BinkP: receiving file %s (%d bytes expected)",
+                    state['pending_file'], state['pending_size'])
+                return True
+            return False
+
+        # Data frame.
+        if state.get('pending_file') is None:
+            return False
+        state['pending_data'] += data
+        if state['pending_size'] > 0 and len(state['pending_data']) >= state['pending_size']:
+            fname = state['pending_file']
+            buf = state['pending_data'][:state['pending_size']]
+            inbound_dir = self._inbound_dir or 'data/binkp/inbound'
+            msgs = self._import_completed(fname, buf, inbound_dir)
+            if msgs:
+                self._interleaved_received.extend(msgs)
+                logger.info("BinkP: imported %d msg(s) from %s", len(msgs), fname)
+            try:
+                self._send_cmd(CMD_GOT, fname)
+            except OSError as exc:
+                logger.info("BinkP: hub closed before GOT ack (clean): %s", exc)
+            state['pending_file'] = None
+            state['pending_size'] = 0
+            state['pending_data'] = b''
+        return True
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -931,7 +1185,29 @@ class BinkPClient:
             raise ConnectionError("BinkP: handshake did not complete")
 
     def _send_messages(self, messages, data_dir: str) -> int:
-        """Package and send outbound messages as a .pkt file."""
+        """Package and send outbound messages as a .pkt file.
+
+        Returns the number of messages successfully sent -- 0 or
+        len(messages), since the whole batch is bundled into a single
+        packet and accepted/rejected as a unit (BinkP has no partial
+        ack at the individual-message level). Callers MUST NOT mark
+        messages as sent/delivered unless this returns nonzero.
+
+        Confirmed real bug (found in a full-subsystem audit, not
+        hypothetical): this used to return len(messages) unconditionally
+        regardless of whether the loop below ever saw GOT, SKIP, ERR, or
+        simply ran out of frames -- and poller.py's caller stamped every
+        queued message as sent based on that count with no further
+        check, so a busy/unstable hub replying M_SKIP (a normal, spec-
+        legal response, e.g. "already have this bundle") or M_ERR
+        silently and permanently discarded real outbound mail with no
+        retry and no visible error (the poll log still read "success").
+        Matches Synchronet's own binkp.js reference implementation,
+        which only fires its tx_callback (the hook that marks a file
+        truly delivered) on M_GOT for that specific file, and moves it
+        to a separate failed-files list on M_SKIP instead of assuming
+        success.
+        """
         if not messages:
             return 0
         pkt_data = _build_ftn_packet(messages, self.our_address, self.hub_address)
@@ -947,23 +1223,57 @@ class BinkPClient:
         self._send_cmd(CMD_FILE, f'{filename} {size} {mtime} 0')
         self._send_data(pkt_data)
 
-        # Wait for GOT or SKIP
+        # Wait for GOT (accepted) or SKIP/ERR (rejected). Any CMD_FILE
+        # the peer interleaves while we wait is received and GOT-acked
+        # inline rather than silently discarded -- see
+        # _consume_inbound_file_frame's docstring.
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
+        accepted = False
         for _ in range(20):
-            is_cmd, data = self._recv_frame_logged()
-            if is_cmd:
+            try:
+                is_cmd, data = self._recv_frame_logged()
+            except (ConnectionError, OSError) as exc:
+                # Real gap found in the same audit that produced this
+                # method: _receive_messages() already treated the peer
+                # closing mid-wait as a graceful (if unwelcome) end and
+                # returned cleanly, but this ack-wait loop had no
+                # equivalent guard -- a peer that processed our packet
+                # fine but hung up without an explicit GOT (or a NAT/
+                # firewall idle-timeout severing the session at exactly
+                # this point) would raise straight out of poll() as an
+                # unhandled exception instead of the safe default
+                # (treat as unacknowledged, retry next poll).
+                logger.warning(
+                    "BinkP: connection closed while awaiting ack for %s "
+                    "-- %d message(s) NOT marked sent, will retry next "
+                    "poll: %s", filename, len(messages), exc)
+                break
+            if is_cmd and data:
                 cmd = data[0]
                 text = data[1:].decode('latin-1', errors='replace')
                 if cmd == CMD_GOT:
                     logger.info("BinkP: hub acknowledged %s", filename)
+                    accepted = True
                     break
                 elif cmd == CMD_SKIP:
-                    logger.warning("BinkP: hub skipped %s", filename)
+                    logger.warning(
+                        "BinkP: hub skipped %s -- %d message(s) NOT marked "
+                        "sent, will retry next poll", filename, len(messages))
                     break
                 elif cmd == CMD_ERR:
-                    logger.error("BinkP: error during send: %s", text)
+                    logger.error(
+                        "BinkP: error sending %s: %s -- %d message(s) NOT "
+                        "marked sent, will retry next poll",
+                        filename, text, len(messages))
                     break
+            self._consume_inbound_file_frame(is_cmd, data, state)
+        else:
+            logger.warning(
+                "BinkP: no GOT/SKIP/ERR for %s within 20 frames -- "
+                "treating as failed, %d message(s) NOT marked sent, "
+                "will retry next poll", filename, len(messages))
 
-        return len(messages)
+        return len(messages) if accepted else 0
 
     def _receive_messages(self, data_dir: str):
         """Receive inbound files from the hub, dispatch by content.
@@ -1000,140 +1310,17 @@ class BinkPClient:
         since the resulting connection-close is still caught below as
         clean.
         """
-        import io as _io
-        import os as _os
-        import zipfile as _zipfile
-
         parsed = []
         sent_eob = 1
         got_eob = 0
         self._send_cmd(CMD_EOB)
 
-        pending_file = None
-        pending_size = 0
-        pending_data = b''
-        # Persistent inbound path — the prior /tmp default was tmpfs
-        # on most distros so anything stashed vanished on restart.
-        inbound_dir = _os.environ.get('BINKP_INBOUND_DIR') or _os.path.join(
-            (data_dir or 'data'), 'binkp', 'inbound')
-
-        def _is_fts_packet(buf):
-            return len(buf) >= 60 and buf[18:20] in (b'\x02\x00', b'\x02\x01')
-
-        def _is_zip(buf):
-            return len(buf) >= 4 and buf[:4] == b'PK\x03\x04'
-
-        def _debug_dump_packet(name, data):
-            """Diagnostic-only, opt-in via env var, no effect unless set:
-            dump the raw bytes of an inbound FTS-0001 packet -- whether
-            received directly or extracted from an arcmail ZIP bundle --
-            before parsing. Added to forensically diagnose a
-            packet-record parser desync (embedded-null bodies truncating
-            a message and misaligning everything after it) that a first
-            fix attempt (v1.0b2.70) reduced but did not fully eliminate.
-            By the time a corrupted message reaches the DB, the true
-            byte layout that caused the misparse is already gone, so
-            root-causing the remainder needs the actual wire bytes, not
-            another guess. Safe to leave in permanently: zero cost
-            unless BINKP_DEBUG_DUMP_DIR is explicitly set."""
-            debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
-            if not debug_dir:
-                return
-            try:
-                _os.makedirs(debug_dir, exist_ok=True)
-                dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_{name}'
-                with open(_os.path.join(debug_dir, dump_name), 'wb') as fh:
-                    fh.write(data)
-                logger.info('BinkP: dumped raw packet %s (%d bytes) to %s',
-                           dump_name, len(data), debug_dir)
-            except OSError as exc:
-                logger.warning('BinkP: failed to dump debug packet %s: %s',
-                               name, exc)
-
-        def _debug_manifest(fname, buf):
-            """Unconditional companion to _debug_dump_packet: appends one
-            line per file handed to _import_completed, regardless of
-            whether it's recognized as an FTS-0001 packet, a ZIP bundle,
-            or neither. Uses plain file I/O, not the `logging` module --
-            confirmed on the live server that production's LOG_LEVEL
-            silently swallows this module's INFO-level messages entirely
-            (zero "BinkP" lines found in gunicorn-error.log despite real
-            traffic flowing through it), so a log-based diagnostic can't
-            be trusted to be visible. Same opt-in, zero-cost-unless-set
-            gating as _debug_dump_packet."""
-            debug_dir = _os.environ.get('BINKP_DEBUG_DUMP_DIR')
-            if not debug_dir:
-                return
-            try:
-                _os.makedirs(debug_dir, exist_ok=True)
-                kind = 'fts' if _is_fts_packet(buf) else (
-                    'zip' if _is_zip(buf) else 'other')
-                line = f'{datetime.utcnow().isoformat()} {fname} {len(buf)} {kind}\n'
-                with open(_os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
-                    fh.write(line)
-            except OSError:
-                pass
-
-        def _import_completed(fname, buf):
-            """Dispatch a fully-received file. Returns a list of parsed
-            messages (may be empty for non-mail content like TICs)."""
-            _debug_manifest(fname, buf)
-            if _is_fts_packet(buf):
-                _debug_dump_packet(fname, buf)
-                try:
-                    return _parse_ftn_packet(buf)
-                except Exception:
-                    logger.exception('BinkP: failed parsing %s as FTS-0001',
-                                     fname)
-                    return []
-            if _is_zip(buf):
-                out = []
-                try:
-                    with _zipfile.ZipFile(_io.BytesIO(buf)) as zf:
-                        for info in zf.infolist():
-                            if info.is_dir():
-                                continue
-                            try:
-                                inner = zf.read(info.filename)
-                            except Exception as exc:
-                                logger.warning(
-                                    'BinkP: zip member %s in %s unreadable: %s',
-                                    info.filename, fname, exc)
-                                continue
-                            if _is_fts_packet(inner):
-                                _debug_dump_packet(
-                                    f'{fname}__{info.filename}', inner)
-                                try:
-                                    out.extend(_parse_ftn_packet(inner))
-                                except Exception:
-                                    logger.exception(
-                                        'BinkP: failed parsing %s inside %s',
-                                        info.filename, fname)
-                            else:
-                                logger.info(
-                                    'BinkP: zip member %s in %s is not a '
-                                    'FTS-0001 packet — skipped',
-                                    info.filename, fname)
-                except _zipfile.BadZipFile as exc:
-                    logger.warning('BinkP: bad ZIP %s: %s', fname, exc)
-                if out:
-                    return out
-                # ZIP contained no mail packets — it's a hatched file binary
-                # (e.g. a nodelist .zip delivered via TIC). Fall through to
-                # write it to inbound so the TIC scanner can find it.
-            # Anything else → file for TIC scanner
-            try:
-                _os.makedirs(inbound_dir, exist_ok=True)
-                with open(_os.path.join(inbound_dir, fname), 'wb') as fh:
-                    fh.write(buf)
-                logger.info(
-                    'BinkP: stored unrecognised file %s (%d bytes) in %s '
-                    '— neither ZIP nor FTS-0001 packet, scanning for TIC',
-                    fname, len(buf), inbound_dir)
-            except OSError as exc:
-                logger.warning('BinkP: could not stash %s in %s: %s',
-                               fname, inbound_dir, exc)
-            return []
+        # File-receive dispatch (CMD_FILE header + DATA frames + the
+        # GOT-per-file ack) is handled by _consume_inbound_file_frame,
+        # shared with the ack-wait loops in _wait_got/_send_messages --
+        # see that method's docstring. This loop only needs to handle
+        # the frame types those callers AREN'T waiting for: EOB and ERR.
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
 
         for _ in range(5000):
             try:
@@ -1143,24 +1330,11 @@ class BinkPClient:
                     "BinkP: hub closed after our M_EOB (clean): %s", exc)
                 break
 
-            if is_cmd:
+            if is_cmd and data:
                 cmd = data[0]
                 text = data[1:].decode('latin-1', errors='replace')
 
-                if cmd == CMD_FILE:
-                    parts = text.split()
-                    pending_file = parts[0] if parts else 'unknown.pkt'
-                    # CMD_FILE is `name size mtime offset`
-                    try:
-                        pending_size = int(parts[1]) if len(parts) > 1 else 0
-                    except ValueError:
-                        pending_size = 0
-                    pending_data = b''
-                    logger.debug(
-                        "BinkP: receiving file %s (%d bytes expected)",
-                        pending_file, pending_size)
-
-                elif cmd == CMD_EOB:
+                if cmd == CMD_EOB:
                     got_eob += 1
                     logger.info("BinkP: end of batch from hub (%d/2)", got_eob)
                     if sent_eob < 2:
@@ -1174,37 +1348,28 @@ class BinkPClient:
                             break
                     if got_eob >= 2:
                         break
+                    continue
 
-                elif cmd == CMD_ERR:
+                if cmd == CMD_ERR:
                     logger.error("BinkP: session error: %s", text)
                     break
 
-                elif cmd == CMD_NUL:
-                    pass  # info frame
+                if cmd == CMD_NUL:
+                    continue  # info frame
 
-            else:
-                if pending_file is None:
-                    continue
-                pending_data += data
-                if pending_size > 0 and len(pending_data) >= pending_size:
-                    msgs = _import_completed(pending_file,
-                                             pending_data[:pending_size])
-                    if msgs:
-                        parsed.extend(msgs)
-                        logger.info(
-                            "BinkP: imported %d msg(s) from %s",
-                            len(msgs), pending_file)
-                    try:
-                        self._send_cmd(CMD_GOT, pending_file)
-                    except OSError as exc:
-                        logger.info(
-                            "BinkP: hub closed before GOT ack (clean): %s", exc)
-                        break
-                    pending_file = None
-                    pending_size = 0
-                    pending_data = b''
+            # CMD_FILE header, a DATA frame for an in-progress file, or
+            # any other frame we don't specifically act on above.
+            before = self._interleaved_received
+            self._interleaved_received = parsed
+            try:
+                self._consume_inbound_file_frame(is_cmd, data, state)
+            finally:
+                self._interleaved_received = before
 
         # Run TIC scan on anything we stashed during this batch.
+        import os as _os
+        inbound_dir = self._inbound_dir or _os.path.join(
+            (data_dir or 'data'), 'binkp', 'inbound')
         try:
             if _os.path.isdir(inbound_dir):
                 from .tic import scan_inbound

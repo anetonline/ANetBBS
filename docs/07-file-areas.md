@@ -16,6 +16,8 @@ under a configurable storage path.
 | `upload_permission` | `none` / `users` / `sysop`                       |
 | `is_sysop_only`     | hide entirely from non-admins                    |
 | `password`          | optional — area lock                             |
+| `min_access_level`  | minimum access level to see/browse the area (default 10 = registered users; 0 = everyone, 50 = VIP, 100 = sysop) |
+| `min_write_level`   | minimum access level to upload, independent of `upload_permission` |
 
 ## Where files live
 
@@ -57,6 +59,18 @@ When on:
   `FileQueueEntry` row marks it pending.
 - **Admin → File Queue** (`/admin/file-queue/`) lets sysop approve
   (moves to area `storage_path`) or reject (deletes).
+
+## Upload safety checks
+
+Two checks run automatically on every upload, before it's accepted:
+
+- **Archive integrity test** — zip/tar/7z/rar archives are opened and
+  verified; a corrupt archive is rejected outright instead of sitting
+  in the file base as a broken download.
+- **Content-hash dedup check** — a SHA-256 hash of the file's content
+  (not its filename) is compared against everything already in the
+  file base. A near-identical re-upload under a different name gets
+  flagged instead of silently duplicating storage.
 
 ## File ratios
 

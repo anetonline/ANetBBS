@@ -4,12 +4,19 @@
   "use_ssl": false,
   "bridge_bbs": "|07My BBS |15MRC Bridge",
   "platform_info": "ANETBBS/Linux.x86_64/1.3.20",
-  "capabilities": ["MCI", "MSGEXT", "CTCP"],
+  "capabilities": ["MCI", "CTCP", "SSL"],
   "ctcp_echo_channel": "ctcp_echo_channel",
   "web_listen_host": "0.0.0.0",
   "web_listen_port": 8080,
   "message_rate_seconds": 0.5,
   "iamhere_interval_seconds": 60,
   "log_level": "INFO",
-  "data_dir": "/app/mrc/bridge/data"
+  "data_dir": "/app/mrc/bridge/data",
+  "identify_required_mode": false,
+  "post_identify_auto_join": false,
+  "bbs_description": "",
+  "bbs_telnet": "",
+  "bbs_ssh": "",
+  "bbs_website": "",
+  "bbs_sysop": ""
 }

@@ -55,7 +55,16 @@ produce.
 | `log_rotate` | Rotate large logs | `max_mb` (default 50) | Any `logs/*.log` over the threshold is renamed to `.1` and a fresh empty file is created in its place. |
 | `security_check` | Security update check | none | Scans `apt list --upgradable` and the venv's `pip list --outdated`, tags Ubuntu `-security` rows, writes `logs/security-report.json` consumed by **Admin → Security**. Always returns ok=True even on a non-Ubuntu box, so a missing `apt` doesn't permanently red-flag the row. |
 | `hub_generate_nodelist` | ANotherNetwork: generate nodelist | none | Publishes the ANotherNetwork nodelist into the `ANN.FILES.NODELIST` file area via `anetbbs.echomail.nodelist.write_nodelist_to_area()`, replacing the prior copy so peers can pull it like any other file-echo entry. Only meaningful on the install designated as the ANotherNetwork hub (`REGISTRY_MODE_ENABLED`) — on any other install it still runs harmlessly, just publishing a nodelist with only the hub entry and no downstream nodes. See [`20-federation.md`](20-federation.md) for the hub role this supports. |
+| `sync_wall_inbound` | InterBBS Wall: import inbound posts | none | Materializes new `ANET_WALL` echomail into local Wall posts. You won't add this by hand — it's auto-created when InterBBS Wall is enabled. |
+| `sync_lastcallers_inbound` | InterBBS Last Callers: import inbound entries | none | Materializes new `ANET_LASTCALLERS` echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled. |
+| `sync_scores_inbound` | InterBBS Game Scores: import inbound scores | none | Materializes new `ANET_GAMESCORES` echomail into local game high scores. Auto-created when InterBBS Score Sharing is enabled. |
 | `shell` | Shell command | `command` (required), `timeout` (default 60s) | Runs an arbitrary command as the service user via `subprocess.run(..., shell=True)`. **No sudo** — anything needing root privileges will silently fail at that step. Output is captured as raw bytes and decoded with `errors='replace'`, so non-UTF8 output (e.g. CP437 from DOS programs) doesn't crash the handler — it just shows replacement characters in the log. |
+
+The three `sync_*_inbound` handlers above aren't something you'd pick
+from a blank slate — they show up in the New/Edit Event dropdown
+already-created and enabled the moment you turn on the matching
+InterBBS feature (Wall, Last Callers, or Game Score sharing) on a
+network. Listed here so they aren't a mystery if you notice them.
 
 ### `shell` handler — worked example
 

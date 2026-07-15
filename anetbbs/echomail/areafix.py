@@ -94,20 +94,43 @@ def _help_text():
     )
 
 
-def process_request(network, from_address, body):
+def process_request(network, from_address, subject, body):
     """Process an incoming areafix netmail and return (response_text, log_data).
 
     `network` is an EchomailNetwork SQLAlchemy row.
     `from_address` is the sender's FTN address (string).
+    `subject` is the netmail's Subject line, which per FTS-0024 (and
+    confirmed against send_areafix_request()'s own outbound convention
+    below) carries the AreaFix password -- NOT a command line.
     `body` is the netmail body text.
 
     Returns a (reply_body_str, log_kwargs) tuple. The caller is responsible
     for writing the reply netmail and the AreafixLog row.
+
+    Real security gap found in a full-echomail-subsystem audit: this
+    function used to accept ANY inbound "areafix"-addressed netmail and
+    apply its commands unconditionally -- the password send_areafix_request()
+    so carefully places in the Subject line was written on the way OUT but
+    never verified on the way IN. Any netmail that reached this system
+    addressed to the areafix robot (spoofed From:, or a legitimate but
+    unrelated node) could silently unsubscribe/resubscribe every echo
+    area. Matches Synchronet sbbsecho.c's own behaviour: an AreaFix
+    request with a missing/wrong password is rejected before any command
+    is applied, not after.
     """
     if network is None:
         return ("Network not configured.", {
             'from_address': from_address, 'request_type': 'error',
             'response': 'no network', 'success': False})
+
+    expected_pw = (getattr(network, 'areafix_password', None)
+                  or getattr(network, 'binkp_password', None) or '').strip()
+    provided_pw = (subject or '').strip()
+    if expected_pw and expected_pw != provided_pw:
+        return ("Areafix: password incorrect or missing — no changes made.\n", {
+            'network_id': network.id,
+            'from_address': from_address, 'request_type': 'badpw',
+            'area_tags': '', 'response': 'bad areafix password', 'success': False})
 
     cmds = parse_request(body)
     if not cmds:
@@ -168,12 +191,27 @@ def process_request(network, from_address, body):
     })
 
 
-def _process_node_request(node, from_address, body):
+def _process_node_request(node, from_address, subject, body):
     """Areafix for a downstream BinkPNode — modifies EchoAreaNode rows.
 
     Subscribing adds a row; unsubscribing removes it.  Returns
     (response_text, log_kwargs) same as process_request().
+
+    `subject` is checked against node.password before anything else --
+    see process_request()'s docstring for why this exists. A message's
+    From: address alone is not proof of identity (it isn't tied to the
+    authenticated BinkP session that delivered it), so without this a
+    peer who can get netmail relayed to this hub could forge a request
+    claiming to be a DIFFERENT downstream node and alter that node's
+    subscriptions.
     """
+    expected_pw = (getattr(node, 'password', None) or '').strip()
+    provided_pw = (subject or '').strip()
+    if expected_pw and expected_pw != provided_pw:
+        return ("Areafix: password incorrect or missing — no changes made.\n", {
+            'from_address': from_address, 'request_type': 'badpw',
+            'area_tags': '', 'response': 'bad areafix password', 'success': False})
+
     cmds = parse_request(body)
     if not cmds:
         return (_help_text(), {
@@ -299,11 +337,12 @@ def handle_areafix_netmail(netmail_id):
     network = None
     if downstream_node:
         response, log_kwargs = _process_node_request(
-            downstream_node, nm.from_address, nm.body)
+            downstream_node, nm.from_address, nm.subject, nm.body)
     else:
         network = (EchomailNetwork.query.get(nm.network_id)
                    if nm.network_id else None)
-        response, log_kwargs = process_request(network, nm.from_address, nm.body)
+        response, log_kwargs = process_request(
+            network, nm.from_address, nm.subject, nm.body)
 
     # Build a reply netmail back to the requester.
     if network is not None:

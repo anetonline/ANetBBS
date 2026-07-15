@@ -336,26 +336,42 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                 if area is None:
                     continue
 
-                em = EchomailMessage(
-                    area_id=area.id,
-                    network_id=area.network_id,
-                    from_name=msg_dict.get('from_name', '')[:100],
-                    to_name=msg_dict.get('to_name', 'All')[:100],
-                    subject=msg_dict.get('subject', '')[:200],
-                    body=msg_dict.get('body', ''),
-                    msg_id=msg_dict.get('msg_id', ''),
-                    reply_id=msg_dict.get('reply_id', ''),
-                    origin_line=msg_dict.get('origin_line', ''),
-                    tear_line=msg_dict.get('tear_line', ''),
-                    from_address=f'QWK:{node.packet_id}',
-                )
-                db.session.add(em)
-                db.session.flush()
+                # Real bug found in a full echomail-subsystem audit: a
+                # bare db.session.rollback() here rolls back the ENTIRE
+                # open transaction, not just this one message -- so any
+                # messages already add()+flush()ed earlier in this SAME
+                # loop (their ids already captured into new_ids, count
+                # already incremented) got silently discarded the moment
+                # any LATER message in the same upload hit an exception.
+                # The final "imported %d messages" log line then reports
+                # a number higher than what's actually in the database,
+                # with zero visible error. Matches the exact SAVEPOINT
+                # pattern poller.py's _import_message() already uses for
+                # the identical problem (a single bad row poisoning a
+                # whole batch) -- begin_nested() isolates each message's
+                # own insert so a rollback only undoes that one row.
+                with db.session.begin_nested():
+                    em = EchomailMessage(
+                        area_id=area.id,
+                        network_id=area.network_id,
+                        from_name=msg_dict.get('from_name', '')[:100],
+                        to_name=msg_dict.get('to_name', 'All')[:100],
+                        subject=msg_dict.get('subject', '')[:200],
+                        body=msg_dict.get('body', ''),
+                        msg_id=msg_dict.get('msg_id', ''),
+                        reply_id=msg_dict.get('reply_id', ''),
+                        origin_line=msg_dict.get('origin_line', ''),
+                        tear_line=msg_dict.get('tear_line', ''),
+                        from_address=f'QWK:{node.packet_id}',
+                    )
+                    db.session.add(em)
+                    db.session.flush()
                 new_ids.append(em.id)
                 count += 1
             except Exception:
-                logger.exception('QWK FTP REP: error importing message')
-                db.session.rollback()
+                logger.exception('QWK FTP REP: error importing message '
+                                 '(this message skipped, earlier ones in '
+                                 'this batch are unaffected)')
 
         if new_ids:
             try:
@@ -370,6 +386,12 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
         try:
             db.session.commit()
         except Exception:
+            # Unlike every other exception handler in this function,
+            # this one had no log call at all -- a failure here (e.g. a
+            # lock timeout under real concurrent QWK/BinkP traffic on
+            # SQLite) silently left last_poll_at stale with zero trail.
+            logger.exception('QWK FTP REP: failed to update last_poll_at '
+                             'for node %s', node.packet_id)
             db.session.rollback()
 
         # Capture while still inside the app context -- node.packet_id is

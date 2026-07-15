@@ -142,6 +142,27 @@
     .status-right { display: flex; align-items: center; gap: 14px; overflow: hidden; min-width: 0; }
     .topic-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 60vw; overflow: hidden; }
     .topic-text { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 55vw; }
+
+    /* Scrolling ticker/banner -- rotates hub-pushed BANNER:/STATS: text,
+       same pool the terminal client's own ticker feeds from (see
+       mrc_chat.py's _add_ticker_text). One entry visible at a time,
+       cross-faded on rotation rather than a pixel-scroll marquee. */
+    .ticker-bar {
+      padding: 3px 20px;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted, #888);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+    }
+    .ticker-bar #ticker-text {
+      display: inline-block;
+      transition: opacity 0.4s ease;
+    }
+    .ticker-bar #ticker-text.ticker-fade { opacity: 0; }
     
     .main-container { 
       display: flex; 
@@ -564,6 +585,10 @@
     </div>
   </div>
 
+  <div class="ticker-bar" id="ticker-bar" style="display:none;">
+    <span id="ticker-text">-</span>
+  </div>
+
   <div class="main-container">
     <div class="chat-area">
       <div class="messages" id="messages"></div>
@@ -608,6 +633,8 @@
       <div class="sidebar-item">Room: <span id="current-room">-</span></div>
       <div class="sidebar-item">Handle: <span id="current-handle">-</span></div>
       <div class="sidebar-item">Server: <span id="server-info">-</span></div>
+      <div class="sidebar-item">Latency: <span id="latency-info">-</span></div>
+      <div class="sidebar-item">Clock: <span id="clock-info">-</span></div>
 
       <div class="panel" id="helpers-panel" style="display:none;">
         <div class="panel-header" id="helpers-header">
@@ -762,6 +789,18 @@
           <div class="toggle-row">
             <input type="checkbox" id="ticker-toggle" checked />
             <label for="ticker-toggle" style="margin:0;">Scrolling ticker/banner</label>
+          </div>
+          <label for="clockformat-select">Clock format</label>
+          <div class="panel-row">
+            <select id="clockformat-select">
+              <option value="24">24-hour</option>
+              <option value="12">12-hour</option>
+            </select>
+          </div>
+          <label for="tzoffset-input">Timezone offset (minutes from UTC, e.g. -300 for US Eastern)</label>
+          <div class="panel-row">
+            <input type="number" id="tzoffset-input" step="1" min="-720" max="840" placeholder="0" />
+            <button id="tzoffset-apply">Apply</button>
           </div>
           <label for="entermsg-input">Enter-chat message (<code>{handle}</code> placeholder)</label>
           <div class="panel-row">
@@ -1028,6 +1067,25 @@
     let twitBlockedCount  = 0;
     let shieldBlockedCount = 0;
 
+    // Clock format + timezone offset -- purely client rendering hints,
+    // synced from the same server-persisted profile as the twit/shield
+    // settings above (see mrc/bridge/main.py's _session_prefs). Latency
+    // and the ticker pool below are local-only (not server-persisted).
+    let clockFormat        = '24';
+    let tzOffsetMinutes    = 0;
+    let latencyMs          = null;
+    let clockTimer         = null;
+
+    // Scrolling ticker/banner -- rotates hub-pushed BANNER:/STATS: text,
+    // same pool source the terminal client's own ticker feeds from (see
+    // mrc_chat.py's _add_ticker_text/_ticker_loop). One entry visible at
+    // a time, cross-faded on rotation.
+    const TICKER_POOL_MAX  = 20;
+    const TICKER_ROTATE_MS = 6000;
+    let tickerPool         = [];
+    let tickerIdx          = 0;
+    let tickerTimer        = null;
+
     let stickyDmUser  = null;
     let stickyDmNodes = new Map();
 
@@ -1054,6 +1112,13 @@
     const messagesDiv      = document.getElementById('messages');
     const statusText       = document.getElementById('status-text');
     const topicText        = document.getElementById('topic-text');
+    const tickerBar        = document.getElementById('ticker-bar');
+    const tickerTextEl     = document.getElementById('ticker-text');
+    const latencyInfoEl    = document.getElementById('latency-info');
+    const clockInfoEl      = document.getElementById('clock-info');
+    const clockformatSelect = document.getElementById('clockformat-select');
+    const tzoffsetInput    = document.getElementById('tzoffset-input');
+    const tzoffsetApplyBtn = document.getElementById('tzoffset-apply');
     const joinPanel        = document.getElementById('join-panel');
     const chatPanel        = document.getElementById('chat-panel');
     const handleInput      = document.getElementById('handle-input');
@@ -1412,6 +1477,10 @@
 
     function isStatsServerMessage(msg) {
       return /^(?:SERVER:\s*)?STATS\s*:/i.test(String(msg || '').trim());
+    }
+
+    function isBannerServerMessage(msg) {
+      return /^(?:SERVER:\s*)?BANNER\s*:/i.test(String(msg || '').trim());
     }
 
     function tryParseRoomTopicFromServerMessage(msg) {
@@ -1883,10 +1952,93 @@
       shieldToggle.checked = broadcastShield;
       renderTwitList();
 
-      if (typeof prefs.ticker_enabled === 'boolean') tickerToggle.checked = prefs.ticker_enabled;
+      if (typeof prefs.ticker_enabled === 'boolean') {
+        tickerToggle.checked = prefs.ticker_enabled;
+        updateTickerVisibility();
+      }
       if (typeof prefs.enter_msg_tpl === 'string')   entermsgInput.value = prefs.enter_msg_tpl;
       if (typeof prefs.leave_msg_tpl === 'string')   leavemsgInput.value = prefs.leave_msg_tpl;
       if (typeof prefs.quit_msg === 'string')        quitmsgInput.value  = prefs.quit_msg;
+
+      if (prefs.clock_format === '12' || prefs.clock_format === '24') {
+        clockFormat = prefs.clock_format;
+        clockformatSelect.value = clockFormat;
+      }
+      if (typeof prefs.tz_offset === 'number') {
+        tzOffsetMinutes = prefs.tz_offset;
+        tzoffsetInput.value = String(tzOffsetMinutes);
+      }
+      updateClockDisplay();
+    }
+
+    // -----------------------------------------------------------------------
+    // Clock (status sidebar) -- respects clockFormat/tzOffsetMinutes above
+    // -----------------------------------------------------------------------
+    function formatClock(date) {
+      const shifted = new Date(date.getTime() + tzOffsetMinutes * 60000);
+      const h24 = shifted.getUTCHours();
+      const m   = String(shifted.getUTCMinutes()).padStart(2, '0');
+      if (clockFormat === '12') {
+        const period = h24 >= 12 ? 'pm' : 'am';
+        let h12 = h24 % 12;
+        if (h12 === 0) h12 = 12;
+        return h12 + ':' + m + period;
+      }
+      return String(h24).padStart(2, '0') + ':' + m;
+    }
+
+    function updateClockDisplay() {
+      if (clockInfoEl) clockInfoEl.textContent = formatClock(new Date());
+    }
+
+    function startClockTimer() {
+      stopClockTimer();
+      updateClockDisplay();
+      clockTimer = setInterval(updateClockDisplay, 15000);
+    }
+
+    function stopClockTimer() {
+      if (clockTimer) clearInterval(clockTimer);
+      clockTimer = null;
+    }
+
+    // -----------------------------------------------------------------------
+    // Scrolling ticker/banner
+    // -----------------------------------------------------------------------
+    function addTickerText(text) {
+      const clean = stripPipeCodes(String(text || '')).trim();
+      if (!clean) return;
+      if (tickerPool.length && tickerPool[tickerPool.length - 1] === clean) return;
+      tickerPool.push(clean);
+      if (tickerPool.length > TICKER_POOL_MAX) tickerPool.shift();
+      updateTickerVisibility();
+    }
+
+    function updateTickerVisibility() {
+      const show = !!(tickerToggle && tickerToggle.checked) && tickerPool.length > 0;
+      if (tickerBar) tickerBar.style.display = show ? 'block' : 'none';
+      if (show) startTickerRotation(); else stopTickerRotation();
+    }
+
+    function rotateTicker() {
+      if (!tickerPool.length || !tickerTextEl) return;
+      tickerTextEl.classList.add('ticker-fade');
+      setTimeout(() => {
+        tickerIdx = (tickerIdx + 1) % tickerPool.length;
+        tickerTextEl.textContent = tickerPool[tickerIdx];
+        tickerTextEl.classList.remove('ticker-fade');
+      }, 400);
+    }
+
+    function startTickerRotation() {
+      if (tickerTimer) return;
+      if (tickerTextEl && tickerPool.length) tickerTextEl.textContent = tickerPool[tickerIdx % tickerPool.length];
+      tickerTimer = setInterval(rotateTicker, TICKER_ROTATE_MS);
+    }
+
+    function stopTickerRotation() {
+      if (tickerTimer) clearInterval(tickerTimer);
+      tickerTimer = null;
     }
 
     function updatePrefsCounts() {
@@ -1996,7 +2148,14 @@
     function handleIncomingMessage(data) {
       switch (data.type) {
 
-        case 'pong': break;
+        case 'pong': {
+          const sentAt = Number(data.t);
+          if (sentAt > 0) {
+            latencyMs = Math.max(0, Date.now() - sentAt);
+            if (latencyInfoEl) latencyInfoEl.textContent = latencyMs + 'ms';
+          }
+          break;
+        }
 
         // ---- Reconnect lifecycle (events emitted by client.js) ----------
         case 'reconnecting':
@@ -2079,7 +2238,10 @@
           twitBlockedCount = 0;
           shieldBlockedCount = 0;
           updatePrefsCounts();
+          tickerPool = [];
+          tickerIdx  = 0;
           applyPrefs(data.prefs);
+          startClockTimer();
 
           togglePanel(stylePanel,    styleChev,    false);
           togglePanel(mentionsPanel, mentionsChev, false);
@@ -2152,9 +2314,18 @@
             const isUserlist = tryParseUserListFromServerMessage(msg);
             const isTopic    = tryParseRoomTopicFromServerMessage(msg);
             const isStats    = isStatsServerMessage(msg);
+            const isBanner   = isBannerServerMessage(msg);
+            // Feed the ticker before suppressing -- same text the
+            // terminal client's ticker pool captures (see
+            // mrc_chat.py's _add_ticker_text), previously either
+            // discarded (STATS) or left to leak into chat as raw
+            // noise (BANNER, never suppressed here before).
+            if (isStats)  addTickerText(msg.split(':').slice(1).join(':'));
+            if (isBanner) addTickerText(msg.split(':').slice(1).join(':'));
             if (window.SUPPRESS_USERLIST_LINES  && isUserlist) break;
             if (window.SUPPRESS_ROOMTOPIC_LINES && isTopic)    break;
             if (window.SUPPRESS_STATS_LINES     && isStats)    break;
+            if (isBanner) break;
           }
 
           const line = formatLine(data);
@@ -2187,6 +2358,9 @@
 
         case 'left':
           stopWsKeepalive();
+          stopClockTimer();
+          stopTickerRotation();
+          if (tickerBar) tickerBar.style.display = 'none';
           addMessage('✓ ' + (data.message || 'Left'), 'system');
           updateStatus('Connected (not in room)', '');
           currentHandle        = '';
@@ -2206,6 +2380,9 @@
         case 'disconnected':
           if (!client || !client._shouldReconnect) {
             stopWsKeepalive();
+            stopClockTimer();
+            stopTickerRotation();
+            if (tickerBar) tickerBar.style.display = 'none';
             updateStatus('Disconnected', '');
             addMessage('✗ Disconnected from server', 'error');
             _handleOverheadChars = 0;
@@ -2331,7 +2508,22 @@
     });
     twitInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') twitAddBtn.click(); });
 
-    tickerToggle.addEventListener('change', () => sendPrefsUpdate({ ticker_enabled: tickerToggle.checked }));
+    tickerToggle.addEventListener('change', () => {
+      sendPrefsUpdate({ ticker_enabled: tickerToggle.checked });
+      updateTickerVisibility();
+    });
+    clockformatSelect.addEventListener('change', () => {
+      clockFormat = clockformatSelect.value === '12' ? '12' : '24';
+      sendPrefsUpdate({ clock_format: clockFormat });
+      updateClockDisplay();
+    });
+    tzoffsetApplyBtn.addEventListener('click', () => {
+      const v = parseInt(tzoffsetInput.value, 10);
+      tzOffsetMinutes = Number.isFinite(v) ? Math.max(-720, Math.min(840, v)) : 0;
+      tzoffsetInput.value = String(tzOffsetMinutes);
+      sendPrefsUpdate({ tz_offset: tzOffsetMinutes });
+      updateClockDisplay();
+    });
     prefsMsgsApply.addEventListener('click', () => sendPrefsUpdate({
       enter_msg_tpl: entermsgInput.value,
       leave_msg_tpl: leavemsgInput.value,

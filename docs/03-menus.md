@@ -57,8 +57,10 @@ Each item has:
 | `who`       | —                                                 | who's online                                  |
 | `multinode` | —                                                 | interactive multinode chat                    |
 | `oneliners` | —                                                 | last 10 callers + recent one-liners           |
+| `lastcallers` | —                                               | full, paginated Last Callers list             |
 | `chat`      | —                                                 | chat menu (IRC / shoutbox)                    |
 | `rss`       | —                                                 | RSS reader                                    |
+| `guru`      | —                                                 | Ask Anet — searches the wiki (FTS5, not an LLM) |
 | `ebooks`    | —                                                 | ebook reader (Gutenberg)                      |
 | `wall`      | —                                                 | graffiti wall                                 |
 | `games`     | —                                                 | game center                                   |

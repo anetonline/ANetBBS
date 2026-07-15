@@ -247,6 +247,68 @@ class TzOffsetPrefsTests(unittest.TestCase):
         self.assertEqual(self.app._session_prefs({})["tz_offset"], 0)
 
 
+class DefaultRoomTwitFilterClockFormatPrefsTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_bridge(self._tmp.name)
+        self.ws_id = 666
+        self.ws = _FakeWs()
+        self.app.websockets[self.ws_id] = self.ws
+        self.app.db.save_session(str(self.ws_id), {
+            "handle": "Alice", "nick": "Alice", "room": "lobby", "in_room": True,
+        })
+
+    def test_default_room_normalized_and_persisted(self):
+        # MRCProtocol.norm_room() strips a leading '#' and swaps spaces
+        # for underscores -- it does NOT lowercase (matches how `room`
+        # itself is handled everywhere else in this file, e.g.
+        # _handle_join_room). The terminal client lowercases client-side
+        # before ever sending /set defaultroom, same as it does for
+        # /join -- this test exercises the bridge layer alone.
+        _run(self.app._handle_set_prefs(self.ws_id, {"default_room": "#My Room"}))
+        self.assertEqual(self.ws.sent[0]["prefs"]["default_room"], "My_Room")
+        prof = self.app.db.get_profile("Alice")
+        self.assertEqual(prof["default_room"], "My_Room")
+
+    def test_default_room_loaded_on_next_join(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"default_room": "sysops"}))
+        ws_id2 = 667
+        ws2 = _FakeWs()
+        self.app.websockets[ws_id2] = ws2
+        _run(self.app._handle_join_room(ws_id2, {"handle": "Alice", "room": "lobby"}))
+        sess2 = self.app.db.get_session(str(ws_id2))
+        self.assertEqual(sess2["default_room"], "sysops")
+
+    def test_default_room_defaults_empty(self):
+        self.assertEqual(self.app._session_prefs({})["default_room"], "")
+
+    def test_clock_format_invalid_value_falls_back_to_24(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"clock_format": "banana"}))
+        self.assertEqual(self.ws.sent[0]["prefs"]["clock_format"], "24")
+
+    def test_clock_format_12_persists(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"clock_format": "12"}))
+        prof = self.app.db.get_profile("Alice")
+        self.assertEqual(prof["clock_format"], "12")
+
+    def test_clock_format_defaults_24(self):
+        self.assertEqual(self.app._session_prefs({})["clock_format"], "24")
+
+    def test_twit_filter_enabled_defaults_true(self):
+        self.assertTrue(self.app._session_prefs({})["twit_filter_enabled"])
+
+    def test_twit_filter_enabled_can_be_turned_off_and_persists(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"twit_filter_enabled": False}))
+        self.assertFalse(self.ws.sent[0]["prefs"]["twit_filter_enabled"])
+        ws_id2 = 668
+        ws2 = _FakeWs()
+        self.app.websockets[ws_id2] = ws2
+        _run(self.app._handle_join_room(ws_id2, {"handle": "Alice", "room": "lobby"}))
+        sess2 = self.app.db.get_session(str(ws_id2))
+        self.assertFalse(sess2["twit_filter_enabled"])
+
+
 class LeaveRoomQuitMessageTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

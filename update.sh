@@ -1246,6 +1246,19 @@ if [[ -f "$SUDOERS_SRC" ]]; then
     fi
 fi
 
+# Self-heal the terminal gallery viewer for installs from before it
+# existed. Only created if missing -- never overwritten once present,
+# same as gallery-config.json, so a sysop's own edits to it survive
+# future updates.
+GALLERY_SCRIPT_SRC="$SOURCE_DIR/deploy/anet-gallery.sh"
+GALLERY_SCRIPT_DST="$INSTALL_DIR/anet-gallery.sh"
+if [[ -f "$GALLERY_SCRIPT_SRC" && ! -f "$GALLERY_SCRIPT_DST" ]]; then
+    sed "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$GALLERY_SCRIPT_SRC" > "$GALLERY_SCRIPT_DST"
+    chmod 0755 "$GALLERY_SCRIPT_DST"
+    chown "$SERVICE_USER":"$SERVICE_USER" "$GALLERY_SCRIPT_DST" 2>/dev/null || true
+    ok "Terminal gallery viewer installed: $GALLERY_SCRIPT_DST"
+fi
+
 # Drop a sentinel /etc/anetbbs.install so the privileged upgrade wrapper
 # (and any other future root helper) can discover the install root
 # without hardcoding a path. Sources cleanly with `. /etc/anetbbs.install`.

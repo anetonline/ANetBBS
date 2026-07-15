@@ -378,7 +378,7 @@ ask_yn INSTALL_DOSBOX "Install DOSBox-staging for DOS door games? (y/n)"      "n
 ask_yn INSTALL_DOSEMU "Install dosemu2 for door_dosemu game type (e.g. TW2002-style doors needing a real FOSSIL/COM1)? (y/n)" "n"
 ask_yn INSTALL_CLAMAV "Install ClamAV for upload virus scanning? (y/n)"        "n"
 ask_yn INSTALL_LHASA  "Install lhasa for .lzh archive description extraction? (y/n)" "n"
-ask_yn INSTALL_SIXEL  "Install libsixel-bin for sixel images in terminal RSS reader? (y/n)" "n"
+ask_yn INSTALL_SIXEL  "Install chafa + libsixel-bin for terminal image viewing (RSS reader + Image Gallery)? (y/n)" "n"
 ask_yn INSTALL_MYSTIC "Install Mystic BBS runtime + mplc compiler (.mps door support)? (y/n)" "n"
 # UFW: only meaningful in production mode (test mode is local-only)
 if [[ "$INSTALL_MODE" == "production" ]]; then
@@ -806,11 +806,26 @@ if [[ "$INSTALL_LHASA" == "y" ]]; then
 fi
 
 if [[ "$INSTALL_SIXEL" == "y" ]]; then
+    sixel_ok=false
     actual=$(pkg_name "libsixel-bin")
     if install_one_pkg "$actual"; then
-        ok "$actual (img2sixel — sixel images in terminal RSS reader)"
+        ok "$actual (img2sixel — sixel images in terminal RSS reader/Gallery)"
+        sixel_ok=true
     else
-        skip "libsixel — terminal RSS images will be skipped (text-only mode)"
+        skip "libsixel — sixel rendering will be skipped (chafa fallback only)"
+    fi
+    chafa_ok=false
+    actual=$(pkg_name "chafa")
+    if install_one_pkg "$actual"; then
+        ok "$actual (Unicode-block image rendering — works in any terminal)"
+        chafa_ok=true
+    else
+        skip "chafa — terminal Gallery viewer will fall back to sixel-only"
+    fi
+    if $sixel_ok || $chafa_ok; then
+        STATUS[terminal_images]="ok"
+    else
+        STATUS[terminal_images]="fail"
     fi
 fi
 
@@ -1607,7 +1622,26 @@ for w in run_upgrade.sh run_restore.sh; do
     fi
 done
 
-# ═══════════════════════════════════════════════════════════════════════════��═══
+# ─── terminal image gallery viewer ─────────────────────────────────────────────
+# Placed at the install ROOT (not under version control there — update.sh's
+# rsync has no source-tree entry at this exact path, so it's never touched
+# by an update) rather than a real Linux home dir: SERVICE_USER is a system
+# account (`useradd -r`) with no real home, just $INSTALL_DIR as its $HOME
+# field. Callers never get a real shell — this only becomes reachable once
+# a sysop wires it up as a menu hotkey (action_type=exec), which the
+# "Add sample items" button on Admin -> BBS Menus now also does automatically.
+GALLERY_SCRIPT_SRC="$SOURCE_DIR/deploy/anet-gallery.sh"
+GALLERY_SCRIPT_DST="$INSTALL_DIR/anet-gallery.sh"
+if [[ -f "$GALLERY_SCRIPT_SRC" ]]; then
+    sed "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$GALLERY_SCRIPT_SRC" > "$GALLERY_SCRIPT_DST"
+    chmod 0755 "$GALLERY_SCRIPT_DST"
+    chown "$SERVICE_USER":"$SERVICE_USER" "$GALLERY_SCRIPT_DST" 2>/dev/null || true
+    ok "Terminal gallery viewer installed: $GALLERY_SCRIPT_DST"
+else
+    warn "deploy/anet-gallery.sh not found — skipping terminal gallery viewer."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # STEP 9: NGINX & SSL
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Step 9/9: Configuring nginx & SSL"
@@ -1938,6 +1972,7 @@ if [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]]; then
     show_status "anetbbs"        "Terminal protocols (${proto_label% })"
 fi
 [[ "$ENABLE_FINGER" == "y" ]] && show_status "anetbbs-finger" "Finger server"
+[[ "$INSTALL_SIXEL" == "y" ]] && show_status "terminal_images" "Terminal image viewer (chafa/img2sixel)"
 show_status "anetbbs-mrc-bridge" "MRC bridge service"
 [[ "$ENABLE_NGINX" == "y" ]]  && show_status "nginx"          "nginx reverse proxy"
 [[ "$ENABLE_SSL" == "y" ]]    && show_status "ssl"            "SSL certificate"

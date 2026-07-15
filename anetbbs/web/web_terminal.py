@@ -2,9 +2,13 @@
 """
 Browser-based terminal — xterm.js front-end, socketio back-end.
 
-Lets a web user open a telnet/SSH/rlogin session to ANY host (defaults to
-the local BBS) right inside the browser tab — no native client required.
-This is the closest analog to fTelnet / SyncTERM-in-browser.
+Lets a web user open a raw TCP socket (optionally TLS-wrapped) to ANY
+host:port (defaults to the local BBS's telnet port) right inside the
+browser tab — no native client required. This is a plain telnet-style
+pipe, not a protocol client: there's no telnet IAC option negotiation
+and no SSH implementation, so it works well against telnet/rlogin-style
+servers that just stream bytes but will not complete a real SSH
+handshake. This is the closest analog to fTelnet / SyncTERM-in-browser.
 
 Architecture:
     Browser <—socketio—> Flask process <—TCP—> Remote BBS

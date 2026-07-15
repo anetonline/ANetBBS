@@ -38,6 +38,9 @@ every 4 seconds and shows:
 - Last action label
 - Idle seconds
 - Eye-icon link → per-node detail with last screen snapshot
+- Kick button → disconnects that node immediately
+  (`/admin/control/nodespy/<slot>/kick`), logged to the admin audit
+  trail as `kick_node`
 
 Stale rows (>5 min) auto-hide.
 

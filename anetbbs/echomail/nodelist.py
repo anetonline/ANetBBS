@@ -30,9 +30,37 @@ import datetime
 from ..models import db, Nodelist, NodelistEntry
 
 
-_HEADER_RE = re.compile(
-    r';A\s+(\w+)\s+nodelist\s+for\s+(\w+\s+\d+,\s+\d+)\s+--\s+Day\s+(\d+)\s+:\s+(\d+)\s*$'
-)
+
+# Real bug found in a full echomail-subsystem audit: the old anchored
+# _HEADER_RE (`;A (\w+) nodelist for (\w+ \d+, \d+) -- Day (\d+) : (\d+)`)
+# never matched THIS module's OWN generator (generate_nodelist(), just
+# below) -- confirmed directly against a real on-disk file
+# (data/files/annet_nodelist/NODELIST.196):
+#
+#   ;A NODELIST.196 for ANotherNetwork -- July 15, 2026 -- Day 196 : 0000
+#
+# Two problems: (1) `\w+` can't cross the `.` in "NODELIST.196", and
+# (2) this format has no literal "nodelist" keyword at all, and inserts
+# an extra "for <network name> --" clause the old regex never
+# anticipated -- a genuinely different structure, not just a stricter
+# version of the classic FTS-5000 style
+# (";A fidonet nodelist for Wednesday, October 15, 1997 -- Day number
+# 288 : 12345"). Every nodelist this software generates -- meaning
+# every peer's own re-import of it -- silently fell through to the
+# fallback path (day_of_year=1, release_date=today()) instead of the
+# real values baked into the file.
+#
+# Fixed by extracting each field independently via its own tolerant
+# search instead of one monolithic anchored pattern -- day-of-year and
+# CRC only need to find "Day [number] N :" and a trailing "digits at
+# end of line" respectively; the release date only needs to find a
+# "Month D, YYYY"-shaped substring anywhere in the line. This handles
+# both this module's own generated format AND the classic external
+# FTS-5000 phrasing (with or without a leading weekday / the word
+# "number") without needing to model the full header structure.
+_DAY_RE = re.compile(r'Day\s+(?:number\s+)?(\d+)\s*:')
+_CRC_RE = re.compile(r':\s*(\d+)\s*$')
+_DATE_RE = re.compile(r'(\w+\s+\d{1,2},\s*\d{4})')
 
 
 def parse_header(content):
@@ -49,27 +77,23 @@ def parse_header(content):
             'crc_checksum': '',
         }
 
-    m = _HEADER_RE.match(first_line)
-    if not m:
-        # Try to grab just the trailing CRC at minimum
-        crc_m = re.search(r'(\d{3,5})\s*$', first_line)
-        return {
-            'filename': 'NODELIST',
-            'day_of_year': 1,
-            'release_date': datetime.date.today(),
-            'crc_checksum': crc_m.group(1) if crc_m else '',
-        }
+    day_m = _DAY_RE.search(first_line)
+    crc_m = _CRC_RE.search(first_line)
+    date_m = _DATE_RE.search(first_line)
 
-    name, date_str, day, crc = m.groups()
-    try:
-        release_date = datetime.datetime.strptime(date_str.strip(), '%B %d, %Y').date()
-    except ValueError:
-        release_date = datetime.date.today()
+    release_date = datetime.date.today()
+    if date_m:
+        try:
+            release_date = datetime.datetime.strptime(
+                date_m.group(1).strip(), '%B %d, %Y').date()
+        except ValueError:
+            pass
+
     return {
-        'filename': name,
-        'day_of_year': int(day),
+        'filename': 'NODELIST',
+        'day_of_year': int(day_m.group(1)) if day_m else 1,
         'release_date': release_date,
-        'crc_checksum': crc,
+        'crc_checksum': crc_m.group(1) if crc_m else '',
     }
 
 

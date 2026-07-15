@@ -40,10 +40,12 @@ The wizard asks every question it needs, roughly in this order:
   18/11)? Enable Finger (privileged port 79)? Enable BinkP (FidoNet
   inbound mail, port 24554)?**
 - *(if nginx enabled)* **Enable SSL via Let's Encrypt?**
-- **Optional extras**: DOSBox-staging (DOS door games), ClamAV (upload
-  virus scanning), lhasa (.lzh archive descriptions), libsixel-bin
-  (sixel images in the terminal RSS reader), Mystic BBS runtime (.mps
-  door support) — each its own yes/no, all default **no**.
+- **Optional extras**: DOSBox-staging (DOS door games), dosemu2
+  (`door_dosemu` game type — TW2002-style doors needing a real
+  FOSSIL/COM1), ClamAV (upload virus scanning), lhasa (.lzh archive
+  descriptions), chafa + libsixel-bin (terminal image viewing — RSS
+  reader and Image Gallery), Mystic BBS runtime (.mps door support) —
+  each its own yes/no, all default **no**.
 - **Configure UFW firewall** to open the ports you just enabled?
   (default **no**) — this prompt only appears in `production` mode;
   `test` and `behind` installs skip it (test mode is local-only, and

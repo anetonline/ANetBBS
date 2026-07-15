@@ -129,13 +129,17 @@ and ANetBBS will show your ANSI instead of the stock colored menu.
 | -------------- | --------------------------------------------- |
 | `chat`         | Chat Systems top menu (IRC / MRC / Local)     |
 | `irc_chat`     | IRC Chat — server connection options          |
-| `sysop_menu`   | Sysop Tools top-level menu                   |
 | `sysop_users`  | Sysop → Manage Users list header             |
 | `sysop_boards` | Sysop → Manage Boards list header            |
 | `sysop_status` | Sysop → Server Status header                 |
 | `game_center`  | Game Center                                   |
 | `door_games`   | Door Games list                               |
 | `dialout`      | Dial-Out Directory                            |
+
+Note: the Sysop Tools top-level menu itself (the U/B/E/G/W/... category
+picker) is a scrolling lightbar screen with fixed row positions, so it
+can't take a variable-height custom art header the way the other slots
+above can — it always shows the standard banner.
 
 ### Tips
 
@@ -186,6 +190,8 @@ The same codes also work inside Synchronet door files served via
 | `@DAY@`                           | weekday, e.g. `Tuesday`         |
 | `@VER@` / `@VERSION@`             | ANetBBS build version           |
 | `@TIMELEFT@`                      | always blank — not modelled yet |
+| `@CLS@`                           | clear screen + home cursor      |
+| `@BPS:NNNN@`                      | simulate an NNNN-baud modem for the rest of the screen (300–56000, clamped); throttles the remaining output with real delays instead of just decorating text |
 
 | Mystic code | Resolves to                                           |
 | ----------- | ----------------------------------------------------- |

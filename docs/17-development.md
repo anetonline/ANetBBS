@@ -102,14 +102,21 @@ console.getkey();
 ```
 
 Drop this in `~/doors/hello/hello.js`, create a Game row with:
-- `game_type`: `door_synchronet`
-- `executable_path`: `<install>/anetbbs/games/sbbs_doors/run_sbbs_js.sh`
-- `command_line_args`: `~/doors/hello/hello.js`
-- `drop_file_type`: `DOOR32.SYS`
-- `drop_file_path`: `%P/door32.sys`
+- `game_type`: `door_synchronet` (label "Synchronet JS Game" in the
+  admin dropdown)
+- **Synchronet Script Path (.js)**: `~/doors/hello/hello.js`
+- **Synchronet Exec Dir**: leave blank unless the script expects to
+  run from a specific working directory
+- `drop_file_type`: `door32.sys`
+- `drop_file_path`: `%Pdoor32.sys`
 
-That's it. The shim handles drop-file generation, terminal I/O,
-ANSI/CP437 passthrough, user info injection.
+There's no separate wrapper shell script to point at — `executable_path`
+and `command_line_args` aren't used for this door type at all. The
+launcher auto-detects a real `jsexec` if present, otherwise falls back
+to the Node.js compat shim, using the two Synchronet-specific fields
+above to find your script. Drop-file generation, terminal I/O,
+ANSI/CP437 passthrough, and user info injection are all handled the
+same generic way every other door type gets them.
 
 **When the shim isn't enough:** drop a real Synchronet install in
 `/usr/local/sbbs/` and set `SBBS_PATH` in `.env`. The launcher detects
@@ -163,7 +170,7 @@ WEB_GAMES.append({
     'name': 'My Cool Game',
     'slug': 'mycoolgame',
     'description': 'It is very cool.',
-    'category': 'puzzle',          # puzzle | action | strategy | rpg | other
+    'category': 'puzzle',          # puzzle | action | strategy | rpg | cards | casino | other
     'icon': 'bi-controller',        # Bootstrap icon class
     'web_game_module': 'mycoolgame',
     'sort_order': 110,
@@ -296,8 +303,9 @@ To ship a new built-in theme:
 
 1. Open the theme builder, tweak colors, save with a name.
 2. Export the resulting `Theme` row's values as SQL (or note them).
-3. Add a fixture call in `anetbbs/seed_data.py` (look for the existing
-   theme seeding block) so fresh installs get your theme.
+3. Add it to the default-theme seed block in `_create_default_data()`
+   in `anetbbs/web_app.py` (there's no separate `seed_data.py` — it's
+   all in `web_app.py`) so fresh installs get your theme.
 
 CSS variables driving the theme include `--theme-bg-dark`,
 `--theme-primary`, `--theme-accent`, etc. — see `templates/base.html`
@@ -315,12 +323,15 @@ web BBS talks to it via socket.io at `/mrc/`.
 
 If you want to add a slash-command, capability, or output format:
 
-- The terminal client lives in `anetbbs/core/mrc_terminal.py`
-- The web client is `anetbbs/static/js/mrc.js`
+- The terminal client lives in `anetbbs/features/mrc_chat.py`
+- The web client is `anetbbs/static/mrc/client.js`
 - The bridge daemon's command surface is `mrc/bridge/main.py`
 
-For an IRC↔MRC mirror, see `anetbbs/admin/mrc_irc_bridges.py` — sysop
-configures the channel pairs at `/admin/mrc-irc-bridges/`.
+For an IRC↔MRC mirror, see `anetbbs/features/mrc_irc_bridge.py` — this
+one is CLI/systemd-only, no web admin UI exists for it yet. A sysop
+creates `MrcIrcBridge` rows directly and runs one instance per bridge
+via `python -m anetbbs.features.mrc_irc_bridge --bridge-id N`, wrapped
+by the `anetbbs-mrc-irc-bridge@.service` systemd template.
 
 ---
 
@@ -359,12 +370,15 @@ Three outbound channels are built in:
 To fire one from your feature code:
 
 ```python
-from anetbbs.features.webhooks import fire_webhook
-fire_webhook('new_post', {'board': 'general', 'title': 'Hello'})
+from anetbbs.features.webhooks import fire
+fire('post', {'board': 'general', 'title': 'Hello'})
 ```
 
-Webhooks are async (queued, retried with backoff) so this won't block
-your request.
+`fire()` spins up a plain thread and makes one POST attempt with an
+8-second timeout — it won't block your request, but there's no queue
+and no retry on failure. See [`23-webhooks.md`](23-webhooks.md) for
+the full list of the 8 real event types and the exact payload shape
+each one sends.
 
 ---
 

@@ -1,3 +1,42 @@
+# ANetBBS v1.0b2.119 — BinkP: fix a real mail-loop/mail-loss bug, full-subsystem audit (July 2026)
+
+Prompted by a real peer sysop's report of repeated duplicate bundle deliveries and mid-session disconnects. Root-caused against the FTS-1026/FTS-1027 specs, binkd's own C source, and Synchronet's binkp.js reference implementation, then verified end-to-end with new regression tests (scripted real BinkP frames, not mocks).
+
+- FIX: inbound listener could freeze **every other concurrent BinkP connection** while importing a large batch of mail — the listener runs one shared event loop for all sessions, and importing (DB writes, ZIP extraction, parsing) ran as blocking code directly on it. A big catch-up on one connection could stall a brand-new, unrelated connection for minutes, causing the peer to give up before ever getting an acknowledgement — the direct cause of the reported loop. Import now runs on a background thread so it can't block other sessions.
+- FIX: the inbound listener could also delay closing its own session until after importing what it just received; a slow import meant the peer's connection timed out before the session formally ended, so the peer's own bookkeeping never marked those files delivered and resent them next time. The session now finishes (and the socket closes) immediately after files are received/acknowledged, before import runs.
+- FIX: the outbound client used to mark a batch of messages "sent" regardless of whether the hub actually acknowledged it — a busy or unstable hub replying "skip" or "error" (both normal, spec-legal responses) silently and permanently discarded real outbound mail with no retry. It now only marks messages sent on actual acknowledgement; anything else is safely retried next poll.
+- FIX: the outbound client didn't handle the hub closing the connection while waiting for that acknowledgement — it would crash instead of retrying gracefully.
+- FIX: a path-traversal gap in both the inbound listener and outbound client — an inbound filename was never reduced to a safe basename before being used to write a local file.
+- FIX: two silent-failure spots (a malformed FTN address, corrupted routing history on a message) now log a warning instead of failing invisibly, so a sysop debugging misrouted mail has a trail to follow.
+
+Follow-up full audit of the rest of the echomail subsystem (AreaFix/FileFix, the hub tosser, QWK-hub FTP, InterBBS sync, nodelist import) surfaced several more real issues, now also fixed:
+
+- FIX (security): inbound AreaFix/FileFix netmail was never checked against the AreaFix password — any netmail addressed to the areafix/filefix robot could subscribe/unsubscribe echo areas with no authentication at all. Now verified against the same password the outbound side already sends (FTS-0024), on both the leaf and hub paths.
+- FIX: the hub's SEEN-BY loop-prevention check never actually worked (comparing a zone-qualified address against untokenized raw SEEN-BY lines, which could never match) — a hub could re-toss a message right back to the exact node that's also subscribed to receive it, a needless bounce and a contributor to loops.
+- FIX: a single bad message in a multi-message QWK REP upload could silently discard earlier, already-successfully-imported messages from the same batch.
+- FIX: InterBBS Wall/Last-Callers/Game-Scores sharing was re-sending a redundant AreaFix subscribe request on every single post/caller/score event instead of only when actually needed.
+- FIX: nodelist header parsing (day-of-year, release date) never worked against this software's own generated nodelists.
+
+---
+
+# ANetBBS v1.0b2.118 — MRC bridge crash fix + protocol correctness; new terminal/web MRC features (July 2026)
+
+- FIX: MRC bridge crash on a WebSocket-disconnect race (16 unguarded response sends) — confirmed via a live production crash-loop; very likely the actual cause of MRC trust unexpectedly lapsing.
+- FIX: MRC bridge now handles the hub's version-enforcement messages instead of silently reconnect-looping or leaking them into chat, plus a few other protocol-correctness fixes (graceful shutdown notice, accurate capability list).
+- NEW: MRC terminal client — `/set defaultroom`, `/set twitfilter`, `/set clockformat`, `/welcome`, `/changes`, plus `/q` `/b` `/cls` aliases.
+- NEW: MRC web client — scrolling ticker/banner, latency display, clock, and timezone-offset setting (all previously missing entirely from the web client).
+
+---
+
+# ANetBBS v1.0b2.117 — Full docs/wiki accuracy pass ahead of Aug 1; exec-door drop-file fix; new terminal gallery viewer (July 2026)
+
+- DOCS: Full docs/wiki accuracy pass ahead of the Aug 1 release — every claim checked against the actual code; fixed dozens of stale, wrong, or fabricated entries across `docs/` and the wiki (including invented MRC hub details, dead admin links, and wrong dosemu2/DOSBox drive-letter guidance).
+- FIX: Exec-door drop-file generation (the `exec` menu action) was silently broken since it shipped — a wrong function name meant every configured drop file failed quietly. Now actually works.
+- NEW: Terminal image gallery viewer (`anet-gallery.sh`) — documented for a while but never built. Now generated automatically by install.sh/update.sh.
+- FIX: RSS feed access-level restrictions weren't enforced on two of four web routes — a restricted feed was directly reachable even though hidden from the river/index.
+
+---
+
 # ANetBBS v1.0b2.116 — install.sh: FTPS cert-renewal fix; expanded troubleshooting docs (July 2026)
 
 - Fixed a gap where FTPS certificate permissions could silently break after the first Let's Encrypt renewal on a fresh install (only `update.sh` had the fix before).

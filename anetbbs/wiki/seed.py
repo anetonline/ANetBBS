@@ -648,7 +648,7 @@ have a list.
 
 On the network's row in `/admin/echomail/` (Networks list), click
 **Poll Now** — it runs an immediate BinkP session in the background
-and flashes a confirmation; watch `/admin/echomail/log/` for
+and flashes a confirmation; watch `/admin/echomail/logs` for
 handshake success and "received N packets". On the first poll you'll
 often get a big initial dump as the uplink catches your node up.
 
@@ -664,12 +664,14 @@ nothing else to configure.
 
 ## Areafix
 
-To subscribe to a new area without bothering the coordinator,
-send a netmail to the `AreaFix` user at the uplink's address with
-the body:
+To subscribe to a new area without bothering the coordinator, send a
+netmail to the `AreaFix` user at the uplink's address with your
+AreaFix password **in the Subject line** (per FTS-0024 — not the
+body) and one command per line in the body:
 
 ```
-%PASSWORD yourareafixpw
+Subject: yourareafixpw
+
 +BBS_SCENE
 +SYSOP_HELP
 ```
@@ -699,6 +701,11 @@ almost every install. A separate admin surface,
 designated the network hub (`REGISTRY_MODE_ENABLED=true`) and is
 about managing *downstream* nodes that peer off **you** — see
 [[Sysop Control Panel]] and [[QWK]] for what's in there.
+
+If you're a hub for more than one real network from this one install,
+the BinkP node form grows a **Hub Identity** picker once a second
+identity exists — see [[Sysop Guide]], "Running more than one hub
+identity." Almost no install needs this.
 """),
 
     # ------------------------------------------------------------------
@@ -796,6 +803,8 @@ transport and they'll add your node under
 - [[QWK]] — the offline-reading side, and Hub Management for QWK nodes
 - [[TIC Processor]] — file-echo distribution mechanics
 - [[Sysop Control Panel]] — where Hub Management lives if you run the hub
+- [[Sysop Guide]] — "Running more than one hub identity," if bbs.a-net.fyi
+  isn't the only network you hub from this install
 """),
 
     # ------------------------------------------------------------------
@@ -834,8 +843,8 @@ name, time remaining, baud rate, etc. ANetBBS writes the major
 formats automatically right before launch:
 
 - `DOOR.SYS` — almost-universal
-- `DORINFOx.DEF` — Synchronet-flavored
-- `EXITINFO.BBS` — Renegade/Telegard
+- `DORINFO1.DEF` — Synchronet/Telegard-flavored
+- `DOOR32.SYS` — modern 32-bit format, used by newer FPC-based door kits
 
 Stored in each door's working directory; cleared on launch.
 
@@ -862,8 +871,9 @@ How to register a new door so users can run it from the menu.
 
 The simplest case — these live entirely in the browser.
 
-`/admin/games/` → **Add Game**. Type = `web`. Provide the HTML
-template path (relative to `anetbbs/templates/games/web/`). That's it.
+`/admin/games/` → **Add Game**. Type = `builtin_web` ("Built-in Web
+Game" in the dropdown). Provide the HTML template path (relative to
+`anetbbs/templates/games/web/`). That's it.
 
 ## 2. Remote rlogin doors (Synchronet game servers)
 
@@ -871,33 +881,40 @@ Most "play LORD on someone else's BBS" setups go through rlogin.
 
 `/admin/games/` → **Add Game**. Type = `door_rlogin`. Fields:
 
-- **Host** — the remote BBS hostname or IP
-- **Port** — usually 513
-- **Remote username** — the rlogin server-side login name. For
-  Synchronet game-server doors this is typically `door:LORD` or
-  similar; check with the remote sysop.
-- **Send password** — the session password agreed with the remote
-- **Local username pass-through** — if checked, your local
-  user's name is sent as the rlogin client-username. Otherwise a
-  generic guest name is used.
+- **Server (host:port)** — the remote server, one field, e.g.
+  `game.example.com:513`
+- **User-template PASSWORD [TERMINAL]** — three space-separated
+  values in one field: a template for what gets sent as the
+  rlogin username (tokens: `@USER@`/`@ALIAS@`/`%U`/`%u`), the
+  session password agreed with the remote, and an optional
+  `[TERMINAL]` value (e.g. `xtrn=LORD408`) to drop straight into a
+  specific door on servers that support it.
+- **BBS Tag (optional)** — appends `-TAG` to your BBS's identifying
+  string so the remote sysop can tell which BBS a caller came from.
+  A separate field purely so you don't have to hand-assemble the
+  combined string yourself.
 
 > ⚠ Synchronet-flavored rlogin uses **password first, username
 > second** — opposite of RFC 1282. ANetBBS's outbound client
-> already does this; you don't need to flip anything.
+> already does this; you don't need to flip anything, just fill in
+> the fields above in the order they're labeled.
 
 ## 3. DOS doors
 
-The full setup — DOS exe + DOSBox + TCP nullmodem bridge. Detailed
-in [[DOS Door Recipe]]. Short version:
+The full setup — DOS exe + DOSBox/dosemu2 + TCP nullmodem bridge.
+Detailed in [[DOS Door Recipe]]. Short version:
 
-1. Install DOSBox-staging.
-2. Drop the door's files under
-   `/var/lib/anetbbs/doors/<door-name>/`.
-3. Create a DOSBox config that wires `serial1=nullmodem
-   server:<port>` and `serial2=nullmodem client:<host>:<port>`.
-4. Register the game in the admin UI with type `door_dos`. Set the
-   bridge port and the DOSBox command line.
-5. Test by playing it. Watch
+1. Install DOSBox-staging (or dosemu2, for the `door_dosemu` type).
+2. Drop the door's files under `<install>/doors/<door-name>/`.
+3. Register the game in the admin UI with type `door_dos` (or
+   `door_dosemu`): **Executable Path**, **Working Directory**,
+   **Command Line Args**, **Drop File Type**, **Drop File Path**.
+   That's it — there's no bridge-port or raw DOSBox/dosemu2
+   command-line field to fill in by hand. The bridge picks a free
+   TCP port itself at launch, and the emulator invocation (including
+   the `serial1=nullmodem`/mount setup) is built automatically from
+   the fields above.
+4. Test by playing it. Watch
    `journalctl -u anetbbs -f` for bridge bytes-in/out (telnet, SSH,
    and rlogin are one unified systemd service, not separate units).
 
@@ -990,55 +1007,55 @@ environment.
 
 ### Prerequisites
 
-- DOSBox-staging built with `--enable-nullmodem` (default in 0.81+)
-- Xvfb if you want to run headless
-- The LORD binaries (`LORD.EXE`, `LORDCFG.EXE`, `LORD.DAT`, etc.)
-  in a directory you own — `/var/lib/anetbbs/doors/lord/`
+- DOSBox-staging (installed by `install.sh`/`update.sh` if you said
+  yes to that prompt)
+- `xvfb-run` (usually the `xvfb` package) if you want headless
+  operation — ANetBBS auto-wraps the DOSBox launch with it when found
+  on the system, no config needed
+- The LORD binaries (`LORD.EXE`, `LORDCFG.EXE`, `LORD.DAT`, etc.) in
+  a directory you own — `<install>/doors/lord/`
 
-## DOSBox config
+### Registering the game
 
-`lord.conf` next to the binaries. Key sections:
+There's no DOSBox config file to hand-write — ANetBBS generates it
+per launch. `/admin/games/` → **Add Game**, type `door_dos`:
 
-```ini
-[serial]
-serial1 = nullmodem server:9001
-serial2 = disabled
+- **Executable Path**: `<install>/doors/lord/LORD.EXE`
+- **Working Directory**: `<install>/doors/lord/`
+- **Drop File Type**: `door.sys` (or `door32.sys`)
+- **Drop File Path**: `E:\\` (see [[Door Setup]]'s drive-layout table
+  — `E:` is always the per-node scratch drive on DOSBox)
 
-[autoexec]
-mount c .
-c:
-LORDCFG -nodes 1
-LORD /N1 /B19200
-```
-
-`COM1` is the bridge port (matched on the BBS side); LORDCFG runs
-once to write `NODE1.DAT`; then LORD launches in "single-node, COM1
-at 19200" mode.
+At launch, ANetBBS mounts `C:` = your working directory, `D:` = its
+bundled FOSSIL driver bundle, `E:` = a per-node scratch directory,
+loads `BNU.COM` on COM1 automatically, copies the drop file from `E:`
+into `C:` so LORD finds it in its own directory, then runs your
+executable. See [[Door Setup]] for the full drive-letter table
+(dosemu2 uses different letters than DOSBox for the same three
+roles).
 
 ## Bridge wiring
 
-The BBS process opens a TCP connection to `localhost:9001` and
-ferries bytes between the user's terminal writer and the socket.
-That's the `DosBridge` class — see [[DosBridge]].
+The BBS process opens a TCP connection to a bridge port it allocates
+itself at launch time (no port to configure by hand) and ferries
+bytes between the user's terminal writer and the socket. That's the
+`DosBridge` class — see [[DosBridge]].
 
 ## LORDCFG gotchas
 
 - `LORDCFG` writes `NODE1.DAT` (or `NODE<n>.DAT`) into the working
   dir. It's a binary config blob — leave it alone between runs.
-- The dropfile path inside LORDCFG should be `.\\` (current dir),
-  not absolute, because DOSBox-staging's path mounting confuses
-  some doors otherwise.
 - `DOOR.SYS COM0` means "carrier present"; set to **COM1** for the
   bridge to think it's on a real port. ANetBBS writes this
   correctly out of the box.
 
 ## Exit hangs
 
-If LORD's exit doesn't release Xvfb cleanly, the watchdog needs
-a `waitpid` on DOSBox plus an idle timeout. ANetBBS does both —
-`xvfb-run` will hang past door exit if not babysat. The fallback
-is **Ctrl+]q** which the bridge translates to DOSBox's "kill
-emulator" sequence.
+If LORD's exit doesn't release Xvfb cleanly, the watchdog needs a
+`waitpid` on DOSBox plus an idle timeout — Xvfb can keep the PTY's
+slave fd open past the actual door exit if not babysat. ANetBBS does
+both. The fallback is **Ctrl+]q** which the bridge translates to
+DOSBox's "kill emulator" sequence.
 
 ## See also
 
@@ -1107,49 +1124,62 @@ since v279.
     ('chat', 'Chat', """
 # Chat
 
-Multi-user real-time chat. Three flavors live in one feature:
+Multi-user real-time chat. Three separate systems share the "chat"
+label:
 
 ## 1. Local chat
 
-Users on this BBS in the local channels. Web: `/chat/`. Terminal:
-main menu → Chat.
+Users on this BBS talking to each other in real time. **Terminal
+only** — main menu → Chat → Local Chat/Multinode. There is currently
+no web equivalent of local chat (the web Chat menu only has MRC Chat
+and IRC — see below).
 
-Backed by Socket.IO on the web side and async on the terminal side.
-History scrollback is 200 lines per channel.
+Multinode chat is a lightweight broadcast: `/list` to see who's
+connected, `/w <slot> <msg>` to whisper a specific node, `/q` to quit
+back to the menu.
 
-## 2. IRC
+## 2. IRC — three separate, unrelated things use this word here
 
-Two separate, unrelated things both use the word "IRC" here:
-
+- **ANetIRC (terminal door)** — a full personal IRC client built into
+  the terminal Chat menu (SASL, bookmarks, scrollback). This is what
+  most callers mean by "IRC chat" on this BBS. See [[IRC Client]] for
+  the closest write-up of the connection flow (same underlying idea,
+  different implementation).
+- **IRC Client (web)** — a personal, per-user IRC connection at
+  `/irc/` — you pick your own server, nick, and channels, same as
+  running your own IRC client, but in the browser. See [[IRC Client]].
 - **IRC Bridge** — a sysop-configured relay between one MRC room and
-  one external IRC server/channel. There's no admin web UI for this;
-  it's a database row plus its own systemd instance. See
-  [[IRC Bridge]].
-- **IRC Client** — a personal, per-user IRC connection at `/irc/` —
-  you pick your own server, nick, and channels, same as running your
-  own IRC client. See [[IRC Client]].
+  one external IRC server/channel, so MRC and IRC users can talk to
+  each other. There's no admin web UI for this; it's a database row
+  plus its own systemd instance. See [[IRC Bridge]].
 
 ## 3. MRC (Multi-Relay Chat)
 
-A BBS-scene chat network — like IRC but specifically for BBS
-sysops and users. The protocol is RFC-style line-oriented with
-`!` commands. Default ANetBBS connects to the public Magicka MRC
-hub on `mrc.bottomlesszoo.com:5000`.
+A BBS-scene chat network — connects sysops and users across many
+BBSes through one central hub. Default ANetBBS connects to the public
+hub at `mrc.bottomlessabyss.net:5000`. Both the web (`/mrc/`) and
+terminal MRC clients talk through the same local bridge, so web and
+terminal users share rooms and a single trust identity.
 
-See [[MRC]].
+See [[MRC]] for the full command reference — it's grown a lot of
+terminal-side features (nick sidebar, status bar, ticker, ignore
+lists) that are easy to miss if you only skim this page.
 
 ## Etiquette
 
 - Local channels: keep on-topic; sysop sets the topic.
-- Bridged channels: assume people on the other side don't know
+- MRC/bridged channels: assume people on the other side don't know
   what BBS they're talking to. Mention it when relevant.
 - Be patient — async typing means a lull doesn't mean nobody's
   there.
 
-## Slash commands
+## Quick MRC command reference
 
-`/me action`, `/topic ...`, `/who`, `/away [reason]`,
-`/whois <nick>`, `/msg <user> <text>` (DM), `/help` lists them all.
+`/me action`, `/topic [text]`, `/who`, `/afk [msg]` / `/back`,
+`/msg <user> <text>` (DM). `/help` asks the *hub* for its own help
+text; for the local command list inside the client, use `/helpserver`
+(alias `/h` or `/?`). Full list, including `/set`/`/twit`/`/shield`,
+is on the [[MRC]] page.
 """),
 
     # ------------------------------------------------------------------
@@ -1162,39 +1192,91 @@ and users across many BBSes through a central hub.
 ## How it differs from IRC
 
 - One central hub (no server federation)
-- Authentication is BBS-name-based (no nickserv)
-- Messages carry the user's BBS-name as part of the identity
+- Authentication is optional, per-handle "trust" (`/identify`), not a
+  NickServ-style requirement to chat at all
+- Messages carry the user's BBS as part of the identity, composed by
+  the bridge — you don't need to type it yourself
 - Mostly text-only; not many bots; a calmer, more BBS-y feel
 
 ## Connecting
 
-Built in. The `mrc-bridge` systemd service runs alongside the BBS
-and keeps a persistent connection to the configured MRC hub.
+Built in. The `mrc-bridge` systemd service runs alongside the BBS and
+keeps one persistent, BBS-wide connection to the hub — every web and
+terminal user shares it. Both `/mrc/` (web) and the terminal Chat
+menu's MRC option talk through this same bridge.
 
-`/admin/mrc/` configures:
+There is no web admin page for the bridge — it's configured by editing
+`mrc/bridge/config.json` (copy `mrc/bridge/config.example.json` on
+first setup) and restarting the `anetbbs-mrc-bridge` service:
 
-- Hub host (default `mrc.bottomlesszoo.com`)
-- Hub port (default 5000)
-- Local channel mapping — which MRC channels get bridged into which
-  local chat channels
+- `mrc_host` / `mrc_port` — the hub to connect to (default
+  `mrc.bottomlessabyss.net` / `5000`)
+- `identify_required_mode` — if `true`, callers must `/identify`
+  before they can chat at all. **Defaults to `false`** — `/identify`
+  is optional "MRC Trust," not a gate, unless a sysop deliberately
+  turns this on.
+- `bbs_description` / `bbs_telnet` / `bbs_ssh` / `bbs_website` /
+  `bbs_sysop` — fill these in! They're what other MRC clients see
+  when someone runs `/bbses` or `/info <n>` and looks up *your* BBS.
+  Left blank (the default), your entry shows up with missing info to
+  everyone else on the network.
 
-## Default channels
+## Rooms
 
-- `general` — everyone
-- `sysops` — sysop-only (gated by the hub)
-- `coding`, `linux`, `games` — topical
-- channel-of-the-day rotates on Sundays
+There's no sysop-configured channel list — rooms are dynamic, created
+on the hub side as people `/join` them. Everyone lands in `lobby` by
+default on connect. Use `/list` to see what rooms currently have
+people in them, `/join <room>` to switch.
+
+## Command reference (terminal client)
+
+**Session:** `/quit` (leave), `/help` (ask the *hub* for help),
+`/helpserver` / `/h` / `/?` (local command list).
+
+**Messaging:** `/msg <user> <text>` (DM, aliases `/t /tell /dm /pm
+/whisper /w`), `/r <text>` (reply to last DM), `/me <action>`,
+`/broadcast <text>` (sysop-wide).
+
+**Rooms:** `/join <room>`, `/list`, `/topic [text]`, `/roompass
+<pw>`, `/roomconfig [param value]`.
+
+**People:** `/who`, `/chatters`, `/users`, `/bbses` (list connected
+BBSes), `/info [n]` (look up one BBS's directory entry — see the
+`bbs_description` etc. fields above), `/lastseen [user]`, `/afk
+[msg]` / `/back`.
+
+**Auth (optional):** `/identify [password]`, `/register <password>
+[email]`, `/trust [sub]`.
+
+**Preferences — `/set`:** `/set list` shows current values.
+Configurable: `prefix`/`suffix` (nick decoration), `color <00-15>`
+(nick color code), `entermsg`/`leavemsg`/`quitmsg` (supports
+`{handle}`), `ticker on|off`, `clock on|off`, `tz <zone-or-offset>`,
+`palette default|green|amber|cyan|mono`.
+
+**Ignore/shield:** `/twit add|del|list|clear [user]` — per-user
+ignore list. `/shield [on|off]` — refuses to send/show sysop
+broadcasts while active.
+
+**Client-only:** `/scroll [n|up|down|bottom]`, `/clear`, `/mentions`,
+`/termsize`, `/raw <text>`, `/dlchatlog` (download your scrollback).
+
+## What the terminal screen shows
+
+- **Status bar** (row 1): current room, topic, mention count, latency,
+  AFK flag, optional clock.
+- **Scrolling ticker** (row 2, toggle with `/set ticker`): hub
+  banners/stats plus rotating tips.
+- **Nick-list sidebar**: everyone in the current room, on terminals
+  ≥100 columns wide.
+- **Tab-complete**: usernames seen in chat or via `/who` autocomplete
+  on Tab.
 
 ## Bridged into web/terminal
 
-Once MRC is wired up, [[Chat]] users on the local BBS see MRC
-traffic as if it were native. Your own messages get a `<sysop@anet>`
-or `<user@anet>` prefix on the MRC side.
-
-## Reference: uMRC
-
-The `uMRC` reference client is bundled in `vendor/uMRC/` — useful
-as a sanity check if the bridge is misbehaving.
+Once MRC is wired up, [[Chat]] users on the local BBS see MRC traffic
+as if it were native — web and terminal share the same rooms and
+identity through the one bridge connection.
 """),
 
     # ------------------------------------------------------------------
@@ -1273,7 +1355,7 @@ on the subject.
 
 ## Block list
 
-Bothered by a user? `/profile/blocks/` lets you block them. Blocked
+Bothered by a user? `/blocks/` lets you block them. Blocked
 users can't PM you; you can still see their public posts.
 
 ## Deletion
@@ -1354,7 +1436,8 @@ sending netmail.
 ## Sending
 
 `/imsg/send` — pick a target from the [[BBS Directory]] or type
-`username@host` manually. Up to ~500 chars per message.
+`username@host` manually. Up to 8000 chars per message (the MSP wire
+protocol itself allows up to 8192 bytes).
 
 ## Receiving
 
@@ -1375,9 +1458,11 @@ Add to it under `/admin/peers/`.
 
 ## Encoding
 
-MSP is 8-bit clean; assume CP437 for safety on inbound. Outbound
-encodes the textarea content as latin-1 (so CP437-style art going
-out doesn't get mangled).
+MSP is 8-bit clean. Outbound messages are encoded as UTF-8. Inbound
+messages are decoded as UTF-8 first, falling back to latin-1 only if
+that fails — so a peer sending plain CP437/latin-1 text still comes
+through readable, but UTF-8 is what ANetBBS actually sends and
+prefers on the wire.
 """),
 
     # ------------------------------------------------------------------
@@ -1410,27 +1495,31 @@ The BBS file library — uploads, downloads, descriptions, areas.
 ## Uploading
 
 Logged-in users can upload to the **Uploads** area by default.
-Sysops can change which areas accept user uploads.
+Sysops can change which areas accept user uploads, and set a minimum
+access level per area (an area can also be sysop-only).
 
-Per-file metadata:
+Per-file metadata is just a description — optional, since it can be
+auto-extracted (see below). There's no tags/license/"replaces older
+file" metadata today.
 
-- Description (required)
-- Tags (optional, comma-separated)
-- Replaces (older file? link them so the system marks one as
-  superseded)
-- License (optional)
+Two safety checks run automatically on every upload: an **archive
+integrity test** (corrupt zip/tar/7z/rar files are rejected outright)
+and a **content-hash dedup check** (warns if the same file — by
+content, not filename — already exists somewhere in the file base).
 
 ## Virus scanning
 
-The sysop can wire ClamAV via `/admin/files/virus-scan/`. Uploads
-are scanned on arrival; infected files are quarantined to a
-sysop-only area.
+The sysop can wire ClamAV via `/admin/virus-scan`. Uploads are
+scanned on arrival; infected files are quarantined to a sysop-only
+area.
 
 ## Descriptions
 
-ANetBBS reads `FILE_ID.DIZ` from inside `.zip` / `.rar` / `.7z`
-uploads and uses it as the description if you didn't provide one.
-Common BBS-scene practice.
+If you didn't type one, ANetBBS auto-extracts a description from
+`FILE_ID.DIZ`, `README.md`/`README.txt`, or `DESCRIPT.ION` found
+inside the upload — supported archive formats are `.zip`, `.rar`,
+`.7z`, `.lha`/`.lzh`, and `.tar.gz`/`.tar.bz2`/`.tar.xz`. Common
+BBS-scene practice, extended to modern archive formats too.
 
 ## TIC distribution
 
@@ -1449,11 +1538,6 @@ network-attached file area (not just ANotherNetwork's) automatically
 queues it for outbound distribution to every subscribed peer — no
 separate "publish" step. See the Outbound section of
 [[TIC Processor]] for exactly which upload paths trigger this.
-
-## Quotas
-
-Sysop sets per-user upload quotas under `/admin/users/<id>/`. Default
-is no quota.
 """),
 
     # ------------------------------------------------------------------
@@ -1497,6 +1581,13 @@ These replace the banner at the top of the named menu. The menu items
 | `chat.ans` | Chat Systems menu |
 | `irc_chat.ans` | IRC Chat menu |
 | `dialout.ans` | Dial Out — Visit Another BBS |
+| `sysop_users.ans` | Sysop -> Manage Users list header |
+| `sysop_boards.ans` | Sysop -> Manage Boards list header |
+| `sysop_status.ans` | Sysop -> Server Status header |
+
+(The Sysop Tools top-level menu itself is a scrolling lightbar screen
+with fixed row positions, so it can't take a custom art header the way
+these can -- it always shows the standard banner.)
 
 Any menu you create through **Admin → Menus** also supports a file override
 using the menu's name as the filename (e.g. a menu named `utilities` →
@@ -1621,7 +1712,7 @@ shows the lot.
 - [[Echomail]] polling runs on its own — a background poller thread
   inside `anetbbs-web` polls each network on its configured interval
   (default every 60 min), no cron needed. Verify
-  `/admin/echomail/log/` for errors.
+  `/admin/echomail/logs` for errors.
 - Approve any [[Files|files]] flagged by the virus scanner.
 - If you run the network hub: peek at the hatch/hold queue under
   Hub Management (see below) — a backlog there means outbound files
@@ -1642,9 +1733,11 @@ shows the lot.
 
 ## Monthly
 
-- Rotate logs (`/var/log/anetbbs/` — `logrotate` config in
-  `deploy/logrotate.anetbbs`). This can also be automated — see
-  **Scheduled events** below.
+- Rotate logs — there's no external `logrotate` config; it's
+  built in as the `log_rotate` scheduled event (any `<install>/logs/*.log`
+  over a size threshold, default 50MB, gets renamed to `.1` and a
+  fresh file starts). See **Scheduled events** below to check its
+  schedule or run it manually.
 - Review user registrations: ban obvious spam accounts.
 - Update door binaries if their authors have patched.
 - Check [[Peers]] for dead links (`/admin/peers/health`).
@@ -1697,8 +1790,8 @@ own schedule. Worth a look if you're tired of remembering to do the
 - Install: `/opt/anetbbs/` (this site)
 - Data: `/opt/anetbbs/data/` (sqlite + uploads)
 - Logs: `/opt/anetbbs/logs/` (rotated)
-- DOSBox doors: `/var/lib/anetbbs/doors/<name>/`
-- Echomail spool: under data dir, `echomail/{in,out}box/`
+- Doors: `/opt/anetbbs/doors/<name>/`
+- Echomail spool: `/opt/anetbbs/data/echomail/binkp/{inbound,outbound}/`
 
 ## See also
 
@@ -1736,7 +1829,7 @@ Live terminal session list with view-screen and kick buttons. See
 ### Online users
 
 Web + terminal users combined, last 5 minutes. Refreshes every
-4 seconds.
+5 seconds.
 
 ### Sysop tools
 
@@ -1879,10 +1972,9 @@ Backing up an ANetBBS install.
 | `data/anetbbs.db` | The sqlite database (everything) |
 | `data/uploads/` | User uploads + file library |
 | `data/avatars/` | Profile pictures |
-| `data/text/` | Custom ANSI screens (see [[Custom ANSI Screens]]) |
+| `data/text/menus/` | Static per-menu ANSI/ASCII art overrides (welcome/goodbye/newuser/custom screens live in the DB — see `data/anetbbs.db` above, not here) |
 | `data/echomail/` | Inbound/outbound BinkP packets |
-| `data/secrets.env` | API keys (CHMOD 600!) |
-| `/var/lib/anetbbs/doors/` | Door binaries & per-door state |
+| `doors/` | Door binaries & per-door state |
 
 Source code itself isn't critical — restored from the install
 tarball.
@@ -1891,9 +1983,9 @@ tarball.
 
 ```bash
 sudo tar czf /backup/anetbbs-$(date +%F).tar.gz \\
-    --exclude=data/logs --exclude=__pycache__ \\
+    --exclude=logs --exclude=__pycache__ \\
     /opt/anetbbs/data \\
-    /var/lib/anetbbs/doors
+    /opt/anetbbs/doors
 ```
 
 Run that out of cron once a week, rotate keep-last-30.
@@ -1988,7 +2080,7 @@ anetbbs-rebuilt/
   static/           images, css overrides
   data/             SQLite + uploads (runtime; gitignored)
   docs/             markdown docs served at /docs/
-  deploy/           systemd units, sudoers, logrotate
+  deploy/           systemd units, sudoers, gallery viewer script
   tools/            one-off scripts
   install.sh / update.sh
 ```
@@ -2030,7 +2122,7 @@ that ANSI art relies on. See [[CP437]].
 
 **Dropfile** — A text file the BBS writes for a door so the door
 knows the user's name, time remaining, etc. (`DOOR.SYS`,
-`DORINFOx.DEF`, `EXITINFO.BBS`).
+`DORINFO1.DEF`, `DOOR32.SYS`).
 
 **Echo / echo area** — A globally-distributed message topic. See
 [[Echomail]].
@@ -2415,14 +2507,12 @@ line (`@MSGID:`, `@INTL`, `@TZUTC`) automatically.
 ## AreaFix
 
 `AreaFix@<your-node>` is a virtual recipient that lets *other*
-sysops subscribe to your areas without bothering you. Configure
-allowed areas in `/admin/echomail/areafix/`.
-
-## Routing
-
-If you peer with multiple uplinks, you can configure routing rules
-(`zone 1 via 1:104/315`, `else via 21:1/1`). Most small installs use
-a single uplink and don't need routing.
+sysops subscribe to your areas without bothering you. Which areas a
+downstream node can see is controlled by that node's echo-area
+subscriptions on its network record (Admin → Echomail → Hub), not a
+separate allow-list page. To see incoming AreaFix requests and how
+they were handled, check the AreaFix Log at
+`/admin/echomail/areafix_log`.
 
 ## Encryption
 
@@ -2546,6 +2636,12 @@ meaningful on the one install that *is* the network hub):
   (see [[ANotherNetwork]] for how a sysop submits one of these).
   Approving auto-creates the QWK node record with a generated
   password.
+
+If you're a hub for more than one real network from this one install,
+the QWK node form grows a **Hub Identity** picker once a second
+identity exists, and each identity gets its own QWK Hub ID (the
+`<hub_id>.qwk` sysops actually download) — see [[Sysop Guide]],
+"Running more than one hub identity." Almost no install needs this.
 """),
 
     # ------------------------------------------------------------------
@@ -2669,41 +2765,31 @@ running under DOSBox-staging on Linux behind ANetBBS.
 
 ## Ingredients
 
-- DOSBox-staging 0.81+ (`apt install dosbox-staging` on Debian/Ubuntu)
-- Xvfb (`apt install xvfb`) for headless runs
+- DOSBox-staging (`apt install dosbox-staging` on Debian/Ubuntu, or
+  say yes to the DOSBox prompt in `install.sh`/`update.sh`)
+- `xvfb-run` (`apt install xvfb`) if you want headless operation —
+  ANetBBS auto-wraps the launch with it when found, no config needed
 - The DOS door's original files (preserve them as-is)
-- TCP nullmodem patch baked into DOSBox-staging (default since 0.81)
+
+There's no DOSBox config file, nullmodem port, or command line to
+write by hand — ANetBBS generates all of that per launch from a few
+admin-form fields. If you're expecting to hand-write a `.conf` file
+like on a bare-metal DOSBox setup, that's not how this works; skip
+straight to "Register the door" below.
 
 ## Steps
 
 ### 1. Drop the door into place
 
 ```bash
-sudo mkdir -p /var/lib/anetbbs/doors/lord
-sudo chown anetbbs:anetbbs /var/lib/anetbbs/doors/lord
-sudo -u anetbbs cp -a /path/to/lord/* /var/lib/anetbbs/doors/lord/
+sudo mkdir -p /opt/anetbbs/doors/lord
+sudo chown anetbbs:anetbbs /opt/anetbbs/doors/lord
+sudo -u anetbbs cp -a /path/to/lord/* /opt/anetbbs/doors/lord/
 ```
+(substitute your real service user / install dir if different from
+the defaults above)
 
-### 2. Configure DOSBox
-
-Make a `lord.conf` next to the binaries. The two essential
-sections:
-
-```ini
-[serial]
-serial1 = nullmodem server:9001
-serial2 = disabled
-
-[autoexec]
-mount c .
-c:
-LORDCFG -nodes 1
-LORD /N1 /B19200
-```
-
-Pick a free TCP port (9001 here) — used by the [[DosBridge]].
-
-### 3. Register the door
+### 2. Register the door
 
 `/admin/games/` → **Add Game**, type `door_dos`:
 
@@ -2711,34 +2797,34 @@ Pick a free TCP port (9001 here) — used by the [[DosBridge]].
 |-------|-------|
 | Name | LORD |
 | Description | Legend of the Red Dragon |
-| Working dir | `/var/lib/anetbbs/doors/lord` |
-| Command | `xvfb-run -a dosbox-staging -conf lord.conf` |
-| Bridge port | `9001` |
+| Executable Path | `/opt/anetbbs/doors/lord/LORD.EXE` |
+| Working Directory | `/opt/anetbbs/doors/lord/` |
+| Drop File Type | `door.sys` (or `door32.sys`) |
+| Drop File Path | `E:\\` |
 | Max nodes | 1 |
 | Time limit | 30 min |
 | Idle timeout | 5 min |
 
-### 4. First test
+At launch, ANetBBS picks a free bridge port itself, mounts `C:` =
+your working directory, `D:` = its bundled FOSSIL driver bundle, `E:`
+= a per-node scratch directory holding the drop file, loads
+`BNU.COM` on COM1, then runs `LORD.EXE`. `LORDCFG` runs the first
+time to write `NODE1.DAT` into the working directory — leave that
+file alone once it exists.
+
+### 3. First test
 
 Play it from your sysop account first. Watch
 `journalctl -u anetbbs -f` (telnet, SSH, and rlogin all run inside
-this one unified service now — the old split `anetbbs-telnet` /
-`anetbbs-ssh` units are retired) — you should see:
+this one unified service — there are no separate `anetbbs-telnet` /
+`anetbbs-ssh` units) — you should see bridge connect/byte-count/exit
+lines. If you see zero bytes in either direction, DOSBox isn't
+talking back — check that the executable path is actually correct
+and that `LORD.EXE` isn't itself configured to expect COM1=stdio
+instead of a real port (`DOOR.SYS` line 1 should read `COM1:`, which
+ANetBBS writes correctly by default).
 
-```
-bridge connected to 127.0.0.1:9001
-bridge: 215 bytes in, 4096 bytes out, ...
-door exited code 0 — bridge closing
-```
-
-If you see "bridge: 0 bytes in, 0 bytes out", DOSBox isn't talking
-back. Common causes:
-
-- `serial1=stdio` instead of `nullmodem server:` (old config)
-- Port already in use (`ss -tnlp | grep 9001`)
-- Door config still pointing at COM1=stdio inside the door itself
-
-### 5. Ship it
+### 4. Ship it
 
 If the test works, make sure the user-side path works too — log
 in as a regular user and play it.

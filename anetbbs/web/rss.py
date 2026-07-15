@@ -20,6 +20,7 @@ import bleach
 from markupsafe import Markup
 
 from ..models import db, RssFeed, RssItem, RssReadStatus
+from ..features.access_control import evaluate_access
 
 # Tags and attributes we allow through when rendering feed HTML bodies.
 _ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + [
@@ -89,8 +90,9 @@ def _unread_counts():
 @login_required
 def index():
     """List all active feeds with unread counts."""
-    feeds = (RssFeed.query.filter_by(is_active=True)
+    feeds = [f for f in (RssFeed.query.filter_by(is_active=True)
              .order_by(RssFeed.sort_order, RssFeed.name).all())
+             if evaluate_access(current_user, f.min_access_level)]
     # NOTE: variable is `feed_unread` not `unread` — base.html does
     # `{% set unread = ... %}` for the PM badge counter, which would
     # shadow our context var inside child templates.
@@ -137,6 +139,8 @@ def river():
 @login_required
 def view_feed(feed_id):
     feed = RssFeed.query.get_or_404(feed_id)
+    if not evaluate_access(current_user, feed.min_access_level):
+        abort(403)
     page = max(1, int(request.args.get('page', 1) or 1))
     pagination = (RssItem.query.filter_by(feed_id=feed.id)
                   .order_by(RssItem.published_at.desc().nullslast())
@@ -155,6 +159,8 @@ def view_feed(feed_id):
 @login_required
 def view_item(item_id):
     item = RssItem.query.get_or_404(item_id)
+    if not evaluate_access(current_user, item.feed.min_access_level):
+        abort(403)
     # Mark as read (idempotent — UniqueConstraint catches dupes)
     if not RssReadStatus.query.filter_by(
             user_id=current_user.id, item_id=item.id).first():

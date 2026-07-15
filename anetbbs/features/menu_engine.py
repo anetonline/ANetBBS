@@ -180,7 +180,7 @@ async def _act_exec(ui, args):
     or a JSON object with keys:
       - cmd:      shell command to run (required)
       - name:     friendly name for the dropfile + logging (optional)
-      - dropfile: 'door.sys' / 'doorsys' / 'door32.sys' / null (optional)
+      - dropfile: 'door.sys' / 'dorinfo' / 'door32.sys' / null (optional)
       - cwd:      working directory (optional)
 
     The session is bridged to the child process's stdin/stdout — output
@@ -214,22 +214,43 @@ async def _act_exec(ui, args):
     dropfile = (cfg.get('dropfile') or '').lower() or None
     cwd = cfg.get('cwd') or None
 
-    # Optional dropfile generation (BBS door convention).
+    # Optional dropfile generation (BBS door convention). There's no Game
+    # model instance in this exec-action context (just a type string from
+    # the sysop's JSON config), so this calls the low-level generate_*
+    # functions directly rather than games.dropfile.write_drop_file (which
+    # requires a Game row for its .drop_file_type/.drop_file_path fields).
     user = ui.session.user or {}
     drop_dir = None
     if dropfile:
         try:
-            from ..games.dropfile import write_dropfile
+            from ..games.dropfile import (
+                generate_door_sys, generate_dorinfo, generate_door32)
+            from ..games.node_paths import node_dir
             # NEVER import anetbbs.web_app here — it triggers
             # eventlet.monkey_patch() which corrupts threading in the
             # telnet/SSH/rlogin processes.
             from ..features.bbs_ui import _app
+            node_entry = getattr(ui.session, '_node_entry', None)
+            node_number = getattr(node_entry, 'slot', None) or 1
+            drop_dir = node_dir(node_number)
+            _os.makedirs(drop_dir, exist_ok=True)
+            filename = {
+                'door.sys': 'DOOR.SYS',
+                'dorinfo': 'DORINFO1.DEF',
+                'door32.sys': 'DOOR32.SYS',
+            }.get(dropfile, 'DOOR.SYS')
+            output_path = _os.path.join(drop_dir.rstrip('/'), filename)
             with _app().app_context():
-                drop_dir, _ = write_dropfile(
-                    dropfile, user.get('id'), user.get('username', '?'),
-                    sysop_name=_os.environ.get('SYSOP_NAME', 'Sysop'),
-                    bbs_name=_os.environ.get('BBS_NAME', 'ANetBBS'),
-                    node=1, baud=38400)
+                bbs_name = _os.environ.get('BBS_NAME', 'ANetBBS')
+                if dropfile == 'door.sys':
+                    generate_door_sys(user, node_number, bbs_name=bbs_name,
+                                      output_path=output_path)
+                elif dropfile == 'dorinfo':
+                    generate_dorinfo(user, node_number, bbs_name=bbs_name,
+                                     output_path=output_path)
+                elif dropfile == 'door32.sys':
+                    generate_door32(user, node_number, bbs_name=bbs_name,
+                                    output_path=output_path)
         except Exception:
             logger.exception('dropfile write failed; running without one')
 

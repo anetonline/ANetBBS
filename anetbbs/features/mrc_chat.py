@@ -361,9 +361,16 @@ class MRCChat(BaseChatSystem):
         # Filtered-but-counted, not silently invisible -- matches the
         # reference client's model.
         self._twit_list             = set()
+        self._twit_filter_enabled   = True
         self._broadcast_shield      = False
         self._twit_blocked_count    = 0
         self._shield_blocked_count  = 0
+        # Room a fresh connect should land in, and clock rendering format --
+        # both purely-local rendering hints synced from the bridge profile
+        # (see mrc/bridge/main.py's _session_prefs), same pattern as
+        # tz_offset below.
+        self._default_room          = ''
+        self._clock_format          = '24'
 
         # Remaining Phase A profile fields, surfaced via /set (see
         # _handle_slash's 'set' branch) -- local mirrors for /set list
@@ -704,7 +711,7 @@ class MRCChat(BaseChatSystem):
         if self._is_away:
             right_bits.append('\x1b[1;33mAWAY\x1b[0m')
         if self._show_clock:
-            right_bits.append(f'\x1b[2;37m{self._local_now().strftime("%H:%M")}\x1b[0m')
+            right_bits.append(f'\x1b[2;37m{self._format_clock(self._local_now())}\x1b[0m')
         right = '  '.join(right_bits)
 
         # When the sidebar is up, this bar was previously drawn full
@@ -910,8 +917,8 @@ class MRCChat(BaseChatSystem):
             await self.session.write(text + '\r\n')
             return
 
-        ts     = self._local_now().strftime('%H:%M ')
-        ts_len = len(ts)                     # always 6 "HH:MM "
+        ts     = self._format_clock(self._local_now()) + ' '
+        ts_len = len(ts)                     # 6 for 24h "HH:MM ", 5-6 for 12h "H:MMa "/"HH:MMa "
         # extra_indent goes on BOTH the first-line prefix and the
         # continuation indent -- not prepended to *text* itself, since
         # _word_wrap() deliberately drops leading whitespace on a fresh
@@ -1067,6 +1074,17 @@ class MRCChat(BaseChatSystem):
         set to -- see _tz_offset_minutes for the bug this replaced."""
         return datetime.utcnow() + timedelta(minutes=self._tz_offset_minutes)
 
+    def _format_clock(self, dt: datetime) -> str:
+        """Render a timestamp per /set clockformat (12|24, default 24).
+        12-hour form drops leading zero and trailing :00 seconds noise
+        the same way the reference client's CLOCKFORMAT option does --
+        `HH:MMa`, e.g. '2:07p' -- since every clock/timestamp display in
+        this file already assumed bare 24h HH:MM before this setting
+        existed, this is the single seam all of them route through now."""
+        if self._clock_format == '12':
+            return dt.strftime('%I:%M%p').lstrip('0').lower()
+        return dt.strftime('%H:%M')
+
     def _pal(self, key: str) -> str:
         return _TERM_PALETTES.get(self._palette_name, _TERM_PALETTES['default'])[key]
 
@@ -1110,7 +1128,7 @@ class MRCChat(BaseChatSystem):
         payload.update(overrides)
         return payload
 
-    async def _apply_prefs(self, prefs):
+    async def _apply_prefs(self, prefs, is_initial_join=False):
         """Sync local state from a 'joined' or 'prefs_updated' event's
         prefs field (see mrc/bridge/main.py's _session_prefs).
 
@@ -1123,12 +1141,23 @@ class MRCChat(BaseChatSystem):
         this re-runs the same split-screen layout negotiation with the
         correct value and repaints the chat history into the
         (possibly resized) scroll region.
+
+        `is_initial_join` gates the default_room auto-/join below: it
+        must only fire once, right after the very first connect of the
+        session (which always lands in DEFAULT_ROOM='lobby' before this
+        runs -- see _connect_and_chat), never on a later prefs_updated
+        (a sysop changing /set defaultroom mid-session should not be
+        unexpectedly teleported to it -- matches the reference client's
+        own DEFAULTROOM semantics of "room auto-joined at login").
         """
         if not isinstance(prefs, dict):
             return
         twit_list = prefs.get('twit_list')
         if isinstance(twit_list, list):
             self._twit_list = {str(t).strip().lower() for t in twit_list if str(t).strip()}
+        twit_filter = prefs.get('twit_filter_enabled')
+        if isinstance(twit_filter, bool):
+            self._twit_filter_enabled = twit_filter
         shield = prefs.get('broadcast_shield')
         if isinstance(shield, bool):
             self._broadcast_shield = shield
@@ -1138,6 +1167,14 @@ class MRCChat(BaseChatSystem):
             val = prefs.get(key)
             if isinstance(val, str):
                 setattr(self, attr, val)
+
+        default_room = prefs.get('default_room')
+        if isinstance(default_room, str):
+            self._default_room = default_room.strip().lstrip('#').lower()
+
+        clock_format = prefs.get('clock_format')
+        if clock_format in ('12', '24'):
+            self._clock_format = clock_format
 
         tz = prefs.get('tz_offset')
         if isinstance(tz, (int, float)):
@@ -1154,6 +1191,15 @@ class MRCChat(BaseChatSystem):
             # _enter_split_screen() itself never touches the lock.
             await self._enter_split_screen()
             await self._redraw_chat_area()
+
+        if is_initial_join and self._default_room and self._default_room != self._room:
+            new_room = self._default_room
+            await self._send_json({
+                'type': 'server_cmd',
+                'command': f'JOIN {new_room}',
+            })
+            self._room = new_room
+            await self._emit(f'\x1b[1;36mJoining your default room #{new_room}...\x1b[0m')
 
     async def _handle_event(self, data: dict):
         evt  = data.get('type', '')
@@ -1288,7 +1334,7 @@ class MRCChat(BaseChatSystem):
             # different part of the same 'joined' payload this handler
             # was already ignoring wholesale before now.
             self._apply_style(data.get('style'))
-            await self._apply_prefs(data.get('prefs'))
+            await self._apply_prefs(data.get('prefs'), is_initial_join=True)
             return
 
         if evt == 'style_updated':
@@ -1333,7 +1379,7 @@ class MRCChat(BaseChatSystem):
             # for every message type in this bucket (not just plain
             # chat) since a twitted user's CTCP/notice/etc. traffic is
             # just as unwanted.
-            if uname and uname.lower() in self._twit_list:
+            if self._twit_filter_enabled and uname and uname.lower() in self._twit_list:
                 self._twit_blocked_count += 1
                 return
 
@@ -1415,7 +1461,7 @@ class MRCChat(BaseChatSystem):
                 if mentioned:
                     self._mention_count += 1
                     self._mention_log.append({
-                        'time': self._local_now().strftime('%H:%M'),
+                        'time': self._format_clock(self._local_now()),
                         'room': f"#{data.get('from_room')}" if data.get('from_room') else '',
                         'from': f"{uname}@{data.get('from_site', '')}" if uname else 'someone',
                         'body': ('[DM] ' if is_dm else '') + plain[:200],
@@ -1439,7 +1485,7 @@ class MRCChat(BaseChatSystem):
         if evt == 'private':
             self._mention_count += 1
             self._mention_log.append({
-                'time': self._local_now().strftime('%H:%M'),
+                'time': self._format_clock(self._local_now()),
                 'room': '(PM)',
                 'from': f'{user}@{bbs}',
                 'body': plain_body[:200],
@@ -1455,7 +1501,7 @@ class MRCChat(BaseChatSystem):
             if mentioned:
                 self._mention_count += 1
                 self._mention_log.append({
-                    'time': self._local_now().strftime('%H:%M'),
+                    'time': self._format_clock(self._local_now()),
                     'room': f'#{room}' if room else '',
                     'from': f'{user}@{bbs}',
                     'body': f'* {plain_body[:200]}',
@@ -1471,7 +1517,7 @@ class MRCChat(BaseChatSystem):
             if mentioned:
                 self._mention_count += 1
                 self._mention_log.append({
-                    'time': self._local_now().strftime('%H:%M'),
+                    'time': self._format_clock(self._local_now()),
                     'room': f'#{room}' if room else '',
                     'from': f'{user}@{bbs}',
                     'body': plain_body[:200],
@@ -1939,7 +1985,7 @@ class MRCChat(BaseChatSystem):
         cmd  = parts[0].lower().lstrip('/')
         rest = parts[1].strip() if len(parts) > 1 else ''
 
-        if cmd in ('quit', 'exit', 'leave'):
+        if cmd in ('quit', 'q', 'exit', 'leave'):
             await self._emit('\x1b[36mLeaving MRC...\x1b[0m')
             return False
 
@@ -1959,7 +2005,7 @@ class MRCChat(BaseChatSystem):
                 '  /msg user text      private message  (aliases: /t /pm /dm /tell /w)',
                 '  /r text             reply to your last received DM',
                 '  /me action          emote (*action*)',
-                '  /broadcast text     broadcast to all rooms (sysop)',
+                '  /broadcast text     broadcast to all rooms (sysop, alias /b)',
                 '  /ctcp user CMD      CTCP query (VERSION/TIME/PING/CLIENTINFO)',
                 '',
                 '\x1b[1mRooms\x1b[0m',
@@ -1996,10 +2042,12 @@ class MRCChat(BaseChatSystem):
                 '  Ctrl+[up]/[dn]       recall previous/next sent line',
                 '  Tab                 nick autocomplete',
                 '  /mentions           show & clear mention log',
+                '  /welcome            re-show the connect tips/status',
+                '  /changes            recent client changes',
                 '  /scroll [n]         scroll up n lines (default 5)',
                 '  /scroll down [n]    scroll down n lines',
                 '  /scroll 0           scroll to bottom (live view)',
-                '  /clear              clear chat area',
+                '  /clear              clear chat area (alias /cls)',
                 '  /twit add|del|list|clear [user]   ignore-list management',
                 '  /shield [on|off]    broadcast shield (blocks /broadcast)',
                 '  /set [field value]  nick style, enter/leave/quit msgs, ticker, clock, tz',
@@ -2007,7 +2055,7 @@ class MRCChat(BaseChatSystem):
                 '  /dlchatlog          download this session\'s scrollback as text',
                 '  /termsize w,h       report terminal size to server',
                 '  /raw text           raw server command',
-                '  /quit               leave MRC',
+                '  /quit               leave MRC (alias /q)',
                 '',
             ):
                 await self._emit(ln)
@@ -2051,7 +2099,7 @@ class MRCChat(BaseChatSystem):
                 })
             return True
 
-        if cmd == 'broadcast':
+        if cmd in ('broadcast', 'b'):
             if not rest:
                 await self._emit('Usage: /broadcast text  (sysop only)')
                 return True
@@ -2130,7 +2178,10 @@ class MRCChat(BaseChatSystem):
                     '  quitmsg <text>      appended to your leave message on /quit',
                     '  ticker <on|off>     scrolling ticker/banner (saved)',
                     '  clock <on|off>      status-bar clock (local only, not saved)',
+                    '  clockformat <12|24> clock/timestamp hour format (saved)',
                     '  tz <zone|offset>    timestamp timezone: EST/CDT/PST/UTC/etc, or -5, +5:30',
+                    '  twitfilter <on|off> master twit-list enforcement (saved)',
+                    '  defaultroom <room>  room to auto-join on your next connect (saved)',
                     '  palette <name>      chrome color scheme (local only, not saved): '
                         + ', '.join(sorted(_TERM_PALETTES)),
                     '',
@@ -2149,7 +2200,10 @@ class MRCChat(BaseChatSystem):
                     f'\x1b[1;36mquitmsg:\x1b[0m {self._quit_msg or "(none)"}',
                     f'\x1b[1;36mticker:\x1b[0m {"on" if self._show_ticker else "off"}',
                     f'\x1b[1;36mclock:\x1b[0m {"on" if self._show_clock else "off"}',
+                    f'\x1b[1;36mclockformat:\x1b[0m {self._clock_format}',
                     f'\x1b[1;36mtz:\x1b[0m {self._format_tz_offset()}',
+                    f'\x1b[1;36mtwitfilter:\x1b[0m {"on" if self._twit_filter_enabled else "off"}',
+                    f'\x1b[1;36mdefaultroom:\x1b[0m {self._default_room or "(none -- lands in lobby)"}',
                     f'\x1b[1;36mpalette:\x1b[0m {self._palette_name}',
                 ):
                     await self._emit(ln)
@@ -2194,6 +2248,13 @@ class MRCChat(BaseChatSystem):
                 await self._emit(f'\x1b[1;36mClock:\x1b[0m {value.lower()}')
                 return True
 
+            if field == 'clockformat':
+                if value not in ('12', '24'):
+                    await self._emit('Usage: /set clockformat 12|24')
+                    return True
+                await self._send_json({'type': 'set_prefs', 'clock_format': value})
+                return True
+
             if field == 'tz':
                 offset = _parse_tz_offset(value)
                 if offset is None:
@@ -2201,6 +2262,22 @@ class MRCChat(BaseChatSystem):
                         'Usage: /set tz <zone|offset>  e.g. EST, CDT, PST, UTC, or -5, +5:30')
                     return True
                 await self._send_json({'type': 'set_prefs', 'tz_offset': offset})
+                return True
+
+            if field == 'twitfilter':
+                if value.lower() not in ('on', 'off'):
+                    await self._emit('Usage: /set twitfilter on|off')
+                    return True
+                await self._send_json({
+                    'type': 'set_prefs', 'twit_filter_enabled': value.lower() == 'on'})
+                return True
+
+            if field == 'defaultroom':
+                if not value:
+                    await self._emit('Usage: /set defaultroom <room>  (takes effect on your next connect)')
+                    return True
+                new_default = value.strip().lstrip('#').lower()
+                await self._send_json({'type': 'set_prefs', 'default_room': new_default})
                 return True
 
             if field == 'palette':
@@ -2452,6 +2529,45 @@ class MRCChat(BaseChatSystem):
             self._mention_log.clear()
             return True
 
+        if cmd == 'welcome':
+            await self._emit('')
+            await self._emit(
+                f'\x1b[32mYou are {self._handle} in #{self._room}.\x1b[0m')
+            await self._emit(
+                '\x1b[33mTip:\x1b[0m use [<] [>] arrow keys to change outgoing text color.')
+            await self._emit(
+                '\x1b[33mTip:\x1b[0m /identify <pass> if your handle is registered (MRC Trust).')
+            await self._emit(
+                '\x1b[33mTip:\x1b[0m /helpserver lists every command; /set help lists preferences.')
+            if not self._twit_filter_enabled:
+                twit_state = 'off'
+            elif self._twit_list:
+                twit_state = 'on'
+            else:
+                twit_state = 'on (empty list)'
+            shield_state = 'on' if self._broadcast_shield else 'off'
+            await self._emit(
+                f'\x1b[2mTwit filter: {twit_state}   Broadcast shield: {shield_state}   '
+                f'Terminal: {self._chat_width} cols\x1b[0m')
+            return True
+
+        if cmd == 'changes':
+            for ln in (
+                '',
+                '\x1b[1mRecent MRC client changes\x1b[0m',
+                '  - /set defaultroom, /set twitfilter, /set clockformat',
+                '  - /welcome, /changes, /q, /b, /cls command aliases',
+                '  - Nick-list sidebar, status bar (room/topic/mentions/latency/clock)',
+                '  - Scrolling ticker/banner fed by hub BANNER:/STATS: text',
+                '  - /set (prefix/suffix/color/entermsg/leavemsg/quitmsg/ticker/tz/palette)',
+                '  - /twit and /shield ignore/broadcast-shield lists',
+                '  - /bbses and /info <n> BBS directory lookup',
+                '  - Tab-complete on usernames seen in chat or via /who',
+                '',
+            ):
+                await self._emit(ln)
+            return True
+
         if cmd == 'scroll':
             arg = (rest or '').strip().lower()
             if arg in ('0', 'bottom', 'end', 'latest', 'live'):
@@ -2468,7 +2584,7 @@ class MRCChat(BaseChatSystem):
                 await self._scroll_chat(n)
             return True
 
-        if cmd == 'clear':
+        if cmd in ('clear', 'cls'):
             self._display_lines.clear()
             self._scroll_offset = 0
             if self._split_screen:
