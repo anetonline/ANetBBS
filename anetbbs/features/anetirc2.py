@@ -99,11 +99,26 @@ def _load_cfg(path: str) -> list[Bookmark]:
     return bms or [Bookmark()]
 
 def _save_cfg(path: str, bms: list[Bookmark]):
+    # Real data-corruption bug found in a deep review: this format has
+    # no escaping at all, and _load_cfg's read side does an unbounded
+    # `.split('|')`. A literal '|' typed into ANY free-text field --
+    # most plausibly `label`, which a sysop might reasonably separate
+    # with "Home | Personal" the way many UIs do -- silently shifts
+    # every field after it on the next load (server becomes the tail
+    # of the label, port becomes the server, etc.), with no error and
+    # no way to tell from the UI that it happened. Fixed by refusing to
+    # ever WRITE an ambiguous '|' into a field, using a visually
+    # similar substitute (U+00A6 BROKEN BAR) -- the read side and file
+    # format are unchanged, so this stays compatible with the original
+    # C client's understanding of the format, and existing saved files
+    # need no migration.
+    def _esc(s: str) -> str:
+        return s.replace('|', '¦')
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         for b in bms:
-            f.write(f"{b.label}|{b.server}|{b.port}|{b.nick}"
-                    f"|{b.channel}|{1 if b.tls else 0}|{b.password}\n")
+            f.write(f"{_esc(b.label)}|{_esc(b.server)}|{b.port}|{_esc(b.nick)}"
+                    f"|{_esc(b.channel)}|{1 if b.tls else 0}|{_esc(b.password)}\n")
 
 
 # ── IRC protocol ───────────────────────────────────────────────────────────────
@@ -221,7 +236,21 @@ class _IRC:
                 line, self._rbuf = self._rbuf.split('\n', 1)
                 line = line.rstrip('\r')
                 if line:
-                    await self._handle(line)
+                    # Real robustness gap found in a deep review: _handle()
+                    # (e.g. its `raw.index(' ')` on a ':'-prefixed line with
+                    # no following space) can raise on a malformed line,
+                    # and this call was completely unguarded. Since this
+                    # loop runs as a detached background task
+                    # (asyncio.create_task in _chat_session), an uncaught
+                    # exception here doesn't crash anything visibly -- it
+                    # just silently kills read_loop, so the user sees no
+                    # error at all, just chat that never receives anything
+                    # again, indistinguishable from a hung connection.
+                    try:
+                        await self._handle(line)
+                    except Exception as exc:
+                        self.client._sys(
+                            f"[client error parsing a server line: {exc}]")
 
         if self.connected:
             self.connected = False
@@ -296,10 +325,37 @@ class _IRC:
 
         elif cmd == "PRIVMSG":
             if params and src.lower() != self.nick.lower():
-                # Handle CTCP ACTION
-                if trailing.startswith('\x01ACTION') and trailing.endswith('\x01'):
-                    action = trailing[7:].rstrip('\x01').strip()
-                    self.client._add(_Line(nick="*", text=f"* {src} {action}", status=True))
+                # Real bug found in a deep review of the whole client:
+                # ANY CTCP request other than ACTION (VERSION, PING,
+                # CLIENTINFO, TIME, ...) used to fall straight into the
+                # plain-chat branch below. _strip() (the mIRC-color
+                # stripper) also matches the generic "\x01...\x01" CTCP
+                # framing as one of its patterns, so the request text
+                # got silently deleted -- the user saw a blank ghost
+                # line from that nick, and the requester got no reply
+                # at all (real IRC etiquette expects VERSION/PING
+                # replies; many bots/clients flag a nick that never
+                # answers). Now explicitly handled: ACTION displays as
+                # before, VERSION/PING get a real CTCP reply and are
+                # NOT shown in chat, anything else CTCP-framed is
+                # silently ignored (not displayed either) instead of
+                # leaking a blank line.
+                if trailing.startswith('\x01') and trailing.endswith('\x01') and len(trailing) >= 2:
+                    ctcp = trailing[1:-1]
+                    verb, _, ctcp_arg = ctcp.partition(' ')
+                    verb = verb.upper()
+                    if verb == "ACTION":
+                        self.client._add(_Line(
+                            nick="*", text=f"* {src} {ctcp_arg}", status=True))
+                    elif verb == "VERSION":
+                        await self._tx(
+                            f"NOTICE {src} :\x01VERSION ANetIRC {_VERSION} "
+                            f"(ANetBBS)\x01")
+                    elif verb == "PING":
+                        await self._tx(f"NOTICE {src} :\x01PING {ctcp_arg}\x01")
+                    # Any other CTCP verb (CLIENTINFO, TIME, ...): silently
+                    # ignored rather than answered incorrectly or leaked
+                    # into chat as a blank line.
                 else:
                     self.client._add(_Line(nick=src, text=_strip(trailing), status=False))
 
@@ -661,6 +717,28 @@ class _Screen:
 
 # ── Key parser ─────────────────────────────────────────────────────────────────
 
+# Tilde-terminated CSI sequences: "ESC [ <n> [; <mod>] ~". Codes 1-6 are
+# the standard vt220 set (Home/Insert/Delete/End/PgUp/PgDn); 11-24 with
+# the gaps at 16 and 22 are SyncTERM's own function-key codes, confirmed
+# verbatim against SyncTERM's own CTerm documentation ("Sequences sent
+# by SyncTERM": F1 "\033[11~" ... F5 "\033[15~", F6 "\033[17~" ...
+# F10 "\033[21~", F11 "\033[23~", F12 "\033[24~") -- SyncTERM does NOT
+# use xterm's "ESC O P"-style SS3 codes for function keys at all, which
+# is the real root cause of a live bug report: F2 (and, it turns out,
+# every other function key, PgUp/PgDn, and several more) did nothing
+# at all for a real SyncTerm/SSH user, because the old parser only
+# recognized narrow prefix patterns that never matched any of these
+# real codes. Modifier suffixes (";2"=Shift, ";3"=Alt, ";5"=Ctrl) are
+# also confirmed against the same table.
+_TILDE_KEYS = {
+    1: 'HOME', 2: 'INSERT', 3: 'DELETE', 4: 'END', 5: 'PGUP', 6: 'PGDN',
+    11: 'F1', 12: 'F2', 13: 'F3', 14: 'F4', 15: 'F5',
+    17: 'F6', 18: 'F7', 19: 'F8', 20: 'F9', 21: 'F10',
+    23: 'F11', 24: 'F12',
+}
+_TILDE_MODIFIERS = {2: 'SHIFT_', 3: 'ALT_', 5: 'CTRL_'}
+
+
 class _Keys:
     """Accumulates raw bytes from session, yields parsed key names."""
 
@@ -682,22 +760,67 @@ class _Keys:
                 if len(b) < 3:
                     return None
                 seq = b[2:].decode('latin-1', errors='replace')
-                # Collect until we hit a letter or ~ (VT sequence terminators)
+                # Collect until we hit a letter, '~', or '@' (VT sequence
+                # terminators). '@' must terminate too -- SyncTERM's
+                # Insert key is the bare, non-numeric "ESC [ @" with no
+                # letter and no '~' at all; without '@' as a recognized
+                # terminator this sequence never completes and silently
+                # blocks all further key parsing behind it.
                 end = 0
-                while end < len(seq) and not seq[end].isalpha() and seq[end] != '~':
+                while (end < len(seq) and not seq[end].isalpha()
+                      and seq[end] not in ('~', '@')):
                     end += 1
                 if end == len(seq):
                     return None   # incomplete
                 full = seq[:end + 1]
                 self._buf = b[3 + end:]
-                mapping = {'A':'UP','B':'DOWN','C':'RIGHT','D':'LEFT',
-                           'H':'HOME','F':'END','P':'F1','Q':'F2','R':'F3','S':'F4'}
+
+                # Letter-terminated: arrows/Home match the common xterm/
+                # vt100 convention every terminal agrees on. End/Back Tab/
+                # Insert below are SyncTERM's own documented (and, for
+                # End and Insert, non-standard -- xterm uses "ESC [ F" and
+                # a numeric "ESC [ 2~" respectively) choices; 'F' is kept
+                # too so xterm-family clients' real End key still works.
+                mapping = {'A': 'UP', 'B': 'DOWN', 'C': 'RIGHT', 'D': 'LEFT',
+                           'H': 'HOME',
+                           'F': 'END',      # xterm's End
+                           'K': 'END',      # SyncTERM's End
+                           'Z': 'BACKTAB',  # SyncTERM's Back Tab
+                           '@': 'INSERT'}   # SyncTERM's Insert
                 if full in mapping:
                     return mapping[full]
-                if full.startswith('5'):  return "PGUP"
-                if full.startswith('6'):  return "PGDN"
-                if full.startswith('3'):  return "DELETE"
-                if full.startswith('1;'): return "SHIFT_" + full[-1]
+
+                # SyncTERM's own Page Up/Down -- "\033[V"/"\033[U", NOT
+                # the vt220 "\033[5~"/"\033[6~" tilde form (handled below
+                # via _TILDE_KEYS for non-SyncTERM clients that use it).
+                if full == 'V': return "PGUP"
+                if full == 'U': return "PGDN"
+
+                if full.endswith('~'):
+                    num_part = full[:-1]
+                    mod = None
+                    if ';' in num_part:
+                        num_part, mod_str = num_part.split(';', 1)
+                        try:
+                            mod = int(mod_str)
+                        except ValueError:
+                            mod = None
+                    try:
+                        num = int(num_part)
+                    except ValueError:
+                        num = None
+                    base = _TILDE_KEYS.get(num)
+                    if base is None:
+                        return None
+                    prefix = _TILDE_MODIFIERS.get(mod, '')
+                    return prefix + base
+
+                # xterm-style "ESC [ 1 ; <mod> <letter>" (shifted arrows,
+                # e.g. Shift+Up = "\033[1;2A") -- structurally distinct
+                # from the plain tilde-numeric form above (no trailing
+                # '~'), kept for non-SyncTERM clients that use it.
+                if full.startswith('1;') and full[-1].isalpha():
+                    return "SHIFT_" + full[-1]
                 return None
             if b[1:2] == b'O':
                 if len(b) < 3:
@@ -714,6 +837,16 @@ class _Keys:
         c = b[0:1].decode('latin-1')
         self._buf = b[1:]
         if c == '\r' or c == '\n': return "ENTER"
+        # \x7f (DEL byte) is SyncTERM's own Delete key, but it's also
+        # the near-universal Backspace byte real physical keyboards send
+        # over ssh/telnet on most OTHER terminals -- a genuine ambiguity
+        # with no clean resolution short of full terminal-type detection
+        # (this project already does that for sixel support via a DA1/
+        # CTDA probe -- see the sixel auto-detect work -- but wiring the
+        # same probe through here is a bigger change than this fix
+        # warrants). Kept as Backspace: that's the overwhelmingly more
+        # common real-world meaning, and forward-delete is low-value in
+        # a single-line chat input anyway.
         if c == '\x7f' or c == '\x08': return "BACKSPACE"
         if c == '\t':  return "TAB"
         if c == '\x1d': return "CTRL_]"
@@ -740,8 +873,8 @@ class ANetIRC:
         self._cur     = 0           # cursor position in _inp
         self._hist:   list[str] = []
         self._hidx    = -1
-        self._tablist: list[str] = []
         self._tabidx  = 0
+        self._tab_state = None      # last tab-complete's {pre,matches,output}, or None
         self._keys    = _Keys()
         self._w = 80; self._h = 24
         self._scr: Optional[_Screen] = None
@@ -1028,6 +1161,13 @@ class ANetIRC:
                 await self._chat_key(key)
 
     async def _chat_key(self, key: str):
+        # Any key other than TAB itself ends the current tab-complete
+        # cycle -- see _tab_complete()'s docstring for the real bug
+        # this (and that method's own rewrite) fixes. TAB must not
+        # clear this, or repeated presses could never continue cycling.
+        if key != "TAB":
+            self._tab_state = None
+
         # ── Scroll (PgUp/PgDn or Up/Down when input empty, Ctrl+U/D) ─────────
         scroll_up   = key in ("PGUP", "\x15")         # PgUp or Ctrl+U
         scroll_down = key in ("PGDN", "\x04")         # PgDn or Ctrl+D
@@ -1109,23 +1249,53 @@ class ANetIRC:
             self._cur += 1; self._hidx = -1; self.dirty_input = True
 
     def _tab_complete(self):
+        """Complete the partial nick before the cursor; repeated Tab
+        presses (with no other key in between) cycle through every
+        matching nick.
+
+        Real bug found in a deep review: this used to unconditionally
+        re-derive `partial` from the text immediately before the
+        cursor on EVERY call. That's correct for the FIRST Tab press,
+        but on the SECOND consecutive press the buffer already
+        contains the previous completion's output (e.g. "Alice: "),
+        which no longer looks like a bare nick prefix at all -- so
+        `matches` came back empty and the function returned before
+        ever reaching the `_tabidx` increment. In practice, repeated
+        Tab never cycled to a different candidate; it only ever
+        offered the very first match, no matter how many other users
+        shared that prefix. Fixed by remembering the ORIGINAL prefix/
+        matches from the last completion and detecting a same-state
+        follow-up Tab press (buffer unchanged since we last wrote it)
+        as "continue this cycle" rather than "start a new one".
+        """
         if not self.irc.users:
             return
-        text  = self._inp[:self._cur]
-        parts = text.split()
-        if not parts:
-            return
-        partial = parts[-1].lower()
-        matches = [u for u in self.irc.users if u.lower().startswith(partial)]
-        if not matches:
-            return
-        self._tabidx = (getattr(self, '_tabidx', 0) + 1) % len(matches)
+        text = self._inp[:self._cur]
+
+        if self._tab_state is not None and text == self._tab_state['output']:
+            pre = self._tab_state['pre']
+            matches = self._tab_state['matches']
+            self._tabidx = (self._tabidx + 1) % len(matches)
+        else:
+            parts = text.split()
+            if not parts:
+                self._tab_state = None
+                return
+            partial = parts[-1].lower()
+            pre = text[:len(text) - len(partial)]
+            matches = [u for u in self.irc.users if u.lower().startswith(partial)]
+            if not matches:
+                self._tab_state = None
+                return
+            self._tabidx = 0
+
         full = matches[self._tabidx]
-        pre  = text[:len(text) - len(partial)]
         sep  = ": " if not pre else " "
         tail = self._inp[self._cur:]
-        self._inp = pre + full + sep + tail
-        self._cur = len(pre) + len(full) + len(sep)
+        output = pre + full + sep
+        self._inp = output + tail
+        self._cur = len(output)
+        self._tab_state = {'pre': pre, 'matches': matches, 'output': output}
         self.dirty_input = True
 
 

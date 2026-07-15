@@ -1,3 +1,17 @@
+# ANetBBS v1.0b2.122 — ANetIRC: fix broken function/nav keys on SyncTerm + 4 more real bugs from a deep review (July 2026)
+
+Prompted by a bug report ("F2 doesn't remove the user listing") from a SyncTerm/SSH user. Root cause was much bigger than F2 alone.
+
+- FIX: the key parser was built entirely around xterm's keyboard conventions, but SyncTerm — likely the most common BBS terminal — uses a completely different, non-standard set of codes, confirmed directly against SyncTerm/CTerm's own official documentation. As a result **F1 through F12, PgUp, PgDn, End, Insert, and Back Tab all silently did nothing** for SyncTerm users, not just F2. Rewrote the parser to correctly handle SyncTerm's real sequences while keeping existing xterm/vt220 support working for other clients.
+- FIX: CTCP requests other than ACTION (VERSION, PING, etc.) used to leak into the chat window as a blank ghost line from that user, and the requester never got a reply (real IRC etiquette expects one; some bots/clients flag nicks that never answer). VERSION and PING now get a real reply and don't show in chat; anything else is silently ignored instead of leaking a blank line.
+- FIX: nick tab-complete could never actually cycle to a different match on repeated Tab presses — the second press looked for a match in the already-completed text, found none, and silently did nothing. Now correctly cycles through every match.
+- FIX: a single malformed line from the IRC server could silently kill the background connection with zero visible error — chat would just stop receiving anything, indistinguishable from a hung connection. Now logs a visible error and keeps going.
+- FIX: a literal `|` character typed into a bookmark field (most plausibly the label, e.g. "Home | Personal") silently corrupted and misaligned every field after it the next time bookmarks loaded, with no error. Fixed at the point bookmarks are saved.
+
+31 new regression tests, each verified to actually catch its bug (reverted and confirmed failing, then restored) rather than just passing by coincidence.
+
+---
+
 # ANetBBS v1.0b2.121 — BinkP inbound transcripts; FileFix docs; Ask Anet troubleshooting content (July 2026)
 
 - FIX: inbound BinkP sessions (a peer connecting TO this BBS) never saved a frame-by-frame transcript — only outbound polls did, since v1.0b2.47. This mattered most for exactly the direction this session's whole BinkP audit was chasing: a peer hub pushing mail in and then stalling, with no in-app log to look at afterward. Inbound sessions now save a transcript the same way outbound polls do, viewable in the same **Admin → Echomail Networks → Poll Logs** UI (no UI changes needed — it already just checks whether a log row has one).
