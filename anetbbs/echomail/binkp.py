@@ -1083,6 +1083,47 @@ class BinkPClient:
             self._log_transcript(f'<< DATA: {len(data)} bytes')
         return is_cmd, data
 
+    def _verify_remote_address(self, remote_adr_text: str):
+        """Cross-check the peer's claimed M_ADR against the address we
+        actually dialed (self.hub_address).
+
+        Known gap found in a full BinkP-subsystem audit: real binkd
+        (protocol.c's ADR() handler) matches an incoming M_ADR's tokens
+        against its own configured link table as part of identifying
+        which link this session belongs to -- if nothing matches, the
+        peer is unknown to it. ANetBBS's outbound client previously
+        accepted whatever address the peer claimed with no cross-check
+        at all: a wrong host answering on the expected IP/port (stale
+        DNS, a misconfigured hub, a MITM) would sail through unnoticed
+        as long as it also somehow knew our password.
+
+        This is defense-in-depth, NOT the primary security gate -- the
+        password remains the real barrier (a wrong host won't have
+        it). Deliberately WARNS rather than aborting the session: a
+        legitimate multi-AKA hub may advertise several addresses that
+        don't textually match our configured hub_address (e.g. it
+        lists its OTHER zones/AKAs first), and hard-aborting on that
+        false positive would turn a working link into a broken one --
+        a worse outcome than a logged warning for a sysop to review.
+        """
+        if not self.hub_address:
+            return
+        expected = self.hub_address.strip().lower()
+        expected_bare = expected.split('@', 1)[0]
+        remote_tokens = [t.strip().lower() for t in remote_adr_text.split() if t.strip()]
+        for tok in remote_tokens:
+            bare = tok.split('@', 1)[0]
+            if tok in (expected, expected_bare) or bare in (expected, expected_bare):
+                return
+        if remote_tokens:
+            logger.warning(
+                "BinkP: hub at %s:%s claims address(es) %r, none of "
+                "which match our configured hub_address %r -- possible "
+                "misconfiguration, stale DNS, or wrong host. Continuing "
+                "since the session password remains the primary auth "
+                "check, but a sysop should verify this link.",
+                self.host, self.port, remote_adr_text.strip(), self.hub_address)
+
     def _handshake(self):
         """Perform BinkP session setup with optional CRAM-MD5 (FTS-1027).
 
@@ -1154,6 +1195,7 @@ class BinkPClient:
                             logger.info("BinkP: hub offered CRAM-MD5 challenge")
             elif cmd == CMD_ADR:
                 logger.debug("BinkP remote ADR: %s", text)
+                self._verify_remote_address(text)
                 if password_sent:
                     continue
                 pw = self.password or '-'

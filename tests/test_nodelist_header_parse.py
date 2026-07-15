@@ -68,6 +68,36 @@ class NodelistHeaderParseTests(unittest.TestCase):
         import datetime
         self.assertEqual(result['release_date'], datetime.date(1997, 10, 15))
 
+    def test_verbatim_fts5000_spec_example(self):
+        """The exact example given in the actual FTS-5000 spec text
+        itself (fetched and confirmed directly, not inferred):
+
+            ';A FidoNet Nodelist for Friday, July 3, 1987 -- Day number
+            184 : 15943'
+
+        Spec wording: 'This line contains the general interest flag,
+        the day, date, and day-of-year number of publication, and ends
+        with a 5-digit decimal number with leading zeros, if
+        necessary.' This is real, verified ground truth, not a
+        hand-constructed guess at the format."""
+        from anetbbs.echomail.nodelist import parse_header
+        import datetime
+        content = (';A FidoNet Nodelist for Friday, July 3, 1987 '
+                  '-- Day number 184 : 15943\n')
+        result = parse_header(content)
+        self.assertEqual(result['day_of_year'], 184)
+        self.assertEqual(result['crc_checksum'], '15943')
+        self.assertEqual(result['release_date'], datetime.date(1987, 7, 3))
+
+    def test_crc_with_leading_zeros_preserved_as_string(self):
+        """Spec: CRC 'ends with a 5-digit decimal number with leading
+        zeros, if necessary' -- must be kept as a string (leading
+        zeros would be silently lost if ever coerced to int)."""
+        from anetbbs.echomail.nodelist import parse_header
+        content = ';A FidoNet Nodelist for Monday, January 1, 2024 -- Day number 1 : 00042\n'
+        result = parse_header(content)
+        self.assertEqual(result['crc_checksum'], '00042')
+
     def test_non_comment_first_line_falls_back_cleanly(self):
         from anetbbs.echomail.nodelist import parse_header
         import datetime

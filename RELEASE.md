@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.120 — BinkP/echomail: close 3 remaining alignment gaps found in follow-up spec research (July 2026)
+
+Direct follow-up to v1.0b2.119's BinkP audit — closes three specific gaps identified after that release, each now verified against a real, fetched primary source rather than inference:
+
+- FIX: the outbound BinkP client never cross-checked a peer's claimed address (M_ADR) against the hub address we actually dialed — a wrong host answering on the expected IP/port (stale DNS, misconfiguration) would sail through unnoticed as long as it also had our password. Now logs a clear warning on mismatch (the password remains the real auth gate, so this doesn't abort the session — a legitimate multi-AKA hub could otherwise trigger a false positive and break a working link).
+- FIX: nodelist header parsing verified directly against the actual FTS-5000 spec text (fetched and confirmed, not guessed) — the real example given in the spec now round-trips correctly, in addition to this software's own generated format from v1.0b2.119.
+- VERIFIED (no bug found): re-checked the QWK MESSAGES.DAT message-header field layout against the actual published QWK format spec, byte by byte. Everything already matched — added dedicated regression tests built independently from the spec's own offset table so this can't silently drift later.
+
+---
+
 # ANetBBS v1.0b2.119 — BinkP: fix a real mail-loop/mail-loss bug, full-subsystem audit (July 2026)
 
 Prompted by a real peer sysop's report of repeated duplicate bundle deliveries and mid-session disconnects. Root-caused against the FTS-1026/FTS-1027 specs, binkd's own C source, and Synchronet's binkp.js reference implementation, then verified end-to-end with new regression tests (scripted real BinkP frames, not mocks).
