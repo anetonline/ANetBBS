@@ -11,6 +11,14 @@ message to all attached clients (web + terminal). Reusing the bridge means:
 Bridge JSON API:
   inbound  → {"type": "join_room"|"send_message"|"direct_message"|
                        "server_cmd"|"leave_room"|"ping", ...}
+              join_room's "ip" field carries this caller's real remote
+              address (see _caller_ip()) -- the bridge has no way to
+              observe it itself for this client, since the WebSocket
+              connection to the bridge always originates from
+              localhost. Needed so the bridge can forward the
+              reference client's own USERIP: packet on join; omitting
+              it silently means the hub never learns which real caller
+              a given handle is connecting from.
   outbound → {"type": "chat"|"system"|"private"|"action"|"error"|...,
                "user": ..., "bbs": ..., "room": ..., "body": ...}
 
@@ -480,6 +488,7 @@ class MRCChat(BaseChatSystem):
                 'type': 'join_room',
                 'handle': self._handle,
                 'room': self._room,
+                'ip': self._caller_ip(),
             })
 
             await self._enter_split_screen()
@@ -1226,8 +1235,14 @@ class MRCChat(BaseChatSystem):
                 payload = body_raw.split(':', 1)[1] if ':' in body_raw else ''
                 if ':' in payload:
                     room, _, topic = payload.partition(':')
-                    self._topic = topic.strip()
-                    if room.strip().lower() == self._room.lower():
+                    new_topic = topic.strip()
+                    # The hub can re-send ROOMTOPIC: without the topic
+                    # actually changing (periodic refresh, alongside an
+                    # unrelated userlist update, etc.) -- only announce
+                    # a genuine change.
+                    changed = new_topic != self._topic
+                    self._topic = new_topic
+                    if changed and room.strip().lower() == self._room.lower():
                         await self._emit(
                             f'\x1b[1;96m── Topic: {_pipe_to_ansi(self._topic)}\x1b[0m')
                 return
@@ -1267,12 +1282,25 @@ class MRCChat(BaseChatSystem):
                 # correctly, the parser just couldn't read it. The web
                 # client has always split on ',' correctly (mrc/index.html
                 # tryParseUserListFromServerMessage) -- matched that here.
+                # Real bug found live: this only ever ADDED entries to
+                # _known_users, never removed any -- so if a single
+                # user's own USEROUT: event was ever missed (dropped
+                # frame, ordering hiccup, or a leave reason the hub
+                # just doesn't send USEROUT for), that stale name stuck
+                # around in the userlist FOREVER, since even a fresh,
+                # completely correct USERLIST: bulk refresh could never
+                # clean it up -- purely additive, no way to shrink.
+                # USERLIST: is the hub's own authoritative full-room
+                # snapshot, so it must REPLACE the known set, not just
+                # union into whatever was already there.
                 raw_list = body_raw.split(':', 1)[1].strip()
+                fresh_users = set()
                 for entry in raw_list.split(','):
                     entry = entry.strip()
                     nick = re.split(r'[@]', entry, 1)[0]
                     if nick:
-                        self._known_users.add(nick)
+                        fresh_users.add(nick)
+                self._known_users = fresh_users
                 return
 
             if head.startswith('USERNICK:'):
@@ -1911,6 +1939,40 @@ class MRCChat(BaseChatSystem):
             except Exception:
                 pass
             self._aiohttp_session = None
+
+    def _caller_ip(self) -> str:
+        """Real remote IP of the connecting telnet/SSH/rlogin caller,
+        same extraction pattern anetbbs/core/session.py's own login flow
+        already uses (writer.get_extra_info('peername') -> 'ip:port').
+
+        Real bug this closes: the bridge's join_room handler never had
+        ANY way to learn a terminal caller's real IP on its own -- this
+        door's WebSocket connection to the bridge always dials
+        ws://127.0.0.1:8080 (see this module's own DEFAULT_BRIDGE_URL),
+        so from the bridge's side every terminal user looks identical
+        (localhost). Without this, the reference client's own USERIP:
+        packet (sent unconditionally on every join, right alongside its
+        "/identify for MRC Trust" tip) could never be sent for terminal
+        callers at all -- if the hub uses USERIP to recognize a
+        returning already-identified connection, that would force a
+        fresh /identify on literally every join, which is exactly what
+        got reported live.
+        """
+        try:
+            addr = self.session.writer.get_extra_info('peername')
+        except Exception:
+            return ''
+        if not addr:
+            return ''
+        # Matches session.py's own defensive handling of this exact
+        # call: normally a (host, port[, ...]) tuple for TCP, but
+        # custom writer wrappers (ssh/rlogin) aren't guaranteed to
+        # follow that -- guard rather than assume. USERIP wants the
+        # host alone, not the port.
+        try:
+            return str(addr[0]) if isinstance(addr, tuple) else str(addr)
+        except Exception:
+            return ''
 
     async def _send_json(self, obj: dict):
         if self._ws is None or self._ws.closed:

@@ -1,3 +1,16 @@
+# ANetBBS v1.0b2.123 — MRC: fix "have to /identify every time" root cause + topic/userlist bugs from a full client review (July 2026)
+
+Prompted by a report that MRC Trust never seemed to persist, plus two bugs found live while testing. Root-caused by comparing ANetBBS's terminal MRC client against the wire protocol line-by-line.
+
+- FIX: the protocol expects a `USERIP:` packet on every room join, and the hub appears to use it to recognize a returning already-identified connection — but ANetBBS's bridge never sent one, for any user, on either the terminal or web client. This forced a fresh `/identify` on every single connect, no matter how recently the same handle had already identified. Now sent correctly: the web client's real address is captured server-side from the incoming connection (honoring `X-Forwarded-For` since the bridge sits behind nginx), and the terminal client — whose connection to the bridge always looks like `localhost` — now reports its own real caller address explicitly.
+- FIX: the room topic line (`── Topic: ...`) was re-printed above the input line every time the hub re-sent a `ROOMTOPIC:` packet, even when the topic text hadn't actually changed — spamming the same line repeatedly. Now only announced when the topic genuinely changes.
+- FIX: the sidebar user list only ever added names, never removed them — so if a single user's leave notice was ever missed, their name stuck around forever, since even a fresh full list refresh from the hub couldn't clean it up. Now treated as the authoritative snapshot it is: a fresh list fully replaces the known set.
+- Reviewed CTCP handling, DM/reply, room switching, and away/back against the protocol's actual wire behavior — all already correct, no further changes needed there.
+
+12 new regression tests, each verified to actually catch its bug (reverted and confirmed failing, then restored).
+
+---
+
 # ANetBBS v1.0b2.122 — ANetIRC: fix broken function/nav keys on SyncTerm + 4 more real bugs from a deep review (July 2026)
 
 Prompted by a bug report ("F2 doesn't remove the user listing") from a SyncTerm/SSH user. Root cause was much bigger than F2 alone.

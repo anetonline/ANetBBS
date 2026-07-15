@@ -559,6 +559,24 @@ class BridgeApp:
 
         self.websockets:   Dict[int, web.WebSocketResponse] = {}
         self.rate_limiter: Dict[int, float]                 = {}
+        # Real caller IP per WebSocket connection, keyed by ws_id --
+        # populated in handle_websocket() at accept time (for the web
+        # client, from the incoming HTTP request, honoring nginx's
+        # X-Forwarded-For since /mrcws is reverse-proxied) and possibly
+        # overridden per-session by an explicit "ip" field in the
+        # join_room message (for the terminal client, whose WebSocket
+        # connection to this bridge always originates from localhost --
+        # ws://127.0.0.1:8080 -- so the bridge has no way to observe the
+        # real caller's IP itself for that path; the terminal door has
+        # to tell us). See _handle_join_room and the real bug this
+        # closes: sess["remote_ip"] was read in two places
+        # (_send_join_payloads) but never written ANYWHERE, so the
+        # USERIP: packet the reference client sends on every join was
+        # never sent at all, for any user, on either client -- if the
+        # hub uses USERIP to recognize a returning already-identified
+        # connection, this would force a fresh /identify on every single
+        # join with no way around it.
+        self._ws_remote_ip: Dict[int, str] = {}
 
         # Default False: verified against the real reference client
         # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
@@ -1193,6 +1211,19 @@ class BridgeApp:
 
         ws_id = id(ws)
         self.websockets[ws_id] = ws
+        # Best-effort real caller IP for the web client, read from the
+        # incoming HTTP request. /mrcws is reverse-proxied by nginx (see
+        # anetbbs/web/mrc_web.py's own docstring), so request.remote
+        # alone would just be nginx's own loopback address -- honor
+        # X-Forwarded-For (nginx sets this on every proxied request per
+        # the shipped nginx config) first. The terminal client's
+        # connection always originates from localhost regardless (it
+        # dials ws://127.0.0.1:8080 itself), so for that path this is
+        # expected to stay a loopback address -- _handle_join_room lets
+        # an explicit "ip" field in the join_room message override it.
+        xff = request.headers.get("X-Forwarded-For", "")
+        self._ws_remote_ip[ws_id] = (
+            xff.split(",")[0].strip() if xff else (request.remote or ""))
         logger.info(f"WebSocket connected: {ws_id}")
 
         try:
@@ -1209,6 +1240,7 @@ class BridgeApp:
                     await self.handle_ws_message(ws_id, data)
         finally:
             self.websockets.pop(ws_id, None)
+            self._ws_remote_ip.pop(ws_id, None)
             sess = self.db.get_session(str(ws_id))
             if sess:
                 eff_nick = self._session_effective_nick(sess)
@@ -1291,10 +1323,42 @@ class BridgeApp:
         twit_list    = [str(t).strip() for t in raw_twits if str(t).strip()][:64] \
                        if isinstance(raw_twits, list) else []
 
+        # Real bug found investigating a live "I have to /identify every
+        # single time" report: sess["remote_ip"] was read in two places
+        # (_send_join_payloads, which sends the reference client's own
+        # USERIP: packet on every join) but never written ANYWHERE in
+        # this file -- so USERIP: was never sent at all, for any user,
+        # on either the terminal or web client. If the hub uses USERIP
+        # to recognize a returning already-identified connection (the
+        # reference client sends it unconditionally on every join,
+        # right alongside its own "/identify for MRC Trust" tip, which
+        # strongly suggests it's load-bearing for that), never sending
+        # it would force a fresh /identify on literally every join with
+        # no way around it, regardless of how recently the same handle
+        # last identified. An explicit "ip" field in the join_room
+        # message (the terminal client's own real caller IP -- the
+        # bridge can't observe it itself, since that connection always
+        # originates from localhost) takes priority over the
+        # server-observed WebSocket peer IP (the web client's real
+        # path, via handle_websocket's X-Forwarded-For handling).
+        remote_ip = (data.get("ip") or "").strip()[:64] or self._ws_remote_ip.get(ws_id, "")
+        # Matches the reference client's own guard (helper_protocol.c:
+        # only sends USERIP if it's non-empty AND not "127.0.0.1") --
+        # loopback is never a meaningful caller identity, and for the
+        # web path specifically it's also the tell-tale sign that
+        # X-Forwarded-For isn't being forwarded correctly (nginx's own
+        # proxy connection, not the real browser's address) -- sending
+        # it anyway would be actively misleading, not just unhelpful,
+        # since every caller behind that misconfiguration would appear
+        # to share one identical IP.
+        if remote_ip == "127.0.0.1":
+            remote_ip = ""
+
         sess = {
             "handle":               handle,
             "nick":                 handle,
             "room":                 room,
+            "remote_ip":            remote_ip,
             "joined_at":            datetime.utcnow().isoformat(),
             "waiting_for_identify": bool(self.identify_required_mode),
             "in_room":              False,
