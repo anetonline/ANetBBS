@@ -1,7 +1,27 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.123`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.124`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.124 — MRC: fix real LOGOFF/command wire-format mismatch behind repeated forced re-identify (July 2026)
+
+Direct follow-up to v1.0b2.123, after live testing showed identify was
+still required on every leave/rejoin. Root-caused by comparing exact
+packet fields against the reference client's C source, field by field.
+
+- FIX: the `LOGOFF` packet sent every time you leave MRC populated the
+  `toRoom` field with the room name; the reference client always sends
+  it empty for `LOGOFF`. If the hub's trust/session tracking keys off
+  that field, a populated one on logoff would plausibly end a handle's
+  trusted session — a direct, verifiable candidate for "have to
+  identify every time."
+- FIX: the same mismatch existed on every other generic command
+  (`MOTD`, `WHOON`, `CHATTERS`, `USERIP`, etc.) — previously only
+  `IDENTIFY`/`REGISTER`/`UPDATE` sent an empty `toRoom`; the reference
+  sends it empty for all of them.
+
+7 new regression tests verified against the reference wire format,
+each confirmed to fail without the fix.
 
 ## v1.0b2.123 — MRC: fix "have to /identify every time" root cause + topic/userlist bugs from a full client review (July 2026)
 

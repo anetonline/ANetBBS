@@ -79,11 +79,17 @@ class MRCProtocol:
 
     @classmethod
     def create_server_command(cls, user: str, bbs: str, room: str, command: str, to_room: str = None) -> str:
+        # Reference client (umrc-client/main.c's sendCmdPacket, which
+        # backs every generic /command) sends toRoom empty for EVERY
+        # command, unconditionally -- not just IDENTIFY/REGISTER/UPDATE
+        # as an earlier, narrower fix here assumed. A populated toRoom
+        # here was a real, verified-against-source wire mismatch on
+        # LOGOFF specifically (see create_logoff) and, by the same
+        # unconditional rule, on every other generic command routed
+        # through this function too.
         room = cls.norm_room(room)
         if to_room is None:
-            stripped = command.strip()
-            cmd_word = stripped.upper().split()[0] if stripped else ''
-            to_room = '' if cmd_word in ('IDENTIFY', 'REGISTER', 'UPDATE') else room
+            to_room = ''
         to_room = cls.norm_room(to_room) if to_room else ''
         return cls.create_packet(user, bbs, room, 'SERVER', '', to_room, command)
 
@@ -109,8 +115,13 @@ class MRCProtocol:
 
     @classmethod
     def create_logoff(cls, user: str, bbs: str, room: str) -> str:
+        # Reference client sends toRoom empty for LOGOFF
+        # (sendMsgPacket(&mrcSock, "SERVER", "", "", "LOGOFF")) -- this
+        # used to send the room name in that field instead, a real
+        # verified-against-source wire mismatch on the exact packet
+        # sent every time a user leaves.
         room = cls.norm_room(room)
-        return cls.create_packet(user, bbs, room, 'SERVER', '', room, 'LOGOFF')
+        return cls.create_packet(user, bbs, room, 'SERVER', '', '', 'LOGOFF')
 
     @classmethod
     def validate_handle(cls, handle: str) -> bool:
