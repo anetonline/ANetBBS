@@ -1,7 +1,30 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.120`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.121`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.121 — BinkP inbound transcripts; FileFix docs; Ask Anet troubleshooting content (July 2026)
+
+- FIX: inbound BinkP sessions (a peer connecting TO this BBS) never
+  saved a frame-by-frame transcript — only outbound polls did, since
+  v1.0b2.47. This mattered most for exactly the direction this
+  session's whole BinkP audit was chasing: a peer hub pushing mail in
+  and then stalling, with no in-app log to look at afterward. Inbound
+  sessions now save a transcript the same way outbound polls do,
+  viewable in the same **Admin → Echomail Networks → Poll Logs** UI
+  (no UI changes needed — it already just checks whether a log row
+  has one).
+- DOCS: FileFix (the file-echo counterpart to AreaFix) was never
+  documented anywhere, despite being a fully-working bot — added a
+  full section to `docs/07-file-areas.md`.
+- FEATURE: Ask Anet's help search only ever indexed the wiki, not
+  `docs/*.md` — and the wiki had zero troubleshooting content, so
+  searching for help with a real problem always came back empty.
+  Added a comprehensive Troubleshooting wiki page consolidating real
+  symptom→fix entries from across the docs (web/nginx, FTPS, MRC,
+  BinkP/echomail, doors, Docker, webhooks, scheduled events, MSP,
+  Raspberry Pi, RSS), linked from Home and the Sysop Guide, and
+  verified end-to-end that Ask Anet's search now actually finds it.
 
 ## v1.0b2.120 — BinkP/echomail: close 3 remaining alignment gaps found in follow-up spec research (July 2026)
 

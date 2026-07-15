@@ -59,6 +59,7 @@ ANetBBS speaks every classic BBS protocol plus a modern web UI:
 - [[BinkP Setup]] — joining a FidoNet-style mail network
 - [[NodeSpy]] — watching and kicking active sessions
 - [[Backup]] — backing up your BBS
+- [[Troubleshooting]] — fixes for common errors and gotchas
 
 ## About this wiki
 
@@ -1687,7 +1688,9 @@ for the full slot reference and how to drop in your own `.ans` files.
 # Sysop Guide
 
 The long-form admin overview. Newer than the README, less prescriptive
-than the [[Tutorial]].
+than the [[Tutorial]]. Something broken? Check [[Troubleshooting]]
+first — it collects the fixes for errors sysops actually hit in
+production.
 
 ## What runs
 
@@ -1800,6 +1803,363 @@ own schedule. Worth a look if you're tired of remembering to do the
 - [[BinkP Setup]]
 - [[Backup]]
 - [[Tutorial]]
+- [[Troubleshooting]]
+"""),
+
+    # ------------------------------------------------------------------
+    ('troubleshooting', 'Troubleshooting', """
+# Troubleshooting
+
+Real symptom-to-fix entries pulled from actual sysop reports and
+live-debugging sessions across every ANetBBS subsystem. If Ask Anet
+help search (or this wiki's own search) sent you here, use your
+browser's find-in-page to jump to the exact wording.
+
+## Web / nginx
+
+- **MRC (or other static assets) 404 / fails to load through nginx,
+  but works fine going straight to the Flask port**, and the
+  `/static/` `alias` path and file permissions all look correct → if
+  your install directory is under a user's home directory (e.g.
+  `/home/sysopname/anetbbs` instead of `/opt/anetbbs`), Ubuntu/Debian
+  gives new home directories `750` permissions by default — that
+  blocks nginx's worker user from even traversing into the home
+  directory to reach the static files, regardless of what the files
+  themselves are set to. Fix:
+  ```
+  sudo chmod o+x /home/sysopname
+  ```
+  (Only adds "can traverse" for others, not "can list/read" — nginx
+  doesn't need more than that to serve files under it.)
+- **nginx returns a blank page / 502**, its own error log shows
+  `connect() to 127.0.0.1:5000 failed (13: Permission denied)`
+  repeating for every request, even though `nginx -t` passes clean
+  and the service is "active (running)" → SELinux enforcing mode
+  (the default on Fedora/RHEL/CentOS) blocks nginx from making
+  outbound connections to backend ports unless explicitly allowed.
+  `install.sh`/`update.sh` set this automatically, but if you set up
+  nginx manually, or `setsebool` wasn't installed at the time, fix it
+  directly:
+  ```
+  sudo setsebool -P httpd_can_network_connect 1
+  ```
+  (needs `policycoreutils-python-utils` on Fedora/RHEL if
+  `setsebool` itself is missing.)
+- **"The CSRF session token is missing" on web login** → your site is
+  running over plain HTTP but `SESSION_COOKIE_SECURE=true`. Fixed by
+  default as of v1.0a2.72. On older installs:
+  ```
+  echo "SESSION_COOKIE_SECURE=false" | sudo tee -a ~/anetbbs/.env
+  sudo systemctl restart anetbbs-web
+  ```
+- **"unable to open database file" on telnet/SSH** → fixed in
+  v1.0a2.74. If you're on an older version, add `DATABASE_URL` to
+  `.env`:
+  ```
+  INSTALL_DIR=~/anetbbs   # adjust if different
+  echo "DATABASE_URL=sqlite:///${INSTALL_DIR}/data/anetbbs.db" | sudo tee -a "$INSTALL_DIR/.env"
+  sudo systemctl restart anetbbs
+  ```
+- **"SECRET_KEY is the dev default" warning** → set a `SECRET_KEY`
+  env var, or a `RuntimeError` will hit you the moment production
+  mode notices.
+- **`/admin/echomail/...` returns 500 after upgrading** → restart the
+  web service so the auto-migration adds the new columns.
+- **Web service stuck in a restart loop with `EADDRINUSE` on :5000**
+  → an old gunicorn worker is leaking past the master. Our systemd
+  unit ships with `KillMode=mixed` to prevent this, but if you
+  adopted an older unit file, add `KillMode=mixed` and
+  `RestartSec=10` to `[Service]` and `daemon-reload`.
+- **Web interface loads fine but telnet/SSH won't connect** → check
+  the firewall and that the terminal service is actually running:
+  ```
+  sudo ufw status
+  sudo systemctl status anetbbs
+  sudo journalctl -u anetbbs -n 50
+  ```
+
+See also [[Web Access]] and [[Sysop Guide]].
+
+## FTPS / certificates
+
+- **FTPS (`AUTH TLS`) worked when you set it up, then stopped working
+  weeks later** with no config change on your end → certbot resets
+  `/etc/letsencrypt/archive/` to `0700 root:root` on every
+  certificate renewal by default, which revokes the service user's
+  read access to the cert/key it was using. `install.sh` (when it
+  obtains a cert via certbot) and `update.sh` (whenever
+  `FTP_TLS_CERTFILE` in `.env` points at `/etc/letsencrypt/...`) both
+  install a renewal hook
+  (`/etc/letsencrypt/renewal-hooks/deploy/anetbbs-ssl-cert-perms.sh`)
+  that restores the correct permissions after every renewal, so this
+  should now be handled automatically whether or not FTPS was
+  already turned on at install time. If you're on an install that
+  predates this and hit the problem, re-run `sudo bash update.sh` to
+  get the hook installed retroactively.
+
+See also [[Files]] (FTP access section).
+
+## MRC chat
+
+- **MRC `<no name>` in Synchronet's IM display** → Synchronet IDENTs
+  (RFC 1413) the sender to look up a "real name." ANetBBS doesn't
+  ship an identd; this is a known cosmetic-only limitation.
+- **BBS info fields (telnet/ssh/website/description/sysop) never
+  show up when other MRC clients look this BBS up** (`/bbses` +
+  `/info <n>` on another client), even with a correctly-filled-in
+  `mrc/bridge/config.json` and zero errors anywhere → check whether
+  the MRC bridge's systemd unit sets a custom `MRC_BRIDGE_CONFIG`
+  environment variable pointing at a different path than the one
+  you're editing:
+  ```
+  systemctl show anetbbs-mrc-bridge -p Environment
+  ```
+  If it does, edit *that* file instead — the running service never
+  reads the default path once an override is in place. More
+  generally: if a config file looks correct and nothing is logging
+  an error, but the feature still doesn't reflect your changes,
+  suspect an environment variable silently redirecting where that
+  service actually reads its config from.
+
+See also [[MRC]] and [[Chat]].
+
+## BinkP / Echomail
+
+- **`MSP: cannot bind ... Permission denied`** in `bbs.log` → apply
+  one of the privilege fixes for binding low ports (see the
+  [[Sysop Guide]] service table, or re-run `install.sh` which sets
+  `AmbientCapabilities=CAP_NET_BIND_SERVICE` on the relevant unit).
+- **A network's poller looks like it dials the BBS's own install
+  instead of a real remote peer, and nothing ever seems to happen**
+  → for BinkP, this happens when `our_address` equals `hub_address`;
+  for QWK, when `qwk_host` equals this BBS's own public host. The
+  poller detects this ("self-referential poll skip") and safely
+  skips the dial-out instead of failing — this is expected and
+  harmless on the hub's own install, since the seeded "point at the
+  hub" network row needs to exist and be configured exactly that way
+  for *other* sysops to reach the hub. Areas stay visible either way.
+  As of v1.0b2.41 the skip produces **no poll log entry at all**
+  (just an invisible-at-default-level debug line) — earlier versions
+  logged a `status='skipped'` row every time the poller loop
+  re-checked the network (once a minute), flooding **Poll Logs**
+  with dozens of identical entries within about 20 minutes of
+  uptime.
+- **Don't poll too aggressively** — `poll_interval_minutes` defaults
+  to 60 and is hard-floored at 5 (setting it lower gets silently
+  clamped back up), but the floor existing doesn't mean polling
+  every 5 minutes is a good idea for a real remote uplink. Some hubs
+  rate-limit or temporarily block a peer that connects too
+  frequently, which makes a genuinely failed poll harder to recover
+  from, not easier. 30–60 minutes is normal; only go tighter if the
+  hub's own docs say it's fine. Separately: as of v1.0b2.114, a poll
+  that fails no longer retries on the very next scheduler tick — it
+  correctly waits out the configured interval before trying again.
+- **No poll transcript for an inbound session** (a peer connecting TO
+  this BBS, not this BBS dialing out) → fixed in a later v1.0b2
+  release. Before that fix, only outbound polls saved a frame-by-frame
+  session transcript; inbound sessions created a poll log row but
+  never captured one. If you're on an older version, the workaround is
+  a full BinkP debug capture at the OS level (`tcpdump`/`socat` in
+  front of the listener) since there's no in-app transcript to fall
+  back on before that fix.
+
+See also [[BinkP Setup]], [[Echomail]], and [[ANotherNetwork]].
+
+## Door games / Synchronet / Mystic
+
+- **Synchronet door fails silently** → check the log for the door
+  child's stderr; if no `jsexec` is found, the Node.js shim runs but
+  doesn't cover every Synchronet API. Install Synchronet itself for
+  full compatibility.
+- **BotWars / RDQ3 fails with `EACCES: permission denied` reading
+  `sbbs_stubs/sbbsdefs.js`** or writing a save file → the service
+  user needs read/write group access. `install.sh` sets this on
+  every run; if you used a manual rsync deploy that reset the perms,
+  run:
+  ```
+  sudo chmod -R g+rX,o+rX /opt/anetbbs/anetbbs/games/sbbs_stubs
+  sudo chmod -R g+rwX /opt/anetbbs/doors
+  ```
+- **`bbs.log` `PermissionError`** → the service user needs write
+  access to the install dir. `install.sh` `chown`s it on every run;
+  if you re-pointed the unit file at a different install dir, mirror
+  the perms there.
+- **`snap-confine is packaged without necessary permissions` /
+  `cap_dac_override not found`** → your `dosbox`/`dosbox-staging` is
+  a snap symlink. Snap-packaged binaries can't run from systemd
+  services that only grant `CAP_NET_BIND_SERVICE`. Fix:
+  ```
+  sudo snap remove dosbox dosbox-staging dosbox-x   # whichever is installed
+  sudo apt install dosbox                            # apt vanilla works for BBS doors
+  # OR install dosbox-staging from a GitHub release tarball into /opt/dosbox-staging
+  # OR change the Game type to door_dosemu and install dosemu2:
+  #   Debian/Ubuntu: sudo apt install dosemu2
+  #   Fedora/RHEL:   enable RPM Fusion or a COPR providing dosemu2, then dnf install dosemu2
+  #   Arch:          AUR-only — yay -S dosemu2 (or paru)
+  #   openSUSE:      check the Packman repo, or build from source
+  ```
+  As of v278, the BBS auto-rejects snap-packaged binaries up front
+  with this exact message instead of letting you discover it the
+  hard way mid-launch.
+- **Door 404 / "executable not found"** → `executable_path` doesn't
+  point at a real file. Check the path with `ls`. Tokens are
+  expanded before the file check, so `%P` only resolves to a real
+  per-node dir if `BBS_NODES >= node_number`.
+- **Drop file written but door reads garbage** → wrong drop file
+  type. LORD wants `door32.sys`. Older doors want `dorinfo` or
+  `door.sys`. Check the door's docs.
+- **`mplc` failures** → set `MYSTIC_MPLC_PATH` to the absolute path
+  of a known-good `mplc`, or re-run `install.sh` and accept the
+  Mystic download step. Errors are logged to `journalctl -u
+  anetbbs-web` (web launches) or `bbs.log` (terminal launches).
+- **DOSBox doors freeze on launch** → likely the TCP nullmodem
+  bridge isn't binding. Check the per-node DOSBox config the runner
+  generates in `<install>/data/temp/nodeN/dosbox.conf` —
+  `serial1=nullmodem port:NNNN` should match what the bridge is
+  listening on.
+- **dosemu2 commands fail with "TERM environment variable needs
+  set"** → export `TERM` and pass `-td` in your script (relevant if
+  you're driving dosemu2 from a scheduled event's shell handler, not
+  just doors).
+
+See also [[Doors]], [[Door Setup]], [[LORD Setup]], [[DosBridge]],
+and [[DOS Door Recipe]].
+
+## Docker / containers
+
+- **`docker: permission denied`** → you're not in the `docker` group
+  yet, or you added yourself but didn't open a new terminal.
+- **Build fails on a specific pip package** → save the full output
+  and report it; some dependency may need a from-source build on
+  your specific CPU architecture, which can need an extra system
+  package.
+- **A service shows `FATAL`/`BACKOFF` in `supervisorctl status`** →
+  run `supervisorctl ... tail <program>` (single-container) or
+  `docker compose logs <service>` (compose) to see why it's
+  crash-looping.
+- **Port already in use** → something else on your machine (maybe a
+  bare-metal ANetBBS install!) is already using that port. Either
+  stop the other thing or change the *host* side of the `-p
+  host:container` mapping (e.g. `-p 5001:5000` to use 5001 on your
+  machine instead).
+- **Can't reach the web UI / telnet from another device on your
+  network** → confirm the port mappings are actually published
+  (`docker ps` shows them in the "PORTS" column) and that your
+  machine's firewall allows those ports.
+- **MSP (18) and SYSTAT (11, UDP) refuse to bind inside the
+  container** → those need `cap_add: [NET_BIND_SERVICE]` in compose
+  (mirrors the bare-metal systemd unit's
+  `AmbientCapabilities=CAP_NET_BIND_SERVICE`). If your platform
+  doesn't allow `cap_add`, override `MSP_PORT`/`SYSTAT_PORT` in
+  `.env` to unprivileged values and remap them the same way Finger
+  is.
+
+## Webhooks
+
+- **"Last status" stays "—" forever** → the webhook has never
+  actually been triggered. Confirm the underlying action has
+  actually happened (posted, logged in, etc.) since the webhook was
+  created; it won't retroactively fire for anything that already
+  happened before it was added.
+- **"Last status" shows a real HTTP code (200, 404, 500...) but
+  nothing shows up on the receiving end** → that's not an ANetBBS
+  problem; the request reached your server, and your server
+  responded with that code. Check your receiver's own logs/config.
+- **Red "err" badge** → a network-level failure (timeout, DNS,
+  connection refused) on the last attempt. Check the URL is correct
+  and reachable from the ANetBBS server specifically (not just from
+  your own machine).
+- **JSON looks malformed on the receiving end** → likely a custom
+  body template getting broken by an unescaped `"` or `\\\\` in a
+  free-text field. Switch to a blank template (default JSON
+  encoding) if you don't need a specific non-default shape.
+- **`{something}` shows up literally, unsubstituted, in the
+  delivered body** → that key doesn't exist in this event's payload.
+  There's no universal placeholder set — check the payload keys
+  available for that specific event.
+- Webhook delivery has an 8-second timeout and, by design, **no
+  retry queue** — a failed delivery just shows the red "err" badge
+  above and won't be automatically retried.
+
+## Scheduled events
+
+- **"Params (JSON object)" rejects what I typed** → it must parse as
+  a JSON object. `/path/to/script.sh` is not valid JSON; wrap it as
+  `{"command": "/path/to/script.sh"}`.
+- **`shell` handler crashes with `UnicodeDecodeError`** → fixed as of
+  v1.0a2.116+; older builds decoded captured output as strict UTF-8
+  and crashed on non-UTF8 bytes (e.g. CP437 from DOS programs run
+  via dosemu2/dosbox). Update if you still see this.
+- **dosemu2 commands fail with "TERM environment variable needs
+  set"** → export `TERM` and pass `-td` in your script.
+- **An event always fails the same way** → click **Run now** and
+  read the captured output; it's the same stdout/stderr you'd get
+  running the command by hand over SSH, just minus your interactive
+  shell's environment (PATH, TERM, etc. may differ from your login
+  shell — set them explicitly in the script if needed).
+
+## MSP / Instant Messages
+
+- **"Connection refused" on port 18** → the listener never bound.
+  Check `bbs.log` for `MSP: cannot bind ... Permission denied` and
+  apply one of the privilege fixes above.
+- **Sent OK but never received** → check the recipient name on the
+  remote BBS. The MSP server falls back from `username` to
+  `display_name`, but that's it — there's no fuzzy match.
+- **SYSTAT reply garbled** → the responder is probably emitting
+  CP437 box glyphs that need rendering. The SYSTAT query client
+  decodes UTF-8 first, then falls back to latin-1, so high bytes
+  survive but won't look pretty in a plain text view.
+
+See also [[Instant Messages]].
+
+## Raspberry Pi
+
+- **Something reports "disk full" even though `df -h /` shows plenty
+  of free space** → check `df -h /tmp` separately. On many Pi images
+  `/tmp` is a small RAM-backed `tmpfs` (often under 500MB, sized off
+  available memory), completely separate from the real disk `/`
+  lives on — filling it up has nothing to do with how much storage
+  the SD card/USB drive actually has left.
+- **Out of disk space on the SD card generally** → move `data/` to a
+  USB SSD if you have one attached. Check usage:
+  ```
+  df -h
+  du -sh ~/anetbbs/data/*/
+  ```
+- **Pi runs hot / throttles** → add a heatsink and fan. Check
+  throttling:
+  ```
+  vcgencmd get_throttled
+  # 0x0 = no throttling, anything else = problem
+  ```
+- **Low memory warnings** → add swap (a Pi 5 shouldn't need this
+  with 8GB, but a Pi 4 4GB might):
+  ```
+  sudo dphys-swapfile swapoff
+  sudo sed -i 's/CONF_SWAPSIZE=100/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+  sudo dphys-swapfile setup
+  sudo dphys-swapfile swapon
+  ```
+- **Door games on Pi** — in-browser DOS games (DOOM, Duke3D via
+  EmulatorJS) run in the user's browser, no server-side binary
+  needed, though on a Pi 3 they may not run well in a browser on the
+  Pi itself (fine for users connecting from a PC browser). LORD
+  (Synchronet JS via Node.js) works on Pi 3+ ARM. DOSBox doors: use
+  DOSBox-X, which has ARM builds — install from the DOSBox-X
+  releases page and set `DOSBOX_PATH` in `.env`. Wine + `door32.exe`
+  doors are possible with box86/box64, but a project for advanced
+  sysops.
+
+## RSS reader
+
+- **A feed shows a red badge in the admin feed list** → its last
+  fetch failed; the poller sets `feed.last_error` on the feed row
+  whenever `feedparser` can't retrieve or parse it. Hit the
+  circular-arrow refresh icon next to the feed in `/admin/rss/` to
+  retry manually, or check the feed's URL is still valid.
+
+See also [[RSS Reader]].
 """),
 
     # ------------------------------------------------------------------

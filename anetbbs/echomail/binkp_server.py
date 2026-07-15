@@ -30,7 +30,7 @@ from datetime import datetime
 
 from .binkp import (
     CMD_NUL, CMD_ADR, CMD_PWD, CMD_FILE, CMD_OK, CMD_EOB,
-    CMD_GOT, CMD_ERR, CMD_SKIP,
+    CMD_GOT, CMD_ERR, CMD_SKIP, CMD_NAMES,
     _build_cmd, _build_data,
     _build_ftn_packet, _parse_ftn_packet,
     _sanitize_inbound_filename,
@@ -43,22 +43,57 @@ logger = logging.getLogger(__name__)
 # Async frame I/O (mirror of the sync helpers in binkp.py)
 # ---------------------------------------------------------------------------
 
-async def _recv_frame(reader: asyncio.StreamReader):
+def _log_transcript(transcript, line: str):
+    """Append one timestamped line to a caller-owned transcript list --
+    mirrors binkp.py's BinkPClient._log_transcript(), just as a free
+    function since this module has no equivalent per-session object.
+    `transcript` may be None (most call sites during early handshake,
+    before _handle_connection has built its own list) -- a no-op then.
+
+    Real gap found while investigating why a sysop debugging an inbound
+    session (a peer connecting TO this BBS -- e.g. the exact "hub
+    delivers mail, we stall" scenario this session's BinkP audit was
+    chasing) had NO frame-by-frame transcript available at all: outbound
+    polls (poller.py dialing OUT) have saved one on EchomailPollLog since
+    v1.0b2.47, but this inbound listener never captured one, on either
+    the fix-shipping side or before it. A sysop diagnosing an INBOUND
+    stall -- arguably the more useful direction to have logs for, since
+    that's the side that can't just be re-run on demand -- had nothing
+    to look at.
+    """
+    if transcript is None:
+        return
+    ts = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
+    transcript.append(f'{ts} {line}')
+
+
+async def _recv_frame(reader: asyncio.StreamReader, transcript=None):
     """Read one BinkP frame. Returns (is_command, data_bytes)."""
     hdr = await reader.readexactly(2)
     word = struct.unpack('>H', hdr)[0]
     is_command = bool(word & 0x8000)
     length = word & 0x7FFF
     payload = await reader.readexactly(length) if length else b''
+    if transcript is not None:
+        if is_command:
+            cmd = payload[0] if payload else None
+            name = CMD_NAMES.get(cmd, str(cmd)) if cmd is not None else '?'
+            text = payload[1:].decode('latin-1', errors='replace') if payload else ''
+            _log_transcript(transcript, f'<< CMD {name}' + (f': {text}' if text else ''))
+        else:
+            _log_transcript(transcript, f'<< DATA: {len(payload)} bytes')
     return is_command, payload
 
 
-async def _send_cmd(writer, cmd, text=''):
+async def _send_cmd(writer, cmd, text='', transcript=None):
+    name = CMD_NAMES.get(cmd, str(cmd))
+    _log_transcript(transcript, f'>> CMD {name}' + (f': {text}' if text else ''))
     writer.write(_build_cmd(cmd, text))
     await writer.drain()
 
 
-async def _send_data(writer, data):
+async def _send_data(writer, data, transcript=None):
+    _log_transcript(transcript, f'>> DATA: {len(data)} bytes')
     writer.write(_build_data(data))
     await writer.drain()
 
@@ -106,6 +141,18 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     peer = writer.get_extra_info('peername')
     logger.info('BinkP inbound from %s', peer)
     session_started_at = datetime.utcnow()
+    # Frame-by-frame transcript for this session, saved to
+    # EchomailPollLog.transcript at the end (see "9." below) -- mirrors
+    # binkp.py's BinkPClient._transcript for outbound polls, which has
+    # existed since v1.0b2.47. Real gap found while investigating this
+    # session's own BinkP audit: outbound polls (us dialing OUT) always
+    # got a saved transcript; inbound sessions (a peer dialing IN --
+    # e.g. the exact "hub delivers mail, we stall" scenario this whole
+    # audit was chasing) never did, on either the fix-shipping side or
+    # before it. A sysop diagnosing an inbound stall had nothing to look
+    # at, even though that's arguably the more valuable direction to
+    # have logs for (it can't be re-run on demand the way a poll can).
+    transcript = []
 
     # 1. Send our M_NUL info + M_ADR.  Match Synchronet binkit's
     # preamble (SYS / ZYZ / LOC / NDL / TIME / VER) so peers that key
@@ -114,12 +161,12 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     location = os.environ.get('BBS_LOCATION', 'Earth')
     from .. import __version__ as _anetbbs_version
     full_ver = f'ANetBBS/{_anetbbs_version} binkp/1.1'
-    await _send_cmd(writer, CMD_NUL, f'SYS {system_name}')
-    await _send_cmd(writer, CMD_NUL, f'ZYZ {sysop_name}')
-    await _send_cmd(writer, CMD_NUL, f'LOC {location}')
-    await _send_cmd(writer, CMD_NUL, 'NDL 115200,TCP,BINKP')
-    await _send_cmd(writer, CMD_NUL, f'TIME {datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}')
-    await _send_cmd(writer, CMD_NUL, f'VER {full_ver}')
+    await _send_cmd(writer, CMD_NUL, f'SYS {system_name}', transcript=transcript)
+    await _send_cmd(writer, CMD_NUL, f'ZYZ {sysop_name}', transcript=transcript)
+    await _send_cmd(writer, CMD_NUL, f'LOC {location}', transcript=transcript)
+    await _send_cmd(writer, CMD_NUL, 'NDL 115200,TCP,BINKP', transcript=transcript)
+    await _send_cmd(writer, CMD_NUL, f'TIME {datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}', transcript=transcript)
+    await _send_cmd(writer, CMD_NUL, f'VER {full_ver}', transcript=transcript)
 
     # Advertise CRAM-MD5 support as the answering side (FTS-1027) -- a
     # random challenge callers can hash their password against instead
@@ -131,7 +178,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     # the matching verification side; plain-text M_PWD is still
     # accepted for callers that don't speak CRAM-MD5.
     cram_challenge_bytes = secrets.token_bytes(32)
-    await _send_cmd(writer, CMD_NUL, f'OPT CRAM-MD5-{cram_challenge_bytes.hex()}')
+    await _send_cmd(writer, CMD_NUL, f'OPT CRAM-MD5-{cram_challenge_bytes.hex()}', transcript=transcript)
 
     akas = []
     try:
@@ -220,7 +267,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     akas.sort(key=_aka_rank)
     aka_line = ' '.join(akas) if akas else our_address
     logger.info('BinkP %s: announcing AKAs %s', peer, aka_line)
-    await _send_cmd(writer, CMD_ADR, aka_line)
+    await _send_cmd(writer, CMD_ADR, aka_line, transcript=transcript)
 
     # 2. Read client commands until we get their address + password
     remote_addr = None
@@ -228,7 +275,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     remote_pwd = None
     while remote_addr is None or remote_pwd is None:
         try:
-            is_cmd, payload = await asyncio.wait_for(_recv_frame(reader), timeout=30)
+            is_cmd, payload = await asyncio.wait_for(_recv_frame(reader, transcript=transcript), timeout=30)
         except asyncio.TimeoutError:
             logger.warning('BinkP %s: handshake timed out', peer)
             return
@@ -297,7 +344,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             if not _verify_binkp_password(network.binkp_password, remote_pwd,
                                           cram_challenge_bytes):
                 logger.warning('BinkP %s: bad password for upstream %s', peer, remote_addr)
-                await _send_cmd(writer, CMD_ERR, 'bad password')
+                await _send_cmd(writer, CMD_ERR, 'bad password', transcript=transcript)
                 writer.close()
                 return
             net_id = network.id
@@ -317,7 +364,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                               cram_challenge_bytes):
                     logger.warning('BinkP %s: bad password for downstream node %s',
                                    peer, remote_addr)
-                    await _send_cmd(writer, CMD_ERR, 'bad password')
+                    await _send_cmd(writer, CMD_ERR, 'bad password', transcript=transcript)
                     writer.close()
                     return
                 downstream_node_id = node.id
@@ -356,17 +403,17 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             else:
                 logger.warning('BinkP %s: unknown remote address %s (tried: %s)',
                                peer, remote_addr, ', '.join(candidates))
-                await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}')
+                await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}', transcript=transcript)
                 writer.close()
                 return
 
     logger.info('BinkP %s: authenticated as %s (%s)', peer, remote_addr, net_name)
 
     # 4. M_OK
-    await _send_cmd(writer, CMD_OK, 'secure')
+    await _send_cmd(writer, CMD_OK, 'secure', transcript=transcript)
 
     # 5. Receive inbound files until M_EOB. Then send outbound. Then M_EOB.
-    inbound_files = await _receive_files(reader, writer, peer)
+    inbound_files = await _receive_files(reader, writer, peer, transcript=transcript)
 
     # 6. Send queued outbound messages -- moved ahead of importing what
     #    we just received (see the note above _finish_session's call
@@ -383,7 +430,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes, transcript=transcript)
                 if accepted:
                     mark_sent_for_node(downstream_node_id,
                                        [m.id for m in outbound])
@@ -401,7 +448,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes)
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes, transcript=transcript)
                 if accepted:
                     now = datetime.utcnow()
                     for m in outbound:
@@ -427,7 +474,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     #    the handshake here means the peer's session completes in
     #    roughly the time it takes to exchange files, regardless of how
     #    large the resulting import turns out to be.
-    await _finish_session(reader, writer, peer, inbound_files, sent_count)
+    await _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=transcript)
 
     # 8. NOW import inbound packets + scan for .tic file echoes. The
     #    socket is already closed at this point (see above) -- however
@@ -642,6 +689,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             with app.app_context():
                 try:
                     from ..models import EchomailPollLog
+                    from .poller import _format_transcript
                     db.session.add(EchomailPollLog(
                         network_id=net_id,
                         poll_type=_inbound_poll_type(imported_total, sent_count),
@@ -650,6 +698,13 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         status='success',
                         messages_sent=sent_count,
                         messages_received=imported_total,
+                        # Real gap this closes: outbound polls have saved
+                        # a frame-by-frame transcript since v1.0b2.47 (see
+                        # _log_transcript above); inbound sessions -- a
+                        # peer connecting TO us, the exact direction this
+                        # session's whole BinkP audit was chasing -- never
+                        # did, on either the fix-shipping side or before.
+                        transcript=_format_transcript(transcript) if transcript else None,
                     ))
                     db.session.commit()
                 except Exception:
@@ -659,7 +714,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     await asyncio.to_thread(_import_and_log)
 
 
-async def _finish_session(reader, writer, peer, inbound_files, sent_count):
+async def _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=None):
     """Send our final M_EOB, complete binkp/1.1's two-round handshake,
     briefly drain any trailing bytes, then close.
 
@@ -677,11 +732,12 @@ async def _finish_session(reader, writer, peer, inbound_files, sent_count):
     the peer still has trailing bytes in flight can register on their
     end as an abrupt disconnect rather than a clean session end.
     """
-    await _send_cmd(writer, CMD_EOB)
+    await _send_cmd(writer, CMD_EOB, transcript=transcript)
     try:
-        is_cmd, payload = await asyncio.wait_for(_recv_frame(reader), timeout=10)
+        is_cmd, payload = await asyncio.wait_for(
+            _recv_frame(reader, transcript=transcript), timeout=10)
         if is_cmd and payload and payload[0] == CMD_EOB:
-            await _send_cmd(writer, CMD_EOB)
+            await _send_cmd(writer, CMD_EOB, transcript=transcript)
     except Exception:
         pass
 
@@ -706,7 +762,7 @@ async def _finish_session(reader, writer, peer, inbound_files, sent_count):
         pass
 
 
-async def _receive_files(reader, writer, peer):
+async def _receive_files(reader, writer, peer, transcript=None):
     """Receive M_FILE offers + data frames until M_EOB. Returns [(filename, bytes)]."""
     files = []
     current_name = None
@@ -715,7 +771,8 @@ async def _receive_files(reader, writer, peer):
 
     while True:
         try:
-            is_cmd, payload = await asyncio.wait_for(_recv_frame(reader), timeout=120)
+            is_cmd, payload = await asyncio.wait_for(
+                _recv_frame(reader, transcript=transcript), timeout=120)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
             break
         if is_cmd:
@@ -740,23 +797,23 @@ async def _receive_files(reader, writer, peer):
             current_buf.extend(payload)
             if current_name and len(current_buf) >= current_size:
                 files.append((current_name, bytes(current_buf[:current_size])))
-                await _send_cmd(writer, CMD_GOT, f'{current_name} {current_size} 0')
+                await _send_cmd(writer, CMD_GOT, f'{current_name} {current_size} 0', transcript=transcript)
                 current_name = None
                 current_buf = bytearray()
     return files
 
 
-async def _send_pkt_file(reader, writer, filename, payload):
+async def _send_pkt_file(reader, writer, filename, payload, transcript=None):
     """Send a M_FILE offer + data frames, then wait for M_GOT (or M_SKIP/M_ERR).
 
     Returns True on accepted (M_GOT), False on rejected/skipped/error.
     """
     unix_time = int(datetime.utcnow().timestamp())
-    await _send_cmd(writer, CMD_FILE, f'{filename} {len(payload)} {unix_time} 0')
+    await _send_cmd(writer, CMD_FILE, f'{filename} {len(payload)} {unix_time} 0', transcript=transcript)
     # Send in 4 KB chunks
     chunk = 4096
     for i in range(0, len(payload), chunk):
-        await _send_data(writer, payload[i:i+chunk])
+        await _send_data(writer, payload[i:i+chunk], transcript=transcript)
 
     # Wait for M_GOT — many BinkP impls won't actually process the file until
     # they confirm. Without this, we'd send M_EOB + close immediately and the
@@ -765,7 +822,8 @@ async def _send_pkt_file(reader, writer, filename, payload):
     while True:
         timeout = max(0.1, deadline - asyncio.get_event_loop().time())
         try:
-            is_cmd, frame = await asyncio.wait_for(_recv_frame(reader), timeout=timeout)
+            is_cmd, frame = await asyncio.wait_for(
+                _recv_frame(reader, transcript=transcript), timeout=timeout)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
             logger.warning('No M_GOT received for %s within 60s', filename)
             return False

@@ -134,6 +134,46 @@ pending/failed counts on the **TIC / File Distribution** tab of **Admin
 is hub-operator-only (gated by `REGISTRY_MODE_ENABLED`); the plain
 **Admin → TIC Log** audit page above is available on every install.
 
+## FileFix — subscription requests from peers
+
+FileFix is the file-echo counterpart to AreaFix (see
+[doc 6 — Echomail](06-echomail.md)) — it lets a downstream peer manage
+their own file-echo subscriptions by sending a netmail instead of the
+hub sysop doing it by hand. It lives in `anetbbs/echomail/filefix.py`
+and reuses AreaFix's exact command grammar.
+
+A peer addresses a netmail to **`FileFix`** (also recognized:
+`File Fix`, `FileMgr`) at your hub address, with the **AreaFix/FileFix
+password in the Subject line** (per FTS-0024 — NOT in the body, same
+convention as AreaFix) and one command per line in the body:
+
+```
++FILES.GAMES        subscribe to a file echo
+-FILES.GAMES        unsubscribe from a file echo
++ALL / -ALL         subscribe / unsubscribe to everything available
+%LIST (or %QUERY)   reply with current subscriptions
+%HELP               reply with a help/command summary
+```
+
+The bot replies with a netmail confirming what changed. If the
+requester's FTN address matches a `BinkPNode` this BBS hosts as a hub
+peer, the change is scoped to that peer's own `FileEchoSubscription`
+rows (keyed by peer address, not a `BinkPNode` foreign key — a real
+structural difference from AreaFix's `EchoAreaNode`) instead of the
+global `FileArea.is_subscribed` flag.
+
+**Password**: FileFix shares the same network-level password fields as
+AreaFix — there's no separate `filefix_password`. Set `areafix_password`
+(or leave it blank to fall back to `binkp_password`) on the network's
+edit page; it covers both bots.
+
+The sysop side of outbound FileFix requests (subscribe/unsubscribe
+buttons on file-area management pages) queues the same kind of netmail
+automatically — see `send_areafix_request(..., robot_name='FileFix')`
+in `areafix.py` (FileFix reuses AreaFix's outbound sender directly).
+Traffic is logged in the same **Admin → Echomail Networks → AreaFix
+Log** table AreaFix uses (`bot='filefix'` distinguishes the rows).
+
 ## Shareable links
 
 Any user can mint an expiring share link for a file in an area they

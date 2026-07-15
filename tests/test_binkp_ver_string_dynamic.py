@@ -59,7 +59,7 @@ class BinkPVerStringDynamicTests(unittest.TestCase):
 
         sent = []
 
-        async def _fake_send_cmd(writer, cmd, text=''):
+        async def _fake_send_cmd(writer, cmd, text='', transcript=None):
             sent.append(text)
 
         class _FakeWriter:
