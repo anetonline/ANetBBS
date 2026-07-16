@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.131 — Web: fix Service Control Center metrics sampler crash-loop (July 2026)
+
+Found while investigating a separate live "dosemu2 door games show a black screen over the web UI" report — this was the actual thing crash-looping in the same process, every ~2 seconds, confirmed via `journalctl`.
+
+- FIX: the Service Control Center's background per-PID metrics sampler called `subprocess.run()` once per known systemd unit in a tight sequential loop. Under gunicorn+eventlet, that call runs through eventlet's greened subprocess module; any transient hiccup could leave its fd-listener registered in the shared epoll hub past the point its fd number got recycled by the next call, colliding with it (`RuntimeError: Second simultaneous read on fileno N detected`) and crash-looping from that point on, indefinitely. Now dispatches the call to a real native OS thread via `eventlet.tpool.execute()`, bypassing eventlet's greened machinery entirely — the officially recommended pattern for exactly this.
+
+4 new regression tests, each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.130 — MRC: stop sending LOGOFF on individual leave — this is what was breaking trust (July 2026)
 
 Root-caused from a real, complete packet transcript (`MRC_BRIDGE_LOG_LEVEL=DEBUG`) captured on the live server — the first fix in this saga backed by actual evidence instead of spec/source comparison.

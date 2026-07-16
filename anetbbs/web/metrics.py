@@ -46,6 +46,13 @@ except ImportError:
     psutil = None  # type: ignore
     _PSUTIL_AVAILABLE = False
 
+try:
+    import eventlet.tpool  # type: ignore
+    _TPOOL_AVAILABLE = True
+except ImportError:
+    eventlet = None  # type: ignore
+    _TPOOL_AVAILABLE = False
+
 
 SAMPLE_INTERVAL_SEC = float(os.environ.get('METRICS_SAMPLE_SEC', '2'))
 HISTORY_POINTS = int(os.environ.get('METRICS_HISTORY_POINTS', '150'))
@@ -79,11 +86,36 @@ def _init_buffers():
 
 
 def _get_main_pid(unit: str) -> Optional[int]:
-    """MainPID via systemctl. Returns None for inactive units."""
+    """MainPID via systemctl. Returns None for inactive units.
+
+    Real bug found live: under gunicorn+eventlet (the actual runtime
+    here — web_app.py calls eventlet.monkey_patch() unconditionally),
+    a plain subprocess.run() runs through eventlet's greened subprocess
+    module, whose blocking read on the child's errpipe cooperates via
+    the shared epoll hub. This sampler calls it once per known unit
+    every SAMPLE_INTERVAL_SEC in a tight sequential loop -- any single
+    transient hiccup here can leave that read's fd-listener registered
+    in the hub past the point its fd number gets recycled by the next
+    subprocess.run() call, which then collides with it: "Second
+    simultaneous read on fileno N detected", crash-looping every tick
+    from that point on (confirmed live via journalctl -- looping every
+    ~2s indefinitely). tpool.execute() runs the call on a real native
+    OS thread instead, bypassing eventlet's greened subprocess/os.read
+    machinery (and its shared hub bookkeeping) entirely -- the
+    officially recommended eventlet pattern for blocking calls like
+    this. Falls back to a plain call when eventlet isn't active (e.g.
+    running this module outside the gunicorn worker, such as in tests).
+    """
     try:
-        r = subprocess.run(
-            ['systemctl', 'show', unit, '--property=MainPID'],
-            capture_output=True, text=True, timeout=5)
+        if _TPOOL_AVAILABLE:
+            r = eventlet.tpool.execute(
+                subprocess.run,
+                ['systemctl', 'show', unit, '--property=MainPID'],
+                capture_output=True, text=True, timeout=5)
+        else:
+            r = subprocess.run(
+                ['systemctl', 'show', unit, '--property=MainPID'],
+                capture_output=True, text=True, timeout=5)
         out = (r.stdout or '').strip()
         if '=' in out:
             pid = int(out.split('=', 1)[1])
