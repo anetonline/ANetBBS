@@ -45,6 +45,32 @@ from flask_login import login_required, current_user
 
 from ..models import User, UserSession
 
+try:
+    import eventlet.tpool  # type: ignore
+    _TPOOL_AVAILABLE = True
+except ImportError:
+    eventlet = None  # type: ignore
+    _TPOOL_AVAILABLE = False
+
+
+def _run_subprocess(*args, **kwargs):
+    """subprocess.run(), but off eventlet's greened subprocess/os.read
+    machinery when running under gunicorn+eventlet (web_app.py calls
+    eventlet.monkey_patch() unconditionally). Mirrors the fix already
+    live in metrics.py's sampler (v1.0b2.131), which found this exact
+    pattern -- a tight sequential loop of subprocess.run() calls, one
+    per known unit -- crash-looping with "Second simultaneous read on
+    fileno N detected" once a transient hiccup left a read's
+    fd-listener registered in eventlet's shared epoll hub past the
+    point its fd number got recycled by the next call. This module has
+    the identical shape: `/status.json` calls `_systemctl_read` once
+    per KNOWN_UNITS entry every time the Control Center panel polls
+    (every 5s while open), so the same collision risk applies here."""
+    if _TPOOL_AVAILABLE:
+        return eventlet.tpool.execute(subprocess.run, *args, **kwargs)
+    return subprocess.run(*args, **kwargs)
+
+
 _RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
 
 # KNOWN_UNITS' systemd-unit names -> the short name used by the other
@@ -170,7 +196,7 @@ def _systemctl_read(*args):
     sudo picks."""
     cmd = ['systemctl'] + list(args)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = _run_subprocess(cmd, capture_output=True, text=True, timeout=15)
         return r.returncode == 0, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return False, '', 'timeout'
@@ -187,7 +213,7 @@ def _systemctl_change(*args):
     install.sh/update.sh)."""
     cmd = ['sudo', '-n', 'systemctl'] + list(args)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = _run_subprocess(cmd, capture_output=True, text=True, timeout=15)
         return r.returncode == 0, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return False, '', 'timeout'
@@ -224,7 +250,7 @@ def _supervisorctl(*args):
     sudo since supervisord itself already runs as root in that image."""
     cmd = ['supervisorctl', '-c', '/app/docker/single/supervisord.conf'] + list(args)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = _run_subprocess(cmd, capture_output=True, text=True, timeout=15)
         return r.returncode == 0, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return False, '', 'timeout'
@@ -509,7 +535,7 @@ def _read_journal_systemd(unit, lines=200):
     The service user just needs read access to the system journal
     (``systemd-journal`` / ``adm`` group on Debian/Ubuntu)."""
     try:
-        r = subprocess.run(
+        r = _run_subprocess(
             ['journalctl', '-u', unit, '--no-pager',
              '-n', str(int(lines))],
             capture_output=True, text=True, timeout=15)

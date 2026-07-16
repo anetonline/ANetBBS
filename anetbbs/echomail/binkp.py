@@ -1012,7 +1012,18 @@ class BinkPClient:
                 self._interleaved_received.extend(msgs)
                 logger.info("BinkP: imported %d msg(s) from %s", len(msgs), fname)
             try:
-                self._send_cmd(CMD_GOT, fname)
+                # Real bug found live (a peer sysop's poll log): a bare
+                # "GOT: filename" is missing the size and timestamp
+                # fields FTS-1026 requires (M_GOT filename size time,
+                # mirroring M_FILE's own fields) -- binkd tolerated it
+                # for the first couple of files in the batch but then
+                # replied "ERR: M_GOT: cannot parse args" and hung up.
+                # binkp_server.py (the inbound listener) already sends
+                # the correct 3-field form; this path (file receipt
+                # during a poll THIS side initiated) never got the same
+                # fix. Timestamp is a literal "0" placeholder, matching
+                # binkp_server.py's own proven-working format exactly.
+                self._send_cmd(CMD_GOT, f'{fname} {state["pending_size"]} 0')
             except OSError as exc:
                 logger.info("BinkP: hub closed before GOT ack (clean): %s", exc)
             state['pending_file'] = None

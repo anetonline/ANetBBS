@@ -1,3 +1,16 @@
+# ANetBBS v1.0b2.134 — BinkP GOT-ack fix, Service Control Center + scheduled-events reliability (July 2026)
+
+Three unrelated reports: a peer sysop's poll log showing a real FidoNet hub rejecting our file acknowledgments mid-session, a Control Center screenshot showing a terminal-services crash with an alarming (but misleading) 99.3% CPU reading, and a peer sysop reporting his nightly/hourly scheduled events just weren't firing.
+
+- FIX: receiving files during a poll we initiated ourselves (as opposed to a peer polling us) acknowledged each one with a bare `GOT: filename` — no size or timestamp. FTS-1026 defines `M_GOT` as `filename size time`, the same three fields as `M_FILE`; our own inbound listener already sent this correctly, but this second, separate code path never got the same fix. Tolerated by most peers, but confirmed live against a real, stricter binkd: the first two files' bare GOT acks were silently accepted, the third was rejected outright (`ERR: M_GOT: cannot parse args`) and the peer hung up — reproduced identically across two independent sessions.
+- FIX: the Service Control Center's CPU%/RAM/thread pills kept showing a dead service's *last-known* reading indefinitely, with nothing marking it stale — a crashed process could look like it was still pinning the CPU for up to 5 minutes after it actually exited. Now blanked to "—" the moment the sampler's most recent tick comes back empty. Same bug also silently inflated the aggregate CPU/RAM totals at the top of the panel.
+- FIX: the Control Center's own `/status.json` polling (systemctl state + journal reads, once per known unit, every 5s while the panel is open) ran raw `subprocess.run()` under gunicorn+eventlet — the same tight-loop shape already found crash-looping in the metrics sampler (v1.0b2.131, "Second simultaneous read on fileno N detected"). Routed through `eventlet.tpool.execute()` the same way.
+- FIX: one scheduled event with an out-of-range time value (the `daily`/`weekly` schedule kinds were never format/range-validated, unlike hourly/weekly-day/interval) could crash the *entire* event scheduler sweep every single tick — silently blocking every other scheduled event (nightly maintenance, log rotation, VACUUM, custom events) from ever running again, with only one generic log line to go on. The scheduler now isolates each event so one bad row can't affect the others, and the form validates daily/weekly times the same way the other schedule kinds already were.
+
+17 new regression tests across the three testable fixes (the stale-metrics display fix is front-end JS with no test harness in this project), each verified to fail without its fix.
+
+---
+
 # ANetBBS v1.0b2.133 — Terminal MRC: fix false "Rate limit" error on split messages (July 2026)
 
 Reported live ("still getting this rate error when dming, even though it's not [too long]"). Not actually related to message length in the sense reported — the fix is real, but the mechanism is different from what it looked like.

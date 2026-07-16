@@ -37,9 +37,25 @@ _TICK_SEC = 60
 
 # ── Schedule math ────────────────────────────────────────────────────────
 def _parse_hhmm(s: str) -> tuple[int, int]:
+    """Parse "HH:MM", falling back to 03:00 for anything unparseable OR
+    out of range. The out-of-range guard matters more than it looks --
+    'daily'/'weekly' schedules are the only two kinds whose time field
+    was never range-validated at save time (events_admin.py validates
+    hourly/weekly-day/interval strictly but took daily/weekly's `time`
+    as a raw string). A stray out-of-range hour (e.g. from an old row,
+    a direct DB edit, or a client that bypasses the <input type=time>
+    widget) reaches datetime.replace(hour=..)  uncaught, and that
+    propagates out of is_due()/compute_next_run() with nothing in
+    _tick()'s per-row loop to catch it -- aborting the ENTIRE sweep for
+    that tick and silently starving every other scheduled event ordered
+    after the bad one, forever, with only a single generic "event
+    scheduler crashed" log line to go on."""
     try:
         h, m = s.split(':')
-        return int(h), int(m)
+        h, m = int(h), int(m)
+        if not (0 <= h < 24 and 0 <= m < 60):
+            return 3, 0
+        return h, m
     except (ValueError, AttributeError):
         return 3, 0
 
@@ -166,7 +182,20 @@ def _tick(app) -> None:
             schedule = json.loads(ev.schedule_json or '{}')
         except json.JSONDecodeError:
             schedule = {}
-        if is_due(schedule, ev.last_run_at):
+        try:
+            due = is_due(schedule, ev.last_run_at)
+        except Exception:
+            # One row's bad schedule must never take the whole sweep
+            # down with it -- previously an uncaught exception here
+            # (e.g. datetime.replace() rejecting an out-of-range hour)
+            # propagated straight out of the `for` loop, skipping every
+            # other event for the rest of this tick (and every tick
+            # after, since the same row fails the same way every time).
+            logger.exception('events: %s has an unevaluable schedule '
+                             '(%r) -- skipping it, other events unaffected',
+                             ev.name, ev.schedule_json)
+            continue
+        if due:
             logger.info('events: firing %s (%s)', ev.name, ev.handler_key)
             ok, _ = fire(app, ev.id)
             if not ok:

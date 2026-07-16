@@ -43,7 +43,19 @@ def _row_view(ev: ScheduledEvent) -> dict:
         sched = json.loads(ev.schedule_json or '{}')
     except json.JSONDecodeError:
         sched = {}
-    next_run = compute_next_run(sched, ev.last_run_at) if ev.is_enabled else None
+    next_run = None
+    if ev.is_enabled:
+        try:
+            next_run = compute_next_run(sched, ev.last_run_at)
+        except Exception:
+            # Mirrors the same guard in events/runner.py's _tick() --
+            # an unevaluable schedule (e.g. a pre-fix row with an
+            # out-of-range hour) must not 500 the whole admin list page,
+            # just show as "?" for that one row so the sysop can still
+            # get in and fix or delete it.
+            logger.exception('events admin: %s has an unevaluable '
+                             'schedule (%r)', ev.name, ev.schedule_json)
+            next_run = None
     return {
         'row': ev,
         'schedule': sched,
@@ -69,11 +81,35 @@ def _human_schedule(sched: dict) -> str:
     return f'unknown ({kind})'
 
 
+def _parse_hhmm_strict(t: str) -> tuple[int, int] | None:
+    """Validate an "HH:MM" string, returning (h, m) or None. Unlike
+    events/runner.py's _parse_hhmm() -- which must fall back silently
+    since it runs unattended in the scheduler tick -- this rejects bad
+    input outright so the sysop finds out at save time, not by their
+    events silently never firing."""
+    try:
+        h, m = t.split(':')
+        h, m = int(h), int(m)
+    except (ValueError, AttributeError):
+        return None
+    if not (0 <= h < 24 and 0 <= m < 60):
+        return None
+    return h, m
+
+
 def _parse_form_schedule(form) -> tuple[dict, str | None]:
-    """Build a schedule dict from the form fields. Returns (sched, error)."""
+    """Build a schedule dict from the form fields. Returns (sched, error).
+
+    hourly/weekly-day/interval were already range-validated here; daily
+    and weekly's `time` field was taken as a raw string with no format
+    or range check at all -- the only reason a bad value could ever
+    reach the scheduler in the first place (see events/runner.py's
+    _parse_hhmm() docstring for what that caused)."""
     kind = form.get('schedule_kind', 'daily')
     if kind == 'daily':
         t = (form.get('schedule_time') or '03:00').strip()
+        if _parse_hhmm_strict(t) is None:
+            return {}, 'time must be HH:MM, 00:00-23:59'
         return {'kind': 'daily', 'time': t}, None
     if kind == 'hourly':
         try:
@@ -91,6 +127,8 @@ def _parse_form_schedule(form) -> tuple[dict, str | None]:
         if not (0 <= d < 7):
             return {}, 'day must be 0..6 (0=Mon, 6=Sun)'
         t = (form.get('schedule_time') or '04:00').strip()
+        if _parse_hhmm_strict(t) is None:
+            return {}, 'time must be HH:MM, 00:00-23:59'
         return {'kind': 'weekly', 'day': d, 'time': t}, None
     if kind == 'interval':
         try:
