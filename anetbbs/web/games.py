@@ -241,6 +241,9 @@ def handle_start_game(data):
         return
 
     bbs_name = current_app.config.get('BBS_NAME', 'ANetBBS')
+    # Captured for _drain_queue below, which runs as a SocketIO
+    # background task outside any request context of its own.
+    _app = current_app._get_current_object()
 
     # Closure box for the session_id — needed because launch_door_game starts
     # the PTY reader thread synchronously, which immediately calls _emit_output.
@@ -326,9 +329,27 @@ def handle_start_game(data):
                 sid = sid_box[0]
                 if sid is not None:
                     try:
-                        gs = GameSession.query.get(sid)
-                        if gs is None or gs.status != 'active':
-                            break
+                        # Real bug found live: this background task has
+                        # no request/app context of its own, and this
+                        # query needs one. Every dosemu2 launch has a
+                        # natural idle stretch (boot, "press any key",
+                        # etc.) long enough to hit the 5s timeout below
+                        # before the terminal client is fast-moving
+                        # enough to avoid it -- the very first time it
+                        # did, this raised RuntimeError: Working outside
+                        # of application context, which the except
+                        # below treated as "session must be gone" and
+                        # broke out of the loop, permanently ending this
+                        # queue's draining for the rest of the session.
+                        # Everything the door rendered after that point
+                        # was queued but never actually emitted to the
+                        # browser -- exactly a stuck/black screen, with
+                        # the backend continuing to run the door
+                        # correctly the whole time.
+                        with _app.app_context():
+                            gs = GameSession.query.get(sid)
+                            if gs is None or gs.status != 'active':
+                                break
                     except Exception:
                         logger.exception('drain_queue: session status check failed')
                         break

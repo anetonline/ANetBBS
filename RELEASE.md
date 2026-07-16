@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.132 — Web: fix door game output silently stopping after the first idle pause (July 2026)
+
+Root-caused the actual "dosemu2 door games show a black screen over the web UI" report — confirmed via a live log capture showing dosemu2 booting and rendering correctly server-side the entire time, while the browser never received any of it.
+
+- FIX: `handle_start_game()`'s background output-draining task has no Flask app context of its own. Its idle-timeout check (does the queue sit empty for 5+ seconds? then verify the session is still active) needs a database query, which needs that context — and didn't have one. The very first time a door produced no output for 5+ seconds (a completely normal boot/loading pause — near-guaranteed for dosemu2 specifically, since it's much slower to boot than a native door), that query crashed with `RuntimeError: Working outside of application context`, which the surrounding code treated as "the session must be gone" and permanently stopped draining the queue for the rest of that browser session. The backend kept running the door correctly the whole time; nothing it rendered after that point ever reached the browser again — exactly a stuck black screen.
+
+1 new regression test that reproduces the real 5-second idle gap directly (not simulated) and confirms output sent after it still reaches the browser — confirmed to fail with the exact live error message before the fix.
+
+---
+
 # ANetBBS v1.0b2.131 — Web: fix Service Control Center metrics sampler crash-loop (July 2026)
 
 Found while investigating a separate live "dosemu2 door games show a black screen over the web UI" report — this was the actual thing crash-looping in the same process, every ~2 seconds, confirmed via `journalctl`.
