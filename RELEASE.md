@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.128 — MRC: add full raw packet tracing for diagnosing the identify-persistence bug (July 2026)
+
+Three rounds of wire-format fixes verified against reference client source and the actual official protocol spec haven't resolved the live "still have to identify every time" report — rather than guess a fourth time, this adds a way to capture a complete real transcript for direct comparison.
+
+- Every outgoing packet (`send_packet`) and every incoming line from the hub are now logged verbatim, tagged `MRC RAW OUT`/`MRC RAW IN`, at `DEBUG` level only — gated behind a new `MRC_BRIDGE_LOG_LEVEL` environment variable (defaults to the existing `INFO`, unchanged). Deliberately not on by default, since full tracing would otherwise mean every private chat message lands in plaintext in the server's own logs permanently.
+
+1 new regression test, verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.127 — MRC: correct wire format against the actual official protocol spec (July 2026)
 
 Direct follow-up to `.123`/`.124`, after obtaining the real MRC protocol developer documentation (not inferred from client source). Two important corrections:

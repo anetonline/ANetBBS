@@ -38,7 +38,18 @@ from aiohttp import web
 from .db import BridgeDB
 from .mrc_protocol import MRCProtocol
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# MRC_BRIDGE_LOG_LEVEL=DEBUG enables full raw packet tracing (every
+# outgoing send_packet() call and every incoming line, both directions,
+# tagged "MRC RAW OUT"/"MRC RAW IN") -- deliberately NOT logged at the
+# default INFO level, since that would mean every private chat message
+# lands in plaintext in the server's own logs permanently. Meant to be
+# switched on temporarily (systemd override or `MRC_BRIDGE_LOG_LEVEL=
+# DEBUG python3 -m mrc.bridge.main`) to capture a full connect/
+# identify/leave/rejoin transcript when static source/spec analysis
+# alone isn't enough to root-cause a live wire-level issue.
+logging.basicConfig(
+    level=os.environ.get("MRC_BRIDGE_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mrc_bridge")
 
 _BRIDGE_DIR = Path(__file__).parent
@@ -429,6 +440,7 @@ class MRCConnection:
     async def send_packet(self, packet: str):
         if not packet:
             return
+        logger.debug("MRC RAW OUT: %r", packet)
         if not self.connected or not self.writer:
             self._queue_packet(packet)
             return
@@ -464,6 +476,7 @@ class MRCConnection:
                     if not self._looks_like_packet(line):
                         logger.warning(f"Skipping non-packet line: {line!r}")
                         continue
+                    logger.debug("MRC RAW IN: %r", line)
                     await self._handle_packet(line)
             except asyncio.CancelledError:
                 break
