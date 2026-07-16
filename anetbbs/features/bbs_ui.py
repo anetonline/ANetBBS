@@ -338,11 +338,43 @@ class BBSMenuUI:
                 if 0 <= idx < len(b_list):
                     _, title, who, when, _, content = b_list[idx]
                     ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
-                    await self._page_text(content or '',
-                                          title=title,
-                                          subtitle=f'by {who} - {ts}')
+                    await self._view_bulletin(title, who, ts, content or '')
             except ValueError:
                 pass
+
+    async def _view_bulletin(self, title, who, ts, content):
+        """Scrollable ANView reader instead of the old page-break [MORE]
+        pager -- matches how echo/private messages are already read.
+
+        Bulletins are authored via the web admin's plain-textarea form
+        (anetbbs/web/admin.py's BulletinForm), NOT typed at a terminal
+        -- unlike echo/private messages, which launch_aneview() assumes
+        are stored as CP437-byte-as-latin1 mojibake (the real wire
+        convention for FidoNet/terminal-composed text). Round-tripping
+        plain Unicode bulletin text through that CP437 decode would
+        silently corrupt any non-ASCII character (curly quotes, em
+        dashes, accented letters) into an unrelated CP437 glyph, so
+        this builds ANView lines directly with the same word-wrap +
+        raw-ANSI-passthrough logic _page_text used, skipping the
+        CP437/pipe-code pipeline entirely. Raw ANSI escapes in a
+        bulletin (sysop-authored colored announcements) still render.
+        """
+        from .anedit import ANView
+        col_w = max(40, (getattr(self.session, 'window_size', (80, 24))[0] or 80) - 2)
+        lines = [
+            f'\x1b[36mBy:  \x1b[0m{who or "?"}',
+            f'\x1b[36mDate:\x1b[0m{ts}',
+            '\x1b[36m' + '─' * col_w + '\x1b[0m',
+            '',
+        ]
+        raw_lines = content.splitlines() or ['(empty)']
+        for _ln in raw_lines:
+            if '\x1b' in _ln:
+                lines.append(_ln)
+            else:
+                lines.extend(self._wrap_text(_ln, col_w) or [''])
+        viewer = ANView(self.session, lines, subject=title or '(no subject)')
+        await viewer.run()
 
     async def _page_text(self, body, title='', subtitle='', page_size=22):
         """Page through `body` one screenful at a time with a [MORE] prompt.

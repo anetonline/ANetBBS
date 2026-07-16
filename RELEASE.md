@@ -1,3 +1,12 @@
+# ANetBBS v1.0b2.126 — Terminal: bulletins now use the scrollable ANView reader (July 2026)
+
+- FEATURE: reading a bulletin longer than a page used the old page-break `[MORE]` pager instead of the scrollable ANView reader already used for echo/private messages. Now uses ANView (Up/Dn/PgUp/PgDn to scroll, Q to back out) instead.
+- Bulletins are authored via the web admin's plain-text form, not composed at a terminal, so this deliberately does *not* reuse the message reader's CP437-mojibake decode pipeline — that would have silently corrupted any non-ASCII bulletin text (curly quotes, em dashes, accented letters) into unrelated glyphs. Raw ANSI escapes in a bulletin still render correctly.
+
+3 new regression tests, verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.125 — Terminal: file areas now lightbar-scrollable, matching message areas/RSS (July 2026)
 
 - FEATURE: the terminal "File Library - Areas" screen used to dump every configured area top-to-bottom with a plain number-entry prompt — for any sysop with more file areas than fit one screen, this meant relying on the terminal client's own scrollback just to see the top entries. Now uses the same arrow-key lightbar selector already used for message areas and the RSS reader: Up/Dn/PgUp/PgDn to scroll, Enter to open, A for All Files, Q to back out.
