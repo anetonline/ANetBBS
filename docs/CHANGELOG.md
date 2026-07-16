@@ -1,7 +1,27 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.132`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.133`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.133 — Terminal MRC: fix false "Rate limit" error on split messages (July 2026)
+
+Reported live ("still getting this rate error when dming, even
+though it's not [too long]"). Not actually related to message length
+in the sense reported — the fix is real, but the mechanism is
+different from what it looked like.
+
+- FIX: a message that needs to split into multiple wire chunks (this
+  can happen well under the 140-char hub limit — a decorated display
+  handle's prefix/suffix eats into that budget before your own text
+  even starts) was sending every chunk back-to-back with zero delay.
+  The bridge only allows one message every 0.5 seconds per
+  connection, so any chunk after the first was always instantly
+  rejected with "Rate limit: please slow down." Fixed by adding a
+  small pause before each chunk after the first, in all four places
+  a message can split: room chat, `/me`, `/broadcast`, and DMs
+  (`/msg`, `/r`).
+
+4 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.132 — Web: fix door game output silently stopping after the first idle pause (July 2026)
 

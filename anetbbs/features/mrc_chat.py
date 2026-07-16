@@ -50,6 +50,16 @@ SCROLLBACK_LINES   = 500        # local ring buffer
 PING_INTERVAL      = 60         # seconds between WS pings
 AWAY_AFTER         = 600        # seconds idle before IAMHERE AWAY
 TICKER_TICK_SECONDS = 1.5       # ticker redraw/advance interval
+# Real bug found live: a message needing 2+ wire chunks (a decorated
+# display handle's prefix/suffix overhead can eat enough of the
+# 140-char budget to force a split well under what looks like a "long"
+# message) got sent with zero delay between chunks -- the bridge's
+# default per-connection rate limiter (message_rate_seconds=0.5s)
+# always rejected the 2nd+ chunk with "Rate limit: please slow down.",
+# since two sends 0ms apart can never clear a 0.5s minimum gap. This
+# is intentionally a bit above the bridge's own default so a normal,
+# unconfigured install never hits this from its own splitting.
+WIRE_CHUNK_DELAY = 0.6
 
 # Static fallback content for the scrolling ticker (see _ticker_items) --
 # always in rotation alongside any live hub-pushed BANNER:/STATS: text,
@@ -1607,7 +1617,9 @@ class MRCChat(BaseChatSystem):
                     self._scroll_offset = 0
                     await self._redraw_chat_area()
                 colored = self._current_color_pipe() + line
-                for chunk in _split_for_wire(colored, cap=self._chat_wire_cap()):
+                for i, chunk in enumerate(_split_for_wire(colored, cap=self._chat_wire_cap())):
+                    if i:
+                        await asyncio.sleep(WIRE_CHUNK_DELAY)
                     await self._send_json({
                         'type': 'send_message',
                         'room': self._room,
@@ -1985,7 +1997,9 @@ class MRCChat(BaseChatSystem):
     async def _send_dm(self, target: str, body: str):
         """Send a direct message and locally echo it. Shared by /msg
         (and its aliases) and /r (reply-to-last-DM)."""
-        for chunk in _split_for_wire(body, cap=self._dm_wire_cap()):
+        for i, chunk in enumerate(_split_for_wire(body, cap=self._dm_wire_cap())):
+            if i:
+                await asyncio.sleep(WIRE_CHUNK_DELAY)
             await self._send_json({
                 'type': 'direct_message',
                 'to_user': target,
@@ -2153,7 +2167,9 @@ class MRCChat(BaseChatSystem):
             if not rest:
                 await self._emit('Usage: /me <action>')
                 return True
-            for chunk in _split_for_wire(rest):
+            for i, chunk in enumerate(_split_for_wire(rest)):
+                if i:
+                    await asyncio.sleep(WIRE_CHUNK_DELAY)
                 await self._send_json({
                     'type': 'send_message',
                     'room': self._room,
@@ -2169,7 +2185,9 @@ class MRCChat(BaseChatSystem):
                 await self._emit(
                     '\x1b[33mBroadcast shield is on -- /shield off to send one.\x1b[0m')
                 return True
-            for chunk in _split_for_wire(rest):
+            for i, chunk in enumerate(_split_for_wire(rest)):
+                if i:
+                    await asyncio.sleep(WIRE_CHUNK_DELAY)
                 await self._send_json({
                     'type': 'server_cmd',
                     'command': f'BROADCAST {chunk}',
