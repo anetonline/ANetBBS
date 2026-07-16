@@ -47,10 +47,17 @@ from .mrc_protocol import MRCProtocol
 # DEBUG python3 -m mrc.bridge.main`) to capture a full connect/
 # identify/leave/rejoin transcript when static source/spec analysis
 # alone isn't enough to root-cause a live wire-level issue.
+_LOG_LEVEL = os.environ.get("MRC_BRIDGE_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=os.environ.get("MRC_BRIDGE_LOG_LEVEL", "INFO").upper(),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mrc_bridge")
+# basicConfig() is a no-op if the root logger already has a handler
+# (e.g. aiohttp or something else configured logging first under
+# systemd) -- setting the level directly on this logger is what
+# actually guarantees MRC_BRIDGE_LOG_LEVEL=DEBUG takes effect
+# regardless of import order.
+logger.setLevel(_LOG_LEVEL)
 
 _BRIDGE_DIR = Path(__file__).parent
 _WEB_DIR    = _BRIDGE_DIR.parent / "web"

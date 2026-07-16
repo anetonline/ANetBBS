@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.129 — MRC: fix debug-level packet tracing not actually activating (July 2026)
+
+`.128`'s `MRC_BRIDGE_LOG_LEVEL=DEBUG` had no effect — confirmed live, zero `MRC RAW` lines after enabling it and restarting. `logging.basicConfig()` is a documented no-op if the root logger already has a handler attached before it runs (plausible under systemd, depending on import order) — it was silently doing nothing. Now sets the level directly on the `mrc_bridge` logger itself, which takes effect regardless.
+
+2 new regression tests (one specifically simulating the pre-existing-root-handler scenario that caused this), verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.128 — MRC: add full raw packet tracing for diagnosing the identify-persistence bug (July 2026)
 
 Three rounds of wire-format fixes verified against reference client source and the actual official protocol spec haven't resolved the live "still have to identify every time" report — rather than guess a fourth time, this adds a way to capture a complete real transcript for direct comparison.
