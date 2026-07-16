@@ -870,7 +870,15 @@ class BridgeApp:
 
     async def _send_join_payloads(self, eff_nick: str, room: str, remote_ip: str = ""):
         if remote_ip:
-            await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, f"USERIP:{remote_ip}"))
+            # Per the official MRC protocol spec, USERIP's documented
+            # template is "user~bbs~~SERVER~msgext~~USERIP:ipaddress~"
+            # -- fromRoom empty, unlike the generic command path
+            # (create_server_command) which populates it. Built
+            # directly rather than through that helper for this reason.
+            pkt = MRCProtocol.create_packet(
+                eff_nick, self.config["bridge_bbs"], '', 'SERVER', '', '',
+                f"USERIP:{remote_ip}")
+            await self.mrc.send_packet(pkt)
             await self._sleep_delay()
         if self.request_banners_on_join:
             await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, "BANNERS"))

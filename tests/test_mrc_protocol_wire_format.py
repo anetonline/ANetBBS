@@ -1,27 +1,27 @@
-"""Regression test for a real wire-format bug found investigating a live
-"I still have to /identify every single time, even leaving and
-immediately rejoining" report.
+"""Regression test for MRC wire-format fields, verified directly against
+the OFFICIAL MRC protocol specification (bbswiki.bottomlessabyss.net,
+MRCDoc:MRC_Protocol -- the actual developer documentation, not inferred
+client behavior).
 
-Verified directly against the reference client's actual C source
-(umrc-client/main.c):
+This corrects two earlier revisions of this test file that had chased a
+live "I still have to /identify every single time" report by copying
+individual reference clients' own implementation shortcuts (uMRC's
+sendCmdPacket hardcodes toRoom empty for every command; Synchronet's JS
+connector empties both fromRoom and toRoom for LOGOFF specifically) --
+neither actually matches the documented spec, which is authoritative
+over any one client's own choices:
 
-  - sendCmdPacket() -- backs every generic /command (MOTD, WHOON,
-    BANNERS, CHATTERS, USERIP, etc.) -- hardcodes toRoom empty for
-    EVERY command it sends, unconditionally:
-        createPacket(chatterName, fromSite, gRoom, "SERVER", "", "", cmdstr)
-                                                          ^^ toRoom always ""
-
-  - LOGOFF (sent via sendMsgPacket on /quit) also sends toRoom empty:
-        sendMsgPacket(&mrcSock, "SERVER", "", "", "LOGOFF")
-                                            ^^ toRoom = ""
-
-ANetBBS's create_server_command() only emptied toRoom for
-IDENTIFY/REGISTER/UPDATE (an earlier, narrower investigation had
-confirmed those three specifically matched the reference and stopped
-there) -- every OTHER generic command, and create_logoff() separately,
-populated toRoom with the actual room name instead, a real deviation
-from the reference on literally every command exchange and on the
-exact packet sent each time a user leaves.
+  - Most "Client session context" commands (MOTD, WHOON, BANNERS, etc.)
+    are documented with a POPULATED toRoom:
+        "user~bbs~room~SERVER~msgext~room~MOTD~"
+  - Only IDENTIFY/REGISTER/UPDATE ("MRC Trust" verbs) are documented
+    with an empty toRoom:
+        "user~bbs~room~SERVER~msgext~~IDENTIFY password~"
+  - LOGOFF is documented with BOTH fromRoom and toRoom populated:
+        "user~bbs~room~SERVER~msgext~room~LOGOFF~"
+  - USERIP is documented with fromRoom empty (unlike the generic
+    command path):
+        "user~bbs~~SERVER~msgext~~USERIP:ipaddress~"
 """
 import sys
 import unittest
@@ -33,21 +33,23 @@ from mrc.bridge.mrc_protocol import MRCProtocol
 
 
 class ServerCommandToRoomTests(unittest.TestCase):
-    def test_generic_command_toroom_is_empty(self):
+    def test_generic_command_toroom_is_populated(self):
         for command in ('MOTD', 'WHOON', 'BANNERS', 'CHATTERS', 'ROOMS',
-                         'TOPICS', 'CHANNEL', 'USERS', 'STATS', 'LASTSEEN',
-                         'AFK', 'BACK', 'TOPIC', 'USERIP:203.0.113.7'):
+                         'TOPICS', 'CHANNEL', 'USERS', 'LASTSEEN',
+                         'AFK', 'BACK', 'TOPIC', 'TRUST INFO'):
             pkt = MRCProtocol.create_server_command('StingRay', 'TestBBS', 'lobby', command)
             parsed = MRCProtocol.parse_packet(pkt)
-            self.assertEqual(parsed['to_room'], '',
-                             f'{command}: toRoom must be empty, matching the '
-                             'reference client\'s sendCmdPacket (always empty)')
+            self.assertEqual(parsed['to_room'], 'lobby',
+                             f'{command}: toRoom must be populated with the '
+                             'room name per the documented spec template')
 
-    def test_identify_register_update_toroom_still_empty(self):
+    def test_identify_register_update_toroom_is_empty(self):
         for command in ('IDENTIFY secret', 'REGISTER secret em@ex.com', 'UPDATE password x'):
             pkt = MRCProtocol.create_server_command('StingRay', 'TestBBS', 'lobby', command)
             parsed = MRCProtocol.parse_packet(pkt)
-            self.assertEqual(parsed['to_room'], '')
+            self.assertEqual(parsed['to_room'], '',
+                             f'{command}: toRoom must be empty per spec '
+                             '("user~bbs~room~SERVER~msgext~~IDENTIFY password~")')
 
     def test_explicit_to_room_override_still_honored(self):
         pkt = MRCProtocol.create_server_command(
@@ -55,22 +57,22 @@ class ServerCommandToRoomTests(unittest.TestCase):
         parsed = MRCProtocol.parse_packet(pkt)
         self.assertEqual(parsed['to_room'], 'ctcp_echo_channel')
 
-    def test_from_room_still_populated(self):
+    def test_from_room_always_populated(self):
         pkt = MRCProtocol.create_server_command('StingRay', 'TestBBS', 'lobby', 'MOTD')
         parsed = MRCProtocol.parse_packet(pkt)
         self.assertEqual(parsed['from_room'], 'lobby')
 
 
-class LogoffToRoomTests(unittest.TestCase):
-    def test_logoff_toroom_is_empty(self):
+class LogoffFieldsTests(unittest.TestCase):
+    def test_logoff_toroom_is_populated(self):
         pkt = MRCProtocol.create_logoff('StingRay', 'TestBBS', 'lobby')
         parsed = MRCProtocol.parse_packet(pkt)
-        self.assertEqual(parsed['to_room'], '',
-                         'LOGOFF must send an empty toRoom, matching the '
-                         'reference client -- a populated toRoom here is '
-                         'the real bug behind repeated forced re-identify')
+        self.assertEqual(parsed['to_room'], 'lobby',
+                         'LOGOFF must send toRoom populated per the '
+                         'documented spec template '
+                         '("user~bbs~room~SERVER~msgext~room~LOGOFF~")')
 
-    def test_logoff_from_room_still_populated(self):
+    def test_logoff_from_room_is_populated(self):
         pkt = MRCProtocol.create_logoff('StingRay', 'TestBBS', 'lobby')
         parsed = MRCProtocol.parse_packet(pkt)
         self.assertEqual(parsed['from_room'], 'lobby')
@@ -80,6 +82,18 @@ class LogoffToRoomTests(unittest.TestCase):
         parsed = MRCProtocol.parse_packet(pkt)
         self.assertEqual(parsed['to_user'], 'SERVER')
         self.assertEqual(parsed['message'], 'LOGOFF')
+
+
+class UserIpFromRoomTests(unittest.TestCase):
+    def test_userip_from_room_is_empty(self):
+        pkt = MRCProtocol.create_packet(
+            'StingRay', 'TestBBS', '', 'SERVER', '', '', 'USERIP:203.0.113.7')
+        parsed = MRCProtocol.parse_packet(pkt)
+        self.assertEqual(parsed['from_room'], '',
+                         'USERIP must send fromRoom empty per the documented '
+                         'spec template ("user~bbs~~SERVER~msgext~~USERIP:'
+                         'ipaddress~"), unlike the generic command path')
+        self.assertEqual(parsed['to_room'], '')
 
 
 if __name__ == '__main__':

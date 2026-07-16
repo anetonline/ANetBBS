@@ -107,6 +107,23 @@ class BridgeUserIpTests(unittest.TestCase):
         self.assertIn("203.0.113.7", userips,
                       "USERIP: must actually be sent to the hub on join")
 
+    def test_userip_packet_from_room_is_empty(self):
+        # Per the official MRC protocol spec, USERIP's documented
+        # template is "user~bbs~~SERVER~msgext~~USERIP:ipaddress~" --
+        # fromRoom empty, unlike the generic command path which
+        # populates it with the current room.
+        _run(self.app._handle_join_room(
+            self.ws_id, {"handle": "Alice", "room": "lobby", "ip": "203.0.113.7"}))
+
+        found = False
+        for call in self.app.mrc.send_packet.call_args_list:
+            pkt = call.args[0] if call.args else call.kwargs.get("packet", "")
+            parsed = MRCProtocol.parse_packet(pkt)
+            if parsed["message"].startswith("USERIP:"):
+                self.assertEqual(parsed["from_room"], "")
+                found = True
+        self.assertTrue(found, "no USERIP: packet was sent to inspect")
+
     def test_web_client_server_observed_ip_is_used_when_no_explicit_ip(self):
         # Simulates handle_websocket()'s own X-Forwarded-For capture,
         # which happens before join_room ever arrives.

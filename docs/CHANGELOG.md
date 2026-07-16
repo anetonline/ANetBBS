@@ -1,7 +1,38 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.126`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.127`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.127 — MRC: correct wire format against the actual official protocol spec (July 2026)
+
+Direct follow-up to `.123`/`.124`, after obtaining the real MRC
+protocol developer documentation (not inferred from client source).
+Two important corrections:
+
+- FIX: `.124`'s "empty `toRoom` for every generic command" change was
+  based on one reference client's own implementation shortcut, not
+  the actual spec — the documented template for most commands
+  (`MOTD`, `WHOON`, `BANNERS`, etc.) is
+  `user~bbs~room~SERVER~msgext~room~COMMAND~`, with `toRoom`
+  populated. Reverted to populate it, keeping the empty-`toRoom`
+  exception only for `IDENTIFY`/`REGISTER`/`UPDATE`, which the spec
+  documents separately.
+- FIX: same correction for `LOGOFF` (sent every time you leave) — the
+  documented template has **both** `fromRoom` and `toRoom` populated
+  with the room name; `.124` had emptied `toRoom` based on the same
+  wrong assumption. Reverted to match spec.
+- FIX: a genuinely new finding from the real spec — `USERIP` should
+  send an empty `fromRoom` (`user~bbs~~SERVER~msgext~~USERIP:
+  ipaddress~`), which the code never did correctly in any prior
+  version. Fixed.
+- Also confirmed from the spec: MRC Trust is keyed to (Handle, BBS
+  Name, BBS's own IP address) with a 30-day window — not the
+  individual caller's IP. Confirmed the BBS has a stable static IP,
+  ruling that out as a contributing factor, which puts the weight
+  back on these wire-format corrections actually being the fix.
+
+10 new/updated regression tests, verified against the reference spec,
+each confirmed to fail without the fix.
 
 ## v1.0b2.126 — Terminal: bulletins now use the scrollable ANView reader (July 2026)
 

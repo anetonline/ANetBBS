@@ -79,17 +79,23 @@ class MRCProtocol:
 
     @classmethod
     def create_server_command(cls, user: str, bbs: str, room: str, command: str, to_room: str = None) -> str:
-        # Reference client (umrc-client/main.c's sendCmdPacket, which
-        # backs every generic /command) sends toRoom empty for EVERY
-        # command, unconditionally -- not just IDENTIFY/REGISTER/UPDATE
-        # as an earlier, narrower fix here assumed. A populated toRoom
-        # here was a real, verified-against-source wire mismatch on
-        # LOGOFF specifically (see create_logoff) and, by the same
-        # unconditional rule, on every other generic command routed
-        # through this function too.
+        # Per the actual official MRC protocol spec (bbswiki.
+        # bottomlessabyss.net MRCDoc:MRC_Protocol, obtained directly --
+        # not inferred from any one client's source): most "Client
+        # session context" commands (MOTD, WHOON, LIST, USERS, etc.)
+        # use a POPULATED toRoom, e.g. MOTD's documented template is
+        # literally "user~bbs~room~SERVER~msgext~room~MOTD~". Only
+        # IDENTIFY/REGISTER/UPDATE ("MRC Trust" verbs) are documented
+        # with an empty toRoom ("user~bbs~room~SERVER~msgext~~IDENTIFY
+        # password~"). An earlier revision of this function emptied
+        # toRoom for EVERY command, reasoning from one reference
+        # client's (uMRC) sendCmdPacket helper hardcoding it empty
+        # unconditionally -- that client's own shortcut, not the spec.
         room = cls.norm_room(room)
         if to_room is None:
-            to_room = ''
+            stripped = command.strip()
+            cmd_word = stripped.upper().split()[0] if stripped else ''
+            to_room = '' if cmd_word in ('IDENTIFY', 'REGISTER', 'UPDATE') else room
         to_room = cls.norm_room(to_room) if to_room else ''
         return cls.create_packet(user, bbs, room, 'SERVER', '', to_room, command)
 
@@ -115,13 +121,19 @@ class MRCProtocol:
 
     @classmethod
     def create_logoff(cls, user: str, bbs: str, room: str) -> str:
-        # Reference client sends toRoom empty for LOGOFF
-        # (sendMsgPacket(&mrcSock, "SERVER", "", "", "LOGOFF")) -- this
-        # used to send the room name in that field instead, a real
-        # verified-against-source wire mismatch on the exact packet
-        # sent every time a user leaves.
+        # Per the official MRC protocol spec (bbswiki.bottomlessabyss.net
+        # MRCDoc:MRC_Protocol): LOGOFF's documented template is
+        # "user~bbs~room~SERVER~msgext~room~LOGOFF~" -- BOTH fromRoom
+        # and toRoom populated with the room name. Two earlier revisions
+        # of this function tried emptying toRoom-only (matching uMRC's
+        # own LOGOFF call) and then both fields (matching Synchronet's
+        # JS connector) while chasing a live "must /identify every
+        # time" report -- neither actually matches the real spec, which
+        # is authoritative over any one client's own implementation
+        # choices. This restores the originally-correct, spec-matching
+        # format.
         room = cls.norm_room(room)
-        return cls.create_packet(user, bbs, room, 'SERVER', '', '', 'LOGOFF')
+        return cls.create_packet(user, bbs, room, 'SERVER', '', room, 'LOGOFF')
 
     @classmethod
     def validate_handle(cls, handle: str) -> bool:
