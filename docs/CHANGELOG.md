@@ -1,7 +1,33 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.129`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.130`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.130 — MRC: stop sending LOGOFF on individual leave — this is what was breaking trust (July 2026)
+
+Root-caused from a real, complete packet transcript
+(`MRC_BRIDGE_LOG_LEVEL=DEBUG`) captured on the live server — the first
+fix in this saga backed by actual evidence instead of spec/source
+comparison.
+
+- FIX: the bridge sent `LOGOFF` every time an individual caller left
+  a room. The transcript showed this ends the hub's MRC Trust state
+  for that handle **immediately** — the very next join got "Cannot
+  join ROOM, please IDENTIFY to use this handle" even though the
+  bridge's own connection to the hub never dropped in between. Since
+  this bridge holds one persistent shared connection to the hub per
+  BBS install across every local caller's join/leave, there's no
+  need to tell the hub "this handle is logging off" the way a
+  single-session client would. `LOGOFF` is no longer sent on an
+  individual leave (neither an explicit `/quit` nor an abrupt
+  disconnect) — `NOTME`'s "has left chat" message still covers the
+  visible room-presence announcement other users see.
+- Trade-off worth knowing: the hub's own `/who`/`CHATTERS` listing
+  may show your handle lingering briefly after you leave, until your
+  next reconnect's fresh join or the hub's own idle timeout cleans
+  it up.
+
+4 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.129 — MRC: fix debug-level packet tracing not actually activating (July 2026)
 

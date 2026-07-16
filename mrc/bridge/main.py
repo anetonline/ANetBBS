@@ -752,8 +752,11 @@ class BridgeApp:
                 # a deliberate /quit, not a dropped connection.
                 exit_msg = _resolve_message_template(sess, "leave_msg_tpl", self.exit_message_tpl, eff_nick)
                 await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
-            if eff_nick and room:
-                await self.mrc.send_packet(MRCProtocol.create_logoff(eff_nick, self.config["bridge_bbs"], room))
+            # LOGOFF deliberately NOT sent here -- see _handle_leave_room's
+            # comment for why (real live evidence: sending it ends the
+            # hub's MRC Trust state for this handle immediately, forcing
+            # a fresh /identify on the very next join even though the
+            # bridge's own connection to the hub never dropped).
             self.db.delete_session(str(ws_id))
             logger.info(f"Applied delayed disconnect logoff for handle={eff_nick} room={room}")
         except asyncio.CancelledError:
@@ -1755,10 +1758,21 @@ class BridgeApp:
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
             await self._sleep_delay()
 
-        if eff_nick and room and sess.get("in_room"):
-            await self.mrc.send_packet(MRCProtocol.create_logoff(eff_nick, self.config["bridge_bbs"], room))
-            await self._sleep_delay()
-
+        # LOGOFF is deliberately NOT sent on an individual caller leaving
+        # a room. Real live evidence (a captured full packet transcript,
+        # MRC_BRIDGE_LOG_LEVEL=DEBUG): sending LOGOFF ends the hub's MRC
+        # Trust state for this handle immediately -- the very next join
+        # got "Cannot join ROOM, please IDENTIFY to use this handle"
+        # despite the bridge's own connection to the hub never having
+        # dropped in between. This bridge holds ONE persistent shared
+        # connection to the hub per BBS install across every local
+        # caller's join/leave, so there's no need to tell the hub this
+        # handle is "logging off" the way a single-session client would
+        # -- NOTME's "has left chat" already covers the visible room-
+        # presence announcement other users see. The one real cost:
+        # the hub's own /who or CHATTERS listing may show this handle
+        # lingering until the next reconnect's fresh join, or the hub's
+        # own idle timeout, cleans it up.
         self.db.delete_session(str(ws_id))
         await self._safe_send(ws, {"type": "left", "message": "Left the room"})
 
