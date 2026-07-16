@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.125 — Terminal: file areas now lightbar-scrollable, matching message areas/RSS (July 2026)
+
+- FEATURE: the terminal "File Library - Areas" screen used to dump every configured area top-to-bottom with a plain number-entry prompt — for any sysop with more file areas than fit one screen, this meant relying on the terminal client's own scrollback just to see the top entries. Now uses the same arrow-key lightbar selector already used for message areas and the RSS reader: Up/Dn/PgUp/PgDn to scroll, Enter to open, A for All Files, Q to back out.
+
+3 new regression tests, verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.124 — MRC: fix real LOGOFF/command wire-format mismatch behind repeated forced re-identify (July 2026)
 
 Direct follow-up to v1.0b2.123, after live testing showed identify was still required on every leave/rejoin. Root-caused by comparing exact packet fields against the reference client's C source, field by field.

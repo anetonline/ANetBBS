@@ -1454,79 +1454,78 @@ class BBSMenuUI:
 
             protos = available_protocols()
 
-            # ---- Draw area list ----
-            from .ansi_ui import ui_width as _ui_width
-            _w = _ui_width(self.session)
-            _name_w = max(38, _w - 40)   # leave room for (xxxx files) + [inactive] [sysop]
-            await self.session.write('\x1b[2J\x1b[H')
-            hdr = (f"{FG['cyan']}{BOLD}"
-                   f"{'─'*_w}\r\n"
-                   f" File Library - Areas\r\n"
-                   f"{'─'*_w}{RESET}\r\n\r\n")
-            await self.session.write(hdr)
+            # ---- Lightbar area list (matches message areas/RSS pattern --
+            # a plain top-to-bottom dump used to overflow a page for any
+            # sysop with more than a screenful of file areas, forcing
+            # reliance on the terminal's own scrollback to see the top
+            # entries) ----
+            from .ansi_ui import ui_width as _ui_width, banner
 
+            lb_rows = []
             if top_cnt or is_sysop:
-                await self.session.write(
-                    f"  {FG['yel']} 0.{RESET} "
-                    f"{FG['wht']}{'General / Top-level':<{_name_w}}{RESET}"
-                    f"  {FG['gry']}({top_cnt} files){RESET}\r\n")
+                lb_rows.append({
+                    'id': None, 'name': 'General / Top-level', 'tag': '',
+                    'cnt': top_cnt, 'inactive': False, 'sysop_only': False,
+                    'can_upload': True, 'storage_path': '', 'is_top': True,
+                })
+            lb_rows.extend(area_rows)
 
-            for i, ar in enumerate(area_rows, 1):
-                cnt_str = f"({ar['cnt']} files)"
-                flags = ''
-                if ar['inactive']:
-                    flags += f" {FG['red']}[inactive]{RESET}"
-                if ar['sysop_only']:
-                    flags += f" {FG['mag']}[sysop]{RESET}"
-                await self.session.write(
-                    f"  {FG['yel']}{i:2d}.{RESET} "
-                    f"{FG['wht']}{ar['name'][:_name_w]:<{_name_w}}{RESET}"
-                    f"  {FG['gry']}{cnt_str}{RESET}"
-                    f"{flags}\r\n")
-
-            if not area_rows and not top_cnt:
+            if not lb_rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('File Library - Areas',
+                                                 _ui_width(self.session)))
                 await self.session.write(
                     f"  {FG['gry']}(no file areas configured){RESET}\r\n")
-
-            if protos:
-                proto_note = ' / '.join(p.upper() for p in protos)
-                await self.session.write(
-                    f"\r\n  {FG['gry']}Transfer protocols: {proto_note}{RESET}\r\n")
-            else:
-                await self.session.write(
-                    f"\r\n  {FG['red']}lrzsz not installed - "
-                    f"downloads will show web URL only{RESET}\r\n")
-
-            choice = (await self.session.read_line(
-                f"\r\n{FG['cyan']}Enter area #, A=All, Q=Back:{RESET} ")
-                      or '').strip().upper()
-
-            if choice == 'Q' or not choice:
+                await self.session.read_line(
+                    f"\r\n{FG['cyan']}Press Enter to go back...{RESET}")
                 return
-            if choice == 'A':
+
+            _w      = _ui_width(self.session)
+            _name_w = max(30, _w - 26)   # leave room for #, files count, flags
+
+            async def render_header_files():
+                await self.session.write(banner('File Library - Areas', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}"
+                    f"{'#':>3}  {'Name':<{_name_w}} {'Files':>7}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
+
+            def render_row_files(idx, row, selected):
+                flags = ''
+                if row.get('inactive'):
+                    flags += f" {FG['red']}[inactive]{RESET}"
+                if row.get('sysop_only'):
+                    flags += f" {FG['mag']}[sysop]{RESET}"
+                n_col = FG['wht'] if not selected else ''
+                return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
+                        f"{n_col}{row['name'][:_name_w]:<{_name_w}}{RESET} "
+                        f"{FG['grn']}{row['cnt']:>7}{RESET}{flags}")
+
+            def render_hint_files(sel, total):
+                return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                        f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                        f"{FG['cyan']}Enter{RESET}=open  "
+                        f"{FG['cyan']}A{RESET}=all files  "
+                        f"{FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(
+                lb_rows, render_header_files, render_row_files, render_hint_files)
+
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                row = lb_rows[result[1]]
+                if row.get('is_top'):
+                    area_filter, area_name, area_id, can_up, stor = \
+                        'top', 'General / Top-level', None, True, ''
+                else:
+                    area_filter, area_name, area_id, can_up, stor = \
+                        'area', row['name'], row['id'], row['can_upload'], row['storage_path']
+            elif result[0] == 'key' and result[1] == 'A':
                 area_filter, area_name, area_id, can_up, stor = \
                     'all', 'All Files', None, False, ''
-            elif choice == '0' and (top_cnt or is_sysop):
-                area_filter, area_name, area_id, can_up, stor = \
-                    'top', 'General / Top-level', None, True, ''
             else:
-                try:
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(area_rows):
-                        ar = area_rows[idx]
-                        area_id     = ar['id']
-                        area_name   = ar['name']
-                        can_up      = ar['can_upload']
-                        stor        = ar['storage_path']
-                        area_filter = 'area'
-                    else:
-                        await self.session.write(
-                            f"{FG['red']}Invalid area number.{RESET}\r\n")
-                        continue
-                except ValueError:
-                    await self.session.write(
-                        f"{FG['red']}Enter a number, A, or Q.{RESET}\r\n")
-                    continue
+                continue
 
             await self._file_area_browse(
                 area_id, area_name, area_filter,

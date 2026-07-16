@@ -1,7 +1,19 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.124`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.125`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.125 — Terminal: file areas now lightbar-scrollable, matching message areas/RSS (July 2026)
+
+- FEATURE: the terminal "File Library - Areas" screen used to dump
+  every configured area top-to-bottom with a plain number-entry
+  prompt — for any sysop with more file areas than fit one screen,
+  this meant relying on the terminal client's own scrollback just to
+  see the top entries. Now uses the same arrow-key lightbar selector
+  already used for message areas and the RSS reader: Up/Dn/PgUp/PgDn
+  to scroll, Enter to open, A for All Files, Q to back out.
+
+3 new regression tests, verified to fail without the fix.
 
 ## v1.0b2.124 — MRC: fix real LOGOFF/command wire-format mismatch behind repeated forced re-identify (July 2026)
 
