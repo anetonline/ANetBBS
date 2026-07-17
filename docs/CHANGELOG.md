@@ -1,7 +1,26 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.138`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.139`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.139 — Outbound echomail origin lines were missing the FTN address entirely (July 2026)
+
+Reported live: outbound messages showed `* Origin: ANetBBS - A Modern
+BBS System` with no address at all, instead of the FTN convention
+`<text> (<our address>)` a peer's own reply routing depends on.
+
+- FIX: the address-inclusive fallback only ran when the message's
+  origin line was completely empty — but the web compose form always
+  populates it from a single global tagline, so that fallback never
+  actually fired for any real outbound message, on any network. The
+  network's own address (already resolved per-network for multi-hub-
+  identity installs) is now always appended, regardless of what origin
+  text is configured.
+- Fresh installs also no longer default to generic ANetBBS-branding
+  text for this — the origin line now defaults to the sysop's own
+  configured BBS name instead.
+
+4 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.138 — Scheduled events: one hung handler could silently kill the entire scheduler forever (July 2026)
 

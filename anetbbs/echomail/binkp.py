@@ -434,11 +434,27 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
                               .replace('\n', '\r'))
         # Strip our own tear/origin if user accidentally embedded them — we
         # add them via build_message() to keep them at the right position.
+        #
+        # The trailing "(address)" must ALWAYS be appended, not just used
+        # as a fallback for an empty origin_line -- real bug found live
+        # (a sysop's own outbound message): msg.origin_line is populated
+        # for essentially every outbound message (the compose route always
+        # sets it from ECHOMAIL_ORIGIN_LINE, a single global tagline), so
+        # `msg.origin_line or f'... ({our_addr})'` never actually reached
+        # the address-inclusive branch -- every origin line shipped with
+        # no AKA at all, on every network, regardless of which network's
+        # own address (our_addr, already resolved per-network above for
+        # multi-hub-identity support) the message was actually going out
+        # under. A real FTN origin line's whole point is identifying which
+        # address to route a reply back to.
+        origin_text = (msg.origin_line or 'ANETBBS').strip()
+        if not origin_text.endswith(')'):
+            origin_text = f'{origin_text} ({our_addr})'
         msg_assembled = build_message(
             body=body_text,
             kludges=wanted,
             tear=msg.tear_line or '--- ANETBBS 1.0',
-            origin=msg.origin_line or f'ANETBBS ({our_addr})',
+            origin=origin_text,
             seenby=seenby_existing if area_tag else None,
             path=path_existing if area_tag else None,
         )

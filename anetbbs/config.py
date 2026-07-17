@@ -263,7 +263,14 @@ class Config:
     ECHOMAIL_ENABLED = os.environ.get('ECHOMAIL_ENABLED', 'true').lower() == 'true'
     ECHOMAIL_POLL_ENABLED = os.environ.get('ECHOMAIL_POLL_ENABLED', 'true').lower() == 'true'
     ECHOMAIL_DATA_DIR = os.path.join(DATA_DIR, 'echomail')
-    ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS - A Modern BBS System')
+    # Defaults to the sysop's own configured BBS_NAME rather than a
+    # generic ANetBBS-branding string -- a fresh install's outbound
+    # echomail origin lines should identify the sysop's own BBS, not
+    # the software running it. (The FTN address gets appended
+    # automatically per-network at packet-build time -- see
+    # anetbbs/echomail/binkp.py's _build_ftn_packet -- so this value
+    # should NOT include one itself.)
+    ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', BBS_NAME)
     ECHOMAIL_TEAR_LINE = os.environ.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS')
 
     # InterBBS Wall / Last Callers -- opt-in sharing of local Graffiti
