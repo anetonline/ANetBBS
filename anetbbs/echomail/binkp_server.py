@@ -26,7 +26,7 @@ import struct
 import hashlib
 import hmac
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .binkp import (
     CMD_NUL, CMD_ADR, CMD_PWD, CMD_FILE, CMD_OK, CMD_EOB,
@@ -1093,6 +1093,32 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                     to_addr = parts[0]
                     if len(parts) > 1:
                         from_addr = parts[1]
+
+            # Content-based dedup fallback, mirroring poller.py's
+            # _import_netmail(). Real gap found live: a peer (SBBSecho)
+            # polls INTO this listener independently of -- and around
+            # the same ~10 minute cadence as -- our own outbound poll of
+            # the same hub, resending the same "Area Management
+            # Request"/"List of Available Areas" netmail with a freshly
+            # regenerated MSGID each time. poller.py's own dedup
+            # fallback only covers netmail arriving via OUR outbound
+            # polls; this separate inbound-listener import path had none
+            # at all, so it kept inserting a fresh row every single time
+            # regardless of the fix in poller.py. See poller.py's own
+            # comment for why this compares sender+subject+network
+            # only, not body (confirmed live the body isn't
+            # byte-identical across resends).
+            _from_name = (m['from_name'] or '')[:120]
+            _subject = (m['subject'] or '')[:200]
+            _cutoff = datetime.utcnow() - timedelta(hours=48)
+            if NetmailMessage.query.filter(
+                    NetmailMessage.network_id == network_id,
+                    NetmailMessage.direction == 'inbound',
+                    NetmailMessage.from_name == _from_name,
+                    NetmailMessage.from_address == (from_addr or None),
+                    NetmailMessage.subject == _subject,
+                    NetmailMessage.received_at >= _cutoff).first():
+                continue
 
             # Match a local user by AKA address or by name -- this
             # listener path never did this at all before, so BinkP-

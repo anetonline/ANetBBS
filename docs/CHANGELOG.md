@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.145`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.146`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.146 — Netmail flood was arriving through a second, unpatched path (July 2026)
+
+Reported live: the same "Area Management Request"/"List of Available Areas" flood kept appearing every ~10 minutes even after v1.0b2.145 shipped, confirmed via direct database inspection.
+
+- FIX: the peer polls into ANetBBS's inbound listener independently of — and around the same cadence as — the outbound poll of the same hub. That's a separate code path (`binkp_server.py`) from the one fixed in v1.0b2.143/145 (`poller.py`, used when ANetBBS dials out), and it never had any content-based dedup fallback at all — only the exact-MSGID check, which the peer's fresh-MSGID-per-resend behavior always defeats. Both directions now share the same sender+subject+network dedup approach.
+
+3 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.145 — Web UI freezing for every user, and the netmail flood fix from v1.0b2.143 wasn't actually catching everything (July 2026)
 

@@ -162,6 +162,76 @@ class InboundDedupTests(unittest.TestCase):
                 msgid='1:114/30@fidonet nmail0001').all()
             self.assertEqual(len(rows), 1)
 
+    def test_netmail_with_fresh_msgid_each_time_still_content_deduped(self):
+        """Real live bug: a peer (SBBSecho) polling INTO this listener
+        independently of -- and around the same ~10 minute cadence as --
+        our own outbound poll of the same hub kept resending the same
+        "Area Management Request"/"List of Available Areas" netmail with
+        a freshly regenerated MSGID every time, defeating the exact-
+        MSGID check above. poller.py's _import_netmail() (used for OUR
+        OWN outbound polls) already got a content-based dedup fallback
+        in v1.0b2.143/145, but this separate inbound-listener import
+        path had none at all -- confirmed live it kept inserting a
+        fresh row every single delivery regardless of that fix, since a
+        peer can poll IN independently of when we poll OUT."""
+        from anetbbs.echomail.binkp import _build_ftn_packet
+        from anetbbs.echomail import binkp_server
+
+        net_id = self._make_network()
+        msg1 = _FakeMsg(area=None, from_name='SBBSecho', to_name='sysop',
+                        subject='Area Management Request',
+                        body='List of available areas...',
+                        msg_id='1:114/30@fidonet aaaa1111',
+                        to_address='1:114/0', from_address='1:3634/12')
+        msg2 = _FakeMsg(area=None, from_name='SBBSecho', to_name='sysop',
+                        subject='Area Management Request',
+                        body='List of available areas...',
+                        msg_id='1:114/30@fidonet bbbb2222',
+                        to_address='1:114/0', from_address='1:3634/12')
+        pkt1 = _build_ftn_packet([msg1], '1:114/30', '1:114/0')
+        pkt2 = _build_ftn_packet([msg2], '1:114/30', '1:114/0')
+
+        with self.app.app_context():
+            first = binkp_server._import_pkt_payload(pkt1, net_id, 'a.pkt')
+            second = binkp_server._import_pkt_payload(pkt2, net_id, 'b.pkt')
+            self.assertEqual(first, 1)
+            self.assertEqual(second, 0,
+                            'same sender+subject+network resent with a '
+                            'fresh MSGID must still be recognized as a '
+                            'duplicate, not counted as a fresh import')
+
+            from anetbbs.models import NetmailMessage
+            rows = NetmailMessage.query.filter_by(
+                from_name='SBBSecho', subject='Area Management Request').all()
+            self.assertEqual(len(rows), 1)
+
+    def test_content_dedup_does_not_over_trigger_on_different_subject(self):
+        """Guard against the content-based fallback being too broad --
+        a genuinely different message from the same sender must still
+        import normally."""
+        from anetbbs.echomail.binkp import _build_ftn_packet
+        from anetbbs.echomail import binkp_server
+
+        net_id = self._make_network()
+        msg1 = _FakeMsg(area=None, from_name='SBBSecho', to_name='sysop',
+                        subject='Area Management Request',
+                        msg_id='1:114/30@fidonet cccc3333',
+                        to_address='1:114/0', from_address='1:3634/12')
+        msg2 = _FakeMsg(area=None, from_name='SBBSecho', to_name='sysop',
+                        subject='Something Else Entirely',
+                        msg_id='1:114/30@fidonet dddd4444',
+                        to_address='1:114/0', from_address='1:3634/12')
+        pkt1 = _build_ftn_packet([msg1], '1:114/30', '1:114/0')
+        pkt2 = _build_ftn_packet([msg2], '1:114/30', '1:114/0')
+
+        with self.app.app_context():
+            first = binkp_server._import_pkt_payload(pkt1, net_id, 'a.pkt')
+            second = binkp_server._import_pkt_payload(pkt2, net_id, 'b.pkt')
+            self.assertEqual(first, 1)
+            self.assertEqual(second, 1,
+                            'a different subject from the same sender '
+                            'must not be treated as a duplicate')
+
 
 if __name__ == '__main__':
     unittest.main()
