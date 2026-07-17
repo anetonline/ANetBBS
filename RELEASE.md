@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.135 — BinkP inbound listener: fix unbounded duplicate-message import (July 2026)
+
+Reported live: a peer sysop's poll log showed the same ~570-message backlog "received" fresh on every inbound BinkP connection, a few minutes apart, with no sign of slowing down.
+
+- FIX: the inbound BinkP listener (a peer connecting *into* this BBS to deliver mail) imported every message in a delivered packet unconditionally — no deduplication at all. For echomail it didn't even capture the MSGID kludge onto the row in the first place; for netmail it captured MSGID but never checked for an existing one before inserting. The outbound poller's own import path already did both correctly (`poller.py`) — this second, separate import path (`binkp_server.py`, used specifically when a peer dials in rather than when we dial out) never got the same treatment. Any redelivery of a backlog — a peer's own retry logic, a flaky link, anything — got re-imported as entirely new messages, unbounded, every time. Now deduplicates by MSGID the same way the outbound path already does.
+
+3 new regression tests, built from a real FTS-0001 packet round-trip (not a hand-built dict), each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.134 — BinkP GOT-ack fix, Service Control Center + scheduled-events reliability (July 2026)
 
 Three unrelated reports: a peer sysop's poll log showing a real FidoNet hub rejecting our file acknowledgments mid-session, a Control Center screenshot showing a terminal-services crash with an alarming (but misleading) 99.3% CPU reading, and a peer sysop reporting his nightly/hourly scheduled events just weren't firing.

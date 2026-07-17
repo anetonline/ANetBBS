@@ -877,9 +877,26 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                                 tag=m['area_tag'], name=m['area_tag'])
                 db.session.add(area)
                 db.session.flush()
+
+            # Deduplicate by MSGID, same as poller.py's _import_message()
+            # (the outbound-poll import path) already does. This path --
+            # a peer connecting IN to deliver mail -- never extracted
+            # MSGID onto the row at all, let alone checked for an
+            # existing one first: a peer that reconnects and redelivers
+            # its backlog (its own retry logic, a flaky link, anything)
+            # got every message re-inserted as brand new, unbounded,
+            # every single time. Real live report: same ~570-message
+            # packet re-"received" on repeat inbound connections a few
+            # minutes apart, each one counted as newly imported.
+            msgid = find_kludge(kludges, 'MSGID')
+            if msgid and EchomailMessage.query.filter_by(
+                    msg_id=msgid, area_id=area.id).first():
+                continue
+
             em = EchomailMessage(
                 area_id=area.id,
                 network_id=network_id,
+                msg_id=msgid or None,
                 from_name=m['from_name'][:100],
                 to_name=m['to_name'][:100],
                 subject=m['subject'][:200],
@@ -905,6 +922,11 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
         else:
             # NETMAIL — point-to-point
             msgid = find_kludge(kludges, 'MSGID')
+            # Same dedup gap as echomail above -- poller.py's
+            # _import_netmail() already checks NetmailMessage.msgid
+            # before inserting; this listener path never did.
+            if msgid and NetmailMessage.query.filter_by(msgid=msgid).first():
+                continue
             reply = find_kludge(kludges, 'REPLY')
             # INTL kludge holds dest+orig zone:net/node — extract fallback
             # FROM/TO addresses if the .pkt header didn't include them.
