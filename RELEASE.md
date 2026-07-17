@@ -1,3 +1,15 @@
+# ANetBBS v1.0b2.136 — Docs/wiki full accuracy pass (July 2026)
+
+First full docs+wiki pass since v1.0b2.45-46 — 5 parallel audit agents checked all 29 docs/*.md files and all 47 wiki pages against actual current code.
+
+- Fixed stale references to gunicorn (dropped for eventlet's native WSGI server back at v1.0a2.67, several docs never caught up), a badly outdated Service Control Center wiki page, and a factually wrong claim about echomail duplicate handling.
+- Documented several real, previously-undocumented features: a new Scheduled Events wiki page, ANetCRAFT (the bundled door game), the Ebook Reader, and the terminal Node Monitor's message capability.
+- Found and fixed 43 broken internal wiki links, plus assorted smaller path/port/version-number corrections.
+
+No code changes — docs and wiki content only.
+
+---
+
 # ANetBBS v1.0b2.135 — BinkP inbound listener: fix unbounded duplicate-message import (July 2026)
 
 Reported live: a peer sysop's poll log showed the same ~570-message backlog "received" fresh on every inbound BinkP connection, a few minutes apart, with no sign of slowing down.

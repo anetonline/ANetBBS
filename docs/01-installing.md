@@ -159,7 +159,7 @@ for you.)
 | `data/`                      | uploads, avatars, SQLite DB   |
 | `data/personal_pages/`       | sysop + per-user web pages    |
 | `data/admin_password.txt`    | auto-generated sysop password (if you left it blank) |
-| `logs/`                      | gunicorn + app logs           |
+| `logs/`                      | app logs                      |
 | `venv/`                      | Python virtual env            |
 | `.env`                       | runtime config (mode 0600)    |
 

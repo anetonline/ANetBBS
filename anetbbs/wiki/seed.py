@@ -95,7 +95,6 @@ Pick the access path that suits you and register:
 
 After registering, the sysop may require you to answer a few
 questions — these are configured per-BBS and seen on first login.
-See [[New User Questionnaire]] for details.
 
 ## 2. Find your way around
 
@@ -146,9 +145,9 @@ in plumbing. Below is the full feature inventory.
 - [[SSH]] (TCP 2234, password and key auth)
 - [[Rlogin]] (TCP 513, used by game-server style auto-login — off by
   default, sysop must enable it)
-- [[Gemini]] — not a real Gemini-protocol (TLS+1965) listener; your
+- Gemini — not a real Gemini-protocol (TLS+1965) listener; your
   gemtext capsule is exposed over plain HTTP at `/gemini/<username>`
-- [[Finger]] (TCP 79, user info)
+- Finger (TCP 79, user info)
 
 ## Messaging
 
@@ -177,6 +176,10 @@ in plumbing. Below is the full feature inventory.
   - Native Synchronet (over rlogin)
   - DOS doors via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge
   - Web doors (native HTML/JS games)
+- **ANetCRAFT** — a bundled, pure-Python Minecraft-like survival door,
+  active by default, no separate install needed. (Not the same thing
+  as the standalone ANetCRAFT-Door C# project — same name, different
+  codebase.)
 
 ## Real-time
 
@@ -186,28 +189,35 @@ in plumbing. Below is the full feature inventory.
 - [[IRC Client]] — each logged-in user can connect to their own IRC
   server, nick, and channels from the web
 - [[MRC]] — the Multi-Relay Chat protocol used by many BBSes
-- [[Telegram Bridge]]
-- [[Sysop Page]] — bell the sysop, see who's around
+- Telegram Bridge
+- Sysop Page — bell the sysop, see who's around
 
 ## Information
 
 - [[RSS Reader]] — built-in feed aggregator (web + terminal)
 - [[Bulletins]] — sysop-curated short notices
-- [[Site Pages]] — pages the sysop hand-authors
-- [[Personal Pages]] — user-edited homepages on the BBS
-- [[Image Gallery]]
-- [[Stats]] — site activity, top users, leaderboards
-- [[Nodelist]] — FidoNet/network nodelist browser
+- Site Pages — pages the sysop hand-authors
+- Personal Pages — user-edited homepages on the BBS
+- Image Gallery
+- Stats — site activity, top users, leaderboards
+- Nodelist — FidoNet/network nodelist browser
+- **Ebook Reader** — search and read free public-domain books
+  (Project Gutenberg, via the Gutendex API) in the web or terminal UI
 - This wiki (`/wiki/`)
 
 ## Sysop tools
 
-- [[Sysop Control Panel]] — services, NodeSpy, who's online
+- [[Sysop Control Panel]] — the Service Control Center (per-service
+  start/stop/restart, live CPU/RAM/thread graphs, listener health,
+  journal viewer), NodeSpy, who's online
+- [[Scheduled Events]] — cron-style maintenance jobs (log rotation,
+  SQLite VACUUM, security-update checks, nodelist generation, InterBBS
+  sync, arbitrary shell commands)
 - [[NodeSpy]] — view and kick live terminal sessions
-- [[Echomail Admin]] — networks, areas, BinkP polling
-- [[Doors Admin]] — register doors and game servers
-- [[RSS Admin]] — manage feeds
-- [[Files Admin]] — areas, virus scanner, batch tools
+- [[BinkP Setup|Echomail Admin]] — networks, areas, BinkP polling
+- [[Door Setup|Doors Admin]] — register doors and game servers
+- [[RSS Reader|RSS Admin]] — manage feeds
+- [[Files|Files Admin]] — areas, virus scanner, batch tools
 - [[Themes]] — switch the dark theme palette per-user or globally
 - [[Backup]] — sqlite dump + asset archive
 - [[Tutorial]] — sysop onboarding walkthrough
@@ -225,7 +235,7 @@ interactive "new user" flow at the welcome prompt.
 ## I forgot my password
 
 If your account had an email address, use **Forgot password** on
-the [[Login]] screen. Otherwise, ask the [[Sysop]] — they can
+the [[Web Access#Sign-in|login]] screen. Otherwise, ask the [[Sysop]] — they can
 reset it from the admin panel.
 
 ## Is this open source?
@@ -245,7 +255,7 @@ A few easy ways:
 
 1. **Edit the wiki.** Fix typos, expand thin pages, add screenshots.
 2. **Post on the boards.** A BBS without messages is a quiet BBS.
-3. **Play doors.** High scores show up on the [[Leaderboard]].
+3. **Play doors.** High scores show up on the leaderboard.
 4. **Run a peer.** If you're a sysop, peer with us over BinkP — see
    [[BinkP Setup]].
 
@@ -360,7 +370,7 @@ You'll see a welcome screen, then a prompt:
 ```
 
 Pick **N** to register. You'll be asked for a username, password,
-email, and answer the [[New User Questionnaire]].
+email, and (if the sysop requires it) a short new-user questionnaire.
 
 ## Encoding
 
@@ -413,7 +423,7 @@ protocol-agnostic.
 
 The first connection prompts you to accept the BBS's host key
 fingerprint. The sysop should publish the fingerprint somewhere
-(usually on the [[Site Pages|info pages]]) so you can verify it.
+(usually on one of their info pages) so you can verify it.
 """),
 
     # ------------------------------------------------------------------
@@ -452,8 +462,8 @@ standard:
 > _**password first, username second.**_
 
 ANetBBS's outbound `door_rlogin` game type follows the Synchronet
-convention. See [[Door Setup#rlogin doors]] for the details on the
-remote-game flow.
+convention. See [[Door Setup#2-remote-rlogin-doors-synchronet-game-servers|rlogin doors]]
+for the details on the remote-game flow.
 
 ## Locally
 
@@ -494,7 +504,6 @@ nearby usernames.
 ## Reactions
 
 Bottom of every post — thumbs-up / down / heart / fire / laugh.
-See [[Reactions]].
 
 ## Subscriptions
 
@@ -504,7 +513,7 @@ new reply.
 ## Polls
 
 Reply to a thread with a `/poll` slash-command from the editor, or
-use the **Poll** tab on the compose form. See [[Polls]].
+use the **Poll** tab on the compose form.
 
 ## Attachments
 
@@ -520,8 +529,7 @@ order. Quoted replies (Reply quote) prefix the original text with
 ## Moderation
 
 Sysops can lock or unlock threads, pin posts to the top of a board,
-move threads between boards, and soft-delete content. See
-[[Moderation]].
+move threads between boards, and soft-delete content.
 """),
 
     # ------------------------------------------------------------------
@@ -563,7 +571,7 @@ until the next BinkP poll picks them up.
 ## Areas
 
 Each area is a topic-bound conversation. Sysop maintains the area
-list under [[Echomail Admin]]. Common areas in the BBS scene:
+list under [[BinkP Setup|Echomail Admin]]. Common areas in the BBS scene:
 
 - `BBS_SCENE` — talking about BBSes
 - `BBS_ADS` — BBS advertisements
@@ -587,8 +595,8 @@ and area policies. See [[BinkP Setup]] to join one.
 
 Every ANetBBS install ships pre-joined to **ANotherNetwork** (hub
 `bbs.a-net.fyi`, zone **1200**) — 26 message echo areas across
-General, Technology, BBS Scene, Retro, Hobby, Trading, Data, and
-SysOp categories, seeded automatically on first run but **inactive
+General, Technology, BBS Scene, Retro, Hobby, Trading, Data, SysOp,
+and Test categories, seeded automatically on first run but **inactive
 and unsubscribed** until a sysop turns on the ones they want. See
 [[ANotherNetwork]] for the full area list and how to get your own
 node number.
@@ -677,7 +685,7 @@ Subject: yourareafixpw
 +SYSOP_HELP
 ```
 
-ANetBBS has an [[AreaFix]] processor for inbound areafix requests
+ANetBBS has an [[Netmail#AreaFix|AreaFix]] processor for inbound areafix requests
 on your own node too — useful if other BBSes peer off you.
 
 ## TIC files — file-echo distribution
@@ -760,8 +768,8 @@ bytes.
 ## Turning it on
 
 1. Pick which of the 26 message areas and 9 file areas you actually
-   want — subscribe to them under [[Echomail Admin]] /
-   [[Files Admin]]. Nothing forces you to run all of them.
+   want — subscribe to them under [[BinkP Setup|Echomail Admin]] /
+   [[Files|Files Admin]]. Nothing forces you to run all of them.
 2. Get a node number (see below) and fill in the address/password on
    whichever of the two network rows matches your transport.
 3. Flip that network row's **Active** flag on.
@@ -830,6 +838,12 @@ fake COM port; today there's a wider menagerie.
 | `door_mystic` | Mystic Python `.mpy` with our compat shim | Mystic-native Python doors |
 | `door_mystic_mps` | Mystic Pascal `.mps`, auto-compiled via `mplc` | Mystic-native Pascal doors |
 | `door_dos_browser` | DOS .ZIP bundle via EmulatorJS + dosbox_pure, runs entirely client-side | DOOM/Duke3D shareware, no telnet/SSH needed |
+| `builtin_python` | Bundled pure-Python door, runs natively in the terminal — no external binary or runtime | ANetCRAFT (active by default) |
+
+Note: **ANetCRAFT** (the bundled `builtin_python` door above) is a
+separate codebase from the standalone **ANetCRAFT-Door** project (a
+C# .NET Minecraft-replica door) — same name, different projects. Don't
+assume a fix or feature in one applies to the other.
 
 ## Playing
 
@@ -928,6 +942,19 @@ A bare `door_native` type — invoked with the dropfile path on
 argv. Works for forks like `lord-linux` or any compliant
 DOOR.SYS-aware binary.
 
+## 5. Bundled Python doors
+
+Some doors ship as pure Python and need no setup at all — type
+`builtin_python`, run natively in the terminal process, no external
+binary, DOSBox, dosemu2, or jsexec required. **ANetCRAFT** (ANetBBS's
+own Minecraft-inspired 2D survival game) is the current example and
+is pre-seeded **active by default**. Nothing to register — it's
+already in `/games/` on a fresh install.
+
+This is a separate codebase from the standalone **ANetCRAFT-Door**
+project (a C# .NET Minecraft-replica door with the same name) — don't
+confuse the two when troubleshooting.
+
 ## Per-door config tips
 
 - **Time limits**: set on the Game row. The BBS enforces them with
@@ -957,8 +984,9 @@ canonical door game. ANetBBS ships **two ways to run it**:
 
 1. **Bundled JS port** (recommended, no DOS required) — Synchronet's
    pure-JavaScript LORD rewrite, pre-installed at
-   `anetbbs/games/sbbs_doors/lord/`. Needs the Synchronet `jsexec`
-   runtime on the host.
+   `anetbbs/games/sbbs_doors/lord/`. Runs under Node.js via ANetBBS's
+   own compat shim — no Synchronet install required (see Path 1
+   below).
 2. **Original DOS** under DOSBox + TCP nullmodem bridge — for
    purists. Detailed below; see also [[DOS Door Recipe]].
 
@@ -1244,7 +1272,11 @@ people in them, `/join <room>` to switch.
 **People:** `/who`, `/chatters`, `/users`, `/bbses` (list connected
 BBSes), `/info [n]` (look up one BBS's directory entry — see the
 `bbs_description` etc. fields above), `/lastseen [user]`, `/afk
-[msg]` / `/back`.
+[msg]` / `/back`, `/status <param> [value]` (set a hub status field,
+e.g. `/status AFK gone fishing`).
+
+**Info:** `/motd` (ask the hub for its message of the day), `/banners`
+(ask the hub for its banner rotation).
 
 **Auth (optional):** `/identify [password]`, `/register <password>
 [email]`, `/trust [sub]`.
@@ -1253,7 +1285,12 @@ BBSes), `/info [n]` (look up one BBS's directory entry — see the
 Configurable: `prefix`/`suffix` (nick decoration), `color <00-15>`
 (nick color code), `entermsg`/`leavemsg`/`quitmsg` (supports
 `{handle}`), `ticker on|off`, `clock on|off`, `tz <zone-or-offset>`,
-`palette default|green|amber|cyan|mono`.
+`palette default|green|amber|cyan|mono`, `clockformat 12|24` (status-bar
+clock/timestamp hour format), `twitfilter on|off` (master switch for
+your `/twit` ignore list — turn it off to temporarily hear from
+everyone again without clearing the list), `defaultroom <room>` (room
+to auto-join on your *next* connect — changing it mid-session doesn't
+move you immediately). All `/set` values save per-user.
 
 **Ignore/shield:** `/twit add|del|list|clear [user]` — per-user
 ignore list. `/shield [on|off]` — refuses to send/show sysop
@@ -1272,6 +1309,15 @@ broadcasts while active.
   ≥100 columns wide.
 - **Tab-complete**: usernames seen in chat or via `/who` autocomplete
   on Tab.
+
+## Long messages
+
+The MRC hub caps a single wire message at 140 characters. A message
+you type that's longer than that is split into multiple `(1/n)`,
+`(2/n)`, … chunks and sent with a small delay between each chunk (the
+hub rate-limits chunks sent back-to-back). If you notice a brief pause
+partway through someone's long message, that's this splitting at
+work, not lag.
 
 ## Bridged into web/terminal
 
@@ -1295,7 +1341,8 @@ you want to read alongside your messages.
 ## What it does
 
 - Subscribes to a set of feeds (sysop-managed; users can't add yet)
-- Polls each feed in the background — see [[RSS Poller]]
+- Polls each feed in the background (default 30-minute cycle — see
+  "Adding a feed" below)
 - Renders the latest items in a unified "river" view or per-feed
 - Marks items read/unread per user
 - Limited HTML inside items is sanitized via bleach
@@ -1436,7 +1483,7 @@ sending netmail.
 
 ## Sending
 
-`/imsg/send` — pick a target from the [[BBS Directory]] or type
+`/imsg/send` — pick a target from the [[Instant Messages#Directory|BBS directory]] or type
 `username@host` manually. Up to 8000 chars per message (the MSP wire
 protocol itself allows up to 8192 bytes).
 
@@ -1594,6 +1641,59 @@ Any menu you create through **Admin → Menus** also supports a file override
 using the menu's name as the filename (e.g. a menu named `utilities` →
 `data/text/menus/utilities.ans`).
 
+## Widescreen (132-column) support
+
+Session screens (`welcome`, `goodbye`, `newuser`, and any custom `ansi`
+slot) also support a widescreen variant for terminals that negotiate
+132 columns: drop a `<slot>132.ans` file alongside the regular
+`<slot>.ans` and ANetBBS serves it automatically to those sessions
+instead of the 80-column art. There's also a `<slot>.asc` plain-ASCII
+fallback for terminals that can't render ANSI at all. ANetBBS checks
+these file-based drop-ins before falling back to the database-driven
+screen, so they're the fastest way to swap in art without touching
+Admin.
+
+## Multiple screens in one login (classic multi-logon-screen style)
+
+Drop in more than one numbered file for the same slot and ANetBBS shows
+**all of them**, in order, every login — the same idea as Synchronet's
+`logon1.ans`/`logon2.ans`/`logon3.ans` convention:
+
+```
+data/text/welcome132.ans      <- shown first (the plain file counts as #1)
+data/text/welcome132_2.ans    <- shown second
+data/text/welcome132_3.ans    <- shown third
+```
+
+Numbers don't need to be contiguous — whatever `_N` files exist are used
+in ascending order. This works independently per screen/variant
+(`welcome`, `welcome132`, `welcome.asc`, `goodbye`, etc. each get their
+own sequence), and a single file behaves exactly as before — nothing
+extra to set up unless you actually want more than one.
+
+Each variant controls its own pause — ANetBBS doesn't insert one
+automatically between screens in a sequence. Put `@PAUSE@` at the end of
+a variant if you want the visitor to press a key before the next one
+loads.
+
+### Random variant: `_ran` naming
+
+Want a different single screen picked at random each login instead of
+the whole sequence? Use `_ran` in the filename in place of the plain
+numbered naming:
+
+```
+data/text/welcome132_ran.ans      <- random variant #1
+data/text/welcome132_2_ran.ans    <- random variant #2
+data/text/welcome132_3_ran.ans    <- random variant #3
+```
+
+With `_ran` naming, each login shows **one** file from the group,
+chosen at random, instead of the whole sequence. If both a `_ran` group
+and a plain numbered group exist for the same slot, the `_ran` group
+wins. Works for any screen — mix and match per-screen as you like (full
+sequence for `welcome`, random-pick-one for `goodbye`, say).
+
 ## File format
 
 Standard CP437 ANSI art. SAUCE records (metadata appended by editors) are
@@ -1679,7 +1779,7 @@ overriding the same "dark" assumptions in base.html.
 ## Terminal menu art
 
 The web theme system doesn't affect the telnet/SSH/rlogin menus —
-those use CP437 ANSI art files instead. See [[Custom ANSI Screens]]
+those use CP437 ANSI art files instead. See [[ansi-screens|Custom ANSI Screens]]
 for the full slot reference and how to drop in your own `.ans` files.
 """),
 
@@ -1698,7 +1798,7 @@ ANetBBS is a handful of services:
 
 | Service | What it does |
 |---------|--------------|
-| `anetbbs-web` | gunicorn + eventlet. Serves the web UI, REST, sockets. |
+| `anetbbs-web` | eventlet's native WSGI server (`deploy/serve.py`, `socketio.run()`), single process. Serves the web UI, REST, sockets. |
 | `anetbbs` | asyncio listener on 2233/2234/513 — telnet, SSH, rlogin (one process, which protocols actually start is driven by `.env` flags) |
 | `anetbbs-mrc-bridge` | persistent MRC connection |
 | `anetbbs-finger` | RFC 1288 Finger daemon |
@@ -1729,7 +1829,7 @@ shows the lot.
 ## Weekly
 
 - Run [[Backup]].
-- Skim the [[Stats]] page — top users, new registrations, message
+- Skim site activity — top users, new registrations, message
   counts.
 - Read the latest fido news area, post a hello if you've been
   quiet.
@@ -1743,7 +1843,7 @@ shows the lot.
   schedule or run it manually.
 - Review user registrations: ban obvious spam accounts.
 - Update door binaries if their authors have patched.
-- Check [[Peers]] for dead links (`/admin/peers/health`).
+- Check [[Instant Messages#Network reachability|peers]] for dead links (`/admin/peers/health`).
 
 ## Hub Management
 
@@ -1770,11 +1870,15 @@ nothing of its own to manage there.
 ## Scheduled events
 
 `/admin/events/` lets a sysop automate routine maintenance instead
-of doing it by hand: log rotation, a security-update check, SQLite
-`VACUUM`, TradeWars 2002 daily maintenance, generating the
-ANotherNetwork nodelist, or an arbitrary shell command, each on its
-own schedule. Worth a look if you're tired of remembering to do the
-**Monthly** items above yourself.
+of doing it by hand, each on its own daily/hourly/weekly/interval
+schedule (times are UTC). Ten built-in handlers ship: a `noop` test
+handler, log rotation, a security-update check, SQLite `VACUUM`,
+TradeWars 2002 daily maintenance, generating the ANotherNetwork
+nodelist, an arbitrary shell command, and three InterBBS inbound-sync
+handlers (Wall, Last Callers, Game Scores) that auto-appear when
+those features are turned on. Worth a look if you're tired of
+remembering to do the **Monthly** items above yourself. Full handler
+table and worked examples: [[Scheduled Events]].
 
 ## On upgrade
 
@@ -1866,7 +1970,8 @@ browser's find-in-page to jump to the exact wording.
 - **`/admin/echomail/...` returns 500 after upgrading** → restart the
   web service so the auto-migration adds the new columns.
 - **Web service stuck in a restart loop with `EADDRINUSE` on :5000**
-  → an old gunicorn worker is leaking past the master. Our systemd
+  → a previous `anetbbs-web` process (eventlet's native WSGI server,
+  `deploy/serve.py`) is leaking past its own shutdown. Our systemd
   unit ships with `KillMode=mixed` to prevent this, but if you
   adopted an older unit file, add `KillMode=mixed` and
   `RestartSec=10` to `[Service]` and `daemon-reload`.
@@ -2170,16 +2275,48 @@ The launchpad for live operations. `/admin/control/`. Admin-only.
 
 ## Sections
 
-### Services
+### Services — the Service Control Center
 
-systemctl-driven status for `anetbbs-web`, `anetbbs` (unified
-telnet/SSH/rlogin), `anetbbs-mrc-bridge`, `anetbbs-finger`,
-`anetbbs-binkp`. Start / Stop / Restart buttons need sudoers
-permission for the account these run as — see `deploy/sudoers.anetbbs`
-(`update.sh` installs this automatically on every run; on a fresh
-install that hasn't been updated yet, it needs the `__SERVICE_USER__`
-placeholder substituted with `sed`, not just copied — see
-[[Sysop Guide]]).
+`/admin/control/` is a real-time dashboard over every systemd unit
+ANetBBS runs, not just start/stop buttons. Five unit cards:
+
+- **Web + Federation** (`anetbbs-web`)
+- **Terminal Protocols** (`anetbbs`, unified telnet/SSH/rlogin)
+- **MRC Chat Bridge** (`anetbbs-mrc-bridge`)
+- **Finger (RFC 1288)** (`anetbbs-finger`)
+- **BinkP Inbound** (`anetbbs-binkp`)
+
+Each card shows:
+
+- **Listener port health dots** — green/yellow/red per TCP (or UDP)
+  port the unit owns, rolled up into an overall pill of `all_up`
+  (green), `partial` (yellow, some but not all ports answering), or
+  `all_down` (red). This is a real socket probe against each port, not
+  just "is the systemd unit active."
+- **Live per-service CPU% / RAM / thread-count sparkline** — a small
+  Chart.js graph sampled continuously by a background thread, so you
+  can see a service's resource trend without SSHing in and running
+  `top`.
+- **Start / Stop / Restart** buttons (Restart always shown; Stop shows
+  only while running, Start only while stopped). The backend also
+  accepts a `reload` action (systemd `reload`, for a config re-read
+  without dropping connections) for units that support it. All three
+  actions need sudoers permission for the account these run as — see
+  `deploy/sudoers.anetbbs` (`update.sh` installs this automatically on
+  every run; on a fresh install that hasn't been updated yet, it needs
+  the `__SERVICE_USER__` placeholder substituted with `sed`, not just
+  copied — see [[Sysop Guide]]).
+- **Logs** button opens a journal-viewer modal — pick how many lines
+  to pull (100 / 500 / 2,000 / 5,000), refresh on demand, or download
+  the log as a `.txt` file. Reads via `journalctl`, no privilege
+  elevation beyond systemd-journal/adm group membership.
+
+Above the five cards, two **aggregate charts** roll up CPU% and memory
+(MB) across all five services on one timeline, so you can spot which
+service is driving a load spike at a glance.
+
+Live **online-user counts** are also broken out by protocol (web,
+telnet, SSH, rlogin) rather than just a single combined total.
 
 ### NodeSpy
 
@@ -2195,15 +2332,17 @@ Web + terminal users combined, last 5 minutes. Refreshes every
 
 Quick links to:
 
-- [[Echomail Admin]]
-- [[Doors Admin]]
-- [[RSS Admin]]
-- [[Files Admin]]
+- [[BinkP Setup|Echomail Admin]]
+- [[Door Setup|Doors Admin]]
+- [[RSS Reader|RSS Admin]]
+- [[Files|Files Admin]]
 - [[Themes|Theme manager]]
 - [[Backup]]
 - [[Notifications|Notification Settings]] — turn off any of the five
   admin-review notification kinds you don't want (they're all on by
   default)
+- [[Scheduled Events]] — cron-style maintenance jobs (nodelist
+  generation, DB vacuum, log rotation, InterBBS sync, and more)
 
 ### Hub Management
 
@@ -2308,7 +2447,7 @@ The kick is cross-process: the web app sets a flag on the user's
 `NodeActivity` DB row, and a watchdog inside the terminal session
 polls that flag every 5 seconds. Worst-case kick latency: ~5 s.
 
-Different from a [[Ban]]: a kick just drops the current connection.
+Different from a ban: a kick just drops the current connection.
 The user can reconnect immediately. To stop them coming back, add
 an IP ban under `/admin/ip-bans/`.
 
@@ -2317,6 +2456,31 @@ an IP ban under `/admin/ip-bans/`.
 Every kick writes a `UserActivity` row with `activity_type='kick_node'`,
 the slot, the target username, the reason, and the sysop's
 username + IP — `/admin/audit/` shows the trail.
+
+## The terminal has its own, separate Node Monitor — with messaging
+
+Everything above is the **web** NodeSpy panel, and it's kick-only. The
+terminal Sysop Tools menu has a distinct **Node Monitor** screen (same
+scrollable live-list style as Synchronet's UNIX monitor) that shows
+the same live nodes — slot, user, protocol, page, action, idle time —
+but adds a second capability the web panel doesn't have:
+
+- **K** — kick, same DB-flag mechanism as the web panel (sets
+  `kick_requested`/`kick_reason` on the node's `NodeActivity` row,
+  picked up by the session watchdog within ~5s), prompts for a reason
+  first.
+- **M** — **message** a specific connected node directly from the
+  terminal. Prompts for the text, then delivers it immediately via
+  the sysop-paging mechanism (the same one used for sysop chat
+  replies) — the recipient sees it without you having to drop into
+  chat or wait for them to check anything. Only works against an
+  authenticated node (can't message an anonymous/unauthenticated
+  session).
+
+Both actions live in the same list — press the letter with a row
+selected, same as any other Sysop Tools record list. This is a
+terminal-only feature; there's no web-panel equivalent of the message
+action.
 """),
 
     # ------------------------------------------------------------------
@@ -2381,6 +2545,147 @@ box.
 """),
 
     # ------------------------------------------------------------------
+    ('scheduled-events', 'Scheduled Events', """
+# Scheduled Events
+
+A built-in cron replacement. Sysop-only, **Admin → Scheduled Events**
+(`/admin/events/`). Maintenance jobs run inside the same process as
+the web app, on a one-minute tick, with results visible right in the
+admin UI — no need to grep syslog to find out if last night's VACUUM
+actually ran.
+
+## How it works
+
+A background thread wakes every 60 seconds, loads every row with
+**Enabled** checked, and fires any whose schedule says it's due. Each
+row records `last_run_at`, `last_status` (`ok`/`fail`),
+`last_duration_ms`, and the first 4KB of captured output — all shown
+in the admin list. Editing or disabling a row takes effect on the
+next tick (within a minute); no restart needed.
+
+There's no per-event timeout enforced by the scheduler itself — a
+handler that hangs blocks the next tick's events. Handlers that shell
+out to something that could run long (like `shell`, below) enforce
+their own timeout instead.
+
+## Creating an event
+
+- **Name** — free text, shown in the admin list only.
+- **Handler** — picks the built-in function that runs (see table
+  below). Each option shows its description and expected params once
+  selected.
+- **Schedule** — one of four kinds:
+  - **Daily** — pick a time (`HH:MM`, **UTC**).
+  - **Hourly** — pick a minute-of-hour (0–59).
+  - **Weekly** — pick a day (Mon–Sun) + time, UTC.
+  - **Every N min** ("interval") — repeats N minutes after the
+    *previous run finished*, not wall-clock-aligned.
+- **Params (JSON object)** — handler-specific arguments. Must parse
+  as a JSON object, even if empty (`{}`) — a bare string or path is
+  rejected. A handler taking one argument called `command` wants
+  `{"command": "/path/to/script.sh"}`, not just the path.
+- **Enabled** — unchecked rows never fire but stay in the list.
+
+There's also a **Run now** button per row for testing without waiting
+on the schedule — same code path either way, so output shown after a
+manual run matches exactly what a scheduled fire would produce.
+
+All schedule times are **UTC**, not the server's local timezone or
+any caller's timezone — keep that in mind when picking a "quiet
+hours" slot.
+
+## Built-in handlers
+
+| Handler key | Label | Params | Notes |
+|---|---|---|---|
+| `noop` | No-op (test) | none | Does nothing; returns ok. Use to confirm the scheduler thread is alive. |
+| `tw2_maint` | Trade Wars 2002 maint | none | Runs TW2002's headless daily maintenance (Cabal move, inactive-player sweep). |
+| `db_vacuum` | SQLite VACUUM | none | Reclaims free pages, defragments, refreshes planner stats. Skips (returns ok) on non-SQLite backends — Postgres autovacuums itself. |
+| `log_rotate` | Rotate large logs | `max_mb` (default 50) | Any `logs/*.log` over the threshold is renamed to `.1` and a fresh empty file takes its place. |
+| `security_check` | Security update check | none | Scans `apt list --upgradable` and the venv's `pip list --outdated`, tags Ubuntu `-security` rows, writes a report consumed by **Admin → Security**. Always returns ok even on a non-Ubuntu box, so a missing `apt` doesn't permanently red-flag the row. |
+| `hub_generate_nodelist` | ANotherNetwork: generate nodelist | none | Publishes the ANotherNetwork nodelist into the `ANN.FILES.NODELIST` file area, replacing the prior copy. Only meaningful on the install designated as the ANotherNetwork hub (`REGISTRY_MODE_ENABLED`) — elsewhere it still runs harmlessly, publishing a nodelist with just the hub entry. |
+| `sync_wall_inbound` | InterBBS Wall: import inbound posts | none | Materializes new inbound InterBBS Wall echomail into local Wall posts. Auto-created when InterBBS Wall is enabled — you won't add this by hand. |
+| `sync_lastcallers_inbound` | InterBBS Last Callers: import inbound entries | none | Materializes new inbound echomail into local Last Callers entries. Auto-created when InterBBS Last Callers sharing is enabled. |
+| `sync_scores_inbound` | InterBBS Game Scores: import inbound scores | none | Materializes new inbound echomail into local game high scores. Auto-created when InterBBS Score Sharing is enabled. |
+| `shell` | Shell command | `command` (required), `timeout` (default 60s) | Runs an arbitrary command as the service user. **No sudo** — anything needing root privileges silently fails at that step. Output is captured as raw bytes and decoded with `errors='replace'`, so non-UTF8 output (e.g. CP437 from a DOS program) doesn't crash the handler. |
+
+The three `sync_*_inbound` handlers aren't something you'd pick from a
+blank slate — they appear already-created and enabled the moment you
+turn on the matching InterBBS feature (Wall, Last Callers, or Game
+Score sharing) on a network. Listed here so they aren't a mystery if
+you spot one.
+
+### `shell` handler — worked example
+
+Running a nightly TradeWars external-events script via dosemu2:
+
+**Params (JSON object):**
+```json
+{"command": "/opt/anetbbs/doors/dos/tw/event.sh", "timeout": 120}
+```
+
+**`event.sh`:**
+```bash
+#!/bin/bash
+export TERM=linux
+cd /opt/anetbbs/doors/dos/tw
+/usr/libexec/dosemu2/dosemu2.bin -td EXTERN.EXE
+```
+
+`export TERM=linux` and `-td` (dumb-terminal mode) are required
+because the scheduler runs the command with no controlling tty — a
+normal door launch gets a real PTY from `door_runner.py`, but a
+scheduled shell command doesn't. Without these, dosemu2 fails with
+`ERROR: TERM environment variable needs set.` before it ever reaches
+your DOS program.
+
+## Default events on a fresh install
+
+Seeded once (idempotent — re-running the seeder skips handler keys
+that already have a row):
+
+| Name | Schedule | Handler |
+|---|---|---|
+| TW2 daily maintenance | Daily 03:30 UTC | `tw2_maint` |
+| Weekly SQLite VACUUM | Weekly, Sunday 04:15 UTC | `db_vacuum` |
+| Rotate oversize logs | Daily 04:45 UTC | `log_rotate` (`max_mb: 50`) |
+| Daily security update check | Daily 04:00 UTC | `security_check` |
+
+Any of these can be disabled, deleted, or rescheduled — they're
+normal rows, not special-cased.
+
+On installs with `REGISTRY_MODE_ENABLED=true` (the designated
+ANotherNetwork hub), a fifth event is also seeded:
+
+| Name | Schedule | Handler |
+|---|---|---|
+| ANotherNetwork: weekly nodelist | Weekly, Sunday 05:00 UTC | `hub_generate_nodelist` |
+
+This one is skipped on regular (non-hub) installs — there's nothing
+useful for it to publish there.
+
+## Troubleshooting
+
+- **"Params (JSON object)" rejects what I typed** — it must parse as
+  a JSON object. `/path/to/script.sh` isn't valid JSON; wrap it as
+  `{"command": "/path/to/script.sh"}`.
+- **dosemu2 commands fail with `TERM environment variable needs
+  set`** — see the worked example above; export `TERM` and pass
+  `-td` in your script.
+- **An event always fails the same way** — click **Run now** and
+  read the captured output; it's the same stdout/stderr you'd get
+  running the command by hand over SSH, just minus your interactive
+  shell's environment (PATH, TERM, etc. may differ — set them
+  explicitly in the script if needed).
+
+## See also
+
+- [[Sysop Control Panel]]
+- [[Sysop Guide]]
+- [[Backup]]
+"""),
+
+    # ------------------------------------------------------------------
     ('architecture', 'Architecture', """
 # Architecture
 
@@ -2391,7 +2696,7 @@ A 10,000-ft overview of how ANetBBS is wired up.
 ```
 +---------------------+         +------------------------+
 |  anetbbs-web        |         |  anetbbs               |
-|  gunicorn+eventlet  |         |  asyncio listener      |
+|  eventlet WSGI      |         |  asyncio listener      |
 |  Flask app + sock.IO|         |  telnet/ssh/rlogin     |
 |                     |         |  (one process, unified)|
 +----------+----------+         +-----------+------------+
@@ -2415,7 +2720,7 @@ sharing the same SQLite database. Cross-process signals (like
 | Layer | Choice |
 |-------|--------|
 | Web framework | Flask 3 + Flask-Login + Flask-SocketIO |
-| WSGI | gunicorn + eventlet workers |
+| WSGI | eventlet's native WSGI server (`deploy/serve.py`, `socketio.run()`), single process — gunicorn's eventlet worker class is broken on Python 3.12, so it's deliberately not used |
 | Realtime | Socket.IO (web) / asyncio (terminal) |
 | DB | SQLite via SQLAlchemy 2 |
 | Migrations | "Auto-sweep" — read model metadata, ALTER TABLE for missing cols |
@@ -2467,7 +2772,7 @@ Quick definitions for BBS / ANetBBS jargon.
 Combined with [[CP437]] it's the visual language of BBSes.
 
 **Areafix** — A FidoNet-style robot user that handles echo-area
-subscription requests. See [[AreaFix]].
+subscription requests. See [[Netmail#AreaFix|AreaFix]].
 
 **BinkP** — Modern FidoNet mail transport protocol (TCP 24554). See
 [[BinkP Setup]].
@@ -2502,7 +2807,7 @@ broadcast). See [[Netmail]].
 up to 100; default 8 (`BBS_NODES=8`).
 
 **Nodelist** — The list of every node in a FidoNet-style network,
-distributed weekly. See [[Nodelist]].
+distributed weekly.
 
 **QWK** — A mail packet format for offline reading; download QWK
 once, read & reply offline, upload REP. See [[QWK]].
@@ -2675,7 +2980,6 @@ yet, log in to create it" placeholder otherwise.
 ## See also
 
 - [[Revision History]]
-- [[Orphan Pages]]
 """),
 
     # ------------------------------------------------------------------
@@ -2917,7 +3221,7 @@ deletes every bulletin whose `expires_at` has passed.
 ## Pager view
 
 On terminal, opening a long bulletin paginates with a `[Q]=quit`
-prompt — see [[Pager]].
+prompt.
 
 ## Use cases
 
@@ -2925,11 +3229,6 @@ prompt — see [[Pager]].
 - Highlighting a new feature (point users at the wiki page)
 - Posting a "what's new" digest each month
 - Sharing scene news that doesn't deserve a full board thread
-
-## See also
-
-- [[Site Pages]] — longer, more page-like sysop content
-- [[Tour]] — multi-slide intro for new users
 """),
 
     # ------------------------------------------------------------------
@@ -2979,11 +3278,17 @@ meaningful on the one install that *is* the network hub):
 - **Node detail** (`/admin/echomail/hub/qwk/<node_id>`) — click into
   a node to manage which echo areas it actually receives.
   Subscribe/unsubscribe areas one at a time, or use the
-  **Subscribe to All** button to subscribe the node to every active
-  area on QWK-transport networks in one click — deliberately scoped
+  **Subscribe to All** button to bulk-subscribe. It first shows a
+  checkbox list of the QWK-transport networks on the install — pick
+  one or more and confirm; picking none just flashes an error and
+  subscribes nothing. Once confirmed, the node is subscribed to
+  every active area on the checked network(s) — deliberately scoped
   to QWK-type networks only, not every area on the whole BBS, so a
   QWK node doesn't end up subscribed to something that only exists
-  on a BinkP-only network.
+  on a BinkP-only network. If the node belongs to a specific hub
+  identity, this is further filtered to that identity's own
+  network(s), so a node never gets swept into another network's
+  areas just because it shares the install.
 - **Preview** — a **Preview** button per node builds and downloads a
   test `.QWK` packet for that node on demand *without* marking any
   messages as sent, so a sysop can sanity-check what a peer would
@@ -3071,9 +3376,10 @@ to.
 
 ## Checksums
 
-`.TIC` carries a CRC32. If the file's CRC doesn't match, the
-processor moves both into `bad/` and logs the mismatch. Manual
-intervention required.
+`.TIC` carries a CRC32. If the file's CRC doesn't match, the file is
+left in place (not moved) and the TIC row is flagged `status='error'`
+with an `error_message` describing the mismatch (expected vs. actual
+CRC) — visible in the TIC admin log for manual review.
 
 ## See also
 

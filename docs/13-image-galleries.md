@@ -95,14 +95,21 @@ fine if you set `is_active: true` and only need browsing.
 
 ## Terminal access (legacy fallback)
 
-For SSH/Telnet users a standalone bash script is included:
-`/home/<user>/anet-gallery.sh`. It uses **chafa** for Unicode-block art
-that renders in any terminal, with **img2sixel** as an alternative for
-sixel-capable terminals (SyncTERM, foot, mlterm, modern xterm).
+For SSH/Telnet users a standalone bash script is included, installed
+by `install.sh` to the install **root** itself: `$INSTALL_DIR/anet-gallery.sh`
+(e.g. `/opt/anetbbs/anet-gallery.sh`). It uses **chafa** for
+Unicode-block art that renders in any terminal, with **img2sixel** as
+an alternative for sixel-capable terminals (SyncTERM, foot, mlterm,
+modern xterm).
 
 Quality is much lower than the web viewer (chafa converts pixels to
 character cells). For real photographic quality, point users at the
 web `/gallery/` URL.
 
-The script lives outside the BBS install dir on purpose — keeps the
-deploy `rsync --delete` from removing it.
+That install-root path isn't arbitrary: `SERVICE_USER` is a system
+account (`useradd -r`) with no real home directory, and `$INSTALL_DIR`
+is set as its `$HOME` field, so this is effectively "the service
+user's home." The script survives `update.sh`'s rsync not because it
+sits outside the install dir — it doesn't — but because the source
+tree has no tracked file at that exact path, so the rsync has nothing
+to overwrite it with.

@@ -15,9 +15,26 @@ through their terminal:
 | `door_rlogin`        | remote BBS              | Outbound rlogin TCP bridge to a Synchronet xtrn server / DoorParty / etc. The "door" lives on someone else's BBS. |
 | `door_telnet`        | remote telnet server    | Outbound telnet TCP bridge (e.g. TWGS — Trade Wars Game Server). Same idea as `door_rlogin` but no pre-auth handshake; the remote handles login interactively. |
 | `builtin_web`        | in-process              | Flask templates — for the built-in web mini-games. |
+| `builtin_python`     | in-process               | Bundled Python game, no drop file or external process. Currently just ANetCRAFT — see below. |
 | `door_dos_browser`   | DOS .ZIP bundle         | EmulatorJS + dosbox_pure core, runs entirely in the browser. No telnet/SSH — web only. |
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
+
+## ANetCRAFT — bundled Minecraft-inspired terminal game
+
+`anetbbs/features/anetcraft.py` is ANetBBS's own 2D survival game —
+mine blocks, craft tools, and explore a procedurally generated world
+with ores, caves, trees, and water. It's a `builtin_python` door: no
+external binary, drop file, or emulator involved, and it's seeded
+`Active=True` by default (`anetbbs/web_app.py`), so it's playable at
+`/games/` out of the box on every install. Each player gets their own
+persistent world. It runs natively over SSH, telnet, or the built-in
+web terminal.
+
+**Not to be confused with ANetCRAFT-Door** — a completely separate,
+standalone project (a C# .NET 8 door game) that happens to share a
+similar name. The two are unrelated codebases; ANetCRAFT-Door is not
+bundled with ANetBBS and isn't the game described in this section.
 
 ## Built-in web games — casino wallet economy
 

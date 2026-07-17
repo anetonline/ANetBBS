@@ -26,9 +26,8 @@ steps. Read this whole file before exposing the BBS to the internet.
 - **`/auth/register` rate limit** (3 attempts / hour / IP) — unlike the
   in-memory limits above, this one is backed by a DB table
   (`RegistrationAttempt`), not the shared `rate_limit` decorator. It
-  persists across restarts and is shared correctly across multiple
-  gunicorn workers — the "N × workers" caveat under Known limitations
-  below does **not** apply to registration.
+  persists across restarts — the in-memory-only caveat under Known
+  limitations below does **not** apply to registration.
 - **Path traversal mitigated** — uploads stored under UUID filenames; the
   `download` route uses `send_from_directory` against the configured
   uploads dir.
@@ -69,13 +68,19 @@ steps. Read this whole file before exposing the BBS to the internet.
 
 ## Known limitations
 
-- **Rate limiter is in-memory and per-process.** Fine for a single
-  gunicorn worker. With multiple workers or a multi-host deployment,
-  the limiter is effectively per-worker — the user gets `N × workers`
-  attempts. For a real multi-worker setup, replace with a Redis-backed
-  store (the `rate_limit` decorator is the only call site to change).
-  This does not affect `/auth/register`, which is already DB-backed
-  and correctly shared across workers/restarts (see above).
+- **Rate limiter is in-memory and resets on restart.** ANetBBS's web
+  app runs as a single eventlet process (`deploy/serve.py` —
+  `socketio.run()`, not gunicorn or any multi-worker WSGI server; see
+  `docs/00-overview.md`), so there's no `N × workers` bypass to worry
+  about. The real caveat: every process restart (deploy, crash,
+  `systemctl restart anetbbs-web`) zeroes all counters, and if you
+  ever ran more than one instance behind a load balancer — not a
+  supported or documented topology today — each instance would keep
+  its own independent counters. For durability across restarts,
+  replace with a Redis- or DB-backed store (the `rate_limit` decorator
+  is the only call site to change). This does not affect
+  `/auth/register`, which is already DB-backed and correctly shared
+  across restarts (see above).
 - **No 2FA.** Single password for both web and terminal logins.
 - **No per-account lockout** — the auto-ban above works on the source
   IP, not the targeted username, so a distributed brute-force attempt

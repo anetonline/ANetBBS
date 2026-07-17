@@ -259,10 +259,20 @@ regular per-network echomail admin every install has:
   QWK packet format). Areas can be subscribed/unsubscribed one at a
   time, or in bulk with the **"Subscribe to All"** button
   (`POST /admin/echomail/hub/qwk/<node_id>/subscribe-all`,
-  `qwk_subscribe_all()`) — deliberately scoped to active areas on
-  QWK-transport networks only, not every file/message area on the
-  whole BBS, since a QWK node has no business receiving areas that
-  only exist on a BinkP-only network.
+  `qwk_subscribe_all()`). This isn't a single click — the sysop first
+  checks one or more networks from a checkbox list; submitting with
+  none checked flashes an error and subscribes nothing. Requiring an
+  explicit pick avoids sweeping in every QWK network on the install at
+  once, which is what this used to do — a real problem for a sysop
+  running more than one QWK network who wanted to add just one node's
+  home network. The area query is further scoped two ways: to active
+  areas on QWK-transport networks only (never BinkP-only networks),
+  and, when the node belongs to a hub identity
+  (`node.hub_identity_id`), to networks under that same hub identity —
+  a node has no business receiving areas from a different hub
+  identity's network. Networks with no hub identity set (a
+  pre-migration edge case) are treated as identity-agnostic and always
+  included.
 - **Hold queue** (`/admin/echomail/hub/holdqueue`) — outbound BinkP
   items queued per node, filterable by status (pending/sent/failed).
 - **QWK node-request approval queue**

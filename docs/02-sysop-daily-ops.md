@@ -106,6 +106,33 @@ verified user. History kept.
 Push a real-time toast to every connected web tab AND every
 telnet/SSH/rlogin user's terminal. Optional TTL.
 
+## /admin/events — scheduled events
+
+Cron-style task scheduler. List view shows every configured event with
+its handler, schedule (daily/hourly/weekly/interval, all in UTC),
+enabled/disabled state, and computed next-run time.
+
+- **Handlers** come from a fixed registry (`anetbbs/events/handlers.py`)
+  — things like TW2 daily maintenance, SQLite `VACUUM`, log rotation,
+  the security-update checker, and the InterBBS Wall/Last
+  Callers/Game Scores inbound-sync jobs (auto-created when those
+  features are enabled). You pick a handler and a schedule; you can't
+  register arbitrary new handler code from the UI.
+- **New / Edit** forms let you change the schedule (daily HH:MM,
+  hourly at :MM, weekly day+time, or every-N-minutes interval) and
+  per-handler params (e.g. `max_mb` for log rotation, `command` for
+  the raw shell handler).
+- **Enable/disable toggle** — flip an event off without deleting it.
+- **Run now** — fires the handler immediately, in-request, so you see
+  the result inline instead of waiting for the next scheduled tick or
+  tailing the journal. Fine for quick jobs (noop, `db_vacuum`); the
+  TW2 maintenance handler spawns a node process and can take a moment.
+- **Delete** removes the row entirely.
+
+A handful of default events are seeded on fresh installs; add your own
+for anything else you want run on a schedule without cron/systemd
+timers.
+
 ## Journals
 
 Every `anetbbs-*` service writes to systemd journal. From the

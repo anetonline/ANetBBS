@@ -45,7 +45,7 @@ maps to a `Game` model row (sysop creates via `/admin/games/`) with a
 
 | `game_type` | Run path | Drop file | Use when |
 |---|---|---|---|
-| `door_dos` | DOSBox-staging bridge with TCP nullmodem on 127.0.0.1:5001-N | `DOOR.SYS` / `DORINFO1.DEF` | Original DOS doors (TradeWars, LORD-DOS, Usurper…) |
+| `door_dos` | DOSBox-staging bridge with TCP nullmodem on 127.0.0.1:5000-5100 | `DOOR.SYS` / `DORINFO1.DEF` | Original DOS doors (TradeWars, LORD-DOS, Usurper…) |
 | `door_dosemu` | dosemu2, virtual COM1 bridged to caller's PTY (no FOSSIL) | `DOOR.SYS` | DOS doors that need dosemu2 specifically instead of DOSBox |
 | `door_native` | Direct exec, stdio piped to caller | configurable | Linux-native doors (Java, Go, …) |
 | `door_synchronet` | Real `jsexec` if present, otherwise Node + our compat shim | `DOOR32.SYS` | Synchronet `.js` doors (LORD-JS, MajorMUD-JS, dorkit-based doors) |

@@ -16,8 +16,10 @@ ANSI art, FidoNet echomail, door games).
             ▼         ▼       ▼       ▼       ▼      ▼            ▼
      anetbbs-web   telnet   ssh    rlogin   ftp   binkp   anetbbs-mrc-bridge
      (Flask +      (asyncio (asyncssh) (asyncio (pyftpdlib (asyncio  (aiohttp /
-      eventlet,     telnet)            rlogin)  thread)    listener)  WebSocket)
-      gunicorn)                  └── all in anetbbs.service ─┘
+      eventlet      telnet)            rlogin)  thread)    listener)  WebSocket)
+      native WSGI            └── all in anetbbs.service ─┘
+      server, via
+      deploy/serve.py)
             │           │           │            │             │
             └───────────┴─────┬─────┴────────────┴─────────────┘
                               │

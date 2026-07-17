@@ -24,6 +24,13 @@ under a configurable storage path.
 Each area stores binaries in its `storage_path`. Sysop can drop files
 in directly (e.g. via SFTP) or users can upload via the web or FTP.
 
+Migrating an existing file collection that already has a classic
+`FILES.BBS` / `FILES.BSS` index? `tools/bbs-files-tool.py` builds the
+`.descriptions.json` cache ANetBBS reads for an area directly from
+that index, without touching the original file. See
+[`FILEBASE-MIGRATION.md`](FILEBASE-MIGRATION.md) for the full
+walkthrough.
+
 ## FTP access
 
 When `FTP_ENABLED=true` in `.env` (or via **Admin → Settings**), the
