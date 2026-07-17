@@ -13,6 +13,7 @@ import struct
 import socket
 import logging
 import re
+import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -828,7 +829,7 @@ class BinkPClient:
                         item.filename, tic_name, item.peer_address)
         return sent_ids
 
-    def _wait_got(self, max_frames: int = 20) -> bool:
+    def _wait_got(self, timeout_sec: float = None) -> bool:
         """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail).
 
         Any CMD_FILE the peer interleaves while we wait is received and
@@ -840,9 +841,19 @@ class BinkPClient:
         unified read loop rather than separate send-then-receive
         phases). Discarding such a frame used to permanently lose that
         file with no diagnostic at all.
+
+        Bounded by wall-clock time (default: self.timeout, 60s unless
+        the client was constructed with a different value),
+        NOT frame count -- mirrors the same fix in _send_messages(),
+        which found this exact fragility live against a real SBBSecho
+        hub: a peer that talks a lot (many small DATA frames of its
+        own) before finally sending our GOT could exhaust a fixed
+        frame-count budget with our GOT never reached, even though the
+        peer fully received and processed what we sent.
         """
         state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
-        for _ in range(max_frames):
+        deadline = time.monotonic() + (timeout_sec or self.timeout)
+        while time.monotonic() < deadline:
             is_cmd, data = self._recv_frame_logged()
             if is_cmd and data:
                 cmd = data[0]
@@ -1296,9 +1307,28 @@ class BinkPClient:
         # the peer interleaves while we wait is received and GOT-acked
         # inline rather than silently discarded -- see
         # _consume_inbound_file_frame's docstring.
+        #
+        # Bounded by wall-clock time, NOT frame count -- real bug found
+        # live (a sysop's own AreaFix request to a real SBBSecho hub):
+        # the old `for _ in range(20)` limit meant a peer that responds
+        # with substantial content of its own (SBBSecho replying with
+        # "Area Management Request" + "List of Available Areas", each
+        # potentially spanning many small DATA frames) BEFORE finally
+        # sending our GOT could exhaust all 20 frames on the peer's OWN
+        # reply alone, with our GOT never even reached. _send_messages
+        # then correctly (by its own logic) treated the packet as
+        # unacknowledged and left the netmail queued for retry -- but
+        # since the peer HAD already fully received and processed it,
+        # the very next poll sent the exact same request again, and the
+        # peer replied again, forever: the sysop saw the same two
+        # SBBSecho messages arrive over and over, once per poll,
+        # indefinitely. A frame-count limit is inherently fragile
+        # against any peer that talks a lot before acking; a time
+        # deadline isn't.
         state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
         accepted = False
-        for _ in range(20):
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
             try:
                 is_cmd, data = self._recv_frame_logged()
             except (ConnectionError, OSError) as exc:
@@ -1338,9 +1368,10 @@ class BinkPClient:
             self._consume_inbound_file_frame(is_cmd, data, state)
         else:
             logger.warning(
-                "BinkP: no GOT/SKIP/ERR for %s within 20 frames -- "
+                "BinkP: no GOT/SKIP/ERR for %s within %ds -- "
                 "treating as failed, %d message(s) NOT marked sent, "
-                "will retry next poll", filename, len(messages))
+                "will retry next poll", filename, self.timeout,
+                len(messages))
 
         return len(messages) if accepted else 0
 

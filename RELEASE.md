@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.141 — BinkP: stop re-sending the same netmail/echomail forever when a peer talks a lot before acking (July 2026)
+
+Reported live: an AreaFix subscription request to a real SBBSecho hub kept getting re-sent on every single poll, forever — the peer replied fresh each time, since as far as it could tell it was receiving a brand-new request every time.
+
+- FIX: the wait for a peer's M_GOT acknowledgment was bounded by a fixed count of frames (20), not wall-clock time. A peer that responds with substantial content of its own before finally acking — exactly what SBBSecho does, replying with real content spread across many small frames — could exhaust that budget with our own GOT never reached, even though the peer had already fully received and processed what we sent. The packet then got treated as unacknowledged and left queued for retry, so the next poll sent the identical request again — and the peer, having no reason to think otherwise, replied again. Now bounded by wall-clock time instead, so any amount of peer chatter before the real acknowledgment still gets fully drained.
+
+3 new regression tests, each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.140 — Echomail origin line: show how to reach the BBS, not just its name (July 2026)
 
 Follow-up to v1.0b2.139's address fix — requested live: the default origin-line text itself should follow the common FTN sysop convention of listing how to actually connect, not just the BBS's name.
