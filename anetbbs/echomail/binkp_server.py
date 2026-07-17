@@ -412,16 +412,31 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     # 4. M_OK
     await _send_cmd(writer, CMD_OK, 'secure', transcript=transcript)
 
-    # 5. Receive inbound files until M_EOB. Then send outbound. Then M_EOB.
-    inbound_files = await _receive_files(reader, writer, peer, transcript=transcript)
-
-    # 6. Send queued outbound messages -- moved ahead of importing what
-    #    we just received (see the note above _finish_session's call
-    #    below) so the peer's own session completes promptly instead of
-    #    sitting through however long parsing/importing a large catch-up
-    #    takes.
+    # 5. Send queued outbound messages FIRST, then our own M_EOB --
+    #    moved ahead of receiving (this used to be step "6", after a
+    #    full receive-to-completion). Real live report (a peer's own
+    #    session log): after delivering its files, a real binkd peer
+    #    sat in total silence waiting to hear ANYTHING back from us --
+    #    apparently expecting our own EOB (or outbound offer) before it
+    #    would send its own -- and our old code never sent a word until
+    #    it had first fully drained the peer's inbound stream (waiting
+    #    on the PEER's M_EOB, up to 120s). Neither side spoke first, so
+    #    the peer's own (shorter) timeout fired, it closed the
+    #    connection, and its bookkeeping marked the whole transfer
+    #    failed even though every file had already been individually
+    #    M_GOT-acknowledged -- so it kept resending the same backlog on
+    #    every subsequent poll. Now we announce completion (our own
+    #    EOB) as soon as we know what, if anything, we have to send --
+    #    before waiting on anything further from the peer.
+    #
+    #    Shared receive state/results -- _send_pkt_file's own
+    #    wait-for-GOT loop and the _receive_files() call below both
+    #    feed into these, since a peer may interleave its own file
+    #    offers while we're still sending ours.
     #    For upstream hub sessions: flush outbound EchomailMessages for that network.
     #    For downstream node sessions: flush the BinkPHoldQueue for that node.
+    recv_state = {'name': None, 'size': 0, 'buf': bytearray()}
+    inbound_files = []
     sent_count = 0
     with app.app_context():
         if downstream_node_id is not None:
@@ -430,7 +445,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes, transcript=transcript)
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                                                peer, recv_state, inbound_files,
+                                                transcript=transcript)
                 if accepted:
                     mark_sent_for_node(downstream_node_id,
                                        [m.id for m in outbound])
@@ -448,7 +465,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             if outbound:
                 pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                 fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes, transcript=transcript)
+                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                                                peer, recv_state, inbound_files,
+                                                transcript=transcript)
                 if accepted:
                     now = datetime.utcnow()
                     for m in outbound:
@@ -458,6 +477,14 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 else:
                     logger.warning('Outbound .pkt was not accepted by %s — '
                                    'leaving in queue for retry', remote_addr)
+
+    await _send_cmd(writer, CMD_EOB, transcript=transcript)
+
+    # 6. NOW finish receiving whatever the peer still has queued for us
+    #    (already-interleaved offers landed in inbound_files/recv_state
+    #    above; this drains anything left, until the peer's own M_EOB).
+    inbound_files = await _receive_files(reader, writer, peer, recv_state,
+                                         inbound_files, transcript=transcript)
 
     # 7. End of batch -- complete the BinkP protocol handshake NOW,
     #    before importing what we just received below. A real peer
@@ -715,16 +742,26 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
 
 
 async def _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=None):
-    """Send our final M_EOB, complete binkp/1.1's two-round handshake,
-    briefly drain any trailing bytes, then close.
+    """Complete binkp/1.1's two-round M_EOB handshake, briefly drain any
+    trailing bytes, then close.
 
-    binkp/1.1 (which our own VER line advertises) expects a two-round
-    M_EOB handshake: since we already received the client's first
-    M_EOB in _receive_files(), a spec-compliant peer (real binkd,
-    confirmed live) now expects one more EOB round-trip before
-    treating the session as cleanly finished -- closing right after
-    our own single M_EOB reads as an unexpected mid-session disconnect
-    on their end, even though every file transferred successfully.
+    Our OWN first M_EOB is sent earlier now (see _handle_connection),
+    right after our own outbound-send phase, specifically so the peer
+    hears from us as soon as possible instead of only after we've
+    fully drained whatever it's sending us -- a real live report (a
+    peer's own session log) showed the peer's binkd waiting in total
+    silence for over 2 minutes after delivering its files with no
+    signal back from us at all, then giving up, closing the connection,
+    and marking the whole transfer failed (0 bytes) even though every
+    file had already been individually M_GOT-acknowledged -- so it kept
+    resending the same backlog on every subsequent poll. Sending our
+    EOB immediately once we know whether we have anything to send (see
+    _handle_connection) closes that gap; this function now only
+    handles the SECOND round binkp/1.1 (which our own VER line
+    advertises) expects once each side has both sent and received one
+    M_EOB -- closing right after that first EOB reads as an unexpected
+    mid-session disconnect to a strict, spec-compliant peer (real
+    binkd, confirmed live) even though the transfer itself completed.
     Wait briefly for their second M_EOB and answer it; a lenient peer
     that just closes instead is still handled cleanly below.
 
@@ -732,7 +769,6 @@ async def _finish_session(reader, writer, peer, inbound_files, sent_count, trans
     the peer still has trailing bytes in flight can register on their
     end as an abrupt disconnect rather than a clean session end.
     """
-    await _send_cmd(writer, CMD_EOB, transcript=transcript)
     try:
         is_cmd, payload = await asyncio.wait_for(
             _recv_frame(reader, transcript=transcript), timeout=10)
@@ -762,49 +798,93 @@ async def _finish_session(reader, writer, peer, inbound_files, sent_count, trans
         pass
 
 
-async def _receive_files(reader, writer, peer, transcript=None):
-    """Receive M_FILE offers + data frames until M_EOB. Returns [(filename, bytes)]."""
-    files = []
-    current_name = None
-    current_size = 0
-    current_buf = bytearray()
+async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, files,
+                                      transcript=None):
+    """Feed one already-read frame into an in-progress inbound-file
+    receive, mutating `state` (dict with name/size/buf keys) and `files`
+    (list of (name, bytes) tuples) in place. Returns True if the frame
+    was consumed as part of a file transfer (a CMD_FILE header, or a
+    DATA frame for a file already in progress), False if the caller
+    should handle the frame itself (e.g. EOB/ERR).
 
+    Shared between _receive_files() (the main post-handshake receive
+    loop) and _send_pkt_file()'s own wait-for-GOT loop -- a peer may
+    start delivering its own mail (interleaved CMD_FILE/DATA frames)
+    while we're mid-send waiting for an ack on OURS, and before this
+    helper existed those frames got silently logged and dropped inside
+    _send_pkt_file's wait loop instead of received. Mirrors the
+    already-proven binkp.py BinkPClient._consume_inbound_file_frame()
+    pattern already used on the outbound-poller side.
+    """
+    if is_cmd:
+        if not payload:
+            return False
+        cmd = payload[0]
+        if cmd == CMD_FILE:
+            body = payload[1:].decode('latin-1', errors='replace')
+            # "filename size unix_time offset"
+            parts = body.split()
+            if len(parts) >= 2:
+                state['name'] = parts[0]
+                state['size'] = int(parts[1])
+                state['buf'] = bytearray()
+                logger.info('BinkP %s: receiving %s (%d bytes)',
+                           peer, state['name'], state['size'])
+            return True
+        return False
+
+    # Data frame.
+    if state.get('name') is None:
+        return False
+    state['buf'].extend(payload)
+    if len(state['buf']) >= state['size']:
+        files.append((state['name'], bytes(state['buf'][:state['size']])))
+        await _send_cmd(writer, CMD_GOT, f"{state['name']} {state['size']} 0",
+                        transcript=transcript)
+        state['name'] = None
+        state['buf'] = bytearray()
+    return True
+
+
+async def _receive_files(reader, writer, peer, state, files, transcript=None):
+    """Receive M_FILE offers + data frames until M_EOB. Appends to
+    `files` (list of (name, bytes)) in place; `state` tracks any file
+    mid-transfer across calls -- both are shared with _send_pkt_file()'s
+    own wait loop so a peer's interleaved file offers during OUR send
+    phase land in the same place as anything it sends here."""
     while True:
         try:
             is_cmd, payload = await asyncio.wait_for(
                 _recv_frame(reader, transcript=transcript), timeout=120)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
             break
-        if is_cmd:
-            if not payload:
-                continue
-            cmd, body = payload[0], payload[1:].decode('latin-1', errors='replace')
-            if cmd == CMD_FILE:
-                # "filename size unix_time offset"
-                parts = body.split()
-                if len(parts) >= 2:
-                    current_name = parts[0]
-                    current_size = int(parts[1])
-                    current_buf = bytearray()
-                    logger.info('BinkP %s: receiving %s (%d bytes)', peer, current_name, current_size)
-            elif cmd == CMD_EOB:
-                break
-            elif cmd == CMD_ERR:
-                logger.warning('BinkP %s: client sent ERR: %s', peer, body)
-                break
-        else:
-            # Data frame for the current file
-            current_buf.extend(payload)
-            if current_name and len(current_buf) >= current_size:
-                files.append((current_name, bytes(current_buf[:current_size])))
-                await _send_cmd(writer, CMD_GOT, f'{current_name} {current_size} 0', transcript=transcript)
-                current_name = None
-                current_buf = bytearray()
+        if await _consume_inbound_file_frame(is_cmd, payload, peer, writer,
+                                             state, files, transcript=transcript):
+            continue
+        if not is_cmd or not payload:
+            continue
+        cmd, body = payload[0], payload[1:].decode('latin-1', errors='replace')
+        if cmd == CMD_EOB:
+            break
+        elif cmd == CMD_ERR:
+            logger.warning('BinkP %s: client sent ERR: %s', peer, body)
+            break
     return files
 
 
-async def _send_pkt_file(reader, writer, filename, payload, transcript=None):
+async def _send_pkt_file(reader, writer, filename, payload, peer, state, files,
+                         transcript=None):
     """Send a M_FILE offer + data frames, then wait for M_GOT (or M_SKIP/M_ERR).
+
+    While waiting, any interleaved CMD_FILE/DATA frames the peer sends
+    (its own mail, delivered before it acks ours) are captured via
+    _consume_inbound_file_frame into the shared `state`/`files` instead
+    of being logged and silently dropped as "some other frame" -- real
+    gap found live: this listener's own send phase moved earlier (see
+    _handle_connection) specifically so we announce our own completion
+    promptly instead of making the peer wait through however long our
+    receive phase takes, but a peer that starts delivering its mail
+    concurrently with acking ours needs those frames to land somewhere.
 
     Returns True on accepted (M_GOT), False on rejected/skipped/error.
     """
@@ -827,6 +907,9 @@ async def _send_pkt_file(reader, writer, filename, payload, transcript=None):
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
             logger.warning('No M_GOT received for %s within 60s', filename)
             return False
+        if await _consume_inbound_file_frame(is_cmd, frame, peer, writer,
+                                             state, files, transcript=transcript):
+            continue
         if not is_cmd or not frame:
             continue
         cmd, body = frame[0], frame[1:].decode('latin-1', errors='replace')

@@ -104,7 +104,18 @@ class ClientTwoRoundEobTests(unittest.TestCase):
 
 
 class ServerTwoRoundEobTests(unittest.TestCase):
-    """binkp_server.py's _finish_session() (extracted end-of-batch step)."""
+    """binkp_server.py's _finish_session() (extracted end-of-batch step).
+
+    As of the BinkP inbound-listener reordering fix (real live report:
+    a peer's own binkd sat in total silence for ~2 minutes after
+    delivering its files, waiting to hear anything back from us, then
+    gave up and marked the transfer failed), the UNCONDITIONAL first
+    M_EOB is sent by the caller (_handle_connection) immediately after
+    our own outbound-send phase -- covered by
+    test_binkp_eob_sent_before_receive.py -- not by this function
+    anymore. _finish_session() now only handles the SECOND round:
+    reply with our own second M_EOB if (and only if) the peer sends
+    one back."""
 
     class _FakeWriter:
         def __init__(self):
@@ -157,7 +168,10 @@ class ServerTwoRoundEobTests(unittest.TestCase):
 
         commands = _decode_sent_commands(writer.sent)
         eob_sends = [t for c, t in commands if c == CMD_EOB]
-        self.assertEqual(len(eob_sends), 2)
+        # Our own first EOB is sent by the caller now, before this
+        # function runs -- this call only sees the peer's second EOB
+        # and replies with our own second (one send, not two).
+        self.assertEqual(len(eob_sends), 1)
 
     def test_lenient_peer_no_second_eob_still_closes_cleanly(self):
         from anetbbs.echomail.binkp_server import _finish_session, CMD_EOB
@@ -169,8 +183,10 @@ class ServerTwoRoundEobTests(unittest.TestCase):
 
         commands = _decode_sent_commands(writer.sent)
         eob_sends = [t for c, t in commands if c == CMD_EOB]
-        # Only our own unconditional first EOB -- no crash, no hang.
-        self.assertEqual(len(eob_sends), 1)
+        # No second-round reply since the peer never sent its own
+        # second EOB -- no crash, no hang. (Our first EOB, sent by the
+        # caller before this function runs, isn't visible here at all.)
+        self.assertEqual(len(eob_sends), 0)
 
 
 if __name__ == '__main__':

@@ -257,7 +257,8 @@ class _BinkpHandlerHarness:
             captured['remote_addr'] = remote_addr_arg
             return b'FAKEPKT'
 
-        async def _fake_send_pkt_file(reader, writer, filename, payload, transcript=None):
+        async def _fake_send_pkt_file(reader, writer, filename, payload,
+                                      peer, state, files, transcript=None):
             captured['sent_pkt'] = True
             return include_got
 

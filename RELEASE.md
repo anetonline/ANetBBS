@@ -1,3 +1,14 @@
+# ANetBBS v1.0b2.137 — BinkP inbound listener: stop making peers wait in silence (July 2026)
+
+A peer sysop's own binkd log showed it delivering files to our inbound listener successfully — every one individually acknowledged — then sitting in total silence for over 2 minutes hearing nothing back from us, before giving up, closing the connection, and marking the whole transfer failed. It kept resending the same backlog on every subsequent connection as a result.
+
+- FIX: the inbound listener used to fully drain everything a peer sent (waiting up to 120s for the *peer's own* end-of-batch signal) before ever sending our own outbound mail or announcing that we were done. If the peer's own mailer was itself waiting to hear from us first — which nothing in the protocol requires either side to do — neither side would say anything until somebody's timeout fired. We now send our own outbound mail (if any) and announce we're done immediately after authenticating, before waiting on the peer's stream at all.
+- As a consequence of sending earlier, a peer may now interleave its own file delivery while we're still waiting on an acknowledgment for ours — those were previously logged and silently dropped; they're now received correctly, same as the outbound side already handled.
+
+5 new/updated regression tests, each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.136 — Docs/wiki full accuracy pass (July 2026)
 
 First full docs+wiki pass since v1.0b2.45-46 — 5 parallel audit agents checked all 29 docs/*.md files and all 47 wiki pages against actual current code.
