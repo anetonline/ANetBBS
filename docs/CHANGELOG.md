@@ -1,7 +1,23 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.141`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.142`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.142 — Echomail web preview didn't match what actually gets sent (July 2026)
+
+Reported live: after the v1.0b2.139/141 origin-line fixes, a newly
+composed message still showed no address in its "* Origin:" line when
+viewed in the web UI — the fix looked like it wasn't working.
+
+- FIX: the message-read page displayed the raw stored `origin_line`
+  field, which never includes the FTN address — that gets appended
+  separately, per network, at actual BinkP send time. The preview
+  simply didn't reflect what would really go out over the wire. The
+  read page now computes the same address-append logic for outbound
+  messages, so what a sysop sees in the web UI matches what a peer
+  actually receives.
+
+2 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.141 — BinkP: stop re-sending the same netmail/echomail forever when a peer talks a lot before acking (July 2026)
 

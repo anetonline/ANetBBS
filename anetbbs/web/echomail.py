@@ -242,9 +242,29 @@ def read(area_id, message_id):
         EchomailMessage.id > message_id
     ).order_by(EchomailMessage.id.asc()).first()
 
+    # For OUR OWN outbound messages, msg.origin_line is stored WITHOUT
+    # the FTN address -- that gets appended separately, per network, at
+    # actual send time (anetbbs/echomail/binkp.py's _build_ftn_packet).
+    # Showing the raw stored value here is misleading: a sysop reading
+    # their own just-composed message sees no address at all and
+    # reasonably assumes it's missing from what actually gets sent,
+    # when it isn't -- confirmed live, this was mistaken for the address
+    # fix not working. Mirror _build_ftn_packet's own logic so the
+    # preview matches the real wire content. Inbound messages need no
+    # such adjustment: their origin_line came from the sender already
+    # fully formed.
+    display_origin_line = msg.origin_line
+    if msg.direction == 'outbound' and msg.origin_line:
+        text = msg.origin_line.strip()
+        if not text.endswith(')'):
+            network = EchomailNetwork.query.get(msg.network_id)
+            our_addr = (network.our_address if network else None) or '1:1/1'
+            display_origin_line = f'{text} ({our_addr})'
+
     return render_template('echomail/read.html',
                            echo_area=echo_area,
                            msg=msg,
+                           display_origin_line=display_origin_line,
                            prev_msg=prev_msg,
                            next_msg=next_msg)
 

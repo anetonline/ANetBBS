@@ -75,10 +75,10 @@
                 {% include '_vote_buttons.html' %}
             </span>
         </div>
-        <div class="msg-body ansi-body" id="bodyPlain">{{ msg.body | msgbody(msg.chrs) }}{% if msg.tear_line or msg.origin_line %}
+        <div class="msg-body ansi-body" id="bodyPlain">{{ msg.body | msgbody(msg.chrs) }}{% if msg.tear_line or display_origin_line %}
 <div class="tear-origin">
 {% if msg.tear_line %}{{ msg.tear_line | msgbody(msg.chrs) }}
-{% endif %}{% if msg.origin_line %}* Origin: {{ msg.origin_line | msgbody(msg.chrs) }}{% endif %}
+{% endif %}{% if display_origin_line %}* Origin: {{ display_origin_line | msgbody(msg.chrs) }}{% endif %}
 </div>
 {% endif %}</div>
         <div id="bodyMd" class="msg-body" style="display:none;">{{ msg.body | markdown }}</div>
