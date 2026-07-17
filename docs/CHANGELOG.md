@@ -1,7 +1,28 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.137`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.138`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.138 — Scheduled events: one hung handler could silently kill the entire scheduler forever (July 2026)
+
+Reported live: a sysop's scheduled events — including the stock
+defaults, not just the one they'd added — simply stopped firing
+entirely, with no error anywhere. A 4-day log showed the scheduler's
+own startup line exactly once and nothing after.
+
+- FIX: a handler that hung (a `shell` command waiting on input, a
+  network call with no effective timeout, anything) froze the
+  scheduler thread forever — silently, with no crash logged — taking
+  down every other scheduled event with it, including ones that had
+  nothing to do with whatever hung. This was a known, deliberate
+  tradeoff ("a runaway is a sysop bug, not a security threat"), but
+  the real-world consequence turned out to be worse than that framing
+  accounted for. Every handler call is now bounded to a generous
+  5-minute ceiling — comfortably above what any of the built-in
+  handlers actually need — so one hung handler can no longer take
+  every other event down with it.
+
+4 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.137 — BinkP inbound listener: stop making peers wait in silence (July 2026)
 

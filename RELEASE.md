@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.138 — Scheduled events: one hung handler could silently kill the entire scheduler forever (July 2026)
+
+Reported live: a sysop's scheduled events — including the stock defaults, not just the one they'd added — simply stopped firing entirely, with no error anywhere. A 4-day log showed the scheduler's own startup line exactly once and nothing after.
+
+- FIX: a handler that hung (a `shell` command waiting on input, a network call with no effective timeout, anything) froze the scheduler thread forever — silently, with no crash logged — taking down every other scheduled event with it, including ones that had nothing to do with whatever hung. This was a known, deliberate tradeoff ("a runaway is a sysop bug, not a security threat"), but the real-world consequence turned out to be worse than that framing accounted for. Every handler call is now bounded to a generous 5-minute ceiling — comfortably above what any of the built-in handlers actually need — so one hung handler can no longer take every other event down with it.
+
+4 new regression tests, each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.137 — BinkP inbound listener: stop making peers wait in silence (July 2026)
 
 A peer sysop's own binkd log showed it delivering files to our inbound listener successfully — every one individually acknowledged — then sitting in total silence for over 2 minutes hearing nothing back from us, before giving up, closing the connection, and marking the whole transfer failed. It kept resending the same backlog on every subsequent connection as a result.

@@ -8,11 +8,18 @@ Every minute (clamped — see ``_TICK_SEC``), the loop:
 4. Records ``last_run_at`` / ``last_status`` / ``last_duration_ms`` /
    ``last_output`` back on the row.
 
-The handler is run in the scheduler thread (no per-event subprocess).
-Handlers that need isolation should fork their own subprocess internally
-— see :func:`anetbbs.events.handlers.shell` as the pattern. The runner
-does NOT enforce a wall-clock timeout because handlers are sysop-owned
-code; a runaway is a sysop bug, not a security threat.
+The handler runs off the scheduler thread's own critical path (see
+``_run_handler_with_timeout`` below) with a generous but hard ceiling.
+This used to be undefended -- "handlers are sysop-owned code; a runaway
+is a sysop bug, not a security threat" -- but a real live report showed
+the actual consequence is much worse than that framing suggests: ONE
+handler that hangs (a `shell` command waiting on input, a network call
+with no effective timeout, anything) freezes the scheduler thread
+FOREVER, silently, taking down every OTHER scheduled event with it --
+including the harmless stock defaults, which have nothing to do with
+whatever the sysop wrote. Confirmed live: a real install's scheduler
+produced literally zero log output for 4 days straight after startup,
+having gone silent on what must have been one of its very first ticks.
 
 We re-load the row fresh each tick so admin edits land within one
 minute. Disabled or deleted rows simply stop firing on the next sweep.
@@ -27,6 +34,61 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+try:
+    import eventlet
+    import eventlet.tpool  # type: ignore
+    _EVENTLET_AVAILABLE = True
+except ImportError:
+    eventlet = None  # type: ignore
+    _EVENTLET_AVAILABLE = False
+
+# Generous ceiling -- real handlers stay well under this (security_check's
+# apt+pip scans cap at 90s combined; shell's own default is 60s; tw2_maint
+# spawns a real subprocess but isn't expected to run for minutes) -- but
+# bounded, so a genuinely hung handler can no longer freeze the scheduler
+# thread forever. The hung handler's own underlying call may keep running
+# in the background past this point (there's no safe way to force-kill a
+# stuck native thread from here) -- the goal is only to stop it from
+# blocking every OTHER scheduled event, not to guarantee it actually stops.
+_HANDLER_TIMEOUT_SEC = 300
+
+
+def _call_with_app_context(app, handler, params):
+    """Re-establish app.app_context() before calling handler -- needed
+    whenever the handler runs off the calling thread/greenlet, since
+    Flask's context doesn't propagate across a real thread boundary the
+    way it does within a single thread's own call stack."""
+    with app.app_context():
+        return handler(app, params)
+
+
+def _run_handler_with_timeout(app, handler, params):
+    """Run handler(app, params), bounded to _HANDLER_TIMEOUT_SEC so one
+    hung handler can't freeze the scheduler thread forever. Returns
+    (ok, out) same shape as a handler would."""
+    if _EVENTLET_AVAILABLE:
+        try:
+            with eventlet.Timeout(_HANDLER_TIMEOUT_SEC):
+                return eventlet.tpool.execute(
+                    _call_with_app_context, app, handler, params)
+        except eventlet.Timeout:
+            return False, (f'handler timed out after {_HANDLER_TIMEOUT_SEC}s '
+                           '-- abandoned so other scheduled events could '
+                           'still run; the timed-out call may still be '
+                           'running in the background')
+    # Fallback when eventlet isn't active (e.g. tests, or a non-eventlet
+    # deployment): a plain thread, abandoned past the deadline rather
+    # than joined forever.
+    result: dict = {}
+    def _target():
+        result['value'] = _call_with_app_context(app, handler, params)
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=_HANDLER_TIMEOUT_SEC)
+    if t.is_alive():
+        return False, f'handler timed out after {_HANDLER_TIMEOUT_SEC}s'
+    return result.get('value', (False, 'handler thread exited with no result'))
 
 # How often the scheduler wakes to check for due events. One minute is
 # the coarsest cadence we expose to sysops (no sub-minute scheduling),
@@ -154,7 +216,7 @@ def fire(app, event_id: int) -> tuple[bool, str]:
         if handler is not None:
             t0 = time.monotonic()
             try:
-                ok, out = handler(app, params)
+                ok, out = _run_handler_with_timeout(app, handler, params)
             except Exception as exc:  # noqa: BLE001
                 logger.exception('event %s handler crashed', ev.handler_key)
                 ok, out = False, f'handler crashed: {exc!r}'
