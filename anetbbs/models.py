@@ -895,7 +895,21 @@ class NetmailMessage(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     sent_at = db.Column(db.DateTime, index=True)
-    received_at = db.Column(db.DateTime)
+    # Indexed as of v1.0b2.145 -- poller.py's content-based netmail dedup
+    # fallback (v1.0b2.143) filters on this column to bound its lookback
+    # window, but without an index that filter does nothing at the SQL
+    # level: SQLite narrows via whichever OTHER indexed column it picks
+    # (from_address is the obvious one, and not very selective for a
+    # single flooding hub address) and then walks EVERY matching row --
+    # unbounded by time -- doing a TEXT comparison against `body` for
+    # each one. Under eventlet (this app's web process monkey-patches
+    # threading, but NOT sqlite3), a slow SQLite query blocks the entire
+    # process for every user on every page until it completes, which is
+    # exactly the shape of a real live report: the whole web UI hanging
+    # for minutes after this dedup fallback shipped, on an install that
+    # had accumulated many rows from the very flood the fallback exists
+    # to catch.
+    received_at = db.Column(db.DateTime, index=True)
     read_at = db.Column(db.DateTime)
 
     # Soft-delete: independent for sender and recipient

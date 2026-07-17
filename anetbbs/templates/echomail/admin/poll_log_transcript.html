@@ -22,11 +22,35 @@
 {% endif %}
 
 <div class="card">
-    <div class="card-header">
-        Frame-by-frame session log — <code>&gt;&gt;</code> sent, <code>&lt;&lt;</code> received
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Frame-by-frame session log — <code>&gt;&gt;</code> sent, <code>&lt;&lt;</code> received</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('transcript-box').scrollTop = 0;">
+            <i class="bi bi-arrow-up"></i> Jump to start
+        </button>
     </div>
     <div class="card-body">
-        <pre style="white-space:pre-wrap; font-family:monospace; font-size:0.85rem; max-height:70vh; overflow-y:auto;">{{ log.transcript }}</pre>
+        <pre id="transcript-box" style="white-space:pre-wrap; font-family:monospace; font-size:0.85rem; max-height:70vh; overflow-y:auto;">{{ log.transcript }}</pre>
     </div>
 </div>
+<script>
+    // Auto-scroll to the END of the transcript on load, not the start --
+    // for a long session (any real file transfer runs to hundreds of
+    // frame-by-frame lines) the fixed-height scroll box above defaults
+    // to showing the top, so a sysop reading it would see only the
+    // handshake and stop right around the first file transfer, never
+    // scrolling down to whatever happened at the actual end of the
+    // session (the peer's own EOB, our DISCONNECT line, or -- for a
+    // failed poll -- the exact frame where things went wrong). That's
+    // consistently the most diagnostically useful part, same reasoning
+    // _format_transcript() already uses server-side when a transcript
+    // is too long to store in full (it keeps the LAST lines, not the
+    // first). A "Jump to start" button above lets a sysop who actually
+    // wants the handshake get back to it in one click.
+    (function () {
+        var box = document.getElementById('transcript-box');
+        if (box) {
+            box.scrollTop = box.scrollHeight;
+        }
+    })();
+</script>
 {% endblock %}

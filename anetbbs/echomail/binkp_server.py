@@ -435,310 +435,350 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     #    offers while we're still sending ours.
     #    For upstream hub sessions: flush outbound EchomailMessages for that network.
     #    For downstream node sessions: flush the BinkPHoldQueue for that node.
-    recv_state = {'name': None, 'size': 0, 'buf': bytearray()}
-    inbound_files = []
-    sent_count = 0
-    with app.app_context():
-        if downstream_node_id is not None:
-            from .tosser import get_pending_for_node, mark_sent_for_node
-            outbound = get_pending_for_node(downstream_node_id)
-            if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
-                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
-                                                peer, recv_state, inbound_files,
-                                                transcript=transcript)
-                if accepted:
-                    mark_sent_for_node(downstream_node_id,
-                                       [m.id for m in outbound])
-                    sent_count = len(outbound)
-                else:
-                    logger.warning('Hold-queue .pkt not accepted by %s — '
-                                   'leaving pending for retry', remote_addr)
-        elif net_id is not None:
-            from ..models import EchomailMessage
-            outbound = EchomailMessage.query.filter_by(
-                network_id=net_id,
-                direction='outbound',
-                sent_at=None,
-            ).all()
-            if outbound:
-                pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
-                fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
-                                                peer, recv_state, inbound_files,
-                                                transcript=transcript)
-                if accepted:
-                    now = datetime.utcnow()
-                    for m in outbound:
-                        m.sent_at = now
-                    db.session.commit()
-                    sent_count = len(outbound)
-                else:
-                    logger.warning('Outbound .pkt was not accepted by %s — '
-                                   'leaving in queue for retry', remote_addr)
-
-    await _send_cmd(writer, CMD_EOB, transcript=transcript)
-
-    # 6. NOW finish receiving whatever the peer still has queued for us
-    #    (already-interleaved offers landed in inbound_files/recv_state
-    #    above; this drains anything left, until the peer's own M_EOB).
-    inbound_files = await _receive_files(reader, writer, peer, recv_state,
-                                         inbound_files, transcript=transcript)
-
-    # 7. End of batch -- complete the BinkP protocol handshake NOW,
-    #    before importing what we just received below. A real peer
-    #    report (a 100+-link hub) traced a mail-loop straight back to
-    #    the OLD ordering here: a large historical catch-up (tens of
-    #    thousands of messages across ~100 bundles) took long enough to
-    #    parse+import+toss that the peer's own connection gave up
-    #    waiting mid-import and the session ended without ever reaching
-    #    this handshake -- every file had already been individually
-    #    M_GOT-acknowledged, but because the session itself never closed
-    #    cleanly, the peer's own bookkeeping never marked those bundles
-    #    delivered and resent all of them on the next connection,
-    #    compounding with every new bundle created in between. Finishing
-    #    the handshake here means the peer's session completes in
-    #    roughly the time it takes to exchange files, regardless of how
-    #    large the resulting import turns out to be.
-    await _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=transcript)
-
-    # 8. NOW import inbound packets + scan for .tic file echoes. The
-    #    socket is already closed at this point (see above) -- however
-    #    long this takes has no further bearing on the peer's own
-    #    session/protocol timing.
-    #
-    # FidoNet hubs deliver mail in several wrappers:
-    #
-    #   * Raw FTS-0001 type-2 packet — bytes 18-19 == 02 00 / 02 01.
-    #     Extension typically .pkt, but Mystic ships point-targeted variants:
-    #       .pkt              standard
-    #       .cut .crt         crash mail
-    #       .dut .drt         direct mail
-    #       .iut .irt         immediate mail
-    #       .hut .hrt         hold mail
-    #       .t<flavor><hex>   point-targeted (.th5 = hold for point .5,
-    #                          .we3 = weekly echomail for point .3, etc.)
-    #
-    #   * ZIP-compressed mail bundle (FTS-5003 / standard FidoNet). Magic
-    #     bytes 50 4B 03 04 = "PK..".  Inside is one or more .pkt files.
-    #     Mystic and binkd default to ZIP for echomail to save bandwidth;
-    #     if we don't extract these the entire feed is silently dropped.
-    #
-    # Strategy: detect by content (magic bytes), extract any .pkt files
-    # inside ZIPs, then import each. Fall back to the extension regex.
-    import re as _re
-    import io as _io
-    import zipfile as _zipfile
-    # Mail-file extension acceptance. Several FTN conventions coexist:
-    #   .pkt                — raw FTS-0001 packet (any tosser)
-    #   .[cdih]ut/.[cdih]rt — Mystic point flavors (crash/direct/
-    #                         immediate/hold, 'ut' = unzipped, 'rt' = ARC)
-    #   .t[a-z][0-9a-z]     — point-targeted bundles per Mystic naming
-    #   .(mo|tu|we|th|fr|sa|su)[0-9a-z]
-    #                       — FTS-5003 day-of-week bundled mail for nodes,
-    #                         where the prefix is the local day at the
-    #                         sending hub and the trailing char is a
-    #                         per-file sequence (0..9, then a..z = 36 per day).
-    # The OLD regex only matched `we<hex>` (Wednesday only) which made
-    # Friday-bundled mail (`.frk`, `.frl`, …) get silently filed as
-    # non-mail and dropped. Mystic hubs delivering to a node use these
-    # by default. Pattern below now covers all 7 days and 36-char
-    # sequence space.
-    _PKT_EXT_RE = _re.compile(
-        r'^\.(?:'
-        r'pkt'
-        r'|[cdih]ut|[cdih]rt'
-        r'|t[cdih][0-9a-f]'
-        r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
-        r')$',
-        _re.IGNORECASE)
-
-    def _is_fts_packet(payload):
-        return len(payload) >= 60 and payload[18:20] in (b'\x02\x00', b'\x02\x01')
-
-    def _is_zip(payload):
-        return len(payload) >= 4 and payload[:4] == b'PK\x03\x04'
-
-    def _extract_packets(name, payload):
-        """Yield (inner_name, inner_bytes) for every FTS-0001 packet found
-        in this file — directly, or after unzipping a mail bundle."""
-        if _is_zip(payload):
-            try:
-                with _zipfile.ZipFile(_io.BytesIO(payload)) as zf:
-                    for info in zf.infolist():
-                        if info.is_dir():
-                            continue
-                        try:
-                            inner = zf.read(info.filename)
-                        except Exception as exc:
-                            logger.warning('Failed to read %s from %s: %s',
-                                           info.filename, name, exc)
-                            continue
-                        if _is_fts_packet(inner) or _PKT_EXT_RE.match(
-                                os.path.splitext(info.filename)[1]):
-                            yield (info.filename, inner)
-                        else:
-                            logger.info('Skipping non-packet %s inside %s',
-                                        info.filename, name)
-            except _zipfile.BadZipFile as exc:
-                logger.warning('Bad ZIP %s: %s', name, exc)
-        elif _is_fts_packet(payload) or _PKT_EXT_RE.match(
-                os.path.splitext(name)[1]):
-            yield (name, payload)
-
-    def _debug_manifest(fname, buf):
-        """Same purpose as binkp.py's _debug_manifest, duplicated here
-        because this is a genuinely separate inbound path: the answering
-        side (this file, when a hub connects TO us) never routed through
-        binkp.py's _import_completed()/_debug_dump_packet() at all, so
-        every diagnostic added there was blind to traffic arriving this
-        way. Confirmed on the live server: real messages kept landing in
-        the DB with zero corresponding manifest entries, which is what
-        led to finding this second, uninstrumented code path. Opt-in via
-        the same BINKP_DEBUG_DUMP_DIR env var, zero cost unless set."""
-        debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
-        if not debug_dir:
-            return
-        try:
-            os.makedirs(debug_dir, exist_ok=True)
-            kind = 'fts' if _is_fts_packet(buf) else (
-                'zip' if _is_zip(buf) else 'other')
-            line = f'{datetime.utcnow().isoformat()} SRV:{fname} {len(buf)} {kind}\n'
-            with open(os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
-                fh.write(line)
-        except OSError:
-            pass
-
-    def _debug_dump_packet(name, data):
-        debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
-        if not debug_dir:
-            return
-        try:
-            os.makedirs(debug_dir, exist_ok=True)
-            dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_srv_{name}'
-            with open(os.path.join(debug_dir, dump_name), 'wb') as fh:
-                fh.write(data)
-        except OSError as exc:
-            logger.warning('BinkP server: failed to dump debug packet %s: %s',
-                           name, exc)
-
-    # Steps 8-9 run in a background thread via asyncio.to_thread(), NOT
-    # inline on this coroutine. Confirmed real gap found while
-    # investigating a second peer sysop's report of multi-minute stalls
-    # on BRAND NEW connections (including tiny, sub-3KB pushes that
-    # never got so much as a M_GOT before the peer gave up and
-    # disconnected): this server runs ONE asyncio event loop
-    # (asyncio.start_server in _serve() below) shared by EVERY inbound
-    # connection. Moving import to run after THIS session's own socket
-    # close (the fix directly above, at "7.") only protects THIS
-    # session's own protocol timing -- it does nothing to stop the
-    # import's synchronous DB writes / ZIP extraction / regex parsing
-    # (potentially thousands of messages during a large catch-up) from
-    # monopolizing the single-threaded event loop and starving EVERY
-    # OTHER concurrent connection, including ones that haven't even
-    # finished their handshake yet. asyncio.to_thread() runs this
-    # synchronous work on a worker thread instead, so the event loop
-    # stays free to service other sessions the moment THIS session's
-    # own _finish_session() above returns, regardless of how long the
-    # import takes. Flask's app.app_context() is designed to be entered
-    # fresh from any thread (already used this way at steps 3o/6 above,
-    # just always from the event-loop thread until now), so no new
-    # threading primitive is needed here beyond to_thread() itself.
-    def _import_and_log():
-        imported_total = 0
-        if inbound_files:
-            with app.app_context():
-                inbound_dir = None
-                for fname, payload in inbound_files:
-                    _debug_manifest(fname, payload)
-                    extracted = list(_extract_packets(fname, payload))
-                    if extracted:
-                        for inner_name, inner_payload in extracted:
-                            _debug_dump_packet(inner_name, inner_payload)
-                            imported_total += _import_pkt_payload(
-                                inner_payload, net_id, inner_name)
+    # 5b. Wrap the whole post-auth session in a try/except so a crash
+    # partway through (a real exception in _send_pkt_file/_receive_files/
+    # _finish_session/import, or a network error) still leaves a record --
+    # previously, _import_and_log() below (step "9.") was the ONLY place
+    # that ever wrote an EchomailPollLog row for an inbound session, and
+    # it's the very LAST statement in this function: any exception before
+    # it meant the session vanished with no trace in the sysop-facing Poll
+    # Log at all, only a bare stack trace in the application log -- the
+    # exact gap that left a real crashed session (peer report: our own
+    # listener closed the connection ~60s in, mid-transfer, with none of
+    # the peer's files ever GOT-acknowledged) with no ANetBBS-side
+    # transcript to diagnose it from. Mirrors poller.py's _do_poll(),
+    # which has always saved the transcript on failure via its own
+    # try/except/finally.
+    try:
+        recv_state = {'name': None, 'size': 0, 'buf': bytearray()}
+        inbound_files = []
+        sent_count = 0
+        with app.app_context():
+            if downstream_node_id is not None:
+                from .tosser import get_pending_for_node, mark_sent_for_node
+                outbound = get_pending_for_node(downstream_node_id)
+                if outbound:
+                    pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
+                    fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
+                    accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                                                    peer, recv_state, inbound_files,
+                                                    transcript=transcript)
+                    if accepted:
+                        mark_sent_for_node(downstream_node_id,
+                                           [m.id for m in outbound])
+                        sent_count = len(outbound)
                     else:
-                        # Non-packet files (TIC manifests, hatched binaries, etc.)
-                        # get written to inbound for later processing.
-                        # Default landed in /tmp/ which is tmpfs on most distros
-                        # — files vanish on service restart. Default to data/
-                        # so the sysop can recover from a tossing miss.
-                        inbound_dir = inbound_dir or (
-                            os.environ.get('BINKP_INBOUND_DIR')
-                            or os.path.join(
-                                app.config.get('DATA_DIR') or 'data',
-                                'binkp', 'inbound'))
-                        try:
-                            safe_name = _sanitize_inbound_filename(fname)
-                            os.makedirs(inbound_dir, exist_ok=True)
-                            with open(os.path.join(inbound_dir, safe_name), 'wb') as f:
-                                f.write(payload)
-                            # Visible-by-default log so the sysop can spot
-                            # mystery files that don't match the regex /
-                            # magic bytes — easier diagnosis than digging
-                            # at DEBUG level.
-                            logger.info(
-                                'BinkP: stored unrecognised file %s '
-                                '(%d bytes) in %s — neither ZIP nor FTS-0001 '
-                                'packet, scanning for TIC manifest',
-                                safe_name, len(payload), inbound_dir)
-                        except OSError as exc:
-                            logger.warning('Failed to write inbound file %s: %s',
-                                           fname, exc)
-                # After dropping any non-.pkt files into inbound, run the TIC scan
-                # so file-echo distributions get filed automatically.
-                if inbound_dir and os.path.isdir(inbound_dir):
-                    try:
-                        from .tic import scan_inbound
-                        n = scan_inbound(inbound_dir)
-                        if n:
-                            logger.info('Processed %d TIC files from %s',
-                                        n, inbound_dir)
-                    except Exception:
-                        logger.exception('TIC scan failed')
+                        logger.warning('Hold-queue .pkt not accepted by %s — '
+                                       'leaving pending for retry', remote_addr)
+            elif net_id is not None:
+                from ..models import EchomailMessage
+                outbound = EchomailMessage.query.filter_by(
+                    network_id=net_id,
+                    direction='outbound',
+                    sent_at=None,
+                ).all()
+                if outbound:
+                    pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
+                    fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
+                    accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                                                    peer, recv_state, inbound_files,
+                                                    transcript=transcript)
+                    if accepted:
+                        now = datetime.utcnow()
+                        for m in outbound:
+                            m.sent_at = now
+                        db.session.commit()
+                        sent_count = len(outbound)
+                    else:
+                        logger.warning('Outbound .pkt was not accepted by %s — '
+                                       'leaving in queue for retry', remote_addr)
 
-        # 9. Record this inbound-initiated session in the same Poll Log a
-        # sysop already checks for outbound polls. Before this, ONLY
-        # anetbbs/echomail/poller.py (which dials OUT) ever wrote an
-        # EchomailPollLog row -- when a remote hub calls IN and
-        # delivers mail (exactly how tqwnet/sp00knet actually work:
-        # they push to us rather than waiting to be polled), the real
-        # imported-message count computed above was discarded, and the
-        # sysop's own subsequent outbound poll of that same network
-        # legitimately found nothing left to pull (the hub already
-        # pushed it here) and logged 0 -- real mail was arriving the
-        # whole time, just never reflected in this log. Only written
-        # for upstream-hub sessions (net_id set); a downstream node
-        # polling US as ITS hub has no EchomailNetwork row to log
-        # against (EchomailPollLog.network_id is NOT NULL).
-        if net_id is not None:
-            with app.app_context():
+        await _send_cmd(writer, CMD_EOB, transcript=transcript)
+
+        # 6. NOW finish receiving whatever the peer still has queued for us
+        #    (already-interleaved offers landed in inbound_files/recv_state
+        #    above; this drains anything left, until the peer's own M_EOB).
+        inbound_files = await _receive_files(reader, writer, peer, recv_state,
+                                             inbound_files, transcript=transcript)
+
+        # 7. End of batch -- complete the BinkP protocol handshake NOW,
+        #    before importing what we just received below. A real peer
+        #    report (a 100+-link hub) traced a mail-loop straight back to
+        #    the OLD ordering here: a large historical catch-up (tens of
+        #    thousands of messages across ~100 bundles) took long enough to
+        #    parse+import+toss that the peer's own connection gave up
+        #    waiting mid-import and the session ended without ever reaching
+        #    this handshake -- every file had already been individually
+        #    M_GOT-acknowledged, but because the session itself never closed
+        #    cleanly, the peer's own bookkeeping never marked those bundles
+        #    delivered and resent all of them on the next connection,
+        #    compounding with every new bundle created in between. Finishing
+        #    the handshake here means the peer's session completes in
+        #    roughly the time it takes to exchange files, regardless of how
+        #    large the resulting import turns out to be.
+        await _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=transcript)
+
+        # 8. NOW import inbound packets + scan for .tic file echoes. The
+        #    socket is already closed at this point (see above) -- however
+        #    long this takes has no further bearing on the peer's own
+        #    session/protocol timing.
+        #
+        # FidoNet hubs deliver mail in several wrappers:
+        #
+        #   * Raw FTS-0001 type-2 packet — bytes 18-19 == 02 00 / 02 01.
+        #     Extension typically .pkt, but Mystic ships point-targeted variants:
+        #       .pkt              standard
+        #       .cut .crt         crash mail
+        #       .dut .drt         direct mail
+        #       .iut .irt         immediate mail
+        #       .hut .hrt         hold mail
+        #       .t<flavor><hex>   point-targeted (.th5 = hold for point .5,
+        #                          .we3 = weekly echomail for point .3, etc.)
+        #
+        #   * ZIP-compressed mail bundle (FTS-5003 / standard FidoNet). Magic
+        #     bytes 50 4B 03 04 = "PK..".  Inside is one or more .pkt files.
+        #     Mystic and binkd default to ZIP for echomail to save bandwidth;
+        #     if we don't extract these the entire feed is silently dropped.
+        #
+        # Strategy: detect by content (magic bytes), extract any .pkt files
+        # inside ZIPs, then import each. Fall back to the extension regex.
+        import re as _re
+        import io as _io
+        import zipfile as _zipfile
+        # Mail-file extension acceptance. Several FTN conventions coexist:
+        #   .pkt                — raw FTS-0001 packet (any tosser)
+        #   .[cdih]ut/.[cdih]rt — Mystic point flavors (crash/direct/
+        #                         immediate/hold, 'ut' = unzipped, 'rt' = ARC)
+        #   .t[a-z][0-9a-z]     — point-targeted bundles per Mystic naming
+        #   .(mo|tu|we|th|fr|sa|su)[0-9a-z]
+        #                       — FTS-5003 day-of-week bundled mail for nodes,
+        #                         where the prefix is the local day at the
+        #                         sending hub and the trailing char is a
+        #                         per-file sequence (0..9, then a..z = 36 per day).
+        # The OLD regex only matched `we<hex>` (Wednesday only) which made
+        # Friday-bundled mail (`.frk`, `.frl`, …) get silently filed as
+        # non-mail and dropped. Mystic hubs delivering to a node use these
+        # by default. Pattern below now covers all 7 days and 36-char
+        # sequence space.
+        _PKT_EXT_RE = _re.compile(
+            r'^\.(?:'
+            r'pkt'
+            r'|[cdih]ut|[cdih]rt'
+            r'|t[cdih][0-9a-f]'
+            r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
+            r')$',
+            _re.IGNORECASE)
+
+        def _is_fts_packet(payload):
+            return len(payload) >= 60 and payload[18:20] in (b'\x02\x00', b'\x02\x01')
+
+        def _is_zip(payload):
+            return len(payload) >= 4 and payload[:4] == b'PK\x03\x04'
+
+        def _extract_packets(name, payload):
+            """Yield (inner_name, inner_bytes) for every FTS-0001 packet found
+            in this file — directly, or after unzipping a mail bundle."""
+            if _is_zip(payload):
                 try:
-                    from ..models import EchomailPollLog
+                    with _zipfile.ZipFile(_io.BytesIO(payload)) as zf:
+                        for info in zf.infolist():
+                            if info.is_dir():
+                                continue
+                            try:
+                                inner = zf.read(info.filename)
+                            except Exception as exc:
+                                logger.warning('Failed to read %s from %s: %s',
+                                               info.filename, name, exc)
+                                continue
+                            if _is_fts_packet(inner) or _PKT_EXT_RE.match(
+                                    os.path.splitext(info.filename)[1]):
+                                yield (info.filename, inner)
+                            else:
+                                logger.info('Skipping non-packet %s inside %s',
+                                            info.filename, name)
+                except _zipfile.BadZipFile as exc:
+                    logger.warning('Bad ZIP %s: %s', name, exc)
+            elif _is_fts_packet(payload) or _PKT_EXT_RE.match(
+                    os.path.splitext(name)[1]):
+                yield (name, payload)
+
+        def _debug_manifest(fname, buf):
+            """Same purpose as binkp.py's _debug_manifest, duplicated here
+            because this is a genuinely separate inbound path: the answering
+            side (this file, when a hub connects TO us) never routed through
+            binkp.py's _import_completed()/_debug_dump_packet() at all, so
+            every diagnostic added there was blind to traffic arriving this
+            way. Confirmed on the live server: real messages kept landing in
+            the DB with zero corresponding manifest entries, which is what
+            led to finding this second, uninstrumented code path. Opt-in via
+            the same BINKP_DEBUG_DUMP_DIR env var, zero cost unless set."""
+            debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
+            if not debug_dir:
+                return
+            try:
+                os.makedirs(debug_dir, exist_ok=True)
+                kind = 'fts' if _is_fts_packet(buf) else (
+                    'zip' if _is_zip(buf) else 'other')
+                line = f'{datetime.utcnow().isoformat()} SRV:{fname} {len(buf)} {kind}\n'
+                with open(os.path.join(debug_dir, '_manifest.log'), 'a') as fh:
+                    fh.write(line)
+            except OSError:
+                pass
+
+        def _debug_dump_packet(name, data):
+            debug_dir = os.environ.get('BINKP_DEBUG_DUMP_DIR')
+            if not debug_dir:
+                return
+            try:
+                os.makedirs(debug_dir, exist_ok=True)
+                dump_name = f'{datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")}_srv_{name}'
+                with open(os.path.join(debug_dir, dump_name), 'wb') as fh:
+                    fh.write(data)
+            except OSError as exc:
+                logger.warning('BinkP server: failed to dump debug packet %s: %s',
+                               name, exc)
+
+        # Steps 8-9 run in a background thread via asyncio.to_thread(), NOT
+        # inline on this coroutine. Confirmed real gap found while
+        # investigating a second peer sysop's report of multi-minute stalls
+        # on BRAND NEW connections (including tiny, sub-3KB pushes that
+        # never got so much as a M_GOT before the peer gave up and
+        # disconnected): this server runs ONE asyncio event loop
+        # (asyncio.start_server in _serve() below) shared by EVERY inbound
+        # connection. Moving import to run after THIS session's own socket
+        # close (the fix directly above, at "7.") only protects THIS
+        # session's own protocol timing -- it does nothing to stop the
+        # import's synchronous DB writes / ZIP extraction / regex parsing
+        # (potentially thousands of messages during a large catch-up) from
+        # monopolizing the single-threaded event loop and starving EVERY
+        # OTHER concurrent connection, including ones that haven't even
+        # finished their handshake yet. asyncio.to_thread() runs this
+        # synchronous work on a worker thread instead, so the event loop
+        # stays free to service other sessions the moment THIS session's
+        # own _finish_session() above returns, regardless of how long the
+        # import takes. Flask's app.app_context() is designed to be entered
+        # fresh from any thread (already used this way at steps 3o/6 above,
+        # just always from the event-loop thread until now), so no new
+        # threading primitive is needed here beyond to_thread() itself.
+        def _import_and_log():
+            imported_total = 0
+            if inbound_files:
+                with app.app_context():
+                    inbound_dir = None
+                    for fname, payload in inbound_files:
+                        _debug_manifest(fname, payload)
+                        extracted = list(_extract_packets(fname, payload))
+                        if extracted:
+                            for inner_name, inner_payload in extracted:
+                                _debug_dump_packet(inner_name, inner_payload)
+                                imported_total += _import_pkt_payload(
+                                    inner_payload, net_id, inner_name)
+                        else:
+                            # Non-packet files (TIC manifests, hatched binaries, etc.)
+                            # get written to inbound for later processing.
+                            # Default landed in /tmp/ which is tmpfs on most distros
+                            # — files vanish on service restart. Default to data/
+                            # so the sysop can recover from a tossing miss.
+                            inbound_dir = inbound_dir or (
+                                os.environ.get('BINKP_INBOUND_DIR')
+                                or os.path.join(
+                                    app.config.get('DATA_DIR') or 'data',
+                                    'binkp', 'inbound'))
+                            try:
+                                safe_name = _sanitize_inbound_filename(fname)
+                                os.makedirs(inbound_dir, exist_ok=True)
+                                with open(os.path.join(inbound_dir, safe_name), 'wb') as f:
+                                    f.write(payload)
+                                # Visible-by-default log so the sysop can spot
+                                # mystery files that don't match the regex /
+                                # magic bytes — easier diagnosis than digging
+                                # at DEBUG level.
+                                logger.info(
+                                    'BinkP: stored unrecognised file %s '
+                                    '(%d bytes) in %s — neither ZIP nor FTS-0001 '
+                                    'packet, scanning for TIC manifest',
+                                    safe_name, len(payload), inbound_dir)
+                            except OSError as exc:
+                                logger.warning('Failed to write inbound file %s: %s',
+                                               fname, exc)
+                    # After dropping any non-.pkt files into inbound, run the TIC scan
+                    # so file-echo distributions get filed automatically.
+                    if inbound_dir and os.path.isdir(inbound_dir):
+                        try:
+                            from .tic import scan_inbound
+                            n = scan_inbound(inbound_dir)
+                            if n:
+                                logger.info('Processed %d TIC files from %s',
+                                            n, inbound_dir)
+                        except Exception:
+                            logger.exception('TIC scan failed')
+
+            # 9. Record this inbound-initiated session in the same Poll Log a
+            # sysop already checks for outbound polls. Before this, ONLY
+            # anetbbs/echomail/poller.py (which dials OUT) ever wrote an
+            # EchomailPollLog row -- when a remote hub calls IN and
+            # delivers mail (exactly how tqwnet/sp00knet actually work:
+            # they push to us rather than waiting to be polled), the real
+            # imported-message count computed above was discarded, and the
+            # sysop's own subsequent outbound poll of that same network
+            # legitimately found nothing left to pull (the hub already
+            # pushed it here) and logged 0 -- real mail was arriving the
+            # whole time, just never reflected in this log. Only written
+            # for upstream-hub sessions (net_id set); a downstream node
+            # polling US as ITS hub has no EchomailNetwork row to log
+            # against (EchomailPollLog.network_id is NOT NULL).
+            if net_id is not None:
+                with app.app_context():
+                    try:
+                        from ..models import EchomailPollLog
+                        from .poller import _format_transcript
+                        db.session.add(EchomailPollLog(
+                            network_id=net_id,
+                            poll_type=_inbound_poll_type(imported_total, sent_count),
+                            started_at=session_started_at,
+                            completed_at=datetime.utcnow(),
+                            status='success',
+                            messages_sent=sent_count,
+                            messages_received=imported_total,
+                            # Real gap this closes: outbound polls have saved
+                            # a frame-by-frame transcript since v1.0b2.47 (see
+                            # _log_transcript above); inbound sessions -- a
+                            # peer connecting TO us, the exact direction this
+                            # session's whole BinkP audit was chasing -- never
+                            # did, on either the fix-shipping side or before.
+                            transcript=_format_transcript(transcript) if transcript else None,
+                        ))
+                        db.session.commit()
+                    except Exception:
+                        logger.exception('BinkP %s: failed to write poll log for '
+                                         'inbound session (net_id=%s)', peer, net_id)
+
+        await asyncio.to_thread(_import_and_log)
+    except Exception as exc:
+        if net_id is not None:
+            try:
+                with app.app_context():
+                    from ..models import EchomailPollLog, db as _db
                     from .poller import _format_transcript
-                    db.session.add(EchomailPollLog(
+                    detail = str(exc)
+                    _db.session.add(EchomailPollLog(
                         network_id=net_id,
-                        poll_type=_inbound_poll_type(imported_total, sent_count),
+                        poll_type='both',
                         started_at=session_started_at,
                         completed_at=datetime.utcnow(),
-                        status='success',
+                        status='error',
+                        error_message=(f'{type(exc).__name__}: {detail}'
+                                      if detail else type(exc).__name__),
                         messages_sent=sent_count,
-                        messages_received=imported_total,
-                        # Real gap this closes: outbound polls have saved
-                        # a frame-by-frame transcript since v1.0b2.47 (see
-                        # _log_transcript above); inbound sessions -- a
-                        # peer connecting TO us, the exact direction this
-                        # session's whole BinkP audit was chasing -- never
-                        # did, on either the fix-shipping side or before.
+                        messages_received=0,
                         transcript=_format_transcript(transcript) if transcript else None,
                     ))
-                    db.session.commit()
-                except Exception:
-                    logger.exception('BinkP %s: failed to write poll log for '
-                                     'inbound session (net_id=%s)', peer, net_id)
-
-    await asyncio.to_thread(_import_and_log)
+                    _db.session.commit()
+            except Exception:
+                logger.exception(
+                    'BinkP %s: failed to write error poll log for inbound '
+                    'session (net_id=%s)', peer, net_id)
+        raise
 
 
 async def _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=None):

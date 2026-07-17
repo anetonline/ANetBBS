@@ -700,6 +700,30 @@ def _lightweight_migrate(app):
             app.logger.warning(
                 f'Could not add column {table}.{col_name}: {exc}')
 
+    def _ensure_index(table, index_name, col_name):
+        """Mirrors _ensure_column above, but for an index on an EXISTING
+        column -- create_all() only creates indexes declared on a model
+        when it's creating the table itself for the first time; it does
+        not retroactively add a newly-declared index=True to a table
+        that already exists on an upgraded install. Real gap found live:
+        NetmailMessage.received_at gained index=True in v1.0b2.145 (a
+        content-based dedup query added in v1.0b2.143 filters on it),
+        but every already-installed sysop's database needed this
+        explicit backfill to actually get the index -- without it, that
+        query silently kept doing an unindexed scan after every upgrade.
+        """
+        try:
+            existing = {i['name'] for i in insp.get_indexes(table)}
+            if index_name in existing:
+                return
+            with engine.begin() as conn:
+                conn.execute(_sa.text(
+                    f'CREATE INDEX {index_name} ON {table} ({col_name})'))
+            app.logger.info(f'Added missing index {index_name} on {table}.{col_name}')
+        except Exception as exc:
+            app.logger.warning(
+                f'Could not add index {index_name} on {table}.{col_name}: {exc}')
+
     # Posts: pinning + locking
     _ensure_column('posts', 'is_pinned',
                    'BOOLEAN NOT NULL DEFAULT 0')
@@ -784,6 +808,11 @@ def _lightweight_migrate(app):
     # permissive, no-default DDL).
     _ensure_column('games', 'share_scores_interbbs',
                    'BOOLEAN NOT NULL DEFAULT 1')
+    # See _ensure_index's own docstring above -- create_all() does not
+    # retroactively add a newly-declared index to an already-existing
+    # table on an upgraded install.
+    _ensure_index('netmail_messages', 'ix_netmail_messages_received_at',
+                  'received_at')
 
     # ------------------------------------------------------------------
     # Auto-sweep: any model column that the DB is missing — add it.

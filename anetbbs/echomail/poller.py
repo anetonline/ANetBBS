@@ -672,12 +672,25 @@ def _import_netmail(network, msg_data: dict) -> int:
 
     # Content-based dedup fallback. Some peer mailers regenerate MSGID
     # on every resend of the same netmail (observed live: a peer
-    # re-flooding an "Area Management Request" notice with a fresh
-    # MSGID each poll, defeating the exact-MSGID check above while the
-    # message itself -- sender, subject, body -- is byte-identical). If
-    # a netmail with matching sender+subject+body already arrived from
-    # this network within the dedup window, treat this as the same
-    # message being resent rather than genuinely new mail.
+    # re-flooding an "Area Management Request"/"List of Available Areas"
+    # notice from SBBSecho every ~10 minutes, matching its poll cadence,
+    # defeating the exact-MSGID check above). The original version of
+    # this fallback also required an exact `body` match -- confirmed
+    # live NOT sufficient: real resends kept creating new rows anyway,
+    # meaning the body isn't byte-identical across regenerations (likely
+    # a timestamp or similar generated into the body text itself, not
+    # just the MSGID kludge). Dropped the body comparison entirely --
+    # sender+subject+network within the dedup window is already a very
+    # strong signal for automated administrative netmail like this (a
+    # sysop is never going to send/receive two genuinely distinct
+    # "Area Management Request" messages from the same address within
+    # the window), and it's also cheaper: no TEXT-column comparison
+    # needed, which matters under eventlet -- this app's web process
+    # monkey-patches threading but NOT sqlite3, so a slow query here
+    # blocks every user on every page, and an ever-growing table of
+    # never-deduped rows (from the body check never matching) made that
+    # query slower every single cycle. See also the received_at index
+    # added in v1.0b2.145 -- this filter was previously unindexed too.
     recent_cutoff = datetime.utcnow() - timedelta(hours=_CONTENT_DEDUP_WINDOW_HOURS)
     content_dup = NetmailMessage.query.filter(
         NetmailMessage.network_id == network.id,
@@ -685,7 +698,6 @@ def _import_netmail(network, msg_data: dict) -> int:
         NetmailMessage.from_name == from_name,
         NetmailMessage.from_address == from_address,
         NetmailMessage.subject == subject,
-        NetmailMessage.body == body,
         NetmailMessage.received_at >= recent_cutoff,
     ).first()
     if content_dup:

@@ -1,16 +1,23 @@
 """Regression tests for the content-based netmail dedup fallback in
 anetbbs/echomail/poller.py:_import_netmail().
 
-Real-world trigger: a live FTN peer (binkd) was observed resending the
-same "Area Management Request" / "List of Available Areas" netmail on
-every poll (~10 minute cadence), each time with a freshly regenerated
-MSGID -- defeating the pre-existing exact-MSGID dedup check, which is
-the *only* dedup that existed before this fix. Sender, subject, and body
-were byte-identical across every resend. This fallback treats a new
-inbound netmail as a duplicate if a message with matching
-network+direction+from_name+from_address+subject+body already arrived
-within the last _CONTENT_DEDUP_WINDOW_HOURS, even when MSGID doesn't
-match anything on file (or doesn't match between the two copies).
+Real-world trigger: a live FTN peer (SBBSecho, transported over binkd)
+was observed resending the same "Area Management Request" / "List of
+Available Areas" netmail on every poll (~10 minute cadence), each time
+with a freshly regenerated MSGID -- defeating the pre-existing
+exact-MSGID dedup check, which is the *only* dedup that existed before
+this fix.
+
+v1.0b2.143 shipped a first version of this fallback matching on
+network+direction+from_name+from_address+subject+body. Confirmed live
+that this was NOT sufficient -- the flood continued creating a new row
+every ~10 minutes even with that fix deployed, proving the body isn't
+actually byte-identical across regenerations (most likely a generated
+timestamp embedded in the message text itself). v1.0b2.145 drops the
+body comparison: sender+subject+network within the dedup window is
+already a strong-enough signal for automated administrative netmail
+like this, and is cheaper (no TEXT-column comparison, which matters
+under eventlet -- see the received_at index added in the same release).
 """
 import os
 import sys
@@ -100,7 +107,17 @@ class ContentDedupTests(_BaseTestCase):
             self.assertEqual(_import_netmail(net, second), 0)
             self.assertEqual(NetmailMessage.query.count(), 1)
 
-    def test_different_body_is_not_deduped(self):
+    def test_different_body_same_sender_subject_is_still_deduped(self):
+        """The actual real-world fix: confirmed live that SBBSecho's
+        resent "Area Management Request"/"List of Available Areas"
+        netmail was STILL creating a new row every ~10 minutes even with
+        the original (body-inclusive) version of this dedup fallback --
+        proving the body isn't byte-identical across regenerations (most
+        likely a generated timestamp embedded in the text itself, not
+        just the MSGID kludge). The fix drops the body comparison
+        entirely: sender+subject+network within the window is enough for
+        automated administrative netmail like this, and it's also
+        cheaper (no TEXT-column comparison)."""
         app = _fresh_app(str(Path(self._tmp.name) / 'diffbody.db'))
         net_id = self._make_network(app)
         from anetbbs.models import EchomailNetwork, NetmailMessage
@@ -118,8 +135,8 @@ class ContentDedupTests(_BaseTestCase):
                 'subject': 'Area Management Request', 'body': 'different body',
             }
             self.assertEqual(_import_netmail(net, first), 1)
-            self.assertEqual(_import_netmail(net, second), 1)
-            self.assertEqual(NetmailMessage.query.count(), 2)
+            self.assertEqual(_import_netmail(net, second), 0)
+            self.assertEqual(NetmailMessage.query.count(), 1)
 
     def test_different_sender_is_not_deduped(self):
         app = _fresh_app(str(Path(self._tmp.name) / 'diffsender.db'))

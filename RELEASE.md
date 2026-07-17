@@ -1,3 +1,27 @@
+# ANetBBS v1.0b2.145 — Web UI freezing for every user, and the netmail flood fix from v1.0b2.143 wasn't actually catching everything (July 2026)
+
+Reported live, urgent: the entire web UI started freezing solid (unresponsive tab, not even a slow page) for minutes at a time, shortly after v1.0b2.143 shipped.
+
+- FIX: `NetmailMessage.received_at` had no database index, but v1.0b2.143's new content-based netmail dedup check filters on it. This app runs under eventlet, which does not make SQLite non-blocking — so an unindexed, growing scan on every inbound netmail blocked the *entire* process for *every* user on *every* page until it finished. Added the missing index, plus an automatic backfill so already-installed databases pick it up on next startup with no manual step required.
+- FIX: v1.0b2.143's dedup check also required an exact match on message body — confirmed live this wasn't sufficient (the same "Area Management Request"/"List of Available Areas" netmail kept creating new entries every ~10 minutes even with that fix deployed), which was also what fed the freeze above by continuously growing the unindexed table. Now matches on sender+subject+network within the dedup window instead, without requiring the body to be byte-identical.
+
+If you already applied the manual `CREATE INDEX` workaround, this release's migration is idempotent and won't error on top of it.
+
+9 new regression tests, each verified to fail without its corresponding fix.
+
+---
+
+# ANetBBS v1.0b2.144 — Inbound BinkP: crashed sessions left zero diagnostic trace (July 2026)
+
+Reported live: a peer sysop's own binkd log showed our inbound listener closing the connection abruptly, mid-transfer, with none of his files ever getting an acknowledgment from our side — but there was no corresponding ANetBBS-side record of what happened, anywhere a sysop could see it.
+
+- FIX: an inbound BinkP session only ever wrote a Poll Log entry on successful completion — that write happened as the very last step of handling a connection, so any exception before it (a network error, a bug, anything going wrong mid-transfer) meant the entire session vanished with no trace beyond a bare stack trace in the raw application log. A crashed session now writes an error-status Poll Log entry with the full frame-by-frame transcript captured up to the failure point, matching how the outbound poller has always behaved on failure.
+- Also: the Poll Log transcript viewer loaded scrolled to the top of a fixed-height box — for any real file transfer (hundreds of frame-by-frame lines), this made it easy to believe a transcript ended wherever the visible area happened to stop, when it actually continued below. Now auto-scrolls to the end (the diagnostically relevant part) on load, with a "jump to start" button for the handshake.
+
+2 new regression tests, each verified to fail without the fix.
+
+---
+
 # ANetBBS v1.0b2.143 — BinkP: peers resending their entire backlog forever, even after every file was correctly acknowledged (July 2026)
 
 Reported live: a real FTN peer kept resending its complete inbound backlog on every single poll, indefinitely, despite ANetBBS correctly M_GOT-acknowledging every file every time — visible as a specific netmail ("Area Management Request" / "List of Available Areas") repeating every ~10 minutes.
