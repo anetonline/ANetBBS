@@ -741,6 +741,10 @@ class BinkPClient:
         # See _consume_inbound_file_frame's docstring for why this can
         # legitimately happen with a spec-compliant peer.
         self._interleaved_received = []
+        # Count of CMD_EOB frames the peer sent (and we recognized) during
+        # that same early window, before _receive_messages() ever ran its
+        # own dedicated EOB-count loop -- see _consume_inbound_file_frame.
+        self._interleaved_eob_count = 0
 
     def _log_transcript(self, line: str):
         ts = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
@@ -775,6 +779,7 @@ class BinkPClient:
         self._inbound_dir = _os.environ.get('BINKP_INBOUND_DIR') or _os.path.join(
             (data_dir or 'data'), 'binkp', 'inbound')
         self._interleaved_received = []
+        self._interleaved_eob_count = 0
         self._connect()
         try:
             self._handshake()
@@ -1023,6 +1028,35 @@ class BinkPClient:
                 logger.debug(
                     "BinkP: receiving file %s (%d bytes expected)",
                     state['pending_file'], state['pending_size'])
+                return True
+            if cmd == CMD_EOB:
+                # A spec-compliant peer sends its own M_EOB the instant its
+                # outbound queue empties (FSP-1011 Table 5's Transmit
+                # Routine: "No more files -> Send M_EOB", unconditional --
+                # not gated on waiting for our GOT, or on us having sent
+                # our own EOB yet). Our session is phase-separated (send
+                # everything, then _receive_messages() sends our EOB and
+                # waits for theirs), so a peer's EOB can arrive while
+                # _send_messages()/_wait_got() are still blocking on our
+                # own GOT/SKIP/ERR -- this frame used to be silently
+                # dropped right here (neither caller checked for CMD_EOB,
+                # and this method returned False with nothing recorded),
+                # so _receive_messages() would then wait forever for an
+                # EOB the peer had already sent once and would never
+                # repeat unprompted. From the peer's own side, FSP-1011
+                # 6.3 requires it to have RECEIVED *our* EOB before its
+                # session counts as successfully completed, so it never
+                # did, and requeued + resent its entire backlog on every
+                # subsequent poll -- despite every file being correctly
+                # GOT-acknowledged. Root-caused against a real SouthEast
+                # Star (binkd 1.1a-113) transcript. self._interleaved_eob_count
+                # (reset each poll() call) lets _receive_messages() credit
+                # this instead of waiting on it again.
+                self._interleaved_eob_count += 1
+                logger.info(
+                    "BinkP: end of batch from hub, seen early during send "
+                    "phase (interleaved count now %d)",
+                    self._interleaved_eob_count)
                 return True
             return False
 
@@ -1412,8 +1446,29 @@ class BinkPClient:
         """
         parsed = []
         sent_eob = 1
-        got_eob = 0
+        # A peer's own EOB may have already arrived -- and been recorded,
+        # not dropped, see _consume_inbound_file_frame -- while we were
+        # still in our own send phase, before this method ever ran. Credit
+        # it here instead of waiting for a repeat that a spec-compliant
+        # peer has no reason to ever send unprompted.
+        got_eob = self._interleaved_eob_count
         self._send_cmd(CMD_EOB)
+        if got_eob >= 1:
+            logger.info(
+                "BinkP: crediting %d EOB(s) the hub already sent during "
+                "our send phase (%d/2)", got_eob, got_eob)
+            if sent_eob < 2:
+                try:
+                    self._send_cmd(CMD_EOB)
+                    sent_eob += 1
+                except OSError as exc:
+                    logger.info(
+                        "BinkP: hub closed before second EOB (clean): %s",
+                        exc)
+                    # Can't send our second round, but the peer already
+                    # sent its one EOB and is gone -- nothing further to
+                    # wait for.
+                    got_eob = 2
 
         # File-receive dispatch (CMD_FILE header + DATA frames + the
         # GOT-per-file ack) is handled by _consume_inbound_file_frame,
@@ -1422,49 +1477,59 @@ class BinkPClient:
         # the frame types those callers AREN'T waiting for: EOB and ERR.
         state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
 
-        for _ in range(5000):
-            try:
-                is_cmd, data = self._recv_frame_logged()
-            except (ConnectionError, OSError) as exc:
-                logger.info(
-                    "BinkP: hub closed after our M_EOB (clean): %s", exc)
-                break
-
-            if is_cmd and data:
-                cmd = data[0]
-                text = data[1:].decode('latin-1', errors='replace')
-
-                if cmd == CMD_EOB:
-                    got_eob += 1
-                    logger.info("BinkP: end of batch from hub (%d/2)", got_eob)
-                    if sent_eob < 2:
-                        try:
-                            self._send_cmd(CMD_EOB)
-                            sent_eob += 1
-                        except OSError as exc:
-                            logger.info(
-                                "BinkP: hub closed before second EOB (clean): %s",
-                                exc)
-                            break
-                    if got_eob >= 2:
-                        break
-                    continue
-
-                if cmd == CMD_ERR:
-                    logger.error("BinkP: session error: %s", text)
+        # If both EOB rounds were already satisfied above (the peer's
+        # round arrived early and we couldn't complete our own second
+        # round because it had already hung up), there's nothing left to
+        # wait for -- skip straight to the TIC scan below.
+        if got_eob < 2:
+            for _ in range(5000):
+                try:
+                    is_cmd, data = self._recv_frame_logged()
+                except (ConnectionError, OSError) as exc:
+                    logger.info(
+                        "BinkP: hub closed after our M_EOB (clean): %s", exc)
+                    got_eob = 2
                     break
 
-                if cmd == CMD_NUL:
-                    continue  # info frame
+                if is_cmd and data:
+                    cmd = data[0]
+                    text = data[1:].decode('latin-1', errors='replace')
 
-            # CMD_FILE header, a DATA frame for an in-progress file, or
-            # any other frame we don't specifically act on above.
-            before = self._interleaved_received
-            self._interleaved_received = parsed
-            try:
-                self._consume_inbound_file_frame(is_cmd, data, state)
-            finally:
-                self._interleaved_received = before
+                    if cmd == CMD_EOB:
+                        got_eob += 1
+                        logger.info("BinkP: end of batch from hub (%d/2)", got_eob)
+                        if sent_eob < 2:
+                            try:
+                                self._send_cmd(CMD_EOB)
+                                sent_eob += 1
+                            except OSError as exc:
+                                logger.info(
+                                    "BinkP: hub closed before second EOB (clean): %s",
+                                    exc)
+                                got_eob = 2
+                                break
+                        if got_eob >= 2:
+                            break
+                        continue
+
+                    if cmd == CMD_ERR:
+                        logger.error("BinkP: session error: %s", text)
+                        got_eob = 2
+                        break
+
+                    if cmd == CMD_NUL:
+                        continue  # info frame
+
+                # CMD_FILE header, a DATA frame for an in-progress file, or
+                # any other frame we don't specifically act on above.
+                before = self._interleaved_received
+                self._interleaved_received = parsed
+                try:
+                    self._consume_inbound_file_frame(is_cmd, data, state)
+                finally:
+                    self._interleaved_received = before
+            # else (5000 frames exhausted without reaching got_eob >= 2):
+            # give up rather than waiting forever -- falls through below.
 
         # Run TIC scan on anything we stashed during this batch.
         import os as _os

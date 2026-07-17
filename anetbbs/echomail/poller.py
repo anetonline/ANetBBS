@@ -22,6 +22,13 @@ _stop_event = threading.Event()
 _TRANSCRIPT_MAX_LINES = 500
 _TRANSCRIPT_MAX_CHARS = 100_000
 
+# Window for the content-based netmail dedup fallback in _import_netmail()
+# below -- covers a peer resending the same netmail with a freshly
+# regenerated MSGID every poll (observed live at a ~10 minute cadence),
+# without treating two genuinely distinct messages with unlucky identical
+# subject/body sent days apart as duplicates.
+_CONTENT_DEDUP_WINDOW_HOURS = 48
+
 
 def _format_transcript(lines):
     """Join transcript lines into one string, truncated to a bounded
@@ -653,6 +660,37 @@ def _import_netmail(network, msg_data: dict) -> int:
         if existing:
             return 0
 
+    # `or ''`/`or '(no subject)'`, not a plain .get() default, so an
+    # explicit None in msg_data (not just a missing key) still coerces to
+    # a concrete string -- matches the to_name/to_address null-safety
+    # pattern already used below, and keeps the dedup equality filter
+    # below from silently failing to match against a NULL column.
+    from_name = msg_data.get('from_name') or ''
+    from_address = msg_data.get('from_address') or ''
+    subject = msg_data.get('subject') or '(no subject)'
+    body = msg_data.get('body') or ''
+
+    # Content-based dedup fallback. Some peer mailers regenerate MSGID
+    # on every resend of the same netmail (observed live: a peer
+    # re-flooding an "Area Management Request" notice with a fresh
+    # MSGID each poll, defeating the exact-MSGID check above while the
+    # message itself -- sender, subject, body -- is byte-identical). If
+    # a netmail with matching sender+subject+body already arrived from
+    # this network within the dedup window, treat this as the same
+    # message being resent rather than genuinely new mail.
+    recent_cutoff = datetime.utcnow() - timedelta(hours=_CONTENT_DEDUP_WINDOW_HOURS)
+    content_dup = NetmailMessage.query.filter(
+        NetmailMessage.network_id == network.id,
+        NetmailMessage.direction == 'inbound',
+        NetmailMessage.from_name == from_name,
+        NetmailMessage.from_address == from_address,
+        NetmailMessage.subject == subject,
+        NetmailMessage.body == body,
+        NetmailMessage.received_at >= recent_cutoff,
+    ).first()
+    if content_dup:
+        return 0
+
     to_name = (msg_data.get('to_name') or '').strip()
     to_address = (msg_data.get('to_address') or '').strip()
     to_user = resolve_netmail_recipient(to_name, to_address, network)
@@ -665,13 +703,13 @@ def _import_netmail(network, msg_data: dict) -> int:
         network_id=network.id,
         msgid=msg_id or None,
         reply_msgid=msg_data.get('reply_id') or None,
-        from_name=msg_data.get('from_name', ''),
-        from_address=msg_data.get('from_address', ''),
+        from_name=from_name,
+        from_address=from_address,
         to_name=to_name,
         to_address=to_address,
         to_user_id=to_user.id if to_user else None,
-        subject=msg_data.get('subject', '(no subject)'),
-        body=msg_data.get('body', ''),
+        subject=subject,
+        body=body,
         chrs=msg_data.get('chrs') or 'CP437 2',
         kludges=_json.dumps(msg_data.get('kludges') or []),
         direction='inbound',

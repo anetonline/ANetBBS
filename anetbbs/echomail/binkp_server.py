@@ -831,6 +831,28 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
                 logger.info('BinkP %s: receiving %s (%d bytes)',
                            peer, state['name'], state['size'])
             return True
+        if cmd == CMD_EOB:
+            # A spec-compliant peer sends its own M_EOB the instant its
+            # outbound queue empties (FSP-1011 Table 5), independent of
+            # whether it's still waiting on us to GOT-ack our own file --
+            # so it can arrive while _send_pkt_file()'s wait-for-GOT loop
+            # is still running, before _receive_files() ever starts. That
+            # loop only checks for CMD_GOT/SKIP/ERR, so the EOB used to
+            # fall through to its "some other frame -- keep waiting" debug
+            # log with nothing recorded, then _receive_files() would sit
+            # through a needless full 120s timeout waiting for an EOB
+            # frame that had already arrived and gone unrecognized (real
+            # gap found alongside the identical, more severe bug on the
+            # outbound-poller side, binkp.py -- see
+            # BinkPClient._consume_inbound_file_frame). Record it in
+            # `state` (shared across both phases via _handle_connection)
+            # instead of just logging it; the caller's own CMD_EOB check
+            # still does the actual state transition (this returns False
+            # deliberately, matching this function's documented contract
+            # of leaving EOB/ERR for the caller to handle) -- see
+            # _receive_files()'s upfront check for how the count is used.
+            state['eob_count'] = state.get('eob_count', 0) + 1
+            logger.info('BinkP %s: M_EOB seen (count=%d)', peer, state['eob_count'])
         return False
 
     # Data frame.
@@ -852,6 +874,15 @@ async def _receive_files(reader, writer, peer, state, files, transcript=None):
     mid-transfer across calls -- both are shared with _send_pkt_file()'s
     own wait loop so a peer's interleaved file offers during OUR send
     phase land in the same place as anything it sends here."""
+    if state.get('eob_count', 0) >= 1:
+        # The peer's M_EOB already arrived and was recorded while
+        # _send_pkt_file() was still waiting on our own M_GOT -- nothing
+        # left to drain. Skip straight to returning instead of blocking
+        # on a 120s timeout waiting for a frame that's already been seen.
+        logger.info(
+            'BinkP %s: M_EOB already seen during our own send phase -- '
+            'nothing to drain', peer)
+        return files
     while True:
         try:
             is_cmd, payload = await asyncio.wait_for(

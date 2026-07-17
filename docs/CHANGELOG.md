@@ -1,7 +1,16 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.142`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.143`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.143 — BinkP: peers resending their entire backlog forever, even after every file was correctly acknowledged (July 2026)
+
+Reported live: a real FTN peer kept resending its complete inbound backlog on every single poll, indefinitely, despite ANetBBS correctly M_GOT-acknowledging every file every time — visible as a specific netmail ("Area Management Request" / "List of Available Areas") repeating every ~10 minutes.
+
+- FIX: a shared internal helper used by both the outbound poller (`binkp.py`) and inbound listener (`binkp_server.py`) opportunistically captures frames a peer interleaves while we're still waiting on our own acknowledgment — but it only recognized file-offer frames. A peer's own end-of-batch signal (M_EOB), which a spec-compliant mailer sends the instant its own outbound queue empties — independent of whether it's still waiting on us — fell straight through and was silently discarded, with zero trace. Our own end-of-batch handshake would then wait indefinitely for a signal the peer had already sent once and had no reason to resend unprompted. From the peer's own side, its session never registered as successfully completed (the binkp spec requires both sides to receive the other's end-of-batch signal), so it kept requeuing and resending everything on every subsequent connection — root-caused against a complete real session transcript and the official binkp protocol specification. Fixed on both the outbound and inbound sides: an early end-of-batch signal is now recorded and credited instead of waited for a second time.
+- Also added a content-based dedup fallback for inbound netmail: if a message's MSGID doesn't match anything on file, but its sender, subject, and body exactly match something received within the last 48 hours, it's now treated as a duplicate too — a backstop for any peer software that regenerates its MSGID on every resend.
+
+15 new regression tests across three files, each verified to fail without its corresponding fix.
 
 ## v1.0b2.142 — Echomail web preview didn't match what actually gets sent (July 2026)
 
