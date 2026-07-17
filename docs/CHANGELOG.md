@@ -1,7 +1,22 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.139`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.140`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.140 — Echomail origin line: show how to reach the BBS, not just its name (July 2026)
+
+Follow-up to v1.0b2.139's address fix — requested live: the default
+origin-line text itself should follow the common FTN sysop convention
+of listing how to actually connect, not just the BBS's name.
+
+- `ECHOMAIL_ORIGIN_LINE`'s default is now `<hostname>, Telnet:N SSH:N
+  HTTP:N` (e.g. `joesbbs.com, Telnet:23 SSH:22 HTTP:80`), using
+  whichever of those services are actually enabled and their real
+  configured ports. Combined with v1.0b2.139's per-network address
+  fix, a full origin line now reads e.g. `joesbbs.com, Telnet:23
+  SSH:22 HTTP:80 (1:342/201)` — matching the standard FTN format.
+
+5 new regression tests.
 
 ## v1.0b2.139 — Outbound echomail origin lines were missing the FTN address entirely (July 2026)
 

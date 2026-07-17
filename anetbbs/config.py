@@ -23,6 +23,28 @@ BASE_DIR = Path(__file__).parent.parent
 load_dotenv(BASE_DIR / '.env')
 
 
+def _default_echomail_origin():
+    """Build a sensible default ECHOMAIL_ORIGIN_LINE: hostname (or BBS
+    name, if no public domain is configured) plus a list of how to
+    actually reach it -- matches the common FTN sysop convention (e.g.
+    "JoesBBS.Com, Telnet:23 SSH:22 HTTP:80") so a peer reading the
+    message knows how to connect, not just what the BBS is called.
+    Reads raw env vars directly (mirrors every other default in this
+    module) since this runs at class-body/import time, before a Flask
+    app context exists. The FTN address itself is NOT included here --
+    it gets appended separately, per network, at packet-build time (see
+    anetbbs/echomail/binkp.py's _build_ftn_packet), since a multi-hub-
+    identity install may have a different address per network."""
+    host = os.environ.get('BBS_DOMAIN', '').strip() or os.environ.get('BBS_NAME', 'ANetBBS')
+    ways = []
+    if os.environ.get('TELNET_ENABLED', 'true').lower() == 'true':
+        ways.append(f"Telnet:{os.environ.get('TELNET_PORT', '2233')}")
+    if os.environ.get('SSH_ENABLED', 'true').lower() == 'true':
+        ways.append(f"SSH:{os.environ.get('SSH_PORT', '2234')}")
+    ways.append(f"HTTP:{os.environ.get('WEB_PORT', '5000')}")
+    return f"{host}, {' '.join(ways)}"
+
+
 class Config:
     """Base configuration"""
     
@@ -263,14 +285,15 @@ class Config:
     ECHOMAIL_ENABLED = os.environ.get('ECHOMAIL_ENABLED', 'true').lower() == 'true'
     ECHOMAIL_POLL_ENABLED = os.environ.get('ECHOMAIL_POLL_ENABLED', 'true').lower() == 'true'
     ECHOMAIL_DATA_DIR = os.path.join(DATA_DIR, 'echomail')
-    # Defaults to the sysop's own configured BBS_NAME rather than a
-    # generic ANetBBS-branding string -- a fresh install's outbound
-    # echomail origin lines should identify the sysop's own BBS, not
-    # the software running it. (The FTN address gets appended
+    # Defaults to "<hostname>, Telnet:N SSH:N HTTP:N" (see
+    # _default_echomail_origin above) rather than a generic ANetBBS-
+    # branding string -- a fresh install's outbound echomail origin
+    # lines should identify the sysop's own BBS and how to reach it,
+    # not the software running it. (The FTN address gets appended
     # automatically per-network at packet-build time -- see
     # anetbbs/echomail/binkp.py's _build_ftn_packet -- so this value
     # should NOT include one itself.)
-    ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', BBS_NAME)
+    ECHOMAIL_ORIGIN_LINE = os.environ.get('ECHOMAIL_ORIGIN_LINE', _default_echomail_origin())
     ECHOMAIL_TEAR_LINE = os.environ.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS')
 
     # InterBBS Wall / Last Callers -- opt-in sharing of local Graffiti
