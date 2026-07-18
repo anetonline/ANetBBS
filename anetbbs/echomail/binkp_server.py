@@ -239,46 +239,56 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 rows = (EchomailNetwork.query
                         .filter_by(network_type='binkp', is_active=True)
                         .all())
+                import re as _re
+                for r in rows:
+                    a = (r.our_address or '').strip()
+                    if not a:
+                        continue
+                    # Advertise ONE form per address -- qualified
+                    # (`addr@domain`) when a domain is derivable, bare
+                    # otherwise. Previously sent BOTH forms for every
+                    # address as a "cover whichever form the peer keys on"
+                    # compat measure, but real binkd's ADR() handler calls
+                    # bsy_add() (its busy-lock acquire) once per
+                    # space-separated token with no de-duplication -- for a
+                    # secure (password-protected) link the first token
+                    # acquires the lock and the second, same address in the
+                    # other form, immediately fails to acquire it and binkd
+                    # drops the session with "Secure AKA busy", before
+                    # password verification ever runs. Confirmed live in
+                    # both directions: ANetBBS calling out to a real binkd
+                    # hub, AND a real binkd hub calling in to an ANetBBS
+                    # install (this code path). A spec-compliant peer
+                    # parses the domain-qualified form fine on its own, so
+                    # one form is sufficient. Domain is sanitised per
+                    # FSP-1028 (a-z 0-9 _ - ~, ≤8 chars).
+                    #
+                    # Prefer EchomailNetwork.ftn_domain (an explicit override
+                    # a sysop can set from the network's admin form) over
+                    # deriving one from `name` -- poller.py's outbound side
+                    # (BinkPClient's own `domain` kwarg) already does this;
+                    # this inbound path never did, so a long display name
+                    # (e.g. "ANotherNetwork") always truncated to an awkward
+                    # "anothern" here regardless of any ftn_domain the sysop
+                    # had already configured.
+                    raw = ((getattr(r, 'ftn_domain', None) or r.name or '')
+                           .strip().lower())
+                    domain = _re.sub(r'[^a-z0-9_~-]+', '', raw)[:8]
+                    one_form = f'{a}@{domain}' if domain else a
+                    if one_form not in akas:
+                        akas.append(one_form)
             finally:
+                # Dispose AFTER reading every row's attributes, not
+                # before -- real bug found live: disposing the engine
+                # first (between the query and this loop) risked a
+                # detached-instance access on `r.our_address`/`r.name`/
+                # `r.ftn_domain` for any attribute SQLAlchemy hadn't
+                # already fully materialized, which the broad except
+                # below would silently swallow and fall back to a
+                # single bare address -- exactly the "inbound session
+                # only shows one AKA instead of all four" oddity a real
+                # sysop noticed live (intermittent, not every session).
                 _dispose_app_engine()
-            import re as _re
-            for r in rows:
-                a = (r.our_address or '').strip()
-                if not a:
-                    continue
-                # Advertise ONE form per address -- qualified
-                # (`addr@domain`) when a domain is derivable, bare
-                # otherwise. Previously sent BOTH forms for every
-                # address as a "cover whichever form the peer keys on"
-                # compat measure, but real binkd's ADR() handler calls
-                # bsy_add() (its busy-lock acquire) once per
-                # space-separated token with no de-duplication -- for a
-                # secure (password-protected) link the first token
-                # acquires the lock and the second, same address in the
-                # other form, immediately fails to acquire it and binkd
-                # drops the session with "Secure AKA busy", before
-                # password verification ever runs. Confirmed live in
-                # both directions: ANetBBS calling out to a real binkd
-                # hub, AND a real binkd hub calling in to an ANetBBS
-                # install (this code path). A spec-compliant peer
-                # parses the domain-qualified form fine on its own, so
-                # one form is sufficient. Domain is sanitised per
-                # FSP-1028 (a-z 0-9 _ - ~, ≤8 chars).
-                #
-                # Prefer EchomailNetwork.ftn_domain (an explicit override
-                # a sysop can set from the network's admin form) over
-                # deriving one from `name` -- poller.py's outbound side
-                # (BinkPClient's own `domain` kwarg) already does this;
-                # this inbound path never did, so a long display name
-                # (e.g. "ANotherNetwork") always truncated to an awkward
-                # "anothern" here regardless of any ftn_domain the sysop
-                # had already configured.
-                raw = ((getattr(r, 'ftn_domain', None) or r.name or '')
-                       .strip().lower())
-                domain = _re.sub(r'[^a-z0-9_~-]+', '', raw)[:8]
-                one_form = f'{a}@{domain}' if domain else a
-                if one_form not in akas:
-                    akas.append(one_form)
     except Exception as exc:
         logger.warning('BinkP listener: AKA lookup failed (%s) — using default', exc)
 
@@ -1214,17 +1224,23 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
             if msgid and NetmailMessage.query.filter_by(msgid=msgid).first():
                 continue
             reply = find_kludge(kludges, 'REPLY')
-            # INTL kludge holds dest+orig zone:net/node — extract fallback
-            # FROM/TO addresses if the .pkt header didn't include them.
-            intl = find_kludge(kludges, 'INTL')
-            to_addr = ''
-            from_addr = ''
-            if intl:
-                parts = intl.split(None, 1)
-                if parts:
-                    to_addr = parts[0]
-                    if len(parts) > 1:
-                        from_addr = parts[1]
+            # Use _parse_ftn_packet's own from_address/to_address rather
+            # than re-deriving from @INTL locally -- this used to
+            # duplicate that logic here (@INTL only, no header fallback
+            # if @INTL was absent, and no @FMPT/@TOPT point-number
+            # handling at all), the same "second unpatched path" pattern
+            # this codebase has hit repeatedly for BinkP logic that
+            # exists in both binkp.py and binkp_server.py. poller.py's
+            # own _import_netmail() (the outbound-poll import path)
+            # already just uses msg_data.get('from_address')/
+            # ('to_address') directly; this inbound-listener path never
+            # matched it. Real gap found during a netmail send/receive
+            # correctness pass: point-addressed netmail (e.g.
+            # "1200:1/2.5") lost its point number on import via this
+            # path specifically, even after _parse_ftn_packet itself was
+            # fixed to reconstruct it from @FMPT/@TOPT.
+            to_addr = m.get('to_address') or ''
+            from_addr = m.get('from_address') or ''
 
             # Content-based dedup fallback, mirroring poller.py's
             # _import_netmail(). Real gap found live: a peer (SBBSecho)

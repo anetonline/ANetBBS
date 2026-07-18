@@ -633,6 +633,8 @@ def _parse_ftn_packet(data: bytes):
         chrs_value = chrs_decl.decode('latin-1', errors='replace') if chrs_decl else ''
         from_address = ''
         to_address = ''
+        fmpt = ''
+        topt = ''
         for k in kludges:
             # Kludges can be `KEY: value` (colon form) or `KEY value`
             # (space form, FTS-0001 spec form for INTL/FMPT/TOPT). Split
@@ -654,7 +656,19 @@ def _parse_ftn_packet(data: bytes):
             elif head == 'CHRS' and not chrs_value:
                 chrs_value = val
             elif head == 'FMPT':
-                pass  # point info — already encoded in from_address if any
+                # Origin point number (FTS-4008/FSC-0035) -- our OWN send
+                # side (_build_ftn_packet above) never puts the point
+                # inside @INTL's own address strings, only here and in
+                # @TOPT, so this MUST be used to reconstruct a
+                # point-qualified from_address or it's silently lost on
+                # every inbound message to/from a point system (e.g.
+                # "1200:1/2.5" collapsing to "1200:1/2"). Real gap found
+                # during a netmail send/receive correctness pass -- this
+                # was previously parsed and discarded (`pass`), and @TOPT
+                # wasn't even matched at all.
+                fmpt = val.strip()
+            elif head == 'TOPT':
+                topt = val.strip()
             elif head == 'INTL':
                 # INTL <dest_addr> <orig_addr>
                 parts_intl = val.split()
@@ -670,6 +684,13 @@ def _parse_ftn_packet(data: bytes):
             from_address = f'{orig_net}/{orig_node}'
         if not to_address and dest_net:
             to_address = f'{dest_net}/{dest_node}'
+
+        # Apply @FMPT/@TOPT point numbers, unless the address already
+        # carries one (some senders DO put the point directly in @INTL).
+        if fmpt and from_address and '.' not in from_address.split('/', 1)[-1]:
+            from_address = f'{from_address}.{fmpt}'
+        if topt and to_address and '.' not in to_address.split('/', 1)[-1]:
+            to_address = f'{to_address}.{topt}'
 
         messages.append({
             'from_name': from_name,

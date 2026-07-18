@@ -224,7 +224,7 @@ def _ctcp_build_reply(cmd: str, bbs_name: str = "ANetBBS") -> str:
     if c == "VERSION":
         # Identify ourselves with bbs_name + our version so peers querying
         # us can see who they're talking to, rather than a generic blob.
-        return f"VERSION {bbs_name} (ANetBBS MRC Bridge)"
+        return f"VERSION {bbs_name} (ANetBBS MRC Bridge v1.4[sr])"
     if c == "TIME":
         return f"TIME {_local_time_hhmm()}"
     if c == "PING":

@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.151`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.152`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.152 — AKA announcement fix, plus a netmail send/receive correctness pass (July 2026)
+
+Sysop-noticed oddity: some inbound sessions' M_ADR line only listed the default Fidonet address instead of all four configured network identities, while every outbound session correctly listed all four. Root cause: the AKA-lookup fix in v1.0b2.147 disposed the database connection *before* reading each network's address/domain fields instead of after, a detached-instance hazard that usually goes unnoticed (the values are normally already in memory) but can intermittently fail and silently fall back to a single default address. Moved the disposal to after all the fields are read. No automated regression test added for this one — reliably reproducing the exact timing needed to trigger a real SQLAlchemy detached-instance failure would need a heavier real-database test fixture than this module's existing mock-based ones; the fix itself is a straightforward reordering, safe by inspection.
+
+Also did a netmail send/receive correctness pass while in this code (prompted by the M_GOT fix above). Found: the FMPT/TOPT kludges that carry a point system's point number (e.g. the ".5" in "1200:1/2.5") were parsed on receive and then silently discarded — our own outbound side never puts the point number inside the INTL kludge itself, only in these separate fields, so any point-addressed netmail lost its point number on import. The inbound listener also had its own separate, redundant re-derivation of the sender/recipient addresses that didn't use the (now-fixed) parser output at all. Both fixed; 4 new regression tests, each verified to fail without its corresponding fix.
 
 ## v1.0b2.151 — Found it: M_GOT was sending a hard-coded 0 instead of the file's real timestamp (July 2026)
 
