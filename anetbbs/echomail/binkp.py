@@ -1024,6 +1024,19 @@ class BinkPClient:
                     state['pending_size'] = int(parts[1]) if len(parts) > 1 else 0
                 except ValueError:
                     state['pending_size'] = 0
+                # binkd's tfile_cmp() (prothlp.c, confirmed live against
+                # its actual source) requires an EXACT match on name,
+                # size, AND this mtime before it recognizes our M_GOT as
+                # acknowledging the file it sent -- remove_from_spool()
+                # is only ever reached if that comparison returns 0. This
+                # field was parsed here but never stored, forcing the
+                # M_GOT send below to hard-code 0 -- which never equals a
+                # real mtime (e.g. 1784314217), so binkd's match ALWAYS
+                # failed and it never removed the file from its outbound
+                # spool, regardless of anything else in the session. The
+                # actual root cause of a real hub (binkd/1.1a-113)
+                # resending its entire backlog every poll for months.
+                state['pending_mtime'] = parts[2] if len(parts) > 2 else '0'
                 state['pending_data'] = b''
                 logger.debug(
                     "BinkP: receiving file %s (%d bytes expected)",
@@ -1082,14 +1095,22 @@ class BinkPClient:
                 # binkp_server.py (the inbound listener) already sends
                 # the correct 3-field form; this path (file receipt
                 # during a poll THIS side initiated) never got the same
-                # fix. Timestamp is a literal "0" placeholder, matching
-                # binkp_server.py's own proven-working format exactly.
-                self._send_cmd(CMD_GOT, f'{fname} {state["pending_size"]} 0')
+                # fix. The timestamp used to be a literal "0" placeholder
+                # here (and in binkp_server.py) -- believed at the time
+                # to match a "proven-working" format, but a real mtime
+                # (e.g. 1784314217) never equals 0, so binkd's own
+                # tfile_cmp() match against its sent-file record always
+                # failed silently and it never dequeued the file. Now
+                # echoes the real mtime parsed from the M_FILE header.
+                self._send_cmd(CMD_GOT,
+                              f'{fname} {state["pending_size"]} '
+                              f'{state.get("pending_mtime", "0")}')
             except OSError as exc:
                 logger.info("BinkP: hub closed before GOT ack (clean): %s", exc)
             state['pending_file'] = None
             state['pending_size'] = 0
             state['pending_data'] = b''
+            state['pending_mtime'] = '0'
         return True
 
     # ------------------------------------------------------------------
@@ -1482,6 +1503,24 @@ class BinkPClient:
         # round because it had already hung up), there's nothing left to
         # wait for -- skip straight to the TIC scan below.
         if got_eob < 2:
+            # Shrink the socket timeout from self.timeout (60s default)
+            # for this receive phase specifically. Real live measurement
+            # against a real hub (binkd/1.1a-113) showed the TCP
+            # connection itself dying ~15s after its last file,
+            # consistently, on every session -- far short of our own
+            # 60s configured timeout, meaning something OUTSIDE our code
+            # (the network path, not the hub's application logic) was
+            # silently killing the idle connection well before we ever
+            # tried to speak again. Our own confirmatory M_EOB below was
+            # therefore always being sent into an already-dead
+            # connection, however successful the local socket write
+            # looked. Waiting less than that ~15s window before
+            # proactively responding gives our confirmation a chance to
+            # actually reach the hub while the link is still alive.
+            try:
+                self._sock.settimeout(5.0)
+            except (OSError, AttributeError):
+                pass
             for _ in range(5000):
                 try:
                     is_cmd, data = self._recv_frame_logged()
@@ -1530,6 +1569,42 @@ class BinkPClient:
                     self._interleaved_received = before
             # else (5000 frames exhausted without reaching got_eob >= 2):
             # give up rather than waiting forever -- falls through below.
+
+        # Per binkp/1.1 (binkp11.txt): a session only counts as
+        # successfully finished once a round passes where NEITHER side
+        # sends nor receives any command between two consecutive M_EOB
+        # exchanges. Our first M_EOB (sent unconditionally above, before
+        # any files were exchanged) gets voided the instant real file
+        # activity follows it, so it can never by itself satisfy that --
+        # only a SECOND, POST-transfer M_EOB, sent proactively, can. This
+        # loop only ever sent that second EOB REACTIVELY, in reply to the
+        # hub sending its own -- never proactively. Real live report: a
+        # real hub (binkd/1.1a-113) never sends an explicit M_EOB back at
+        # all in these sessions, just goes silent for its own ~15s grace
+        # period then disconnects, and its own outbound queue never
+        # dequeued any of these files on the next poll despite every one
+        # being individually M_GOT-acknowledged here -- it was left
+        # waiting on a confirmation we never sent. Mirrors the identical
+        # fix in binkp_server.py's _finish_session() (the answering
+        # side); this is the same gap on the dialing-out side.
+        if sent_eob < 2:
+            try:
+                self._send_cmd(CMD_EOB)
+                sent_eob += 1
+                logger.info("BinkP: proactive post-transfer M_EOB sent OK")
+            except OSError as exc:
+                # _send_cmd() logs the transcript line BEFORE attempting
+                # the actual socket write -- if the hub already closed
+                # the connection by the time we get here, the transcript
+                # can show ">> CMD EOB" while the write itself silently
+                # failed, making a failed send indistinguishable from a
+                # successful one without this log line (real live
+                # report: the hub's own outbound queue never shrank even
+                # across sessions whose transcript showed this EOB being
+                # sent).
+                logger.warning(
+                    "BinkP: proactive post-transfer M_EOB send FAILED "
+                    "(hub likely already closed): %s", exc)
 
         # Run TIC scan on anything we stashed during this batch.
         import os as _os

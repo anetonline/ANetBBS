@@ -91,6 +91,26 @@ class ClientTwoRoundEobTests(unittest.TestCase):
         sent, result = self._run([])  # peer closes immediately
         self.assertEqual(result, [])  # no exception, empty parsed list
 
+    def test_proactive_second_eob_sent_even_if_hub_never_replies_at_all(self):
+        """The actual regression this fix targets on the dialing-out
+        side: a real hub (binkd/1.1a-113, confirmed live) that never
+        sends an explicit M_EOB back at all -- not even after a long
+        silence -- must still get OUR OWN post-transfer confirmatory
+        EOB, sent proactively, not only as a reaction to seeing one
+        from the hub first. Before this fix, a hub like this only ever
+        got our SINGLE, pre-transfer EOB (sent unconditionally at the
+        top of this method, before any real file activity), which per
+        binkp/1.1 gets voided the instant that activity follows it --
+        leaving the hub with no confirmation the transfer was actually
+        done, regardless of how many files were individually
+        M_GOT-acknowledged. Mirrors the identical server-side test."""
+        sent, _ = self._run([])  # hub sends nothing back at all, then closes
+        from anetbbs.echomail.binkp import CMD_EOB
+        eob_sends = [t for c, t in sent if c == CMD_EOB]
+        self.assertGreaterEqual(len(eob_sends), 2,
+            "_receive_messages() must proactively send a second EOB "
+            "even when the hub never sends one back at all")
+
     def test_does_not_send_a_third_eob(self):
         """Guard against an infinite/runaway EOB ping-pong -- once we've
         sent two, a third peer EOB must not provoke a fourth send."""
@@ -106,16 +126,26 @@ class ClientTwoRoundEobTests(unittest.TestCase):
 class ServerTwoRoundEobTests(unittest.TestCase):
     """binkp_server.py's _finish_session() (extracted end-of-batch step).
 
-    As of the BinkP inbound-listener reordering fix (real live report:
-    a peer's own binkd sat in total silence for ~2 minutes after
-    delivering its files, waiting to hear anything back from us, then
-    gave up and marked the transfer failed), the UNCONDITIONAL first
-    M_EOB is sent by the caller (_handle_connection) immediately after
-    our own outbound-send phase -- covered by
-    test_binkp_eob_sent_before_receive.py -- not by this function
-    anymore. _finish_session() now only handles the SECOND round:
-    reply with our own second M_EOB if (and only if) the peer sends
-    one back."""
+    The UNCONDITIONAL first M_EOB (round 1) is sent by the caller
+    (_handle_connection) immediately after our own outbound-send phase
+    -- covered by test_binkp_eob_sent_before_receive.py -- before this
+    function ever runs.
+
+    _finish_session() itself now ALWAYS sends its own second,
+    POST-transfer M_EOB proactively, unconditionally, as its first
+    action -- it no longer only reacts to the peer sending one back.
+    Real live report: a real peer (binkd/1.1a-113) never sends an
+    explicit M_EOB at all in these sessions, just goes silent for its
+    own grace period and closes -- per binkp/1.1 (binkp11.txt), a
+    session only counts as successfully finished once a round happens
+    where NEITHER side sends nor receives any command between two
+    consecutive EOB exchanges, and our round-1 EOB (sent before any
+    real activity) can never by itself satisfy that; only sending a
+    fresh, unconditional round-2 EOB after receiving does. Waiting
+    passively to react to the peer's own second EOB left real,
+    spec-compliant-but-untrusting peers waiting on a confirmation we
+    never sent, so they never dequeued their outbound backlog despite
+    every file being individually M_GOT-acknowledged."""
 
     class _FakeWriter:
         def __init__(self):
@@ -168,10 +198,9 @@ class ServerTwoRoundEobTests(unittest.TestCase):
 
         commands = _decode_sent_commands(writer.sent)
         eob_sends = [t for c, t in commands if c == CMD_EOB]
-        # Our own first EOB is sent by the caller now, before this
-        # function runs -- this call only sees the peer's second EOB
-        # and replies with our own second (one send, not two).
-        self.assertEqual(len(eob_sends), 1)
+        # One unconditional, proactive send at the top of this function,
+        # plus one more in reply to the peer's own EOB arriving.
+        self.assertEqual(len(eob_sends), 2)
 
     def test_lenient_peer_no_second_eob_still_closes_cleanly(self):
         from anetbbs.echomail.binkp_server import _finish_session, CMD_EOB
@@ -183,10 +212,36 @@ class ServerTwoRoundEobTests(unittest.TestCase):
 
         commands = _decode_sent_commands(writer.sent)
         eob_sends = [t for c, t in commands if c == CMD_EOB]
-        # No second-round reply since the peer never sent its own
-        # second EOB -- no crash, no hang. (Our first EOB, sent by the
-        # caller before this function runs, isn't visible here at all.)
-        self.assertEqual(len(eob_sends), 0)
+        # The peer never sends anything back (or closes immediately) --
+        # but we must still have sent our own unconditional, proactive
+        # EOB as this function's first action, regardless. No crash, no
+        # hang either way.
+        self.assertEqual(len(eob_sends), 1)
+
+    def test_proactive_eob_sent_even_if_peer_never_replies_at_all(self):
+        """The actual regression this fix targets: a real peer
+        (binkd/1.1a-113, confirmed live) that never sends an explicit
+        M_EOB at all -- not even after a long silence -- must still
+        get OUR OWN post-transfer EOB, sent unconditionally, not only
+        as a reaction to seeing one from the peer first. Before this
+        fix, a peer like this got ZERO EOBs from _finish_session() and
+        was left to conclude the session was never properly confirmed,
+        regardless of how many files were individually GOT-acknowledged."""
+        from anetbbs.echomail.binkp_server import _finish_session, CMD_EOB
+
+        writer = self._FakeWriter()
+        # Peer sends nothing at all after its files -- EOF immediately,
+        # simulating a peer that just goes silent then closes.
+        reader = self._FakeReader([])
+
+        asyncio.run(_finish_session(reader, writer, ('1.2.3.4', 1),
+                                    [('some.pkt', b'x')], 0))
+
+        commands = _decode_sent_commands(writer.sent)
+        eob_sends = [t for c, t in commands if c == CMD_EOB]
+        self.assertGreaterEqual(len(eob_sends), 1,
+            "_finish_session() must proactively send its own EOB even "
+            "when the peer never sends one back at all")
 
 
 if __name__ == '__main__':

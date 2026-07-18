@@ -39,6 +39,55 @@ from .binkp import (
 logger = logging.getLogger(__name__)
 
 
+def _new_app():
+    """Build a fresh, disposable Flask app for one connection's DB access.
+
+    Each caller is responsible for calling _dispose_app_engine() (while
+    still inside that app's app_context()) once done with it -- see the
+    call sites in _handle_connection(). Every inbound connection
+    creates its own app (twice, in fact: once for the early AKA-
+    announcement lookup, again for the main network/node match +
+    import), and each db.init_app() call binds a brand-new SQLAlchemy
+    engine (its own SQLite connection pool) to that app. Without an
+    explicit dispose(), those engines/connections were never reclaimed
+    -- relying on GC for this is unreliable (SQLAlchemy's own docs warn
+    against it, and Flask-SQLAlchemy's internal ref cycles can delay
+    collection well past the point the local `app` variable goes out of
+    scope). With 5 active BinkP networks polling in roughly every 10
+    minutes, this steadily accumulated open sqlite3 connections between
+    service restarts; under WAL mode those hold back checkpointing and
+    add just enough intermittent lock contention to occasionally blow
+    past a peer's own session timeout, even though our side finishes and
+    logs the poll as a success.
+
+    (A single cached, shared app was tried instead and reverted -- test
+    fixtures across this module rely on getting a fresh, disposable app
+    per call so they can freely monkeypatch db.init_app/db.session per
+    test; a shared app carries stale bindings across tests and breaks
+    that isolation. Explicit dispose() per call gets the leak fix
+    without changing that architecture.)
+    """
+    from flask import Flask
+    from anetbbs.config import get_config
+    app = Flask(__name__)
+    app.config.from_object(
+        get_config(os.environ.get('FLASK_ENV', 'production')))
+    return app
+
+
+def _dispose_app_engine():
+    """Best-effort db.engine.dispose() for the currently-active app
+    context. Disposal is cleanup, not correctness -- tests that mock
+    db.init_app() to a no-op (so unit tests don't need a real DB) leave
+    no engine registered at all, which makes db.engine raise rather than
+    just being a no-op; swallow that here instead of at every call site."""
+    from anetbbs.models import db
+    try:
+        db.engine.dispose()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Async frame I/O (mirror of the sync helpers in binkp.py)
 # ---------------------------------------------------------------------------
@@ -182,17 +231,16 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
 
     akas = []
     try:
-        from flask import Flask
-        from anetbbs.config import get_config
         from anetbbs.models import db, EchomailNetwork
-        _app = Flask(__name__)
-        _app.config.from_object(
-            get_config(os.environ.get('FLASK_ENV', 'production')))
+        _app = _new_app()
         db.init_app(_app)
         with _app.app_context():
-            rows = (EchomailNetwork.query
-                    .filter_by(network_type='binkp', is_active=True)
-                    .all())
+            try:
+                rows = (EchomailNetwork.query
+                        .filter_by(network_type='binkp', is_active=True)
+                        .all())
+            finally:
+                _dispose_app_engine()
             import re as _re
             for r in rows:
                 a = (r.our_address or '').strip()
@@ -216,7 +264,17 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 # parses the domain-qualified form fine on its own, so
                 # one form is sufficient. Domain is sanitised per
                 # FSP-1028 (a-z 0-9 _ - ~, ≤8 chars).
-                raw = (r.name or '').strip().lower()
+                #
+                # Prefer EchomailNetwork.ftn_domain (an explicit override
+                # a sysop can set from the network's admin form) over
+                # deriving one from `name` -- poller.py's outbound side
+                # (BinkPClient's own `domain` kwarg) already does this;
+                # this inbound path never did, so a long display name
+                # (e.g. "ANotherNetwork") always truncated to an awkward
+                # "anothern" here regardless of any ftn_domain the sysop
+                # had already configured.
+                raw = ((getattr(r, 'ftn_domain', None) or r.name or '')
+                       .strip().lower())
                 domain = _re.sub(r'[^a-z0-9_~-]+', '', raw)[:8]
                 one_form = f'{a}@{domain}' if domain else a
                 if one_form not in akas:
@@ -299,12 +357,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
 
     # 3. Look up the caller — may be an upstream hub (EchomailNetwork) or a
     #    downstream node that registered with us as hub (BinkPNode).
-    from flask import Flask
-    from anetbbs.config import get_config
     from anetbbs.models import db, EchomailNetwork, BinkPNode
 
-    app = Flask(__name__)
-    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+    app = _new_app()
     db.init_app(app)
 
     # Build the set of address candidates to check. Each AKA the peer
@@ -346,6 +401,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 logger.warning('BinkP %s: bad password for upstream %s', peer, remote_addr)
                 await _send_cmd(writer, CMD_ERR, 'bad password', transcript=transcript)
                 writer.close()
+                _dispose_app_engine()
                 return
             net_id = network.id
             net_name = network.name
@@ -366,6 +422,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                    peer, remote_addr)
                     await _send_cmd(writer, CMD_ERR, 'bad password', transcript=transcript)
                     writer.close()
+                    _dispose_app_engine()
                     return
                 downstream_node_id = node.id
                 net_name = node.name
@@ -405,6 +462,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                peer, remote_addr, ', '.join(candidates))
                 await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}', transcript=transcript)
                 writer.close()
+                _dispose_app_engine()
                 return
 
     logger.info('BinkP %s: authenticated as %s (%s)', peer, remote_addr, net_name)
@@ -779,6 +837,17 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     'BinkP %s: failed to write error poll log for inbound '
                     'session (net_id=%s)', peer, net_id)
         raise
+    finally:
+        # Dispose the engine bound to `app` (see _new_app()'s docstring) --
+        # covers every exit path (success, the except above, or an
+        # exception raised before either): without this, each connection
+        # leaked its own SQLAlchemy engine/SQLite connection pool with
+        # nothing ever reclaiming it.
+        try:
+            with app.app_context():
+                _dispose_app_engine()
+        except Exception:
+            pass
 
 
 async def _finish_session(reader, writer, peer, inbound_files, sent_count, transcript=None):
@@ -794,21 +863,55 @@ async def _finish_session(reader, writer, peer, inbound_files, sent_count, trans
     signal back from us at all, then giving up, closing the connection,
     and marking the whole transfer failed (0 bytes) even though every
     file had already been individually M_GOT-acknowledged -- so it kept
-    resending the same backlog on every subsequent poll. Sending our
-    EOB immediately once we know whether we have anything to send (see
-    _handle_connection) closes that gap; this function now only
-    handles the SECOND round binkp/1.1 (which our own VER line
-    advertises) expects once each side has both sent and received one
-    M_EOB -- closing right after that first EOB reads as an unexpected
-    mid-session disconnect to a strict, spec-compliant peer (real
-    binkd, confirmed live) even though the transfer itself completed.
-    Wait briefly for their second M_EOB and answer it; a lenient peer
-    that just closes instead is still handled cleanly below.
+    resending the same backlog on every subsequent poll.
+
+    Per binkp/1.1 (binkp11.txt): once both sides have exchanged EOB,
+    the session doesn't end -- it "restarts by resetting binkp to the
+    state it had just after login" (a fresh rescan), and only counts as
+    successfully finished once a round happens where NEITHER side sends
+    nor receives any command between two consecutive EOB exchanges. Our
+    first EOB (sent before receiving anything) gets voided the instant
+    real file activity follows it, so it can never by itself satisfy
+    that rule -- we still need a SECOND, POST-transfer EOB confirming
+    "now that all that's happened, I still have nothing more", to
+    complete our half of the empty round the peer is waiting for.
+
+    This function used to only ever send that second EOB REACTIVELY, in
+    reply to the peer's own second EOB arriving within a 10s wait --
+    never proactively. A real peer (binkd/1.1a-113) confirmed live never
+    sends an explicit M_EOB at all in these sessions; it just goes
+    silent for its own ~15s grace period, then closes the connection
+    outright with no EOB ever exchanged, and its own outbound queue
+    never dequeues those files on the next poll despite every one being
+    individually M_GOT-acknowledged here -- exactly the "no consecutive
+    EOB-to-EOB empty round" case in the spec text above, because we
+    never sent the second EOB it needed from OUR side to reach that
+    state, only ever having sent the one before any activity happened.
+    Sending our own post-transfer EOB immediately (rather than waiting
+    to see if the peer sends one first) gives the peer that confirmation
+    regardless of whether it ever reciprocates -- a lenient peer that
+    just closes instead of replying is still handled cleanly below.
 
     Also does a brief drain before closing: an immediate close() while
     the peer still has trailing bytes in flight can register on their
     end as an abrupt disconnect rather than a clean session end.
     """
+    try:
+        await _send_cmd(writer, CMD_EOB, transcript=transcript)
+        logger.info('BinkP %s: proactive post-transfer M_EOB sent OK', peer)
+    except Exception as exc:
+        # _send_cmd() logs the transcript line BEFORE attempting the
+        # actual socket write -- if the peer already closed the
+        # connection by the time we get here (real live report: this
+        # hub's own outbound queue never shrank even after this EOB
+        # started being sent, across multiple confirmed-clean-looking
+        # sessions), the transcript can show ">> CMD EOB" while the
+        # write itself silently failed, making a failed send
+        # indistinguishable from a successful one without this log line.
+        logger.warning(
+            'BinkP %s: proactive post-transfer M_EOB send FAILED (peer '
+            'likely already closed): %s', peer, exc)
+
     try:
         is_cmd, payload = await asyncio.wait_for(
             _recv_frame(reader, transcript=transcript), timeout=10)
@@ -867,6 +970,20 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
             if len(parts) >= 2:
                 state['name'] = parts[0]
                 state['size'] = int(parts[1])
+                # binkd's tfile_cmp() (prothlp.c) requires an EXACT match
+                # on name, size, AND this mtime before it will recognize
+                # our M_GOT as acknowledging the file it sent -- real
+                # source confirmed live: remove_from_spool() is only
+                # ever reached if tfile_cmp() returns 0. This field was
+                # parsed here but never stored, so the M_GOT send below
+                # had no choice but to hard-code 0 for it -- and 0 never
+                # equals a real mtime (e.g. 1784314217), meaning binkd's
+                # match ALWAYS failed and it never removed the file from
+                # its outbound spool, regardless of how correctly
+                # anything else in the session behaved. This is the
+                # actual root cause of a real hub (binkd/1.1a-113)
+                # resending its entire backlog every poll for months.
+                state['mtime'] = parts[2] if len(parts) >= 3 else '0'
                 state['buf'] = bytearray()
                 logger.info('BinkP %s: receiving %s (%d bytes)',
                            peer, state['name'], state['size'])
@@ -901,7 +1018,8 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
     state['buf'].extend(payload)
     if len(state['buf']) >= state['size']:
         files.append((state['name'], bytes(state['buf'][:state['size']])))
-        await _send_cmd(writer, CMD_GOT, f"{state['name']} {state['size']} 0",
+        await _send_cmd(writer, CMD_GOT,
+                        f"{state['name']} {state['size']} {state.get('mtime', '0')}",
                         transcript=transcript)
         state['name'] = None
         state['buf'] = bytearray()
@@ -923,10 +1041,24 @@ async def _receive_files(reader, writer, peer, state, files, transcript=None):
             'BinkP %s: M_EOB already seen during our own send phase -- '
             'nothing to drain', peer)
         return files
+    # Per-frame wait, deliberately short (was 120s): real live measurement
+    # against a real hub (binkd/1.1a-113) showed the TCP connection itself
+    # dying ~15s after its last file, consistently, on every single
+    # session -- far short of either side's own configured timeout (this
+    # 120s value, or the client's 60s), meaning something OUTSIDE our
+    # code (the network path, not either mailer's application logic) was
+    # silently killing the idle connection well before we ever tried to
+    # speak again. Our own confirmatory M_EOB (sent immediately once this
+    # loop returns -- see _finish_session()) was therefore always being
+    # sent into an already-dead connection, however successful the local
+    # socket write looked. Waiting less than that ~15s window before
+    # proactively responding gives our confirmation a chance to actually
+    # reach the peer while the link is still alive, instead of arriving
+    # (or trying to) after it's already gone.
     while True:
         try:
             is_cmd, payload = await asyncio.wait_for(
-                _recv_frame(reader, transcript=transcript), timeout=120)
+                _recv_frame(reader, transcript=transcript), timeout=5)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
             break
         if await _consume_inbound_file_frame(is_cmd, payload, peer, writer,

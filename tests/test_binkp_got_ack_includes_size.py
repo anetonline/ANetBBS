@@ -1,17 +1,29 @@
-"""Regression test for a real bug found in a peer sysop's live poll log
-(Firehawke, The SmallTime BBS): ANetBBS successfully received and
-GOT-acknowledged 3 files during an outbound poll, but the peer's binkd
-replied "ERR: M_GOT: cannot parse args" and hung up right after the
-3rd GOT.
+"""Regression test for two real bugs, both found in a peer sysop's live
+poll log (Firehawke, The SmallTime BBS), in the same M_GOT-sending code:
 
-Root cause: _consume_inbound_file_frame() (used to receive files
-interleaved into an outbound poll -- exactly what happened here, since
-ANetBBS initiated this connection and the peer offered files back) sent
-a bare "GOT: <filename>" with no size or timestamp. FTS-1026 defines
-M_GOT as `filename size time`, mirroring M_FILE's own fields --
-binkp_server.py (the inbound listener) already sends the correct
-3-field form (`f'{name} {size} 0'`), but this file-receipt path, used
-during a poll THIS side initiated, never got the same fix.
+1. ANetBBS successfully received and GOT-acknowledged 3 files during an
+   outbound poll, but the peer's binkd replied "ERR: M_GOT: cannot
+   parse args" and hung up right after the 3rd GOT. Root cause:
+   _consume_inbound_file_frame() (used to receive files interleaved
+   into an outbound poll -- exactly what happened here, since ANetBBS
+   initiated this connection and the peer offered files back) sent a
+   bare "GOT: <filename>" with no size or timestamp. FTS-1026 defines
+   M_GOT as `filename size time`, mirroring M_FILE's own fields.
+
+2. The fix for #1 added the missing fields, but hard-coded the
+   timestamp to a literal "0" (matching binkp_server.py's own,
+   identically-wrong format at the time) instead of echoing the real
+   mtime the peer sent in its M_FILE header. Direct inspection of
+   binkd's own source (prothlp.c's tfile_cmp()) confirmed this second
+   bug live: binkd requires an EXACT match on name, size, AND mtime
+   before recognizing our M_GOT as acknowledging the file it sent --
+   remove_from_spool() is only ever reached if that comparison returns
+   0. Since a real mtime (e.g. 1784138490) never equals 0, binkd's
+   match ALWAYS failed silently (no protocol-visible error, unlike bug
+   #1) and it never removed the file from its outbound spool -- the
+   actual root cause of a real hub (binkd/1.1a-113) resending its
+   entire backlog every poll for months, unrelated to session timing
+   or EOB handshaking despite much investigation there first.
 
 Uses the same lightweight monkeypatch-the-client-methods pattern as
 test_binkp_send_ack_gating.py.
@@ -63,12 +75,17 @@ class GotAckIncludesSizeTests(unittest.TestCase):
         parts = got_calls[0].split()
         self.assertEqual(len(parts), 3,
                          'M_GOT must send filename, size, and timestamp -- '
-                         'FTS-1026, and the exact format binkp_server.py '
-                         'already sends correctly -- a bare filename-only '
-                         'GOT is what a real peer (binkd) rejected with '
-                         '"ERR: M_GOT: cannot parse args" live')
+                         'FTS-1026 -- a bare filename-only GOT is what a '
+                         'real peer (binkd) rejected with "ERR: M_GOT: '
+                         'cannot parse args" live')
         self.assertEqual(parts[0], '56bded08.tu0')
         self.assertEqual(parts[1], '4')
+        self.assertEqual(parts[2], '1784138490',
+            "the timestamp must echo the M_FILE header's real mtime, not "
+            "a hard-coded 0 -- binkd's tfile_cmp() requires an exact "
+            "match on this field before it will remove the file from its "
+            "own outbound spool, confirmed live against binkd's own "
+            "source (prothlp.c)")
 
     def test_got_ack_size_matches_actual_file_size(self):
         from anetbbs.echomail.binkp import CMD_FILE, CMD_GOT
@@ -89,6 +106,7 @@ class GotAckIncludesSizeTests(unittest.TestCase):
         self.assertEqual(len(got_calls), 1)
         parts = got_calls[0].split()
         self.assertEqual(parts[1], '40648')
+        self.assertEqual(parts[2], '1784220345')
 
 
 if __name__ == '__main__':

@@ -1,7 +1,42 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.146`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.151`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.151 — Found it: M_GOT was sending a hard-coded 0 instead of the file's real timestamp (July 2026)
+
+The actual root cause of the multi-month BinkP resend loop, found by comparing our code line-by-line against binkd's own real source. When ANetBBS receives a file and acknowledges it with M_GOT, the reply is supposed to echo back the file's name, size, AND timestamp — ours sent the timestamp as a literal `0` instead of the real value, in both the inbound listener and the outbound poller.
+
+binkd's own matching logic (`tfile_cmp()` in its `prothlp.c`) requires an *exact* match on all three fields before it will recognize our M_GOT as acknowledging the file it sent, and only then does it remove the file from its own outbound queue. A real timestamp looks like `1784314217` — it never equals `0`, so that match silently failed on every single file, every single session, regardless of anything else going on. The hub kept re-offering its entire backlog every poll because it never once got a M_GOT it could actually match, no matter how correctly ANetBBS otherwise received and acknowledged every file.
+
+This fully explains the resend loop on its own — independent of session timing or the end-of-batch handshake work in v1.0b2.148-150, which remain valid improvements but were not the actual fix. 4 new regression tests, each verified to fail without the fix.
+
+## v1.0b2.150 — Respond faster after a BinkP transfer instead of waiting out most of a minute first (July 2026)
+
+Real measurement against a real Fidonet hub showed the TCP connection consistently dying ~15 seconds after its last file, well under either side's configured wait (120s inbound, 60s outbound) — meaning our own confirmatory end-of-batch signal (v1.0b2.148) was often being sent well after that window had already closed. Shrunk the wait to 5 seconds on both the inbound listener and outbound poller, so that signal has a real chance of reaching the hub while the link is still alive.
+
+This is a genuine improvement to session responsiveness, verified with 2 new regression tests (each confirmed to fail without the fix) — but it's not confirmed to be the actual fix for the hub's resend loop. Direct inspection of binkd's own source turned up a more likely explanation: binkd deletes a file from its outbound queue the instant it receives our `M_GOT`, independent of anything that happens afterward in the session — and we've confirmed via transcript that our `M_GOT` has always been sent correctly. That points toward a stuck or misconfigured outbound-queue file on the hub's own system, not something fixable in our protocol timing. Investigation continues.
+
+## v1.0b2.149 — Diagnostic logging: confirm whether the post-transfer M_EOB is actually reaching the hub (July 2026)
+
+Follow-up to v1.0b2.148: the Fidonet hub's backlog still isn't shrinking even with that fix active. `_send_cmd()` logs its transcript line before attempting the actual socket write, so a failed write (e.g. the peer already closed the connection) can look identical in the transcript to a successful send. Added explicit success/failure logging around the proactive post-transfer M_EOB in both the inbound listener and outbound poller, to tell the two cases apart on the next poll. No behavior change.
+
+## v1.0b2.148 — Inbound and outbound BinkP still weren't confirming delivery to the hub (July 2026)
+
+Reported live: even after v1.0b2.147's fix, the same Fidonet hub kept resending its entire backlog every poll — the file list never shrank, even across sessions ANetBBS logged as clean successes in both directions (hub polling in, and ANetBBS polling out).
+
+- FIX: ANetBBS only ever sent one BinkP end-of-batch signal (M_EOB) per session, sent before any files changed hands. Real file activity that followed voided it, and nothing ever sent a second, post-transfer confirmation — so a peer that never explicitly replies with its own end-of-batch signal (confirmed live: this hub doesn't) was left with no way to know the transfer was actually done, no matter how many files were individually acknowledged. Now sent unconditionally after every transfer completes, in both the inbound listener and the outbound poller.
+- FIX: the inbound BinkP listener's address announcement never checked the per-network domain override (`ftn_domain`), always deriving one from the network's display name instead — a long name like "ANotherNetwork" always announced as `@anothern` regardless of any override already configured.
+
+8 new regression tests, each verified to fail without its corresponding fix.
+
+## v1.0b2.147 — Inbound BinkP sessions leaked a database connection every time (July 2026)
+
+Reported live: a Fidonet hub kept resending the same packets dozens of times, even though ANetBBS was actually receiving and acknowledging every one of them successfully. A second sysop's own install hit the identical symptom.
+
+- FIX: every inbound BinkP connection opened its own database connection and never closed it — twice per connection, in fact. The leak accumulated over hours of polling from multiple networks, occasionally causing just enough delay to trip a peer's own session timeout, even though our side finished and logged the poll as a success. Connections are now explicitly closed after every session, success or failure.
+
+3 new regression tests, each verified to fail without the fix.
 
 ## v1.0b2.146 — Netmail flood was arriving through a second, unpatched path (July 2026)
 
