@@ -808,6 +808,10 @@ def _lightweight_migrate(app):
     _ensure_column('echomail_networks', 'default_hold', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'default_direct', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'packet_password', 'VARCHAR(20)')
+    # BadAreaLog now also records the 'unsubscribed' drop reason (area
+    # exists locally but is_subscribed/is_active is False), not just
+    # 'unknown' -- see models.py's BadAreaLog comment.
+    _ensure_column('bad_area_log', 'reason', "VARCHAR(20) NOT NULL DEFAULT 'unknown'")
     # InterBBS score sharing: per-game opt-in, defaults on (needs an
     # explicit boolean default like the other flags above -- the
     # generic nullable-column auto-sweep below only synthesizes
@@ -1690,6 +1694,30 @@ def _create_default_data():
         for name, slug, order in defaults:
             db.session.add(GameCategory(name=name, slug=slug, sort_order=order))
         db.session.commit()
+
+    # ─── Default tagline pool ────────────────────────────────────────
+    # Idempotent: only seeds if the table is completely empty, so a
+    # sysop who's already added/removed their own entries never gets
+    # them silently re-added on a later update.
+    from .models import Tagline
+    if not Tagline.query.first():
+        try:
+            taglines_path = os.path.join(
+                os.path.dirname(__file__), 'data', 'default_taglines.txt')
+            with open(taglines_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    db.session.add(Tagline(text=line[:200], is_active=True))
+            db.session.commit()
+        except Exception as exc:  # pylint: disable=broad-except
+            db.session.rollback()
+            try:
+                from flask import current_app as _ca
+                _ca.logger.warning('Tagline seed skipped: %s', exc)
+            except Exception:
+                pass
 
 
 def main():

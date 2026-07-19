@@ -44,6 +44,16 @@
                 style="font-family:monospace;") }}
         </div>
 
+        <div class="mb-2">
+            <label for="qwknm_tagline_id" class="form-label">Add a tagline (optional)</label>
+            <select name="tagline_id" id="qwknm_tagline_id" class="form-select" size="6">
+                <option value="">-- None --</option>
+                {% for t in taglines %}
+                <option value="{{ t.id }}">{{ t.text }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
         <button type="submit" class="btn btn-success">
             <i class="bi bi-send"></i> {{ form.submit.label.text }}
         </button>

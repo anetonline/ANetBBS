@@ -64,12 +64,24 @@ bbs.log*
 *.log
 
 # Runtime data — DB, user uploads, gallery cache, personal pages,
-# SSH host keys, inbound/outbound mail spools, etc. Anything under
-# data/ is sysop-specific or contains user content. Same for logs/.
-data/
+# SSH host keys, inbound/outbound mail spools, etc. Anything under the
+# top-level data/ is sysop-specific or contains user content. Same for
+# logs/. Anchored to repo root (/data/, not data/) -- an unanchored
+# pattern here previously matched EVERY directory named "data" anywhere
+# in the tree, including anetbbs/data/, which holds bundled shipped
+# content (e.g. default_taglines.txt) that needs to actually ship in
+# release tarballs. Found live: the tagline pool silently never made it
+# into any built tarball, so the seed step always found the file
+# missing and silently skipped seeding -- taglines never worked on any
+# real install. The other data/ dirs that genuinely are runtime state
+# and were relying on the old broad pattern get their own explicit
+# entries below instead.
+/data/
 logs/
 doors/
 gallery-config.json
+anetbbs/games/sbbs_doors/data/
+vendor/games/anetsims/data/
 
 # Test / cache dirs
 .pytest_cache/

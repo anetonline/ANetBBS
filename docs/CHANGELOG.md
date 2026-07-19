@@ -1,7 +1,47 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.154`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.162`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.162 — Tagline picker selection visibility: give up on reverse-video (July 2026)
+
+Third attempt at the same bug, reported live each time via screenshot: the selected row in the tagline picker was still invisible after both (1) adding an explicit color to compete with the reverse-video highlight, and (2) removing that color to match every other lightbar row's convention of relying on reverse-video alone. Both were still invisible on the user's terminal (SyncTERM), which means reverse-video + bold itself doesn't render usably on that client, regardless of what color the row text has. Stopped guessing at the SGR interaction and sidestepped reverse-video for this row entirely: it now explicitly cancels the wrapper's escape codes and draws its own `> ` marker in a plain bright color instead, which doesn't depend on how any given client's reverse-video happens to interact with bold.
+
+## v1.0b2.161 — Wide-terminal row overflow, and the real selected-row visibility fix (July 2026)
+
+- FIX: on a wide (132-col) terminal, the "Compose Echomail" area-picker lightbar corrupted itself after scrolling down then back up — stray fragments ("tegory", "S Scene", "neral") left on screen. Root cause: the row's Name-column width was computed as `terminal_width - 28`, undercounting the row's real overhead (tag + spacing + category = 37 visible chars, not 28) by 9 characters. On a 132-col terminal each row silently overflowed the line and the terminal auto-wrapped it onto the next line; a later partial redraw (scrolling) only overwrote part of that wrapped-in text, leaving the rest behind. Fixed the width math; added a test that measures every rendered row's real visible width against the terminal width at 132 columns.
+- FIX (real fix this time): v1.0b2.160's tagline-picker color fix (adding an explicit bold-white foreground to the row text) was still invisible when selected, confirmed via a second live screenshot. The actual cause was the opposite of the first guess — an explicit foreground color competing with the reverse-video highlight is what's invisible, not the lack of one. Every other lightbar row in the app already avoids this by leaving the selected row's main text uncolored (relying purely on the reverse-video wrapper against default terminal colors) while only non-selected rows get an explicit color; the tagline picker now follows that same convention.
+
+## v1.0b2.160 — Tagline picker: defer to send time, fix invisible selected row (July 2026)
+
+- FIX: the terminal tagline picker showed up before the user even started typing — reported live ("it should not ask you about a tag line until you send, when you send it should bring up the tagline"). Moved from a pre-editor prompt to a `tagline_picker` callback that ANEdit itself calls once, at actual send time (Ctrl+W/`/send`). Removed the now-redundant `/tag` slash command and its toggle state — the picker is the only path now, and it always runs (if the pool isn't empty) right before finalizing a send, never on abort.
+- FIX: the selected row in the tagline picker rendered as a blank, unreadable highlighted bar — the row text had no explicit foreground color, and reverse-video + bold with no explicit color apparently collapses to white-on-white in real terminal clients (SyncTERM, confirmed live via screenshot). Every other lightbar row in the app already colors its text for this exact reason; this was the one that didn't.
+
+## v1.0b2.159 — Real root cause: the tagline seed file never shipped in ANY release tarball (July 2026)
+
+Found after v1.0b2.158's fix still didn't work live: `build-release.sh` builds its file list from git (tracked + untracked-but-not-ignored), and `.gitignore`'s runtime-data rule was a bare `data/` — which git matches against every directory named `data` anywhere in the tree, not just the intended top-level `data/` (sysop DB/uploads/mail spools). That silently caught `anetbbs/data/` too, which holds bundled shipped content, not runtime state — so `anetbbs/data/default_taglines.txt` (~200 taglines) never made it into v1.0b2.157 or .158's tarball. The seed step's `open()` always hit a missing file on a real install, silently logged and skipped, so `/tag` correctly reported "no taglines available" — the pool was genuinely empty on every deployed copy, no matter which compose path you used. Every test in the suite passed throughout, because tests run against the repo checkout, which still has the file locally — none of them exercised "what actually ends up in the tarball."
+
+Fixed by anchoring the rule to `/data/` and adding explicit entries for the two genuine runtime-state directories that were incidentally relying on the old broad pattern (`anetbbs/games/sbbs_doors/data/`, `vendor/games/anetsims/data/`). Also added a small regression test that shells out to `git check-ignore`/`git ls-files` to catch this exact class of "silently never shipped" bug going forward, since the existing test suite structurally couldn't.
+
+## v1.0b2.158 — Fourth tagline call site: replying from inside an echo area (July 2026)
+
+v1.0b2.157 wired the tagline picker into three terminal compose points (`_post_compose`, `_send_pm`, `_compose_echomail`), but missed a fourth: replying to (or starting a new message from) an echo area's message list — reached by reading an area, then pressing R or N inside the ANView reader — calls `launch_anedit()` directly from inside `read_echo_area()`, a separate code path. Reported live ("I still dont see an add tagline option in terminal when sending an echomail", then confirmed via `/tag` reporting "no taglines available" from that exact screen). Fixed; new regression test drives the real reply flow end-to-end.
+
+## v1.0b2.157 — Tagline picker (browse & choose), compose-echomail lightbar, bad-area visibility (July 2026)
+
+- Taglines now work as a **scrollable picker** in both terminal and web, not a blind random pick — you browse the pool and choose one, or skip. Terminal uses the same lightbar as everywhere else; web uses a visible multi-row listbox instead of a checkbox.
+- FIX: composing a message in the terminal never actually asked whether to add a tagline — `/tag` was the only way in, and it wasn't even listed in ANEdit's real help screen (only in an unused internal help string). Added an active picker at all three terminal compose points, and added `/tag` to the real help screen too.
+- FIX: the "Compose echomail" area picker (network → area → message) used the old numbered list with a `-- more (Enter / Q) --` page break every 17 areas. Now a scrollable lightbar, matching how areas are already browsed when reading.
+- Added visibility for echomail dropped because a known area is unsubscribed/deactivated — previously silently discarded with no record at all (unlike the existing "unknown area" case). Both reasons now share the same Bad Areas admin review queue, tagged by reason, with a re-subscribe action.
+
+## v1.0b2.156 — Message-board ANView fix, actually wired this time (July 2026)
+
+v1.0b2.155's message-board fix targeted `read_thread()`/`list_threads()` (class-body methods), but both were dead code — `BBSMenuUI.list_threads` gets reassigned near the bottom of `bbs_ui.py` to a different implementation (`_list_threads_v2`, calling `read_thread_v2`) that shadows them at every real call site, so the original fix never actually ran. Found via a live terminal capture still showing the old `--MORE--` pager after the .155 build. Fixed the actually-reachable `read_thread_v2` to use ANView, and removed the now-confirmed-dead `read_thread`/`list_threads` methods. New end-to-end regression test drives the real `list_threads()` entry point (not just the function in isolation) to guard against this exact class of bug recurring.
+
+## v1.0b2.155 — Shared tagline pool, and ANView for message boards (July 2026)
+
+- Added a shared, sysop-editable pool of ~200 taglines. Opt in per message with a checkbox (web) or `/tag` (terminal) — works across local boards, private messages, netmail, and echomail. Distinct from the existing fixed per-user FTN tagline, which still auto-appends unconditionally to netmail/echomail.
+- FIX: terminal message boards used the old page-break `[MORE]` pager instead of the scrollable ANView reader already used for echomail/private messages. Board threads now render through the same CP437/ANSI-aware pipeline, and reply/new-thread shortcuts work the same way they already do when reading echomail. (Note: this fix was incomplete — see v1.0b2.156.)
 
 ## v1.0b2.154 — File area fixes, per-network netmail options, and poll-in-progress visibility (July 2026)
 

@@ -541,13 +541,25 @@ class _Screen:
 # ── Main editor ────────────────────────────────────────────────────────────────
 class ANEdit:
     def __init__(self, session, lines: list, subject: str = "",
-                 draft_path: str = "", theme_idx: int = 0):
+                 draft_path: str = "", theme_idx: int = 0,
+                 tagline_picker=None):
         self.session    = session
         self.lines      = lines if lines else [""]
         self.subject    = subject
         self.draft_path = draft_path
         self._tidx      = theme_idx % len(_THEMES)
         self._scr       = _Screen(_THEMES[self._tidx])
+
+        # Tagline pool pick, deferred to SEND time (not asked up front,
+        # before the user has even started typing -- reported live:
+        # "it should not ask you about a tag line until you send, when
+        # you send it should bring up the tagline"). `tagline_picker`,
+        # if given, is a zero-arg async callable that shows the actual
+        # browsable picker and returns the chosen text (or None) -- the
+        # caller (bbs_ui.py) owns it since it needs DB/Flask-app-context
+        # access this UI module deliberately doesn't have; this module
+        # just calls it opaquely, once, right before finalizing a send.
+        self._tagline_picker = tagline_picker
 
         self.cy         = 0
         self.cx         = 0
@@ -665,7 +677,19 @@ class ANEdit:
                     os.remove(self.draft_path)
                 except Exception:
                     pass
-            return "\r\n".join(self.lines)
+            text = "\r\n".join(self.lines)
+            if self._tagline_picker:
+                tagline = await self._tagline_picker()
+                if tagline:
+                    # Classic "-- " signature-separator format so mail
+                    # readers that recognize it can fold/hide it like a
+                    # real signature. Kept as a plain inline format
+                    # (rather than importing
+                    # anetbbs.models.format_tagline_append) since this
+                    # module has no DB/model dependency anywhere else
+                    # and shouldn't gain one just for a one-line format.
+                    text = text.rstrip('\r\n') + "\r\n\r\n-- \r\n" + tagline + "\r\n"
+            return text
         return None
 
     # ── Redraw ─────────────────────────────────────────────────────────────────
@@ -1718,7 +1742,8 @@ def _format_quote(raw: str, width: int = 74) -> list:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 async def launch_anedit(session, quote: str = "", subject: str = "",
-                         username: str = "guest") -> Optional[str]:
+                         username: str = "guest",
+                         tagline_picker=None) -> Optional[str]:
     """
     Launch the ANEdit full-screen terminal message editor.
 
@@ -1727,6 +1752,11 @@ async def launch_anedit(session, quote: str = "", subject: str = "",
         quote:    Optional quoted text to pre-fill (reply scenario).
         subject:  Message subject shown in the title bar.
         username: BBS username — used to locate the draft file.
+        tagline_picker: Optional zero-arg async callable that shows a
+            browsable tagline picker and returns the chosen text (or
+            None). Called once, at send time (not before editing starts)
+            -- the caller (bbs_ui.py) owns it since it needs DB access
+            this module deliberately doesn't.
 
     Returns:
         The composed message as a string, or None if the user aborted.
@@ -1751,7 +1781,8 @@ async def launch_anedit(session, quote: str = "", subject: str = "",
         dpath = ""
 
     editor = ANEdit(session, lines, subject=subject,
-                    draft_path=dpath, theme_idx=0)
+                    draft_path=dpath, theme_idx=0,
+                    tagline_picker=tagline_picker)
     editor.cy = min(start_y, len(editor.lines) - 1)
     editor.cx = 0
 
@@ -1907,14 +1938,16 @@ class ANView(ANEdit):
             self.view_result = 'new';   self.done = True
 
 
-async def launch_aneview(session, body: str, subject: str = "",
-                         from_name: str = "", to_name: str = "",
-                         date_str: str = "") -> str:
-    """Display a message body in a scrollable read-only ANView frame.
-
-    Runs the body through CP437 decode, pipe-code conversion, and the VT
-    renderer so ANSI art (cursor-pos and flat block) displays correctly.
-    Returns 'reply', 'new', or 'back'.
+def render_message_body_lines(body: str) -> list:
+    """Decode a stored message body (CP437-as-latin1 mojibake, the real
+    wire convention for FidoNet/terminal-composed text) into a list of
+    80-col ANSI-coloured terminal lines, same pipeline launch_aneview()
+    uses for a single message. Extracted so other terminal-composed
+    message types (local board threads, which go through the same
+    ANEdit-based compose path as echomail/private messages) can render
+    correctly through ANView too, instead of duplicating this logic --
+    the CP437/pipe-code/flat-art-vs-cursor-pos handling here is subtle
+    enough that a second, drifted copy would be a real correctness risk.
     """
     from .ansi_html import to_ansi_lines, _HAS_CURSOR_POS, _HAS_BLOCK_ART
 
@@ -1968,7 +2001,19 @@ async def launch_aneview(session, body: str, subject: str = "",
         body_for_vt = body_unicode
 
     # Render through VT renderer → list of 80-col ANSI-coloured terminal lines.
-    display_lines = to_ansi_lines(body_for_vt)
+    return to_ansi_lines(body_for_vt)
+
+
+async def launch_aneview(session, body: str, subject: str = "",
+                         from_name: str = "", to_name: str = "",
+                         date_str: str = "") -> str:
+    """Display a message body in a scrollable read-only ANView frame.
+
+    Runs the body through CP437 decode, pipe-code conversion, and the VT
+    renderer so ANSI art (cursor-pos and flat block) displays correctly.
+    Returns 'reply', 'new', or 'back'.
+    """
+    display_lines = render_message_body_lines(body)
 
     # Build a short message header above the body.
     header = []

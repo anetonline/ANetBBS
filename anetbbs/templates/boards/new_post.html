@@ -31,6 +31,16 @@
                 {% endif %}
             </div>
             
+            <div class="mb-2">
+                <label for="tagline_id" class="form-label">Add a tagline (optional)</label>
+                <select name="tagline_id" id="tagline_id" class="form-select" size="6">
+                    <option value="">-- None --</option>
+                    {% for t in taglines %}
+                    <option value="{{ t.id }}">{{ t.text }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
             <div class="d-grid gap-2 d-md-flex justify-content-md-end align-items-center">
                 <small id="draftStatus" class="text-muted me-auto"></small>
                 <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="btn btn-secondary">Cancel</a>

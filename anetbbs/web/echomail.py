@@ -316,6 +316,16 @@ def compose(area_id, reply_to_id=None):
         if getattr(current_user, 'tagline', None):
             body = body.rstrip() + '\n\n... ' + current_user.tagline + '\n'
 
+        # Optional random pool tagline (opt-in checkbox) -- distinct from
+        # the fixed profile tagline above; classic "-- " signature
+        # separator so the two are visually distinguishable.
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                body = body.rstrip('\n') + format_tagline_append(_t.text)
+
         msg = EchomailMessage(
             area_id=form.area_id.data,
             network_id=echo_area.network_id,
@@ -333,10 +343,12 @@ def compose(area_id, reply_to_id=None):
         flash('Message queued for sending.', 'success')
         return redirect(url_for('echomail.area', area_id=form.area_id.data))
 
+    from ..models import get_active_taglines
     return render_template('echomail/compose.html',
                            form=form,
                            echo_area=echo_area,
-                           original=original)
+                           original=original,
+                           taglines=get_active_taglines())
 
 
 @echomail_bp.route('/netmail', methods=['GET'])
@@ -400,6 +412,16 @@ def netmail_compose():
         if getattr(current_user, 'tagline', None):
             body = body.rstrip() + '\n\n... ' + current_user.tagline + '\n'
 
+        # Optional random pool tagline (opt-in checkbox) -- distinct from
+        # the fixed profile tagline above; classic "-- " signature
+        # separator so the two are visually distinguishable.
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                body = body.rstrip('\n') + format_tagline_append(_t.text)
+
         msg = EchomailMessage(
             area_id=area.id,
             network_id=network.id,
@@ -419,7 +441,9 @@ def netmail_compose():
               'success')
         return redirect(url_for('echomail.netmail_inbox'))
 
-    return render_template('echomail/netmail_compose.html', form=form)
+    from ..models import get_active_taglines
+    return render_template('echomail/netmail_compose.html', form=form,
+                           taglines=get_active_taglines())
 
 
 @echomail_bp.route('/<int:area_id>/next-unread')

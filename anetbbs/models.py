@@ -1872,6 +1872,48 @@ class MotdEntry(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class Tagline(db.Model):
+    """Shared random-tagline pool (classic BBS feature) -- distinct from
+    User.tagline (a single fixed FTN-style line a user sets once in their
+    profile, auto-appended unconditionally to netmail/echomail) and from
+    User.signature (shown at read time, never stored in the body). This
+    is an opt-in-per-message pool of short one-liners; when a sysop/user
+    checks "add a random tagline" while composing ANY message (local
+    board post/reply, private message, netmail, echomail — terminal or
+    web), one entry is picked at random and appended."""
+    __tablename__ = 'taglines'
+
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.String(200), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+def get_random_tagline():
+    """Return one random active Tagline's text, or None if the pool is
+    empty/all disabled. Shared helper for every compose path (web routes
+    + the terminal ANEdit editor) so the selection logic lives in one
+    place."""
+    import random
+    pool = Tagline.query.filter_by(is_active=True).all()
+    return random.choice(pool).text if pool else None
+
+
+def get_active_taglines():
+    """Return every active Tagline, for a browsable picker (web <select>
+    listbox / terminal lightbar) -- reported live ("you should be able
+    to pick from a scrollable list, not just a random one. So you should
+    be able to see it"), replacing the earlier "add a random one, blind"
+    UX with an explicit browse-and-choose one."""
+    return Tagline.query.filter_by(is_active=True).order_by(Tagline.text).all()
+
+
+def format_tagline_append(tagline_text):
+    """Classic Fidonet/Usenet '-- ' signature-separator format, so mail
+    readers that recognize it can fold/hide it like a real signature."""
+    return f'\n\n-- \n{tagline_text}\n'
+
+
 class CallerLog(db.Model):
     """Per-login record — who connected, from where, on what protocol."""
     __tablename__ = 'caller_log'
@@ -2472,11 +2514,22 @@ class MessageVote(db.Model):
 
 
 class BadAreaLog(db.Model):
-    """Echomail tags received for areas we don't carry — sysop review queue.
+    """Echomail tags for messages dropped on import — sysop review queue.
 
-    Mirrors SBBSecho's BadAreaFile semantics. We don't auto-create areas on
-    inbound traffic; the sysop reviews this list and either subscribes or
-    ignores. A repeat-counter helps spot the noisy ones.
+    Mirrors SBBSecho's BadAreaFile semantics, extended to cover BOTH drop
+    reasons `_import_message()` (echomail/poller.py) can hit:
+      - 'unknown':      area tag not recognized at all (BinkP/FTN only --
+                        QWK auto-creates unknown areas, so this reason
+                        never applies to QWK networks). We don't auto-
+                        create FTN areas on inbound traffic; the sysop
+                        reviews this list and either subscribes or ignores.
+      - 'unsubscribed': the area DOES exist locally, but is_subscribed or
+                        is_active is False -- applies to any network type.
+                        Previously silently dropped with no persisted
+                        record at all (only a logger.debug line), so a
+                        sysop had no way to see which areas were quietly
+                        losing mail without grepping the log.
+    A repeat-counter helps spot the noisy ones.
     """
     __tablename__ = 'bad_area_log'
 
@@ -2485,6 +2538,7 @@ class BadAreaLog(db.Model):
                            db.ForeignKey('echomail_networks.id'),
                            nullable=False, index=True)
     tag = db.Column(db.String(100), nullable=False, index=True)
+    reason = db.Column(db.String(20), nullable=False, default='unknown')
     sample_from = db.Column(db.String(100))
     sample_subject = db.Column(db.String(200))
     count = db.Column(db.Integer, default=1)

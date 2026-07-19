@@ -224,71 +224,13 @@ class BBSMenuUI:
             except ValueError:
                 pass
 
-    async def list_threads(self, board_id, board_name):
-        from anetbbs.models import Post, User
-        with _app().app_context():
-            threads = (Post.query
-                       .filter_by(board_id=board_id, parent_id=None)
-                       .order_by(Post.created_at.desc())
-                       .limit(50).all())
-            t_list = []
-            for t in threads:
-                author = User.query.get(t.author_id)
-                t_list.append((t.id, t.subject, author.username if author else '?',
-                               t.created_at, t.replies.count()))
-
-        if not t_list:
-            await self.session.write(f"\r\n{board_name}: no threads yet.\r\n")
-            await self.session.read_line("\r\nPress Enter...")
-            return
-
-        while True:
-            await self.session.write(f"\r\n=== {board_name} (latest 50 threads) ===\r\n\r\n")
-            for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
-                ts = when.strftime('%m-%d %H:%M') if when else '?'
-                line = f"  {i:2d}. [{n_replies:2d}] {subj[:35]:<35} by {who[:12]:<12} {ts}"
-                await self.session.write(line + "\r\n")
-            choice = (await self.session.read_line("\r\nPick thread (number) or Q: ") or '').strip()
-            if choice.upper() == 'Q' or not choice:
-                return
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(t_list):
-                    await self.read_thread(t_list[idx][0])
-            except ValueError:
-                pass
-
-    async def read_thread(self, post_id):
-        from anetbbs.models import Post, User
-        with _app().app_context():
-            root = Post.query.get(post_id)
-            if not root:
-                return
-            posts = [root] + list(root.replies.order_by(Post.created_at).all())
-            rendered = []
-            for p in posts:
-                author = User.query.get(p.author_id)
-                rendered.append({
-                    'subject': p.subject,
-                    'author': author.username if author else '?',
-                    'when': p.created_at,
-                    'content': p.content,
-                })
-
-        from .ansi_ui import ui_width
-        col_w = ui_width(self.session)
-        await self.session.write("\r\n" + "═" * col_w + "\r\n")
-        lines = []
-        for i, p in enumerate(rendered):
-            ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
-            tag = '[OP]' if i == 0 else f'[Reply {i}]'
-            lines.append('')
-            lines.append(f"{tag} {p['subject']}")
-            lines.append(f"From: {p['author']}    Date: {ts}")
-            lines.append("─" * col_w)
-            lines.extend(self._wrap_text(p['content'] or '', col_w))
-            lines.append('')
-        await self._page_lines(lines, end_message='--- end of thread ---')
+    # list_threads/read_thread used to live here as class-body methods,
+    # but both are dead code: `BBSMenuUI.list_threads = _list_threads_v2`
+    # (bottom of this file) shadows the class-body list_threads at every
+    # call site, so read_thread (only ever called from the shadowed
+    # method) was never reachable either. The real, reachable
+    # implementations are _list_threads_v2/_read_thread_v2 further down.
+    # See feedback_bbs_ui_monkeypatch memory -- this is that exact trap.
 
     # ------------------------------------------------------------------
     # Bulletins
@@ -1384,7 +1326,8 @@ class BBSMenuUI:
                     username = self.session.user.get('username', 'guest')
                     body_out = await launch_anedit(
                         self.session, quote=quote,
-                        subject=compose_subj, username=username)
+                        subject=compose_subj, username=username,
+                        tagline_picker=lambda: _maybe_prompt_tagline(self))
                     if body_out and net_id:
                         with _app().app_context():
                             from anetbbs.models import db as _db2, EchomailMessage as _EM
@@ -3599,6 +3542,74 @@ class _ComposeMixin:
 # Re-open BBSMenuUI to append more methods; Python lets us assign new methods
 # to the class. (Or we could subclass; this is shorter.)
 
+async def _maybe_prompt_tagline(ui):
+    """Let the user browse the shared tagline pool in a scrollable
+    lightbar and pick one (or skip). Returns the picked tagline text, or
+    None if skipped/pool empty.
+
+    Passed into launch_anedit() as a `tagline_picker` callback, called
+    ONCE at actual send time (Ctrl+W/`/send`), not before the user has
+    even started typing -- reported live twice: first "it never asked
+    me if I wanted to add a tagline" (fixed by adding this prompt at
+    all), then "it should not ask you about a tag line until you send,
+    when you send it should bring up the tagline" (fixed by moving the
+    call from before launch_anedit() to inside ANEdit's own send
+    handling).
+    """
+    with _app().app_context():
+        from anetbbs.models import get_active_taglines
+        taglines = [(t.id, t.text) for t in get_active_taglines()]
+    if not taglines:
+        return None
+
+    from .ansi_ui import banner, FG, RESET, ui_width
+
+    async def render_header():
+        await ui.session.write(banner('Pick a Tagline', ui_width(ui.session)))
+
+    def render_row(idx, row, selected):
+        # _rss_lightbar's SEL wrapper (reverse+bold) rendered the
+        # selected row completely invisible on the user's actual
+        # terminal (SyncTERM) -- confirmed live via screenshot on TWO
+        # separate attempts: first with an explicit color on the text
+        # (bold-white competing with the reverse highlight), then with
+        # NO color at all (matching every other lightbar row's
+        # convention, which relies purely on reverse-video against
+        # default colors). Both were still invisible, meaning
+        # reverse+bold itself -- not what render_row() does with
+        # color -- is the actual problem in this client. Rather than
+        # keep guessing at SGR interactions blind, this sidesteps
+        # reverse-video entirely for the selected row: explicitly
+        # cancel SEL's escape codes (\x1b[0m) and draw a plain,
+        # unambiguous marker + bright color instead. Guaranteed visible
+        # on any ANSI terminal, since it doesn't depend on how a given
+        # client's reverse-video implementation interacts with bold.
+        #
+        # Truncated to the terminal width minus a small margin -- a
+        # tagline can be up to 200 chars (model column limit); an
+        # untruncated row longer than the terminal width auto-wraps
+        # onto the next line under this lightbar's absolute cursor
+        # positioning, corrupting subsequent rows on redraw (the exact
+        # bug class found live in the compose-echomail area picker's
+        # column-width math).
+        _w = ui_width(ui.session)
+        text = row[1][:max(20, _w - 4)]
+        if selected:
+            return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+        return f"  {FG['wht']}{text}{RESET}"
+
+    def render_hint(sel, total):
+        return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                f"{FG['cyan']}Enter{RESET}=use this one  "
+                f"{FG['cyan']}Q{RESET}=no tagline")
+
+    result = await ui._rss_lightbar(taglines, render_header, render_row, render_hint)
+    if result[0] == 'enter':
+        return taglines[result[1]][1]
+    return None
+
+
 async def _post_compose(self, board_id, board_name, parent_id=None):
     from anetbbs.models import db, Post
     from .ansi_ui import banner, FG, RESET, BOLD, ui_width
@@ -3636,7 +3647,8 @@ async def _post_compose(self, board_id, board_name, parent_id=None):
 
     username = self.session.user.get('username', 'guest')
     body = await launch_anedit(self.session, quote=quote,
-                               subject=subject, username=username)
+                               subject=subject, username=username,
+                               tagline_picker=lambda: _maybe_prompt_tagline(self))
     if body is None:
         await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
         await self.session.read_line("  Press Enter...")
@@ -3681,7 +3693,8 @@ async def _send_pm(self):
         return
     from .anedit import launch_anedit
     username = self.session.user.get('username', 'guest')
-    body = await launch_anedit(self.session, subject=subject, username=username)
+    body = await launch_anedit(self.session, subject=subject, username=username,
+                               tagline_picker=lambda: _maybe_prompt_tagline(self))
     if body is None:
         await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
         await self.session.read_line("  Press Enter...")
@@ -3763,6 +3776,10 @@ async def _compose_echomail(self):
         net_id, net_name, _, _ = net_rows[nidx]
 
         # ── Step 2: choose area within network ────────────────────────
+        # Scrollable lightbar instead of the old numbered-list-with-
+        # "-- more (Enter / Q) --" paging -- matches the read-side area
+        # picker (_list_network_areas), which already uses _rss_lightbar
+        # with category shown as a column rather than separator rows.
         with _app().app_context():
             q = EchoArea.query.filter_by(
                 network_id=net_id, is_active=True, is_subscribed=True)
@@ -3771,69 +3788,74 @@ async def _compose_echomail(self):
                              EchoArea.min_access_level <= user_level)
             areas = q.order_by(EchoArea.category, EchoArea.order,
                                EchoArea.name).all()
-            # Build grouped list
-            a_list   = []
-            cat_rows = []
-            cur_cat  = None
+            a_list = []
             for area in areas:
                 cat = area.category or 'General'
-                if cat != cur_cat:
-                    cat_rows.append((len(a_list), cat))
-                    cur_cat = cat
                 a_list.append((area.id, area.tag, area.name,
                                area.network_id,
-                               area.network.our_address or '1:1/1'))
+                               area.network.our_address or '1:1/1', cat))
 
-        while True:
-            _w = ui_width(self.session)
-            _name_w = max(28, _w - 28)
+        if not a_list:
             await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(f'Compose — {net_name}', ui_width(self.session)))
+            await self.session.write(
+                f"  {FG['gry']}No areas in this network.{RESET}\r\n")
+            await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+            continue
+
+        COL_TAG = 18
+
+        async def render_header_carea():
+            _w = ui_width(self.session)
+            # Visible-char overhead per row: "  "(2) + idx(3) + "  "(2) +
+            # tag(COL_TAG=18) + " "(1) + name(_nw) + " "(1) + cat(10)
+            # = 37 + _nw. Previously subtracted 28 (wrong -- 9 short of
+            # the real overhead), so on wide terminals (132-col SyncTERM,
+            # confirmed live via screenshot) each row overflowed the
+            # terminal width and auto-wrapped onto the next line,
+            # corrupting subsequent rows once a partial-redraw (after
+            # scrolling) didn't fully overwrite the wrapped-in fragments.
+            _nw = max(24, _w - 38)
             await self.session.write(banner(f'Compose — {net_name}', _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>3}  {'Tag':<{COL_TAG}} "
+                f"{'Name':<{_nw}} {'Category':<10}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(70, _w - 4)}{RESET}\r\n")
 
-            cat_idx, next_cat_at, next_cat_lbl = 0, (cat_rows[0][0] if cat_rows else len(a_list)), (cat_rows[0][1] if cat_rows else '')
-            row_count = 0
-            PAGE = 17
-            for i, (_, tag, name, _, _) in enumerate(a_list):
-                if i == next_cat_at:
-                    await self.session.write(
-                        f"  {FG['grn']}{BOLD}── {next_cat_lbl} ──{RESET}\r\n")
-                    cat_idx += 1
-                    if cat_idx < len(cat_rows):
-                        next_cat_at  = cat_rows[cat_idx][0]
-                        next_cat_lbl = cat_rows[cat_idx][1]
-                    row_count += 1
-                await self.session.write(
-                    f"  {FG['yel']}{BOLD}{i+1:2d}{RESET}  "
-                    f"{FG['cyan']}{tag[:18]:<18}{RESET} "
-                    f"{FG['wht']}{name[:_name_w]:<{_name_w}}{RESET}\r\n")
-                row_count += 1
-                if row_count % PAGE == 0 and (i + 1) < len(a_list):
-                    ans = (await self.session.read_line(
-                        f"  {FG['cyan']}-- more (Enter / Q) --{RESET}"
-                    ) or '').strip().upper()
-                    if ans == 'Q':
-                        break
+        def render_row_carea(idx, row, selected):
+            _, tag, name, _, _, cat = row
+            _w = ui_width(self.session)
+            # Visible-char overhead per row: "  "(2) + idx(3) + "  "(2) +
+            # tag(COL_TAG=18) + " "(1) + name(_nw) + " "(1) + cat(10)
+            # = 37 + _nw. Previously subtracted 28 (wrong -- 9 short of
+            # the real overhead), so on wide terminals (132-col SyncTERM,
+            # confirmed live via screenshot) each row overflowed the
+            # terminal width and auto-wrapped onto the next line,
+            # corrupting subsequent rows once a partial-redraw (after
+            # scrolling) didn't fully overwrite the wrapped-in fragments.
+            _nw = max(24, _w - 38)
+            return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
+                    f"{FG['cyan']}{tag[:COL_TAG]:<{COL_TAG}}{RESET} "
+                    f"{FG['wht']}{name[:_nw]:<{_nw}}{RESET} "
+                    f"{FG['gry']}{cat[:10]:<10}{RESET}")
 
-            await self.session.write('\r\n' + footer(_w) + '\r\n')
-            pick = (await self.session.read_line(
-                _prompt('Pick area (number / B=back / Q): ')
-            ) or '').strip().upper()
-            if pick == 'Q':
-                return
-            if pick == 'B' or not pick:
-                break   # back to network chooser
-            try:
-                aidx = int(pick) - 1
-                if 0 <= aidx < len(a_list):
-                    selected_area = a_list[aidx]
-                    break
-            except ValueError:
-                pass
+        def render_hint_carea(sel, total):
+            return (f"  {FG['cyan']}{sel+1}/{total}{RESET}  "
+                    f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Enter{RESET}=pick  "
+                    f"{FG['cyan']}Q{RESET}=back")
+
+        result = await self._rss_lightbar(
+            a_list, render_header_carea, render_row_carea, render_hint_carea)
+        if result[0] == 'quit':
+            continue   # back to network chooser
+        elif result[0] == 'enter':
+            selected_area = a_list[result[1]]
 
     if selected_area is None:
         return
 
-    area_id, area_tag, area_name, network_id, our_addr = selected_area
+    area_id, area_tag, area_name, network_id, our_addr, _cat = selected_area
 
     # ── Step 3: compose the message ──────────────────────────────────
     await self.session.write('\x1b[2J\x1b[H')
@@ -3852,7 +3874,8 @@ async def _compose_echomail(self):
         return
 
     from .anedit import launch_anedit
-    body = await launch_anedit(self.session, subject=subject, username=username)
+    body = await launch_anedit(self.session, subject=subject, username=username,
+                               tagline_picker=lambda: _maybe_prompt_tagline(self))
     if body is None:
         await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
         await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
@@ -4124,8 +4147,23 @@ BBSMenuUI.list_threads = _list_threads_v2
 
 
 async def _read_thread_v2(self, post_id, board_id, board_name):
+    """Scrollable ANView reader instead of the old page-break [MORE]
+    pager -- matches how echo/private messages are already read.
+    Local board posts, unlike bulletins, ARE composed at a real
+    terminal via the same ANEdit editor echomail/PM use, so this
+    renders each post's content through the same CP437-decode +
+    pipe-code + VT-render pipeline launch_aneview() uses (via the
+    shared render_message_body_lines() helper) rather than the
+    plain-Unicode path bulletins use for web-authored text.
+
+    This is the function actually reachable from the menu (via
+    list_threads -> _list_threads_v2 -> read_thread_v2, wired at the
+    bottom of this file) -- NOT the class-body read_thread()/
+    list_threads(), which are shadowed dead code.
+    """
     from anetbbs.models import Post, User
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+    from .anedit import ANView, render_message_body_lines
+    from .ansi_ui import ui_width
     with _app().app_context():
         root = Post.query.get(post_id)
         if not root:
@@ -4137,37 +4175,30 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
             rendered.append({
                 'subject': p.subject, 'author': author.username if author else '?',
                 'when': p.created_at, 'content': p.content,
-                'pid': p.id,
             })
-    _w = ui_width(self.session)
-    # Was `max(76, _w - 4)` — a floor of 76 meant lines could still overflow
-    # a narrower-than-80 terminal. `max(20, ...)` lets it actually shrink.
-    _line_w = max(20, _w - 4)
-    await self.session.write('\x1b[2J\x1b[H')
-    await self.session.write(banner(f'{board_name} — {rendered[0]["subject"][:40]}', _w))
+
+    col_w = ui_width(self.session)
     lines = []
     for i, p in enumerate(rendered):
         ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
-        tag = f"{FG['yel']}{BOLD}[OP]{RESET}" if i == 0 else f"{FG['gry']}[Reply {i}]{RESET}"
+        tag = '[OP]' if i == 0 else f'[Reply {i}]'
+        lines.append(f'\x1b[36m{tag} \x1b[0m{p["subject"] or "(no subject)"}')
+        lines.append(f'\x1b[36mFrom:\x1b[0m {p["author"]}    \x1b[36mDate:\x1b[0m {ts}')
+        lines.append('\x1b[36m' + '─' * col_w + '\x1b[0m')
+        lines.extend(render_message_body_lines(p['content'] or ''))
         lines.append('')
-        lines.append(f"{tag}  {FG['cyan']}{BOLD}{p['subject']}{RESET}")
-        lines.append(f"  {FG['grn']}From:{RESET} {p['author']:<16}"
-                      f"  {FG['gry']}Date:{RESET} {ts}")
-        lines.append(f"  {FG['gry']}{'─' * max(60, _w - 4)}{RESET}")
-        for source_line in (p['content'] or '').splitlines() or ['']:
-            is_quote = source_line.lstrip().startswith('>')
-            for wrapped_line in (self._wrap_text(source_line, _line_w) or ['']):
-                wrapped_line = self._linkify_url_line(wrapped_line)
-                if is_quote:
-                    lines.append(f"  {FG['gry']}{wrapped_line}{RESET}")
-                else:
-                    lines.append(f"  {wrapped_line}")
-    await self._page_lines(lines, end_message='--- end of thread ---')
-    await self.session.write('\r\n' + footer(_w) + '\r\n')
-    choice = (await self.session.read_line(
-        _prompt('R=reply  Enter=back: ')) or '').strip().upper()
-    if choice == 'R':
+    subject = rendered[0]['subject'] or '(no subject)' if rendered else '(no subject)'
+    viewer = ANView(self.session, lines, subject=subject)
+    view_result = await viewer.run()
+
+    # R/N inside ANView always exit with a result (same viewer class
+    # echomail reading uses) -- wire them up to the real reply/new-
+    # thread flow instead of silently discarding them, matching how
+    # read_echo_area() already handles the exact same two outcomes.
+    if view_result == 'reply':
         await self._post_compose(board_id, board_name, parent_id=post_id)
+    elif view_result == 'new':
+        await self._post_compose(board_id, board_name, parent_id=None)
 BBSMenuUI.read_thread_v2 = _read_thread_v2
 
 

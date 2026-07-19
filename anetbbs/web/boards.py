@@ -138,6 +138,12 @@ def new_post(board_id):
         except Exception:
             clean_subject = form.subject.data
             clean_content = form.content.data
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                clean_content = clean_content + format_tagline_append(_t.text)
         post = Post(
             board_id=board_id,
             author_id=current_user.id,
@@ -179,7 +185,9 @@ def new_post(board_id):
         flash('Post created successfully!', 'success')
         return redirect(url_for('boards.view_post', post_id=post.id))
     
-    return render_template('boards/new_post.html', form=form, board=board)
+    from ..models import get_active_taglines
+    return render_template('boards/new_post.html', form=form, board=board,
+                           taglines=get_active_taglines())
 
 
 @boards_bp.route('/post/<int:post_id>')
@@ -207,10 +215,12 @@ def view_post(post_id):
             stack.append((c, depth + 1))
 
     form = ReplyForm()
+    from ..models import get_active_taglines
     return render_template('boards/view_post.html',
                            post=post,
                            replies=flat,
-                           form=form)
+                           form=form,
+                           taglines=get_active_taglines())
 
 
 @boards_bp.route('/post/<int:post_id>/ansi')
@@ -282,6 +292,12 @@ def reply_post(post_id):
             clean_content = _wf.apply(form.content.data or '')
         except Exception:
             clean_content = form.content.data
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                clean_content = clean_content + format_tagline_append(_t.text)
         reply = Post(
             board_id=parent_post.board_id,
             author_id=current_user.id,

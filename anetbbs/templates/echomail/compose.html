@@ -67,6 +67,16 @@
                 {% endfor %}
             </div>
 
+            <div class="mb-2">
+                <label for="echo_tagline_id" class="form-label">Add a tagline (optional)</label>
+                <select name="tagline_id" id="echo_tagline_id" class="form-select" size="6">
+                    <option value="">-- None --</option>
+                    {% for t in taglines %}
+                    <option value="{{ t.id }}">{{ t.text }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
             <div class="d-flex justify-content-between">
                 <a href="{{ url_for('echomail.area', area_id=echo_area.id) }}" class="btn btn-primary">
                     <i class="bi bi-x-circle"></i> Cancel

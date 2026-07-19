@@ -1,0 +1,219 @@
+# Default tagline pool, one per line. Blank lines and lines starting
+# with # are ignored. Seeded into the Taglines table on first run if
+# the table is empty -- sysops can add/remove more from Admin > Taglines.
+# All original text, written for ANetBBS.
+A 56k modem is a terrible thing to waste.
+Carrier detected. Reality optional.
+This tagline intentionally left blank. Oh wait.
+Please hold, your call is important to no one.
+I upgraded my RAM and my expectations simultaneously.
+Error 404: Wit not found. Please insert quarter.
+Some people are alive only because it's illegal to shoot them.
+I put the "pro" in procrastinate.
+Ctrl+Alt+Delete: the original reset button for bad decisions.
+My other computer is a 486.
+Life is short. Compile fast.
+I came, I saw, I forgot why I logged on.
+Segmentation fault: core dumped, along with my dignity.
+Behind every great sysop is an even greater backup strategy.
+NULL pointer, infinite possibilities.
+This line reserved for future disappointment.
+I don't byte, I nibble.
+Warning: contents under pressure and low on caffeine.
+The only thing constant is change. And modem noise.
+Some days you're the terminal, some days you're the null modem.
+I asked the Magic 8-Ball for advice. It said "connection timed out."
+Sarcasm: my only recognized programming language.
+Never trust a computer you can't lift.
+This BBS is powered by hopes, dreams, and a suspicious extension cord.
+I've got 99 problems and all of them are DNS.
+Age and treachery beat youth and a fast modem.
+Two wrongs don't make a right, but three lefts do.
+I'm not lazy, I'm on standby.
+If at first you don't succeed, call it version 1.0.
+My keyboard has a mind of its own; mostly it thinks about typos.
+Reality.exe has stopped working.
+Void where prohibited. Prohibited nearly everywhere.
+Sysop's note: batteries not included, sanity not guaranteed.
+I speak fluent sarcasm and broken HTML.
+Insert witty remark here. Batteries not included.
+Some call it stubbornness. I call it consistency.
+This tagline was brought to you by the letter Ctrl.
+I'm not arguing, I'm just explaining why I'm right.
+There's no place like 127.0.0.1.
+I used to have a handle on life, then it broke off.
+Yesterday I was a genius. Today my code won't compile.
+Give a man a fish and he eats for a day. Teach a man to phish and he goes to prison.
+My spirit animal is a dial tone.
+I'm on a seafood diet. I see modems and I dial them.
+Error: witty comment not found on this line.
+A good sysop never reveals the root password.
+This line left intentionally hilarious.
+I'm not anti-social, I'm pro-selective.
+Behind every successful download is a suspicious file name.
+Age is just a number. Mine happens to be unlisted.
+I run on coffee, sarcasm, and expired warranties.
+Some days the algebra wins.
+My other terminal is a teletype.
+This is not a bug. It's an undocumented feature.
+I put the fun in nonfunctional.
+Beware of programmers carrying screwdrivers.
+Never underestimate the bandwidth of a station wagon full of tapes.
+The best things in life are free, or pirated, allegedly.
+I'm fluent in two languages: English and profanity.
+Common sense isn't common anymore. It's a rare collectible.
+My password is the last four digits of my student loan.
+There are 10 kinds of people: those who understand binary and those who don't.
+I came for the ANSI art, I stayed for the arguments.
+This is a signature. It signifies nothing.
+My hard drive has more issues than a magazine stand.
+Some people graduate with honors. I graduated despite them.
+I'm not saying I'm Batman. I'm just saying no one has seen me and Batman online at the same time.
+This message will self-destruct in 10 seconds. Or not. We'll see.
+Sysop's motto: uptime is a lifestyle, not a metric.
+I've been coding so long I dream in syntax errors.
+My favorite exercise is jumping to conclusions.
+A door game a day keeps reality away.
+I'm not procrastinating, I'm doing side quests.
+Home is where the WiFi connects automatically. Or the modem, in this case.
+This tagline is like my code: it works, don't ask why.
+I don't have a short attention span, I just -- ooh, shiny.
+This BBS runs on hopes, dreams, and a duct-taped power supply.
+Old sysops never die, they just terminate their sessions.
+I'm not weird, I'm limited edition.
+A byte a day keeps the modem inspector away.
+Sysop status: caffeinated and dangerous.
+There is no cloud, just someone else's computer with better marketing.
+My code doesn't have bugs, it has undocumented side quests.
+I've got a black belt in keyboard mashing.
+I don't make mistakes, I make undocumented features.
+Some people call it insomnia, I call it nightly maintenance.
+This tagline was compiled without warnings.
+My modem screeches, therefore I am.
+I'm not old school, I'm the school they built the other schools from.
+Careful, or you'll end up in my next door game as an NPC.
+I have a photographic memory but I never developed the film.
+Wisdom comes with age, but sometimes age comes alone.
+I run this BBS with equal parts caffeine and stubbornness.
+This tagline pool grows faster than my to-do list shrinks.
+My uptime is longer than my attention span.
+Never trust a modem that purrs.
+Some days I'm a wizard, other days I'm just really good at googling.
+Behind every good BBS is a sysop who forgot to sleep.
+A clean terminal is a sign of a wasted evening.
+I don't argue, I just explain why I'm correct at length.
+Some bugs are features in disguise. Most are just bugs.
+I've been called stubborn. I refuse to accept that.
+The best backups are the ones you never have to use.
+My keyboard shortcuts have shortcuts.
+I'm not stalling, I'm buffering.
+Some people count sheep. I count uptime.
+This line was left blank by a committee. Efficiently.
+I once fixed a bug on the first try. I don't remember what year that was.
+A good tagline is like a good handshake protocol: brief and reliable.
+My spirit BBS runs entirely on nostalgia and spare parts.
+Some doors should stay closed. This one's a door game though, go ahead.
+I run on eight-bit dreams and sixteen-bit ambitions.
+This tagline has been quality tested by zero people.
+Behind this prompt lies infinite possibility, or a typo. Fifty-fifty.
+I'm not lost, I'm exploring the file system.
+My favorite error message is "it worked on my machine."
+Some people collect stamps. I collect deprecated protocols.
+This BBS: where the ANSI art is prettier than my life choices.
+I don't do mornings, I do "eventually."
+A wise sysop once said nothing, because the modem was still connecting.
+My patience has a busy signal.
+I've read the manual. I just chose violence instead.
+There's a fine line between clever and "why did I do that."
+Some nights the only thing carrying me is the carrier signal.
+I don't fear the dark. I fear the dark mode toggle not working.
+My code compiles on the first try about as often as I win the lottery.
+This tagline is powered by 100% recycled sarcasm.
+A good door game is cheaper than therapy and twice as addictive.
+I run this network on hope, duct tape, and a spare null modem cable.
+Some people are the light at the end of the tunnel. I am the tunnel.
+My favorite pastime is pretending my code is self-documenting.
+This BBS was built with love, caffeine, and several strongly worded commits.
+I don't have writer's block, I have "the compiler is judging me" block.
+Some evenings the modem sings louder than I do.
+I speak three languages: English, sarcasm, and error codes.
+My other hobby is explaining why my other hobby is broken.
+Behind every working script is a dozen that almost worked.
+This tagline self-terminated with exit code zero.
+I've never met a deadline I couldn't creatively reinterpret.
+Some people see the glass half full. I see the modem half connected.
+My uptime record is longer than most relationships.
+I don't do small talk, I do small packets.
+A watched download never finishes.
+This line is under construction. So is my life, honestly.
+Some bugs you fix. Some bugs you name and adopt.
+I run on coffee, cold pizza, and stubborn optimism.
+My favorite four-letter word is "PING."
+Some people fear public speaking. I fear public debugging.
+This tagline was hand-crafted by an artisanal keyboard.
+I don't lose arguments, I just concede strategically.
+A good BBS never really logs off, it just goes idle.
+My inbox has more unread messages than my life has answers.
+Some days you're the hammer, some days you're the segfault.
+I've never met a rabbit hole I didn't fall into willingly.
+This tagline pool is proof that quantity has a quality all its own.
+My terminal is 80 columns of pure possibility.
+Some nights the stars align. Most nights it's just the modem lights.
+I don't get writer's block, I get "let me refactor this comment instead" block.
+A good sysop knows when to reboot and when to just wait it out.
+My favorite exception is the one I catch just in time.
+Some people binge shows. I binge changelogs.
+This BBS is proudly powered by spite and spare capacitors.
+I don't have a filter, I have a spam folder for my own thoughts.
+A door game a night keeps the real world at bay.
+My favorite kind of silence is a modem finally connecting.
+Some evenings I debate the router. The router always wins.
+This tagline has survived three server migrations and one power outage.
+I don't rage quit, I strategically log off.
+A good backup is worth a thousand panicked phone calls.
+My favorite color is 0x00FF00, and yes I had to look that up.
+Some people knock on wood. I ping the server.
+This line has been optimized for readability and mild amusement.
+I don't need luck, I need a working power supply.
+A watched modem never dials faster.
+My favorite subject in school was recess, closely followed by lunch.
+Some nights the only bug I fix is the one in my sleep schedule.
+This tagline was assembled from spare parts and leftover sarcasm.
+I don't argue with fools, I let them post first.
+A good echo area is worth a thousand silent lurkers.
+My favorite kind of chaos is the well-documented kind.
+Some people dream in color. I dream in hex codes.
+This BBS runs on nostalgia, duct tape, and one very tired sysop.
+I don't do resolutions, I do rolling updates.
+A good tagline pool never repeats itself. This one's still working on it.
+My other signature is illegible, so this one has to do.
+Some evenings the best conversation is the one with the compiler.
+This line was tested in production, which explains a lot.
+I don't fear Mondays, I fear Monday's changelog.
+A good door game outlives its own server twice over.
+My favorite kind of quiet is a fully synced echo area.
+Some people count blessings. I count successful pings.
+This tagline exists because the pool needed one more entry.
+I don't have bad days, I have undocumented ones.
+A working modem is worth more than a working excuse.
+Some nights the stars are out. Some nights it's just static.
+This line was proofread by absolutely no one, and it shows.
+I don't need a therapist, I need a faster download speed.
+A good sysop keeps calm and reads the log files.
+My favorite kind of luck is the kind that compiles.
+Some evenings the only carrier detected is the mailman.
+This tagline was written under the influence of stale coffee.
+I don't do apologies, I do patch notes.
+A good BBS never sleeps, it just idles politely.
+Some people quote philosophers. I quote error logs.
+This line was left here so the pool would look impressively long.
+I don't need motivation, I need the modem to stop screeching.
+A good echo network is a small miracle held together by SEEN-BY lines.
+Some nights the only connection that matters is the null modem.
+This tagline is 100% organic, gluten-free, and mildly nonsensical.
+I don't collect stamps, I collect uptime records.
+A good file area is worth a thousand broken download managers.
+Some people believe in ghosts. I believe in phantom carriage returns.
+This line was generated the old-fashioned way: by someone typing it.
+I don't need a crystal ball, I need a working crystal oscillator.
+A good tagline should make you smile, or at least not groan too loudly.

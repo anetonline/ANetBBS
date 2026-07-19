@@ -492,12 +492,47 @@ def _run_client(network, outbound_messages, app, transcript=None):
         raise ValueError(f"Unknown network type: {network.network_type}")
 
 
+def _record_bad_area(network, area_tag, msg_data, reason, title, body):
+    """Upsert a BadAreaLog row for a dropped message (see reason values in
+    the model's docstring). One row per (network, tag) -- `reason` is
+    overwritten with the latest classification so a tag that was, say,
+    'unsubscribed' and got fully removed later would read 'unknown' on
+    its next sighting instead of showing a stale reason.
+    """
+    from ..models import db, BadAreaLog
+    try:
+        existing_bad = BadAreaLog.query.filter_by(
+            network_id=network.id, tag=area_tag).first()
+        if existing_bad:
+            existing_bad.reason = reason
+            existing_bad.count = (existing_bad.count or 0) + 1
+            existing_bad.last_seen_at = datetime.utcnow()
+        else:
+            db.session.add(BadAreaLog(
+                network_id=network.id, tag=area_tag, reason=reason,
+                sample_from=msg_data.get('from_name', '')[:100],
+                sample_subject=msg_data.get('subject', '')[:200],
+                count=1,
+                first_seen_at=datetime.utcnow(),
+                last_seen_at=datetime.utcnow(),
+            ))
+            # Only on first sighting of this (network, tag) pair --
+            # existing_bad above absorbs every later message for the
+            # same bad area, so this can't turn into a per-message
+            # notification flood.
+            from ..features.notify import notify_admins
+            notify_admins('bad_area', title=title, body=body,
+                          target_url='/admin/echomail/bad_areas')
+    except Exception as exc:
+        logger.debug("BadAreaLog write failed (table may be absent): %s", exc)
+
+
 def _import_message(network, msg_data: dict) -> int:
     """
     Import a single parsed message dict into the database.
     Returns 1 if imported, 0 if duplicate, -1 if dropped (loop / unsubscribed).
     """
-    from ..models import db, EchoArea, EchomailMessage, BadAreaLog
+    from ..models import db, EchoArea, EchomailMessage
     import json as _json
 
     area_tag = msg_data.get('area_tag')
@@ -550,40 +585,31 @@ def _import_message(network, msg_data: dict) -> int:
             db.session.add(area)
             db.session.flush()
         else:
-            try:
-                existing_bad = BadAreaLog.query.filter_by(
-                    network_id=network.id, tag=area_tag).first()
-                if existing_bad:
-                    existing_bad.count = (existing_bad.count or 0) + 1
-                    existing_bad.last_seen_at = datetime.utcnow()
-                else:
-                    db.session.add(BadAreaLog(
-                        network_id=network.id, tag=area_tag,
-                        sample_from=msg_data.get('from_name', '')[:100],
-                        sample_subject=msg_data.get('subject', '')[:200],
-                        count=1,
-                        first_seen_at=datetime.utcnow(),
-                        last_seen_at=datetime.utcnow(),
-                    ))
-                    # Only on first sighting of this (network, tag) pair --
-                    # existing_bad above absorbs every later message for
-                    # the same bad area, so this can't turn into a
-                    # per-message notification flood.
-                    from ..features.notify import notify_admins
-                    notify_admins(
-                        'bad_area',
-                        title=f'Unknown echomail area: {area_tag} on {network.name}',
-                        body=f'Inbound mail arrived tagged for {area_tag!r}, '
-                             f'which this BBS does not carry. Review under '
-                             f'Admin -> Echomail -> Bad Areas.',
-                        target_url='/admin/echomail/bad_areas')
-            except Exception as exc:
-                logger.debug("BadAreaLog write failed (table may be absent): %s", exc)
+            _record_bad_area(
+                network, area_tag, msg_data, reason='unknown',
+                title=f'Unknown echomail area: {area_tag} on {network.name}',
+                body=f'Inbound mail arrived tagged for {area_tag!r}, '
+                     f'which this BBS does not carry. Review under '
+                     f'Admin -> Echomail -> Bad Areas.')
             logger.info("Echomail: dropping msg for unknown area %s on %s",
                         area_tag, network.name)
             return -1
 
     if not area.is_subscribed or not area.is_active:
+        # Area exists locally -- sysop just isn't taking it right now.
+        # Previously silently dropped (logger.debug only, no persisted
+        # record), so there was no way to see which areas were quietly
+        # losing mail without grepping the log. Applies to every network
+        # type (unlike the 'unknown' branch above, which is BinkP/FTN-
+        # only -- QWK auto-creates unknown areas so can't hit this path
+        # via an unrecognized tag, only via a *known* area the sysop
+        # unsubscribed/deactivated after it was created).
+        _record_bad_area(
+            network, area_tag, msg_data, reason='unsubscribed',
+            title=f'Mail dropped for unsubscribed area: {area_tag} on {network.name}',
+            body=f'Inbound mail arrived for {area_tag!r}, which this BBS '
+                 f'carries but is not subscribed to (or has deactivated). '
+                 f'Review under Admin -> Echomail -> Bad Areas.')
         logger.debug("Echomail: skipping msg for unsubscribed area %s", area_tag)
         return -1
 

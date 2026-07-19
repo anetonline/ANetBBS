@@ -73,17 +73,20 @@ def compose(username=None):
         recipient = User.query.filter_by(username=form.recipient.data).first()
         if not recipient:
             flash('User not found.', 'danger')
-            return render_template('pm/compose.html', form=form)
+            from ..models import get_active_taglines
+            return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
         if recipient.id == current_user.id:
             flash('You cannot message yourself.', 'danger')
-            return render_template('pm/compose.html', form=form)
+            from ..models import get_active_taglines
+            return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
 
         # Honor recipient's block list — sysops bypass.
         try:
             from .blocks import is_blocked
             if is_blocked(recipient.id, current_user.id) and not getattr(current_user, 'is_admin', False):
                 flash('That user has blocked you.', 'danger')
-                return render_template('pm/compose.html', form=form)
+                from ..models import get_active_taglines
+                return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
         except Exception:
             pass
 
@@ -97,7 +100,8 @@ def compose(username=None):
             if recent >= _PM_LIMIT:
                 flash(f'PM rate limit exceeded — max {_PM_LIMIT} per '
                       f'{_PM_WINDOW_SECONDS // 60} minutes.', 'danger')
-                return render_template('pm/compose.html', form=form)
+                from ..models import get_active_taglines
+                return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
 
         try:
             from ..features import word_filter as _wf
@@ -106,6 +110,12 @@ def compose(username=None):
         except Exception:
             clean_subject = form.subject.data
             clean_content = form.content.data
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                clean_content = clean_content + format_tagline_append(_t.text)
         msg = PrivateMessage(
             sender_id=current_user.id,
             recipient_id=recipient.id,
@@ -141,7 +151,8 @@ def compose(username=None):
         flash('Message sent!', 'success')
         return redirect(url_for('pm.sent'))
 
-    return render_template('pm/compose.html', form=form)
+    from ..models import get_active_taglines
+    return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
 
 
 @pm_bp.route('/<int:message_id>')

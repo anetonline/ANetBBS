@@ -257,6 +257,7 @@ ADMIN_HUB_SECTIONS = {
             ('admin.boards', 'Boards', 'bi-collection', 'Message board / conference list'),
             ('admin.bulletins', 'Bulletins', 'bi-megaphone', 'System announcements'),
             ('admin.motd_admin', 'MOTD Pool', 'bi-card-text', 'Message-of-the-day rotation'),
+            ('admin.taglines_admin', 'Taglines', 'bi-chat-quote', 'Shared tagline pool for message composing'),
             ('admin.broadcast', 'Broadcast', 'bi-broadcast', 'Send a message to all online users'),
             ('echomail_admin.dashboard', 'Echomail', 'bi-envelope-arrow-up', 'FidoNet-style echomail networks'),
             ('admin.default_echos', 'Default Echo Subs', 'bi-envelope-check', 'Auto-subscribe new users to echoes'),
@@ -2633,6 +2634,34 @@ def motd_admin():
         return redirect(url_for('admin.motd_admin'))
     motds = MotdEntry.query.order_by(MotdEntry.created_at.desc()).all()
     return render_template('admin/motd.html', motds=motds)
+
+
+@admin_bp.route('/taglines', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def taglines_admin():
+    """Manage the shared random-tagline pool. Distinct from a user's own
+    fixed profile tagline (User.tagline, Profile > Edit) -- this is the
+    opt-in-per-message pool offered while composing on the local boards,
+    private messages, netmail, and echomail (terminal and web alike)."""
+    from ..models import Tagline
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'add':
+            text = (request.form.get('text') or '').strip()
+            if text:
+                db.session.add(Tagline(text=text[:200], is_active=True))
+                db.session.commit()
+                flash('Tagline added.', 'success')
+        elif action == 'toggle':
+            t = Tagline.query.get_or_404(request.form.get('tagline_id', type=int))
+            t.is_active = not bool(t.is_active); db.session.commit()
+        elif action == 'delete':
+            t = Tagline.query.get_or_404(request.form.get('tagline_id', type=int))
+            db.session.delete(t); db.session.commit()
+        return redirect(url_for('admin.taglines_admin'))
+    taglines = Tagline.query.order_by(Tagline.created_at.desc()).all()
+    return render_template('admin/taglines.html', taglines=taglines)
 
 
 @admin_bp.route('/callers')

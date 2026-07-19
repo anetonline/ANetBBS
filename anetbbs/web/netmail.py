@@ -146,25 +146,31 @@ def compose(reply_to=None):
 
         if not parse_address(to_address):
             flash(f'Invalid FTN address: {to_address!r}', 'danger')
+            from ..models import get_active_taglines
             return render_template('netmail/compose.html',
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
-                                   form=request.form)
+                                   form=request.form,
+                                   taglines=get_active_taglines())
         if not to_name:
             flash('Recipient name is required.', 'danger')
+            from ..models import get_active_taglines
             return render_template('netmail/compose.html',
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
-                                   form=request.form)
+                                   form=request.form,
+                                   taglines=get_active_taglines())
 
         # Pick the network that matches the destination zone
         network = find_network_for_address(to_address)
         if network is None:
             flash(f'No active FTN network covers zone of {to_address}.', 'danger')
+            from ..models import get_active_taglines
             return render_template('netmail/compose.html',
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
-                                   form=request.form)
+                                   form=request.form,
+                                   taglines=get_active_taglines())
 
         # Pick the FROM address: explicit AKA, network-matched AKA, or
         # network's `our_address`.
@@ -179,6 +185,17 @@ def compose(reply_to=None):
         # in canonical FTN format.
         if current_user.tagline:
             body = body.rstrip() + '\n\n... ' + current_user.tagline + '\n'
+
+        # Optional random pool tagline (opt-in checkbox) -- distinct from
+        # the user's own fixed profile tagline above; uses the classic
+        # "-- " signature-separator format instead of the FTN "... " tear
+        # line so the two are visually distinguishable.
+        _tagline_id = request.form.get('tagline_id', type=int)
+        if _tagline_id:
+            from ..models import Tagline, format_tagline_append
+            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _t:
+                body = body.rstrip('\n') + format_tagline_append(_t.text)
 
         # Generate kludges
         from_name = (current_user.display_name or current_user.username)
@@ -289,9 +306,11 @@ def compose(reply_to=None):
             'to_name': request.args.get('to_name', ''),
             'subject': request.args.get('subject', ''),
         }
+    from ..models import get_active_taglines
     return render_template('netmail/compose.html',
                            networks=networks, user_akas=user_akas,
-                           parent=parent, form=initial)
+                           parent=parent, form=initial,
+                           taglines=get_active_taglines())
 
 
 @netmail_bp.route('/<int:msg_id>/delete', methods=['POST'])

@@ -79,6 +79,16 @@
         </div>
     </div>
 
+    <div class="mb-3">
+        <label for="cb_tagline_id" class="form-label">Add a tagline (optional)</label>
+        <select name="tagline_id" id="cb_tagline_id" class="form-select" size="6">
+            <option value="">-- None --</option>
+            {% for t in taglines %}
+            <option value="{{ t.id }}">{{ t.text }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
     <button type="submit" class="btn btn-primary">
         <i class="bi bi-send"></i> Send
     </button>
