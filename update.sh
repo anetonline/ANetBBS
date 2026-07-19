@@ -28,6 +28,17 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+# ─── Systemd check ─────────────────────────────────────────────────────────────
+# This script restarts/patches ANetBBS's systemd units throughout. Without
+# systemctl, those calls would fail piecemeal with "command not found"
+# scattered across 8 steps rather than one clear signal up front.
+if ! command -v systemctl >/dev/null 2>&1; then
+    fail "systemctl not found — ANetBBS's install/update scripts require systemd."
+    echo "  This system (or container) doesn't appear to run systemd."
+    echo "  See docker/ for a container-based deployment that doesn't need it."
+    exit 1
+fi
+
 # ─── Source directory (where update.sh lives) ──────────────────────────────────
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -170,7 +181,13 @@ _check_free_space "$INSTALL_DIR" "install filesystem"
 # has room. It also survives a reboot, unlike /tmp on distros that
 # clear it at boot.
 BACKUP_DIR="$INSTALL_DIR/data/backups/anetbbs-backup-$(date +%Y%m%d%H%M%S)"
-mkdir -p "$BACKUP_DIR"
+# mkdir -p alone leaves this world-readable (default umask) until the
+# chmod 0700 that used to run at the very end of this step -- a window
+# during which .env.bak (SECRET_KEY, DB creds) sat readable by any local
+# user while the rest of the backup (DB, code snapshot, units) was still
+# being written. Lock it down at creation instead of after the fact.
+mkdir -p -m 0700 "$BACKUP_DIR"
+chmod 0700 "$BACKUP_DIR"
 
 # Every backup step below is now checked -- a failure here (near-certainly
 # meaning the disk filled up despite the check above, e.g. a concurrent
@@ -234,6 +251,35 @@ ok "Backed up systemd service files"
 
 NGINX_AVAIL="/etc/nginx/sites-available/anetbbs"
 [[ -f "$NGINX_AVAIL" ]] && cp "$NGINX_AVAIL" "$BACKUP_DIR/anetbbs-nginx.bak"
+
+# Snapshot the current application code so a failed update can be fully
+# rolled back, not just its .env/DB/systemd units. Previously "rollback"
+# only restored config and left whatever broken code the failed update
+# had already written in place -- restarting services just failed again
+# against the same broken code. Mirrors Step 4's rsync excludes (the
+# user data/config Step 4 never touches doesn't need backing up here
+# either), plus runtime-only artifacts (*.log, __pycache__, egg-info,
+# pytest cache) that would just waste backup space/time -- excluding
+# those keeps this snapshot ~28MB rather than pulling in bbs.log, which
+# can grow into the GBs on a long-running install.
+CODE_BACKUP_DIR="$BACKUP_DIR/code"
+mkdir -p "$CODE_BACKUP_DIR"
+info "Snapshotting current application code for rollback..."
+if rsync -a \
+    --exclude='.git' --exclude='venv' --exclude='__pycache__' --exclude='*.pyc' \
+    --exclude='*.egg-info' --exclude='.pytest_cache' \
+    --exclude='*.log' --exclude='bbs.log*' \
+    --exclude='/.env' --exclude='/data/' --exclude='/logs/' --exclude='/doors/' \
+    --exclude='/gallery-config.json' --exclude='/mrc/bridge/config.json' \
+    --exclude='/mrc/bridge/config/' --exclude='/mrc/bridge/data/' \
+    --exclude='/mrc/bridge/data-*/' --exclude='/mrc/bridge/logs/' \
+    --exclude='/mrc/bridge/*.db' --exclude='/mrc/bridge/*.db-shm' --exclude='/mrc/bridge/*.db-wal' \
+    "$INSTALL_DIR/" "$CODE_BACKUP_DIR/"; then
+    ok "Code snapshot stored ($(du -sh "$CODE_BACKUP_DIR" 2>/dev/null | cut -f1))"
+else
+    fail "Could not snapshot application code — aborting before touching anything live."
+    exit 1
+fi
 
 # Manifest so rollback can identify what's inside without guessing.
 OLD_VERSION=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo unknown)
@@ -1162,8 +1208,8 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     cat > "$MRC_BRIDGE_CONFIG" << MRCEOF
 {
   "mrc_host": "mrc.bottomlessabyss.net",
-  "mrc_port": 5000,
-  "use_ssl": false,
+  "mrc_port": 5001,
+  "use_ssl": true,
   "bridge_bbs": "$BBS_NAME",
   "platform_info": "ANETBBS/Linux.$(uname -m)/$BBS_VERSION",
   "capabilities": ["MCI", "MSGEXT", "CTCP"],
@@ -1607,6 +1653,29 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
         warn "Critical service failed to start. Rolling back from backup..."
         cp "$BACKUP_DIR/.env.bak" "$ENV_FILE"
         [[ -f "$BACKUP_DIR/anetbbs.db.bak" ]] && cp "$BACKUP_DIR/anetbbs.db.bak" "$DB_FILE"
+        if [[ -d "$BACKUP_DIR/code" ]]; then
+            info "Restoring application code from pre-update snapshot..."
+            # --delete removes anything the failed update added that wasn't
+            # in the old version (new modules, etc.) -- same exclude list as
+            # the snapshot step so user data/config already on disk is left
+            # alone rather than being deleted for "not being in the backup".
+            if rsync -a --delete \
+                --exclude='.git' --exclude='venv' --exclude='__pycache__' --exclude='*.pyc' \
+                --exclude='*.egg-info' --exclude='.pytest_cache' \
+                --exclude='*.log' --exclude='bbs.log*' \
+                --exclude='/.env' --exclude='/data/' --exclude='/logs/' --exclude='/doors/' \
+                --exclude='/gallery-config.json' --exclude='/mrc/bridge/config.json' \
+                --exclude='/mrc/bridge/config/' --exclude='/mrc/bridge/data/' \
+                --exclude='/mrc/bridge/data-*/' --exclude='/mrc/bridge/logs/' \
+                --exclude='/mrc/bridge/*.db' --exclude='/mrc/bridge/*.db-shm' --exclude='/mrc/bridge/*.db-wal' \
+                "$BACKUP_DIR/code/" "$INSTALL_DIR/"; then
+                ok "Application code rolled back"
+            else
+                warn "Code rollback rsync reported errors — check $BACKUP_DIR/code manually"
+            fi
+        else
+            warn "No code snapshot in $BACKUP_DIR (backup predates this safety feature) — code NOT rolled back"
+        fi
         for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
             [[ -f "$BACKUP_DIR/${svc}.service.bak" ]] && \
                 cp "$BACKUP_DIR/${svc}.service.bak" "/etc/systemd/system/${svc}.service"

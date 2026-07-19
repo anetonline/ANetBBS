@@ -1,7 +1,7 @@
 {
   "mrc_host": "mrc.bottomlessabyss.net",
-  "mrc_port": 5000,
-  "use_ssl": false,
+  "mrc_port": 5001,
+  "use_ssl": true,
   "bridge_bbs": "|07My BBS |15MRC Bridge",
   "platform_info": "ANETBBS/Linux.x86_64/1.3.20",
   "capabilities": ["MCI", "CTCP", "SSL"],

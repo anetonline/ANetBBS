@@ -1,7 +1,24 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.152`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.153`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.153 — Release-readiness audit: 10 install/update fixes ahead of the August 1 full release (July 2026)
+
+Top-to-bottom pass over install.sh, update.sh, and their generated configs, prompted by wanting the BinkP fix (v1.0b2.147-152) to be the last "oh, our side is broken" surprise before the full release. All 10 findings below were fixed, in priority order:
+
+- FIX (CRITICAL): install.sh computed a mode-specific `WEB_BIND` (e.g. `127.0.0.1` for a reverse-proxied test-mode install) but only ever displayed it — never wrote it to `.env`. `deploy/serve.py` therefore always fell back to its own `0.0.0.0` default regardless of install mode, silently defeating test mode's entire "gunicorn binds localhost-only, nothing reaches the LAN" security promise. Now written to `.env`; also added to `.env.example` so update.sh's existing key-backfill mechanism picks it up on upgrades of already-affected installs.
+- FIX (HIGH): update.sh's rollback-on-failed-update path restored `.env`, the database, and systemd units, but never the application code itself — a bad update that failed its health check left the broken new code in place, so the "rollback" just restarted the same broken code. Added a pre-update code snapshot (excludes logs/data/venv, ~28MB) and restore-on-failure.
+- FIX (HIGH): install.sh's fresh-install `anetbbs.service` (telnet/ssh/rlogin/FTP) never granted `CAP_NET_BIND_SERVICE`, so FTP (port 21) would silently fail to bind if a sysop later set `FTP_ENABLED=true` — until their next update.sh run self-healed it. Now granted at install time, matching what update.sh already does.
+- FIX (MEDIUM): install.sh had no disk-space preflight check at all; update.sh gained one after a real disk-full corruption incident. Added the same check to install.sh.
+- FIX (MEDIUM): the MRC bridge config self-heal path (update.sh) and `mrc/bridge/config.example.json` still defaulted to the old unencrypted `mrc_port: 5000` / `use_ssl: false`, stale since v1.0a2.111 changed the real default to `5001`/SSL. install.sh itself already had it right.
+- FIX (MEDIUM): re-running install.sh against an existing install silently reset the sysop's password (if the same username was retyped) or created a second, duplicate admin account (if it wasn't) — no warning either way. Existing accounts are now preserved unless `--force` is passed.
+- FIX (LOW): neither script checked for `systemctl` before assuming systemd — added a clear fail-fast message instead of scattered "command not found" errors partway through a 9-step install.
+- FIX (LOW): update.sh's backup directory was created with default (world-readable) permissions and only `chmod 0700`'d after `.env.bak` (SECRET_KEY, DB credentials) and everything else was already written into it. Now locked down at creation.
+- FIX (LOW): install.sh's nginx CVE-2026-42945 check tried to distinguish "vulnerable version, exploitable config" from "vulnerable version, safe config" using a crude "config contains both `rewrite` and `set`" heuristic. Verified the CVE itself against NVD/vendor advisories (real, CVSS 9.2, confirmed version range) but the heuristic doesn't match the actual trigger condition (an unnamed PCRE capture + literal `?` in a rewrite's replacement, followed by another rewrite/if/set) and could have told a genuinely vulnerable config it was safe. Dropped the exploitability guess; now always recommends patching when the version is in range.
+- Documented `install.sh --uninstall` (and `--defaults`/`--force`) in the README — previously undocumented anywhere despite being a real, working flag.
+
+No behavior changes to the running BBS itself — every fix in this release is in the install/update tooling. Full test suite (1032 tests) still green throughout.
 
 ## v1.0b2.152 — AKA announcement fix, plus a netmail send/receive correctness pass (July 2026)
 

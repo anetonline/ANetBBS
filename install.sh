@@ -95,6 +95,20 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SYSTEMD CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+# This installer manages ANetBBS entirely as systemd units (Step 8 below).
+# Without systemctl, every service-install/enable/start call would just fail
+# with "command not found", scattered across 9 steps with no clear signal
+# of the real cause. Fail fast with one clear message instead.
+if ! command -v systemctl >/dev/null 2>&1; then
+    fail "systemctl not found — ANetBBS's install/update scripts require systemd."
+    echo "  This system (or container) doesn't appear to run systemd."
+    echo "  See docker/ for a container-based deployment that doesn't need it."
+    exit 1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # OS DETECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Detecting operating system"
@@ -560,6 +574,34 @@ pkg_name() {
             ;;
     esac
 }
+
+# Disk-space pre-flight check. update.sh gained this after a sysop's disk
+# hit zero mid-update and corrupted the install; a fresh install can fail
+# the exact same way (package installs + venv + rsynced source all write
+# real bytes before anything is recoverable). INSTALL_DIR itself may not
+# exist yet, so check its parent directory's filesystem instead.
+MIN_FREE_KB=512000  # 500MB
+_check_free_space() {
+    local path="$1" label="$2"
+    local avail_kb
+    avail_kb=$(df -Pk "$path" 2>/dev/null | tail -1 | awk '{print $4}')
+    if [[ -z "$avail_kb" ]]; then
+        warn "Could not determine free space on $label ($path) — proceeding without this check"
+        return 0
+    fi
+    if (( avail_kb < MIN_FREE_KB )); then
+        fail "Only $((avail_kb / 1024))MB free on $label ($path) — need at least $((MIN_FREE_KB / 1024))MB."
+        echo "  Free up space first, then re-run install.sh. Refusing to proceed:"
+        echo "  running out of space mid-install can leave a half-configured system."
+        exit 1
+    fi
+    ok "$label: $((avail_kb / 1024))MB free"
+}
+_INSTALL_PARENT="$INSTALL_DIR"
+while [[ ! -d "$_INSTALL_PARENT" && "$_INSTALL_PARENT" != "/" ]]; do
+    _INSTALL_PARENT=$(dirname "$_INSTALL_PARENT")
+done
+_check_free_space "$_INSTALL_PARENT" "install filesystem"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 1: HEAL & UPDATE PACKAGE MANAGER
@@ -1085,6 +1127,13 @@ RLOGIN_PORT=513
 
 # Web Server
 WEB_HOST=0.0.0.0
+# WEB_BIND is what deploy/serve.py actually binds the socketio/gunicorn
+# listener to (WEB_HOST above is read by a different, unrelated code
+# path) -- real bug found live: test mode's whole security promise
+# ("gunicorn binds 127.0.0.1 -- no port exposed to the LAN") was silently
+# false because this line never existed, so serve.py always fell back to
+# its own 0.0.0.0 default regardless of install mode.
+WEB_BIND=$WEB_BIND
 WEB_PORT=$WEB_PORT
 
 # Application
@@ -1220,6 +1269,15 @@ elif [[ -f "$DB_FILE" ]] && $FORCE_OVERWRITE; then
 fi
 
 # ─── Set admin password via Python ─────────────────────────────────────────────
+# Whether an existing admin account (matched by username typed into the
+# wizard above) gets its password silently reset. Without this guard, any
+# re-run of install.sh against an already-provisioned DB either quietly
+# overwrote the real sysop's password (if the same username was retyped)
+# or created a second, duplicate is_admin=True account (if it wasn't) --
+# neither with any warning. Mirrors the .env/.db skip-unless---force
+# pattern already used elsewhere in this same step.
+PY_FORCE_OVERWRITE=$($FORCE_OVERWRITE && echo True || echo False)
+ADMIN_PRESERVED=false
 if [[ "${STATUS[python]:-}" != "ok" ]]; then
     warn "Skipping admin account setup — Python environment failed to install."
     warn "Fix the pip error above, then re-run: sudo bash $INSTALL_DIR/install.sh"
@@ -1232,7 +1290,7 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data"
 chmod 755 "$INSTALL_DIR/data"
 
 cd "$INSTALL_DIR"
-if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" << ADMINEOF
+ADMIN_RESULT=$(sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" << ADMINEOF
 import os, sys
 sys.path.insert(0, '$INSTALL_DIR')
 os.chdir('$INSTALL_DIR')
@@ -1246,6 +1304,8 @@ load_dotenv('$ENV_FILE')
 from anetbbs.web_app import create_app
 from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage, EchomailReadStatus, EchomailPollLog
 
+force_overwrite = $PY_FORCE_OVERWRITE
+
 app = create_app('production')
 with app.app_context():
     db.create_all()
@@ -1256,18 +1316,27 @@ with app.app_context():
         db.session.add(user)
         db.session.commit()
         print('CREATED')
-    else:
+    elif force_overwrite:
         user.set_password('$ADMIN_PASS')
         user.is_admin = True
         db.session.commit()
         print('UPDATED')
+    else:
+        print('PRESERVED')
 ADMINEOF
-then
-    ok "Admin account configured ($ADMIN_USER)"
+)
+ADMIN_RC=$?
+ADMIN_PRESERVED=false
+if [[ $ADMIN_RC -eq 0 ]]; then
+    case "$ADMIN_RESULT" in
+        *PRESERVED*) ADMIN_PRESERVED=true
+                     ok "Existing sysop account preserved ($ADMIN_USER) — password NOT changed (use --force to reset it)" ;;
+        *)           ok "Admin account configured ($ADMIN_USER)" ;;
+    esac
 else
     # ★ FIX 5b: If running as service user fails, try as root then fix ownership
     warn "Retrying admin setup as root..."
-    if "$VENV_DIR/bin/python" << ADMINEOF2
+    ADMIN_RESULT2=$("$VENV_DIR/bin/python" << ADMINEOF2
 import os, sys
 sys.path.insert(0, '$INSTALL_DIR')
 os.chdir('$INSTALL_DIR')
@@ -1281,6 +1350,8 @@ load_dotenv('$ENV_FILE')
 from anetbbs.web_app import create_app
 from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage, EchomailReadStatus, EchomailPollLog
 
+force_overwrite = $PY_FORCE_OVERWRITE
+
 app = create_app('production')
 with app.app_context():
     db.create_all()
@@ -1291,14 +1362,22 @@ with app.app_context():
         db.session.add(user)
         db.session.commit()
         print('CREATED')
-    else:
+    elif force_overwrite:
         user.set_password('$ADMIN_PASS')
         user.is_admin = True
         db.session.commit()
         print('UPDATED')
+    else:
+        print('PRESERVED')
 ADMINEOF2
-    then
-        ok "Admin account configured ($ADMIN_USER)"
+)
+    ADMIN_RC2=$?
+    if [[ $ADMIN_RC2 -eq 0 ]]; then
+        case "$ADMIN_RESULT2" in
+            *PRESERVED*) ADMIN_PRESERVED=true
+                         ok "Existing sysop account preserved ($ADMIN_USER) — password NOT changed (use --force to reset it)" ;;
+            *)           ok "Admin account configured ($ADMIN_USER)" ;;
+        esac
     else
         warn "Could not configure admin account (you can use default: admin / admin123)"
     fi
@@ -1337,9 +1416,9 @@ for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge ane
 done
 systemctl daemon-reload 2>/dev/null || true
 # and all paths are absolute so services work regardless of cwd.
-# The web service uses gunicorn with deploy.wsgi_wrapper:app
-# The telnet/SSH services use $VENV_DIR/bin/python $INSTALL_DIR/main.py
-# (NOT the console script, which has historically broken)
+# The web service runs deploy/serve.py directly (reads WEB_BIND/WEB_PORT
+# from .env). The telnet/SSH/rlogin service runs the anetbbs console
+# script (matches what update.sh generates for the same unit).
 
 # ─── Web service ────────────────────────────────────────────────────────────��──
 cat > /etc/systemd/system/anetbbs-web.service << SVCEOF
@@ -1391,6 +1470,16 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
+# FTP on port 21 needs CAP_NET_BIND_SERVICE since the unit doesn't run as
+# root. Without this, a sysop who later sets FTP_ENABLED=true in .env
+# gets a listener that silently fails to bind (update.sh's own migration
+# block would self-heal this on the next upgrade, but a fresh install
+# should just grant it up front rather than depend on that). Unlike
+# anetbbs-web.service, nothing in this unit's own process ever calls
+# sudo, so CapabilityBoundingSet can safely match the Ambient set here
+# (matches what update.sh writes for the same unit).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=$VENV_DIR/bin/anetbbs
 Restart=always
 RestartSec=5
@@ -1892,10 +1981,24 @@ else
 fi
 
 # ─── nginx CVE check ──────────────────────────────────────────────────────────
-# CVE-2026-42945 is a heap overflow affecting nginx 0.6.27 through 1.30.0
-# when the `rewrite` and `set` directives interact. Warn the sysop if their
-# installed nginx falls in the range, and check the live config for the
-# vulnerable directive pair so we can flag actual exploitability vs latent risk.
+# CVE-2026-42945 ("NGINX Rift") is a confirmed, real, CVSS 9.2 unauthenticated
+# heap-overflow RCE affecting nginx 0.6.27 through 1.30.0, patched upstream in
+# 1.30.1/1.31.0 (verified against NVD/vendor advisories, not guessed).
+#
+# The actual trigger is narrow: a `rewrite` directive using an unnamed PCRE
+# capture (e.g. $1) with a literal `?` in the replacement string, followed by
+# another rewrite/if/set directive. That precise pattern isn't something a
+# simple grep can reliably confirm or rule out (multi-line rules, regex
+# capture groups, directive adjacency across included files) — an earlier
+# version of this check tried a coarse "config contains both 'rewrite' and
+# 'set' somewhere" heuristic and used a negative result to tell the sysop
+# they were "not currently exploitable". That's both a false-positive risk
+# (unrelated rewrite/set elsewhere in the config) and, worse, a false-negative
+# risk (a vulnerable rewrite→rewrite or rewrite→if chain needs no 'set'
+# directive at all, so it would have been wrongly told it was safe). Given
+# this is a 9.2 unauthenticated RCE, a wrong "you're fine" is far worse than
+# an unconditional "patch now" — so this no longer tries to assess
+# exploitability, only the version range.
 if [[ "$ENABLE_NGINX" == "y" ]] && command -v nginx &>/dev/null; then
     NGINX_VER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     if [[ -n "$NGINX_VER" ]]; then
@@ -1909,25 +2012,11 @@ if [[ "$ENABLE_NGINX" == "y" ]] && command -v nginx &>/dev/null; then
         if (( NG_MAJ == 1 && NG_MIN == 30 && NG_PAT == 0 )); then vulnerable=1; fi
 
         if (( vulnerable )); then
-            # Check whether the active config actually uses the vulnerable
-            # directive pair. The CVE only fires when both `rewrite` and `set`
-            # appear in the loaded config.
-            uses_rewrite=$(grep -rEhc '^\s*rewrite\s' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ /etc/nginx/snippets/ 2>/dev/null | awk '{s+=$1} END{print s+0}')
-            uses_set=$(grep -rEhc '^\s*set\s' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | awk '{s+=$1} END{print s+0}')
-            if (( uses_rewrite > 0 && uses_set > 0 )); then
-                bad "nginx $NGINX_VER is in the CVE-2026-42945 range AND your"
-                bad "config uses both 'rewrite' and 'set' — you are exploitable."
-                bad "Upgrade nginx immediately: sudo apt update && sudo apt"
-                bad "upgrade nginx, OR remove the rewrite/set directive pair."
-                STATUS[nginx_cve]="fail"
-            else
-                warn "nginx $NGINX_VER is in the CVE-2026-42945 vulnerable range"
-                warn "(0.6.27 to 1.30.0) but your live config does not use both"
-                warn "'rewrite' and 'set' directives, so you're not currently"
-                warn "exploitable. Patch when your distro ships a fix:"
-                warn "  sudo apt update && sudo apt list --upgradable | grep nginx"
-                STATUS[nginx_cve]="warn"
-            fi
+            bad "nginx $NGINX_VER is in the CVE-2026-42945 range (0.6.27-1.30.0)"
+            bad "— unauthenticated RCE, CVSS 9.2. Upgrade nginx immediately:"
+            bad "  sudo apt update && sudo apt upgrade nginx"
+            bad "(need 1.30.1+ or 1.31.0+ mainline)."
+            STATUS[nginx_cve]="fail"
         else
             ok "nginx $NGINX_VER is outside the CVE-2026-42945 range"
             STATUS[nginx_cve]="ok"
@@ -1977,10 +2066,8 @@ show_status "anetbbs-mrc-bridge" "MRC bridge service"
 [[ "$ENABLE_NGINX" == "y" ]]  && show_status "nginx"          "nginx reverse proxy"
 [[ "$ENABLE_SSL" == "y" ]]    && show_status "ssl"            "SSL certificate"
 show_status "web_health"      "Web health check"
-if [[ "${STATUS[nginx_cve]:-}" == "warn" ]]; then
-    echo -e "  ${YELLOW}⚠${NC}  nginx CVE-2026-42945 — version is in vulnerable range (latent, not exploitable in this config)"
-elif [[ "${STATUS[nginx_cve]:-}" == "fail" ]]; then
-    echo -e "  ${RED}❌${NC} nginx CVE-2026-42945 — version vulnerable AND config uses rewrite+set: patch nginx NOW"
+if [[ "${STATUS[nginx_cve]:-}" == "fail" ]]; then
+    echo -e "  ${RED}❌${NC} nginx CVE-2026-42945 — version is vulnerable (0.6.27-1.30.0): patch nginx NOW"
 elif [[ "${STATUS[nginx_cve]:-}" == "ok" ]]; then
     echo -e "  ${GREEN}✅${NC} nginx CVE-2026-42945 check (version not in vulnerable range)"
 fi
@@ -2041,7 +2128,9 @@ fi
 echo ""
 echo -e "${BOLD}  Admin Login:${NC}"
 echo -e "  Username:  ${CYAN}${ADMIN_USER}${NC}"
-if $ADMIN_PASS_GENERATED; then
+if $ADMIN_PRESERVED; then
+    echo -e "  Password:  ${DIM}(unchanged — an existing account with this username was preserved)${NC}"
+elif $ADMIN_PASS_GENERATED; then
     echo -e "  Password:  ${CYAN}${ADMIN_PASS}${NC}  ${YELLOW}(save this — it won't be shown again!)${NC}"
 else
     echo -e "  Password:  ${DIM}(the password you entered)${NC}"

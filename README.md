@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.152`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.153`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.152.tar.gz
-cd ANetBBS-v1.0b2.152
+tar xzf ANetBBS-v1.0b2.153.tar.gz
+cd ANetBBS-v1.0b2.153
 sudo bash install.sh
 ```
 
@@ -31,6 +31,32 @@ change it on first use.
 
 For details on individual services and post-install configuration see
 [`docs/INSTALL.md`](docs/INSTALL.md).
+
+### Updating and uninstalling
+
+To upgrade an existing install in place, download the new release tarball
+and run `update.sh` from inside it (backs up `.env`/database/systemd units
+first, then syncs files and restarts services):
+
+```
+tar xzf ANetBBS-v1.0b2.153.tar.gz
+cd ANetBBS-v1.0b2.153
+sudo bash update.sh
+```
+
+`install.sh` itself also takes a few flags:
+
+```
+sudo bash install.sh --uninstall  # Stops/disables services, then (after one
+                                   # y/N confirmation) deletes the ENTIRE
+                                   # install directory -- including data/ (DB,
+                                   # uploads, echomail) -- with no separate
+                                   # prompt or backup for that. Back up
+                                   # data/ first if you want to keep it.
+sudo bash install.sh --defaults   # Non-interactive install, all defaults
+sudo bash install.sh --force      # Re-run install, overwriting an existing
+                                   # .env and database (normally preserved)
+```
 
 ## Quick install (Docker)
 
