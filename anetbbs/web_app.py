@@ -802,6 +802,12 @@ def _lightweight_migrate(app):
     # Optional short domain-suffix override -- see the field's own comment
     # in models.py. NULL for existing networks preserves current behavior.
     _ensure_column('echomail_networks', 'ftn_domain', 'VARCHAR(8)')
+    # Per-network netmail flavor defaults (Crash/Hold/Direct) + FTS-0001
+    # packet-level password -- see models.py's EchomailNetwork comment.
+    _ensure_column('echomail_networks', 'default_crash', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('echomail_networks', 'default_hold', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('echomail_networks', 'default_direct', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('echomail_networks', 'packet_password', 'VARCHAR(20)')
     # InterBBS score sharing: per-game opt-in, defaults on (needs an
     # explicit boolean default like the other flags above -- the
     # generic nullable-column auto-sweep below only synthesizes

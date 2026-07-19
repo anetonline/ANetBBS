@@ -240,7 +240,16 @@ def _do_poll(app, network):
         network_id=network.id,
         poll_type='both',
         started_at=datetime.utcnow(),
-        status='error',
+        # 'running', not 'error' -- this row is committed BEFORE the poll
+        # has even attempted anything. The old placeholder value meant a
+        # sysop who happened to view the poll log while a poll was still
+        # in flight saw it reported as already failed. Real report (FR):
+        # "no place to see if a poll is going on... you can't tell if one
+        # is ongoing currently or not" -- this was one reason why: the
+        # one signal that WOULD have existed (a running row) looked
+        # exactly like a failure. Every exit path below still correctly
+        # overwrites this to 'success'/'error' before the function returns.
+        status='running',
     )
     db.session.add(log)
     db.session.commit()
@@ -402,6 +411,10 @@ def _run_client(network, outbound_messages, app, transcript=None):
             domain=(getattr(network, 'ftn_domain', None)
                     or network.name or '').strip().lower() or None,
             transcript=transcript,
+            packet_password=getattr(network, 'packet_password', None) or '',
+            default_crash=bool(getattr(network, 'default_crash', False)),
+            default_hold=bool(getattr(network, 'default_hold', False)),
+            default_direct=bool(getattr(network, 'default_direct', False)),
         )
         data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
         # Pick up any pending hatch-out files for this peer (the network's

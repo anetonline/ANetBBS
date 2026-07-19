@@ -157,6 +157,36 @@ def _inbound_poll_type(imported_total, sent_count):
     return 'receive'
 
 
+def _flush_transcript_checkpoint(app, poll_log_id, transcript, peer):
+    """Best-effort mid-session transcript save, called from a couple of
+    natural checkpoints in _handle_connection (after sending our backlog,
+    after receiving the peer's files) -- NOT on every frame. This exists
+    because anetbbs-binkp.service is a SEPARATE OS process from
+    anetbbs-web.service (confirmed: deploy/anetbbs-binkp.service runs its
+    own `python -m anetbbs.echomail.binkp_server`), so the shared SQLite
+    database is the only channel the admin UI has to see an inbound
+    session's progress while it's still running -- an in-memory list in
+    this process is otherwise invisible to it. Deliberately isolated from
+    the actual protocol flow: any failure here is logged and swallowed,
+    never raised, and this is only ever called between awaits (never
+    itself blocking a socket read/write), so it cannot introduce the kind
+    of timing regression this codebase's BinkP work has hit before.
+    """
+    if poll_log_id is None or not transcript:
+        return
+    try:
+        with app.app_context():
+            from ..models import db as _db, EchomailPollLog
+            from .poller import _format_transcript
+            log = EchomailPollLog.query.get(poll_log_id)
+            if log is not None:
+                log.transcript = _format_transcript(transcript)
+                _db.session.commit()
+    except Exception:
+        logger.debug('BinkP %s: mid-session transcript checkpoint failed '
+                     '(poll_log_id=%s)', peer, poll_log_id, exc_info=True)
+
+
 def _verify_binkp_password(stored_password, remote_pwd, challenge_bytes):
     """Verify a caller's M_PWD against our stored password.
 
@@ -388,6 +418,19 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     net_id = None
     net_name = None
     downstream_node_id = None   # set when caller is a downstream BinkPNode
+    # Per-network packet password + netmail flavor defaults, captured as
+    # plain scalars (not the ORM object) when the network is matched below
+    # -- see the capture site's own comment for why.
+    net_packet_password = ''
+    net_default_crash = False
+    net_default_hold = False
+    net_default_direct = False
+    # id of the EchomailPollLog row created at session start (upstream
+    # network sessions only -- see its creation site for why). None means
+    # either no such row was created (downstream-node session) or the
+    # creation attempt itself failed; both are handled as "nothing to
+    # update" at completion, matching pre-existing behavior.
+    poll_log_id = None
     # Outbound FROM-address for THIS session's .pkt -- defaults to the
     # single process-wide address (BINKP_OUR_ADDRESS), same as before
     # multi-hub-identity support existed. Resolved to the matched
@@ -415,6 +458,43 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 return
             net_id = network.id
             net_name = network.name
+            # Capture these as plain scalars NOW, not the ORM object --
+            # `network` was loaded inside this app_context, which closes
+            # before the outbound .pkt gets built several hundred lines
+            # below in a LATER, separate app_context (line ~524+). Holding
+            # the object across that boundary and reading attributes off
+            # it there is exactly the detached-instance hazard already
+            # found and fixed once in this file (v1.0b2.152's AKA
+            # dispose-ordering bug) -- same mistake, different fields.
+            net_packet_password = getattr(network, 'packet_password', None) or ''
+            net_default_crash = bool(getattr(network, 'default_crash', False))
+            net_default_hold = bool(getattr(network, 'default_hold', False))
+            net_default_direct = bool(getattr(network, 'default_direct', False))
+            # Create the EchomailPollLog row NOW, at the start of the
+            # session, not only after it completes (the prior behavior --
+            # see step "9." far below). Real FR from a sysop: "no place to
+            # see if a poll is going on... you can't tell if one is
+            # ongoing currently or not" before deciding whether it's safe
+            # to trigger a manual one. Capture only the new row's id as a
+            # plain scalar -- same detached-instance reasoning as the
+            # capture above, this survives into the LATER app_context
+            # where the session actually gets updated/completed, an ORM
+            # object reference would not.
+            try:
+                from ..models import EchomailPollLog as _EPL
+                _new_log = _EPL(
+                    network_id=net_id,
+                    poll_type='both',  # not yet known; set for real at completion
+                    started_at=session_started_at,
+                    status='running',
+                )
+                db.session.add(_new_log)
+                db.session.commit()
+                poll_log_id = _new_log.id
+            except Exception:
+                logger.exception('BinkP %s: failed to create in-progress poll '
+                                 'log row for network %s', peer, net_id)
+                db.session.rollback()
             # The matched network row already carries its own AKA --
             # no identity lookup needed for this branch.
             if (network.our_address or '').strip():
@@ -546,7 +626,12 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     sent_at=None,
                 ).all()
                 if outbound:
-                    pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
+                    pkt_bytes = _build_ftn_packet(
+                        outbound, matched_our_address, remote_addr,
+                        packet_password=net_packet_password,
+                        default_crash=net_default_crash,
+                        default_hold=net_default_hold,
+                        default_direct=net_default_direct)
                     fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
                     accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
                                                     peer, recv_state, inbound_files,
@@ -562,12 +647,14 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                        'leaving in queue for retry', remote_addr)
 
         await _send_cmd(writer, CMD_EOB, transcript=transcript)
+        _flush_transcript_checkpoint(app, poll_log_id, transcript, peer)
 
         # 6. NOW finish receiving whatever the peer still has queued for us
         #    (already-interleaved offers landed in inbound_files/recv_state
         #    above; this drains anything left, until the peer's own M_EOB).
         inbound_files = await _receive_files(reader, writer, peer, recv_state,
                                              inbound_files, transcript=transcript)
+        _flush_transcript_checkpoint(app, poll_log_id, transcript, peer)
 
         # 7. End of batch -- complete the BinkP protocol handshake NOW,
         #    before importing what we just received below. A real peer
@@ -800,22 +887,29 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     try:
                         from ..models import EchomailPollLog
                         from .poller import _format_transcript
-                        db.session.add(EchomailPollLog(
-                            network_id=net_id,
-                            poll_type=_inbound_poll_type(imported_total, sent_count),
-                            started_at=session_started_at,
-                            completed_at=datetime.utcnow(),
-                            status='success',
-                            messages_sent=sent_count,
-                            messages_received=imported_total,
-                            # Real gap this closes: outbound polls have saved
-                            # a frame-by-frame transcript since v1.0b2.47 (see
-                            # _log_transcript above); inbound sessions -- a
-                            # peer connecting TO us, the exact direction this
-                            # session's whole BinkP audit was chasing -- never
-                            # did, on either the fix-shipping side or before.
-                            transcript=_format_transcript(transcript) if transcript else None,
-                        ))
+                        final_transcript = _format_transcript(transcript) if transcript else None
+                        # Update the "running" row created at session start
+                        # (see its creation site) rather than inserting a
+                        # second row -- falls back to inserting fresh only
+                        # if that row somehow doesn't exist (its own
+                        # creation attempt failed and already logged that).
+                        log = (EchomailPollLog.query.get(poll_log_id)
+                               if poll_log_id is not None else None)
+                        if log is None:
+                            log = EchomailPollLog(network_id=net_id, started_at=session_started_at)
+                            db.session.add(log)
+                        log.poll_type = _inbound_poll_type(imported_total, sent_count)
+                        log.completed_at = datetime.utcnow()
+                        log.status = 'success'
+                        log.messages_sent = sent_count
+                        log.messages_received = imported_total
+                        # Real gap this closes: outbound polls have saved
+                        # a frame-by-frame transcript since v1.0b2.47 (see
+                        # _log_transcript above); inbound sessions -- a
+                        # peer connecting TO us, the exact direction this
+                        # session's whole BinkP audit was chasing -- never
+                        # did, on either the fix-shipping side or before.
+                        log.transcript = final_transcript
                         db.session.commit()
                     except Exception:
                         logger.exception('BinkP %s: failed to write poll log for '
@@ -829,18 +923,21 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     from ..models import EchomailPollLog, db as _db
                     from .poller import _format_transcript
                     detail = str(exc)
-                    _db.session.add(EchomailPollLog(
-                        network_id=net_id,
-                        poll_type='both',
-                        started_at=session_started_at,
-                        completed_at=datetime.utcnow(),
-                        status='error',
-                        error_message=(f'{type(exc).__name__}: {detail}'
-                                      if detail else type(exc).__name__),
-                        messages_sent=sent_count,
-                        messages_received=0,
-                        transcript=_format_transcript(transcript) if transcript else None,
-                    ))
+                    # Same update-not-insert approach as the success path
+                    # above -- see that site's comment.
+                    log = (EchomailPollLog.query.get(poll_log_id)
+                           if poll_log_id is not None else None)
+                    if log is None:
+                        log = EchomailPollLog(network_id=net_id, poll_type='both',
+                                              started_at=session_started_at)
+                        _db.session.add(log)
+                    log.completed_at = datetime.utcnow()
+                    log.status = 'error'
+                    log.error_message = (f'{type(exc).__name__}: {detail}'
+                                        if detail else type(exc).__name__)
+                    log.messages_sent = sent_count
+                    log.messages_received = 0
+                    log.transcript = _format_transcript(transcript) if transcript else None
                     _db.session.commit()
             except Exception:
                 logger.exception(

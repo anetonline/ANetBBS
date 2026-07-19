@@ -34,9 +34,12 @@ import re
 import json
 import zlib
 import datetime
+import logging
 import shutil
 
 from ..models import db, TicFile, FileArea, FileEchoSubscription, HatchQueue
+
+logger = logging.getLogger(__name__)
 
 
 _LINE_RE = re.compile(r'^\s*(\w+)\s+(.*?)\s*$')
@@ -236,12 +239,22 @@ def process_tic(tic_path, inbound_dir):
             ).strip()
             db.session.commit()
         except Exception as exc:
+            # The TIC transfer itself already succeeded (status='filed',
+            # committed above) -- this is a secondary, best-effort "also
+            # try to import this as a nodelist" step. A nodelist-flagged
+            # area can legitimately receive ordinary (non-nodelist) files
+            # too (mixed-use tag, or just a day with no nodelist release),
+            # so a file here not matching the nodelist-shape heuristic
+            # isn't a real transfer error. Previously this was appended to
+            # tic.error_message, which reads exactly like a failed
+            # transfer in the TIC log — a real sysop report ("the tic log
+            # shows an error... on files that are not a nodelist") traced
+            # to exactly this. Log it instead of flagging the TIC record.
             db.session.rollback()
-            tic.error_message = (
-                (tic.error_message or '')
-                + f' [nodelist auto-import failed: {exc}]'
-            ).strip()
-            db.session.commit()
+            logger.debug(
+                'TIC %s: nodelist auto-import skipped for area %s '
+                '(domain %s) — %s', tic.filename, area.tag,
+                area.nodelist_domain, exc)
 
     # Hatch-out: queue the TIC for any downstream peer subscribed to this
     # area, EXCEPT peers who are already in the SEEN-BY (avoid loops).

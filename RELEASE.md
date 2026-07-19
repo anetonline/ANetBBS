@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.154 — File area fixes, per-network netmail options, and poll-in-progress visibility (July 2026)
+
+- FIX: file area "Delete" silently saved instead of deleting (a hidden form field always overrode the button)
+- Added bulk actions for file areas (multi-select, select-by-network, bulk enable/disable/subscribe/delete)
+- FIX: TIC log showed a false "nodelist import failed" error on ordinary (non-nodelist) files
+- Added per-network Crash/Hold/Direct netmail delivery defaults and a packet-header password field (separate from the BinkP session password)
+- Added visibility for in-progress BinkP polls (previously showed nothing until a poll finished) — an admin can now see a poll is running, with a live elapsed-time counter and partial transcript
+
+---
+
 # ANetBBS v1.0b2.153 — Release-readiness audit: 10 install/update fixes ahead of the August 1 full release (July 2026)
 
 Top-to-bottom pass over install.sh, update.sh, and their generated configs, prompted by wanting the BinkP fix (v1.0b2.147-152) to be the last "oh, our side is broken" surprise before the full release. All 10 findings below were fixed, in priority order:

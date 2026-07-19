@@ -90,15 +90,61 @@
     </div>
 </div>
 
+{% if areas %}
+<form id="bulkAreaForm" method="post" action="{{ url_for('admin.file_areas_bulk') }}"
+      onsubmit="return document.querySelectorAll('input[name=area_ids]:checked').length > 0
+                 || (alert('Select at least one area first.'), false);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-auto">
+                <div class="form-check">
+                    <input type="checkbox" id="bulkSelectAll" class="form-check-input"
+                           onchange="document.querySelectorAll('input[name=area_ids]').forEach(cb => cb.checked = this.checked);">
+                    <label class="form-check-label" for="bulkSelectAll">Select all</label>
+                </div>
+            </div>
+            <div class="col-md-auto">
+                <select id="bulkSelectNetwork" class="form-select form-select-sm"
+                        onchange="if (!this.value) return;
+                                  document.querySelectorAll('input[name=area_ids]').forEach(cb => {
+                                      cb.checked = (cb.dataset.networkId === this.value);
+                                  }); this.value='';">
+                    <option value="">Select all in network…</option>
+                    <option value="none">— local (no network) —</option>
+                    {% for n in networks %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-md-auto ms-auto d-flex gap-2 flex-wrap">
+                <button form="bulkAreaForm" class="btn btn-outline-success btn-sm" name="bulk_action" value="enable">Enable</button>
+                <button form="bulkAreaForm" class="btn btn-outline-secondary btn-sm" name="bulk_action" value="disable">Disable</button>
+                <button form="bulkAreaForm" class="btn btn-outline-success btn-sm" name="bulk_action" value="subscribe">Subscribe</button>
+                <button form="bulkAreaForm" class="btn btn-outline-secondary btn-sm" name="bulk_action" value="unsubscribe">Unsubscribe</button>
+                <button form="bulkAreaForm" class="btn btn-outline-danger btn-sm" name="bulk_action" value="delete"
+                        onclick="return confirm('Delete every SELECTED file area? Files on disk are NOT removed.')">
+                    Delete Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-body p-0">
     {% if areas %}
         {% for fa in areas %}
         <form method="post" class="border-bottom p-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="action" value="update">
             <input type="hidden" name="area_id" value="{{ fa.id }}">
             <div class="row g-2 align-items-end">
+                <div class="col-md-auto d-flex align-items-center">
+                    <input type="checkbox" name="area_ids" value="{{ fa.id }}"
+                           form="bulkAreaForm" data-network-id="{{ fa.network_id or 'none' }}"
+                           class="form-check-input" title="Select for bulk actions">
+                </div>
                 <div class="col-md-2"><strong><code>{{ fa.tag }}</code></strong></div>
                 <div class="col-md-3">
                     <label class="form-label small mb-0">Name</label>
@@ -149,7 +195,7 @@
                 </div>
             </div>
             <div class="mt-2">
-                <button class="btn btn-primary btn-sm">Save</button>
+                <button class="btn btn-primary btn-sm" name="action" value="update">Save</button>
                 <button class="btn btn-outline-danger btn-sm" name="action" value="delete"
                         onclick="return confirm('Delete area {{ fa.tag }}? Files on disk are NOT removed.')">Delete</button>
                 <a href="{{ url_for('file_areas.view_area', area_id=fa.id) }}" class="btn btn-outline-secondary btn-sm">Browse</a>

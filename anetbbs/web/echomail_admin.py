@@ -49,6 +49,17 @@ class NetworkForm(FlaskForm):
         'Use CRAM-MD5 for BinkP auth (recommended — required by Synchronet)',
         default=True)
     binkp_tls = BooleanField('Use TLS for outbound BinkP', default=False)
+    packet_password = PasswordField(
+        'Packet Password (FTS-0001 header password — separate from the '
+        'BinkP password above; leave blank if this hub doesn\'t require one)',
+        validators=[Optional(), Length(max=20)])
+    default_crash = BooleanField(
+        'Default: Crash (attempt immediate delivery)', default=False)
+    default_hold = BooleanField(
+        'Default: Hold (hold for pickup, don\'t push)', default=False)
+    default_direct = BooleanField(
+        'Default: Direct (dial straight to destination, bypass routing)',
+        default=False)
     default_recipient = StringField(
         'Default Netmail Recipient (BBS user that catches netmail addressed '
         'to unknown names)',
@@ -247,6 +258,10 @@ def new_network():
             is_active=form.is_active.data,
             cram_md5=form.cram_md5.data,
             binkp_tls=form.binkp_tls.data,
+            packet_password=form.packet_password.data or None,
+            default_crash=form.default_crash.data,
+            default_hold=form.default_hold.data,
+            default_direct=form.default_direct.data,
             default_recipient=form.default_recipient.data or None,
         )
         db.session.add(network)
@@ -269,6 +284,7 @@ def edit_network(network_id):
         prior_binkp = network.binkp_password
         prior_areafix = network.areafix_password
         prior_qwk = network.qwk_password
+        prior_packet_password = network.packet_password
         form.populate_obj(network)
         if not (form.binkp_password.data or '').strip():
             network.binkp_password = prior_binkp
@@ -276,6 +292,8 @@ def edit_network(network_id):
             network.areafix_password = prior_areafix
         if not (form.qwk_password.data or '').strip():
             network.qwk_password = prior_qwk
+        if not (form.packet_password.data or '').strip():
+            network.packet_password = prior_packet_password
         db.session.commit()
         flash(f'Network "{network.name}" updated.', 'success')
         return redirect(url_for('echomail_admin.networks'))
@@ -839,9 +857,13 @@ def poll_log_transcript(log_id):
     attempt -- lets a sysop see exactly what was sent/received without
     needing server log access. QWK polls never have one (BinkP-only
     concept); 404s if this particular poll predates the feature or
-    never captured anything."""
+    never captured anything -- UNLESS the poll is still running, in
+    which case an empty transcript just means no checkpoint has landed
+    yet (checkpoints are best-effort, at a couple of natural points in
+    the session, not per-frame) -- show that plainly instead of a bare
+    404, which would look like the poll never existed at all."""
     log = EchomailPollLog.query.get_or_404(log_id)
-    if not log.transcript:
+    if not log.transcript and log.status != 'running':
         abort(404)
     return render_template('echomail/admin/poll_log_transcript.html', log=log)
 

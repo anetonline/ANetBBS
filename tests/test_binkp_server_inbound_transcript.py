@@ -144,11 +144,22 @@ class _FakeEchomailNetwork:
 
 class _CapturingSession:
     """Like the _NoOpSession used elsewhere, but actually remembers what
-    got add()ed so the test can inspect the EchomailPollLog row."""
+    got add()ed so the test can inspect the EchomailPollLog row.
+
+    add() also assigns an autoincrementing .id, mirroring a real DB --
+    binkp_server.py's poll-log-update-not-insert logic (added alongside
+    the poll-in-progress feature) captures a new row's .id right after
+    creating it, then looks it back up later via
+    EchomailPollLog.query.get(that_id) to update it in place instead of
+    inserting a second row."""
     def __init__(self):
         self.added = []
+        self._next_id = 1
 
     def add(self, obj):
+        if getattr(obj, 'id', None) is None:
+            obj.id = self._next_id
+            self._next_id += 1
         self.added.append(obj)
 
     def commit(self, *a, **k):
@@ -161,6 +172,22 @@ class _CapturingSession:
         pass
 
 
+class _LiveRowQuery:
+    """Backed by a live reference to a growing list (session.added)
+    rather than a snapshot copy, so a row added earlier in the test is
+    findable via .get(id) later -- the way a real SQLAlchemy session's
+    identity map would find it."""
+    def __init__(self, rows_ref, model_cls):
+        self._rows_ref = rows_ref
+        self._model_cls = model_cls
+
+    def get(self, _id):
+        for row in self._rows_ref:
+            if isinstance(row, self._model_cls) and getattr(row, 'id', None) == _id:
+                return row
+        return None
+
+
 def _minimal_fts_packet():
     hdr = bytearray(58)
     struct.pack_into('<H', hdr, 18, 2)
@@ -170,7 +197,7 @@ def _minimal_fts_packet():
 class InboundTranscriptTests(unittest.TestCase):
     def test_inbound_session_saves_a_frame_by_frame_transcript(self):
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, db
 
         network = _FakeEchomailNetwork(
             id=1, hub_address='1:200/100', network_type='binkp',
@@ -188,6 +215,7 @@ class InboundTranscriptTests(unittest.TestCase):
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
         session = _CapturingSession()
+        EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -202,8 +230,8 @@ class InboundTranscriptTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del EchomailPollLog.query
 
-        from anetbbs.models import EchomailPollLog
         log_rows = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(log_rows), 1, 'expected exactly one poll log row')
         log = log_rows[0]

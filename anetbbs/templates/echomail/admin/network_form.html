@@ -108,6 +108,39 @@
                     </div>
                     <div class="row g-3 mt-1">
                         <div class="col-md-6">
+                            {{ form.packet_password.label(class="form-label") }}
+                            {{ form.packet_password(class="form-control",
+                                placeholder="(leave blank to keep current / no packet password)") }}
+                            <div class="form-text">
+                                FTS-0001 packet-header password, separate from
+                                the BinkP session password above. Only needed
+                                if this hub's tosser checks it independently.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-12"><label class="form-label mb-0">Outbound Netmail Flavor Defaults</label>
+                            <div class="form-text mt-0 mb-1">
+                                Applied to every outbound netmail routed through
+                                this network. Independently selectable — pick
+                                any combination.
+                            </div>
+                        </div>
+                        <div class="col-md-4 form-check">
+                            {{ form.default_crash(class="form-check-input") }}
+                            {{ form.default_crash.label(class="form-check-label ms-1") }}
+                        </div>
+                        <div class="col-md-4 form-check">
+                            {{ form.default_hold(class="form-check-input") }}
+                            {{ form.default_hold.label(class="form-check-label ms-1") }}
+                        </div>
+                        <div class="col-md-4 form-check">
+                            {{ form.default_direct(class="form-check-input") }}
+                            {{ form.default_direct.label(class="form-check-label ms-1") }}
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-6">
                             {{ form.default_recipient.label(class="form-label") }}
                             {{ form.default_recipient(class="form-control",
                                 placeholder="e.g. SYSOP — for unaddressed netmail") }}

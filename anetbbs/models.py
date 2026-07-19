@@ -525,6 +525,29 @@ class EchomailNetwork(db.Model):
     cram_md5 = db.Column(db.Boolean, default=True)
     binkp_tls = db.Column(db.Boolean, default=False)
 
+    # Per-network outbound netmail flavor defaults (FTS-0001 §5.2
+    # attribute bits), applied to every outbound netmail message routed
+    # through this network unless the individual message already set its
+    # own flag (see NetmailMessage.is_crash/is_hold). Independently
+    # selectable -- a sysop can turn on more than one at once.
+    # "Direct" has no dedicated FTS-0001 bit of its own; FTN convention
+    # treats direct (bypass routing, dial straight to the destination) as
+    # functionally the same immediate-delivery intent as Crash, so it
+    # also sets the Crash attribute bit on the wire -- kept as its own
+    # column rather than folded into default_crash so the sysop's actual
+    # selection stays visible/distinguishable in this config.
+    default_crash = db.Column(db.Boolean, default=False)
+    default_hold = db.Column(db.Boolean, default=False)
+    default_direct = db.Column(db.Boolean, default=False)
+
+    # FTS-0001 packet-level password -- distinct from binkp_password
+    # (which authenticates the BinkP SESSION itself). This is embedded in
+    # every .pkt file's own 58-byte header, an older FTN convention some
+    # hubs/tossers still check independently of transport-level session
+    # auth. NUL-padded to 8 ASCII bytes on the wire; longer values here
+    # are truncated at send time.
+    packet_password = db.Column(db.String(20))
+
     # Which real-world hub identity this transport row belongs to, if
     # any (see HubIdentity). Only meaningful for networks that represent
     # THIS install acting as a hub -- a plain leaf/spoke network (polling

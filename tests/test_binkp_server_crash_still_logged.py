@@ -141,11 +141,24 @@ class _FakeEchomailNetwork:
 
 class _RecordingSession:
     """Records every object passed to add(); commit/rollback/flush are
-    no-ops, matching _NoOpSession elsewhere but with add() observable."""
+    no-ops, matching _NoOpSession elsewhere but with add() observable.
+
+    add() also assigns an autoincrementing .id to whatever's passed in,
+    if it doesn't already have one -- mirrors a real DB's real behavior
+    (the row's primary key becomes available once added+committed), which
+    binkp_server.py's poll-log-update-not-insert logic (added alongside
+    the poll-in-progress feature) now depends on: it captures a new row's
+    .id as a plain scalar right after creating it, then looks that row
+    back up later via EchomailPollLog.query.get(that_id) to update it in
+    place instead of inserting a second row."""
     def __init__(self):
         self.added = []
+        self._next_id = 1
 
     def add(self, obj, *a, **k):
+        if getattr(obj, 'id', None) is None:
+            obj.id = self._next_id
+            self._next_id += 1
         self.added.append(obj)
 
     def commit(self, *a, **k):
@@ -156,6 +169,22 @@ class _RecordingSession:
 
     def flush(self, *a, **k):
         pass
+
+
+class _LiveRowQuery:
+    """Like _FakeQuery, but backed by a live reference to a growing list
+    (session.added) rather than a snapshot copy -- needed so a row added
+    earlier in the same test is actually findable via .get(id) later,
+    the way a real SQLAlchemy session's identity map would find it."""
+    def __init__(self, rows_ref, model_cls):
+        self._rows_ref = rows_ref
+        self._model_cls = model_cls
+
+    def get(self, _id):
+        for row in self._rows_ref:
+            if isinstance(row, self._model_cls) and getattr(row, 'id', None) == _id:
+                return row
+        return None
 
 
 class ServerCrashStillLoggedTests(unittest.TestCase):
@@ -184,6 +213,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         session = _RecordingSession()
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -199,6 +229,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del EchomailPollLog.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(poll_logs), 1,
@@ -237,6 +268,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         session = _RecordingSession()
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -250,6 +282,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del EchomailPollLog.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(poll_logs), 1)

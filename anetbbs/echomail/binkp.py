@@ -207,10 +207,25 @@ def _sanitize_inbound_filename(raw: str) -> str:
     return name
 
 
-def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
+def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
+                      packet_password: str = '',
+                      default_crash: bool = False,
+                      default_hold: bool = False,
+                      default_direct: bool = False) -> bytes:
     """
     Produce a minimal FTS-0001 Type-2+ .pkt file containing *messages*.
     *messages* is a list of EchomailMessage ORM objects.
+
+    `packet_password` is the FTS-0001 packet-HEADER password (distinct
+    from the BinkP session password) -- NUL-padded/truncated to 8 ASCII
+    bytes on the wire.
+
+    `default_crash`/`default_hold`/`default_direct` are per-network
+    defaults (EchomailNetwork.default_crash/default_hold/default_direct)
+    ORed into every outbound netmail message's attribute bits alongside
+    any explicit per-message flag already set on it. `default_direct`
+    has no FTS-0001 bit of its own -- see EchomailNetwork's own comment
+    in models.py -- so it sets the Crash bit too.
     """
     def _parse_ftn(addr):
         try:
@@ -276,6 +291,12 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
     PROD_CODE_HI = 0x00
     PROD_REV_MIN = 0x01
     CAP_WORD     = 0x0001
+    # NUL-padded ASCII, exactly 8 bytes -- FTS-0001's header field is a
+    # fixed-width slot, not length-prefixed. Longer configured passwords
+    # are silently truncated rather than raising, since a working (if
+    # truncated) packet is better than a hard failure on every poll.
+    pkt_pw_bytes = (packet_password or '').encode('ascii', errors='ignore')[:8]
+    pkt_pw_bytes = pkt_pw_bytes.ljust(8, b'\x00')
     fmt = '<HH HHHHHH HH HH BB 8s HH HH BB H HH HH I'
     header = struct.pack(
         fmt,
@@ -286,7 +307,7 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
         2,                                         # packet_type
         on, dn,                                    # orig_net, dest_net
         PROD_CODE_LO, FTSC_REV,
-        b'\x00' * 8,                               # password
+        pkt_pw_bytes,                               # password
         oz, dz,                                    # zones
         0, CAP_WORD,                               # aux_net, cap_validate
         PROD_CODE_HI, PROD_REV_MIN,
@@ -349,9 +370,15 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str) -> bytes:
         attr = 0
         if is_netmail:
             attr |= ATTR_PRIVATE
-        if getattr(msg._nm if hasattr(msg, '_nm') else msg, 'is_crash', False):
+        _nm_msg = msg._nm if hasattr(msg, '_nm') else msg
+        # Crash/Hold/Direct are netmail delivery-flavor concepts (FTN
+        # convention has no per-message meaning for them on echomail area
+        # posts) -- the network-level defaults below only apply here too.
+        msg_crash = is_netmail and getattr(_nm_msg, 'is_crash', False)
+        msg_hold = is_netmail and getattr(_nm_msg, 'is_hold', False)
+        if is_netmail and (msg_crash or default_crash or default_direct):
             attr |= ATTR_CRASH
-        if getattr(msg._nm if hasattr(msg, '_nm') else msg, 'is_hold', False):
+        if is_netmail and (msg_hold or default_hold):
             attr |= ATTR_HOLD
 
         # Re-use any kludges that came in with the message (e.g. when
@@ -730,7 +757,9 @@ class BinkPClient:
     def __init__(self, host: str, port: int, our_address: str,
                  hub_address: str, password: str = '', timeout: int = 60,
                  use_tls: bool = False, domain: str = None,
-                 transcript: list = None):
+                 transcript: list = None, packet_password: str = '',
+                 default_crash: bool = False, default_hold: bool = False,
+                 default_direct: bool = False):
         self.host = host
         self.port = port
         self.our_address = our_address
@@ -738,6 +767,13 @@ class BinkPClient:
         self.password = password
         self.timeout = timeout
         self.use_tls = use_tls
+        # FTS-0001 packet-HEADER password + per-network netmail flavor
+        # defaults -- distinct from `password` above, which is the BinkP
+        # SESSION auth secret. See EchomailNetwork's own model comment.
+        self.packet_password = packet_password
+        self.default_crash = default_crash
+        self.default_hold = default_hold
+        self.default_direct = default_direct
         # Per FSP-1028 the FTN domain must match [a-z0-9_~-]+, ≤8 chars.
         # Strip illegal chars from a human-readable network name.
         import re as _re
@@ -1366,7 +1402,12 @@ class BinkPClient:
         """
         if not messages:
             return 0
-        pkt_data = _build_ftn_packet(messages, self.our_address, self.hub_address)
+        pkt_data = _build_ftn_packet(
+            messages, self.our_address, self.hub_address,
+            packet_password=self.packet_password,
+            default_crash=self.default_crash,
+            default_hold=self.default_hold,
+            default_direct=self.default_direct)
         # Conventional FTN packet-naming style (8-hex-digit timestamp,
         # e.g. binkd/SBBSecho/Mystic all use this) rather than a
         # decimal, prefixed name -- purely cosmetic/compliance, flagged

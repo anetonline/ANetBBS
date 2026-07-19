@@ -33,7 +33,7 @@
             </thead>
             <tbody>
                 {% for log in logs %}
-                <tr>
+                <tr data-status="{{ log.status }}" {% if log.status == 'running' %}class="table-warning"{% endif %}>
                     <td>{{ log.network.name }}</td>
                     <td style="font-size:0.8rem; white-space:nowrap;">{{ log.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                     <td style="font-size:0.8rem; white-space:nowrap;">
@@ -43,6 +43,9 @@
                     <td>
                         {% if log.status == 'success' %}<span style="color:#00ff00;">✓ success</span>
                         {% elif log.status == 'error' %}<span style="color:#ff0000;">✗ error</span>
+                        {% elif log.status == 'running' %}
+                            <span style="color:#ffff00; font-weight:bold;">🔄 in progress</span>
+                            <span class="live-elapsed small text-muted" data-started="{{ log.started_at.isoformat() }}Z"></span>
                         {% else %}<span style="color:#ffff00;">~ {{ log.status }}</span>{% endif %}
                     </td>
                     <td>{{ log.messages_sent or 0 }}</td>
@@ -54,7 +57,14 @@
                     <td style="white-space:nowrap;">
                         {% if log.transcript %}
                         <a href="{{ url_for('echomail_admin.poll_log_transcript', log_id=log.id) }}"
-                           class="btn btn-sm btn-outline-secondary" title="Full BinkP session transcript">
+                           class="btn btn-sm btn-outline-secondary"
+                           title="{{ 'Partial transcript — poll still in progress' if log.status == 'running' else 'Full BinkP session transcript' }}">
+                            <i class="bi bi-file-text"></i>
+                            {{ 'Transcript (partial)' if log.status == 'running' else 'Transcript' }}
+                        </a>
+                        {% elif log.status == 'running' %}
+                        <a href="{{ url_for('echomail_admin.poll_log_transcript', log_id=log.id) }}"
+                           class="btn btn-sm btn-outline-secondary" title="No transcript captured yet">
                             <i class="bi bi-file-text"></i> Transcript
                         </a>
                         {% endif %}
@@ -100,4 +110,48 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Live "started Xs ago" ticker for in-progress polls, plus a periodic
+// re-fetch of just this table (no full page reload/scroll-jump) while
+// any poll is still running -- matches the fetch()+setInterval pattern
+// already used by the Service Control Center (admin/control.html),
+// deliberately not introducing SocketIO just for this.
+(function () {
+    function tickElapsed() {
+        document.querySelectorAll('.live-elapsed').forEach(function (el) {
+            var started = new Date(el.dataset.started);
+            var secs = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+            var mins = Math.floor(secs / 60);
+            el.textContent = mins > 0 ? ('(' + mins + 'm ' + (secs % 60) + 's ago)')
+                                       : ('(' + secs + 's ago)');
+        });
+    }
+    tickElapsed();
+    setInterval(tickElapsed, 1000);
+
+    function hasRunningPoll() {
+        return !!document.querySelector('tr[data-status="running"]');
+    }
+
+    function refreshTable() {
+        if (!hasRunningPoll()) return;
+        fetch(window.location.href, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var newTbody = doc.querySelector('table tbody');
+                var curTbody = document.querySelector('table tbody');
+                if (newTbody && curTbody) {
+                    curTbody.innerHTML = newTbody.innerHTML;
+                    tickElapsed();
+                }
+            })
+            .catch(function () { /* best-effort; try again next interval */ });
+    }
+    if (hasRunningPoll()) {
+        setInterval(refreshTable, 5000);
+    }
+})();
+</script>
 {% endblock %}

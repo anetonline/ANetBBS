@@ -1516,6 +1516,58 @@ def file_areas_admin():
     return render_template('admin/file_areas.html', areas=areas, networks=networks)
 
 
+@admin_bp.route('/file-areas/bulk', methods=['POST'])
+@login_required
+@admin_required
+def file_areas_bulk():
+    """Apply one action to every selected file area at once — previously
+    sysops had to edit/delete areas one at a time. Mirrors the existing
+    /users/bulk pattern. area_ids come from checkboxes tied to this form
+    via HTML's form= attribute (each area still lives inside its own
+    individual edit/delete <form>, so the checkboxes can't be direct
+    children of this one without invalid nested <form> markup)."""
+    from ..models import FileArea
+    bulk_action = request.form.get('bulk_action')
+    area_ids = request.form.getlist('area_ids', type=int)
+
+    if not area_ids:
+        flash('No file areas selected.', 'warning')
+        return redirect(url_for('admin.file_areas_admin'))
+
+    areas = FileArea.query.filter(FileArea.id.in_(area_ids)).all()
+
+    if bulk_action == 'delete':
+        count = len(areas)
+        for fa in areas:
+            db.session.delete(fa)
+        db.session.commit()
+        flash(f'Deleted {count} file area(s). Files on disk were NOT removed.', 'success')
+    elif bulk_action == 'enable':
+        for fa in areas:
+            fa.is_active = True
+        db.session.commit()
+        flash(f'Enabled {len(areas)} file area(s).', 'success')
+    elif bulk_action == 'disable':
+        for fa in areas:
+            fa.is_active = False
+        db.session.commit()
+        flash(f'Disabled {len(areas)} file area(s).', 'success')
+    elif bulk_action == 'subscribe':
+        for fa in areas:
+            fa.is_subscribed = True
+        db.session.commit()
+        flash(f'Subscribed to {len(areas)} file area(s).', 'success')
+    elif bulk_action == 'unsubscribe':
+        for fa in areas:
+            fa.is_subscribed = False
+        db.session.commit()
+        flash(f'Unsubscribed from {len(areas)} file area(s).', 'success')
+    else:
+        flash('Unknown bulk action.', 'danger')
+
+    return redirect(url_for('admin.file_areas_admin'))
+
+
 @admin_bp.route('/file-areas/networks/<int:network_id>/subscribe_all',
                 methods=['POST'])
 @login_required
