@@ -1,7 +1,12 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.162`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.163`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.163 — Who's Online font-path leak + "Default Theme" fixes (July 2026)
+
+- FIX: Who's Online sometimes showed a user "on" /static/fonts/Ac437_IBM_VGA_9x16.woff instead of their real page — a lazily-loaded font fetch could be the last request recorded for a session. Static asset requests no longer update presence.
+- FIX: setting a theme as the site's "Default Theme" in Admin had no effect — nothing ever read that flag. Both the web UI and terminal UI now actually fall back to it, and their "Default" theme-picker labels show which theme that really is instead of a hardcoded "Classic Green".
 
 ## v1.0b2.162 — Tagline picker selection visibility: give up on reverse-video (July 2026)
 

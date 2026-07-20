@@ -107,6 +107,19 @@ def create_app(config_name=None):
         from flask_login import current_user
         from flask import request
         if current_user.is_authenticated:
+            # Skip static-asset requests (fonts/CSS/JS/images) entirely --
+            # browsers fetch these on their own schedule (a font in
+            # particular often loads lazily, well after the real page
+            # request), so a static fetch can easily be the LAST request
+            # this session made. Without this guard, /who/ (sysops see the
+            # raw path) would sometimes show a user "on"
+            # /static/fonts/Ac437_IBM_VGA_9x16.woff instead of whatever
+            # page they're actually on -- reported live. `request.endpoint
+            # == 'static'` is Flask's own built-in static-route endpoint
+            # name, not a path string match, so this can't be fooled by a
+            # real route that merely starts with /static.
+            if request.endpoint == 'static':
+                return
             session = UserSession.query.filter_by(user_id=current_user.id).first()
             if session is None:
                 session = UserSession(user_id=current_user.id)
@@ -127,6 +140,32 @@ def create_app(config_name=None):
         per-request cost is just a dict lookup."""
         from .version import VERSION
         return {'anetbbs_version': VERSION}
+
+    @app.context_processor
+    def _inject_effective_theme():
+        """Resolve which Theme should actually be applied this request.
+
+        Admin's "Default Theme" checkbox (Theme.is_default) correctly
+        toggled on/off in the DB, but nothing ever READ it — base.html
+        only ever applied `current_user.theme`, which is None for any
+        user who never explicitly picked one (including every new
+        signup) and for every logged-out visitor. Setting a new default
+        in admin therefore visibly saved but never changed what anyone
+        actually saw -- reported live ("when you set the 'default
+        theme' it does not make a difference. it does not change the
+        default"). base.html now uses `effective_theme` (this) instead
+        of `current_user.theme` directly: a signed-in user's own pick
+        still wins if they have one, otherwise this falls back to
+        whichever Theme has is_default=True, for BOTH logged-in users
+        without a personal choice and logged-out visitors.
+        """
+        from flask_login import current_user
+        try:
+            if current_user.is_authenticated and current_user.theme:
+                return {'effective_theme': current_user.theme}
+            return {'effective_theme': Theme.query.filter_by(is_default=True, is_active=True).first()}
+        except Exception:
+            return {'effective_theme': None}
 
     @app.context_processor
     def inject_online_count():

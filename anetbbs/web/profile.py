@@ -66,9 +66,18 @@ class UpdateProfileForm(FlaskForm):
     def __init__(self, original_email, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.original_email = original_email
-        # Populate theme choices
+        # Populate theme choices. Choice 0 (theme_id=None) means "use
+        # whatever the site's admin-configured default is" -- label it
+        # with that theme's actual name rather than a hardcoded
+        # "Classic Green", which used to be a lie whenever admin had set
+        # a different Theme.is_default (the picker said Classic Green,
+        # the page rendered something else). Falls back to "Classic
+        # Green" only when no theme is marked default, matching the
+        # unstyled :root CSS base.html renders in that case.
         themes = Theme.query.filter_by(is_active=True).all()
-        self.theme_id.choices = [(0, 'Default (Classic Green)')] + [(t.id, t.display_name) for t in themes]
+        site_default = Theme.query.filter_by(is_default=True, is_active=True).first()
+        default_label = f'Site Default: {site_default.display_name}' if site_default else 'Site Default: Classic Green'
+        self.theme_id.choices = [(0, default_label)] + [(t.id, t.display_name) for t in themes]
 
     def validate_email(self, field):
         """Check if email is already taken by another user"""

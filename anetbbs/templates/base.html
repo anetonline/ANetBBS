@@ -311,19 +311,19 @@
         }
     </style>
 
-    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active %}
+    {% if effective_theme and effective_theme.is_active %}
     <style id="user-theme">
     :root {
-      {% for key, value in (current_user.theme.css_variables | from_json).items() %}
+      {% for key, value in (effective_theme.css_variables | from_json).items() %}
       {{ key }}: {{ value }};
       {% endfor %}
     }
     </style>
     {# Extended themes: load a full override stylesheet when the theme marks itself #}
-    {% if current_user.theme.css_variables and '"--theme-stylesheet"' in current_user.theme.css_variables %}
-      {% if '"enhanced"' in current_user.theme.css_variables %}
+    {% if effective_theme.css_variables and '"--theme-stylesheet"' in effective_theme.css_variables %}
+      {% if '"enhanced"' in effective_theme.css_variables %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/enhanced_theme.css') }}">
-      {% elif '"hackers"' in current_user.theme.css_variables %}
+      {% elif '"hackers"' in effective_theme.css_variables %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/hackers_theme.css') }}">
       {% endif %}
     {% endif %}
@@ -537,7 +537,7 @@
                         </li>
                     {% endif %}
                     {# Hackers (1995) secret easter egg — only visible with the Hackers theme #}
-                    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active and current_user.theme.css_variables and '"hackers"' in current_user.theme.css_variables %}
+                    {% if effective_theme and effective_theme.is_active and effective_theme.css_variables and '"hackers"' in effective_theme.css_variables %}
                     <li class="nav-item">
                         <a class="nav-link htp-trigger" href="#" data-bs-toggle="modal" data-bs-target="#hackThePlanetModal" title="...">HACK THE PLANET</a>
                     </li>
@@ -593,7 +593,7 @@
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-    {% if current_user.is_authenticated and current_user.theme and current_user.theme.is_active and current_user.theme.css_variables and '"hackers"' in current_user.theme.css_variables %}
+    {% if effective_theme and effective_theme.is_active and effective_theme.css_variables and '"hackers"' in effective_theme.css_variables %}
     <!-- HACKERS (1995) tribute modal -->
     <div class="modal fade" id="hackThePlanetModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">

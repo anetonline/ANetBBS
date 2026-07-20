@@ -3966,7 +3966,9 @@ async def _edit_profile_field(self, kind, attr, label):
     elif kind == 'theme':
         with _app().app_context():
             themes = Theme.query.filter_by(is_active=True).order_by(Theme.name).all()
-            choices = [('Default (Classic Green)', None)] + [
+            site_default = Theme.query.filter_by(is_default=True, is_active=True).first()
+            default_label = f'Site Default: {site_default.display_name}' if site_default else 'Site Default: Classic Green'
+            choices = [(default_label, None)] + [
                 (t.display_name, t.id) for t in themes]
         picked, value = await self._pick_choice('Pick a Theme', choices)
         if picked:
@@ -4025,7 +4027,8 @@ async def _edit_profile(self):
             u = User.query.get(self.session.user['id'])
             if not u:
                 return None
-            theme_name = 'Default (Classic Green)'
+            site_default = Theme.query.filter_by(is_default=True, is_active=True).first()
+            theme_name = f'Site Default: {site_default.display_name}' if site_default else 'Site Default: Classic Green'
             if u.theme_id:
                 t = Theme.query.get(u.theme_id)
                 if t:

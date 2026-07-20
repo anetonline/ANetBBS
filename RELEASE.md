@@ -1,3 +1,10 @@
+# ANetBBS v1.0b2.163 — Who's Online font-path leak + "Default Theme" fixes (July 2026)
+
+- FIX: Who's Online sometimes showed a user "on" /static/fonts/Ac437_IBM_VGA_9x16.woff instead of their real page — a lazily-loaded font fetch could be the last request recorded for a session. Static asset requests no longer update presence.
+- FIX: setting a theme as the site's "Default Theme" in Admin had no effect — nothing ever read that flag. Both the web UI and terminal UI now actually fall back to it, and their "Default" theme-picker labels show which theme that really is instead of a hardcoded "Classic Green".
+
+---
+
 # ANetBBS v1.0b2.162 — Tagline picker selection visibility: give up on reverse-video (July 2026)
 
 Third attempt at the same bug, reported live each time via screenshot: the selected row in the tagline picker was still invisible after both (1) adding an explicit color to compete with the reverse-video highlight, and (2) removing that color to match every other lightbar row's convention of relying on reverse-video alone. Both were still invisible on the user's terminal (SyncTERM), which means reverse-video + bold itself doesn't render usably on that client, regardless of what color the row text has. Stopped guessing at the SGR interaction and sidestepped reverse-video for this row entirely: it now explicitly cancels the wrapper's escape codes and draws its own `> ` marker in a plain bright color instead, which doesn't depend on how any given client's reverse-video happens to interact with bold.
