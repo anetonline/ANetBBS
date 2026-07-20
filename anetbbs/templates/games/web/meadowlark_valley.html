@@ -1,0 +1,126 @@
+<link rel="stylesheet" href="{{ url_for('static', filename='css/meadowlark.css') }}">
+
+<div id="mlv-app">
+
+  <header id="topBar">
+    <h1>🌾 Meadowlark Valley</h1>
+    <div class="stat"><span class="stat-icon">💰</span><span id="statCash">$0</span></div>
+    <div class="stat"><span class="stat-icon">👥</span><span id="statPop">0</span></div>
+    <div class="stat"><span class="stat-icon">📅</span><span id="statDay">Day 1</span></div>
+    <div class="stat"><span class="stat-icon">🍂</span><span id="statSeason">Spring</span></div>
+    <div class="stat happiness-stat">
+      <span id="statHappiness">🙂 70%</span>
+      <div class="happiness-track"><div id="happinessBar" class="happiness-fill"></div></div>
+    </div>
+    <div class="stat tax-stat">
+      <label>Tax <span id="taxValue">9%</span></label>
+      <input type="range" id="taxSlider" min="0" max="25" value="9">
+    </div>
+    <div class="speed-controls">
+      <button class="speed-btn" data-speed="0" title="Pause">⏸</button>
+      <button class="speed-btn" data-speed="1" title="Normal">▶</button>
+      <button class="speed-btn" data-speed="2" title="Fast">▶▶</button>
+      <button class="speed-btn" data-speed="4" title="Very fast">▶▶▶</button>
+    </div>
+    <div class="camera-controls">
+      <button id="btnZoomOut" title="Zoom out">−</button>
+      <button id="btnZoomIn" title="Zoom in">+</button>
+      <button id="btnRecenter" title="Center on Town Hall">⌖</button>
+      <button id="btnMute" title="Toggle sound &amp; music">🔊</button>
+      <input type="range" id="volumeSlider" min="0" max="100" value="70" title="Volume" class="volume-slider">
+    </div>
+    <div class="view-mode-controls">
+      <button class="viewmode-btn active" data-mode="normal" title="Normal view">🗺</button>
+      <button class="viewmode-btn" data-mode="landvalue" title="Land Value overlay">💲</button>
+      <button class="viewmode-btn" data-mode="crime" title="Crime overlay">🚨</button>
+      <button class="viewmode-btn" data-mode="traffic" title="Traffic overlay">🚗</button>
+    </div>
+    <button id="btnStats" title="Town history graphs">📊</button>
+    <button id="btnCoop" title="Build together with friends">🤝</button>
+    <button id="btnHelp" title="How to play">❓</button>
+  </header>
+
+  <div id="statsModal" class="mlv-modal hidden">
+    <div class="mlv-modal-panel">
+      <div class="mlv-modal-header">
+        <h2>📊 Town History</h2>
+        <button id="btnCloseStats" class="mlv-modal-close">✕</button>
+      </div>
+      <canvas id="statsCanvas" width="640" height="320"></canvas>
+      <p class="mlv-modal-hint">Population (green) · Cash (gold) · Happiness (blue) over the last up to 200 simulated days.</p>
+    </div>
+  </div>
+
+  <div id="coopModal" class="mlv-modal hidden">
+    <div class="mlv-modal-panel">
+      <div class="mlv-modal-header">
+        <h2>🤝 Co-op</h2>
+        <button id="btnCloseCoop" class="mlv-modal-close">✕</button>
+      </div>
+      <div id="coopPanel"></div>
+    </div>
+  </div>
+
+  <div id="helpModal" class="mlv-modal hidden">
+    <div class="mlv-modal-panel mlv-help-panel">
+      <div class="mlv-modal-header">
+        <h2>❓ How to Play</h2>
+        <button id="btnCloseHelp" class="mlv-modal-close">✕</button>
+      </div>
+      <div class="mlv-help-body">
+        <p><strong>The basics:</strong> zone Houses/Shops/Farms, keep them powered, watered, and road-connected, and your town grows. Power Plants and Water Towers cover a radius around themselves — no wires to place, pure proximity. Town Hall gives a small free radius to bootstrap your first few houses.</p>
+        <p><strong>Tax:</strong> 0-25%, default 9%. A well-run town is sustainable at the default rate; above ~10% starts costing happiness. 0% is a real austerity choice, not a trap.</p>
+        <p><strong>Farmers:</strong> a Farm Plot is a real workplace — an assigned villager ("farmer") harvests the ripe crop automatically, credited straight to your treasury. An unstaffed farm still works the old way: click it when ripe.</p>
+        <p><strong>Villagers:</strong> spawn based on population, each with a home and (if a job's available) a workplace, commuting on a daily schedule. Click one to see their name, mood, and job.</p>
+        <p><strong>View modes:</strong> the map buttons next to Normal switch to Land Value, Crime, and Traffic overlays — scout where to build next before you commit cash.</p>
+        <p><strong>Disasters:</strong> fires (Fire Station reduces damage), storms (temporary happiness dip), droughts (slower farm growth), and vandalism (Police Station reduces it, only starts once your town is big enough to build one).</p>
+        <p><strong>Saves:</strong> 3 slots tied to your account, autosaves every ~30s to whichever slot you last used.</p>
+        <p><strong>Co-op:</strong> click 🤝 to host a room (get a share code) or join a friend's with theirs — one player's town is the shared one everyone builds on, in real time.</p>
+      </div>
+    </div>
+  </div>
+
+  <main id="mainArea">
+    <aside id="sidePanel">
+      <div class="cat-tabs">
+        <button class="cat-tab active" data-cat="zone">Zones</button>
+        <button class="cat-tab" data-cat="infra">Roads</button>
+        <button class="cat-tab" data-cat="service">Services</button>
+        <button class="cat-tab" data-cat="deco">Decor</button>
+      </div>
+      <div id="buildButtons" class="build-list"></div>
+      <button id="btnBulldoze" class="bulldoze-btn">🔨 Bulldoze</button>
+
+      <div id="infoPanel" class="info-panel"><h3>Meadowlark Valley</h3><p>Click a tile (or a villager!) to see details, or select a tool and click the map to build.</p></div>
+
+      <div class="log-panel">
+        <h4>Town Log</h4>
+        <ul id="logList"></ul>
+      </div>
+    </aside>
+
+    <div id="canvasWrap">
+      <canvas id="gameCanvas"></canvas>
+      <canvas id="minimapCanvas" title="Click to jump the camera"></canvas>
+    </div>
+  </main>
+
+  <footer id="bottomBar">
+    <div id="slotPicker" class="slot-picker"></div>
+    <button id="btnSave">💾 Save</button>
+    <button id="btnLoad">📂 Load</button>
+    <button id="btnNewGame">🆕 New Game</button>
+    <span class="hint">Tip: right-drag or arrow keys to pan, scroll wheel to zoom, keys 1-9/0 pick a tool. Build a road, a Power Plant, and a Water Tower first — houses only grow when powered, watered, and road-connected. Farms with a farmer harvest automatically once ripe. Click 🤝 to build together with friends.</span>
+  </footer>
+
+  <div id="mlvToasts"></div>
+</div>
+
+<script src="{{ url_for('static', filename='js/meadowlark/data.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/sound.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/npc.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/simulation.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/ui.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meadowlark/main.js') }}"></script>

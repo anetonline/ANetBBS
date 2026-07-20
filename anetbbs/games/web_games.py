@@ -198,6 +198,19 @@ WEB_GAMES = [
         'web_game_module': 'ebooks',
         'sort_order': 190,
     },
+    {
+        'name': 'Meadowlark Valley',
+        'slug': 'meadowlark-valley',
+        'description': 'An original town/farm-builder sim. Zone houses and shops, '
+                       'keep the lights and water on, balance taxes against '
+                       'happiness, and watch your villagers go about their day. '
+                       '3 save slots tied to your account, plus co-op building '
+                       'with friends.',
+        'category': 'strategy',
+        'icon': 'bi-buildings',
+        'web_game_module': 'meadowlark_valley',
+        'sort_order': 200,
+    },
 ]
 
 

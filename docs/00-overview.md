@@ -78,3 +78,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [21 — Scheduled events (cron-style maintenance jobs)](21-scheduled-events.md)
 - [22 — Running ANetBBS in Docker](22-containers.md)
 - [23 — Webhooks (outbound event notifications)](23-webhooks.md)
+- [24 — Game Center (built-in web games catalog)](24-game-center.md)

@@ -342,6 +342,7 @@ def create_app(config_name=None):
     from .web.games import games_bp
     from .web.games_admin import games_admin_bp
     from .web.ebooks import ebooks_bp
+    from .web.meadowlark import meadowlark_bp
     from .web.gallery import gallery_bp
     from .web.gallery_admin import gallery_admin_bp
     from .web.rss import rss_bp, redirect_bp
@@ -418,6 +419,7 @@ def create_app(config_name=None):
     app.register_blueprint(games_bp)
     app.register_blueprint(games_admin_bp)
     app.register_blueprint(ebooks_bp)
+    app.register_blueprint(meadowlark_bp)
     app.register_blueprint(gallery_bp)
     app.register_blueprint(gallery_admin_bp)
     app.register_blueprint(rss_bp)

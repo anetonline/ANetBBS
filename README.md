@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.163`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.167`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.163.tar.gz
-cd ANetBBS-v1.0b2.163
+tar xzf ANetBBS-v1.0b2.167.tar.gz
+cd ANetBBS-v1.0b2.167
 sudo bash install.sh
 ```
 
@@ -39,8 +39,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0b2.163.tar.gz
-cd ANetBBS-v1.0b2.163
+tar xzf ANetBBS-v1.0b2.167.tar.gz
+cd ANetBBS-v1.0b2.167
 sudo bash update.sh
 ```
 
@@ -108,6 +108,15 @@ buildx` once there's a registry to publish to.
   16-color SGR → HTML spans)
 
 ### Doors
+- **Game Center** — 20 built-in browser games (puzzle, action, cards/
+  casino, strategy, RPG) playable with no telnet client or per-game
+  setup: Hangman, Trivia, Number Guesser, Snake, Tic Tac Toe, Memory
+  Match, Typing Speed Test, Minesweeper, 2048, a text adventure,
+  Klondike Solitaire, Video Poker, Texas Hold'em, Blackjack, Slot
+  Machines, Galaga, Tetris, Breakout, an Ebook Reader (Project
+  Gutenberg), and **Meadowlark Valley** — an original town/farm-builder
+  sim with auto-harvesting farmer NPCs and real-time co-op building.
+  See [docs/24-game-center.md](docs/24-game-center.md).
 - DOSBox-staging / dosbox-x / vanilla DOSBox auto-detect, TCP nullmodem
   bridge to the user's PTY
 - Mystic Pascal Script (`.mps`) and Mystic Python (`.mpy`) doors
@@ -129,7 +138,7 @@ buildx` once there's a registry to publish to.
 - Full collaborative wiki at `/wiki/` with markdown bodies, `[[Page]]`
   cross-links, per-page revision history, unified-diff compare,
   revert, full-text search, recent changes, wanted/orphan pages
-- 48 seeded pages cover connecting, every messaging subsystem, doors
+- 51 seeded pages cover connecting, every messaging subsystem, doors
   (including a LORD recipe + the DosBridge), echomail/BinkP setup,
   NodeSpy, backup, full architecture, sysop guide, glossary, FAQ
 - Anyone can read; logged-in users can edit (configurable minimum post count + account age); admins can lock/delete/rename

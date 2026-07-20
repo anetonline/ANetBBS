@@ -1,7 +1,31 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.163`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.167`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.167 — Meadowlark Valley: volume control (July 2026)
+
+- FEATURE: a volume slider next to the mute button sets a master volume (0-100%) for every sound effect and the ambient music, independent of mute — muting/unmuting restores whatever volume was last set.
+
+## v1.0b2.166 — Meadowlark Valley code review + game docs (July 2026)
+
+- FIX: Fire Station's real fire-coverage radius had silently drifted to match Police's widened radius instead of its own stated 5 tiles — now derived consistently for every building type.
+- FIX: a farm's single job slot could get double-booked by multiple villagers over time, and villagers with no reachable road to their job were still counted as employed.
+- FIX: co-op autosave could silently overwrite a guest's own save slot with the host's town; a guest's own placements could briefly show a phantom building before the host's correction arrived.
+- FEATURE: in-game Help (❓) explaining the mechanics; info panel now shows a farm's assigned farmer.
+- DOCS: new wiki pages for the Game Center, Ebook Reader, and Meadowlark Valley; a new sysop-facing games catalog doc; fixed a stale reference to a game that doesn't exist.
+
+## v1.0b2.165 — Meadowlark Valley: sidebar overlap fix + auto-harvesting farmers (July 2026)
+
+- FIX: the Services/Zones sidebar rendered every section on top of each other on shorter screens — reported live via screenshot. A flexbox default let sections shrink below their own content instead of the sidebar scrolling.
+- FEATURE: Farm Plots now employ a farmer (like a Shop or Factory) who harvests the crop automatically the day it ripens, credited straight to your treasury. Unstaffed farms still work exactly like before — click to harvest.
+
+## v1.0b2.164 — Meadowlark Valley: ANetBBS web game + co-op, tax/vandalism balance fixes (July 2026)
+
+- FEATURE: Meadowlark Valley (the town/farm-builder sim) is now a full Game Center entry — server-side save/load tied to your account (3 slots), no more import/export files.
+- FEATURE: Co-op mode — host a room, share a code, build the same town together with friends in real time.
+- FIX: default tax rate was a guaranteed slow bankruptcy for any real town; rebalanced so default tax roughly breaks even and higher tax genuinely pays off, instead of max tax being the only way to survive.
+- FIX: vandalism could start before Police Stations even unlock, and extra stations barely helped a spread-out town; both fixed.
 
 ## v1.0b2.163 — Who's Online font-path leak + "Default Theme" fixes (July 2026)
 

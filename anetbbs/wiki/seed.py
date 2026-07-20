@@ -172,6 +172,8 @@ in plumbing. Below is the full feature inventory.
 
 ## Doors
 
+- [[games|Game Center]] — 20 built-in browser games (puzzle, action,
+  cards/casino, strategy, RPG) plus terminal doors, all in one lobby
 - [[Doors]] — door game subsystem driving:
   - Native Synchronet (over rlogin)
   - DOS doors via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge
@@ -201,7 +203,7 @@ in plumbing. Below is the full feature inventory.
 - Image Gallery
 - Stats — site activity, top users, leaderboards
 - Nodelist — FidoNet/network nodelist browser
-- **Ebook Reader** — search and read free public-domain books
+- [[ebooks|Ebook Reader]] — search and read free public-domain books
   (Project Gutenberg, via the Gutendex API) in the web or terminal UI
 - This wiki (`/wiki/`)
 
@@ -828,7 +830,7 @@ fake COM port; today there's a wider menagerie.
 
 | Type | What it is | Typical example |
 |------|------------|------------------|
-| `builtin_web` | Native HTML/JS — runs in the browser, no shell-out | 2048, Wordle |
+| `builtin_web` | Native HTML/JS — runs in the browser, no shell-out | 2048, Tetris, Meadowlark Valley |
 | `door_rlogin` | Outbound rlogin to a remote BBS's own game server | LORD, TradeWars on a partner BBS |
 | `door_telnet` | Outbound telnet to a remote game server, no pre-auth handshake | TWGS (Trade Wars Game Server) |
 | `door_dos` | DOS executable via [DOSBox-staging](https://dosbox-staging.github.io/) + TCP nullmodem bridge | LORD locally |
@@ -3610,6 +3612,194 @@ next alpha.
 
 The authoritative deep-dive is at [`docs/17-development.md`](/docs/17-development).
 This wiki page is the lightweight community-editable companion.
+"""),
+
+    # ------------------------------------------------------------------
+    ('games', 'Game Center', """
+# Game Center
+
+The Game Center (`/games/`) is every built-in browser game in one
+place — no telnet client, no per-game setup, just log in and click
+Play. Most games track your score on a shared leaderboard
+(`/games/scoreboard`).
+
+## Puzzle
+
+- **Hangman** — guess the hidden word one letter at a time before the
+  hangman is fully drawn.
+- **Trivia Challenge** — multiple-choice questions across categories.
+- **Number Guesser** — a number 1-100, guess it in as few tries as
+  you can.
+- **Memory Match** — flip cards, find the matching pairs.
+- **Minesweeper** — clear the minefield without triggering a mine.
+- **2048** — slide and merge tiles to reach the 2048 tile.
+- **Tetris** — falling blocks with ghost piece, hard drop, and
+  wall-kick rotation.
+
+## Action
+
+- **Snake** — eat, grow, don't hit the walls.
+- **Galaga** — arcade shooter, waves of aliens, dive-bombing bosses.
+- **Breakout** — Arkanoid-style brick breaker with power-ups (wide
+  paddle, multi-ball, laser cannon).
+
+## Strategy
+
+- **Tic Tac Toe** — against a real AI opponent, not a coin flip.
+- **[[Meadowlark Valley]]** — an original town/farm-builder sim, by
+  far the deepest game in the Center. Has its own wiki page.
+
+## Cards & Casino
+
+- **Klondike Solitaire** — drag-and-drop, build all four suits Ace to
+  King.
+- **Video Poker** — Jacks or Better, with a full paytable.
+- **Texas Hold'em** — no-limit, up to 4 CPU opponents (Easy, Medium,
+  or Hard).
+- **Blackjack** — hit, stand, double down, split.
+- **Slot Machines** — three themed machines: Classic Bars, Lucky
+  Fruits, Retro BBS.
+
+Blackjack, Video Poker, Hold'em, and Slots share a play-money wallet
+economy — a starting balance per game that resets every Monday if you
+go broke. See [[Doors]] for how that's implemented.
+
+## RPG & other
+
+- **Text Adventure** — a classic parser-based dungeon crawl (`go
+  north`, `take key`, `look`, ...).
+- **[[ebooks|Ebook Reader]]** — search and read free public-domain
+  classics from Project Gutenberg, with bookmarks and reading history.
+  Has its own wiki page.
+- **Typing Speed Test** — measure your WPM against a passage.
+
+## Terminal doors (not in the browser Game Center)
+
+Not everything is a web game. **ANetCRAFT** (a bundled
+Minecraft-inspired survival game), **LORD** (Legend of the Red
+Dragon), and shareware **DOOM**/**Duke Nukem 3D** (playable in-browser
+via an emulator, no telnet/SSH needed) are classic doors, launched the
+same way any other door is. Full rundown: [[Doors]].
+
+## Something broken?
+
+Message {sysop_name} — game bugs get fixed fast around here.
+"""),
+
+    # ------------------------------------------------------------------
+    ('ebooks', 'Ebook Reader', """
+# Ebook Reader
+
+A built-in reader for free, public-domain books — no downloads, no
+account on some other site, just search and start reading. Lives in
+the [[games|Game Center]] alongside the rest of the built-in games,
+in both the web UI and the terminal.
+
+## What it does
+
+- Searches Project Gutenberg's catalog (via the Gutendex API) by
+  title or author.
+- A curated shelf of well-known classics for instant browsing without
+  searching first (Pride and Prejudice, Frankenstein, Dracula, Alice
+  in Wonderland, Sherlock Holmes, Moby Dick, A Tale of Two Cities,
+  and more).
+- Clean, book-styled reading view with chapter navigation.
+- Bookmarks and reading history — pick up where you left off.
+- Download the cached text as a plain `.txt` file.
+
+## Where
+
+- Web: Game Center → Ebook Reader.
+- Terminal: same feature, text-mode reading view, from the main menu.
+
+Both share the same bookmarks/history — start a book on the web,
+finish it in the terminal, or the other way around.
+"""),
+
+    # ------------------------------------------------------------------
+    ('meadowlark-valley', 'Meadowlark Valley', """
+# Meadowlark Valley
+
+An original town + farm building sim, built entirely for {bbs_name} —
+not affiliated with, based on, or copying any commercial game. Find
+it in the [[games|Game Center]] under Strategy.
+
+## The basics
+
+You start with a Town Hall, 60x45 tiles of open land, and $1,500.
+Zone houses, shops, and farms; keep the lights and water on; balance
+taxes against happiness; and watch your villagers actually walk to
+work and back on a daily schedule.
+
+- **Roads** connect everything — houses/shops/farms need road access
+  to grow or hire.
+- **Power Plant** and **Water Tower** cover a radius around
+  themselves (no wires/pipes to place — pure proximity). Town Hall
+  gives a small free radius too, enough to bootstrap your first few
+  houses before you can afford real utilities.
+- **Tax rate** (0-25%, default 9%) funds services but a rate much
+  above 10% starts denting happiness. A well-run town is sustainable
+  at the default rate; running at 0% is a real (if harsh) austerity
+  choice, not a trap.
+- **Population milestones** unlock new buildings as your town grows —
+  Factories at 20, Clinics/Police/Fire at 30, Schools/Parks at 50, and
+  on up through Universities, Malls, Stadiums.
+
+## Villagers
+
+NPCs spawn based on population, each with a generated name, a home,
+and (if a job is available) an assigned workplace — they path along
+the real road network on a daily commute: to work, work in place,
+back home, wander near home overnight. Click a villager to see their
+name, mood, and employment status.
+
+## Farmers
+
+Farm Plots are a real workplace, same as a Shop or Factory. An NPC
+assigned to a farm — a "farmer" — harvests the crop automatically the
+day it ripens, no click needed, credited straight to your treasury
+and named in the Town Log. An unstaffed farm (no population/villagers
+assigned yet) still works exactly like it always did: click a ripe
+farm to harvest it yourself.
+
+## View modes
+
+Beyond the normal map view, three data overlays help you scout where
+to build next, SimCity-style:
+
+- **Land Value** — green (desirable) to red (undesirable), boosted by
+  parks/civic buildings, hurt by factories and heavy traffic.
+- **Crime** — house-by-house crime risk, sharply reduced by nearby
+  Police Station coverage (plus a smaller town-wide reduction for
+  every station you've built).
+- **Traffic** — road congestion near each tile.
+
+## Disasters & events
+
+Random fires (reduced by Fire Station coverage), storms (temporary
+happiness dip), droughts (slower farm growth), and vandalism
+(reduced by Police coverage, only starts once your town is big enough
+to actually build a station) keep a long-running town from being
+purely a spreadsheet.
+
+## Saves
+
+3 save slots, tied to your ANetBBS account — no import/export files,
+your progress just lives on your account. Autosaves every ~30 seconds
+to whichever slot you last used.
+
+## Co-op — build with friends
+
+Click the 🤝 button to host a room (you get a short share code) or
+join a friend's room with their code. One player's town is the shared
+one everyone builds on — real-time, no turns. Leaving the co-op panel
+and building solo again is one click away (Leave Room).
+
+## Reference
+
+The authoritative deep-dive (every constant, every fix, every known
+limitation) lives in the game's own `README.md` in its source
+repository — this wiki page is the player-facing summary.
 """),
 ]
 

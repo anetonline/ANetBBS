@@ -3363,3 +3363,38 @@ class EbookReadingHistory(db.Model):
 
     def __repr__(self):
         return f'<EbookReadingHistory {self.source}:{self.source_id} user={self.user_id}>'
+
+
+class MeadowlarkSave(db.Model):
+    """Per-user save slot for the Meadowlark Valley town-builder web game.
+    Mirrors the standalone (pre-migration) client's 3-slot localStorage
+    scheme -- one row per (user, slot), state_json holding the same JSON
+    blob serializeState()/deserializeState() (js/state.js) already
+    produce/consume, so the client-side save format didn't need to
+    change, only where it's persisted to.
+
+    day/population/season are denormalized out of state_json purely so
+    the slot-picker UI can list summaries (GET /games/meadowlark/saves)
+    without deserializing every slot's full state server-side.
+    """
+    __tablename__ = 'meadowlark_saves'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'slot', name='uq_meadowlark_save_user_slot'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    slot = db.Column(db.Integer, nullable=False, default=1)
+    state_json = db.Column(db.Text, nullable=False)
+    day = db.Column(db.Integer, default=1)
+    population = db.Column(db.Integer, default=0)
+    season = db.Column(db.Integer, default=0)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow, index=True)
+
+    user = db.relationship('User', backref='meadowlark_saves')
+
+    def __repr__(self):
+        return f'<MeadowlarkSave user={self.user_id} slot={self.slot} day={self.day}>'
