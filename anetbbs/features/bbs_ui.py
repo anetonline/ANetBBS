@@ -3901,6 +3901,20 @@ async def _compose_echomail(self):
         db.session.commit()
         saved_id = em.id
 
+        # Real gap found live: a LOCAL user posting/replying directly in a
+        # shared echo area never went through any of the three inbound-
+        # network-import notify hooks (poller.py/binkp_server.py/
+        # qwk_hub_ftp.py) -- those only fire when a message arrives FROM
+        # an external network transfer. Two ANetBBS accounts replying to
+        # each other in the same area is a fourth, previously-unhooked
+        # write path into EchomailMessage.
+        from ..echomail.notify_reply import maybe_notify_recipient
+        from ..models import EchoArea, EchomailNetwork
+        _area_obj = EchoArea.query.get(area_id)
+        _network_obj = EchomailNetwork.query.get(network_id)
+        if _area_obj is not None and _network_obj is not None:
+            maybe_notify_recipient(em, _area_obj, _network_obj)
+
     await self.session.write(
         f"\r\n  {FG['grn']}{BOLD}Message queued (#{saved_id}).{RESET}"
         f"  {FG['gry']}Goes out on next poll.{RESET}\r\n")

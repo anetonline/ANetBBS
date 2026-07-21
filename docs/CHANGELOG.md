@@ -1,7 +1,64 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.176`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.182`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.182 — Multi-hub-identity BinkP mail loss + local-post reply notifications (July 2026)
+
+Reported live: a sysop testing a second network's (ANotherNetwork) echomail saw a fully successful-looking BinkP transcript -- CRAM-MD5 auth succeeded, the .pkt file was received and M_GOT-acknowledged -- but the message never showed up anywhere on ANetBBS.
+
+- FIX: the inbound BinkP listener resolves a downstream node's hub identity to find its EchomailNetwork row, but only ever used that row to compute the OUTBOUND stamping address -- the network's id itself was never captured, so every downstream-node session imported its received mail with network_id=None. EchoArea/EchomailMessage both require a real network_id, so this failed a database constraint that was silently swallowed by a generic exception handler -- no trace anywhere a sysop could check (this listener never uses the Bad Areas log, that's an outbound-poller-only mechanism). BinkP itself looked entirely successful the whole time.
+- Also added: if a hub identity genuinely has no matching BinkP network configured at all, inbound mail is now skipped with a loud, specific log message instead of the same silent crash.
+
+While verifying the above, a second, unrelated gap surfaced: two local ANetBBS accounts replying to each other directly in a shared echo area (no external network transfer at all) never triggered the v1.0b2.176 echomail-reply notification -- that hook only ever fired from the three inbound-network-import paths, never from ANetBBS's own web/terminal message composer.
+
+- FIX: both the web and terminal echomail composers now also check the reply's TO name and notify a matching local recipient, the same way an inbound network message already does.
+
+4 new regression tests: 2 driving a real scripted BinkP session (auth + file transfer) through the actual connection handler confirming the resolved network id reaches the importer instead of None, and 2 covering the local-post notification hook.
+
+## v1.0b2.181 — PETSCII: Wall + goodbye screen no longer leak raw ANSI (July 2026)
+
+Reported live on a third real-hardware pass (login now works correctly): after logging in, a "Graffiti Wall" bulletin screen showed garbled raw ANSI escape fragments and CP437 box-drawing artifacts, and the same happened on the goodbye/logoff screen.
+
+- FIX: the Wall logon module and the sysop-configurable goodbye ANSI-art screen both write raw CP437/ANSI bytes directly to the socket, completely bypassing the PETSCII-aware encode path -- and neither is on the Phase 1 core-BBS feature list to begin with. PETSCII sessions now skip all logon/logoff modules (wall, ansi screens, shell hooks) and the ANSI-art goodbye screen entirely, the same way Games/doors/ANetCRAFT/DarkForces/MRC/IRC are already not shown at all rather than shown broken. The plain-text "Goodbye!" fallback (which already goes through the correct PETSCII path) still shows on disconnect.
+
+## v1.0b2.180 — PETSCII: real letter-case inversion, not just charset timing (July 2026)
+
+Reported live on a second real-hardware pass (v1.0b2.179 fixed the charset-timing bug, login still failed): the BBS's own output text was rendering with every letter's case flipped -- "Welcome" as "wELCOME", "Login" as "lOGIN", "Invalid username or password" as "iNVALID USERNAME OR PASSWORD".
+
+- FIX: got the actual PETSCII spec backwards in the previous release. In the "upper/lowercase" charset, PETSCII's letter-case byte assignment is INVERTED from ASCII's -- sending the ASCII-uppercase byte value displays as a lowercase glyph, and the ASCII-lowercase byte value displays as uppercase. This isn't just a display quirk -- the same inversion applies to what a real C64 keyboard sends for typed letters, so every letter of a typed username/password arrived with the wrong case and authentication always failed regardless of the charset-timing fix. Both directions are now corrected: the encoder swaps letter case before writing to the wire, and the same swap is applied to bytes read back from the client before they ever reach the login/username/password buffers.
+
+10 new regression tests (encode/decode round-trip, decode_char, and login/password reader coverage); existing PETSCII tests updated to assert the corrected (swapped) byte values instead of the previous identity-mapping assumption.
+
+## v1.0b2.179 — PETSCII: login always failed + no admin settings UI (July 2026)
+
+Reported live during first real-hardware testing (Pi + PETSCII port enabled): login always said "invalid username or password" against known-good accounts, and there was no way to enable/see the PETSCII ports in the admin UI at all -- required hand-editing .env with no visibility.
+
+- FIX: a real C64 keyboard's PETSCII byte code for a letter key depends on which charset ROM is currently selected -- a KERNAL keyboard-decode difference, not just a display choice. Unshifted letters send the UPPERCASE byte range in the default power-on "graphics" charset, and only send the lowercase range once the upper/lowercase charset is selected. That charset switch was only being sent AFTER a successful login (in the post-login menu placeholder) -- so login itself always ran in the wrong charset, every password typed arrived silently case-flattened to uppercase, and authentication always failed. Now sent as the very first bytes of the connection, before login ever begins.
+- FIX: backspace/delete didn't work at all for PETSCII sessions -- a real C64 keyboard's DEL/INST key sends PETSCII 0x14, not ASCII 0x7f/0x08 (which means something else entirely on real hardware -- "disable Shift-Commodore", not erase-in-place). Both the username/password input readers now recognize the real key and echo the correct PETSCII cursor-left erase sequence.
+- NEW: PETSCII40/80 ENABLED+PORT are now in Admin -> Settings (same .env editor as Telnet/SSH/rlogin/FTP) and show live up/down status in the Service Control Center, instead of requiring a blind .env edit with zero visibility anywhere in the admin UI.
+
+13 new regression tests (7 for the two hardware bugs, 6 for the admin settings/status wiring).
+
+## v1.0b2.178 — rlogin health-check probe no longer looks like an attack (July 2026)
+
+Reported live: a sysop's rlogin log showed rapid repeated bursts of "rlogin connection from 127.0.0.1" immediately followed by "rlogin connection closed", with no way to see a real attacker IP or trigger a ban -- looked exactly like a sustained, unbannable attack.
+
+- FIX: this was ANetBBS's own Service Control Center health-check prober (/admin/control's status page, polled every ~5s) doing a bare connect-and-close against every listener including rlogin to confirm it's alive -- genuinely from 127.0.0.1, which is why no external IP ever appeared and no ban ever fired. The prober's own zero-byte probe connections now log at DEBUG instead of INFO; a real rlogin connection attempt still gets a clear INFO line the moment its handshake actually completes, so real activity stays fully visible while the SCC's own routine health checks no longer read like an attack.
+
+3 new regression tests confirming a bare probe-and-close produces no INFO-level log while a real handshake still does.
+
+## v1.0b2.177 — Terminal notification pop-up + PETSCII support (Phase 1, in progress) (July 2026)
+
+Terminal:
+- CHANGE: the login-time notification banner is now a blocking pop-up -- lists every unread notification by name/detail ("Jane wrote to you (in FidoNet (General))", PM/IM counts, etc.) and requires pressing ENTER before continuing into the menu. Previously this was a passive one-line count that scrolled past like any other banner and was easy to miss.
+
+PETSCII (Commodore 64/128) support -- Phase 1, vertical slice only:
+- NEW: two dedicated, opt-in listener ports (PETSCII40_ENABLED/PETSCII80_ENABLED, disabled by default, ports 6400/6401) for 40- and 80-column PETSCII clients -- no telnet TTYPE negotiation/guessing, every connection on these ports is treated as PETSCII unconditionally, matching Synchronet's own 40/80-column PETSCII port convention.
+- NEW: a dedicated PETSCII byte encoder/control-code module and a from-scratch plain-text login screen, completely separate from the existing ANSI/CP437 pipeline (which stays untouched -- zero risk to existing telnet/SSH/rlogin behavior).
+- This is a deliberately staged rollout: this release gets a PETSCII user through login and confirms the wire format works end to end. The actual message boards/echomail/PM/file-area menu screens come in a follow-up release once real hardware testing confirms this first slice looks right on an actual C64/VICE client -- Games/doors/ANetCRAFT/DarkForces/MRC chat/IRC are not planned to ever be offered over PETSCII.
+
+29 new regression tests (10 codec, 10 session plumbing, 6 login/menu-stub, 3 notification pop-up).
 
 ## v1.0b2.176 — Echomail/QWK reply notifications (July 2026)
 

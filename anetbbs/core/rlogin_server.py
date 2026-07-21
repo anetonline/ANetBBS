@@ -36,13 +36,28 @@ class RloginServer:
 
     async def handle_connection(self, reader, writer):
         addr = writer.get_extra_info('peername')
-        logger.info('rlogin connection from %s', addr)
+        # DEBUG, not INFO, at raw accept -- the SCC's own health-check
+        # prober (anetbbs/web/control.py's _probe_tcp_uncached) hits this
+        # port every ~5s from 127.0.0.1 with a bare connect-then-close and
+        # no handshake data at all, which used to look IDENTICAL to a real
+        # client at INFO level: "rlogin connection from ... / rlogin
+        # connection closed for ..." with nothing in between. A sysop
+        # reported this live as what looked like a sustained, unbannable
+        # attack (no real external IP, because there genuinely isn't
+        # one -- it's the BBS's own loopback health check). Real client
+        # activity still gets its own INFO line once the handshake
+        # actually completes below.
+        logger.debug('rlogin connection from %s', addr)
         self.active_connections.add(writer)
+        handshake_ok = False
 
         try:
             # rlogin handshake: read until three NUL-terminated strings
             header = await _read_rlogin_header(reader)
             logger.debug('rlogin header from %s: %s', addr, header)
+            handshake_ok = True
+            logger.info('rlogin session started for %s (login as %r)',
+                       addr, header.get('server_user'))
 
             # Send the acknowledgement NUL byte
             writer.write(b'\x00')
@@ -65,7 +80,10 @@ class RloginServer:
                 except Exception:
                     pass
             self.active_connections.discard(writer)
-            logger.info('rlogin connection closed for %s', addr)
+            if handshake_ok:
+                logger.info('rlogin connection closed for %s', addr)
+            else:
+                logger.debug('rlogin connection closed for %s (no handshake)', addr)
 
     async def start(self):
         """Start the rlogin server and wait until shutdown."""

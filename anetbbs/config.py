@@ -76,6 +76,18 @@ class Config:
     RLOGIN_HOST = os.environ.get('RLOGIN_HOST', '0.0.0.0')
     RLOGIN_PORT = int(os.environ.get('RLOGIN_PORT', '513'))
 
+    # PETSCII Servers (Commodore 64/128 terminal support, Phase 1 — core
+    # BBS only, see docs/petscii or CHANGELOG) — one dedicated port per
+    # screen width, same convention Synchronet uses. Disabled by default;
+    # 4-digit ports (not Synchronet's 64/128) to dodge the bot/scanner
+    # traffic low port numbers attract.
+    PETSCII40_ENABLED = os.environ.get('PETSCII40_ENABLED', 'false').lower() == 'true'
+    PETSCII40_HOST = os.environ.get('PETSCII40_HOST', '0.0.0.0')
+    PETSCII40_PORT = int(os.environ.get('PETSCII40_PORT', '6400'))
+    PETSCII80_ENABLED = os.environ.get('PETSCII80_ENABLED', 'false').lower() == 'true'
+    PETSCII80_HOST = os.environ.get('PETSCII80_HOST', '0.0.0.0')
+    PETSCII80_PORT = int(os.environ.get('PETSCII80_PORT', '6401'))
+
     # FTP Server — serves the file areas. Anonymous access is read-only and
     # limited to FileAreas with is_active=True AND is_sysop_only=False.
     # Authenticated users can upload to areas whose upload_permission lets

@@ -340,6 +340,21 @@ def compose(area_id, reply_to_id=None):
         db.session.add(msg)
         db.session.commit()
 
+        # Real gap found live: a LOCAL user posting/replying directly in a
+        # shared echo area never went through any of the three inbound-
+        # network-import notify hooks (poller.py/binkp_server.py/
+        # qwk_hub_ftp.py) -- those only fire when a message arrives FROM
+        # an external network transfer. Two ANetBBS accounts replying to
+        # each other in the same area is a fourth, previously-unhooked
+        # write path into EchomailMessage. maybe_notify_recipient() is
+        # already best-effort/self-swallowing, same as every other call
+        # site -- no extra try/except needed here.
+        from ..echomail.notify_reply import maybe_notify_recipient
+        from ..models import EchomailNetwork
+        network = EchomailNetwork.query.get(echo_area.network_id)
+        if network is not None:
+            maybe_notify_recipient(msg, echo_area, network)
+
         flash('Message queued for sending.', 'success')
         return redirect(url_for('echomail.area', area_id=form.area_id.data))
 

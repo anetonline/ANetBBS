@@ -133,14 +133,16 @@ KNOWN_UNITS = [
         'unit': 'anetbbs',
         'label': 'Terminal Protocols',
         'desc': ('Single asyncio process serving telnet, SSH, rlogin, '
-                 'and FTP. Each protocol is gated by its own '
+                 'PETSCII, and FTP. Each protocol is gated by its own '
                  '*_ENABLED flag in the .env file.'),
         'icon': 'bi-terminal',
         'ports': [
-            {'name': 'Telnet', 'key': 'TELNET_PORT', 'default': 2233, 'proto': 'tcp'},
-            {'name': 'SSH',    'key': 'SSH_PORT',    'default': 2234, 'proto': 'tcp'},
-            {'name': 'rlogin', 'key': 'RLOGIN_PORT', 'default': 513,  'proto': 'tcp'},
-            {'name': 'FTP',    'key': 'FTP_PORT',    'default': 21,   'proto': 'tcp'},
+            {'name': 'Telnet',       'key': 'TELNET_PORT',    'default': 2233, 'proto': 'tcp'},
+            {'name': 'SSH',          'key': 'SSH_PORT',       'default': 2234, 'proto': 'tcp'},
+            {'name': 'rlogin',       'key': 'RLOGIN_PORT',    'default': 513,  'proto': 'tcp'},
+            {'name': 'PETSCII (40)', 'key': 'PETSCII40_PORT', 'default': 6400, 'proto': 'tcp'},
+            {'name': 'PETSCII (80)', 'key': 'PETSCII80_PORT', 'default': 6401, 'proto': 'tcp'},
+            {'name': 'FTP',          'key': 'FTP_PORT',       'default': 21,   'proto': 'tcp'},
         ],
     },
     {

@@ -214,19 +214,31 @@ NEW_ENVIRON = bytes([39])  # New Environment Option
 class BBSSession:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  config: Dict[str, Any], prefill_username: Optional[str] = None,
-                 prefill_password: Optional[str] = None):
+                 prefill_password: Optional[str] = None,
+                 forced_term_mode: Optional[str] = None,
+                 forced_width: Optional[int] = None):
         """
         prefill_username: when set (typically from SSH or rlogin), the login flow
             skips the welcome menu + username prompt.
         prefill_password: when also set (SSH client sent a password) the login
             flow attempts authentication silently and only falls back to the
             interactive prompt if it fails.
+        forced_term_mode: set by anetbbs/core/petscii_server.py's dedicated
+            PETSCII listener(s) -- every connection on those ports IS
+            PETSCII unconditionally (real C64 telnet clients mostly don't
+            announce themselves usefully via TTYPE negotiation, so this
+            skips that guesswork entirely rather than trying to detect it).
+            Overrides the normal window-size/TTYPE-based term_mode property.
+        forced_width: paired with forced_term_mode -- 40 or 80, matching
+            which PETSCII port (40-col vs 80-col) the connection came in on.
         """
         self.reader = reader
         self.writer = writer
         self.config = config
         self.user_manager = UserManager()
         self.user = None
+        self._forced_term_mode = forced_term_mode
+        self._forced_width = forced_width
         # CP437 — the encoding ANSI BBSes have always spoken. SyncTERM,
         # NetRunner, mTelnet, and modern terminals all support it (most
         # auto-detect via the IBM-PC font). v172 briefly flipped this to
@@ -266,15 +278,21 @@ class BBSSession:
 
     @property
     def term_mode(self):
-        """Detected terminal capability: 'wide', 'ansi', or 'ascii'.
+        """Detected terminal capability: 'petscii', 'wide', 'ansi', or 'ascii'.
 
-        wide  — 132+ column ANSI terminal (SyncTERM 132x37, etc.)
-        ansi  — standard 80-col ANSI/CP437 (default when unknown)
-        ascii — plain-text terminal (dumb, TTY, etc.)
+        petscii — a Commodore PETSCII client, connected via one of the
+                  dedicated PETSCII-only ports (see forced_term_mode in
+                  __init__) -- never negotiation-detected, since real C64
+                  telnet clients mostly don't announce themselves usefully.
+        wide    — 132+ column ANSI terminal (SyncTERM 132x37, etc.)
+        ansi    — standard 80-col ANSI/CP437 (default when unknown)
+        ascii   — plain-text terminal (dumb, TTY, etc.)
 
         Defaults to 'ansi' when TTYPE is absent so existing behaviour is
         preserved for terminals that don't answer the negotiation.
         """
+        if self._forced_term_mode:
+            return self._forced_term_mode
         if self.window_size[0] >= 132:
             return 'wide'
         ttype = (self.terminal_type or '').upper()
@@ -282,6 +300,12 @@ class BBSSession:
         if ttype in _ASCII_TERMS:
             return 'ascii'
         return 'ansi'
+
+    @property
+    def petscii_width(self):
+        """40 or 80 -- which PETSCII port this session connected on.
+        Only meaningful when term_mode == 'petscii'."""
+        return self._forced_width or 40
 
     def get_box_chars(self):
         """Get the box drawing characters in CP437 encoding"""
@@ -479,13 +503,31 @@ class BBSSession:
                 # (cheap-and-cheerful — not strictly needed for asyncio reader)
                 await self.write('\r\n')
                 break
-            if ch in (b'\x08', b'\x7f'):  # backspace / del
+            # A real C64 keyboard's DEL/INST key sends PETSCII 0x14, not
+            # ASCII 0x7f/0x08 -- and the echo sequence needs its own
+            # PETSCII cursor-left/space/cursor-left too, since ASCII
+            # backspace (0x08) means something else entirely on real
+            # hardware ("disable Shift-Commodore"), not erase-in-place.
+            is_backspace = (ch == b'\x14') if self.term_mode == 'petscii' \
+                          else (ch in (b'\x08', b'\x7f'))
+            if is_backspace:
                 if chars:
                     chars.pop()
-                    await self.write('\b \b')
+                    if self.term_mode == 'petscii':
+                        from ..features.petscii_codec import CURSOR_LEFT
+                        await self.write(f'{CURSOR_LEFT} {CURSOR_LEFT}')
+                    else:
+                        await self.write('\b \b')
                 continue
             if ch < b' ':  # ignore other control chars (Ctrl-C etc just stop)
                 continue
+            if self.term_mode == 'petscii':
+                # Same case-inversion as read_line() -- swap back to the
+                # intended logical character before it reaches the
+                # password buffer, or every letter arrives wrong-case
+                # and auth always fails.
+                from ..features.petscii_codec import decode_char
+                ch = decode_char(ch[0]).encode('utf-8')
             chars.append(ch)
             await self.write('*')
         return b''.join(chars).decode('utf-8', errors='replace').strip()
@@ -1018,7 +1060,10 @@ class BBSSession:
 
         # Sysop's pre-login welcome ANSI (telnet path only — auto-login
         # SSH/rlogin already short-circuited above and never reaches here).
-        await self._show_ansi_screen('welcome')
+        # Skipped for PETSCII: it's raw sysop-uploaded ANSI art with no
+        # reliable degrade path onto a 40/80-col C64 screen.
+        if self.term_mode != 'petscii':
+            await self._show_ansi_screen('welcome')
 
         try:
             from ..features.bbs_ui import _app as _bbs_app
@@ -1039,6 +1084,27 @@ class BBSSession:
                     f"|  2. New User Registration              |\r\n"
                     f"|  3. Exit                               |\r\n"
                     f"+----------------------------------------+\r\n"
+                    "\r\n"
+                    "Choice: "
+                )
+            elif self.term_mode == 'petscii':
+                w = self.petscii_width
+                inner = w - 4
+                bar = '+' + '-' * (w - 2) + '+'
+
+                def _row(s):
+                    return '| ' + s[:inner].ljust(inner) + ' |'
+
+                title_p = f'Welcome to {_bbs_name}'[:inner].center(inner)
+                menu = (
+                    "\r\n"
+                    f"{bar}\r\n"
+                    f"{_row(title_p)}\r\n"
+                    f"{bar}\r\n"
+                    f"{_row(' 1. Login')}\r\n"
+                    f"{_row(' 2. New User Registration')}\r\n"
+                    f"{_row(' 3. Exit')}\r\n"
+                    f"{bar}\r\n"
                     "\r\n"
                     "Choice: "
                 )
@@ -1327,9 +1393,19 @@ class BBSSession:
         still have IAC negotiation in flight. Don't spam the journal."""
         try:
             if isinstance(text, str):
-                if self.term_mode == 'ascii':
-                    text = _ANSI_ESC_RE.sub('', text)
-                text = text.encode(self.encoding, errors='replace')
+                if self.term_mode == 'petscii':
+                    # Not the CP437/ANSI encode path at all -- PETSCII is a
+                    # different control-code system, not just a different
+                    # code page. See anetbbs/features/petscii_codec.py.
+                    from ..features import petscii_codec
+                    text = petscii_codec.encode(_ANSI_ESC_RE.sub('', text))
+                else:
+                    if self.term_mode == 'ascii':
+                        text = _ANSI_ESC_RE.sub('', text)
+                    text = text.encode(self.encoding, errors='replace')
+            elif self.term_mode == 'petscii':
+                from ..features import petscii_codec
+                text = petscii_codec.encode(_ANSI_ESC_RE_B.sub(b'', text).decode('latin-1'))
             elif self.term_mode == 'ascii':
                 text = _ANSI_ESC_RE_B.sub(b'', text)
             self.writer.write(text)
@@ -1352,12 +1428,24 @@ class BBSSession:
                 if not char:  # Connection closed (defensive — read_raw raises now)
                     raise CarrierLost('client disconnected')
 
-                # Handle special characters
-                if char == b'\x7f' or char == b'\x08':  # Backspace
+                # Handle special characters. A real C64 keyboard's
+                # DEL/INST key sends PETSCII 0x14, not ASCII 0x7f/0x08 --
+                # and echoing back ASCII backspace (0x08) means something
+                # completely different on real hardware ("disable Shift-
+                # Commodore"), not erase-in-place, so the echo sequence
+                # needs its own PETSCII cursor-left/space/cursor-left too.
+                is_petscii = self.term_mode == 'petscii'
+                is_backspace = (char == b'\x14') if is_petscii else \
+                              (char == b'\x7f' or char == b'\x08')
+                if is_backspace:
                     if line:
                         line.pop()
                         if self.echo:
-                            await self.write('\b \b')
+                            if is_petscii:
+                                from ..features.petscii_codec import CURSOR_LEFT
+                                await self.write(f'{CURSOR_LEFT} {CURSOR_LEFT}')
+                            else:
+                                await self.write('\b \b')
                     continue
 
                 elif char == b'\r':  # Enter key
@@ -1370,9 +1458,23 @@ class BBSSession:
 
                 # Regular character
                 if len(char) == 1 and 32 <= char[0] <= 126:  # Printable ASCII
-                    line.extend(char)
-                    if self.echo:
-                        await self.write(char.decode(self.encoding))
+                    if is_petscii:
+                        # A real C64 keyboard's byte-per-letter mapping is
+                        # case-inverted from ASCII in this charset mode,
+                        # same as screen output (see petscii_codec.py) --
+                        # swap it back to the intended logical character
+                        # before it reaches the line buffer / DB lookup,
+                        # or every letter of a typed username/password
+                        # arrives with the wrong case and auth always fails.
+                        from ..features.petscii_codec import decode_char
+                        logical_ch = decode_char(char[0])
+                        line.extend(logical_ch.encode(self.encoding, errors='replace'))
+                        if self.echo:
+                            await self.write(logical_ch)
+                    else:
+                        line.extend(char)
+                        if self.echo:
+                            await self.write(char.decode(self.encoding))
 
             except CarrierLost:
                 raise
@@ -1397,13 +1499,27 @@ class BBSSession:
         session loop when a port probe disconnected mid-greeting. The
         outer start() handler now classifies those as a clean carrier
         loss too, but removing the redundant drain is the cheap fix."""
+        if self.term_mode == 'petscii':
+            # The ANSI escape below has no PETSCII meaning -- write()
+            # would just strip it to nothing, silently no-opping clear
+            # screen entirely. Use the real C64 clear+home control byte.
+            from ..features.petscii_codec import CLR_HOME
+            await self.write(CLR_HOME)
+            return
         await self.write("\x1b[2J\x1b[H\x1b[0m")
 
     async def _show_notification_summary(self):
-        """Render a one-liner counting unread mail, IMs, and notifications.
+        """Blocking pop-up shown once at login when anything is waiting:
+        lists every unread Notification by name/detail (echomail/QWK
+        replies, netmail, @mentions, etc. -- whatever notify() created,
+        see anetbbs/features/notify.py) plus PM/IM counts, and requires
+        the user to press Enter before continuing into the menu loop.
 
-        Mirrors the badges in the web nav so terminal users know at a glance
-        whether anything is waiting for them. Silent if everything is zero.
+        Previously this only printed a passive one-line count ("*** You
+        have new: 2 notifications") that scrolled past like any other
+        banner -- easy to miss entirely on a fast connection or a client
+        with limited scrollback, and it didn't say who or where. Silent
+        (no pop-up, no pause) if nothing is waiting.
         """
         try:
             uid = self.user.get('id') if isinstance(self.user, dict) else None
@@ -1420,31 +1536,40 @@ class BBSSession:
                 unread_notifs = (Notification.query
                                   .filter_by(user_id=uid, is_read=False)
                                   .order_by(Notification.id).all())
-                nt_n = len(unread_notifs)
             except Exception:
                 unread_notifs = []
-                nt_n = 0
-            if not (pm_n or im_n or nt_n):
+            if not (pm_n or im_n or unread_notifs):
                 return
-            bits = []
-            if pm_n: bits.append(f'\x1b[1;36m{pm_n}\x1b[0m PM' + ('s' if pm_n != 1 else ''))
-            if im_n: bits.append(f'\x1b[1;36m{im_n}\x1b[0m InterBBS IM' + ('s' if im_n != 1 else ''))
-            if nt_n: bits.append(f'\x1b[1;36m{nt_n}\x1b[0m notification' + ('s' if nt_n != 1 else ''))
+
             await self.write(
-                '\r\n\x1b[1;33m*** You have new: \x1b[0m'
-                + ', '.join(bits) + '\r\n')
-            # Echomail/QWK reply notifications carry the actual "who
-            # wrote to you, in which area" detail in title/body (see
-            # anetbbs/echomail/notify_reply.py) -- worth listing by name
-            # here rather than folding into the bare count above, the
-            # same way Synchronet surfaces a specific "msg to you" line
-            # per reply rather than just a tally.
+                '\r\n\x1b[1;33m'
+                '+============================================+\r\n'
+                '|         YOU HAVE NEW NOTIFICATIONS          |\r\n'
+                '+============================================+'
+                '\x1b[0m\r\n')
+            if pm_n:
+                await self.write(
+                    f'  \x1b[1;36m{pm_n}\x1b[0m new Private Message'
+                    + ('s' if pm_n != 1 else '') + '\r\n')
+            if im_n:
+                await self.write(
+                    f'  \x1b[1;36m{im_n}\x1b[0m new InterBBS IM'
+                    + ('s' if im_n != 1 else '') + '\r\n')
+            # Each Notification's own title/body already carries the
+            # "who, and in what area/context" detail (see notify() call
+            # sites -- e.g. anetbbs/echomail/notify_reply.py's "Jane
+            # wrote to you" / "in FidoNet (General)"), so list them by
+            # name rather than folding into a bare count.
             for n in unread_notifs:
-                if n.kind == 'echomail_reply':
-                    line = f'    \x1b[33m- {n.title}\x1b[0m'
-                    if n.body:
-                        line += f' \x1b[36m({n.body})\x1b[0m'
-                    await self.write(line + '\r\n')
+                line = f'  \x1b[33m-\x1b[0m {n.title}'
+                if n.body:
+                    line += f' \x1b[36m({n.body})\x1b[0m'
+                await self.write(line + '\r\n')
+            await self.write('\r\n\x1b[1mPress ENTER to continue...\x1b[0m')
+            try:
+                await self.read_line('')
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1612,34 +1737,42 @@ class BBSSession:
             # a chance to skip logon modules and jump straight to the menu.
             # Read directly from .env so changes take effect without restart.
             fast_logon = False
-            try:
-                import os as _os
-                _fl_enabled = False
-                _fl_env = _os.path.abspath(_os.path.join(
-                    _os.path.dirname(_os.path.abspath(__file__)),
-                    '..', '..', '.env'))
+            # Logon modules (wall, ansi screens, shell hooks, etc.) have no
+            # PETSCII-aware rendering at all -- wall.py and the ansi-screen
+            # loader both write raw CP437/ANSI bytes directly to the socket,
+            # bypassing write()'s petscii branch entirely, and none of them
+            # are on the Phase 1 core-BBS feature list. Skip them the same
+            # way Games/doors/ANetCRAFT/DarkForces/MRC/IRC are skipped --
+            # not shown at all, rather than shown broken.
+            if self.term_mode != 'petscii':
                 try:
-                    with open(_fl_env) as _fe:
-                        for _fl_line in _fe:
-                            if _fl_line.startswith('FAST_LOGON_ENABLED='):
-                                _fl_val = _fl_line.split('=', 1)[1].strip().lower()
-                                _fl_enabled = _fl_val in ('true', '1', 'yes')
-                                break
+                    import os as _os
+                    _fl_enabled = False
+                    _fl_env = _os.path.abspath(_os.path.join(
+                        _os.path.dirname(_os.path.abspath(__file__)),
+                        '..', '..', '.env'))
+                    try:
+                        with open(_fl_env) as _fe:
+                            for _fl_line in _fe:
+                                if _fl_line.startswith('FAST_LOGON_ENABLED='):
+                                    _fl_val = _fl_line.split('=', 1)[1].strip().lower()
+                                    _fl_enabled = _fl_val in ('true', '1', 'yes')
+                                    break
+                    except Exception:
+                        pass
+                    if _fl_enabled:
+                        _fl_resp = (await self.read_line(
+                            '\r\n\x1b[1;33m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
+                        fast_logon = _fl_resp.strip().lower() == 'y'
                 except Exception:
                     pass
-                if _fl_enabled:
-                    _fl_resp = (await self.read_line(
-                        '\r\n\x1b[1;33m[F]ast logon — skip intro modules? [y/N]:\x1b[0m ') or '')
-                    fast_logon = _fl_resp.strip().lower() == 'y'
-            except Exception:
-                pass
 
-            # Run logon modules (wall, ansi screens, shell hooks, etc.)
-            try:
-                from ..features.login_modules import run_modules as _run_logon
-                await _run_logon(self, 'logon', fast_logon=fast_logon)
-            except Exception:
-                pass
+                # Run logon modules (wall, ansi screens, shell hooks, etc.)
+                try:
+                    from ..features.login_modules import run_modules as _run_logon
+                    await _run_logon(self, 'logon', fast_logon=fast_logon)
+                except Exception:
+                    pass
 
             # Prefer the data-driven menu engine if any BbsMenu rows exist;
             # otherwise fall back to the hard-coded BBSMenuUI.show_main().
@@ -1667,7 +1800,16 @@ class BBSSession:
             from ..features.notify import check_new_notifications
             await check_new_notifications(self)
             try:
-                await run_menu(self, start='main')
+                if self.term_mode == 'petscii':
+                    # PETSCII sessions get their own dedicated, hand-built
+                    # menu loop (Phase 1: core BBS only -- boards/echomail/
+                    # PM/files/who's-online/profile) instead of the
+                    # general ANSI-native run_menu()/BBSMenuUI.show_main()
+                    # -- see anetbbs/features/petscii_ui.py.
+                    from ..features.petscii_ui import run_petscii_menu
+                    await run_petscii_menu(self)
+                else:
+                    await run_menu(self, start='main')
             except (CarrierLost, BrokenPipeError, ConnectionResetError,
                     ConnectionAbortedError):
                 # Clean unwind — client (or a TCP port probe) disconnected.
@@ -1703,8 +1845,10 @@ class BBSSession:
             # Cancel the periodic presence heartbeat task.
             if _hb_task is not None:
                 _hb_task.cancel()
-            # Run logoff modules before tearing down the session.
-            if self.user:
+            # Run logoff modules before tearing down the session -- same
+            # petscii skip as the logon modules above (wall/ansi-screen/
+            # shell-hook modules have no PETSCII-aware rendering at all).
+            if self.user and self.term_mode != 'petscii':
                 try:
                     from ..features.login_modules import run_modules as _run_logoff
                     await _run_logoff(self, 'logoff', fast_logon=False)
@@ -1737,9 +1881,14 @@ class BBSSession:
             except Exception:
                 pass
             # Sysop-defined goodbye ANSI (falls back to the simple text below
-            # if no 'goodbye' slot is configured).
-            try:
-                await self._show_ansi_screen('goodbye')
-            except Exception:
-                pass
+            # if no 'goodbye' slot is configured). _show_ansi_screen has no
+            # PETSCII-aware rendering -- it writes raw CP437/ANSI bytes
+            # directly to the socket, bypassing write()'s petscii branch --
+            # so petscii sessions skip straight to the plain-text fallback,
+            # which already goes through write() correctly.
+            if self.term_mode != 'petscii':
+                try:
+                    await self._show_ansi_screen('goodbye')
+                except Exception:
+                    pass
             await self.write("\r\nGoodbye!\r\n")

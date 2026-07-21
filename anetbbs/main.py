@@ -166,9 +166,11 @@ def main():
     ssh_enabled = config_class.SSH_ENABLED
     rlogin_enabled = config_class.RLOGIN_ENABLED
     ftp_enabled = getattr(config_class, 'FTP_ENABLED', False)
+    petscii40_enabled = getattr(config_class, 'PETSCII40_ENABLED', False)
+    petscii80_enabled = getattr(config_class, 'PETSCII80_ENABLED', False)
 
     if not telnet_enabled and not ssh_enabled and not rlogin_enabled \
-            and not ftp_enabled:
+            and not ftp_enabled and not petscii40_enabled and not petscii80_enabled:
         logger.info("All BBS servers are disabled. Use 'anetbbs-web' to run the web interface.")
         return
 
@@ -227,6 +229,18 @@ def main():
         'rlogin': {
             'host': config_class.RLOGIN_HOST,
             'port': config_class.RLOGIN_PORT,
+        }
+    }
+    petscii40_cfg = {
+        'petscii': {
+            'host': config_class.PETSCII40_HOST,
+            'port': config_class.PETSCII40_PORT,
+        }
+    }
+    petscii80_cfg = {
+        'petscii': {
+            'host': config_class.PETSCII80_HOST,
+            'port': config_class.PETSCII80_PORT,
         }
     }
 
@@ -291,6 +305,24 @@ def main():
             logger.info("Starting ANetBBS rlogin Server on %s:%d",
                         config_class.RLOGIN_HOST, config_class.RLOGIN_PORT)
             tasks.append(asyncio.ensure_future(rlogin_server.start()))
+
+        if petscii40_enabled:
+            from anetbbs.core.petscii_server import PetsciiServer
+            petscii40_cfg_merged = {**bbs_config, **petscii40_cfg}
+            petscii40_server = PetsciiServer(petscii40_cfg_merged, width=40)
+            servers_to_stop.append(petscii40_server)
+            logger.info("Starting ANetBBS PETSCII (40-col) Server on %s:%d",
+                        config_class.PETSCII40_HOST, config_class.PETSCII40_PORT)
+            tasks.append(asyncio.ensure_future(petscii40_server.start()))
+
+        if petscii80_enabled:
+            from anetbbs.core.petscii_server import PetsciiServer
+            petscii80_cfg_merged = {**bbs_config, **petscii80_cfg}
+            petscii80_server = PetsciiServer(petscii80_cfg_merged, width=80)
+            servers_to_stop.append(petscii80_server)
+            logger.info("Starting ANetBBS PETSCII (80-col) Server on %s:%d",
+                        config_class.PETSCII80_HOST, config_class.PETSCII80_PORT)
+            tasks.append(asyncio.ensure_future(petscii80_server.start()))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

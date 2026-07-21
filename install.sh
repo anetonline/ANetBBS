@@ -1125,6 +1125,15 @@ RLOGIN_ENABLED=false
 RLOGIN_HOST=0.0.0.0
 RLOGIN_PORT=513
 
+# PETSCII (Commodore 64/128 terminal support, Phase 1 -- disabled by
+# default; sysop opts in manually by editing .env, same as rlogin)
+PETSCII40_ENABLED=false
+PETSCII40_HOST=0.0.0.0
+PETSCII40_PORT=6400
+PETSCII80_ENABLED=false
+PETSCII80_HOST=0.0.0.0
+PETSCII80_PORT=6401
+
 # Web Server
 WEB_HOST=0.0.0.0
 # WEB_BIND is what deploy/serve.py actually binds the socketio/gunicorn

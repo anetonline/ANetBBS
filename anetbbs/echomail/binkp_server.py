@@ -533,12 +533,40 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                               network_type='binkp')
                                     .filter(EchomailNetwork.our_address.isnot(None))
                                     .first())
-                    if identity_net and (identity_net.our_address or '').strip():
-                        matched_our_address = identity_net.our_address.strip()
+                    if identity_net:
+                        # Real bug found live (multi-hub-identity install,
+                        # sysop testing a second network): this used to
+                        # only read identity_net.our_address for the
+                        # OUTBOUND stamping address below and never
+                        # captured identity_net.id anywhere -- net_id
+                        # stayed None for every downstream-node session,
+                        # every single time, regardless of how correctly
+                        # everything else was configured. That None then
+                        # got passed straight into the inbound packet
+                        # importer, which hit EchoArea/EchomailMessage's
+                        # NOT-NULL network_id constraint on flush -- an
+                        # IntegrityError silently swallowed by the
+                        # session's generic exception handler further
+                        # down, with zero trace anywhere a sysop could
+                        # see (BadAreaLog is a poller.py-only mechanism,
+                        # never touched by this listener). BinkP itself
+                        # looked completely successful (GOT sent back for
+                        # the received .pkt file), but the message inside
+                        # it never made it into any EchoArea.
+                        net_id = identity_net.id
+                        net_name = identity.name
+                        if (identity_net.our_address or '').strip():
+                            matched_our_address = identity_net.our_address.strip()
                     elif identity.binkp_zone and identity.binkp_net:
                         matched_our_address = (
                             f'{identity.binkp_zone}:{identity.binkp_net}/'
                             f'{identity.binkp_hub_node or 1}')
+                        logger.warning(
+                            'BinkP %s: downstream node %s belongs to hub '
+                            'identity %r, which has no BinkP EchomailNetwork '
+                            'row -- inbound mail cannot be imported (no '
+                            'network to attach it to) until one is created',
+                            peer, remote_addr, identity.name)
                     else:
                         logger.warning(
                             'BinkP %s: downstream node %s belongs to hub '
@@ -824,6 +852,25 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         _debug_manifest(fname, payload)
                         extracted = list(_extract_packets(fname, payload))
                         if extracted:
+                            if net_id is None:
+                                # No EchomailNetwork row to attach these
+                                # messages to (e.g. a hub identity with
+                                # only zone:net configured, no actual
+                                # BinkP network row yet) -- _import_pkt_
+                                # payload() would otherwise hit EchoArea/
+                                # EchomailMessage's NOT-NULL network_id
+                                # constraint and lose the whole packet to
+                                # a silently-swallowed exception with zero
+                                # sysop-visible trace. Loud and skipped is
+                                # strictly better than quiet and lost.
+                                logger.error(
+                                    'BinkP %s: received %d packet(s) in %s '
+                                    'but no EchomailNetwork is resolved for '
+                                    'this session -- cannot import, mail '
+                                    'DROPPED. Configure a BinkP network for '
+                                    'this hub identity.',
+                                    peer, len(extracted), fname)
+                                continue
                             for inner_name, inner_payload in extracted:
                                 _debug_dump_packet(inner_name, inner_payload)
                                 imported_total += _import_pkt_payload(
