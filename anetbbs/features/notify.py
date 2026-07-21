@@ -33,8 +33,69 @@ def notify(user_id, kind, title='', body='', target_url=''):
             user_id=user_id, kind=kind, title=title[:200],
             body=body, target_url=target_url[:500]))
         db.session.commit()
+        # Live push to any already-connected browser tab for this user --
+        # piggybacks on the same default-namespace socket base.html
+        # already opens for sysop_broadcast (see web_app.py's connect
+        # handler, which joins every authenticated socket to a room named
+        # after its own user id). Lazy import: notify() runs from
+        # contexts that don't always want eventlet/SocketIO pulled in
+        # (background pollers, CLI tools), same reasoning as the
+        # sysop_broadcast emit's own lazy import in web/admin.py.
+        try:
+            from ..web_app import socketio
+            socketio.emit('user_notification', {
+                'kind': kind, 'title': title, 'body': body,
+                'target_url': target_url,
+            }, room=str(user_id))
+        except Exception:
+            pass
     except Exception:
         db.session.rollback()
+
+
+async def check_new_notifications(session):
+    """Print any Notification rows created since the last check THIS
+    terminal session made (tracked via session._last_notif_id) -- the
+    "while already online" half of session.py's login-time
+    _show_notification_summary() banner (which only covers what was
+    already unread AT login). Called once per menu redraw from both
+    menu_engine.py's run_menu() and BBSMenuUI.show_main()'s hard-coded
+    fallback loop, the same granularity the existing sysop-reply
+    pop_messages() check already uses elsewhere in those same loops.
+
+    The first call in a session only establishes the baseline (whatever
+    was already unread at login was already announced by
+    _show_notification_summary(), so it must not repeat here) -- it
+    prints nothing until a notification arrives AFTER that baseline.
+    Best-effort: never raises, silent if nothing new.
+    """
+    try:
+        uid = session.user.get('id') if isinstance(session.user, dict) else None
+        if not uid:
+            return
+        from ..models import Notification
+        last_id = getattr(session, '_last_notif_id', None)
+        if last_id is None:
+            top = (Notification.query.filter_by(user_id=uid)
+                   .order_by(Notification.id.desc()).first())
+            session._last_notif_id = top.id if top else 0
+            return
+        new_rows = (Notification.query
+                    .filter(Notification.user_id == uid,
+                            Notification.id > last_id)
+                    .order_by(Notification.id)
+                    .all())
+        if not new_rows:
+            return
+        session._last_notif_id = new_rows[-1].id
+        await session.write('\r\n')
+        for n in new_rows:
+            line = f'\x1b[1;33m*** New: \x1b[0m{n.title}'
+            if n.body:
+                line += f' \x1b[36m({n.body})\x1b[0m'
+            await session.write(line + '\r\n')
+    except Exception:
+        pass
 
 
 def notify_admins(kind, title='', body='', target_url=''):

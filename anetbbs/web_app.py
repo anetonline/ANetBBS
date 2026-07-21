@@ -18,9 +18,9 @@ import logging
 import json
 from datetime import datetime
 from flask import Flask, request, render_template
-from flask_login import LoginManager
+from flask_login import LoginManager, current_user
 from flask_migrate import Migrate
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room
 from flask_wtf.csrf import CSRFProtect
 
 from .models import db, User, Theme, UserSession
@@ -37,6 +37,21 @@ socketio = SocketIO(async_mode='eventlet',
                     ping_timeout=60,
                     ping_interval=25)
 csrf = CSRFProtect()
+
+
+@socketio.on('connect')
+def _handle_default_namespace_connect():
+    """The default-namespace socket base.html already opens for every
+    authenticated page (used for sysop_broadcast/sysop_page) also joins a
+    room named after its own user id here -- zero extra client-side
+    connections needed. This is what lets features/notify.py's notify()
+    push a live 'user_notification' toast to an already-open browser tab
+    the instant a Notification row is created (echomail/QWK replies,
+    @mentions, netmail, etc.), rather than only surfacing on next page
+    load. No-op for anonymous visitors -- base.html never opens this
+    socket for them in the first place, so this is just defense in depth."""
+    if current_user.is_authenticated:
+        join_room(str(current_user.id))
 
 
 def create_app(config_name=None):

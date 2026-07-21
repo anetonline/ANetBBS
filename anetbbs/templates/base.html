@@ -499,12 +499,15 @@
                                 {% if im_unread > 0 %}<span class="badge bg-info">{{ im_unread }}</span>{% endif %}
                             </a>
                         </li>
-                        <!-- Notification bell — @mentions, sysop replies, etc. -->
+                        <!-- Notification bell — @mentions, sysop replies, echomail/QWK
+                             replies addressed to you, etc. id's on the link/badge so the
+                             'user_notification' socket listener below can bump the count
+                             live without a page reload. -->
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('notifications.index') }}" title="Notifications">
+                            <a class="nav-link" id="notifBellLink" href="{{ url_for('notifications.index') }}" title="Notifications">
                                 <i class="bi bi-bell"></i>
                                 {% set notif_unread = (current_user.notifications | selectattr('is_read', 'equalto', False) | list | length) if current_user.notifications else 0 %}
-                                {% if notif_unread > 0 %}<span class="badge bg-warning text-dark">{{ notif_unread }}</span>{% endif %}
+                                <span id="notifBellBadge" class="badge bg-warning text-dark" style="{{ '' if notif_unread > 0 else 'display:none;' }}">{{ notif_unread }}</span>
                             </a>
                         </li>
                         <!-- Account dropdown — Profile / AKAs / Themes / Logout -->
@@ -725,6 +728,35 @@
                 setTimeout(() => t.remove(), 120000);
             });
             {% endif %}
+            // Live "you have a new notification" toast -- echomail/QWK
+            // replies addressed to you, @mentions, netmail, etc. (see
+            // features/notify.py's notify(), which emits this on the
+            // same socket right after inserting the Notification row).
+            // Bumps the nav bell badge live too, so it matches what a
+            // page reload would already show.
+            sock.on('user_notification', d => {
+                const badge = document.getElementById('notifBellBadge');
+                if (badge) {
+                    const n = (parseInt(badge.textContent, 10) || 0) + 1;
+                    badge.textContent = n;
+                    badge.style.display = '';
+                }
+                const c = document.getElementById('bcastContainer');
+                if (!c) return;
+                const t = document.createElement('div');
+                t.className = 'toast show align-items-center text-bg-info border-0 mb-2';
+                const link = d.target_url || '{{ url_for("notifications.index") }}';
+                t.innerHTML = `<div class="d-flex">
+                    <div class="toast-body">
+                        <strong>🔔 ${(d.title || 'New notification').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</strong>
+                        ${d.body ? `<div class="mt-1">${d.body.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</div>` : ''}
+                        <a href="${link}" class="text-white text-decoration-underline small">View</a>
+                    </div>
+                    <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+                c.appendChild(t);
+                setTimeout(() => t.remove(), 30000);
+            });
         } catch (e) { console.warn('sysop broadcast socket failed:', e); }
     })();
     </script>

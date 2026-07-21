@@ -313,6 +313,7 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
             return 0
 
         new_ids = []
+        notify_pairs = []  # (EchomailMessage, EchoArea) for post-commit reply-notify
         for msg_dict in parsed:
             try:
                 # _parse_messages_dat() (qwk.py) returns dicts keyed
@@ -367,6 +368,7 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                     db.session.add(em)
                     db.session.flush()
                 new_ids.append(em.id)
+                notify_pairs.append((em, area))
                 count += 1
             except Exception:
                 logger.exception('QWK FTP REP: error importing message '
@@ -381,6 +383,20 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
             except Exception:
                 logger.exception('QWK FTP REP: commit/toss error')
                 db.session.rollback()
+            else:
+                # Reply-to-a-real-user notifications -- a hub often has
+                # its own local users reading the very same shared areas
+                # a downstream node just uploaded replies into, so this
+                # path needs the same "so-and-so replied to you" notice
+                # poller.py's and binkp_server.py's inbound paths already
+                # get (see notify_reply.py). Only runs after a successful
+                # commit, same as the toss loop above.
+                from ..models import EchomailNetwork
+                from .notify_reply import maybe_notify_recipient
+                for em_obj, area_obj in notify_pairs:
+                    network_obj = EchomailNetwork.query.get(area_obj.network_id)
+                    if network_obj is not None:
+                        maybe_notify_recipient(em_obj, area_obj, network_obj)
 
         node.last_poll_at = __import__('datetime').datetime.utcnow()
         try:

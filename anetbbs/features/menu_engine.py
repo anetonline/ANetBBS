@@ -473,6 +473,15 @@ async def run_menu(session, start='main'):
         except Exception:
             pass
 
+        # Same idea, for anything notify()'d since login (echomail/QWK
+        # replies addressed to this user, etc.) -- the "while already
+        # online" half of the login-time notification banner.
+        try:
+            from .notify import check_new_notifications
+            await check_new_notifications(session)
+        except Exception:
+            pass
+
         with _app().app_context():
             menu = BbsMenu.query.filter_by(name=current).first()
             if not menu:

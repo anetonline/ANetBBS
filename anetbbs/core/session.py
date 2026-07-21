@@ -1417,9 +1417,12 @@ class BBSSession:
             im_n = (InstantMessage.query
                     .filter_by(recipient_id=uid, is_read=False).count())
             try:
-                nt_n = (Notification.query
-                        .filter_by(user_id=uid, is_read=False).count())
+                unread_notifs = (Notification.query
+                                  .filter_by(user_id=uid, is_read=False)
+                                  .order_by(Notification.id).all())
+                nt_n = len(unread_notifs)
             except Exception:
+                unread_notifs = []
                 nt_n = 0
             if not (pm_n or im_n or nt_n):
                 return
@@ -1430,6 +1433,18 @@ class BBSSession:
             await self.write(
                 '\r\n\x1b[1;33m*** You have new: \x1b[0m'
                 + ', '.join(bits) + '\r\n')
+            # Echomail/QWK reply notifications carry the actual "who
+            # wrote to you, in which area" detail in title/body (see
+            # anetbbs/echomail/notify_reply.py) -- worth listing by name
+            # here rather than folding into the bare count above, the
+            # same way Synchronet surfaces a specific "msg to you" line
+            # per reply rather than just a tally.
+            for n in unread_notifs:
+                if n.kind == 'echomail_reply':
+                    line = f'    \x1b[33m- {n.title}\x1b[0m'
+                    if n.body:
+                        line += f' \x1b[36m({n.body})\x1b[0m'
+                    await self.write(line + '\r\n')
         except Exception:
             pass
 
@@ -1644,6 +1659,13 @@ class BBSSession:
             # toast that pops in the web UI.
             await self._show_notification_summary()
             await self._show_pending_broadcasts()
+            # Establish the baseline for check_new_notifications()'s
+            # "while already online" check in the menu loop below --
+            # everything unread as of THIS point was already covered by
+            # _show_notification_summary() above, so the menu loop must
+            # only announce notifications that arrive AFTER login.
+            from ..features.notify import check_new_notifications
+            await check_new_notifications(self)
             try:
                 await run_menu(self, start='main')
             except (CarrierLost, BrokenPipeError, ConnectionResetError,

@@ -77,6 +77,11 @@ class BBSMenuUI:
     async def show_main(self):
         """Top-level 'Main BBS' menu — wired into BBSSession.show_main_menu()."""
         while True:
+            try:
+                from .notify import check_new_notifications
+                await check_new_notifications(self.session)
+            except Exception:
+                pass
             menu = (
                 "\r\n"
                 "╔══════════════════════════════════════════╗\r\n"

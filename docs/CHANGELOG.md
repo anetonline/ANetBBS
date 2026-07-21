@@ -1,7 +1,19 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.175`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.176`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.176 — Echomail/QWK reply notifications (July 2026)
+
+When an inbound echomail (FidoNet) or QWK-network message arrives in a public area addressed TO your handle specifically (not the generic "All"), you now get notified -- both at login and while already online.
+
+- FEATURE: all three inbound-message paths now check the TO name against local usernames/display names/FTN AKAs (reusing netmail's own recipient-matching logic) and create a Notification if it's really addressed to someone: the outbound-poll/QWK-REP import path, the real-time BinkP listener, and a hub receiving a REP upload from a downstream node.
+- Terminal: the existing login-time "you have new mail" banner now lists these by name ("Jane wrote to you (in FidoNet (General))"), not just a bare count. A new check at every return to the main menu also surfaces ones that arrive while you're already connected.
+- Web: the notification bell already showed these after a page reload; now an already-open browser tab gets a live toast and the bell badge count bumps immediately, without needing a reload.
+- Skips the generic "everyone in this area" convention (to_name of All/Everyone/Sysop/etc.) so it only fires for messages genuinely addressed to a real person.
+- New toggle in Notification Settings to opt out.
+
+13 new regression tests covering all three import paths, the notify-skip rules, and both terminal delivery mechanisms.
 
 ## v1.0b2.175 — ANetDarkForces (Web): stale terminal mention removed from description (July 2026)
 

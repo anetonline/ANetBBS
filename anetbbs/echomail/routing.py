@@ -110,22 +110,19 @@ def find_aka_for_network(user, network):
     return akas[0]
 
 
-def resolve_netmail_recipient(to_name, to_address, network):
-    """Match an inbound netmail's recipient to a local User account.
+def resolve_user_by_name_or_address(to_name, to_address):
+    """Match a to_name/to_address pair to a local User account by
+    UserAka.address exact match, then username, then display_name
+    (case-insensitive). Returns None if nothing matches. No network-level
+    default-recipient fallback here -- that's netmail-specific (a public
+    echomail/QWK message with an unmatched TO name just isn't for anyone
+    local; there's no "catch-all sysop" convention for those the way
+    there is for netmail).
 
-    Match order: UserAka.address exact match, then username, then
-    display_name (case-insensitive), then the network's configured
-    DefaultRecipient as a last-resort catch-all. Returns None if nothing
-    matches -- the netmail still gets stored, just unlinked to any user
-    (and so never gets a Notification).
-
-    Shared by both inbound netmail import paths (anetbbs/echomail/poller.py's
-    _import_netmail, used by the QWK/poll-response path, and
-    anetbbs/echomail/binkp_server.py's _import_pkt_payload, used by the
-    real-time BinkP listener) -- they used to duplicate this logic, and the
-    BinkP listener path didn't do it at all (netmail received over a live
-    BinkP session was never linked to a User, so its recipient never got
-    notified of new mail).
+    Shared by resolve_netmail_recipient (below, which adds the netmail-
+    only default-recipient fallback) and
+    anetbbs.echomail.notify_reply.maybe_notify_recipient (echomail/QWK
+    reply-to-a-real-user notifications).
     """
     to_name = (to_name or '').strip()
     to_address = (to_address or '').strip()
@@ -143,6 +140,26 @@ def resolve_netmail_recipient(to_name, to_address, network):
             user = (User.query
                     .filter(func.lower(User.display_name) == to_name.lower())
                     .first())
+    return user
+
+
+def resolve_netmail_recipient(to_name, to_address, network):
+    """Match an inbound netmail's recipient to a local User account.
+
+    Match order: resolve_user_by_name_or_address(), then the network's
+    configured DefaultRecipient as a last-resort catch-all. Returns None
+    if nothing matches -- the netmail still gets stored, just unlinked to
+    any user (and so never gets a Notification).
+
+    Shared by both inbound netmail import paths (anetbbs/echomail/poller.py's
+    _import_netmail, used by the QWK/poll-response path, and
+    anetbbs/echomail/binkp_server.py's _import_pkt_payload, used by the
+    real-time BinkP listener) -- they used to duplicate this logic, and the
+    BinkP listener path didn't do it at all (netmail received over a live
+    BinkP session was never linked to a User, so its recipient never got
+    notified of new mail).
+    """
+    user = resolve_user_by_name_or_address(to_name, to_address)
     if user is None:
         default_name = (getattr(network, 'default_recipient', '') or '').strip()
         if default_name:

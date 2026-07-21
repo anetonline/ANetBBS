@@ -1252,6 +1252,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
     messages = _parse_ftn_packet(pkt_bytes)
     imported = 0
     echomail_objects = []       # EchomailMessage ORM objects for post-commit toss
+    echomail_notify_pairs = []  # (EchomailMessage, EchoArea) for post-commit reply-notify
     netmails_to_process = []   # ids of newly-inserted netmails for post-processing
 
     for m in messages:
@@ -1306,6 +1307,11 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
             )
             db.session.add(em)
             echomail_objects.append(em)
+            # (em, area) pairs for the post-commit reply-notify pass below
+            # -- mirrors netmails_to_process just below, but for echomail/
+            # QWK messages addressed to a real local user's handle rather
+            # than the generic 'All' convention (see notify_reply.py).
+            echomail_notify_pairs.append((em, area))
             # Bump the area counters so the admin index and area list show
             # accurate "Messages" and "Last Activity" columns. The QWK
             # poller does this in poller.py — the listener path was missing
@@ -1412,6 +1418,17 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
                     toss_message(em_obj.id)
         except Exception:
             logger.exception('Hub tosser failed for %s', filename)
+
+    # Reply-to-a-real-user notifications -- this listener path never
+    # linked an inbound echomail/QWK message's TO name to a local user at
+    # all before, so a Synchronet-style "so-and-so replied to you in
+    # <network> (<area>)" notice was only ever possible via poller.py's
+    # own outbound-poll import path (_import_message), never via a live
+    # inbound BinkP session.
+    if echomail_notify_pairs:
+        from .notify_reply import maybe_notify_recipient
+        for em_obj, area_obj in echomail_notify_pairs:
+            maybe_notify_recipient(em_obj, area_obj, network)
 
     # Areafix bot — trigger reply for any netmail addressed to 'areafix'
     # (or any Synchronet-style robot name we recognize). Done AFTER the

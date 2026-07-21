@@ -1,4 +1,4 @@
-ANetBBS v1.0b2.175 - Modern BBS System
+ANetBBS v1.0b2.176 - Modern BBS System
 -----------------------------------------
 Web (Flask+SocketIO), telnet, SSH, rlogin,
 FTP front-ends sharing one user database.

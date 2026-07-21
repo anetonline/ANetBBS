@@ -38,11 +38,12 @@ def mark_all_read():
 
 
 _NOTIFY_KINDS = [
-    ('mention',      "@-mentions in posts/PMs/shouts"),
-    ('reply',        "Replies to your posts"),
-    ('pm',           "New private messages"),
-    ('subscription', "New posts in subscribed boards"),
-    ('achievement',  "Achievement unlocks"),
+    ('mention',        "@-mentions in posts/PMs/shouts"),
+    ('reply',          "Replies to your posts"),
+    ('pm',             "New private messages"),
+    ('subscription',   "New posts in subscribed boards"),
+    ('achievement',    "Achievement unlocks"),
+    ('echomail_reply', "Echomail/QWK messages addressed to you"),
 ]
 
 # Admin-only: things that need a sysop's review, sent to every admin user

@@ -674,6 +674,9 @@ def _import_message(network, msg_data: dict) -> int:
     except Exception:
         pass
 
+    from .notify_reply import maybe_notify_recipient
+    maybe_notify_recipient(msg, area, network)
+
     return 1
 
 
