@@ -3398,3 +3398,41 @@ class MeadowlarkSave(db.Model):
 
     def __repr__(self):
         return f'<MeadowlarkSave user={self.user_id} slot={self.slot} day={self.day}>'
+
+
+class DarkForcesSave(db.Model):
+    """Per-user save slot for the ANetDarkForces web game. Mirrors
+    MeadowlarkSave's pattern exactly -- one row per (user, slot),
+    state_json holding the same JSON blob serializeState()/
+    deserializeState() (js/state.js) already produce/consume, so the
+    client-side save format didn't need to change, only where it's
+    persisted to.
+
+    level_name/level_index/player_level are denormalized out of
+    state_json purely so the slot-picker UI can list summaries (GET
+    /games/darkforces/saves) without deserializing every slot's full
+    state server-side -- the server has no independent copy of the
+    LEVELS array to look level_index up against, so the client computes
+    and sends these three fields alongside state_json on every save.
+    """
+    __tablename__ = 'darkforces_saves'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'slot', name='uq_darkforces_save_user_slot'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    slot = db.Column(db.Integer, nullable=False, default=1)
+    state_json = db.Column(db.Text, nullable=False)
+    level_name = db.Column(db.String(64))
+    level_index = db.Column(db.Integer, default=0)
+    player_level = db.Column(db.Integer, default=1)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow, index=True)
+
+    user = db.relationship('User', backref='darkforces_saves')
+
+    def __repr__(self):
+        return f'<DarkForcesSave user={self.user_id} slot={self.slot} level={self.level_name}>'

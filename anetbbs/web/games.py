@@ -118,8 +118,17 @@ def play(slug):
 
     if game.game_type == 'builtin_web':
         module = game.web_game_module or slug
+        from ..games.web_games import get_web_game_info
+        info = get_web_game_info(module)
+        # Most web games play boxed inside the normal site chrome
+        # (navbar/search bar/footer). A few -- currently just the
+        # first-person raycaster -- need the whole viewport for
+        # mouse-look and HUD framing, so they opt in via the registry's
+        # 'fullscreen' flag and get a chrome-free page instead.
+        template = ('games/play_web_fullscreen.html' if info and info.get('fullscreen')
+                    else 'games/play_web.html')
         return render_template(
-            'games/play_web.html',
+            template,
             game=game,
             module=module,
         )

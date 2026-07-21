@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playing {{ game.name }} — {{ config.BBS_NAME }}</title>
+{% if csrf_token is defined %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+{% endif %}
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; }
+  #fsBackLink {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.55);
+    color: #e8e2f0;
+    border: 1px solid #3a2050;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: 12px/1.4 'Segoe UI', Roboto, -apple-system, sans-serif;
+    text-decoration: none;
+    opacity: 0.45;
+    transition: opacity 0.15s ease;
+  }
+  #fsBackLink:hover { opacity: 1; color: #fff; }
+</style>
+</head>
+<body>
+<a id="fsBackLink" href="{{ url_for('games.lobby') }}">&larr; Game Center</a>
+{% include "games/web/" + module + ".html" %}
+</body>
+</html>

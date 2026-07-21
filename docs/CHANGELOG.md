@@ -1,7 +1,85 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.167`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.175`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.175 — ANetDarkForces (Web): stale terminal mention removed from description (July 2026)
+
+- FIX: the Game Center description for ANetDarkForces still said "(Also playable in the terminal via SSH/telnet, with sixel graphics on capable clients.)" -- stale since v1.0b2.174 pulled the terminal edition out of the live product. Removed.
+
+## v1.0b2.174 — ANetDarkForces (Terminal): pulled from the live product for offline rework (July 2026)
+
+After further playtesting, the terminal edition's visuals need substantially more work than incremental fixes can deliver (wall-texture readability, enemy visibility, general legibility over a real SyncTerm/SSH session). Rather than keep shipping partial fixes to players, it's being pulled out of ANetBBS entirely while it gets reworked separately -- the same way the canvas/web edition itself started out as a standalone build before being migrated in.
+
+- CHANGE: ANetDarkForces (Terminal) no longer appears in the Game Center or native SSH/telnet game listings. Its registry entry was removed from web_app.py's BUNDLED_DOORS; an install that already seeded it in a prior release (v1.0b2.168-173) gets the row deactivated (not deleted) on next boot, so any score/session history tied to it survives.
+- The module itself (anetbbs/features/darkforces_term.py) and its full test suite (tests/test_darkforces_term.py, 30 tests) are untouched and still pass -- development continues on it separately until it's ready to ship again.
+- UNCHANGED: the canvas/web edition ("ANetDarkForces" in the Game Center, full viewport, server-side saves) is unaffected and remains the only reachable way to play right now.
+
+3 new regression tests in tests/test_darkforces_term_retired.py (fresh installs never seed it; an existing active row from a prior release gets deactivated, not deleted, and stays deactivated across further reboots; the Game Center listing and direct play route both correctly 404/omit it once retired).
+
+## v1.0b2.173 — ANetDarkForces: exit waypoint, door texture spam, intro word-wrap (July 2026)
+
+Reported live across both editions after further playtesting.
+
+Web (canvas):
+- FIX: "stuck on level 4" wasn't a missing-content bug -- all 10 sectors are real and complete (verified). The actual problem: the level exit has always been a pure invisible coordinate with zero on-screen indication anywhere, so a big/open level cleared of enemies and pickups left no clue where to go. The minimap now shows a waypoint marker for the exit, clamped to the minimap's edge (pointing in the right direction) when it's outside the local view radius -- gold once the level's boss (if any) is down, gray otherwise.
+- CONFIRMED, no change needed: Escape-to-pause already worked correctly and was already wired to the right screen.
+
+Terminal:
+- FIX: standing close to a Security Door (or vault/ammo dispenser) filled large portions of the viewport with the same solid letter ('D'/'V'/'A') repeated in every cell -- reported live as looking like a rendering glitch. These wall types now stencil their identifying letter on a sparse diagonal over a normally-shaded fill instead of tiling it solid.
+- FIX: level-intro text was written raw to an 80-col terminal with no word-wrapping of our own, so long lines broke mid-word ("stockpi" / "ling"). Now wrapped at word boundaries before being sent.
+- CONFIRMED, no change needed: P-to-pause already exists.
+- Enemy visibility on the terminal port needs another pass -- still under active investigation, not part of this release.
+
+3 new regression tests in tests/test_darkforces_term.py (door-texture stencil pattern, plain-wall glyph unaffected, intro word-wrap). The web-side exit waypoint was verified via Node syntax check plus manual trace of the minimap's existing local-radius/clamping logic (no existing JS test harness in this repo to extend).
+
+## v1.0b2.172 — ANetDarkForces (Web): fullscreen play page (July 2026)
+
+Reported live: the canvas edition's play area was clipped inside ANetBBS's normal page chrome (navbar, search bar, footer) -- unable to scroll down to see the full play area, and the visible portion sat off-center to the right.
+
+- FIX: the raycaster's CSS was written for a true full-viewport page (like the standalone build had), but the Game Center's play route always renders web games inside base.html's bounded, nav-wrapped .container. That mismatch is what clipped/off-centered the canvas -- boxing a 100vw/100vh element inside a narrower, offset container instead of ignoring it.
+- FIX: ANetDarkForces now opts into a new chrome-free play template (a per-registry 'fullscreen' flag on web_games.py entries) so it gets the entire browser viewport, matching how it played standalone -- other web games are unaffected and still play boxed inside the normal site chrome. A small always-present "Game Center" link replaces the removed navbar as the way back out.
+
+3 new regression tests in tests/test_darkforces_web.py (play page renders the chromeless template with CSRF meta + back link; other web games still get the normal chrome).
+
+## v1.0b2.171 — ANetDarkForces: fix duplicate terminal entries on upgrade (July 2026)
+
+Reported live: after upgrading, the Game Center showed two ANetDarkForces entries and both launched the terminal edition -- the canvas version was unreachable.
+
+- FIX: the web-game seeding loop only inserted a Game row if its slug didn't already exist, with no logic to correct an EXISTING row. ANetDarkForces's terminal door originally shipped under the plain 'darkforces' slug; when the real web entry was added it needed that slug too, so the terminal door moved to 'darkforces-term' -- but on an in-place upgrade, the OLD 'darkforces' row (still pointing at the terminal port) was left untouched instead of being corrected, leaving two terminal-routed entries and no working canvas entry. The seeding loop now self-corrects an existing row's game_type/web_game_module on every boot (matching how door-game seeding already worked), without touching sysop-customizable fields like name/description/sort_order.
+- As a side effect of the same stale data, the canvas game was also incorrectly showing up in native SSH/telnet game listings (which already filter out web-only games by type) -- fixed by the same correction.
+
+3 new regression tests, including one confirming sysop customizations to a game's name/description/sort_order survive a restart.
+
+## v1.0b2.170 — ANetDarkForces: full web Game Center migration (July 2026)
+
+The canvas/browser version of ANetDarkForces -- built and polished standalone before this -- is now actually reachable from ANetBBS's own Game Center, not just the terminal port. Previously only the terminal door game was registered, so launching "ANetDarkForces" from the web UI always landed on the terminal edition regardless of intent.
+
+- FEATURE: full canvas game now lives at /games/darkforces/, same pattern as Meadowlark Valley -- 3 save slots tied to your ANetBBS account (server-side, replacing the standalone version's browser-local storage), reachable from the regular Game Center listing.
+- FIX: the terminal door game's slug collided with the new web entry (both wanted 'darkforces') -- terminal edition is now 'darkforces-term' internally; both remain full, independent ways to play the same campaign.
+
+No gameplay changes -- this is purely making the already-built web version reachable inside ANetBBS, alongside the terminal port from the last two releases.
+
+## v1.0b2.169 — ANetDarkForces (Terminal Edition): minimap + readable enemies (July 2026)
+
+Reported live: a player was killed without ever seeing what killed them -- the terminal port's raycast view only shows a narrow forward-facing slice with no peripheral awareness at all, and enemies attack based on distance/line-of-sight, not on whether they're inside that view.
+
+- FIX: added a top-down minimap (top-right corner of the viewport) showing nearby walls, the player's position/facing, and every nearby enemy -- the single biggest missing piece of situational awareness compared to the browser version.
+- FIX: enemies on non-sixel sessions were a single floating dot character, unreadable as "a person" at any distance -- now a real 2-row humanoid silhouette (head + body, taller up close), matching how the browser version's own sprites read as human silhouettes rather than blobs.
+- FIX: sixel-capable sessions had enemies rendering too small to read clearly at normal combat range -- bumped both the sprite canvas resolution and the on-screen scaling formula.
+- FIX: a minimap edge case where the player's own facing-direction tick could land on the exact same cell as a one-tile-away enemy and paint over it, hiding the enemy marker -- caught by a new regression test before shipping.
+
+2 new tests in tests/test_darkforces_term.py (27 total for this module).
+
+## v1.0b2.168 — ANetDarkForces (Terminal Edition): raycasting FPS with sixel sprites (July 2026)
+
+A first-person raycasting shooter now ships as a built-in terminal door game, ported from the standalone browser version -- an original "raid the Dark Forces' hideout computer stores" campaign across 10 sectors, 7 weapons, 8 enemy types, secrets, keycard vaults, and explosive barrels.
+
+- FEATURE: walls render as a real-time truecolor-ANSI column grid (same dirty-diffed double-buffer technique ANetCRAFT already uses over telnet/SSH), with enemies/pickups/barrels composited on top as small sixel-encoded sprites on sixel-capable terminals (SyncTerm, etc.) or a colored ANSI glyph otherwise -- no img2sixel dependency, a from-scratch native sixel encoder runs entirely in-process so the game stays real-time.
+- FEATURE: full parity with the browser version's combat/AI -- enemy infighting, memory (an alerted enemy gives up the chase after losing sight for a while), kamikaze drone arm/telegraph, riot-shield frontal damage reduction, barrel chain reactions, ammo caps, and all 10 levels' secrets/locked-door vaults.
+- One save slot per player, migration-safe the same way the browser version's own save format is.
+
+25 new tests in tests/test_darkforces_term.py.
 
 ## v1.0b2.167 — Meadowlark Valley: volume control (July 2026)
 

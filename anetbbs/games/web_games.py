@@ -211,6 +211,25 @@ WEB_GAMES = [
         'web_game_module': 'meadowlark_valley',
         'sort_order': 200,
     },
+    {
+        'name': 'ANetDarkForces',
+        'slug': 'darkforces',
+        'description': "A first-person raycasting shooter, ANetBBS's own take "
+                       "on the genre. Raid the Dark Forces' hideout computer "
+                       "stores across a 10-sector campaign to reclaim BBS "
+                       "parts -- 7 weapons, 8 enemy types, secrets, keycard "
+                       "vaults, and explosive barrels. 3 save slots tied to "
+                       "your account.",
+        'category': 'action',
+        'icon': 'bi-crosshair',
+        'web_game_module': 'darkforces',
+        'sort_order': 210,
+        # First-person raycaster: needs mouse-look + the full viewport like
+        # the standalone build did. Playing it boxed inside the normal
+        # site chrome (navbar/search bar/footer) clipped the play area and
+        # threw off centering -- see play_web_fullscreen.html.
+        'fullscreen': True,
+    },
 ]
 
 

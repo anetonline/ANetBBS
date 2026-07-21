@@ -1,0 +1,292 @@
+/* ─── ANetDarkForces: page chrome, HUD, menu screens ───────────────────── */
+/* The raycast scene itself is drawn entirely on <canvas id="gameCanvas">
+   at a fixed 640x400 internal resolution (see js/data.js RENDER_W/H) and
+   scaled up here via CSS -- everything else in this file is DOM overlay
+   (HUD, toasts, menu screens). */
+
+:root {
+  --accent: #ff4fd8;
+  --accent-dim: #c02fa0;
+  --cyan: #5fd6ff;
+  --green: #5fae6e;
+  --amber: #e0b23d;
+  --red: #d84f4f;
+  --bg: #08070c;
+  --panel-bg: rgba(14, 12, 20, 0.94);
+  --border: #3a2050;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: #e8e2f0;
+  font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
+  overflow: hidden;
+  height: 100%;
+}
+
+#gameRoot {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+#gameCanvas {
+  width: min(100vw, 177.78vh);
+  height: min(56.25vw, 100vh);
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: auto;
+  display: block;
+  background: #000;
+}
+
+/* ── Overlay flashes ── */
+.overlay-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.05s linear;
+}
+.overlay-flash.damage { background: radial-gradient(ellipse at center, rgba(216,79,79,0.15) 0%, rgba(216,79,79,0.55) 100%); }
+.overlay-flash.muzzle { background: radial-gradient(ellipse at 50% 85%, rgba(255,220,150,0.5) 0%, rgba(255,220,150,0) 55%); }
+
+#crosshair {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--cyan);
+  font-size: 16px;
+  font-weight: bold;
+  text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── HUD ── */
+#hud {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 10px 16px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  background: linear-gradient(to top, rgba(5,4,8,0.88), rgba(5,4,8,0));
+  pointer-events: none;
+  font-size: 13px;
+}
+.hud-bars { display: flex; gap: 14px; }
+.hud-stat { display: flex; align-items: center; gap: 6px; }
+.hud-label { color: #9a90ac; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.hud-num { font-weight: bold; min-width: 1.6em; }
+.hud-bar { width: 90px; height: 10px; border: 1px solid var(--border); background: rgba(0,0,0,0.5); border-radius: 3px; overflow: hidden; }
+.hud-bar-fill { height: 100%; width: 0%; transition: width 0.15s ease-out; }
+.hud-bar-hp .hud-bar-fill { background: var(--green); }
+.hud-bar-armor .hud-bar-fill { background: var(--cyan); }
+.hud-bar-xp { width: 140px; }
+.hud-bar-xp .hud-bar-fill { background: var(--accent); }
+.hud-mid { flex: 1; text-align: center; color: #8a80a0; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.hud-weapon { display: flex; align-items: center; gap: 8px; }
+.hud-weapon-name { color: var(--amber); font-weight: bold; }
+.hud-ammo { font-weight: bold; font-size: 16px; }
+.hud-rpg { display: flex; align-items: center; gap: 8px; }
+
+.weapon-bar { display: flex; gap: 4px; }
+.weapon-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.4);
+  color: #a89cc0;
+  font-size: 10px;
+  line-height: 1.1;
+}
+.weapon-slot-num { font-size: 9px; opacity: 0.7; }
+.weapon-slot-abbr { font-weight: bold; letter-spacing: 0.03em; }
+.weapon-slot.locked { opacity: 0.3; }
+.weapon-slot.active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 8px rgba(255,79,216,0.4); background: rgba(255,79,216,0.08); }
+
+#killFeed {
+  position: absolute;
+  top: 14px; left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  pointer-events: none;
+  max-width: 40vw;
+}
+#killFeed > div { text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+.feed-milestone { color: var(--amber); font-weight: bold; }
+.feed-warning { color: var(--red); }
+.feed-harvest { color: var(--accent); }
+.feed-info { color: #cfc8dd; }
+
+#toasts {
+  position: absolute;
+  top: 14px; right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  max-width: 32vw;
+}
+.adf-toast {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateX(12px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.adf-toast.show { opacity: 1; transform: translateX(0); }
+.adf-toast-milestone { border-color: var(--amber); color: var(--amber); }
+.adf-toast-warning { border-color: var(--red); color: #f0a0a0; }
+.adf-toast-harvest { border-color: var(--accent); color: var(--accent); }
+
+#topControls {
+  position: absolute;
+  top: 12px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.icon-btn {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  color: #e8e2f0;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.icon-btn:hover { border-color: var(--accent); }
+.icon-btn.muted { opacity: 0.5; }
+.volume-slider { width: 80px; accent-color: var(--accent); }
+
+/* ── Menu / message screens ── */
+.adf-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 3, 8, 0.82);
+  backdrop-filter: blur(2px);
+  z-index: 20;
+}
+.adf-screen.hidden { display: none; }
+
+.adf-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px 32px;
+  max-width: 560px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(255, 79, 216, 0.08);
+}
+.adf-panel h1 {
+  margin: 0 0 4px;
+  font-size: 2.2em;
+  letter-spacing: 0.02em;
+}
+.adf-panel h1 .accent { color: var(--accent); text-shadow: 0 0 12px rgba(255,79,216,0.6); }
+.adf-panel h2 { margin: 0 0 14px; color: var(--accent); }
+.tagline { color: #b0a6c4; margin-top: 0; }
+.section-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #9a90ac; margin: 18px 0 8px; }
+.intro-text { color: #cfc8dd; line-height: 1.5; text-align: left; }
+.hint { font-size: 12px; color: #8a80a0; }
+.controls-hint { margin-top: 20px; font-size: 12px; color: #9a90ac; border-top: 1px solid var(--border); padding-top: 14px; line-height: 1.6; }
+
+.complete-stats p { margin: 6px 0; color: #cfc8dd; }
+.complete-stats strong { color: var(--amber); }
+
+.adf-slot-picker { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.adf-slot-btn {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  color: #e8e2f0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100px;
+}
+.adf-slot-btn:hover { border-color: var(--accent); }
+.adf-slot-btn.active { border-color: var(--cyan); box-shadow: 0 0 8px rgba(95,214,255,0.4); }
+.adf-slot-sub { font-size: 11px; color: #9a90ac; }
+
+.adf-btn {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  color: #e8e2f0;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 4px;
+}
+.adf-btn:hover { border-color: var(--accent); }
+.adf-btn-primary { background: var(--accent-dim); border-color: var(--accent); font-weight: bold; }
+.adf-btn-primary:hover { background: var(--accent); }
+.adf-btn-danger:hover { border-color: var(--red); color: var(--red); }
+.pause-actions { margin-top: 18px; display: flex; flex-wrap: wrap; justify-content: center; }
+
+/* ── Backpack laptop -- deliberately a different register from the pink
+   hacker-neon panels above: a green-phosphor CRT readout, like pulling a
+   second device out of your bag mid-raid. ── */
+.laptop-frame {
+  background: #1c1a18;
+  border: 2px solid #3a3530;
+  border-radius: 10px;
+  padding: 18px;
+  max-width: 620px;
+  width: 92%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.laptop-screen {
+  background: #04140a;
+  border: 3px solid #0a2a14;
+  border-radius: 4px;
+  padding: 18px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 30px rgba(0,255,120,0.15);
+}
+.laptop-screen::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.15) 3px);
+  pointer-events: none;
+}
+.laptop-body {
+  margin: 0;
+  color: #4fff8a;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  text-shadow: 0 0 4px rgba(79,255,138,0.6);
+  white-space: pre-wrap;
+  text-align: left;
+}
+.laptop-close-btn { display: block; margin: 18px auto 0; }

@@ -1,0 +1,134 @@
+<link rel="stylesheet" href="{{ url_for('static', filename='css/darkforces.css') }}">
+
+<div id="gameRoot">
+
+  <canvas id="gameCanvas" width="640" height="400"></canvas>
+
+  <div id="muzzleFlash" class="overlay-flash muzzle"></div>
+  <div id="damageFlash" class="overlay-flash damage"></div>
+
+  <div id="crosshair">+</div>
+
+  <div id="hud">
+    <div class="hud-bars">
+      <div class="hud-stat">
+        <span class="hud-label">HP</span>
+        <div class="hud-bar hud-bar-hp"><div id="hudHpBar" class="hud-bar-fill"></div></div>
+        <span id="hudHp" class="hud-num">100</span>
+      </div>
+      <div class="hud-stat">
+        <span class="hud-label">ARM</span>
+        <div class="hud-bar hud-bar-armor"><div id="hudArmorBar" class="hud-bar-fill"></div></div>
+        <span id="hudArmor" class="hud-num">0</span>
+      </div>
+    </div>
+    <div class="hud-mid">
+      <span id="hudLevelName" class="hud-levelname"></span>
+    </div>
+    <div class="hud-weapon">
+      <span id="hudWeaponName" class="hud-weapon-name">Solder Gun</span>
+      <span id="hudAmmo" class="hud-ammo">&infin;</span>
+    </div>
+    <div id="weaponBar" class="weapon-bar"></div>
+    <div class="hud-rpg">
+      <span class="hud-label">LVL <span id="hudLevel">1</span></span>
+      <div class="hud-bar hud-bar-xp"><div id="hudXpBar" class="hud-bar-fill"></div></div>
+      <span class="hud-label">PARTS <span id="hudParts">0</span></span>
+    </div>
+  </div>
+
+  <div id="killFeed"></div>
+  <div id="toasts"></div>
+
+  <div id="topControls">
+    <button id="btnMute" class="icon-btn" title="Mute/unmute">🔊</button>
+    <input id="volumeSlider" class="volume-slider" type="range" min="0" max="100" value="70" title="Volume">
+  </div>
+
+  <!-- ── Title screen ─────────────────────────────────────────────── -->
+  <div id="screenTitle" class="adf-screen">
+    <div class="adf-panel adf-panel-title">
+      <h1>ANetDark<span class="accent">Forces</span></h1>
+      <p class="tagline">Nerd meets action hero. Raid the stores. Save the board.</p>
+      <p class="section-label">Choose a save slot to begin or continue:</p>
+      <div id="titleSlotPicker" class="adf-slot-picker"></div>
+      <p class="hint">Picking an empty slot starts a new run there. Picking a slot with a save continues it. Saves are tied to your ANetBBS account.</p>
+      <div class="controls-hint">
+        <strong>Controls:</strong> WASD/Arrows move &amp; turn &middot; Mouse look (click to lock) &middot;
+        Ctrl/Click fire &middot; Space open door &middot; Shift sprint &middot; Alt hop &middot;
+        1-7 / scroll wheel / Q-E switch weapon &middot; Tab backpack &middot; Esc pause
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Level intro ──────────────────────────────────────────────── -->
+  <div id="screenIntro" class="adf-screen hidden">
+    <div class="adf-panel">
+      <h2 id="introTitle"></h2>
+      <p id="introText" class="intro-text"></p>
+      <button id="btnBeginLevel" class="adf-btn adf-btn-primary">Move In →</button>
+    </div>
+  </div>
+
+  <!-- ── Level complete ───────────────────────────────────────────── -->
+  <div id="screenComplete" class="adf-screen hidden">
+    <div class="adf-panel">
+      <h2 id="completeTitle"></h2>
+      <div id="completeStats" class="complete-stats"></div>
+      <button id="btnLevelContinue" class="adf-btn adf-btn-primary"><span id="completeNextLabel">Next Sector →</span></button>
+    </div>
+  </div>
+
+  <!-- ── Victory ───────────────────────────────────────────────────── -->
+  <div id="screenVictory" class="adf-screen hidden">
+    <div class="adf-panel">
+      <h2>Board Saved</h2>
+      <div id="victoryStats" class="complete-stats"></div>
+      <button id="btnPlayAgain" class="adf-btn adf-btn-primary">Back to Title</button>
+    </div>
+  </div>
+
+  <!-- ── Death ─────────────────────────────────────────────────────── -->
+  <div id="screenDeath" class="adf-screen hidden">
+    <div class="adf-panel">
+      <h2>Down But Not Out</h2>
+      <div id="deathStats" class="complete-stats"></div>
+      <button id="btnRespawn" class="adf-btn adf-btn-primary">Respawn</button>
+    </div>
+  </div>
+
+  <!-- ── Backpack laptop (Tab) ────────────────────────────────────── -->
+  <div id="screenLaptop" class="adf-screen hidden">
+    <div class="laptop-frame">
+      <div class="laptop-screen"><pre id="laptopBody" class="laptop-body"></pre></div>
+      <button id="btnCloseLaptop" class="adf-btn adf-btn-primary laptop-close-btn">Stow Laptop</button>
+    </div>
+  </div>
+
+  <!-- ── Pause ─────────────────────────────────────────────────────── -->
+  <div id="screenPause" class="adf-screen hidden">
+    <div class="adf-panel">
+      <h2>Paused</h2>
+      <p class="section-label">Active save slot:</p>
+      <div id="pauseSlotPicker" class="adf-slot-picker"></div>
+      <div class="pause-actions">
+        <button id="btnResume" class="adf-btn adf-btn-primary">Resume</button>
+        <button id="btnSaveGame" class="adf-btn">Save</button>
+        <button id="btnLoadGame" class="adf-btn">Load</button>
+        <button id="btnQuitToTitle" class="adf-btn adf-btn-danger">Quit to Title</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='js/darkforces/data.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/levels.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/textures.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/raycaster.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/entities.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/weapons.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/sound.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/ui.js') }}"></script>
+<script src="{{ url_for('static', filename='js/darkforces/main.js') }}"></script>

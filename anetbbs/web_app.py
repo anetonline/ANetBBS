@@ -343,6 +343,7 @@ def create_app(config_name=None):
     from .web.games_admin import games_admin_bp
     from .web.ebooks import ebooks_bp
     from .web.meadowlark import meadowlark_bp
+    from .web.darkforces import darkforces_bp
     from .web.gallery import gallery_bp
     from .web.gallery_admin import gallery_admin_bp
     from .web.rss import rss_bp, redirect_bp
@@ -420,6 +421,7 @@ def create_app(config_name=None):
     app.register_blueprint(games_admin_bp)
     app.register_blueprint(ebooks_bp)
     app.register_blueprint(meadowlark_bp)
+    app.register_blueprint(darkforces_bp)
     app.register_blueprint(gallery_bp)
     app.register_blueprint(gallery_admin_bp)
     app.register_blueprint(rss_bp)
@@ -1458,11 +1460,23 @@ def _create_default_data():
             ))
             db.session.commit()
 
-    # Create default built-in web games
+    # Create default built-in web games. Self-corrects an EXISTING row's
+    # routing-critical fields only (game_type/web_game_module) -- same
+    # narrow scope the BUNDLED_DOORS loop below already uses for door
+    # games, deliberately NOT touching name/description/category/icon/
+    # sort_order so a sysop's own admin-UI customizations to those fields
+    # survive a restart. Caught live: a slug that used to belong to a
+    # DIFFERENT game_type in an older release (ANetDarkForces's slug was
+    # 'darkforces'/builtin_python here before it got a real web entry and
+    # the terminal door moved to 'darkforces-term') would otherwise
+    # silently keep pointing at the old game forever on an in-place
+    # upgrade -- "insert only if the slug doesn't exist yet" has no way
+    # to notice the row's TYPE is now wrong for that slug.
     from .games.web_games import WEB_GAMES
     for game_data in WEB_GAMES:
-        if not Game.query.filter_by(slug=game_data['slug']).first():
-            game = Game(
+        game = Game.query.filter_by(slug=game_data['slug']).first()
+        if game is None:
+            db.session.add(Game(
                 name=game_data['name'],
                 slug=game_data['slug'],
                 description=game_data['description'],
@@ -1472,8 +1486,10 @@ def _create_default_data():
                 web_game_module=game_data['web_game_module'],
                 sort_order=game_data.get('sort_order', 0),
                 is_active=True,
-            )
-            db.session.add(game)
+            ))
+        else:
+            game.game_type = 'builtin_web'
+            game.web_game_module = game_data['web_game_module']
     db.session.commit()
 
     # Pre-seed bundled door games. The binaries / scripts ship inside the
@@ -1563,6 +1579,20 @@ def _create_default_data():
                 _ca.root_path, 'features', 'anetcraft.py'),
             '_active_default': True,
         },
+        # ANetDarkForces (Terminal Edition) is deliberately NOT in this
+        # list right now -- pulled back out of the live product per a
+        # live playtest report (readability/visual issues bad enough to
+        # warrant offline iteration rather than shipping it half-baked).
+        # The module (anetbbs/features/darkforces_term.py) and its own
+        # test suite (tests/test_darkforces_term.py) are untouched and
+        # still fully functional -- this is purely a registry/seeding
+        # change so it stops appearing in the Game Center and native SSH/
+        # telnet game listings. See the deactivation block right after
+        # this loop for how an install that already seeded the row (e.g.
+        # a prior release) gets it turned back off. The canvas/web edition
+        # (slug 'darkforces', games/web_games.py) is untouched and stays
+        # the only reachable way to play ANetDarkForces until the
+        # terminal edition is ready to come back.
         {
             # LORD — the canonical door game, Synchronet's JS port.
             # The game files ship inside the anetbbs package itself
@@ -1684,6 +1714,26 @@ def _create_default_data():
         else:
             db.session.add(Game(**kw))
     db.session.commit()
+
+    # ANetDarkForces (Terminal) was removed from BUNDLED_DOORS above (see
+    # its comment) -- so it's simply never seeded on a fresh install, but
+    # an install that already has the row from a prior release (v1.0b2.
+    # 168-173) would otherwise keep it active forever, since the self-
+    # correction loop above only touches game_type/web_game_module/
+    # web_game_url on an existing row, never is_active. Deactivate it
+    # here instead of deleting it, so any GameScore/GameSession history
+    # tied to it survives intact -- same reasoning delete_game() in
+    # web/games_admin.py documents for why deletion (not deactivation)
+    # is the destructive path. Remove this block once the terminal
+    # edition is ready to ship again and BUNDLED_DOORS gets its entry
+    # back (at which point a sysop's own admin-UI re-activation would
+    # also stop getting reverted on every boot, which this block doesn't
+    # try to distinguish from -- acceptable while this is a short-lived,
+    # single-entry retirement rather than a general mechanism).
+    _df_term = Game.query.filter_by(slug='darkforces-term').first()
+    if _df_term is not None and _df_term.is_active:
+        _df_term.is_active = False
+        db.session.commit()
 
     # ─── Default RSS feeds ───────────────────────────────────────────
     # Seed at least one feed so a fresh install ships with something
