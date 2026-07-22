@@ -2958,6 +2958,14 @@ class BinkPNode(db.Model):
     Unlike EchomailNetwork (which represents an *upstream* hub we connect to),
     a BinkPNode is a *downstream* peer: they authenticate to our listener,
     pick up mail we've tossed to them, and deliver their own outbound mail.
+
+    Also pollable the OTHER direction (see poller.poll_node_now): if the
+    node runs its own reachable BinkP listener (binkp_host set), the hub
+    can dial OUT to push its hold queue immediately instead of waiting for
+    the node to call in -- normal hub behavior, e.g. for crash-mode mail
+    or a node behind an unreliable connection. binkp_host is optional --
+    many real downstream nodes are poll-in-only (dynamic IP/NAT/firewalled)
+    and simply can't be dialed; that's expected, not an error state.
     """
     __tablename__ = 'binkp_nodes'
 
@@ -2976,6 +2984,12 @@ class BinkPNode(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     notes = db.Column(db.Text)
 
+    # Optional dial-out address for hub-initiated polling of this node.
+    # Blank binkp_host means "poll-in only" -- Poll Now stays disabled.
+    binkp_host = db.Column(db.String(255))
+    binkp_port = db.Column(db.Integer, default=24554)
+    binkp_tls = db.Column(db.Boolean, default=False)
+
     # Which hub identity this downstream peer belongs to (see
     # HubIdentity). Scopes inbound BinkP auth and outbound packet
     # sender-stamping so nodes of different hub identities can't
@@ -2983,11 +2997,24 @@ class BinkPNode(db.Model):
     hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
                                 default=_default_hub_identity_id, nullable=True, index=True)
 
+    # Which BinkP EchomailNetwork this node's mail actually belongs to.
+    # A single HubIdentity can own more than one binkp EchomailNetwork row
+    # (e.g. a sysop who is both hub of their own network AND a leaf member
+    # of several other real-world networks under the same identity) --
+    # hub_identity_id alone can't disambiguate which one a given downstream
+    # node is polling for. Nullable for rows created before this column
+    # existed; binkp_server.py falls back to the old hub_identity-based
+    # (self-hub-filtered) lookup when unset. Always set going forward by
+    # new_binkp_node/approve_join_request.
+    network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'),
+                           nullable=True, index=True)
+
     subscriptions = db.relationship('EchoAreaNode', backref='node',
                                     lazy='dynamic', cascade='all, delete-orphan')
     hold_queue = db.relationship('BinkPHoldQueue', backref='node',
                                  lazy='dynamic', cascade='all, delete-orphan')
     hub_identity = db.relationship('HubIdentity', backref=db.backref('binkp_nodes', lazy='dynamic'))
+    network = db.relationship('EchomailNetwork', backref=db.backref('downstream_nodes', lazy='dynamic'))
 
     def __repr__(self):
         return f'<BinkPNode {self.ftn_address}>'

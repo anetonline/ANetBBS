@@ -398,6 +398,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     # 3. Look up the caller — may be an upstream hub (EchomailNetwork) or a
     #    downstream node that registered with us as hub (BinkPNode).
     from anetbbs.models import db, EchomailNetwork, BinkPNode
+    from .routing import self_hub_binkp_network
 
     app = _new_app()
     db.init_app(app)
@@ -521,60 +522,79 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 db.session.commit()
 
                 identity = node.hub_identity
+                # Prefer the node's own explicit network_id when set -- the
+                # only unambiguous source of truth (see BinkPNode.network_id).
+                # A HubIdentity can own MULTIPLE binkp EchomailNetwork rows
+                # (we're hub of one, leaf member of others under the same
+                # identity), so falling back to hub_identity_id alone can't
+                # tell which network a downstream node actually belongs to.
+                identity_net = EchomailNetwork.query.get(node.network_id) \
+                    if node.network_id else None
+                if identity_net is None and identity is not None:
+                    # Legacy row predating network_id (or never resolved at
+                    # creation time) -- narrow hub_identity_id's candidates
+                    # down to the one network under this identity where WE
+                    # are the hub (our_address == hub_address). Plain
+                    # hub_identity_id filtering + .first() used to pick
+                    # whichever binkp network under this identity sorted
+                    # first by id, completely unrelated to the node that
+                    # actually connected, whenever an identity owned more
+                    # than one binkp network -- a real bug found live
+                    # (sysop is hub of one network and a leaf member of
+                    # several others, all sharing one HubIdentity; inbound
+                    # mail from a real downstream node landed silently under
+                    # the wrong network's poll log/EchoArea).
+                    identity_net = self_hub_binkp_network(identity.id)
                 if identity is None:
                     logger.warning(
                         'BinkP %s: downstream node %s (id=%s) has no '
                         'resolvable hub identity -- outbound mail will be '
                         'stamped with the process-wide default address %s',
                         peer, remote_addr, node.id, our_address)
+                elif identity_net:
+                    # Real bug found live (multi-hub-identity install,
+                    # sysop testing a second network): this used to
+                    # only read identity_net.our_address for the
+                    # OUTBOUND stamping address below and never
+                    # captured identity_net.id anywhere -- net_id
+                    # stayed None for every downstream-node session,
+                    # every single time, regardless of how correctly
+                    # everything else was configured. That None then
+                    # got passed straight into the inbound packet
+                    # importer, which hit EchoArea/EchomailMessage's
+                    # NOT-NULL network_id constraint on flush -- an
+                    # IntegrityError silently swallowed by the
+                    # session's generic exception handler further
+                    # down, with zero trace anywhere a sysop could
+                    # see (BadAreaLog is a poller.py-only mechanism,
+                    # never touched by this listener). BinkP itself
+                    # looked completely successful (GOT sent back for
+                    # the received .pkt file), but the message inside
+                    # it never made it into any EchoArea.
+                    net_id = identity_net.id
+                    net_name = identity.name
+                    if (identity_net.our_address or '').strip():
+                        matched_our_address = identity_net.our_address.strip()
+                elif identity.binkp_zone and identity.binkp_net:
+                    matched_our_address = (
+                        f'{identity.binkp_zone}:{identity.binkp_net}/'
+                        f'{identity.binkp_hub_node or 1}')
+                    logger.warning(
+                        'BinkP %s: downstream node %s belongs to hub '
+                        'identity %r, which has no resolvable BinkP '
+                        'EchomailNetwork row (none set, or ambiguous which '
+                        'of several under this identity) -- inbound mail '
+                        'cannot be imported (no network to attach it to) '
+                        'until node.network_id is set explicitly',
+                        peer, remote_addr, identity.name)
                 else:
-                    identity_net = (EchomailNetwork.query
-                                    .filter_by(hub_identity_id=identity.id,
-                                              network_type='binkp')
-                                    .filter(EchomailNetwork.our_address.isnot(None))
-                                    .first())
-                    if identity_net:
-                        # Real bug found live (multi-hub-identity install,
-                        # sysop testing a second network): this used to
-                        # only read identity_net.our_address for the
-                        # OUTBOUND stamping address below and never
-                        # captured identity_net.id anywhere -- net_id
-                        # stayed None for every downstream-node session,
-                        # every single time, regardless of how correctly
-                        # everything else was configured. That None then
-                        # got passed straight into the inbound packet
-                        # importer, which hit EchoArea/EchomailMessage's
-                        # NOT-NULL network_id constraint on flush -- an
-                        # IntegrityError silently swallowed by the
-                        # session's generic exception handler further
-                        # down, with zero trace anywhere a sysop could
-                        # see (BadAreaLog is a poller.py-only mechanism,
-                        # never touched by this listener). BinkP itself
-                        # looked completely successful (GOT sent back for
-                        # the received .pkt file), but the message inside
-                        # it never made it into any EchoArea.
-                        net_id = identity_net.id
-                        net_name = identity.name
-                        if (identity_net.our_address or '').strip():
-                            matched_our_address = identity_net.our_address.strip()
-                    elif identity.binkp_zone and identity.binkp_net:
-                        matched_our_address = (
-                            f'{identity.binkp_zone}:{identity.binkp_net}/'
-                            f'{identity.binkp_hub_node or 1}')
-                        logger.warning(
-                            'BinkP %s: downstream node %s belongs to hub '
-                            'identity %r, which has no BinkP EchomailNetwork '
-                            'row -- inbound mail cannot be imported (no '
-                            'network to attach it to) until one is created',
-                            peer, remote_addr, identity.name)
-                    else:
-                        logger.warning(
-                            'BinkP %s: downstream node %s belongs to hub '
-                            'identity %r, which has no BinkP network or '
-                            'zone:net configured -- outbound mail will be '
-                            'stamped with the process-wide default address '
-                            '%s instead of that identity\'s own AKA',
-                            peer, remote_addr, identity.name, our_address)
+                    logger.warning(
+                        'BinkP %s: downstream node %s belongs to hub '
+                        'identity %r, which has no BinkP network or '
+                        'zone:net configured -- outbound mail will be '
+                        'stamped with the process-wide default address '
+                        '%s instead of that identity\'s own AKA',
+                        peer, remote_addr, identity.name, our_address)
             else:
                 logger.warning('BinkP %s: unknown remote address %s (tried: %s)',
                                peer, remote_addr, ', '.join(candidates))

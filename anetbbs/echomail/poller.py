@@ -145,6 +145,17 @@ def poll_all_now(app):
                 logger.error("Poller: error polling %s: %s", network.name, exc)
 
 
+def poll_node_now(app, node_id: int):
+    """Trigger an immediate hub-initiated poll of a downstream BinkP node
+    (dial OUT and push its hold queue), mirroring poll_network_now() for
+    upstream networks. Runs synchronously in the calling thread."""
+    with app.app_context():
+        from ..models import BinkPNode
+        node = BinkPNode.query.get(node_id)
+        if node:
+            _do_poll_node(app, node)
+
+
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
@@ -390,6 +401,156 @@ def _do_poll(app, network):
         if transcript_lines:
             log.transcript = _format_transcript(transcript_lines)
         db.session.commit()
+
+
+def _do_poll_node(app, node):
+    """Hub-initiated outbound poll of a downstream BinkP node: dial OUT
+    to node.binkp_host, push its BinkPHoldQueue, and import anything it
+    sends back. Mirrors _do_poll()'s structure but for a BinkPNode instead
+    of an upstream EchomailNetwork -- the roles are reversed (we're the
+    caller, they're the answering hub for this one session), but the
+    packet transport, message import, and poll-log bookkeeping are the
+    same BinkP mechanics either way.
+    """
+    from ..models import db, EchomailPollLog
+    from .routing import self_hub_binkp_network
+
+    if not (node.binkp_host or '').strip():
+        logger.warning(
+            "Poller: cannot poll node %s (%s) -- no BinkP host configured "
+            "(this node is poll-in only)", node.name, node.ftn_address)
+        return
+
+    # Same resolution BinkPNode.network_id exists to make unambiguous (see
+    # its own model comment) -- reused here rather than re-derived, since
+    # a node with no resolvable network has nowhere valid to stamp
+    # outbound mail's AKA or attach an EchomailPollLog row (NOT NULL).
+    network = node.network or self_hub_binkp_network(node.hub_identity_id)
+    if network is None:
+        logger.warning(
+            "Poller: cannot poll node %s (%s) -- no resolvable BinkP "
+            "network to stamp outbound mail/log against; set the node's "
+            "Network field explicitly", node.name, node.ftn_address)
+        return
+
+    log = EchomailPollLog(
+        network_id=network.id,
+        poll_type='both',
+        started_at=datetime.utcnow(),
+        status='running',
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    transcript_lines = []
+    try:
+        from .tosser import get_pending_for_node, mark_sent_for_node
+        from ..models import EchomailMessage as _EM_PRE
+
+        outbound = get_pending_for_node(node.id)
+
+        # Snapshot BEFORE import, same as _do_poll(), so the tosser
+        # fan-out below can find exactly the rows this poll just added.
+        pre_import_max = (db.session.query(db.func.max(_EM_PRE.id))
+                          .filter_by(network_id=network.id, direction='inbound')
+                          .scalar() or 0)
+
+        result = _run_node_client(node, network, outbound, app,
+                                  transcript=transcript_lines)
+
+        imported = duplicates = dropped = 0
+        for msg_data in result.get('received', []):
+            rc = _import_message(network, msg_data)
+            if rc > 0:
+                imported += 1
+            elif rc == 0:
+                duplicates += 1
+            else:
+                dropped += 1
+
+        log.status = 'success'
+        log.messages_sent = result.get('sent', 0)
+        log.messages_received = imported
+        if duplicates or dropped:
+            err_bits = []
+            if duplicates:
+                err_bits.append(f'{duplicates} duplicate')
+            if dropped:
+                err_bits.append(f'{dropped} dropped (loop/unknown/unsub)')
+            log.error_message = ', '.join(err_bits)
+
+        # Same ack-gating as _do_poll() -- only mark the hold queue sent
+        # if the node actually acknowledged the batch (see
+        # test_poller_ack_gated_stamping.py for why this matters).
+        if result.get('sent', 0) and outbound:
+            mark_sent_for_node(node.id, [m.id for m in outbound])
+        elif outbound:
+            logger.warning(
+                "Poller: node %s (%s) -- did not acknowledge outbound "
+                "batch, %d message(s) left queued for retry",
+                node.name, node.ftn_address, len(outbound))
+
+        node.last_seen_at = datetime.utcnow()
+
+        logger.info("Poller: node %s (%s) -- sent=%d received=%d",
+                    node.name, node.ftn_address, log.messages_sent,
+                    log.messages_received)
+
+        if imported:
+            try:
+                from .tosser import toss_message
+                from ..models import EchomailMessage as _EM
+                new_msgs = (_EM.query
+                           .filter(_EM.network_id == network.id,
+                                   _EM.direction == 'inbound',
+                                   _EM.id > pre_import_max)
+                           .all())
+                for em in new_msgs:
+                    toss_message(em.id)
+            except Exception:
+                logger.exception('Hub tosser failed after polling node %s',
+                                 node.name)
+
+    except Exception as exc:
+        log.status = 'error'
+        detail = str(exc)
+        log.error_message = f'{type(exc).__name__}: {detail}' if detail else type(exc).__name__
+        db.session.commit()
+        logger.error("Poller: poll failed for node %s (%s): %s",
+                     node.name, node.ftn_address, exc)
+        raise
+    finally:
+        log.completed_at = datetime.utcnow()
+        if transcript_lines:
+            log.transcript = _format_transcript(transcript_lines)
+        db.session.commit()
+
+
+def _run_node_client(node, network, outbound_messages, app, transcript=None):
+    """Instantiate a BinkPClient and dial OUT to a downstream node --
+    the node-poll counterpart of _run_client(), which dials upstream
+    EchomailNetwork rows instead. Separated out (rather than inlined in
+    _do_poll_node) so tests can patch this one seam exactly like existing
+    poller tests patch _run_client (see test_poller_ack_gated_stamping.py)."""
+    from .binkp import BinkPClient
+    client = BinkPClient(
+        host=node.binkp_host or '',
+        port=node.binkp_port or 24554,
+        our_address=network.our_address or '1:1/1',
+        hub_address=node.ftn_address,
+        password=node.password or '',
+        use_tls=bool(getattr(node, 'binkp_tls', False)),
+        domain=(getattr(network, 'ftn_domain', None)
+                or network.name or '').strip().lower() or None,
+        transcript=transcript,
+        packet_password=getattr(network, 'packet_password', None) or '',
+        default_crash=bool(getattr(network, 'default_crash', False)),
+        default_hold=bool(getattr(network, 'default_hold', False)),
+        default_direct=bool(getattr(network, 'default_direct', False)),
+    )
+    data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+    return client.poll(outbound_messages=outbound_messages, data_dir=data_dir,
+                       hatch_items=[])
 
 
 def _run_client(network, outbound_messages, app, transcript=None):

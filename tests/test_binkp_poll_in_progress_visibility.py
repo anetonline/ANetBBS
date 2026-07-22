@@ -271,6 +271,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
                 self.is_active = True
                 self.last_seen_at = None
                 self.hub_identity = None
+                self.network_id = None
 
         from anetbbs.models import BinkPNode
         node = _FakeNode(id=3, ftn_address='1:1/2', password='nodepass')

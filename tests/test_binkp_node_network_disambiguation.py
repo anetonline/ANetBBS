@@ -1,31 +1,32 @@
-"""Regression test for a real live bug: a sysop testing a SECOND
-HubIdentity's echomail (multi-hub-identity feature) reported that his
-message never showed up on ANetBBS, even though the BinkP transcript
-showed a completely successful protocol-level transfer -- CRAM-MD5 auth
-succeeded, the .pkt file was received and M_GOT-acknowledged.
+"""Regression test for a real live bug: a sysop (hub of ANotherNetwork,
+zone 1200) is ALSO a leaf member of four other real-world binkp networks
+(tqwnet, sp00knet, IREX, Fidonet) -- all five EchomailNetwork rows share
+the install's one default HubIdentity, since multi-hub-identity is only
+needed when a sysop runs more than one distinct hub. A real downstream
+node (GateKeeper, 1200:1/2) polled in successfully -- CRAM-MD5 auth OK,
+.pkt received, M_GOT acknowledged, and the exchange even showed up via
+the unrelated InterBBS Last Callers feature -- but nothing appeared
+under ANotherNetwork in Admin -> Echomail poll log.
 
 Root cause, found in anetbbs/echomail/binkp_server.py's
-_handle_connection(): when the connecting peer is a *downstream* node
-(registered as a BinkPNode, not an upstream EchomailNetwork), the code
-resolves `identity_net` (the EchomailNetwork row for that node's
-HubIdentity) but used it ONLY to compute the outbound-stamping address
-(`matched_our_address`) -- `identity_net.id` was never captured into
-`net_id`. `net_id` stayed None for every downstream-node session,
-regardless of how correctly everything else was configured, and that
-None got passed straight into `_import_pkt_payload()`, which needs a
-real network_id to create/attach EchoArea and EchomailMessage rows
-(both NOT NULL on network_id). The resulting IntegrityError was
-silently swallowed by the session's generic exception handler with no
-sysop-visible trace anywhere (BadAreaLog is a poller.py-only mechanism,
-never touched by this listener) -- BinkP itself looked fully successful
-(M_GOT sent) while the message inside the packet was lost.
+_handle_connection(): resolving `identity_net` for a downstream node
+used to filter EchomailNetwork purely by `hub_identity_id=identity.id,
+network_type='binkp'` and take `.first()` -- with 5 matching rows under
+one identity, `.first()` returned whichever sorted first by id (tqwnet),
+completely unrelated to which network the connecting node actually
+belongs to. GateKeeper's mail got silently imported/logged under tqwnet
+instead of ANotherNetwork.
 
-Reuses the real-frame session-simulator pattern established in
-test_binkp_multi_hub_identity.py (downstream node + HubIdentity fakes)
-combined with the FILE-transfer scripting pattern from
-test_binkp_finish_before_import_ordering.py (a real M_FILE + DATA + EOB
-frame sequence, with _import_pkt_payload patched out to capture the
-network_id it was actually called with).
+Fixed two ways: (1) BinkPNode gained an explicit `network_id` FK --
+the only truly unambiguous source of truth, set at node-creation time
+by approve_join_request()/the admin form; (2) for legacy rows without
+it, routing.self_hub_binkp_network() narrows the ambiguous
+hub_identity_id candidates down to the one network under that identity
+where we're actually the hub (our_address == hub_address) -- the only
+case a downstream node polling IN makes sense for.
+
+Reuses the real-frame session-simulator pattern from
+test_binkp_downstream_node_import_network_id.py.
 """
 import asyncio
 import struct
@@ -127,6 +128,12 @@ class _FakeQuery:
     def all(self):
         return [row for row in self._rows if self._matches(row)]
 
+    def get(self, pk):
+        for row in self._rows:
+            if row.id == pk:
+                return row
+        return None
+
 
 class _FakeHubIdentity:
     def __init__(self, id, name='Identity', is_default=False,
@@ -166,10 +173,6 @@ class _FakeEchomailNetwork:
 
 
 class _RecordingSession:
-    """Like the plain no-op session the other BinkP tests use, but
-    remembers every object passed to add() -- needed here to inspect
-    the EchomailPollLog row the code under test constructs, since
-    add()/commit() are otherwise no-ops with nothing to assert against."""
     def __init__(self):
         self.added = []
 
@@ -187,16 +190,31 @@ class _RecordingSession:
 
 
 def _minimal_fts_packet():
-    """A minimal-but-structurally-valid FTS-0001 type-2 packet header
-    (58 bytes) -- enough for _is_fts_packet()'s magic-byte check to
-    recognize it as a real packet. _import_pkt_payload is patched out
-    entirely; only the network_id it's called with matters here."""
     hdr = bytearray(58)
     struct.pack_into('<H', hdr, 18, 2)  # version = 2 (type-2 packet)
     return bytes(hdr)
 
 
-class DownstreamNodeImportNetworkIdTests(unittest.TestCase):
+def _real_world_networks(identity_id=1):
+    """The exact shape of Jerry's real live data: 5 binkp networks under
+    one HubIdentity, only ANotherNetwork (id=5) is a self-hub network
+    (our_address == hub_address); the rest are leaf memberships. tqwnet
+    (id=3) sorts first by id -- the old buggy `.first()` picked it."""
+    return [
+        _FakeEchomailNetwork(id=3, name='tqwnet', our_address='1337:3/231',
+                             hub_address='1337:3/100', hub_identity_id=identity_id),
+        _FakeEchomailNetwork(id=4, name='sp00knet', our_address='700:100/111',
+                             hub_address='700:100/0', hub_identity_id=identity_id),
+        _FakeEchomailNetwork(id=5, name='ANotherNetwork', our_address='1200:1/1',
+                             hub_address='1200:1/1', hub_identity_id=identity_id),
+        _FakeEchomailNetwork(id=7, name='IREX', our_address='111:1111/3',
+                             hub_address='111:111/2', hub_identity_id=identity_id),
+        _FakeEchomailNetwork(id=8, name='Fidonet', our_address='1:123/3003',
+                             hub_address='1:3634/12', hub_identity_id=identity_id),
+    ]
+
+
+class NetworkDisambiguationTests(unittest.TestCase):
     def _run(self, networks, nodes, remote_addr, remote_pwd):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
@@ -206,7 +224,7 @@ class DownstreamNodeImportNetworkIdTests(unittest.TestCase):
 
         def _tracking_import_pkt_payload(pkt_bytes, network_id, filename):
             captured['import_calls'].append(network_id)
-            return 3  # nonzero -- lets the poll-log messages_received assertion be meaningful
+            return 3
 
         pkt_bytes = _minimal_fts_packet()
         frames = [
@@ -246,89 +264,75 @@ class DownstreamNodeImportNetworkIdTests(unittest.TestCase):
         captured['session_added'] = recording_session.added
         return writer, captured
 
-    def test_downstream_node_with_resolvable_identity_net_imports_under_its_id(self):
-        # The exact reported scenario: a downstream node belongs to a
-        # second HubIdentity that DOES have its own BinkP EchomailNetwork
-        # row -- _import_pkt_payload must be called with THAT network's
-        # id, not None.
-        identity = _FakeHubIdentity(id=2, name='ANotherNetwork', is_default=False)
-        identity_net = _FakeEchomailNetwork(
-            id=42, network_type='binkp', our_address='1200:1/1',
-            hub_identity_id=2, name='ANotherNetwork')
-        node = _FakeBinkPNode(id=2, ftn_address='1200:1/2', password='secret',
-                              hub_identity=identity)
+    def test_legacy_node_without_network_id_resolves_via_self_hub_not_first_by_id(self):
+        # The exact reported scenario: node.network_id unset (legacy row),
+        # 5 binkp networks share one hub_identity_id, tqwnet (id=3) sorts
+        # first. Must resolve to ANotherNetwork (id=5) -- the network
+        # where we're actually the hub -- not tqwnet.
+        identity = _FakeHubIdentity(id=1, name='ANotherNetwork')
+        networks = _real_world_networks(identity_id=1)
+        node = _FakeBinkPNode(id=9, ftn_address='1200:1/2', password='secret',
+                              name='GateKeeper', hub_identity=identity,
+                              network_id=None)
 
         writer, captured = self._run(
-            networks=[identity_net], nodes=[node],
+            networks=networks, nodes=[node],
             remote_addr='1200:1/2', remote_pwd='secret')
 
-        self.assertEqual(captured['import_calls'], [42],
-                         '_import_pkt_payload must be called with the resolved '
-                         "identity's EchomailNetwork id, not None -- this is "
-                         'exactly why the message vanished with a fully '
-                         'successful-looking BinkP transfer (M_GOT sent) but '
-                         'no trace anywhere of the import itself failing.')
+        self.assertEqual(captured['import_calls'], [5],
+                         'must resolve to ANotherNetwork (id=5, our_address=='
+                         'hub_address), not tqwnet (id=3) which only sorted '
+                         'first by id -- this is exactly why real ANotherNetwork '
+                         'mail was landing under the wrong network')
 
-    def test_resolvable_identity_net_also_gets_a_poll_log_entry(self):
-        # Direct, positive side effect of the same fix: net_id being
-        # correctly resolved means the existing
-        # `if net_id is not None:` poll-log-writing block (previously
-        # only ever true for upstream-hub sessions) now also fires for
-        # a downstream node on a resolvable identity -- so a sysop
-        # testing a second network's echomail this way now gets a
-        # visible entry under Admin -> Echomail, not just a correctly
-        # imported message with no record the exchange ever happened.
+    def test_legacy_node_poll_log_lands_under_anothernetwork_not_tqwnet(self):
+        # Directly encodes the reported symptom: Admin -> Echomail poll
+        # log showed nothing for ANotherNetwork despite a fully successful
+        # BinkP session -- because the entry was silently landing under
+        # tqwnet's network_id instead.
         from anetbbs.models import EchomailPollLog
-        identity = _FakeHubIdentity(id=2, name='ANotherNetwork', is_default=False)
-        identity_net = _FakeEchomailNetwork(
-            id=42, network_type='binkp', our_address='1200:1/1',
-            hub_identity_id=2, name='ANotherNetwork')
-        node = _FakeBinkPNode(id=2, ftn_address='1200:1/2', password='secret',
-                              hub_identity=identity)
+        identity = _FakeHubIdentity(id=1, name='ANotherNetwork')
+        networks = _real_world_networks(identity_id=1)
+        node = _FakeBinkPNode(id=9, ftn_address='1200:1/2', password='secret',
+                              name='GateKeeper', hub_identity=identity,
+                              network_id=None)
 
         writer, captured = self._run(
-            networks=[identity_net], nodes=[node],
+            networks=networks, nodes=[node],
             remote_addr='1200:1/2', remote_pwd='secret')
 
         logs = [obj for obj in captured['session_added']
-                if isinstance(obj, EchomailPollLog)]
-        self.assertEqual(len(logs), 1,
-                         'exactly one EchomailPollLog row must be created for '
-                         'this downstream-node session now that net_id resolves')
-        log = logs[0]
-        self.assertEqual(log.network_id, 42)
-        self.assertEqual(log.status, 'success')
-        self.assertEqual(log.messages_received, 3)
+               if isinstance(obj, EchomailPollLog)]
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].network_id, 5,
+                         'poll log must be attributed to ANotherNetwork (5), '
+                         'not tqwnet (3)')
 
-    def test_downstream_node_on_default_identity_still_gets_none_handled_gracefully(self):
-        # A node whose hub_identity is None (or has no matching
-        # EchomailNetwork row at all) must not crash -- the connection
-        # still completes, the packet import is skipped with a loud log
-        # instead of an uncaught IntegrityError.
-        node = _FakeBinkPNode(id=1, ftn_address='1:200/100', password='secret',
-                              hub_identity=None)
-        from anetbbs.echomail.binkp_server import CMD_OK, CMD_ERR
+    def test_explicit_network_id_overrides_ambiguous_heuristic(self):
+        # A node with network_id set explicitly must use it directly, even
+        # in a case the self-hub heuristic alone could NOT resolve (two
+        # networks under the identity both happen to be self-hub rows --
+        # contrived, but proves the explicit FK is authoritative and
+        # doesn't depend on the heuristic succeeding).
+        identity = _FakeHubIdentity(id=1, name='ANotherNetwork')
+        networks = [
+            _FakeEchomailNetwork(id=3, name='tqwnet', our_address='1337:3/231',
+                                 hub_address='1337:3/231',  # also "self-hub" -- ambiguous
+                                 hub_identity_id=1),
+            _FakeEchomailNetwork(id=5, name='ANotherNetwork', our_address='1200:1/1',
+                                 hub_address='1200:1/1', hub_identity_id=1),
+        ]
+        node = _FakeBinkPNode(id=9, ftn_address='1200:1/2', password='secret',
+                              name='GateKeeper', hub_identity=identity,
+                              network_id=5)
 
         writer, captured = self._run(
-            networks=[], nodes=[node],
-            remote_addr='1:200/100', remote_pwd='secret')
+            networks=networks, nodes=[node],
+            remote_addr='1200:1/2', remote_pwd='secret')
 
-        self.assertEqual(captured['import_calls'], [],
-                         '_import_pkt_payload must not be called at all when no '
-                         'network_id can be resolved -- skip loudly, not crash silently')
-
-        def _decode(raw_frames):
-            out = []
-            for f in raw_frames:
-                word = struct.unpack('>H', f[0:2])[0]
-                length = word & 0x7FFF
-                payload = f[2:2 + length]
-                if word & 0x8000 and payload:
-                    out.append(payload[0])
-            return out
-        commands = _decode(writer.sent)
-        self.assertIn(CMD_OK, commands)
-        self.assertNotIn(CMD_ERR, commands)
+        self.assertEqual(captured['import_calls'], [5],
+                         'explicit node.network_id must be used directly, not '
+                         're-derived from the (here-ambiguous) hub_identity_id heuristic')
 
 
 if __name__ == '__main__':

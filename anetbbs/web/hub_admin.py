@@ -16,6 +16,7 @@ for a node and it goes to their system." Gated with a blueprint-wide
 before_request check below.
 """
 import os
+import threading
 
 from flask import (Blueprint, render_template, redirect, url_for,
                    flash, request, abort, jsonify, current_app)
@@ -84,12 +85,24 @@ class BinkPNodeForm(FlaskForm):
     baud = IntegerField('Baud Rate (for nodelist)', default=115200,
                         validators=[Optional(), NumberRange(min=300)])
     is_active = BooleanField('Active', default=True)
+    # Optional dial-out address for hub-initiated polling (Poll Now) --
+    # see BinkPNode.binkp_host. Blank means poll-in only.
+    binkp_host = StringField('BinkP Host (for Poll Now -- leave blank if poll-in only)',
+                             validators=[Optional(), Length(max=255)])
+    binkp_port = IntegerField('BinkP Port', default=24554,
+                              validators=[Optional(), NumberRange(1, 65535)])
+    binkp_tls = BooleanField('Use TLS when polling this node', default=False)
     # Populated dynamically in the route (SelectField needs live choices,
     # not a class-body constant) -- see _populate_identity_choices().
     # Only rendered/shown when more than one HubIdentity exists; a
     # single-hub install's one-and-only default identity is always
     # used with no picker in the way.
     hub_identity_id = SelectField('Hub Identity', coerce=int, validators=[Optional()])
+    # Populated dynamically in the route -- see _populate_network_choices().
+    # Which binkp EchomailNetwork this node's mail belongs to. Only
+    # ambiguous (and only then worth showing) when the selected hub
+    # identity owns more than one binkp network; see BinkPNode.network_id.
+    network_id = SelectField('BinkP Network', coerce=int, validators=[Optional()])
     notes = TextAreaField('Notes', validators=[Optional()])
     submit = SubmitField('Save Node')
 
@@ -154,6 +167,27 @@ def _populate_identity_choices(form):
         default = HubIdentity.query.filter_by(is_default=True).first()
         if default:
             form.hub_identity_id.data = default.id
+
+
+def _populate_network_choices(form):
+    """Fill in BinkPNodeForm's network_id SelectField with every binkp
+    EchomailNetwork row, defaulting to the self-hub network under
+    whichever hub_identity_id the form currently has selected (see
+    routing.self_hub_binkp_network) when that's unambiguous. A blank
+    '(auto)' choice is always first so a sysop can defer back to the
+    hub_identity-based fallback in binkp_server.py rather than being
+    forced to guess when it genuinely IS ambiguous."""
+    from ..models import EchomailNetwork
+    from ..echomail.routing import self_hub_binkp_network
+    networks = (EchomailNetwork.query
+               .filter_by(network_type='binkp')
+               .order_by(EchomailNetwork.name).all())
+    form.network_id.choices = [(0, '(auto -- resolve from hub identity)')] + \
+        [(n.id, n.name) for n in networks]
+    if form.network_id.data in (None, 0, ''):
+        guess = self_hub_binkp_network(form.hub_identity_id.data)
+        if guess:
+            form.network_id.data = guess.id
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +413,10 @@ def delete_hub_identity(identity_id):
 def binkp_nodes():
     nodes = BinkPNode.query.order_by(BinkPNode.ftn_address).all()
     identity_count = HubIdentity.query.count()
+    binkp_network_count = EchomailNetwork.query.filter_by(network_type='binkp').count()
     return render_template('echomail/admin/hub/binkp_nodes.html', nodes=nodes,
-                           identity_count=identity_count)
+                           identity_count=identity_count,
+                           binkp_network_count=binkp_network_count)
 
 
 @hub_admin_bp.route('/binkp/new', methods=['GET', 'POST'])
@@ -389,6 +425,7 @@ def binkp_nodes():
 def new_binkp_node():
     form = BinkPNodeForm()
     _populate_identity_choices(form)
+    _populate_network_choices(form)
     if form.validate_on_submit():
         if not form.password.data:
             flash('Session password is required when creating a new node.', 'danger')
@@ -412,6 +449,10 @@ def new_binkp_node():
             baud=form.baud.data or 115200,
             is_active=form.is_active.data,
             hub_identity_id=form.hub_identity_id.data or None,
+            network_id=form.network_id.data or None,
+            binkp_host=(form.binkp_host.data or '').strip() or None,
+            binkp_port=form.binkp_port.data or 24554,
+            binkp_tls=form.binkp_tls.data,
             notes=form.notes.data.strip() or None,
         )
         db.session.add(node)
@@ -464,6 +505,7 @@ def edit_binkp_node(node_id):
     node = BinkPNode.query.get_or_404(node_id)
     form = BinkPNodeForm(obj=node)
     _populate_identity_choices(form)
+    _populate_network_choices(form)
     if form.validate_on_submit():
         node.name = form.name.data.strip()
         node.ftn_address = form.ftn_address.data.strip()
@@ -477,6 +519,10 @@ def edit_binkp_node(node_id):
         node.baud = form.baud.data or 115200
         node.is_active = form.is_active.data
         node.hub_identity_id = form.hub_identity_id.data or None
+        node.network_id = form.network_id.data or None
+        node.binkp_host = (form.binkp_host.data or '').strip() or None
+        node.binkp_port = form.binkp_port.data or 24554
+        node.binkp_tls = form.binkp_tls.data
         node.notes = form.notes.data.strip() or None
         db.session.commit()
         flash('Node updated.', 'success')
@@ -494,6 +540,36 @@ def delete_binkp_node(node_id):
     db.session.commit()
     flash(f'Node {node.ftn_address} deleted.', 'success')
     return redirect(url_for('hub_admin.binkp_nodes'))
+
+
+@hub_admin_bp.route('/binkp/<int:node_id>/poll', methods=['POST'])
+@login_required
+@_admin_required
+def poll_binkp_node(node_id):
+    """Trigger an immediate hub-initiated poll of a downstream node
+    (dial out and push its hold queue now) -- mirrors
+    echomail_admin.poll_now() for upstream networks. Runs in a
+    background thread so the request doesn't block on the connection."""
+    node = BinkPNode.query.get_or_404(node_id)
+    if not (node.binkp_host or '').strip():
+        flash(f'{node.name} has no BinkP host configured -- it can only '
+              f'poll in, not be dialed out to. Set a host on the node '
+              f'edit form first.', 'warning')
+        return redirect(url_for('hub_admin.binkp_node_detail', node_id=node.id))
+
+    app = current_app._get_current_object()
+
+    def run():
+        from ..echomail.poller import poll_node_now
+        try:
+            poll_node_now(app, node_id)
+        except Exception as exc:
+            app.logger.error("Manual node poll error: %s", exc)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    flash(f'Poll of {node.name} triggered — check poll logs for results.', 'info')
+    return redirect(url_for('hub_admin.binkp_node_detail', node_id=node.id))
 
 
 @hub_admin_bp.route('/binkp/<int:node_id>/subscribe', methods=['POST'])
@@ -1240,6 +1316,7 @@ def approve_join_request(req_id):
     import datetime
     import secrets
     import string
+    from ..echomail.routing import self_hub_binkp_network
 
     req = NetworkJoinRequest.query.get_or_404(req_id)
     if req.status != 'pending':
@@ -1274,6 +1351,13 @@ def approve_join_request(req_id):
     binkp_password = qwk_password = None
     if req.binkp_ftn_address:
         binkp_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+        # Stamp network_id now, at creation, rather than leaving it to be
+        # re-derived on every future inbound session -- identity_id alone
+        # is ambiguous whenever this hub identity owns more than one binkp
+        # EchomailNetwork (see BinkPNode.network_id / routing.
+        # self_hub_binkp_network). None if genuinely ambiguous; sysop can
+        # set it by hand via the node edit form in that case.
+        binkp_network = self_hub_binkp_network(identity_id)
         binkp_node = BinkPNode(
             name=req.bbs_name,
             ftn_address=binkp_address,
@@ -1284,6 +1368,7 @@ def approve_join_request(req_id):
             email=req.email,
             is_active=True,
             hub_identity_id=identity_id,
+            network_id=binkp_network.id if binkp_network else None,
             notes=f'Auto-created from network join request #{req.id}.',
         )
         db.session.add(binkp_node)

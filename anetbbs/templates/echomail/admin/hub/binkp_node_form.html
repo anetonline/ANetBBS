@@ -39,6 +39,30 @@
                 {{ form.hub_identity_id(class="form-select") }}
             </div>
             {% endif %}
+            {% if form.network_id.choices|length > 2 %}
+            <div class="mb-3">
+                {{ form.network_id.label(class="form-label") }}
+                {{ form.network_id(class="form-select") }}
+                <div class="form-text">Which BinkP network this node's inbound mail belongs to. Only matters when a hub identity owns more than one BinkP network -- leave on "(auto)" unless you know it needs to be forced.</div>
+            </div>
+            {% endif %}
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    {{ form.binkp_host.label(class="form-label") }}
+                    {{ form.binkp_host(class="form-control", placeholder="node.example.com") }}
+                    <div class="form-text">Only needed to use "Poll Now" (dial this node instead of waiting for it to call in). Leave blank for poll-in-only nodes.</div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    {{ form.binkp_port.label(class="form-label") }}
+                    {{ form.binkp_port(class="form-control") }}
+                </div>
+                <div class="col-md-3 mb-3 d-flex align-items-end">
+                    <div class="form-check">
+                        {{ form.binkp_tls(class="form-check-input") }}
+                        {{ form.binkp_tls.label(class="form-check-label") }}
+                    </div>
+                </div>
+            </div>
             <div class="row">
                 <div class="col-md-6 mb-3">
                     {{ form.sysop.label(class="form-label") }}

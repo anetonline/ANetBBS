@@ -194,13 +194,14 @@ class _FakeHubIdentity:
 
 class _FakeBinkPNode:
     def __init__(self, id, ftn_address, password, name='Node',
-                is_active=True, hub_identity=None):
+                is_active=True, hub_identity=None, network_id=None):
         self.id = id
         self.ftn_address = ftn_address
         self.password = password
         self.name = name
         self.is_active = is_active
         self.hub_identity = hub_identity
+        self.network_id = network_id
         self.last_seen_at = None
 
 

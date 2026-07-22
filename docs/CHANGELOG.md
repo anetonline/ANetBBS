@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.183`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.185`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.185 — Hub can now poll downstream BinkP nodes on demand (July 2026)
+
+- Added ability to manually poll a downstream BinkP node on demand instead of waiting for it to call in.
+
+## v1.0b2.184 — BinkP downstream-node network misattribution fix (July 2026)
+
+Fixed a real bug: inbound BinkP sessions from downstream nodes (e.g. ANotherNetwork peers polling in) could get silently attributed to the WRONG network whenever a hub identity owns more than one BinkP network -- explains poll-log entries and mail missing from ANotherNetwork specifically. BinkPNode now tracks which network it belongs to explicitly, set automatically on join-approval; existing nodes are backfilled on upgrade.
+
+15 new regression tests; full suite verified clean (1236 passed, 2 skipped, 0 failed).
 
 ## v1.0b2.183 — PETSCII Phase 1: real menu screens; fix stale multi-service restart message (July 2026)
 

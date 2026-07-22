@@ -13,6 +13,8 @@ This module exposes:
   - find_aka_for_network(user, network)  -> UserAka the user should send from
   - format_address(zone, net, node, point=0)  -> canonical 'z:n/no[.p]' string
   - resolve_netmail_recipient(to_name, to_address, network) -> local User or None
+  - self_hub_binkp_network(hub_identity_id)  -> the one binkp EchomailNetwork
+    under that identity where we ARE the hub, or None if zero/ambiguous
 """
 import re
 from sqlalchemy import func
@@ -80,6 +82,40 @@ def find_network_for_address(address):
         if ours and ours[1] == target_net:
             return net
     return matches[0]
+
+
+def self_hub_binkp_network(hub_identity_id):
+    """The binkp EchomailNetwork under `hub_identity_id` that a downstream
+    BinkPNode polling in actually belongs to.
+
+    A single HubIdentity can own several binkp EchomailNetwork rows: one
+    where we're the hub (downstream nodes poll us) and any number where
+    we're a leaf member of someone else's network (we poll them). When
+    there's exactly one binkp network under the identity, there's no
+    ambiguity -- return it (matches every single-network install, where
+    hub_address is often left unset since it's irrelevant to a leaf-only
+    setup). When there's more than one, narrow to the one where we ARE
+    the hub (our_address == hub_address) -- the only case a downstream
+    node polling in makes sense for; filtering on hub_identity_id alone
+    is ambiguous once both kinds of network exist under the same identity
+    (see BinkPNode.network_id).
+
+    Returns the matching EchomailNetwork, or None if it can't be resolved
+    unambiguously (caller should fall back to manual sysop resolution,
+    not guess).
+    """
+    if hub_identity_id is None:
+        return None
+    candidates = (EchomailNetwork.query
+                  .filter_by(hub_identity_id=hub_identity_id, network_type='binkp')
+                  .filter(EchomailNetwork.our_address.isnot(None))
+                  .all())
+    if len(candidates) == 1:
+        return candidates[0]
+    matches = [n for n in candidates
+              if (n.our_address or '').strip()
+              and (n.our_address or '').strip() == (n.hub_address or '').strip()]
+    return matches[0] if len(matches) == 1 else None
 
 
 def find_aka_for_network(user, network):

@@ -947,6 +947,9 @@ def _lightweight_migrate(app):
     # network_join_config/network_join_requests/qwk_node_requests on an
     # upgrading install.
     _seed_default_hub_identity(app, engine, _sa)
+    # Must run AFTER _seed_default_hub_identity (needs hub_identity_id
+    # backfilled) and AFTER the auto-sweep above (adds binkp_nodes.network_id).
+    _backfill_binkp_node_network_id(app, engine, _sa)
 
 
 def _seed_default_hub_identity(app, engine, _sa):
@@ -1008,6 +1011,46 @@ def _seed_default_hub_identity(app, engine, _sa):
                     'Could not backfill %s.hub_identity_id: %s', _table, exc)
     except Exception as exc:
         app.logger.warning('Could not seed default HubIdentity: %s', exc)
+
+
+def _backfill_binkp_node_network_id(app, engine, _sa):
+    """One-time backfill for BinkPNode.network_id on upgrading installs.
+
+    Real bug found live: a HubIdentity can own more than one binkp
+    EchomailNetwork row (a sysop can be hub of one network and a leaf
+    member of several others, all under the one default identity) --
+    inbound BinkP sessions used to resolve a downstream node's network
+    purely from hub_identity_id, which is ambiguous in that case and
+    silently misattributed real inbound mail/poll-log entries to whichever
+    binkp network happened to sort first by id (see binkp_server.py and
+    routing.self_hub_binkp_network). This backfills every existing
+    BinkPNode row (network_id IS NULL, added fresh as NULL by the generic
+    auto-sweep above) to the one binkp network under its hub identity
+    where we're actually the hub -- the only case a downstream node could
+    have legitimately polled in for. Rows where that's still ambiguous
+    (zero or 2+ candidates) are left NULL; binkp_server.py's runtime
+    fallback still applies to those, and a sysop can resolve one by hand
+    via the node edit form.
+    """
+    from .echomail.routing import self_hub_binkp_network
+    try:
+        with engine.begin() as conn:
+            node_rows = conn.execute(_sa.text(
+                'SELECT id, hub_identity_id FROM binkp_nodes '
+                'WHERE network_id IS NULL AND hub_identity_id IS NOT NULL')).fetchall()
+        for node_id, hub_identity_id in node_rows:
+            network = self_hub_binkp_network(hub_identity_id)
+            if network is None:
+                continue
+            with engine.begin() as conn:
+                conn.execute(_sa.text(
+                    'UPDATE binkp_nodes SET network_id = :nid WHERE id = :id'),
+                    {'nid': network.id, 'id': node_id})
+            app.logger.info(
+                'Backfilled binkp_nodes.network_id for node %s -> network %r',
+                node_id, network.name)
+    except Exception as exc:
+        app.logger.warning('Could not backfill binkp_nodes.network_id: %s', exc)
 
 
 def _create_default_data():

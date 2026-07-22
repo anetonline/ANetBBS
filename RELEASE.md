@@ -1,3 +1,22 @@
+# ANetBBS v1.0b2.185 — Hub can now poll downstream BinkP nodes on demand (July 2026)
+
+Added ability to manually poll a downstream BinkP node on demand instead of waiting for it to call in -- a "Poll Now" button on the node's detail page, mirroring the existing manual poll for upstream networks. Requires an optional BinkP host/port (and TLS toggle) set on the node; nodes without one stay poll-in-only, which is normal for anything behind a dynamic IP or firewall. Reuses the existing hold-queue and ack-gated retry logic, so a node that doesn't acknowledge the batch keeps its mail queued for the next attempt rather than losing it.
+
+9 new regression tests; full suite verified clean (1245 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.184 — BinkP downstream-node network misattribution fix (July 2026)
+
+Reported live: a sysop saw a real downstream node (a peer on ANotherNetwork) connect successfully via BinkP -- CRAM-MD5 auth OK, packet transferred, and the exchange even showed up via the InterBBS Last Callers feature -- but nothing appeared under ANotherNetwork in Admin -> Echomail poll log.
+
+- FIX: the inbound BinkP listener resolves a downstream node's mail purely from its `hub_identity_id`, taking the first matching BinkP `EchomailNetwork` row it finds. That's ambiguous whenever one hub identity owns more than one BinkP network (a sysop who is hub of one network and a leaf member of several others under the same default identity -- a real, common shape) -- inbound mail/poll-log entries were silently landing under whichever network happened to sort first by id, unrelated to the node that actually connected.
+- `BinkPNode` now tracks `network_id` explicitly -- the only unambiguous source of truth. Set automatically when a join application is approved and available as an override on the node edit form. Legacy nodes are backfilled on upgrade to the one BinkP network under their hub identity where the install is actually the hub; this also improves the runtime fallback for any node that still can't be backfilled unambiguously.
+
+15 new regression tests, including a scripted-BinkP-session reproduction of the exact reported shape (5 BinkP networks under one hub identity); full suite verified clean (1236 passed, 2 skipped, 0 failed).
+
+---
+
 # ANetBBS v1.0b2.183 — PETSCII Phase 1: real menu screens; fix stale multi-service restart message (July 2026)
 
 With login confirmed working on real hardware across three prior rounds of fixes, PETSCII sessions now get the real Phase 1 core-BBS menu instead of a placeholder stub: message boards (list/read/post/reply), echomail areas (list/read/post -- wired into the same reply-notification hook the web/terminal composers use), private messages (inbox/read/send), file-area browsing, who's-online, and profile. Plain numbered-list menus and a simple line-by-line composer, built fresh for this rendering path rather than reusing any ANSI/lightbar code -- matching the same "not shown at all if not vetted" rule already applied to games/doors/MRC/IRC for PETSCII sessions. Reuses only the existing data-layer models/queries, not any ANSI rendering code.
