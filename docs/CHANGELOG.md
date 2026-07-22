@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.182`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.183`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.183 — PETSCII Phase 1: real menu screens; fix stale multi-service restart message (July 2026)
+
+With login confirmed working on real hardware across three prior rounds of fixes, PETSCII sessions now get the real Phase 1 core-BBS menu instead of a placeholder stub: message boards (list/read/post/reply), echomail areas (list/read/post -- wired into the same reply-notification hook the web/terminal composers use), private messages (inbox/read/send), file-area browsing, who's-online, and profile. Plain numbered-list menus and a simple line-by-line composer, built fresh for this rendering path rather than reusing any ANSI/lightbar code -- matching the same "not shown at all if not vetted" rule already applied to games/doors/MRC/IRC for PETSCII sessions. Reuses only the existing data-layer models/queries, not any ANSI rendering code.
+
+Also, reported live by a sysop: Admin -> Settings' "restart required" message, and deploy/README.md, still told sysops to restart 4 separate systemd services (anetbbs-telnet / anetbbs-ssh / anetbbs-rlogin, plus anetbbs.service) after a settings change requiring a restart -- anetbbs-rlogin.service never existed as a real unit at all, and anetbbs-telnet/anetbbs-ssh were merged into the single combined anetbbs.service a while back (Ubuntu systemd's EnvironmentFile directive winning over per-unit Environment= overrides meant the split units couldn't reliably share .env). Both now correctly point sysops at just `sudo systemctl restart anetbbs.service`.
+
+12 new regression tests covering the PETSCII menu screens (boards, echomail incl. reply-notification wiring, private messages incl. notification + error handling, files, who's-online, profile) and the restart-message fix; full suite verified clean (1234 passed, 2 skipped, 0 failed).
 
 ## v1.0b2.182 — Multi-hub-identity BinkP mail loss + local-post reply notifications (July 2026)
 
