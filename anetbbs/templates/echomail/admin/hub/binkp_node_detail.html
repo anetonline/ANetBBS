@@ -26,6 +26,12 @@
             <i class="bi bi-arrow-left"></i> Back
         </a>
     </div>
+    {% if not node.binkp_host %}
+    <div class="w-100"></div>
+    <div class="text-muted small">
+        <i class="bi bi-info-circle"></i> Poll Now is disabled -- no BinkP host set on this node, so it can only poll in. <a href="{{ url_for('hub_admin.edit_binkp_node', node_id=node.id) }}">Set a host</a> to enable it.
+    </div>
+    {% endif %}
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}

@@ -1,7 +1,70 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.185`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.193`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.193 — PETSCII: word-wrap listing picker prompts (July 2026)
+
+Reported live on the real A-Net Software file area (18 files, forcing M=more): the picker prompt itself ('#=download, E=extended info, M=more, Q=back: ') exceeded 40 columns and hard-broke mid-word ('Q=back' -> 'Q=b' / 'ack'). `_paginated_pick()`'s prompt construction wasn't width-aware -- now wraps at word boundaries, a no-op for every shorter prompt already in use elsewhere.
+
+2 new regression tests (one direct against `_paginated_pick`, one end-to-end against the real file listing); full suite verified clean (1306 passed, 2 skipped, 0 failed).
+
+## v1.0b2.192 — PETSCII: word-wrap XMODEM status messages (July 2026)
+
+Reported live: the "Starting XMODEM send of..." status message (and the file-not-found / XMODEM-unavailable / transfer-complete messages) were written unwrapped, hard-breaking mid-word/mid-filename on a 40-column screen. Added a small word-wrap helper and applied it to all of `_files_download`'s status messages.
+
+1 new regression test reproducing the exact overflow with a long filename; full suite verified clean (1304 passed, 2 skipped, 0 failed).
+
+## v1.0b2.191 — PETSCII: file listing redesign — immediate download, E=extended info (July 2026)
+
+Reported live (confirmed XMODEM itself works end-to-end on real hardware): the download prompt only appeared after paging through every file's full description first, and quitting early with Q at any point exited the whole file area instead of skipping to the download prompt ("there are numbers, but there is no way to download").
+
+- File listings are now brief (name + size only) with the download picker shown immediately -- no pagination needed before you can pick a file.
+- Added E to view a file's full/extended description on demand, then return to the listing.
+
+7 new regression tests, including one asserting zero -- More -- prompts appear before the download picker; full suite verified clean (1303 passed, 2 skipped, 0 failed).
+
+## v1.0b2.190 — PETSCII: file downloads (XMODEM), network-first echomail, ANSI-art description fix (July 2026)
+
+Reported live against the real ANetBBS file areas: file descriptions containing FILE_ID.DIZ-style ANSI-art banners (CP437/Unicode box-drawing) turned into walls of '?' when displayed -- the session layer's PETSCII encoder falls back to '?' per character with no representation. Now stripped/collapsed to spaces before display, applied everywhere body text is shown (file descriptions, echomail/PM/board bodies).
+
+- Added file downloads via XMODEM (sysop's choice -- the protocol real C64 terminal software most reliably supports). File listings are now numbered and pick a file to download; reuses the existing telnet-aware transfer code as-is since PETSCII connections are plain telnet sockets.
+- Echomail area picking is now two-step: choose a network first, then see only that network's areas, instead of every subscribed network's areas combined into one flat list.
+
+17 new regression tests; full suite verified clean (1300 passed, 2 skipped, 0 failed). XMODEM download and the ANSI-art fix still need verification against the real file areas on ANetBBS itself (the Pi has none).
+
+## v1.0b2.189 — PETSCII: page-back (B=prev) for listings and body-text readers (July 2026)
+
+Added B=prev to step back one page after paging forward with M=more -- previously the only way "back" was Q, which exits the whole screen rather than returning to the previous page. Applies everywhere pagination exists: echo/board/file-area listings, and message/file-listing/profile body-text reading.
+
+Also investigated a report that 80-column echo message subjects still looked cut off short -- confirmed this is upstream data (the posting tool that creates those messages already truncates the subject before it reaches ANetBBS), not a rendering bug; the PETSCII renderer is already showing the complete stored subject.
+
+7 new regression tests; full suite verified clean (1290 passed, 2 skipped, 0 failed).
+
+## v1.0b2.188 — PETSCII: auto-wrap blank-line fix, word-boundary truncation, wider subject column (July 2026)
+
+Reported live on the Pi: the echo-area list's PREVIOUS column-width fix sized both columns to add up to EXACTLY the terminal width, filling the last column -- real terminals (C64 hardware included) auto-wrap the instant that happens, so each row's own \r\n produced a genuine blank line after it. On a 25-row screen that doubled the vertical space every row used, scrolling the top of an 18-item page off-screen before the prompt even appeared ("you can't see 1-7"). Fixed by always leaving one spare column -- applies everywhere the same column-budget technique is used.
+
+- Also fixed: subject/label columns across echo/board/PM listings truncated mid-word ("voluntarily" -> "volun") and reserved a fixed budget for the trailing name/count column regardless of how short it actually was. Now truncates at a word boundary and sizes that column from the actual longest value present, giving the subject more room.
+
+5 new regression tests, including one that renders every row across a range of widths/network-name lengths and asserts none fills the terminal exactly; full suite verified clean (1283 passed, 2 skipped, 0 failed).
+
+## v1.0b2.187 — PETSCII: echo-area column wrap fix, top-level pagination, profile editing (July 2026)
+
+Reported live on the Pi: the echomail area list's network-name column math assumed the bracketed name would never exceed ~9 chars -- a real name like "ANotherNetwork (QWK)" (20 chars) wrapped onto a second line on both 40- and 80-column screens. Fixed by sizing both columns from the actual longest network name present.
+
+- Also fixed: the echo/board/file-area top-level listings (picking which area/board to enter) had no pagination at all -- only the listings INSIDE them (messages/threads) were paginated in the previous release. Now consistent everywhere.
+- Added: profile is now editable (display name, location, bio), not just viewable.
+
+8 new regression tests; full suite verified clean (1278 passed, 2 skipped, 0 failed).
+
+## v1.0b2.186 — PETSCII: pagination/quit fixes, Number Guessing, sysop custom menus (July 2026)
+
+- Fixed long echo/board/PM/file listings forcing the reader through every page with no way to back out -- Q now actually quits at a "-- More --" prompt, and listings that had zero pagination at all (echo/board/PM) now page at 18 lines with an M=more option.
+- Added the built-in Number Guessing game to the PETSCII Games menu (text-only, no ANSI dependency).
+- Added sysop-buildable custom PETSCII menus (Admin → PETSCII Menus) -- a separate menu tree from the ANSI custom-menu system, opt-in; PETSCII sessions use the built-in menu unchanged until a sysop marks one as default.
+
+26 new regression tests; full suite verified clean (1270 passed, 2 skipped, 0 failed).
 
 ## v1.0b2.185 — Hub can now poll downstream BinkP nodes on demand (July 2026)
 

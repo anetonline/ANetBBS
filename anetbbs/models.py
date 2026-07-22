@@ -731,6 +731,67 @@ class BbsMenuItem(db.Model):
         return f'<BbsMenuItem menu={self.menu_id} {self.hotkey}={self.label!r}>'
 
 
+class PetsciiMenu(db.Model):
+    """A sysop-defined custom menu for PETSCII (C64/128) sessions --
+    completely separate from BbsMenu/BbsMenuItem (the ANSI custom-menu
+    system) rather than a shared tree, since most ANSI action types
+    (ansi art, sixel, chat, most doors) have no PETSCII equivalent at
+    all and a sysop building a PETSCII menu wants full layout control,
+    not an ANSI tree with items silently missing.
+
+    If no PetsciiMenu has is_default=True, PETSCII sessions fall back to
+    petscii_ui.py's hardcoded Phase 1 menu unchanged -- this is opt-in,
+    not a replacement.
+    """
+    __tablename__ = 'petscii_menus'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    title = db.Column(db.String(100), nullable=False)
+    prompt = db.Column(db.String(100), default='Choice: ')
+    is_default = db.Column(db.Boolean, default=False)
+    min_access = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    items = db.relationship('PetsciiMenuItem', backref='menu',
+                            order_by='PetsciiMenuItem.sort_order',
+                            lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<PetsciiMenu {self.name}>'
+
+
+class PetsciiMenuItem(db.Model):
+    """A single item on a PetsciiMenu. action_type is deliberately a much
+    smaller set than BbsMenuItem's -- only actions petscii_ui.py actually
+    implements a plain-text/no-ANSI handler for:
+      - 'goto':    jump to another PetsciiMenu (action_args = menu name)
+      - 'boards':  message boards
+      - 'echo':    echomail areas
+      - 'pm':      private messages
+      - 'files':   file-area browsing
+      - 'who':     who's online
+      - 'profile': view own profile
+      - 'games':   Number Guessing (the only PETSCII-safe built-in game)
+      - 'logoff':  end the session
+    """
+    __tablename__ = 'petscii_menu_items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    menu_id = db.Column(db.Integer, db.ForeignKey('petscii_menus.id'),
+                        nullable=False, index=True)
+    hotkey = db.Column(db.String(4), nullable=False)
+    label = db.Column(db.String(80), nullable=False)
+    action_type = db.Column(db.String(20), nullable=False)
+    action_args = db.Column(db.String(255))
+    min_access = db.Column(db.Integer, default=0)
+    sort_order = db.Column(db.Integer, default=0)
+    is_visible = db.Column(db.Boolean, default=True)
+
+    def __repr__(self):
+        return f'<PetsciiMenuItem menu={self.menu_id} {self.hotkey}={self.label!r}>'
+
+
 # ---------------------------------------------------------------------------
 # Phase 6: FidoNet support — nodelist, netmail, AKAs, TIC, areafix
 # ---------------------------------------------------------------------------

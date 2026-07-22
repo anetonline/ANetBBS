@@ -181,11 +181,12 @@ class BoardsScreenTests(PetsciiScreensTestCase):
 class EchomailScreenTests(PetsciiScreensTestCase):
     def test_reply_to_a_real_user_creates_notification(self):
         from anetbbs.features.petscii_ui import _echomail_menu
-        # 1(area) -> N(new) -> To -> Subject -> body -> /send -> ''(press ENTER
-        # after "Message posted.") -> Q(back to message list) -> Q(exit area list)
+        # 1(network) -> 1(area) -> N(new) -> To -> Subject -> body -> /send
+        # -> ''(press ENTER after "Message posted.") -> Q(back to message
+        # list) -> Q(exit area list) -> Q(exit network list)
         session = _FakeSession(self._alice_user(),
-                               ['1', 'N', 'bob', 'Hi Bob', 'a message body',
-                                '/send', '', 'Q', 'Q'])
+                               ['1', '1', 'N', 'bob', 'Hi Bob', 'a message body',
+                                '/send', '', 'Q', 'Q', 'Q'])
         with self._patched_app():
             asyncio.run(_echomail_menu(session))
         with self.app.app_context():
@@ -208,12 +209,13 @@ class EchomailScreenTests(PetsciiScreensTestCase):
             db.session.add(seed)
             db.session.commit()
 
-        # 1(area) -> 1(read first/only msg) -> R(reply) -> accept default To/
-        # Subject (blank -> default) -> body -> /send -> ''(press ENTER after
-        # "Message posted.") -> Q(back to message list) -> Q(exit area list)
+        # 1(network) -> 1(area) -> 1(read first/only msg) -> R(reply) ->
+        # accept default To/Subject (blank -> default) -> body -> /send ->
+        # ''(press ENTER after "Message posted.") -> Q(back to message
+        # list) -> Q(exit area list) -> Q(exit network list)
         session = _FakeSession(self._alice_user(),
-                               ['1', '1', 'R', '', '', 'reply body text',
-                                '/send', '', 'Q', 'Q'])
+                               ['1', '1', '1', 'R', '', '', 'reply body text',
+                                '/send', '', 'Q', 'Q', 'Q'])
         with self._patched_app():
             asyncio.run(_echomail_menu(session))
         with self.app.app_context():
@@ -274,7 +276,7 @@ class PrivateMessageScreenTests(PetsciiScreensTestCase):
 class FilesWhosOnlineProfileTests(PetsciiScreensTestCase):
     def test_files_browse_lists_uploaded_file_via_db_fallback(self):
         from anetbbs.features.petscii_ui import _files_browse
-        session = _FakeSession(self._alice_user(), [''])
+        session = _FakeSession(self._alice_user(), ['Q'])
         with self._patched_app():
             asyncio.run(_files_browse(session, self.farea_id, 'Test Files'))
         self.assertIn('doc.txt', session.transcript())

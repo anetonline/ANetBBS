@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}{% if menu %}Edit{% else %}New{% endif %} PETSCII Menu{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+  <h1><i class="bi bi-list-nested"></i> {% if menu %}Edit PETSCII menu: <code>{{ menu.name }}</code>{% else %}New PETSCII menu{% endif %}</h1>
+</div>
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  {% if not menu %}
+  <div class="mb-3">
+    <label class="form-label">Name (key)</label>
+    <input name="name" class="form-control" placeholder="e.g. main, files_sub" required>
+    <small class="text-muted">Lowercase, used as the lookup key in goto actions.</small>
+  </div>
+  {% endif %}
+
+  <div class="mb-3">
+    <label class="form-label">Title</label>
+    <input name="title" class="form-control" value="{{ menu.title if menu else '' }}" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Prompt</label>
+    <input name="prompt" class="form-control" value="{{ menu.prompt if menu else 'Choice: ' }}">
+  </div>
+
+  <div class="row">
+    <div class="col-md-4 mb-3">
+      <label class="form-label">Min access</label>
+      <input name="min_access" type="number" class="form-control" value="{{ menu.min_access if menu else 0 }}">
+      <small class="text-muted">0 = anyone, 100 = sysop</small>
+    </div>
+    <div class="col-md-4 mb-3 form-check pt-4">
+      <input class="form-check-input" name="is_default" type="checkbox" id="isdef"
+             {% if menu and menu.is_default %}checked{% endif %}>
+      <label class="form-check-label" for="isdef">Default menu (PETSCII entry point)</label>
+    </div>
+  </div>
+
+  <button class="btn btn-primary"><i class="bi bi-save"></i> Save menu</button>
+  <a href="{{ url_for('petscii_menu_admin.list_menus') }}" class="btn btn-outline-secondary">Cancel</a>
+</form>
+
+{% if menu %}
+<hr>
+<h3>Menu Items</h3>
+
+<table class="table table-dark table-sm align-middle">
+  <thead><tr><th>Hotkey</th><th>Label</th><th>Action</th><th>Args</th><th>Min</th><th>Ord</th><th>Vis</th><th></th></tr></thead>
+  <tbody>
+    {% for it in items %}
+    <tr>
+      <td colspan="8" class="p-1">
+        <form method="post" action="{{ url_for('petscii_menu_admin.edit_item', item_id=it.id) }}" class="row g-1 align-items-center">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-1"><input name="hotkey" class="form-control form-control-sm" value="{{ it.hotkey }}"></div>
+          <div class="col-3"><input name="label" class="form-control form-control-sm" value="{{ it.label }}"></div>
+          <div class="col-2">
+            <select name="action_type" class="form-select form-select-sm">
+              {% for v, desc in action_types %}
+                <option value="{{ v }}" {% if it.action_type == v %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-2"><input name="action_args" class="form-control form-control-sm" placeholder="args" value="{{ it.action_args or '' }}"></div>
+          <div class="col-1"><input name="min_access" type="number" class="form-control form-control-sm" value="{{ it.min_access }}"></div>
+          <div class="col-1"><input name="sort_order" type="number" class="form-control form-control-sm" value="{{ it.sort_order }}"></div>
+          <div class="col-1"><input name="is_visible" type="checkbox" class="form-check-input" {% if it.is_visible %}checked{% endif %}></div>
+          <div class="col-1 d-flex gap-1">
+            <button class="btn btn-sm btn-success" title="Save"><i class="bi bi-check"></i></button>
+        </form>
+        <form method="post" action="{{ url_for('petscii_menu_admin.delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Delete this item?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+        </form>
+          </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="text-muted">No items yet — add one below.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h4>Add new item</h4>
+<form method="post" action="{{ url_for('petscii_menu_admin.add_item', menu_id=menu.id) }}" class="row g-2">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="col-md-1"><input name="hotkey" class="form-control" placeholder="1" required></div>
+  <div class="col-md-3"><input name="label" class="form-control" placeholder="Label" required></div>
+  <div class="col-md-2">
+    <select name="action_type" class="form-select">
+      {% for v, desc in action_types %}<option value="{{ v }}">{{ v }} — {{ desc }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3"><input name="action_args" class="form-control" placeholder="action args"></div>
+  <div class="col-md-1"><input name="min_access" type="number" class="form-control" value="0"></div>
+  <div class="col-md-1"><input name="sort_order" type="number" class="form-control" value="0"></div>
+  <div class="col-md-1"><button class="btn btn-primary"><i class="bi bi-plus"></i></button></div>
+</form>
+
+<hr>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-diagram-3"></i> Add a sub-menu (one click)</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Creates a new PETSCII menu and adds a <code>goto</code> hotkey on
+          this menu that jumps to it. The new menu auto-includes a
+          <code>Q</code> key to come back here.
+        </p>
+        <form method="post" action="{{ url_for('petscii_menu_admin.spawn_submenu', menu_id=menu.id) }}" class="row g-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-md-3"><label class="form-label small">Menu key</label>
+            <input name="name" class="form-control form-control-sm" placeholder="files_sub" required></div>
+          <div class="col-md-5"><label class="form-label small">Title</label>
+            <input name="title" class="form-control form-control-sm" placeholder="File Areas" required></div>
+          <div class="col-md-1"><label class="form-label small">Hotkey</label>
+            <input name="hotkey" class="form-control form-control-sm" placeholder="4" required></div>
+          <div class="col-md-3"><label class="form-label small">Item label</label>
+            <input name="label" class="form-control form-control-sm" placeholder="Files"></div>
+          <div class="col-md-12"><button class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> Create sub-menu</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-info-circle"></i> Action args cheatsheet</div>
+      <ul class="list-group list-group-flush small">
+        <li class="list-group-item bg-transparent"><code>goto</code> &mdash; another PETSCII menu's name (e.g. <code>files_sub</code>)</li>
+        <li class="list-group-item bg-transparent">All other actions ignore args.</li>
+        <li class="list-group-item bg-transparent">Only actions petscii_ui.py has a plain-text handler for are listed -- no ANSI art, chat, or door games beyond Number Guessing.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

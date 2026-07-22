@@ -364,6 +364,7 @@ def create_app(config_name=None):
     from .web.rss import rss_bp, redirect_bp
     from .web.rss_admin import rss_admin_bp
     from .web.menu_admin import menu_admin_bp
+    from .web.petscii_menu_admin import petscii_menu_admin_bp
     from .web.nodelist import nodelist_bp
     from .web.registry import registry_bp
     from .web.netmail import netmail_bp
@@ -443,6 +444,7 @@ def create_app(config_name=None):
     app.register_blueprint(rss_admin_bp)
     app.register_blueprint(redirect_bp)
     app.register_blueprint(menu_admin_bp)
+    app.register_blueprint(petscii_menu_admin_bp)
     app.register_blueprint(nodelist_bp)
     app.register_blueprint(registry_bp)
     # Federation registry API is called by peer ANetBBS hosts, not

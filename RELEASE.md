@@ -1,3 +1,100 @@
+# ANetBBS v1.0b2.193 — PETSCII: word-wrap listing picker prompts (July 2026)
+
+Reported live immediately after the v1.0b2.192 status-message fix, on the real A-Net Software file area (18 files, enough to force M=more): the picker prompt line itself -- `#=download, E=extended info, M=more, Q=back: ` (46 characters) -- exceeded the 40-column terminal width and hard-broke mid-word, splitting "Q=back" into "Q=b" on one line and "ack:" on the next.
+
+- FIX: `_paginated_pick()`'s prompt construction now runs through `_wrap_body()` before being sent, wrapping at word boundaries when the combined `prompt_label` + M=more/B=prev/Q=back options exceed the terminal width. `_wrap_body()` returns a single unchanged line for anything that already fits, so this is a no-op for every other `_paginated_pick` caller (echo areas, boards, PM inbox, file areas) -- only the file-browsing screen's unusually long `'download, E=extended info'` label was actually at risk.
+
+2 new regression tests: one directly against `_paginated_pick()` with a long label forced into `M=more`, and one end-to-end against a 23-file listing (the real reported shape); full suite verified clean (1306 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.192 — PETSCII: word-wrap XMODEM status messages (July 2026)
+
+Reported live immediately after testing the v1.0b2.191 file-listing redesign (download itself confirmed working end-to-end on real hardware): the "Starting XMODEM send of A-NET-door-scores1.5.zip -- start your terminal's receive now." status message was written as one long unwrapped string, so the terminal itself hard-broke it mid-word/mid-filename at the 40-column boundary ("A-NET-door-score" / "s1.5.zip", "receiv" / "e").
+
+- FIX: added `_write_wrapped()`, a small helper that word-wraps text to the session's width before writing, and applied it to all four of `_files_download`'s status messages (file-not-found, XMODEM-unavailable, transfer-starting, transfer-complete/failed) -- all of which embed a filename of unpredictable length.
+
+1 new regression test using a long real filename to reproduce the exact overflow condition and confirm every line stays within the terminal width; full suite verified clean (1304 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.191 — PETSCII: file listing redesign — immediate download, E=extended info (July 2026)
+
+Reported live testing v1.0b2.190 against the real ANetBBS file areas: XMODEM downloads work correctly end-to-end on real C64 hardware (confirmed), but the download prompt was buried behind every file's full description -- with real FILE_ID.DIZ-derived descriptions running several pages each (even after the previous release's ANSI-art stripping fix), reaching the download prompt meant paging through all of them first. Quitting early with Q at any `-- More --` prompt along the way exited the whole file area instead of skipping ahead to the download prompt ("there are numbers, but there is no way to download, no download option").
+
+- CHANGED: file listings are now brief -- name and size only, one line per file -- with the numbered download picker (`#=download, E=extended info, Q=back`) shown immediately after the listing itself, using the same `_paginated_pick()` pattern as every other listing screen in this project (echo areas, boards, PM inbox). No pagination is needed before the picker appears unless the file list itself is long.
+- ADDED: `E` opens a file's full/extended description (the same art-stripped, word-wrapped, paginated view as before) on demand, then returns to the brief listing.
+
+7 new regression tests, including one asserting zero `-- More --` prompts appear before the download picker on a normal-sized listing, and one confirming `E` shows the description and then returns to the listing rather than exiting; full suite verified clean (1303 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.190 — PETSCII: file downloads (XMODEM), network-first echomail, ANSI-art description fix (July 2026)
+
+Reported live testing v1.0b2.189 against the real ANetBBS install (real subscriptions across tqwnet/Fidonet/DOVE-Net/sp00knet/ANotherNetwork, real uploaded door-game files with FILE_ID.DIZ-style ANSI-art descriptions):
+
+- FIX: file descriptions full of CP437/Unicode box-drawing art were passed straight to `session.write()`'s PETSCII encoder, which falls back to a literal `?` PER CHARACTER with no representation -- a wall of question marks ("omg file areas look awful when you enter one"). Added `_strip_for_petscii()`, which collapses any run of non-PETSCII-representable characters into a single space before display, wired into `_wrap_body()` (the shared choke-point for all body text: file descriptions, echomail/PM/board post bodies, profile bio) so the same class of bug can't recur anywhere text gets displayed.
+- ADDED: file downloads via XMODEM, per the sysop's explicit choice -- the protocol real C64 terminal software (Novaterm, CCGMS, 64NIC+) most reliably supports, and the simplest to integrate given PETSCII's plain-text constraints (no in-band filename/size metadata needed, unlike Ymodem/Zmodem). File listings are now numbered; picking a number launches `features.xfer.send_file()` as-is -- no PETSCII-specific transfer code needed at all, since PETSCII connections are plain telnet sockets (confirmed via `core/petscii_server.py`'s own docstring) and `xfer.py`'s existing telnet IAC-escaping already applies correctly to any non-SSH/rlogin session.
+- CHANGED: echomail area picking ("echomail you should be able to pick the network first, then the areas. not all combine") is now two-step -- `_echomail_menu` shows only the networks a user actually has visible areas in, `_echomail_areas_menu` shows that network's areas -- instead of combining every subscribed network's areas into one flat list.
+
+17 new regression tests covering the art-stripping helper, the network-first picker (including that one network's areas never leak into another's listing), and the download flow (real file, missing file, XMODEM unavailable); full suite verified clean (1300 passed, 2 skipped, 0 failed).
+
+**Not yet verified on real hardware**: XMODEM download and the ANSI-art description fix were built and tested against synthetic data only -- the Pi test server has no file areas. Both need a real pass against ANetBBS itself, which is exactly where this release is headed next.
+
+---
+
+# ANetBBS v1.0b2.189 — PETSCII: page-back (B=prev) for listings and body-text readers (July 2026)
+
+Requested live after the M=more pagination fix: once you'd paged forward, the only way "back" was Q -- which exits the whole screen (back to the previous menu level) rather than just returning to the page you'd already scrolled past.
+
+- Added B=prev to `_paginated_pick()` (echo-area/board/file-area listing screens) -- offered only once there's a previous page to go back to, alongside M=more.
+- Added the same to `_paginate()` (body-text readers: message reading, file-area contents, profile) -- takes an optional `header_title` now, redrawn on every page transition (forward or back) so B produces a clean re-render rather than appending old content below new.
+
+Also investigated a report that echo message subjects in 80-column mode still looked cut off ("Nintendo says users volun..."): confirmed via direct reproduction that the stored subject itself is already only ~25 characters, truncated mid-word before it ever reaches ANetBBS -- almost certainly by whatever posts those "Tech News Bot" messages, not by the PETSCII renderer, which is already displaying the complete stored value. No code change for this one; nothing to fix on the ANetBBS side.
+
+7 new regression tests covering page-back in both pagination helpers; full suite verified clean (1290 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.188 — PETSCII: auto-wrap blank-line fix, word-boundary truncation, wider subject column (July 2026)
+
+Reported live testing v1.0b2.187 on the Pi (real SyncTERM transcripts, both 40- and 80-column): the echo-area list's previous column-width fix sized the area-name and network-name columns to add up to EXACTLY the terminal width. That fills the terminal's last column, and most terminals -- real C64 hardware included -- auto-wrap the cursor the instant that happens. The row's own trailing `\r\n` then produced a genuine second, blank line after every row. On a real 25-row screen that doubled the vertical space each row consumed, scrolling the top of an 18-item page off-screen before the prompt even appeared ("you can't see 1-7").
+
+- FIX: column-budget math across the listing screens now always leaves one spare column (`w - 1`, never the full `w`) rather than filling the line exactly.
+- FIX: subject/label columns in the echo-message, board-thread, and PM-inbox listings truncated mid-word ("voluntarily" -> "volun") via a plain `text[:n]` slice, and reserved a fixed budget for the trailing from-name/reply-count column regardless of how short the actual values were (e.g. always reserving room for a long name even when every sender was "Tech News Bot"). Added `_truncate_words()` (breaks at the last word boundary, falling back to a hard cut only when a single word alone exceeds the whole budget) and size the trailing column from the actual longest value present in the current page -- the same technique already used for the network-name column -- giving the subject meaningfully more room.
+
+5 new regression tests, including one that renders every echo-area row across a matrix of widths (40/80) and network-name lengths (short to pathologically long) and asserts none ever fills the terminal exactly; full suite verified clean (1283 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.187 — PETSCII: echo-area column wrap fix, top-level pagination, profile editing (July 2026)
+
+Reported live testing v1.0b2.186 on the Pi (real SyncTERM screenshots, both 40- and 80-column): the echomail AREA list (distinct from the per-area MESSAGE list fixed in the previous release) wrapped onto a second physical line for every row -- `name_w = w - 16` assumed the bracketed network name would never exceed ~9 characters, but a real network name like "ANotherNetwork (QWK)" is 20.
+
+- FIX: both the area-name and network-name columns are now sized from the actual longest network name present in the list, with a floor so the area-name column never drops below 10 chars even for a pathologically long network name. Verified the fix keeps every row within the terminal width on both 40- and 80-column sessions.
+- FIX: the echo/board/file-area top-level listings (the screen where you pick WHICH area/board to enter) had no pagination at all -- only the listings INSIDE them (messages, threads) were paginated in v1.0b2.186. A sysop with 25 echo areas (the real reported case) saw them all dumped onto one unbroken screen. Now uses the same page-at-a-time + M=more pattern as everything else.
+- Added: the profile screen was view-only; can now edit display name, location, and bio (the same three fields it already displays) via a simple numbered picker.
+
+8 new regression tests, including one that renders every listing row and asserts none exceeds the terminal width; full suite verified clean (1278 passed, 2 skipped, 0 failed).
+
+---
+
+# ANetBBS v1.0b2.186 — PETSCII: pagination/quit fixes, Number Guessing, sysop custom menus (July 2026)
+
+Reported live: reading a long echomail message or browsing a file area with many files forced the PETSCII reader through every single page with no way to back out -- the "-- More --" prompt read a keystroke but never checked what was typed. Separately, the echo message subject list, board thread list, and PM inbox had NO pagination at all (up to 50 rows dumped in one unbroken screen on a 25-row real C64 display), unlike file-area browsing which already paginated.
+
+- FIX: `_paginate()` now checks for Q at the "-- More --" prompt and stops immediately, returning a flag so callers skip a redundant trailing prompt.
+- FIX: echo/board/PM listings gained the same page-at-a-time rendering file browsing already had, with an M=more option once a listing exceeds one page. Row numbers stay globally consecutive across pages.
+
+Also added, per request:
+
+- The built-in Number Guessing game is now reachable from a new PETSCII Games menu -- reused directly from `features.games.GameManager.play_number_guess()` rather than reimplemented, since it's pure session I/O with zero ANSI escape codes (the session layer's existing PETSCII encode-on-write path handles it transparently).
+- Sysops can now build custom PETSCII menus (Admin → PETSCII Menus, mirrors the existing "BBS Menus" admin screens) -- a fully separate menu tree from the ANSI custom-menu system (`PetsciiMenu`/`PetsciiMenuItem`, not `BbsMenu`/`BbsMenuItem`), since most ANSI action types (art screens, chat, most doors) have no PETSCII equivalent and a sysop building a PETSCII menu wants full layout control rather than an ANSI tree with items silently missing. Opt-in: PETSCII sessions use the hardcoded Phase 1 menu unchanged until a sysop marks a custom menu as default. The interpreter fails safe into the hardcoded menu on a broken `goto` target or any DB error during the initial custom-menu check, so a misconfigured menu (or an upgrade race before the new tables exist) can't break PETSCII login.
+
+26 new regression tests across pagination, the games menu, the custom-menu interpreter, and the new admin routes; full suite verified clean (1270 passed, 2 skipped, 0 failed).
+
+---
+
 # ANetBBS v1.0b2.185 — Hub can now poll downstream BinkP nodes on demand (July 2026)
 
 Added ability to manually poll a downstream BinkP node on demand instead of waiting for it to call in -- a "Poll Now" button on the node's detail page, mirroring the existing manual poll for upstream networks. Requires an optional BinkP host/port (and TLS toggle) set on the node; nodes without one stay poll-in-only, which is normal for anything behind a dynamic IP or firewall. Reuses the existing hold-queue and ack-gated retry logic, so a node that doesn't acknowledge the batch keeps its mail queued for the next attempt rather than losing it.

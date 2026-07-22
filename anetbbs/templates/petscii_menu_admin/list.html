@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}PETSCII Menus{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+  <h1><i class="bi bi-list-nested"></i> PETSCII Menus</h1>
+</div>
+
+<p class="text-muted">
+  Custom menus shown to Commodore 64/128 (PETSCII) users -- completely
+  separate from the ANSI "BBS Menus" tree, since most ANSI actions (art
+  screens, chat, most doors) have no PETSCII equivalent. If no menu here
+  has "Default" checked, PETSCII sessions use the built-in Phase 1 menu
+  unchanged.
+</p>
+
+<div class="mb-3">
+  <a href="{{ url_for('petscii_menu_admin.new_menu') }}" class="btn btn-primary"><i class="bi bi-plus"></i> New PETSCII menu</a>
+</div>
+
+<table class="table table-dark table-hover">
+  <thead><tr><th>Name</th><th>Title</th><th>Items</th><th>Default?</th><th>Min access</th><th></th></tr></thead>
+  <tbody>
+    {% for m in menus %}
+    <tr>
+      <td><code>{{ m.name }}</code></td>
+      <td>{{ m.title }}</td>
+      <td>{{ m.items.count() }}</td>
+      <td>{% if m.is_default %}✓{% endif %}</td>
+      <td>{{ m.min_access }}</td>
+      <td>
+        <a href="{{ url_for('petscii_menu_admin.edit_menu', menu_id=m.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
+        <form method="post" action="{{ url_for('petscii_menu_admin.delete_menu', menu_id=m.id) }}" class="d-inline" onsubmit="return confirm('Delete PETSCII menu {{ m.name }}?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No PETSCII menus yet -- PETSCII sessions use the built-in menu. Click "New PETSCII menu" to build a custom one.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
