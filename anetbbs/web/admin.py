@@ -1238,10 +1238,18 @@ def settings():
                           'Games -> InterBBS Scores once you\'re ready, which will '
                           'reset these back to the shared standard values.', 'warning')
                 if needs_restart:
+                    # Telnet/SSH/rlogin/PETSCII all run in the single
+                    # combined anetbbs.service process (main.py's
+                    # run_all() starts every enabled listener in one
+                    # asyncio loop) -- there is no anetbbs-rlogin.service
+                    # unit at all, and the split anetbbs-telnet.service/
+                    # anetbbs-ssh.service units are a legacy/optional
+                    # deploy artifact most installs don't actually run.
+                    # Telling every sysop to restart 4 services (one of
+                    # which doesn't exist) was just wrong for the
+                    # documented/default setup.
                     flash('Settings saved. Some changes require a service '
-                          'restart: sudo systemctl restart anetbbs.service '
-                          'anetbbs-telnet.service anetbbs-ssh.service '
-                          'anetbbs-rlogin.service', 'warning')
+                          'restart: sudo systemctl restart anetbbs.service', 'warning')
                 else:
                     flash('Settings saved.', 'success')
             except Exception as exc:

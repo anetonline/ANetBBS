@@ -70,13 +70,25 @@ flask db upgrade  # or: python -c "from anetbbs.web_app import create_app; app =
 
 ```bash
 sudo cp deploy/anetbbs-web.service    /etc/systemd/system/
-sudo cp deploy/anetbbs-telnet.service /etc/systemd/system/
-sudo cp deploy/anetbbs-ssh.service    /etc/systemd/system/
+sudo cp deploy/anetbbs.service        /etc/systemd/system/   # telnet + SSH + rlogin + PETSCII, one process
 sudo cp deploy/anetbbs-finger.service /etc/systemd/system/   # optional: RFC 1288 Finger
 sudo systemctl daemon-reload
-sudo systemctl enable  anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-finger
-sudo systemctl start   anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-finger
+sudo systemctl enable  anetbbs-web anetbbs anetbbs-finger
+sudo systemctl start   anetbbs-web anetbbs anetbbs-finger
 ```
+
+**Note:** `anetbbs.service` is a single process that owns telnet, SSH,
+rlogin, and PETSCII -- which of those actually start is controlled
+entirely by `TELNET_ENABLED`/`SSH_ENABLED`/`RLOGIN_ENABLED`/
+`PETSCII40_ENABLED`/`PETSCII80_ENABLED` in `.env`, not by separate
+services. Older releases shipped `anetbbs-telnet.service`/
+`anetbbs-ssh.service` as two independent units; those were merged into
+`anetbbs.service` because Ubuntu systemd's `EnvironmentFile` directive
+wins over per-unit `Environment=` overrides (the opposite of the
+documented precedence), so the two split units couldn't reliably
+override `.env` and ended up fighting each other for ports. If you're
+upgrading an install that still has the old split units, stop/disable/
+remove them and switch to `anetbbs.service` instead.
 
 ### 7. Configure nginx
 
@@ -108,14 +120,13 @@ gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:5000 deploy.wsgi_wrapper:app
 
 ## Service overview
 
-| Service              | Port  | Description                           |
-|----------------------|-------|---------------------------------------|
-| anetbbs-web          | 5000  | Flask web app (via gunicorn+eventlet) |
-| anetbbs-telnet       | 2233  | Telnet BBS server                     |
-| anetbbs-ssh          | 2234  | SSH BBS server                        |
-| anetbbs-finger       | 79    | RFC 1288 Finger (privileged port)     |
-| nginx                | 80/443| Reverse proxy + SSL termination       |
-| MRC bridge (optional)| 8080  | MRC chat bridge                       |
+| Service              | Port          | Description                                |
+|----------------------|---------------|---------------------------------------------|
+| anetbbs-web          | 5000          | Flask web app (via gunicorn+eventlet)        |
+| anetbbs              | 2233/2234/513/6400/6401 | Telnet, SSH, rlogin, PETSCII (40/80-col) -- one process, each protocol individually enabled in `.env` |
+| anetbbs-finger       | 79            | RFC 1288 Finger (privileged port)            |
+| nginx                | 80/443        | Reverse proxy + SSL termination              |
+| MRC bridge (optional)| 8080          | MRC chat bridge                              |
 
 ---
 
@@ -130,9 +141,9 @@ bridge settings.
 ## Uninstall
 
 ```bash
-sudo systemctl stop  anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-finger
-sudo systemctl disable anetbbs-web anetbbs-telnet anetbbs-ssh anetbbs-finger
-sudo rm /etc/systemd/system/anetbbs-*.service
+sudo systemctl stop  anetbbs-web anetbbs anetbbs-finger
+sudo systemctl disable anetbbs-web anetbbs anetbbs-finger
+sudo rm /etc/systemd/system/anetbbs*.service
 sudo systemctl daemon-reload
 sudo rm -rf /opt/anetbbs
 sudo userdel anetbbs
