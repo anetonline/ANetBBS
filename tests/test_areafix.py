@@ -268,6 +268,99 @@ class AreafixTests(unittest.TestCase):
                 node_id=node.id, echo_area_id=area.id).first(),
                 'wrong password must not create a subscription')
 
+    def test_parse_request_captures_rescan_argument(self):
+        """Real report: a real downstream sysop sent repeated
+        "%RESCAN AREA.TAG" requests trying to recover a backlog he'd
+        never received -- the old parser only captured 'RESCAN' as the
+        target and silently discarded the area-tag argument entirely."""
+        from anetbbs.echomail.areafix import parse_request
+        self.assertEqual(parse_request('%RESCAN AF.SOMETAG\n'),
+                         [('%', 'RESCAN', 'AF.SOMETAG')])
+        self.assertEqual(parse_request('%RESCAN\n'),
+                         [('%', 'RESCAN', None)])
+        # Plain +/- commands (no second token) must still parse with arg=None.
+        self.assertEqual(parse_request('+AF.SOMETAG\n'),
+                         [('+', 'AF.SOMETAG', None)])
+
+    def test_hub_side_rescan_with_tag_requeues_that_areas_messages(self):
+        from anetbbs.models import (db, EchomailNetwork, EchoArea, EchoAreaNode,
+                                    BinkPNode, BinkPHoldQueue, EchomailMessage)
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='RescanNet', network_type='binkp',
+                                  our_address='7:7/1')
+            db.session.add(net)
+            node = BinkPNode(name='Rescanner', ftn_address='7:7/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            area = EchoArea(tag='AF.RESCAN', name='Rescan Test', network_id=net.id,
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.flush()
+            # Real backlog: 3 messages already exist in the area, none
+            # ever queued for this node (matches the live-reported shape
+            # -- local/imported messages that predate the node's own
+            # subscription, or that were never tossed at all).
+            for n in range(3):
+                db.session.add(EchomailMessage(
+                    area_id=area.id, network_id=net.id, from_name='Sysop',
+                    to_name='All', subject=f'Backlog {n}', body='x',
+                    direction='inbound'))
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '7:7/2', '', '%RESCAN AF.RESCAN\n')
+
+            self.assertIn('queued 3 message(s)', response)
+            self.assertEqual(
+                BinkPHoldQueue.query.filter_by(node_id=node.id).count(), 3)
+
+    def test_hub_side_bare_rescan_requeues_every_subscribed_area(self):
+        from anetbbs.models import (db, EchomailNetwork, EchoArea, EchoAreaNode,
+                                    BinkPNode, BinkPHoldQueue, EchomailMessage)
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='BareRescanNet', network_type='binkp',
+                                  our_address='8:8/1')
+            db.session.add(net)
+            node = BinkPNode(name='BareRescanner', ftn_address='8:8/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            area_a = EchoArea(tag='AF.BARE.A', name='A', network_id=net.id,
+                              is_active=True, is_subscribed=True)
+            area_b = EchoArea(tag='AF.BARE.B', name='B', network_id=net.id,
+                              is_active=True, is_subscribed=True)
+            db.session.add_all([area_a, area_b])
+            db.session.flush()
+            db.session.add(EchomailMessage(
+                area_id=area_a.id, network_id=net.id, from_name='Sysop',
+                to_name='All', subject='A msg', body='x', direction='inbound'))
+            db.session.add(EchomailMessage(
+                area_id=area_b.id, network_id=net.id, from_name='Sysop',
+                to_name='All', subject='B msg', body='x', direction='inbound'))
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area_a.id))
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area_b.id))
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '8:8/2', '', '%RESCAN\n')
+
+            self.assertIn('queued 2 message(s) across 2 subscribed area(s)', response)
+            self.assertEqual(
+                BinkPHoldQueue.query.filter_by(node_id=node.id).count(), 2)
+
+    def test_help_text_lists_every_accepted_command(self):
+        from anetbbs.echomail.areafix import _help_text
+        text = _help_text()
+        for token in ('+AREA.TAG', '*AREA.TAG', '-AREA.TAG', '+ALL', '-ALL',
+                     '%LIST', '%QUERY', '%RESCAN', '%COMPRESS', '%HELP'):
+            self.assertIn(token, text, f'{token!r} missing from areafix %HELP text')
+
 
 if __name__ == '__main__':
     unittest.main()

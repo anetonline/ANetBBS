@@ -12,13 +12,32 @@ Supported commands (case-insensitive, one per line of the message body):
     %LIST           reply with the list of areas the requester is subscribed to
     %QUERY          (alias of %LIST)
     %HELP           reply with a help text
+    %RESCAN AREA.TAG  re-queue every existing message in AREA.TAG for this
+                      requester's hold queue (real backlog-catchup request,
+                      not a subscription change); bare %RESCAN with no tag
+                      re-queues every area the requester is subscribed to.
+                      Downstream-node-only (see _process_node_request) --
+                      no-op for an upstream leaf request (process_request),
+                      since there's no per-us hold queue for a network we
+                      poll rather than host.
     %COMPRESS GZIP  no-op (we always send uncompressed bundles)
     *AREA.TAG       (some implementations) — equivalent to +AREA.TAG
 
 The robot replies with a netmail back to the requester listing what was
-done. Subscription state is currently kept on EchoArea.is_subscribed
-(global flag — no per-uplink subscription table yet); when a per-link table
-is added, this module is the one that should be updated.
+done. Two subscription models exist side by side, picked by
+handle_areafix_netmail() based on whether the sender is a known
+downstream BinkPNode:
+  - process_request(network, ...) — for an UPSTREAM request (this install
+    is a leaf member polling someone else's hub): flips the install-wide
+    EchoArea.is_subscribed flag, since there's only one subscriber (us).
+  - _process_node_request(node, ...) — for a DOWNSTREAM request (a real
+    peer node polling US as hub): adds/removes that SPECIFIC node's
+    EchoAreaNode row, leaving every other node's subscriptions and the
+    area's own is_subscribed flag untouched. This is the one that
+    actually drives the hub's per-node BinkPHoldQueue fan-out via
+    tosser.py -- if a downstream node's request is ever routed through
+    process_request() instead, their subscription changes silently do
+    nothing for their own mail flow.
 
 Reference: FTS-0024 (areafix-style commands).
 """
@@ -27,23 +46,26 @@ import datetime
 from ..models import db, EchoArea, EchomailNetwork, NetmailMessage, AreafixLog, BinkPNode, EchoAreaNode
 
 
-_CMD_RE = re.compile(r'^\s*([+\-*%])\s*([A-Z0-9._\-]+)\b', re.IGNORECASE)
+_CMD_RE = re.compile(
+    r'^\s*([+\-*%])\s*([A-Z0-9._\-]+)(?:\s+([A-Z0-9._\-]+))?', re.IGNORECASE)
 
 
 def parse_request(body):
     """Pull recognized commands out of an areafix netmail body.
 
-    Returns a list of (verb, target) tuples where verb is one of
-    '+', '-', '%' and target is the uppercased area-tag or keyword."""
+    Returns a list of (verb, target, arg) tuples where verb is one of
+    '+', '-', '%'; target is the uppercased area-tag or keyword; arg is
+    an optional uppercased second token (only meaningful for '%RESCAN
+    AREA.TAG' and the already-no-op '%COMPRESS GZIP') or None."""
     cmds = []
     for line in (body or '').splitlines():
         m = _CMD_RE.match(line)
         if not m:
             continue
-        verb, target = m.group(1), m.group(2).upper()
+        verb, target, arg = m.group(1), m.group(2).upper(), m.group(3)
         if verb == '*':            # '*' is sometimes used as +
             verb = '+'
-        cmds.append((verb, target))
+        cmds.append((verb, target, arg.upper() if arg else None))
     return cmds
 
 
@@ -84,10 +106,15 @@ def _help_text():
         "Areafix robot — subscribe/unsubscribe to echo areas.\n\n"
         "Commands (one per line):\n"
         "  +AREA.TAG    subscribe to AREA.TAG\n"
+        "  *AREA.TAG    same as +AREA.TAG (some implementations use *)\n"
         "  -AREA.TAG    unsubscribe from AREA.TAG\n"
         "  +ALL         subscribe to every available area\n"
         "  -ALL         unsubscribe from every area\n"
         "  %LIST        list the areas you're currently receiving\n"
+        "  %QUERY       same as %LIST\n"
+        "  %RESCAN AREA.TAG  re-send every existing message in AREA.TAG\n"
+        "               (bare %RESCAN re-sends every area you're subscribed to)\n"
+        "  %COMPRESS GZIP  accepted, no-op (bundles are always uncompressed)\n"
         "  %HELP        this help text\n\n"
         "Lines that don't match a command are ignored. Reply will list\n"
         "what was done."
@@ -144,7 +171,7 @@ def process_request(network, from_address, subject, body):
                  f"For: {from_address}", "=" * 40]
     affected = []
 
-    for verb, target in cmds:
+    for verb, target, _arg in cmds:
         if verb == '+' and target == 'ALL':
             tags = _sub_all(network)
             affected += tags
@@ -184,7 +211,7 @@ def process_request(network, from_address, subject, body):
     return (response, {
         'network_id': network.id,
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _ in cmds) else 'unsubscribe',
+        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
         'area_tags': ','.join(affected),
         'response': response[:1000],          # cap log entry size
         'success': True,
@@ -257,7 +284,7 @@ def _process_node_request(node, from_address, subject, body):
                 .all())
         return [row.tag for row in subs]
 
-    for verb, target in cmds:
+    for verb, target, arg in cmds:
         if verb == '+' and target == 'ALL':
             tags = [_node_sub(a.tag.upper()) for a in all_areas]
             tags = [t for t in tags if t]
@@ -295,6 +322,33 @@ def _process_node_request(node, from_address, subject, body):
                     out_lines.append(f'  {t}')
             elif target == 'HELP':
                 out_lines.append(_help_text())
+            elif target == 'RESCAN':
+                # Real gap found live: a real downstream sysop sent
+                # repeated "%RESCAN AREA.TAG" requests trying to recover
+                # a backlog he'd never received, and every one came back
+                # a silent "ignored" with no actual re-toss -- this
+                # command was parsed but never implemented at all.
+                # toss_area_messages(area_id, node_id=...) already exists
+                # for exactly this ("used when a node newly subscribes
+                # and requests a catchup", per its own docstring) but was
+                # never wired to the areafix command that requests it.
+                from .tosser import toss_area_messages
+                if arg:
+                    area = area_map.get(arg)
+                    if area is None:
+                        out_lines.append(f'%RESCAN {arg} : ERROR — area not available')
+                    else:
+                        n = toss_area_messages(area.id, node_id=node.id)
+                        affected.append(area.tag)
+                        out_lines.append(f'%RESCAN {arg} : queued {n} message(s)')
+                else:
+                    subs = EchoAreaNode.query.filter_by(node_id=node.id).all()
+                    total = 0
+                    for row in subs:
+                        total += toss_area_messages(row.echo_area_id, node_id=node.id)
+                    out_lines.append(
+                        f'%RESCAN : queued {total} message(s) across '
+                        f'{len(subs)} subscribed area(s)')
             else:
                 out_lines.append(f'%{target} : ignored')
 
@@ -302,7 +356,7 @@ def _process_node_request(node, from_address, subject, body):
     response = '\n'.join(out_lines) + '\n'
     return (response, {
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _ in cmds) else 'unsubscribe',
+        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,

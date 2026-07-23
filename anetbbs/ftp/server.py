@@ -161,6 +161,21 @@ class AnetbbsAuthorizer(DummyAuthorizer):
             self.add_anonymous(homedir=anon_root, perm='elr')
 
     def validate_authentication(self, username, password, handler):
+        # Real crash found live: pyftpdlib's ftp_USER stores self.username
+        # verbatim from the wire (`self.username = line`, no case
+        # normalization at all) -- but this method used to register the
+        # DummyAuthorizer's user_table entry under a DIFFERENT case
+        # (user.username, the DB's canonical stored case; or
+        # node.packet_id.upper() for QWK nodes) than whatever case the
+        # client actually typed. The DB lookups above are case-insensitive
+        # (ilike), so a client typing "gatekeeper" against a DB/packet_id
+        # of "GateKeeper"/"GATEKEEPER" authenticated fine here, but the
+        # later get_home_dir(self.username) call -- keyed by the RAW
+        # wire username, a plain dict lookup, case-sensitive -- raised an
+        # unhandled KeyError and crashed the whole FTP session. Always
+        # register under the exact `username` parameter (what the client
+        # actually sent), never a normalized/canonical form, so the two
+        # lookups always agree regardless of what case anyone typed.
         if username == 'anonymous':
             return super().validate_authentication(username, password, handler)
         from ..models import User, QWKNode
@@ -173,9 +188,9 @@ class AnetbbsAuthorizer(DummyAuthorizer):
             if user is not None and user.check_password(password):
                 home = self.admin_root if user.is_admin else self.user_root
                 perm = 'elradfmwM' if user.is_admin else 'elradfmw'
-                if self.has_user(user.username):
-                    self.remove_user(user.username)
-                self.add_user(user.username, password=password,
+                if self.has_user(username):
+                    self.remove_user(username)
+                self.add_user(username, password=password,
                               homedir=home, perm=perm)
                 return
 
@@ -195,14 +210,16 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                 # correctly receives the bare DATA_DIR) actually writes
                 # the packet -- the client always saw an empty
                 # directory no matter how successfully login went.
+                # (node.packet_id.upper() below is the QWK packet-naming
+                # convention -- unrelated to the FTP user_table key, which
+                # must stay the raw `username` per the note above.)
                 node_home = os.path.join(self.qwk_root, node.packet_id.upper())
                 os.makedirs(node_home, exist_ok=True)
                 handler._qwk_node_id = node.id
                 handler._qwk_packet_id = node.packet_id.upper()
-                reg_name = node.packet_id.upper()
-                if self.has_user(reg_name):
-                    self.remove_user(reg_name)
-                self.add_user(reg_name, password=password,
+                if self.has_user(username):
+                    self.remove_user(username)
+                self.add_user(username, password=password,
                               homedir=node_home, perm='elradfmw')
                 return
 
@@ -211,7 +228,8 @@ class AnetbbsAuthorizer(DummyAuthorizer):
     def get_home_dir(self, username):
         # DummyAuthorizer raises KeyError on unknown users — for real users
         # that haven't yet been cached this is fine because validate_*
-        # registers them before this is called.
+        # registers them before this is called (under the exact same
+        # username key -- see validate_authentication's comment above).
         return super().get_home_dir(username)
 
 

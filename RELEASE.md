@@ -1,3 +1,12 @@
+# ANetBBS v1.0b2.194 — Live bug fixes: FTP login crash, hub message delivery (July 2026)
+
+- Fixed a real FTP login crash on mixed-case usernames.
+- Fixed a hub bug where locally-composed echomail never reached downstream BinkP nodes — also added AreaFix %RESCAN so nodes can request a backlog re-send.
+
+Full suite verified clean (1305 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.193 — PETSCII: word-wrap listing picker prompts (July 2026)
 
 Reported live immediately after the v1.0b2.192 status-message fix, on the real A-Net Software file area (18 files, enough to force M=more): the picker prompt line itself -- `#=download, E=extended info, M=more, Q=back: ` (46 characters) -- exceeded the 40-column terminal width and hard-broke mid-word, splitting "Q=back" into "Q=b" on one line and "ack:" on the next.

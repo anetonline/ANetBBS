@@ -3901,6 +3901,20 @@ async def _compose_echomail(self):
         db.session.commit()
         saved_id = em.id
 
+        # Real gap found live: a hub with real downstream nodes (a real
+        # sysop reported never receiving a single packet despite dozens
+        # of real local messages existing in areas they're correctly
+        # subscribed to) -- toss_message() was ONLY ever called from the
+        # inbound-import paths (binkp_server.py/poller.py/qwk_hub_ftp.py/
+        # web/qwk_hub.py), despite the tosser's own module docstring
+        # explicitly saying it handles "locally composed" messages too.
+        # None of the three local composers (this one, the web compose()
+        # route, petscii_ui.py's _echo_compose) ever actually called it --
+        # a message composed directly on the hub just sat there, visible
+        # locally, but never queued for any downstream node at all.
+        from ..echomail.tosser import toss_message
+        toss_message(saved_id)
+
         # Real gap found live: a LOCAL user posting/replying directly in a
         # shared echo area never went through any of the three inbound-
         # network-import notify hooks (poller.py/binkp_server.py/

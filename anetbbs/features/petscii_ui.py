@@ -654,6 +654,12 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
         )
         db.session.add(msg)
         db.session.commit()
+        # Real gap found live: a hub with real downstream nodes -- see
+        # the identical fix + full explanation in bbs_ui.py's
+        # _compose_echomail and web/echomail.py's compose(). This is the
+        # third of three local composers that never called toss_message().
+        from ..echomail.tosser import toss_message
+        toss_message(msg.id)
         if area is not None and network is not None:
             from ..echomail.notify_reply import maybe_notify_recipient
             maybe_notify_recipient(msg, area, network)

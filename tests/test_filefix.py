@@ -345,6 +345,20 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
             self.assertEqual(row.bot, 'areafix')
 
+    def test_help_text_lists_every_accepted_command_but_not_rescan_or_compress(self):
+        """filefix.py reuses areafix.py's parse_request(), but has no
+        toss_area_messages()-equivalent for files -- %RESCAN/%COMPRESS
+        must NOT be advertised here since neither is implemented."""
+        from anetbbs.echomail.filefix import _help_text
+        text = _help_text()
+        for token in ('+AREA.TAG', '*AREA.TAG', '-AREA.TAG', '+ALL', '-ALL',
+                     '%LIST', '%QUERY', '%HELP'):
+            self.assertIn(token, text, f'{token!r} missing from filefix %HELP text')
+        for token in ('%RESCAN', '%COMPRESS'):
+            self.assertNotIn(token, text,
+                            f'{token!r} must not be advertised -- filefix has no '
+                            'implementation for it')
+
 
 if __name__ == '__main__':
     unittest.main()

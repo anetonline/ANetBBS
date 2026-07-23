@@ -1,7 +1,14 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.193`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.194`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.194 — Live bug fixes: FTP login crash, hub message delivery (July 2026)
+
+- Fixed a real FTP login crash on mixed-case usernames.
+- Fixed a hub bug where locally-composed echomail never reached downstream BinkP nodes — also added AreaFix %RESCAN so nodes can request a backlog re-send.
+
+Full suite verified clean (1305 passed, 2 skipped).
 
 ## v1.0b2.193 — PETSCII: word-wrap listing picker prompts (July 2026)
 

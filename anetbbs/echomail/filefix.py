@@ -76,10 +76,12 @@ def _help_text():
         "FileFix robot — subscribe/unsubscribe to file echoes.\n\n"
         "Commands (one per line):\n"
         "  +AREA.TAG    subscribe to AREA.TAG\n"
+        "  *AREA.TAG    same as +AREA.TAG (some implementations use *)\n"
         "  -AREA.TAG    unsubscribe from AREA.TAG\n"
         "  +ALL         subscribe to every available file area\n"
         "  -ALL         unsubscribe from every file area\n"
         "  %LIST        list the file areas you're currently receiving\n"
+        "  %QUERY       same as %LIST\n"
         "  %HELP        this help text\n\n"
         "Lines that don't match a command are ignored. Reply will list\n"
         "what was done."
@@ -127,7 +129,7 @@ def process_request(network, from_address, subject, body):
                  f"For: {from_address}", "=" * 40]
     affected = []
 
-    for verb, target in cmds:
+    for verb, target, _arg in cmds:
         if verb == '+' and target == 'ALL':
             tags = _sub_all(network)
             affected += tags
@@ -167,7 +169,7 @@ def process_request(network, from_address, subject, body):
     return (response, {
         'network_id': network.id,
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _ in cmds) else 'unsubscribe',
+        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,
@@ -242,7 +244,7 @@ def _process_node_request(peer_address, from_address, subject, body,
                 .all())
         return [row.tag for row in subs]
 
-    for verb, target in cmds:
+    for verb, target, _arg in cmds:
         if verb == '+' and target == 'ALL':
             tags = [_node_sub(a.tag.upper()) for a in all_areas]
             tags = [t for t in tags if t]
@@ -288,7 +290,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     response = '\n'.join(out_lines) + '\n'
     return (response, {
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _ in cmds) else 'unsubscribe',
+        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,
