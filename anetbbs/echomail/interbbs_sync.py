@@ -180,12 +180,27 @@ def post_lastcaller_to_interbbs(caller_log_row):
     """Same shape as post_wall_to_interbbs, for Last Callers. Body carries
     ONLY service + started_at -- never ip_address. There is no precedent
     anywhere in this codebase for sharing caller IPs across BBS
-    boundaries, and there shouldn't be one."""
+    boundaries, and there shouldn't be one.
+
+    Real report: a sysop who tests heavily (many logins/day) was
+    flooding every other BBS's Last Callers area on the shared network
+    with their own account. LASTCALLERS_HIDE_SYSOP already existed to
+    hide sysop logins from the LOCAL Last Callers displays
+    (features/lastcallers.py's recent_callers_query), but this outbound
+    relay never checked it at all -- a sysop login got relayed to every
+    downstream BBS regardless of that setting. Same toggle now also
+    gates the relay, so "hidden from Last Callers" means hidden from
+    every BBS's copy, not just this one's."""
     from flask import current_app
     if not current_app.config.get('LASTCALLERS_INTERBBS_ENABLED'):
         return
     if caller_log_row.origin_bbs is not None:
         return
+    if current_app.config.get('LASTCALLERS_HIDE_SYSOP'):
+        from ..models import User
+        caller_user = User.query.get(caller_log_row.user_id) if caller_log_row.user_id else None
+        if caller_user is not None and caller_user.is_admin:
+            return
     network = _configured_network(current_app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'))
     if network is None:
         return

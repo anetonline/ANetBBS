@@ -456,6 +456,77 @@ class InterbbsLastCallersTests(unittest.TestCase):
 
             self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
 
+    def test_hide_sysop_blocks_relay_for_admin_login(self):
+        """Real report: a sysop who tests heavily flooded every other
+        BBS's Last Callers area on the shared network with their own
+        account. LASTCALLERS_HIDE_SYSOP already hid sysop logins from
+        the LOCAL displays (see test_lastcallers_hide_sysop.py) but
+        this outbound relay never checked it -- a sysop login got
+        relayed regardless. Same toggle now gates the relay too."""
+        from anetbbs.echomail.interbbs_sync import post_lastcaller_to_interbbs
+        from anetbbs.models import db, User, CallerLog, EchomailMessage
+        with self.app.app_context():
+            self.app.config['LASTCALLERS_INTERBBS_ENABLED'] = True
+            self.app.config['LASTCALLERS_HIDE_SYSOP'] = True
+            net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
+
+            sysop = User(username='stingray', email='stingray@example.com',
+                        password_hash='x', is_admin=True)
+            db.session.add(sysop)
+            db.session.commit()
+
+            cl = CallerLog(user_id=sysop.id, username='stingray', service='telnet')
+            db.session.add(cl)
+            db.session.commit()
+            post_lastcaller_to_interbbs(cl)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 0)
+
+    def test_hide_sysop_does_not_block_relay_for_regular_user(self):
+        from anetbbs.echomail.interbbs_sync import post_lastcaller_to_interbbs
+        from anetbbs.models import db, User, CallerLog, EchomailMessage
+        with self.app.app_context():
+            self.app.config['LASTCALLERS_INTERBBS_ENABLED'] = True
+            self.app.config['LASTCALLERS_HIDE_SYSOP'] = True
+            net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
+
+            regular = User(username='jerry_user', email='ju@example.com',
+                           password_hash='x', is_admin=False)
+            db.session.add(regular)
+            db.session.commit()
+
+            cl = CallerLog(user_id=regular.id, username='jerry_user', service='telnet')
+            db.session.add(cl)
+            db.session.commit()
+            post_lastcaller_to_interbbs(cl)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 1)
+
+    def test_sysop_login_still_relays_when_hide_sysop_is_off(self):
+        """Default-off behavior must be unchanged -- this is an opt-in
+        toggle, not a new default."""
+        from anetbbs.echomail.interbbs_sync import post_lastcaller_to_interbbs
+        from anetbbs.models import db, User, CallerLog, EchomailMessage
+        with self.app.app_context():
+            self.app.config['LASTCALLERS_INTERBBS_ENABLED'] = True
+            self.app.config['LASTCALLERS_HIDE_SYSOP'] = False
+            net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
+
+            sysop = User(username='stingray', email='stingray@example.com',
+                        password_hash='x', is_admin=True)
+            db.session.add(sysop)
+            db.session.commit()
+
+            cl = CallerLog(user_id=sysop.id, username='stingray', service='telnet')
+            db.session.add(cl)
+            db.session.commit()
+            post_lastcaller_to_interbbs(cl)
+
+            self.assertEqual(EchomailMessage.query.filter_by(direction='outbound').count(), 1)
+
     def test_inbound_sync_materializes_without_ip_and_dedups_globally(self):
         from anetbbs.echomail.interbbs_sync import (
             sync_lastcallers_inbound, ensure_special_area, LASTCALLERS_AREA_TAG)

@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.196 — Fixed InterBBS Last Callers flooding from sysop test logins (July 2026)
+
+- "Hide sysop from Last Callers" already hid sysop logins from the local display, but never stopped them from being relayed to other BBSes on the network — a heavily-tested sysop account could flood every peer's Last Callers area. Same toggle now blocks the relay too.
+
+Full suite verified clean (1327 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.195 — Web: reorganized the Tools navbar dropdown (July 2026)
 
 - The Tools dropdown had grown to 24 flat items — split into 5 category landing pages (Community, Network Directory, Content, My Stuff, Info & Help), same treatment the Admin dropdown already got.
