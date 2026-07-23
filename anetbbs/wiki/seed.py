@@ -145,6 +145,8 @@ in plumbing. Below is the full feature inventory.
 - [[SSH]] (TCP 2234, password and key auth)
 - [[Rlogin]] (TCP 513, used by game-server style auto-login — off by
   default, sysop must enable it)
+- [[PETSCII]] (TCP 6400/6401, Commodore 64/128 terminal support —
+  off by default, sysop must enable it)
 - Gemini — not a real Gemini-protocol (TLS+1965) listener; your
   gemtext capsule is exposed over plain HTTP at `/gemini/<username>`
 - Finger (TCP 79, user info)
@@ -476,6 +478,54 @@ Rlogin's local auto-login handshake (username pre-filled, no
 password re-prompt) is for genuine rlogin clients — other BBS
 software launching a door on this system, or a sysop's own rlogin
 client — not the web UI.
+"""),
+
+    # ------------------------------------------------------------------
+    ('petscii', 'PETSCII', """
+# PETSCII (Commodore 64/128)
+
+A dedicated connection option for real Commodore 64/128 hardware and
+PETSCII terminal emulators (SyncTERM's C64 mode, Novaterm, CCGMS,
+64NIC+). Completely separate from the [[Telnet]]/[[SSH]] ANSI menus —
+PETSCII isn't ANSI, so there's no color, no cursor-addressed
+selectors, just plain text, numbered menus, and single-key prompts.
+
+**Off by default** — the sysop has to opt in. If you don't see a
+PETSCII port mentioned anywhere for this BBS, it isn't enabled here;
+use [[Telnet]] or [[SSH]] instead.
+
+## Connecting
+
+Two ports, one per screen width — connect to whichever matches your
+setup:
+
+| Width | Typical port |
+|-------|--------------|
+| 40 columns | `6400` |
+| 80 columns | `6401` |
+
+There's no auto-detect: every connection on a given port is treated
+as that width, unconditionally, since most real C64 telnet clients
+don't announce themselves usefully otherwise.
+
+## What you can do
+
+- Message boards — browse, read, post, reply
+- Echomail — pick a network first, then its areas
+- Private messages
+- File areas — browse, view extended descriptions, download over
+  XMODEM (start your terminal's receive when prompted)
+- Who's online
+- View/edit your profile
+- Play **Number Guessing** — the one built-in game available here
+  (guess a number, get higher/lower hints)
+
+Door games, ANetCRAFT, [[MRC]]/[[IRC Client]], and ANSI art are not
+offered over PETSCII — none of those have a plain-text-only path.
+
+## Sysop note
+
+Sysops can build fully custom PETSCII menus — see [[Sysop Guide]].
 """),
 
     # ------------------------------------------------------------------
@@ -1869,6 +1919,16 @@ admin surface appears at `/admin/echomail/hub/`:
 A peer install (not the hub) doesn't see this section — it has
 nothing of its own to manage there.
 
+## PETSCII custom menus
+
+If [[PETSCII]] (C64/128) support is enabled, build custom PETSCII
+menus at `/admin/petscii-menus/` — a separate tree from the ANSI
+custom-menu system, with a much smaller action set (boards, echomail,
+PMs, files, who's-online, profile, Number Guessing, goto-another-menu,
+logoff) since most ANSI actions have no PETSCII equivalent. No
+default menu is required — without one, PETSCII sessions fall back
+to the built-in Phase 1 menu unchanged.
+
 ## Scheduled events
 
 `/admin/events/` lets a sysop automate routine maintenance instead
@@ -1907,6 +1967,7 @@ table and worked examples: [[Scheduled Events]].
 - [[Sysop Control Panel]]
 - [[Door Setup]]
 - [[BinkP Setup]]
+- [[PETSCII]]
 - [[Backup]]
 - [[Tutorial]]
 - [[Troubleshooting]]

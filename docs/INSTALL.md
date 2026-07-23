@@ -256,6 +256,38 @@ already a normal dependency (installed by `pip install -e .` in step
 than crashing the rest of the BBS. See `docs/PORTS.md` for the full
 port table and firewall rules.
 
+## 10. PETSCII (Commodore 64/128) terminal support (optional)
+
+Dedicated telnet listener(s) for real C64/128 hardware and PETSCII
+terminal emulators (SyncTERM's C64 mode, Novaterm, CCGMS, 64NIC+).
+Runs as part of the same unified `anetbbs.service` process as
+telnet/SSH/rlogin (see `anetbbs/main.py` / `anetbbs/core/petscii_server.py`),
+not a separate systemd unit. Off by default — two independent toggles,
+one per screen width, matching Synchronet's own "40 Column PETSCII
+Support" / "80 Column PETSCII Support" convention:
+
+```bash
+export PETSCII40_ENABLED=true
+export PETSCII40_PORT=6400
+export PETSCII80_ENABLED=true
+export PETSCII80_PORT=6401
+```
+
+Each port is fixed at one width, unconditionally — real C64 telnet
+clients mostly don't announce themselves usefully via telnet TTYPE
+negotiation, so there's no auto-detect; users just connect to
+whichever port matches their screen. This is a hand-built plain-text
+rendering path (no ANSI/cursor-addressing at all, since PETSCII isn't
+ANSI) covering message boards, echomail, private messages, file
+browsing + XMODEM download, who's-online, profile, and one built-in
+game (Number Guessing). Sysops can also build fully custom PETSCII
+menus at `/admin/petscii-menus/` — separate from the ANSI custom-menu
+system, since most ANSI actions (art, sixel, most doors) have no
+PETSCII equivalent. See `docs/25-petscii.md` for the full rundown.
+
+Put these in `.env` so they survive a restart, then `sudo systemctl
+restart anetbbs`.
+
 ## Troubleshooting
 
 - **MRC (or other static assets) 404/fails to load through nginx, but

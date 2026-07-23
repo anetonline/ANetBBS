@@ -54,6 +54,10 @@ app uses, so the "who's online" widget shows everyone at once.
 - **Themes** — pick from 9 built-in or sysop builds custom.
 - **Customizable everything** — every menu, hotkey, ANSI screen,
   external program, board category is data-driven.
+- **PETSCII terminal support** — dedicated plain-text rendering path
+  for real Commodore 64/128 hardware and PETSCII emulators, on its
+  own opt-in ports. Boards, echomail, PMs, files (incl. XMODEM
+  download), Number Guessing, and sysop-buildable custom menus.
 
 ## Where to go next
 
@@ -79,3 +83,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [22 — Running ANetBBS in Docker](22-containers.md)
 - [23 — Webhooks (outbound event notifications)](23-webhooks.md)
 - [24 — Game Center (built-in web games catalog)](24-game-center.md)
+- [25 — PETSCII (Commodore 64/128 terminal support)](25-petscii.md)

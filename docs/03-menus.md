@@ -4,6 +4,13 @@ Every menu shown to telnet / SSH / rlogin users is stored in the
 database and editable from the web. There's no source code change
 needed to add, remove, rename, or relink anything.
 
+This covers the **ANSI** menu tree (`BbsMenu`/`BbsMenuItem`). PETSCII
+(C64/128) sessions use a completely separate, sysop-buildable menu
+tree at `/admin/petscii-menus/` with a much smaller action-type set —
+most ANSI actions (art, sixel, chat, most doors) have no PETSCII
+equivalent, so the two trees are deliberately not shared. See
+[25 — PETSCII](25-petscii.md).
+
 ## Where to edit
 
 **Admin → BBS Menus** (`/admin/bbs-menus/`).

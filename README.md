@@ -3,10 +3,10 @@
 **Status: beta** (`v1.0b2.194`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
-rlogin, **and FTP** front-ends; FidoNet binkp + DOVE-Net QWK echomail;
-inter-BBS instant messaging via MSP (RFC 1312); a built-in collaborative
-wiki and RSS reader; door-game support including stock Synchronet `.js`
-doors (LORD ships pre-installed and plays out of the box).
+rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
+QWK echomail; inter-BBS instant messaging via MSP (RFC 1312); a built-in
+collaborative wiki and RSS reader; door-game support including stock
+Synchronet `.js` doors (LORD ships pre-installed and plays out of the box).
 
 ## Quick install (Linux)
 
@@ -138,7 +138,7 @@ buildx` once there's a registry to publish to.
 - Full collaborative wiki at `/wiki/` with markdown bodies, `[[Page]]`
   cross-links, per-page revision history, unified-diff compare,
   revert, full-text search, recent changes, wanted/orphan pages
-- 51 seeded pages cover connecting, every messaging subsystem, doors
+- 52 seeded pages cover connecting, every messaging subsystem, doors
   (including a LORD recipe + the DosBridge), echomail/BinkP setup,
   NodeSpy, backup, full architecture, sysop guide, glossary, FAQ
 - Anyone can read; logged-in users can edit (configurable minimum post count + account age); admins can lock/delete/rename
@@ -203,6 +203,12 @@ buildx` once there's a registry to publish to.
   long echomail networks. Notification banner at login (`*** You have
   new: 3 PMs, 1 InterBBS IM`). Synchronet `@CODE@` and Mystic `|XX`
   display codes in welcome / goodbye / menu ANSI screens.
+- **PETSCII (C64/128)** — dedicated plain-text rendering path for real
+  Commodore hardware and PETSCII terminal emulators, two opt-in ports
+  (40-col / 80-col, off by default). Boards, echomail (network-first
+  picker), PMs, file browsing + XMODEM download, who's-online, profile,
+  Number Guessing, and sysop-buildable custom menus at
+  `/admin/petscii-menus/`. See [docs/25-petscii.md](docs/25-petscii.md).
 
 ### Sysop tools
 - Echomail dashboard with poll logs, AreaFix log, bad-areas review
@@ -222,6 +228,7 @@ buildx` once there's a registry to publish to.
 - [`docs/06-echomail.md`](docs/06-echomail.md) — echomail config
 - [`docs/07-file-areas.md`](docs/07-file-areas.md) — file area config
 - [`docs/13-image-galleries.md`](docs/13-image-galleries.md) — image galleries
+- [`docs/25-petscii.md`](docs/25-petscii.md) — PETSCII (C64/128) terminal support
 
 ## License
 

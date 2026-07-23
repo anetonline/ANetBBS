@@ -13,6 +13,8 @@
 | 11    | UDP   | yes     | SYSTAT         | "Who's online" lookup from peer BBSes (Finger-style) | `SYSTAT_PORT`   |
 | 79    | TCP   | yes     | Finger         | RFC 1288 Finger — per-user info queries          | `FINGER_LISTEN_PORT`|
 | 5001* | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | `MRC_BRIDGE_PORT`   |
+| 6400  | TCP   | off     | PETSCII (40-col) | Commodore 64/128 terminal support, fixed 40-column | `PETSCII40_PORT` (`PETSCII40_ENABLED`) |
+| 6401  | TCP   | off     | PETSCII (80-col) | Commodore 64/128 terminal support, fixed 80-column | `PETSCII80_PORT` (`PETSCII80_ENABLED`) |
 
 \* `install.sh` always derives `MRC_BRIDGE_PORT` as `WEB_PORT + 1` (5001
 on the standard `WEB_PORT=5000`) and writes it to both `.env` and
@@ -86,6 +88,8 @@ sudo iptables -A INPUT -p tcp --dport 24554 -j ACCEPT   # binkp
 sudo iptables -A INPUT -p tcp --dport 18    -j ACCEPT   # msp
 sudo iptables -A INPUT -p udp --dport 11    -j ACCEPT   # systat
 sudo iptables -A INPUT -p tcp --dport 79    -j ACCEPT   # finger
+sudo iptables -A INPUT -p tcp --dport 6400  -j ACCEPT   # petscii 40-col (if enabled)
+sudo iptables -A INPUT -p tcp --dport 6401  -j ACCEPT   # petscii 80-col (if enabled)
 ```
 
 To get listed in the official `sbbsimsg.lst` directory on Vertrauen,
