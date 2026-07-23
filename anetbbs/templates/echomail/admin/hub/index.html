@@ -192,6 +192,7 @@
                 <div class="alert alert-warning">No nodelist-generation event found — enable REGISTRY_MODE_ENABLED and restart to seed it.</div>
                 {% endif %}
                 <form method="post" action="{{ url_for('hub_admin.nodelist_generate_now') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-primary" {% if not nodelist_event %}disabled{% endif %}>
                         <i class="bi bi-play-circle"></i> Generate Now
                     </button>
