@@ -31,14 +31,28 @@ def _user_addresses(user):
     """All FTN addresses associated with this user — used to filter inbox/sent.
 
     Returns a list of strings. The user's AKAs are primary; the username also
-    matches if the netmail was addressed by name rather than by address."""
+    matches if the netmail was addressed by name rather than by address.
+
+    SECURITY FIX (real live bug reported by the sysop): this used to add
+    every active network's own `our_address` to EVERY user's list
+    unconditionally, not just admins. Since _user_owns() (gating read/
+    delete/reply-authorization) and the inbox()/sent() list queries all
+    call this function, ANY regular user could read -- and delete -- a
+    netmail addressed to the BBS's own raw hub address (exactly what an
+    unresolved "to the sysop" netmail from a new/unrecognized node looks
+    like) purely because they happened to be logged in, with no
+    connection to the message at all. Only an admin acts as the
+    catch-all identity for the BBS's own bare FTN address now. A
+    genuinely unresolved netmail with no other match still lands in the
+    admin-only "Unclaimed Netmail" review queue
+    (/admin/echomail/unclaimed_netmail) instead of leaking to everyone.
+    """
     addrs = [a.address for a in (UserAka.query
                                   .filter_by(user_id=user.id).all())]
-    # Also include any network's our_address — a sysop might receive netmail
-    # via the BBS's primary FTN address even if they have no personal AKAs.
-    for net in EchomailNetwork.query.filter_by(is_active=True).all():
-        if net.our_address and net.our_address not in addrs:
-            addrs.append(net.our_address)
+    if getattr(user, 'is_admin', False):
+        for net in EchomailNetwork.query.filter_by(is_active=True).all():
+            if net.our_address and net.our_address not in addrs:
+                addrs.append(net.our_address)
     return addrs
 
 

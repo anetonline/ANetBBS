@@ -1,3 +1,26 @@
+# ANetBBS v1.0b2.198 — Bug fixes (July 2026)
+
+- Minor bug fixes.
+
+Full suite verified clean (1442 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.197 — Full echomail/QWK/BinkP audit + file-area storage validation (July 2026)
+
+A full audit of the echomail/QWK/BinkP subsystem turned up 28 issues, now fixed:
+
+- File-echo hatch-out to downstream nodes was silently broken (subscribed peers never received files, no error anywhere).
+- Two real security gaps in TIC processing (path traversal, missing password check) and a third occurrence of a known QWK data-corruption bug (CONTROL.DAT) and a known batch-rollback bug.
+- Hub-side AreaFix/FileFix could leak internal sync-only areas to any downstream node.
+- AreaFix/FileFix now correctly process requests received during a hub-initiated outbound poll, not just inbound connections.
+- Assorted smaller fixes: duplicate netmail kludges, QWK reply-threading, stale-node nodelist flagging, a `%PASSWORD` AreaFix command, and a new "Unclaimed Netmail" admin review queue.
+- File areas: typing a Storage Path that doesn't exist now warns and offers to create it (single area and bulk import).
+
+Full suite verified clean (1431 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.196 — Fixed InterBBS Last Callers flooding from sysop test logins (July 2026)
 
 - "Hide sysop from Last Callers" already hid sysop logins from the local display, but never stopped them from being relayed to other BBSes on the network — a heavily-tested sysop account could flood every peer's Last Callers area. Same toggle now blocks the relay too.
