@@ -701,7 +701,7 @@ Optional but useful:
 
 ## Step 2 — register echo areas
 
-`/admin/echomail/areas/` → **Add Area**. The tag must exactly match
+`/admin/echomail/areas` → **Add Area**. The tag must exactly match
 the network's tag (`BBS_SCENE`, `fsx_gen`, etc.) — coordinator will
 have a list.
 
@@ -755,7 +755,7 @@ both inbound and outbound.
 
 ## Hub Management vs. this page
 
-Everything above (`/admin/echomail/` and `/admin/echomail/areas/`) is
+Everything above (`/admin/echomail/` and `/admin/echomail/areas`) is
 about *your own* node peering out to an uplink — the normal case for
 almost every install. A separate admin surface,
 `/admin/echomail/hub/`, only appears if this install is itself
@@ -1906,11 +1906,20 @@ admin surface appears at `/admin/echomail/hub/`:
 - **BinkP nodes** and **QWK nodes** — add/edit/delete downstream
   nodes, subscribe/unsubscribe them from areas, reset a QWK node's
   high-water mark.
-- **Hold queue** — messages/files held back from distribution rather
-  than sent straight out.
+- **Hold queue** — BinkP-only: outbound echomail queued per
+  downstream node, flushed on its next poll. Purely a delivery queue
+  (pending/sent status) — no moderation step involved.
 - **Node requests** — the approve/deny queue for BBSes applying for
   a node number (terminal wizard or the peer-facing `/qwkhub/apply`
   endpoint both land here).
+- **Join Form** (`/admin/echomail/hub/join/requests`) — a SEPARATE
+  review queue from Node requests above, for the public self-service
+  `/join/` application form (see [[ANotherNetwork]]) — a prospective
+  member fills it out, uploads/confirms their `*NETMAIL.NA` and echo/
+  file-echo picks, and it lands here for approval. Approving
+  auto-creates the BinkP and/or QWK node record(s) and emails
+  credentials; a rules-file upload and other config for the form
+  itself live under **Join Form** too.
 - **Generation & Distribution** — generate the nodelist right now
   (in addition to its weekly schedule), preview a QWK packet for a
   node without marking anything as sent, and see TIC/file
@@ -3356,9 +3365,11 @@ meaningful on the one install that *is* the network hub):
   test `.QWK` packet for that node on demand *without* marking any
   messages as sent, so a sysop can sanity-check what a peer would
   receive before the real packet goes out.
-- **Hold queue** (`/admin/echomail/hub/holdqueue`) — messages held
-  back from distribution (e.g. awaiting moderation or a size/policy
-  check) before they're released to nodes.
+- **Hold queue** (`/admin/echomail/hub/holdqueue`) — BinkP-only, not
+  QWK: outbound echomail queued per downstream BinkP node, flushed the
+  next time that node polls in (or is polled). No moderation/policy-
+  check step involved — it's purely a delivery queue, filterable by
+  status (pending/sent).
 - **Node requests** (`/admin/echomail/hub/qwk/requests`) — the
   approve/deny queue for BBSes applying for a new QWK node number
   (see [[ANotherNetwork]] for how a sysop submits one of these).

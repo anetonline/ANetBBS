@@ -108,6 +108,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def _matches(self, row):
         for kind, name, value in self._predicates:
             attr = getattr(row, name, None)
@@ -218,11 +221,11 @@ class NetworkDisambiguationTests(unittest.TestCase):
     def _run(self, networks, nodes, remote_addr, remote_pwd):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
-        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, HatchQueue, db
 
         captured = {'import_calls': []}
 
-        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename):
+        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename, peer_address=None):
             captured['import_calls'].append(network_id)
             return 3
 
@@ -239,6 +242,10 @@ class NetworkDisambiguationTests(unittest.TestCase):
         EchomailNetwork.query = _FakeQuery(networks)
         BinkPNode.query = _FakeQuery(nodes)
         EchomailMessage.query = _FakeQuery([])
+        # See test_binkp_multi_hub_identity.py's harness for why this
+        # is needed -- _handle_connection() now also queries
+        # HatchQueue on the downstream_node_id branch.
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailNetwork, 'our_address', _FakeColumn('our_address')), \
@@ -260,6 +267,7 @@ class NetworkDisambiguationTests(unittest.TestCase):
             del EchomailNetwork.query
             del BinkPNode.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         captured['session_added'] = recording_session.added
         return writer, captured

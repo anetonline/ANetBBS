@@ -22,12 +22,22 @@ nodes inherit the right zone:net/node coordinates.
 Reference: binkterm-php's NodelistParser.php ported to Python.
 """
 import json
+import logging
 import os
 import re
 import tempfile
 import datetime
 
 from ..models import db, Nodelist, NodelistEntry
+
+logger = logging.getLogger(__name__)
+
+# A downstream BinkPNode not seen in this many days (or never seen at
+# all) gets flagged Down in the generated hub nodelist rather than
+# looking indistinguishable from one polled minutes ago. Two full
+# weekly nodelist-publish cycles (the built-in scheduled event runs
+# Sundays) of total silence is a reasonable "flag as down" threshold.
+_DOWN_AFTER_DAYS = 14
 
 
 
@@ -436,13 +446,37 @@ def generate_nodelist(zone: int, net: int, hub_node: int,
             node_part = node.ftn_address.split('@', 1)[0]
             node_num = int(node_part.split('/', 1)[1].split('.')[0])
         except Exception:
+            # Real gap found in a full echomail-subsystem audit: this
+            # silently dropped the node from every weekly nodelist
+            # publish with zero sysop-visible signal why -- a malformed
+            # or legacy ftn_address just made a registered downstream
+            # node quietly vanish from the generated file.
+            logger.warning(
+                'Nodelist: skipping node id=%s (%r) — could not parse '
+                'a node number from ftn_address %r',
+                node.id, node.name, node.ftn_address)
             continue
         safe_sys = (node.system_name or node.name or 'Unknown').replace(' ', '_').replace(',', '_')
         safe_loc = (node.location or 'Unknown').replace(' ', '_').replace(',', '_')
         safe_sop = (node.sysop or 'Sysop').replace(' ', '_').replace(',', '_')
         phone = (node.phone or '-Unpublished-').replace(' ', '_').replace(',', '_')
+        # Real gap found in the same audit: no Down/Hold concept at all
+        # -- a node that hasn't been seen in a long time (or has NEVER
+        # been seen since being registered) was indistinguishable in
+        # the generated nodelist from one polled five minutes ago.
+        # FTS-5000's Down keyword-flag (first field of the node entry)
+        # is the standards-correct way to represent "known but
+        # currently unreachable" without breaking any point-address
+        # hierarchy nested under it -- unlike is_active=False, which
+        # removes the node from this listing entirely and would orphan
+        # any point addresses still hung off it.
+        is_stale = (node.last_seen_at is None or
+                   (datetime.datetime.utcnow() - node.last_seen_at)
+                   > datetime.timedelta(days=_DOWN_AFTER_DAYS))
+        down_flag = 'Down,' if is_stale else ''
         lines.append(
-            f',{node_num},{safe_sys},{safe_loc},{safe_sop},{phone},IBN:24554,CM'
+            f',{node_num},{safe_sys},{safe_loc},{safe_sop},{phone},'
+            f'{down_flag}IBN:24554,CM'
         )
 
     return '\r\n'.join(lines) + '\r\n'
@@ -521,6 +555,20 @@ def write_nodelist_to_area(hub_identity=None) -> str:
     dest = os.path.join(storage_path, filename)
     with open(dest, 'w', encoding='utf-8', newline='') as f:
         f.write(content)
+
+    # Real gap found in a full echomail-subsystem audit: the freshly
+    # written file was made browsable/downloadable locally, but never
+    # queued for outbound distribution to peers who subscribed to this
+    # file echo via FileFix -- every other locally-added file in this
+    # area goes through hatch_local_file() (web/file_areas.py's own
+    # upload route, bbs_ui.py's terminal upload) to trigger that
+    # fan-out; this scheduled auto-publish path never called it at all.
+    try:
+        from .tic import hatch_local_file
+        hatch_local_file(area, dest, filename,
+                         f'ANotherNetwork nodelist, day {day_of_year:03d}')
+    except Exception:
+        logger.exception('write_nodelist_to_area: hatch-out failed for %s', filename)
 
     node_count = BinkPNode.query.filter_by(
         is_active=True, hub_identity_id=hub_identity.id).count()

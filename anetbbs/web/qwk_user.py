@@ -220,20 +220,46 @@ def upload():
                          .replace('\xe3', '\n')
                          .replace('\r\n', '\n')
                          .rstrip(' \x00\n'))
-            msg = EchomailMessage(
-                area_id=area.id,
-                network_id=area.network_id,
-                from_name=current_user.username,
-                to_name=to_name or 'All',
-                subject=subject or '(no subject)',
-                body=body_text,
-                created_at=datetime.utcnow(),
-                direction='outbound',
-            )
-            db.session.add(msg)
+            # Real gap found in a full echomail-subsystem audit: this is
+            # the one REP importer that does its own raw positional
+            # parse instead of reusing qwk.py's _parse_messages_dat(),
+            # so it never got the reply-threading extraction that
+            # function's own _clean_body() step already does for the
+            # other two importers (qwk_hub.py/qwk_hub_ftp.py) --
+            # @REPLY:/@REPLYID:/@REPLYTO: kludge lines just stayed as
+            # visible junk text at the top of the message instead of
+            # setting reply_id. Reuses the same _clean_body() helper
+            # rather than re-implementing the same parsing a third time.
+            from ..echomail.qwk import _clean_body
+            _cleaned = _clean_body(body_text)
+            body_text = _cleaned['body']
+            reply_id = _cleaned['reply_id']
+            # Real bug found in a full echomail-subsystem audit: a bare
+            # db.session.rollback() here rolls back the ENTIRE open
+            # transaction, not just this one message -- so every message
+            # already add()ed earlier in this SAME loop got silently
+            # discarded the moment any LATER message in the same upload
+            # hit an exception, while `imported` still reported success
+            # for all of them. This is the exact bug already fixed in
+            # qwk_hub_ftp.py's process_rep_upload() (see its own comment)
+            # -- a third, independent REP importer that never got the
+            # same fix. begin_nested() isolates each message's own
+            # insert so a rollback only undoes that one row.
+            with db.session.begin_nested():
+                msg = EchomailMessage(
+                    area_id=area.id,
+                    network_id=area.network_id,
+                    from_name=current_user.username,
+                    to_name=to_name or 'All',
+                    subject=subject or '(no subject)',
+                    body=body_text,
+                    reply_id=reply_id,
+                    created_at=datetime.utcnow(),
+                    direction='outbound',
+                )
+                db.session.add(msg)
             imported += 1
         except Exception:
-            db.session.rollback()
             continue
     db.session.commit()
     flash(f'Imported {imported} reply message(s).', 'success')

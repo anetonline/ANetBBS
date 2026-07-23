@@ -386,10 +386,20 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
         # echomail we also add an AREA line and append SEEN-BY/PATH.
         existing = kludges_from_json(msg.kludges) if msg.kludges else []
         wanted = []
-        # Drop any existing CHRS/MSGID/TID — we'll regenerate consistent ones
+        # Drop any existing CHRS/MSGID/TID/PID/REPLY/INTL/FMPT/TOPT --
+        # we'll regenerate consistent ones below. Real gap found in a
+        # full echomail-subsystem audit: this filter only ever dropped
+        # CHRS/MSGID/TID/PID, but web/netmail.py's compose() route
+        # pre-builds and stores a FULL kludge set on NetmailMessage.
+        # kludges -- including REPLY/INTL/FMPT/TOPT -- which then got
+        # appended here via `wanted` UNFILTERED, right alongside this
+        # function's own independently-regenerated copies of the exact
+        # same kludges (lines below), shipping every inter-zone/point/
+        # reply netmail composed through the web UI with each of those
+        # kludges duplicated on the wire.
         for k in existing:
             head = k.split(' ', 1)[0].split(':', 1)[0].upper()
-            if head in ('CHRS', 'MSGID', 'TID', 'PID'):
+            if head in ('CHRS', 'MSGID', 'TID', 'PID', 'REPLY', 'INTL', 'FMPT', 'TOPT'):
                 continue
             wanted.append(k)
 
@@ -404,6 +414,12 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
             msg.msg_id = new_msgid
         if msg.reply_id:
             kludge_head.append(f'REPLY: {msg.reply_id}')
+        # PID identifies the originating software (FTS-0001 convention,
+        # same idea as TID below but for the ORIGINATOR rather than the
+        # last tosser to touch it) -- was stripped from `existing` above
+        # but never regenerated anywhere, so outbound netmail never
+        # actually carried one despite compose() building one.
+        kludge_head.append('PID: ANETBBS 1.0')
 
         # Netmail-specific routing kludges (FTS-4001 + FSC-4009).
         # Spec form is space-separated, NO colon: `^AFMPT 1`, `^ATOPT 1`,

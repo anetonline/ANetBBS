@@ -224,6 +224,111 @@ class TosserTests(unittest.TestCase):
             created = toss_message(msg.id)
             self.assertEqual(created, 1)
 
+    def test_exclude_peer_address_skips_the_node_even_with_empty_seenby(self):
+        """Real gap found in a full echomail-subsystem audit: loop-
+        prevention relied solely on SEEN-BY with no independent
+        fallback -- if a downstream node's own tosser has a bug and
+        never adds itself to SEEN-BY, the hub would toss the message
+        straight back to the node it just received it from. exclude_
+        peer_address is a caller-supplied "this is the peer we JUST
+        imported this from" signal, independent of SEEN-BY entirely."""
+        from anetbbs.models import (db, EchomailMessage, BinkPNode,
+                                    EchoAreaNode, BinkPHoldQueue)
+        from anetbbs.echomail.tosser import toss_message
+
+        with self.app.app_context():
+            net, area = self._make_area_and_network('TossExcludePeer')
+            node = BinkPNode(name='JustSentThis', ftn_address='1:200/8',
+                             password='x', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            msg = EchomailMessage(
+                area_id=area.id, network_id=net.id, from_name='A', to_name='All',
+                subject='hi', body='hello', direction='inbound',
+                seenby=json.dumps([]))  # empty -- peer's tosser bug scenario
+            db.session.add(msg)
+            db.session.commit()
+
+            created = toss_message(msg.id, exclude_peer_address='1:200/8')
+            self.assertEqual(created, 0,
+                             'must not toss back to the peer session this '
+                             'message was just received from')
+            self.assertEqual(BinkPHoldQueue.query.filter_by(
+                node_id=node.id, message_id=msg.id).count(), 0)
+
+    def test_exclude_peer_address_does_not_affect_other_nodes(self):
+        """Sanity check the fallback isn't overly broad: a node with a
+        DIFFERENT address than the excluded peer must still be tossed."""
+        from anetbbs.models import (db, EchomailMessage, BinkPNode,
+                                    EchoAreaNode, BinkPHoldQueue)
+        from anetbbs.echomail.tosser import toss_message
+
+        with self.app.app_context():
+            net, area = self._make_area_and_network('TossExcludeOther')
+            node = BinkPNode(name='GenuineSubscriber', ftn_address='1:200/12',
+                             password='x', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            msg = EchomailMessage(
+                area_id=area.id, network_id=net.id, from_name='A', to_name='All',
+                subject='hi', body='hello', direction='inbound')
+            db.session.add(msg)
+            db.session.commit()
+
+            created = toss_message(msg.id, exclude_peer_address='1:200/999')
+            self.assertEqual(created, 1)
+            self.assertEqual(BinkPHoldQueue.query.filter_by(
+                node_id=node.id, message_id=msg.id).count(), 1)
+
+    def test_exclude_peer_address_zone_qualified_matches_bare(self):
+        """Same zone-stripping normalization as SEEN-BY comparison --
+        the caller passes a full peer address (however it happened to
+        be captured), a candidate node's ftn_address is also
+        zone-qualified, both must reduce to the same bare form."""
+        from anetbbs.models import (db, EchomailMessage, BinkPNode,
+                                    EchoAreaNode, BinkPHoldQueue)
+        from anetbbs.echomail.tosser import toss_message
+
+        with self.app.app_context():
+            net, area = self._make_area_and_network('TossExcludeZone')
+            node = BinkPNode(name='ZoneQualifiedPeer', ftn_address='1:200/10',
+                             password='x', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            msg = EchomailMessage(
+                area_id=area.id, network_id=net.id, from_name='A', to_name='All',
+                subject='hi', body='hello', direction='inbound')
+            db.session.add(msg)
+            db.session.commit()
+
+            created = toss_message(msg.id, exclude_peer_address='1:200/10')
+            self.assertEqual(created, 0)
+
+    def test_exclude_peer_address_none_is_a_no_op(self):
+        """Default/omitted must behave exactly like before this fix."""
+        from anetbbs.models import (db, EchomailMessage, BinkPNode,
+                                    EchoAreaNode, BinkPHoldQueue)
+        from anetbbs.echomail.tosser import toss_message
+
+        with self.app.app_context():
+            net, area = self._make_area_and_network('TossExcludeNone')
+            node = BinkPNode(name='Sub', ftn_address='1:200/11',
+                             password='x', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            msg = EchomailMessage(
+                area_id=area.id, network_id=net.id, from_name='A', to_name='All',
+                subject='hi', body='hello', direction='inbound')
+            db.session.add(msg)
+            db.session.commit()
+
+            created = toss_message(msg.id)
+            self.assertEqual(created, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

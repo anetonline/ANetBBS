@@ -26,8 +26,21 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-def toss_message(message_id: int) -> int:
+def toss_message(message_id: int, exclude_peer_address: str = None) -> int:
     """Queue one echomail message for delivery to all subscribed downstream nodes.
+
+    `exclude_peer_address`, when given, is an extra defense-in-depth
+    loop-prevention check on top of SEEN-BY: the FTN address of the
+    peer session this specific message was JUST received from (passed
+    by the caller right after import, not stored on the message row --
+    the message's own `from_address` field is the ORIGINAL AUTHOR's
+    address, which is usually a completely different node than
+    whichever peer relayed us this particular copy, so reusing that
+    field here would misfire). If a downstream node's own tosser has a
+    bug and fails to add itself to SEEN-BY before relaying a message
+    that originated there, this catches it anyway. Real gap found in a
+    full echomail-subsystem audit: loop-prevention relied solely on
+    SEEN-BY with no independent fallback at all.
 
     Returns the number of new BinkPHoldQueue entries created.
     """
@@ -76,6 +89,11 @@ def toss_message(message_id: int) -> int:
             logger.warning('tosser: msg %d has malformed seenby JSON, '
                            'loop-prevention check skipped: %s', message_id, exc)
 
+    exclude_bare = ''
+    if exclude_peer_address:
+        exclude_bare = exclude_peer_address.split('@', 1)[0].strip()
+        exclude_bare = exclude_bare.split(':', 1)[-1]
+
     # Find all active downstream nodes subscribed to this area.
     subs = (
         EchoAreaNode.query
@@ -112,6 +130,11 @@ def toss_message(message_id: int) -> int:
         addr_bare = addr_bare.split(':', 1)[-1]
         if addr_bare and addr_bare in seenby_entries:
             logger.debug('tosser: skipping %s (in SEEN-BY for msg %d)',
+                         node.ftn_address, message_id)
+            continue
+        if addr_bare and exclude_bare and addr_bare == exclude_bare:
+            logger.debug('tosser: skipping %s (received msg %d from this '
+                         'same peer -- SEEN-BY fallback)',
                          node.ftn_address, message_id)
             continue
         entry = BinkPHoldQueue(

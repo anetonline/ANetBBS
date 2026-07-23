@@ -158,6 +158,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def _matches(self, row):
         for kind, name, value in self._predicates:
             attr = getattr(row, name, None)
@@ -248,7 +251,7 @@ class _BinkpHandlerHarness:
              our_address='1:1/1', include_got=False, outbound_messages=None):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
-        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, HatchQueue, db
 
         captured = {}
         pending = outbound_messages or []
@@ -273,6 +276,17 @@ class _BinkpHandlerHarness:
         EchomailNetwork.query = _FakeQuery(networks)
         BinkPNode.query = _FakeQuery(nodes)
         EchomailMessage.query = _FakeQuery(pending)
+        # Real gap found in a full echomail-subsystem audit: _handle_
+        # connection() now also queries HatchQueue for pending file-echo
+        # hatch-out items on the downstream_node_id branch. This harness
+        # predates that and never patched HatchQueue.query, so it fell
+        # through to the real Flask-SQLAlchemy descriptor -- which,
+        # combined with db.session being patched to _NoOpSession() below,
+        # raised 'TypeError: _NoOpSession object is not callable' the
+        # instant it was touched. Empty by default (no pending hatch
+        # items) -- matches the overwhelmingly common case and every
+        # existing test here, none of which care about hatching.
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailNetwork, 'our_address', _FakeColumn('our_address')), \
@@ -297,6 +311,7 @@ class _BinkpHandlerHarness:
             del EchomailNetwork.query
             del BinkPNode.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         return writer, captured
 

@@ -666,6 +666,31 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     else:
                         logger.warning('Hold-queue .pkt not accepted by %s — '
                                        'leaving pending for retry', remote_addr)
+
+                from ..models import HatchQueue
+                # Keyed on node.ftn_address (the resolved DB row's own
+                # address, matching what filefix.py's hub side stored
+                # as FileEchoSubscription/HatchQueue.peer_address when
+                # the node subscribed) -- NOT remote_addr, which is
+                # only the first AKA the peer happened to claim during
+                # auth and isn't guaranteed byte-identical to it.
+                pending_hatch = (HatchQueue.query
+                                 .filter(HatchQueue.peer_address == (node.ftn_address or ''),
+                                         HatchQueue.status == 'pending')
+                                 .order_by(HatchQueue.queued_at)
+                                 .all())
+                if pending_hatch:
+                    hatched_ids = await _send_hatch_items(
+                        reader, writer, pending_hatch, matched_our_address,
+                        peer, recv_state, inbound_files, transcript=transcript)
+                    if hatched_ids:
+                        now = datetime.utcnow()
+                        for hid in hatched_ids:
+                            row = HatchQueue.query.get(hid)
+                            if row is not None:
+                                row.status = 'sent'
+                                row.sent_at = now
+                        db.session.commit()
             elif net_id is not None:
                 from ..models import EchomailMessage
                 outbound = EchomailMessage.query.filter_by(
@@ -894,7 +919,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                             for inner_name, inner_payload in extracted:
                                 _debug_dump_packet(inner_name, inner_payload)
                                 imported_total += _import_pkt_payload(
-                                    inner_payload, net_id, inner_name)
+                                    inner_payload, net_id, inner_name,
+                                    peer_address=remote_addr)
                         else:
                             # Non-packet files (TIC manifests, hatched binaries, etc.)
                             # get written to inbound for later processing.
@@ -1300,7 +1326,62 @@ async def _send_pkt_file(reader, writer, filename, payload, peer, state, files,
         logger.debug('Waiting for M_GOT, got cmd=%d body=%s', cmd, body)
 
 
-def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int:
+async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
+                            state, files, transcript=None):
+    """Ship pending HatchQueue rows (binary file + .tic manifest pair) to
+    a connected peer, using the same M_FILE/M_GOT exchange as
+    _send_pkt_file(). Async counterpart of binkp.py's BinkPClient.
+    _send_hatch() (the outbound-poll/dial-out direction) -- this is the
+    inbound-listener direction (a downstream node dials INTO us).
+
+    Real gap found in a full echomail-subsystem audit: this listener's
+    downstream_node_id branch only ever sent the pending echomail .pkt
+    via get_pending_for_node()/_send_pkt_file -- nothing here ever
+    queried HatchQueue for pending file-echo items, so a node polling
+    IN to the hub never received a file it was subscribed to via
+    FileFix, even though the whole rest of the pipeline (subscription,
+    queueing, .tic rendering) was already correct. Mirrors poller.py's
+    _run_client()'s already-correct hatch-out for the OTHER direction
+    (a leaf dialing out to its upstream hub).
+
+    Returns a list of HatchQueue.id values successfully sent.
+    """
+    from .tic import build_tic_text
+    sent_ids = []
+    for item in hatch_items:
+        try:
+            with open(item.binary_path, 'rb') as f:
+                binary = f.read()
+        except OSError as exc:
+            logger.error('Hatch (inbound listener): cannot read binary %s: %s',
+                        item.binary_path, exc)
+            continue
+
+        accepted = await _send_pkt_file(reader, writer, item.filename, binary,
+                                        peer, state, files, transcript=transcript)
+        if not accepted:
+            logger.warning('Hatch (inbound listener): peer did not ack %s',
+                           item.filename)
+            continue
+
+        tic_text = build_tic_text(item, our_address)
+        tic_bytes = tic_text.encode('cp437', errors='replace')
+        tic_name = item.filename.rsplit('.', 1)[0] + '.tic'
+        accepted = await _send_pkt_file(reader, writer, tic_name, tic_bytes,
+                                        peer, state, files, transcript=transcript)
+        if not accepted:
+            logger.warning('Hatch (inbound listener): peer did not ack %s',
+                           tic_name)
+            continue
+
+        sent_ids.append(item.id)
+        logger.info('Hatch (inbound listener): shipped %s + %s to %s',
+                    item.filename, tic_name, peer)
+    return sent_ids
+
+
+def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
+                        peer_address: str = None) -> int:
     """Parse an FTS-0001 .pkt and import each message as inbound. Returns count.
 
     Routes by AREA: kludge:
@@ -1308,6 +1389,12 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
       - absent  → netmail  → NetmailMessage (with kludges, all attribute flags)
     Triggers the areafix bot if a netmail's to_name matches 'areafix' (any
     case), or the filefix bot for 'filefix' (any case).
+
+    `peer_address` is the connecting session's own claimed FTN address
+    (this function's caller's `remote_addr`) -- passed through to the
+    post-import toss_message() calls as an extra loop-prevention
+    fallback on top of SEEN-BY. See tosser.py's toss_message() for why
+    this can't just reuse the message's own from_address field.
     """
     import json
     from ..models import db, EchomailMessage, EchoArea, NetmailMessage, EchomailNetwork
@@ -1482,7 +1569,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str) -> int
             from .tosser import toss_message
             for em_obj in echomail_objects:
                 if em_obj.id:
-                    toss_message(em_obj.id)
+                    toss_message(em_obj.id, exclude_peer_address=peer_address)
         except Exception:
             logger.exception('Hub tosser failed for %s', filename)
 

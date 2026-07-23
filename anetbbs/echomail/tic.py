@@ -156,7 +156,24 @@ def process_tic(tic_path, inbound_dir):
         db.session.commit()
         return tic
 
-    bin_path = os.path.join(inbound_dir, parsed['file'])
+    # Real gap found in a full echomail-subsystem audit: the manifest's
+    # File: field is peer-supplied text, used unsanitized in TWO
+    # os.path.join() calls below (locating the binary, and staging it
+    # into the file area's storage) -- the exact same traversal bug
+    # already fixed for the raw wire-level CMD_FILE filename in
+    # binkp.py's _sanitize_inbound_filename() (an absolute path like
+    # '/etc/cron.d/x' silently discards inbound_dir/storage_path
+    # entirely per os.path.join()'s own documented semantics, and
+    # '../../x' escapes it). Reusing that same sanitizer here means a
+    # crafted "File ../../x" manifest can no longer read or write
+    # outside inbound_dir/area.storage_path. binkp.py already applies
+    # this sanitizer when it stashes the file it received on the wire,
+    # so a legitimate File: field (matching the real basename) still
+    # resolves to the exact same on-disk name here.
+    from .binkp import _sanitize_inbound_filename
+    safe_filename = _sanitize_inbound_filename(parsed['file'])
+
+    bin_path = os.path.join(inbound_dir, safe_filename)
     if not os.path.isfile(bin_path):
         tic.status = 'error'
         tic.error_message = f'binary not found at {bin_path!r}'
@@ -184,6 +201,19 @@ def process_tic(tic_path, inbound_dir):
     # into its storage directory.
     area = (FileArea.query.filter_by(tag=parsed['area']).first()
             if parsed['area'] else None)
+
+    # Real gap found in the same audit: FileArea.password ("optional
+    # area password", models.py) exists specifically to gate TIC
+    # filing the same way network.areafix_password gates AreaFix --
+    # but nothing here ever compared it against the manifest's own Pw:
+    # field. Any authenticated BinkP peer able to deliver a TIC could
+    # file into a password-protected area regardless. Only enforced
+    # when the area actually has a password set (it's opt-in).
+    if area is not None and area.password and parsed['pw'] != area.password:
+        tic.status = 'error'
+        tic.error_message = 'TIC password does not match area password'
+        db.session.commit()
+        return tic
     if area is None:
         # Auto-create the area on first sight so an unknown TIC doesn't get
         # silently dropped. The sysop can later edit storage_path / name.
@@ -205,7 +235,7 @@ def process_tic(tic_path, inbound_dir):
                                          area.tag.replace('/', '_'))
     try:
         os.makedirs(area.storage_path, exist_ok=True)
-        dest = os.path.join(area.storage_path, parsed['file'])
+        dest = os.path.join(area.storage_path, safe_filename)
         # Don't clobber an existing file with the same name — re-distributed
         # TICs could legitimately replace, but we treat that as the sysop's
         # choice and currently skip if the same name already exists.

@@ -86,6 +86,14 @@
             <div class="col-md-1 d-flex align-items-end">
                 <button class="btn btn-primary w-100">Add</button>
             </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input type="checkbox" name="create_storage_dir" id="createStorageDirNew" class="form-check-input">
+                    <label class="form-check-label small" for="createStorageDirNew">
+                        Create directory if missing (Storage Path above must already exist otherwise)
+                    </label>
+                </div>
+            </div>
         </form>
     </div>
 </div>
@@ -153,6 +161,10 @@
                 <div class="col-md-3">
                     <label class="form-label small mb-0">Storage</label>
                     <input type="text" name="storage_path" class="form-control form-control-sm" value="{{ fa.storage_path or '' }}">
+                    <div class="form-check">
+                        <input type="checkbox" name="create_storage_dir" id="createStorageDir{{ fa.id }}" class="form-check-input">
+                        <label class="form-check-label small" for="createStorageDir{{ fa.id }}">Create if missing</label>
+                    </div>
                 </div>
                 <div class="col-md-1">
                     <label class="form-label small mb-0">Upload</label>

@@ -21,9 +21,10 @@ TQW_FILES       - TQW File Echo         (FidoNet backbone style)</pre>
         <p style="font-size:0.85rem; color:#888;">
             Lines starting with <code>;</code> or <code>#</code> are skipped.
             Leading <code>-</code> on the description is stripped automatically,
-            so <code>FILEBONE.NA</code>-style files import cleanly. Storage
-            paths aren't set — edit each area afterwards to point at a
-            directory, or leave blank for queue-only.
+            so <code>FILEBONE.NA</code>-style files import cleanly. Leave
+            "Storage path base directory" below blank to import queue-only
+            (no storage path set) — edit each area individually afterwards
+            to point at a directory.
         </p>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -57,6 +58,27 @@ TQW_FILES       - TQW File Echo         (FidoNet backbone style)</pre>
                 <label class="form-check-label small" for="is_subscribed">
                     Mark imported areas as subscribed (uncheck for backbone
                     catalog imports — you can subscribe individually later)
+                </label>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Storage path base directory (optional)</label>
+                <input type="text" name="storage_base" class="form-control"
+                       placeholder="/var/lib/anetbbs/file_areas">
+                <div class="form-text">
+                    Each imported area gets <code>&lt;base&gt;/&lt;TAG&gt;/</code>
+                    as its storage path. Leave blank to import queue-only
+                    (no storage path).
+                </div>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" name="create_storage_dirs" value="1"
+                       class="form-check-input" id="create_storage_dirs">
+                <label class="form-check-label small" for="create_storage_dirs">
+                    Create each area's storage directory if missing (applies
+                    to every area in this batch — only relevant if a base
+                    directory is set above)
                 </label>
             </div>
 

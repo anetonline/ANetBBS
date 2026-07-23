@@ -194,7 +194,7 @@ class FinishBeforeImportOrderingTests(unittest.TestCase):
             order.append('finish_session')
             return await real_finish_session(*args, **kwargs)
 
-        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename):
+        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename, peer_address=None):
             order.append('import_pkt_payload')
             return 0
 

@@ -81,12 +81,21 @@ def generate_node_packet(node, data_dir: str, hub_id: str = _HUB_ID) -> str:
         if not subs:
             logger.info('QWK FTP: node %s has no subscriptions — empty packet',
                         node.packet_id)
-            _write_empty_packet(out_path, hub_id)
+            _write_empty_packet(out_path, hub_id, node.packet_id)
             return out_path
 
         # Build conference list and collect messages.
         conferences = {}     # conf_num → area
         messages_by_conf = {}
+        # area_id → highest message id sent this packet -- committed
+        # below AFTER the packet is written successfully. Real gap
+        # found in audit: this function is called on every FTP login
+        # (see module docstring) but nothing ever advanced
+        # QWKNodeLastSent.last_message_id on this path, unlike the
+        # already-correct HTTP hub path (web/qwk_hub.py's
+        # mark_qwk_sent()) -- every login re-sent the identical up-to-
+        # 500-message batch per conference forever.
+        new_hwm = {}
         for sub in subs:
             area = EchoArea.query.get(sub.echo_area_id)
             if area is None or not area.is_active:
@@ -102,11 +111,19 @@ def generate_node_packet(node, data_dir: str, hub_id: str = _HUB_ID) -> str:
                     .all())
             if msgs:
                 messages_by_conf[conf_num] = msgs
+                new_hwm[area.id] = msgs[-1].id
 
         _write_qwk_packet(out_path, hub_id, node.packet_id,
                           conferences, messages_by_conf)
-        logger.info('QWK FTP: wrote %s for node %s (%d confs)',
-                    out_path, node.packet_id, len(conferences))
+
+        for sub in subs:
+            new_id = new_hwm.get(sub.echo_area_id)
+            if new_id is not None:
+                sub.last_message_id = new_id
+        db.session.commit()
+
+        logger.info('QWK FTP: wrote %s for node %s (%d confs, hwm advanced for %d)',
+                    out_path, node.packet_id, len(conferences), len(new_hwm))
         return out_path
 
     except Exception:
@@ -115,9 +132,9 @@ def generate_node_packet(node, data_dir: str, hub_id: str = _HUB_ID) -> str:
         return ''
 
 
-def _write_empty_packet(path: str, hub_id: str):
+def _write_empty_packet(path: str, hub_id: str, packet_id: str = ''):
     """Write a minimal valid QWK packet with no messages."""
-    control = _build_control_dat(hub_id, {})
+    control = _build_control_dat(hub_id, {}, packet_id)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('CONTROL.DAT', control)
@@ -130,7 +147,7 @@ def _write_qwk_packet(path: str, hub_id: str, packet_id: str,
                       conferences: dict, messages_by_conf: dict):
     """Write a complete QWK packet zip to *path*."""
     import struct, time
-    control = _build_control_dat(hub_id, conferences)
+    control = _build_control_dat(hub_id, conferences, packet_id)
     messages_dat = _build_messages_dat(messages_by_conf, packet_id)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -140,8 +157,22 @@ def _write_qwk_packet(path: str, hub_id: str, packet_id: str,
         f.write(buf.getvalue())
 
 
-def _build_control_dat(hub_id: str, conferences: dict) -> str:
-    """Build CONTROL.DAT content for the packet."""
+def _build_control_dat(hub_id: str, conferences: dict, packet_id: str = '') -> str:
+    """Build CONTROL.DAT content for the packet.
+
+    Line layout verified against Synchronet's own writer (pack_qwk.cpp)
+    and matches anetbbs/web/qwk_hub.py's already-fixed writer exactly:
+    a strict positional reader (this codebase's own
+    qwk.py:_parse_control_dat, plus real readers like Blue Wave/
+    EZReader/Mystic) expects the conference count at line index 10 and
+    a mandatory "0"/"E-mail" pair for the reserved conference-0
+    (netmail) slot immediately before any real conferences. The
+    previous version here only emitted 10 header lines total (count at
+    index 9) and no conf-0 pair at all -- every conference in the
+    packet parsed back as an empty dict, silently dropping all mail.
+    This was already fixed once in qwk_hub.py and once in qwk_user.py;
+    this was the third, independent writer that never got the fix.
+    """
     lines = [
         hub_id,                    # BBS name
         'Internet',                # City
@@ -149,10 +180,13 @@ def _build_control_dat(hub_id: str, conferences: dict) -> str:
         'SysOp',                   # SysOp
         f'{hub_id},0',             # Serial,max_msgs
         '00-00-00,00:00:00',       # Download date/time
-        '0',                       # number of messages to download
-        '999',                     # max chars per message
-        '0',                       # total messages
+        packet_id,                 # logged-in user (alias)
+        '',                        # blank (placeholder)
+        '0',                       # placeholder
+        '0',                       # placeholder
         str(len(conferences)),     # number of conferences
+        '0',                       # reserved conference 0 (netmail) number
+        'E-mail',                  # reserved conference 0 name
     ]
     # Conference block: number then name, alternating
     for conf_num, area in sorted(conferences.items()):
@@ -186,6 +220,16 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             date_str  = when.strftime('%m-%d-%y')
             time_str  = when.strftime('%H:%M')
 
+            # Real gap found in a full echomail-subsystem audit: reply-
+            # threading was never propagated into outbound QWK bodies on
+            # this path -- see web/qwk_hub.py's _build_qwk_hub_packet for
+            # the full rationale (mirrors qwk.py's already-working
+            # @MSGID: convention rather than the packet-local-only
+            # binary reference-number header field).
+            body_raw = msg.body or ''
+            if getattr(msg, 'reply_id', None) and '@REPLY:' not in body_raw:
+                body_raw = f'@REPLY: {msg.reply_id}\n' + body_raw
+
             # Encode to CP437 BYTES first, then do the newline -> 0xE3
             # paragraph-separator substitution at the byte level, not on
             # the Python str. The Python string literal '\xe3' is the
@@ -198,7 +242,7 @@ def _build_messages_dat(messages_by_conf: dict, packet_id: str) -> bytes:
             # ASCII and survive CP437 encoding unchanged, so replacing
             # them with the raw byte b'\xe3' after encoding is safe and
             # unambiguous.
-            body_bytes = (msg.body or '').encode('cp437', errors='replace')
+            body_bytes = body_raw.encode('cp437', errors='replace')
             body_bytes = body_bytes.replace(b'\r\n', b'\xe3').replace(b'\n', b'\xe3') + b'\xe3'
 
             # Number of 128-byte blocks needed for header + body.

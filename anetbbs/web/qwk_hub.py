@@ -150,7 +150,23 @@ def _build_qwk_hub_packet(node: QWKNode) -> bytes:
     for conf_num in sorted(conferences):
         msgs = messages_by_conf.get(conf_num, [])
         for msg in msgs:
-            body_text = (msg.body or '').replace('\n', '\xe3').replace('\r', '')
+            body_raw = msg.body or ''
+            # Real gap found in a full echomail-subsystem audit: QWK's
+            # own binary "reference message number" header field
+            # (bytes 108:116, always written as literal '0' below) only
+            # has meaning WITHIN one packet's own numbering -- it can't
+            # durably reference a message that isn't in THIS packet, so
+            # it was never a viable way to persist reply-threading
+            # across independently-built/regenerated packets. Instead,
+            # mirror qwk.py's own already-working @MSGID: convention
+            # (Synchronet QNET-FTP-compatible plain-text kludge line)
+            # for @REPLY: too -- a message that arrived via BinkP with
+            # real FTN threading (EchomailMessage.reply_id) now carries
+            # that thread pointer into the QWK body text instead of
+            # silently losing it the moment it's delivered to a QWK node.
+            if getattr(msg, 'reply_id', None) and '@REPLY:' not in body_raw:
+                body_raw = f'@REPLY: {msg.reply_id}\n' + body_raw
+            body_text = body_raw.replace('\n', '\xe3').replace('\r', '')
             body_encoded = body_text.encode('latin-1', errors='replace')
             remainder = len(body_encoded) % QWK_BLOCK_SIZE
             if remainder:

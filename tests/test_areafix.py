@@ -354,11 +354,210 @@ class AreafixTests(unittest.TestCase):
             self.assertEqual(
                 BinkPHoldQueue.query.filter_by(node_id=node.id).count(), 2)
 
+    def test_hub_side_sysop_only_area_cannot_be_subscribed_via_tag(self):
+        """Real gap found in a full echomail-subsystem audit: is_sysop_only
+        areas (e.g. interbbs_sync.py's Wall/Last-Callers-sync/casino-
+        score-sync machine-to-machine channels) were subscribable by any
+        downstream node via a plain +TAG, same as a public area."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixSysopOnlyNet', network_type='binkp',
+                                  our_address='3:3/1')
+            db.session.add(net)
+            node = BinkPNode(name='Downstream', ftn_address='3:3/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            area = EchoArea(tag='AF.SYSOPONLY', name='Sysop Only', network_id=net.id,
+                            is_active=True, is_subscribed=True, is_sysop_only=True)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '3:3/2', '', '+AF.SYSOPONLY\n')
+
+            self.assertNotIn('subscribed', response)
+            sub = EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=area.id).first()
+            self.assertIsNone(sub,
+                             'a sysop-only area must not become subscribable '
+                             'via AreaFix from any downstream node')
+
+    def test_hub_side_plus_all_excludes_sysop_only_areas(self):
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixPlusAllSysopNet', network_type='binkp',
+                                  our_address='3:4/1')
+            db.session.add(net)
+            node = BinkPNode(name='Downstream', ftn_address='3:4/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            public_area = EchoArea(tag='AF.PUBLIC', name='Public', network_id=net.id,
+                                   is_active=True, is_subscribed=True,
+                                   is_sysop_only=False)
+            sysop_area = EchoArea(tag='AF.INTERNAL', name='Internal', network_id=net.id,
+                                  is_active=True, is_subscribed=True,
+                                  is_sysop_only=True)
+            db.session.add_all([public_area, sysop_area])
+            db.session.commit()
+
+            _process_node_request(node, '3:4/2', '', '+ALL\n')
+
+            self.assertIsNotNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=public_area.id).first())
+            self.assertIsNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=sysop_area.id).first(),
+                '+ALL must never sweep in a sysop-only area')
+
+    def test_hub_side_legacy_null_is_sysop_only_is_treated_as_not_sysop_only(self):
+        """A migrated/legacy EchoArea row with is_sysop_only IS NULL
+        (nullable column, no DB-level default) must not get excluded by
+        SQL's three-valued NULL logic -- only an explicit True hides it,
+        same NULL-safety convention as LASTCALLERS_HIDE_SYSOP."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixLegacyNullNet', network_type='binkp',
+                                  our_address='3:5/1')
+            db.session.add(net)
+            node = BinkPNode(name='Downstream', ftn_address='3:5/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.flush()
+            area = EchoArea(tag='AF.LEGACY', name='Legacy', network_id=net.id,
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.flush()
+            db.session.execute(db.text(
+                'UPDATE echo_areas SET is_sysop_only = NULL WHERE id = :id'),
+                {'id': area.id})
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '3:5/2', '', '+AF.LEGACY\n')
+
+            self.assertIn('subscribed', response)
+            self.assertIsNotNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=area.id).first())
+
+    def test_password_command_changes_node_password_when_authenticated(self):
+        """Real gap found in a full echomail-subsystem audit: no remote
+        way for a downstream sysop to rotate their own AreaFix/BinkP
+        password. New password value must survive with its exact case
+        -- NOT go through parse_request()'s uppercasing arg capture."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixPwChangeNet', network_type='binkp',
+                                  our_address='7:1/1')
+            db.session.add(net)
+            node = BinkPNode(name='PwChangeNode', ftn_address='7:1/2',
+                             password='OldSecret1', is_active=True)
+            db.session.add(node)
+            db.session.commit()
+            node_id = node.id
+
+            response, log_kwargs = _process_node_request(
+                node, '7:1/2', 'OldSecret1', '%PASSWORD NewMixedCase99\n')
+
+            self.assertIn('password changed', response)
+            refreshed = BinkPNode.query.get(node_id)
+            self.assertEqual(refreshed.password, 'NewMixedCase99',
+                             'new password must preserve its exact case, not '
+                             'get uppercased like a normal command argument')
+
+    def test_password_command_rejected_when_node_has_no_password_set(self):
+        """SECURITY: a node with no password configured must not be able
+        to bootstrap one via %PASSWORD -- the surrounding auth check
+        only rejects a WRONG password, not a MISSING one, so this needs
+        its own explicit guard."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixPwBootstrapNet', network_type='binkp',
+                                  our_address='7:2/1')
+            db.session.add(net)
+            node = BinkPNode(name='NoPwNode', ftn_address='7:2/2',
+                             password='', is_active=True)
+            db.session.add(node)
+            db.session.commit()
+            node_id = node.id
+
+            response, log_kwargs = _process_node_request(
+                node, '7:2/2', '', '%PASSWORD Whatever123\n')
+
+            self.assertIn('ERROR', response)
+            refreshed = BinkPNode.query.get(node_id)
+            self.assertEqual(refreshed.password, '',
+                             'must not silently set a password on an '
+                             'unprotected node from an unauthenticated request')
+
+    def test_password_command_with_no_argument_is_an_error(self):
+        from anetbbs.models import db, EchomailNetwork, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixPwNoArgNet', network_type='binkp',
+                                  our_address='7:3/1')
+            db.session.add(net)
+            node = BinkPNode(name='PwNoArgNode', ftn_address='7:3/2',
+                             password='RealPassword', is_active=True)
+            db.session.add(node)
+            db.session.commit()
+            node_id = node.id
+
+            response, log_kwargs = _process_node_request(
+                node, '7:3/2', 'RealPassword', '%PASSWORD\n')
+
+            self.assertIn('ERROR', response)
+            refreshed = BinkPNode.query.get(node_id)
+            self.assertEqual(refreshed.password, 'RealPassword')
+
+    def test_request_type_classifies_plain_query_correctly(self):
+        """Real bug found in a full echomail-subsystem audit: a request
+        containing ONLY %LIST/%HELP/%QUERY (no +/- at all) was logged
+        as request_type='unsubscribe' even though nothing was
+        unsubscribed -- false entries in the AreaFix audit trail."""
+        from anetbbs.echomail.areafix import _classify_request_type, parse_request
+        self.assertEqual(_classify_request_type(parse_request('%LIST\n')), 'query')
+        self.assertEqual(_classify_request_type(parse_request('%HELP\n')), 'query')
+        self.assertEqual(_classify_request_type(parse_request('%QUERY\n')), 'query')
+        self.assertEqual(_classify_request_type(parse_request('%RESCAN\n')), 'query')
+
+    def test_request_type_classifies_subscribe_and_unsubscribe(self):
+        from anetbbs.echomail.areafix import _classify_request_type, parse_request
+        self.assertEqual(_classify_request_type(parse_request('+AF.TAG\n')), 'subscribe')
+        self.assertEqual(_classify_request_type(parse_request('-AF.TAG\n')), 'unsubscribe')
+        # Mixed batch with at least one '+' counts as subscribe.
+        self.assertEqual(
+            _classify_request_type(parse_request('+AF.A\n-AF.B\n')), 'subscribe')
+
+    def test_leaf_side_plain_list_request_logs_as_query_not_unsubscribe(self):
+        from anetbbs.models import db, EchomailNetwork
+        from anetbbs.echomail.areafix import process_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixQueryLogNet', network_type='binkp',
+                                  our_address='6:6/1', hub_address='6:6/2')
+            db.session.add(net)
+            db.session.commit()
+
+            response, log_kwargs = process_request(net, '6:6/2', '', '%LIST\n')
+            self.assertEqual(log_kwargs['request_type'], 'query')
+
     def test_help_text_lists_every_accepted_command(self):
         from anetbbs.echomail.areafix import _help_text
         text = _help_text()
         for token in ('+AREA.TAG', '*AREA.TAG', '-AREA.TAG', '+ALL', '-ALL',
-                     '%LIST', '%QUERY', '%RESCAN', '%COMPRESS', '%HELP'):
+                     '%LIST', '%QUERY', '%RESCAN', '%COMPRESS', '%PASSWORD', '%HELP'):
             self.assertIn(token, text, f'{token!r} missing from areafix %HELP text')
 
 

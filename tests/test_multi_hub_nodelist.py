@@ -277,6 +277,31 @@ class WriteNodelistToAreaTests(unittest.TestCase):
         files = [f for f in os.listdir(self.storage_dir) if f.upper().startswith('NODELIST.')]
         self.assertEqual(len(files), 1)
 
+    def test_hatches_out_to_subscribed_file_echo_peers(self):
+        """Real gap found in a full echomail-subsystem audit: the
+        freshly written nodelist file was browsable/downloadable
+        locally but never queued for outbound TIC distribution to
+        peers subscribed to this file echo via FileFix -- every other
+        locally-added file goes through hatch_local_file()."""
+        from anetbbs.models import db, FileArea, FileEchoSubscription, HatchQueue
+        from anetbbs.echomail.nodelist import write_nodelist_to_area
+        with self.app.app_context():
+            area = FileArea.query.filter_by(tag='ANN.FILES.NODELIST').first()
+            db.session.add(FileEchoSubscription(
+                file_area_id=area.id, peer_address='6100:1/2', is_active=True))
+            db.session.commit()
+
+            before = HatchQueue.query.count()
+            write_nodelist_to_area()
+            after = HatchQueue.query.count()
+
+            self.assertEqual(after, before + 1,
+                             'the generated nodelist must be queued for the '
+                             'subscribed peer, not just written to local storage')
+            row = HatchQueue.query.order_by(HatchQueue.id.desc()).first()
+            self.assertEqual(row.peer_address, '6100:1/2')
+            self.assertTrue(row.filename.upper().startswith('NODELIST.'))
+
 
 if __name__ == '__main__':
     unittest.main()

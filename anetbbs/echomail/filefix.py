@@ -36,7 +36,7 @@ implementations elsewhere in the wild use for file echoes.
 import datetime
 from ..models import (db, FileArea, EchomailNetwork, NetmailMessage,
                        AreafixLog, BinkPNode, FileEchoSubscription)
-from .areafix import parse_request
+from .areafix import parse_request, _classify_request_type
 
 
 def _sub_all(network):
@@ -169,7 +169,7 @@ def process_request(network, from_address, subject, body):
     return (response, {
         'network_id': network.id,
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
+        'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,
@@ -204,7 +204,16 @@ def _process_node_request(peer_address, from_address, subject, body,
             'bot': 'filefix',
         })
 
-    all_areas = FileArea.query.filter_by(is_active=True).all()
+    # Real gap found in a full echomail-subsystem audit (identical fix
+    # applied to areafix.py's hub side): is_sysop_only areas must not
+    # be subscribable via a plain +TAG/+ALL from any downstream node --
+    # see areafix.py's _process_node_request for the full rationale.
+    # isnot(True), not is_(False), for the same NULL-safety reason as
+    # LASTCALLERS_HIDE_SYSOP's is_admin check.
+    all_areas = (FileArea.query
+                .filter_by(is_active=True)
+                .filter(FileArea.is_sysop_only.isnot(True))
+                .all())
     area_map = {a.tag.upper(): a for a in all_areas}
 
     out_lines = [f'FileFix robot (hub) for {peer_address}',
@@ -290,7 +299,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     response = '\n'.join(out_lines) + '\n'
     return (response, {
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
+        'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,

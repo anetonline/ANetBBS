@@ -247,6 +247,29 @@ def _do_poll(app, network):
                      "not the hub at itself.", network.name, self_ref)
         return
 
+    # Real gap found in a full echomail-subsystem audit: nothing guarded
+    # against two overlapping poll attempts for the SAME network -- a
+    # sysop double-clicking "Poll Now" (echomail_admin.py's poll_now(),
+    # which spawns a bare daemon thread with no dedup check at all), or
+    # a manual poll landing while the scheduled _poller_loop's own tick
+    # for this network is already mid-flight. Two concurrent BinkP
+    # sessions to the same peer risk duplicate sends and interleaved
+    # ack-gated-stamping/hold-queue writes. Reuses the existing
+    # status='running' row this function already writes (added for poll-
+    # in-progress visibility) as the dedup signal, rather than a new
+    # locking primitive -- a stale 'running' row genuinely blocking
+    # future polls forever isn't a new risk this introduces: every exit
+    # path below (including the except/finally) already unconditionally
+    # flips status away from 'running' before returning.
+    already_running = EchomailPollLog.query.filter_by(
+        network_id=network.id, status='running').first()
+    if already_running:
+        logger.info(
+            "Poller: skipping %s -- a poll is already in progress "
+            "(EchomailPollLog #%d, started %s)",
+            network.name, already_running.id, already_running.started_at)
+        return
+
     log = EchomailPollLog(
         network_id=network.id,
         poll_type='both',
@@ -371,7 +394,7 @@ def _do_poll(app, network):
                                     _EM.id > pre_import_max)
                             .all())
                 for em in new_msgs:
-                    toss_message(em.id)
+                    toss_message(em.id, exclude_peer_address=network.hub_address)
             except Exception:
                 logger.exception('Hub tosser failed after poll of %s', network.name)
 
@@ -506,7 +529,7 @@ def _do_poll_node(app, node):
                                    _EM.id > pre_import_max)
                            .all())
                 for em in new_msgs:
-                    toss_message(em.id)
+                    toss_message(em.id, exclude_peer_address=node.ftn_address)
             except Exception:
                 logger.exception('Hub tosser failed after polling node %s',
                                  node.name)
@@ -533,6 +556,7 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
     _do_poll_node) so tests can patch this one seam exactly like existing
     poller tests patch _run_client (see test_poller_ack_gated_stamping.py)."""
     from .binkp import BinkPClient
+    from ..models import db, HatchQueue
     client = BinkPClient(
         host=node.binkp_host or '',
         port=node.binkp_port or 24554,
@@ -549,8 +573,31 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
         default_direct=bool(getattr(network, 'default_direct', False)),
     )
     data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
-    return client.poll(outbound_messages=outbound_messages, data_dir=data_dir,
-                       hatch_items=[])
+
+    # Real gap found in a full echomail-subsystem audit: this always
+    # passed hatch_items=[], so a downstream node's FileFix subscription
+    # (tic.py's process_tic()/hatch_local_file() queue HatchQueue rows
+    # keyed by the node's own ftn_address as peer_address) never
+    # actually got delivered on this path -- the hub's own "Pending"
+    # counter went up and the file just sat there forever with no error
+    # anywhere. Mirrors _run_client()'s already-correct hatch-out for
+    # the leaf-dialing-upstream-hub direction, just keyed on the node's
+    # ftn_address instead of network.hub_address.
+    hatch_items = (HatchQueue.query
+                   .filter(HatchQueue.peer_address == (node.ftn_address or ''),
+                           HatchQueue.status == 'pending')
+                   .order_by(HatchQueue.queued_at)
+                   .all())
+    out = client.poll(outbound_messages=outbound_messages, data_dir=data_dir,
+                      hatch_items=hatch_items)
+    for hid in out.get('hatched_ids', []):
+        row = HatchQueue.query.get(hid)
+        if row is not None:
+            row.status = 'sent'
+            row.sent_at = datetime.utcnow()
+    if out.get('hatched_ids'):
+        db.session.commit()
+    return out
 
 
 def _run_client(network, outbound_messages, app, transcript=None):
@@ -933,9 +980,9 @@ def _import_netmail(network, msg_data: dict) -> int:
         received_at=datetime.utcnow(),
     )
     db.session.add(nm)
+    db.session.flush()  # assigns nm.id, needed below regardless of to_user
 
     if to_user is not None:
-        db.session.flush()  # assigns nm.id, needed for target_url below
         try:
             from ..features.notify import notify
             notify(to_user.id, 'netmail',
@@ -945,5 +992,29 @@ def _import_netmail(network, msg_data: dict) -> int:
         except Exception as exc:
             logger.debug("Netmail notify() failed for user %s: %s",
                         to_user.id, exc)
+
+    # Real gap found in a full echomail-subsystem audit: AreaFix/FileFix
+    # only ever got dispatched from binkp_server.py's INBOUND-listener
+    # session (a peer dialing INTO us) -- this outbound-poll receive
+    # path (a hub dialing OUT to an upstream network, or the newer
+    # hub-initiated "Poll Node" dialing OUT to a downstream node) never
+    # checked the recipient name at all, so a netmail addressed to
+    # AreaFix/FileFix sent to us in response to OUR OWN poll (a very
+    # real scenario once hub-initiated polling exists) just sat there
+    # as a plain unread netmail, never processed. Same recognized-name
+    # set as binkp_server.py's dispatch.
+    to_lower = to_name.lower()
+    if to_lower in ('areafix', 'area fix', 'areamgr'):
+        try:
+            from .areafix import handle_areafix_netmail
+            handle_areafix_netmail(nm.id)
+        except Exception:
+            logger.exception('Areafix bot failed for netmail %d (outbound-poll path)', nm.id)
+    elif to_lower in ('filefix', 'file fix', 'filemgr'):
+        try:
+            from .filefix import handle_filefix_netmail
+            handle_filefix_netmail(nm.id)
+        except Exception:
+            logger.exception('FileFix bot failed for netmail %d (outbound-poll path)', nm.id)
 
     return 1

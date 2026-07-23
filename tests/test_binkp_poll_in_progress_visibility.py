@@ -120,6 +120,9 @@ class _FakeQuery:
     def get(self, _id):
         return self._rows[0] if self._rows else None
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def _matches(self, row):
         for kind, name, value in self._predicates:
             attr = getattr(row, name, None)
@@ -273,7 +276,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
                 self.hub_identity = None
                 self.network_id = None
 
-        from anetbbs.models import BinkPNode
+        from anetbbs.models import BinkPNode, HatchQueue
         node = _FakeNode(id=3, ftn_address='1:1/2', password='nodepass')
 
         frames = [
@@ -284,6 +287,10 @@ class PollInProgressVisibilityTests(unittest.TestCase):
         EchomailNetwork.query = _FakeQuery([])
         EchomailMessage.query = _FakeQuery([])
         BinkPNode.query = _FakeQuery([node])
+        # See test_binkp_multi_hub_identity.py's harness for why this is
+        # needed -- _handle_connection() now also queries HatchQueue on
+        # the downstream_node_id branch this test exercises.
+        HatchQueue.query = _FakeQuery([])
         session = _HistorySession(EchomailPollLog)
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         from anetbbs.echomail import tosser as tosser_mod
@@ -303,6 +310,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
             del EchomailNetwork.query
             del EchomailMessage.query
             del BinkPNode.query
+            del HatchQueue.query
             del EchomailPollLog.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]

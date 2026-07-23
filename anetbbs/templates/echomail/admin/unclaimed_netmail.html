@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Unclaimed Netmail — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-envelope-exclamation"></i> Unclaimed Netmail</h2>
+            <p class="text-muted mb-0">
+                Inbound netmail whose To: name/address didn't match any local
+                user's account or AKA. Without a match here, this mail is
+                otherwise invisible — every inbox view filters by the
+                logged-in user's own identity. Assign it to the right user,
+                or leave it for now.
+            </p>
+        </div>
+        <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Echomail Dashboard
+        </a>
+    </div>
+
+    {% if not rows %}
+        <div class="alert alert-success">
+            No unclaimed netmail pending review.
+        </div>
+    {% else %}
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Network</th>
+                    <th>From</th>
+                    <th>To (as received)</th>
+                    <th>Subject</th>
+                    <th>Received</th>
+                    <th class="text-end">Assign to</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ networks[row.network_id].name if row.network_id in networks else '?' }}</td>
+                    <td><small>{{ row.from_name }}<br>{{ row.from_address or '' }}</small></td>
+                    <td><small>{{ row.to_name }}<br>{{ row.to_address or '' }}</small></td>
+                    <td>{{ (row.subject or '')[:60] }}</td>
+                    <td>{{ row.received_at.strftime('%Y-%m-%d %H:%M') if row.received_at else '' }}</td>
+                    <td class="text-end">
+                        <form method="post"
+                              action="{{ url_for('echomail_admin.unclaimed_netmail_assign', nm_id=row.id) }}"
+                              class="d-flex gap-1 justify-content-end">
+                            {% if csrf_token is defined %}
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% endif %}
+                            <select name="user_id" class="form-select form-select-sm" style="width:auto;" required>
+                                <option value="">— pick a user —</option>
+                                {% for u in users %}
+                                <option value="{{ u.id }}">{{ u.username }}</option>
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-success btn-sm">
+                                <i class="bi bi-check-circle"></i> Assign
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+{% endblock %}

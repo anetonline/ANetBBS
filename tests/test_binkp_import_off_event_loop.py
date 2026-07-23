@@ -171,7 +171,7 @@ class ImportOffEventLoopTests(unittest.TestCase):
 
         SLOW_IMPORT_SECONDS = 0.4
 
-        def _slow_import_pkt_payload(pkt_bytes, network_id, filename):
+        def _slow_import_pkt_payload(pkt_bytes, network_id, filename, peer_address=None):
             # A REAL blocking sleep -- if this ever runs inline on the
             # event loop again (regression), it freezes everything
             # sharing that loop for its whole duration.

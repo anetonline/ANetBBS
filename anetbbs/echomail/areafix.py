@@ -21,6 +21,11 @@ Supported commands (case-insensitive, one per line of the message body):
                       since there's no per-us hold queue for a network we
                       poll rather than host.
     %COMPRESS GZIP  no-op (we always send uncompressed bundles)
+    %PASSWORD newpass  change your own AreaFix/BinkP password. Downstream-
+                      node-only (see _process_node_request) -- only reachable
+                      having already passed the password check with the
+                      OLD password, so this can't bootstrap a password on a
+                      node that doesn't have one set yet.
     *AREA.TAG       (some implementations) — equivalent to +AREA.TAG
 
 The robot replies with a netmail back to the requester listing what was
@@ -49,6 +54,13 @@ from ..models import db, EchoArea, EchomailNetwork, NetmailMessage, AreafixLog, 
 _CMD_RE = re.compile(
     r'^\s*([+\-*%])\s*([A-Z0-9._\-]+)(?:\s+([A-Z0-9._\-]+))?', re.IGNORECASE)
 
+# %PASSWORD's new-password value must NOT go through parse_request()'s
+# generic arg capture -- that group is uppercased for every other
+# command (area tags/keywords are conventionally uppercase, but a
+# password is case-sensitive and would be silently corrupted). Scanned
+# separately, straight from the raw body, case preserved.
+_PASSWORD_CMD_RE = re.compile(r'^\s*%PASSWORD\s+(\S+)', re.IGNORECASE | re.MULTILINE)
+
 
 def parse_request(body):
     """Pull recognized commands out of an areafix netmail body.
@@ -67,6 +79,21 @@ def parse_request(body):
             verb = '+'
         cmds.append((verb, target, arg.upper() if arg else None))
     return cmds
+
+
+def _classify_request_type(cmds):
+    """Classify a parsed command list for the AreafixLog/FileFix-log
+    'request_type' column. Real bug found in a full echomail-subsystem
+    audit: every caller used `'subscribe' if any '+' else 'unsubscribe'`
+    -- a request containing ONLY `%LIST`/`%HELP`/`%QUERY`/`%RESCAN` (no
+    `+`/`-` at all) got mislabeled 'unsubscribe' even though nothing was
+    unsubscribed, making the audit trail show false unsubscribe entries
+    for every plain status/help query."""
+    if any(v == '+' for v, _t, _a in cmds):
+        return 'subscribe'
+    if any(v == '-' for v, _t, _a in cmds):
+        return 'unsubscribe'
+    return 'query'
 
 
 def _sub_all(network):
@@ -115,6 +142,8 @@ def _help_text():
         "  %RESCAN AREA.TAG  re-send every existing message in AREA.TAG\n"
         "               (bare %RESCAN re-sends every area you're subscribed to)\n"
         "  %COMPRESS GZIP  accepted, no-op (bundles are always uncompressed)\n"
+        "  %PASSWORD newpass  change your AreaFix/BinkP password (hub-\n"
+        "               managed downstream nodes only)\n"
         "  %HELP        this help text\n\n"
         "Lines that don't match a command are ignored. Reply will list\n"
         "what was done."
@@ -211,7 +240,7 @@ def process_request(network, from_address, subject, body):
     return (response, {
         'network_id': network.id,
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
+        'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),
         'response': response[:1000],          # cap log entry size
         'success': True,
@@ -246,8 +275,26 @@ def _process_node_request(node, from_address, subject, body):
             'area_tags': '', 'response': 'help text returned', 'success': True,
         })
 
-    # All areas available for hub distribution (active areas from any network).
-    all_areas = EchoArea.query.filter_by(is_active=True).all()
+    # All areas available for hub distribution (active areas from any
+    # network) -- EXCLUDING is_sysop_only areas. Real gap found in a
+    # full echomail-subsystem audit: is_sysop_only is enforced as a
+    # hard content gate everywhere else (web/terminal/FTP listings,
+    # evaluate_access()), including by interbbs_sync.py's own areas
+    # (InterBBS Wall / Last-Callers-sync / casino-score-sync), which
+    # are deliberately created with is_sysop_only=True specifically
+    # because they're machine-to-machine sync channels between paired
+    # systems, not discussion areas meant to be read directly -- but
+    # this hub-side handler let ANY downstream node subscribe to them
+    # via a plain +TAG or +ALL, same as any public area.
+    # isnot(True), not is_(False) -- a legacy/migrated EchoArea row with
+    # is_sysop_only IS NULL (nullable column, no DB-level default) must
+    # read as "not sysop-only", not get excluded by SQL's three-valued
+    # NULL logic (same defensive pattern as LASTCALLERS_HIDE_SYSOP's
+    # is_admin check in features/lastcallers.py).
+    all_areas = (EchoArea.query
+                .filter_by(is_active=True)
+                .filter(EchoArea.is_sysop_only.isnot(True))
+                .all())
     area_map = {a.tag.upper(): a for a in all_areas}
 
     out_lines = [f'Areafix robot (hub) for node {node.ftn_address}',
@@ -349,6 +396,34 @@ def _process_node_request(node, from_address, subject, body):
                     out_lines.append(
                         f'%RESCAN : queued {total} message(s) across '
                         f'{len(subs)} subscribed area(s)')
+            elif target == 'PASSWORD':
+                # Real gap found in a full echomail-subsystem audit: no
+                # remote way for a downstream sysop to rotate their own
+                # BinkP/AreaFix password (the same node.password field
+                # gates both) -- standard AreaFix capability (Synchronet
+                # sbbsecho, Mystic MUTIL).
+                #
+                # SECURITY: the password check above (`if expected_pw and
+                # expected_pw != provided_pw`) only REJECTS when a
+                # password IS configured and WRONG -- a node with no
+                # password set at all (expected_pw == '') sails straight
+                # through that check with zero real authentication, same
+                # as every other command. Letting %PASSWORD through in
+                # that case would mean anyone could bootstrap an initial
+                # password on an unprotected node via a spoofable From:
+                # address. Must explicitly require a real password to
+                # have already been verified, not just "wasn't rejected".
+                if not expected_pw:
+                    out_lines.append(
+                        '%PASSWORD : ERROR — no password currently set for '
+                        'this node; ask the hub sysop to set one first')
+                else:
+                    m = _PASSWORD_CMD_RE.search(body or '')
+                    if not m:
+                        out_lines.append('%PASSWORD : ERROR — no new password given')
+                    else:
+                        node.password = m.group(1)
+                        out_lines.append('%PASSWORD : password changed')
             else:
                 out_lines.append(f'%{target} : ignored')
 
@@ -356,7 +431,7 @@ def _process_node_request(node, from_address, subject, body):
     response = '\n'.join(out_lines) + '\n'
     return (response, {
         'from_address': from_address,
-        'request_type': 'subscribe' if any(v == '+' for v, _, _a in cmds) else 'unsubscribe',
+        'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),
         'response': response[:1000],
         'success': True,

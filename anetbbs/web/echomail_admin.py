@@ -675,7 +675,9 @@ def custom_areafix(network_id):
     `%RESCAN <tag>`, `%RESCAN <tag> D=3650`, `%QUERY`, `%LIST`,
     `%COMPRESS GZIP`, etc. Each line becomes one body line as-is.
     Subject is the AreaFix password (FTS-0024). To-name is `AreaFix`
-    (override with `?robot=FileFix` if needed for FileFix flow)."""
+    (override via the form's `robot` field, e.g. `robot=FileFix`,
+    if needed for FileFix flow).
+    """
     from ..models import NetmailMessage
     import datetime as _dt
     network = EchomailNetwork.query.get_or_404(network_id)
@@ -948,6 +950,74 @@ def bad_areas_clear_all():
     db.session.commit()
     flash('Cleared all bad-area entries.', 'info')
     return redirect(url_for('echomail_admin.bad_areas'))
+
+
+# ---------------------------------------------------------------------------
+# Unclaimed netmail — real gap found in a full echomail-subsystem audit:
+# inbound netmail whose to_name/to_address doesn't match any local
+# user's AKA/username (routing.py's resolve_netmail_recipient()) has
+# always been stored with to_user_id=NULL, but every read path in the
+# app (web/netmail.py's inbox/sent/drafts) filters by the logged-in
+# user's own id/AKAs -- there was no admin-facing view of these at all,
+# unlike the analogous BadAreaLog mechanism for unrecognized echomail
+# areas. Mail with a typo'd/stale recipient name, or arriving before a
+# sysop ever configured EchomailNetwork.default_recipient, just
+# silently vanished from anyone's view with zero visible signal.
+# ---------------------------------------------------------------------------
+
+@echomail_admin_bp.route('/unclaimed_netmail')
+@login_required
+@_admin_required
+def unclaimed_netmail():
+    """Sysop review queue for inbound netmail that never resolved to a
+    local user. Excludes AreaFix/FileFix bot traffic -- those are
+    intentionally not tied to a real user and are already tracked via
+    AreafixLog, not a gap worth surfacing here."""
+    from ..models import NetmailMessage
+    _bot_names = ('areafix', 'area fix', 'areamgr',
+                 'filefix', 'file fix', 'filemgr')
+    rows = (NetmailMessage.query
+            .filter(NetmailMessage.direction == 'inbound',
+                    NetmailMessage.to_user_id.is_(None),
+                    db.func.lower(NetmailMessage.to_name).notin_(_bot_names))
+            .order_by(NetmailMessage.received_at.desc())
+            .limit(200).all())
+    networks = {n.id: n for n in EchomailNetwork.query.all()}
+    from ..models import User
+    users = User.query.order_by(User.username).all()
+    return render_template('echomail/admin/unclaimed_netmail.html',
+                           rows=rows, networks=networks, users=users)
+
+
+@echomail_admin_bp.route('/unclaimed_netmail/<int:nm_id>/assign', methods=['POST'])
+@login_required
+@_admin_required
+def unclaimed_netmail_assign(nm_id):
+    """Manually assign an unclaimed netmail to a real local user --
+    same notify() hook the automatic resolver already fires, so the
+    recipient sees it exactly like a normally-routed netmail."""
+    from ..models import NetmailMessage, User
+    nm = NetmailMessage.query.get_or_404(nm_id)
+    user_id = request.form.get('user_id', type=int)
+    user = User.query.get(user_id) if user_id else None
+    if user is None:
+        flash('Pick a user to assign this netmail to.', 'danger')
+        return redirect(url_for('echomail_admin.unclaimed_netmail'))
+
+    nm.to_user_id = user.id
+    db.session.commit()
+
+    try:
+        from ..features.notify import notify
+        notify(user.id, 'netmail',
+              title=f'Netmail from {nm.from_name}',
+              body=nm.subject or '',
+              target_url=f'/netmail/{nm.id}')
+    except Exception:
+        pass
+
+    flash(f'Assigned to {user.username}.', 'success')
+    return redirect(url_for('echomail_admin.unclaimed_netmail'))
 
 
 @echomail_admin_bp.route('/networks/<int:network_id>/areafix', methods=['POST'])

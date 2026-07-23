@@ -96,6 +96,21 @@ class FilefixTests(unittest.TestCase):
             response, _ = process_request(net, '1:1/2', '', '%LIST\n')
             self.assertIn('FF.LISTED', response)
 
+    def test_leaf_side_plain_list_request_logs_as_query_not_unsubscribe(self):
+        """Same fix as areafix.py: a plain %LIST/%HELP/%QUERY request
+        (no +/-) must not be mislabeled 'unsubscribe' in the log."""
+        from anetbbs.models import db, EchomailNetwork
+        from anetbbs.echomail.filefix import process_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixQueryLogNet', network_type='binkp',
+                                  our_address='6:7/1')
+            db.session.add(net)
+            db.session.commit()
+
+            response, log_kwargs = process_request(net, '6:7/2', '', '%LIST\n')
+            self.assertEqual(log_kwargs['request_type'], 'query')
+
     def test_hub_side_subscribe_creates_file_echo_subscription_not_echoareanode(self):
         from anetbbs.models import db, FileArea, FileEchoSubscription, EchoAreaNode
         from anetbbs.echomail.filefix import _process_node_request
@@ -332,6 +347,49 @@ class FilefixTests(unittest.TestCase):
             self.assertIsNone(FileEchoSubscription.query.filter_by(
                 file_area_id=area.id, peer_address='6:6/2').first(),
                 'wrong password must not create a subscription')
+
+    def test_hub_side_sysop_only_area_cannot_be_subscribed_via_tag(self):
+        """Same fix as areafix.py's hub side, identical rationale: a
+        sysop-only file area must not be subscribable via a plain +TAG
+        from any downstream node."""
+        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            area = FileArea(tag='FF.SYSOPONLY', name='Sysop Only',
+                            is_active=True, is_subscribed=True, is_sysop_only=True)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                '3:3/2', '3:3/2', '', '+FF.SYSOPONLY\n', '')
+
+            self.assertNotIn('subscribed', response)
+            sub = FileEchoSubscription.query.filter_by(
+                file_area_id=area.id, peer_address='3:3/2').first()
+            self.assertIsNone(sub)
+
+    def test_hub_side_plus_all_excludes_sysop_only_areas(self):
+        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            public_area = FileArea(tag='FF.PUBLIC', name='Public',
+                                   is_active=True, is_subscribed=True,
+                                   is_sysop_only=False)
+            sysop_area = FileArea(tag='FF.INTERNAL', name='Internal',
+                                  is_active=True, is_subscribed=True,
+                                  is_sysop_only=True)
+            db.session.add_all([public_area, sysop_area])
+            db.session.commit()
+
+            _process_node_request('3:4/2', '3:4/2', '', '+ALL\n', '')
+
+            self.assertIsNotNone(FileEchoSubscription.query.filter_by(
+                file_area_id=public_area.id, peer_address='3:4/2').first())
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=sysop_area.id, peer_address='3:4/2').first(),
+                '+ALL must never sweep in a sysop-only file area')
 
     def test_areafix_log_bot_column_defaults_to_areafix(self):
         """Pre-existing rows (all message-echo requests, from before this

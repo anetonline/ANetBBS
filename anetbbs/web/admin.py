@@ -1470,6 +1470,42 @@ def tic_detail(tic_id):
                            tic=tic, seenby=seenby, path=path)
 
 
+def _resolve_storage_dir(storage_path, create_dir, tag):
+    """Real gap: a sysop typing a Storage Path that doesn't exist on
+    disk yet used to be saved silently -- uploads to that area would
+    then fail at upload time with no earlier warning at all pointing
+    back to the typo/unmade directory. Now checked at save time:
+    returns True if `storage_path` is empty (no path configured is
+    always fine — falls back to the auto-derived default elsewhere,
+    see tic.py's process_tic()) or already exists as a real directory.
+    If it doesn't exist, creates it (mkdir -p) when `create_dir` is
+    True (the sysop checked "Create directory if missing"); otherwise
+    flashes a warning explaining why nothing was saved and returns
+    False without touching the filesystem.
+    """
+    import os as _os
+    if not storage_path:
+        return True
+    if _os.path.isdir(storage_path):
+        return True
+    if _os.path.exists(storage_path):
+        flash(f'"{storage_path}" exists but is not a directory — pick a '
+              f'different path for {tag}.', 'danger')
+        return False
+    if not create_dir:
+        flash(f'Directory "{storage_path}" does not exist for {tag}. '
+              f'Check "Create directory if missing" and save again to '
+              f'create it, or fix the path.', 'warning')
+        return False
+    try:
+        _os.makedirs(storage_path, exist_ok=True)
+        flash(f'Created directory "{storage_path}" for {tag}.', 'info')
+        return True
+    except OSError as exc:
+        flash(f'Could not create "{storage_path}" for {tag}: {exc}', 'danger')
+        return False
+
+
 @admin_bp.route('/file-areas', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1484,10 +1520,13 @@ def file_areas_admin():
             name = (request.form.get('name') or '').strip()
             storage_path = (request.form.get('storage_path') or '').strip()
             net_id = request.form.get('network_id', type=int) or None
+            create_dir = bool(request.form.get('create_storage_dir'))
             if not tag:
                 flash('Tag required.', 'danger')
             elif FileArea.query.filter_by(tag=tag).first():
                 flash(f'Area {tag} already exists.', 'warning')
+            elif not _resolve_storage_dir(storage_path, create_dir, tag):
+                pass  # _resolve_storage_dir already flashed why
             else:
                 fa = FileArea(
                     tag=tag, name=name or tag,
@@ -1500,7 +1539,16 @@ def file_areas_admin():
         elif action == 'update':
             fa = FileArea.query.get_or_404(request.form.get('area_id', type=int))
             fa.name = (request.form.get('name') or fa.name).strip()
-            fa.storage_path = (request.form.get('storage_path') or '').strip() or None
+            new_storage_path = (request.form.get('storage_path') or '').strip()
+            create_dir = bool(request.form.get('create_storage_dir'))
+            if new_storage_path != (fa.storage_path or ''):
+                if not new_storage_path or _resolve_storage_dir(
+                        new_storage_path, create_dir, fa.tag):
+                    fa.storage_path = new_storage_path or None
+                # else: leave fa.storage_path unchanged -- _resolve_storage_dir
+                # already flashed why the new value was rejected, and every
+                # OTHER field on this same submit still gets applied below
+                # rather than blocking the whole update over one bad path.
             fa.description = (request.form.get('description') or '').strip() or None
             fa.is_active = bool(request.form.get('is_active'))
             fa.is_subscribed = bool(request.form.get('is_subscribed'))
@@ -1677,6 +1725,8 @@ def file_areas_bulk_import():
         upload = request.files.get('backbone_file')
         is_subscribed = bool(request.form.get('is_subscribed'))
         is_active = True
+        storage_base = (request.form.get('storage_base') or '').strip()
+        create_dirs = bool(request.form.get('create_storage_dirs'))
         if upload and upload.filename:
             raw = upload.read()
             try:
@@ -1690,10 +1740,24 @@ def file_areas_bulk_import():
         entries = _parse_backbone(text)
         imported = 0
         skipped = 0
+        dir_failures = []
         for tag, name in entries:
             if FileArea.query.filter_by(tag=tag).first():
                 skipped += 1
                 continue
+            # Real gap: bulk-imported areas never got a storage path at
+            # all ("edit each area afterwards"). An optional base
+            # directory lets a sysop set one for the whole batch in one
+            # step, with the same missing-directory check the single-
+            # area create/edit form uses -- an area whose computed
+            # directory can't be made just imports with no storage path
+            # instead of silently pointing at a non-existent path.
+            area_storage_path = (os.path.join(storage_base, tag)
+                                 if storage_base else None)
+            if area_storage_path and not _resolve_storage_dir(
+                    area_storage_path, create_dirs, tag):
+                dir_failures.append(tag)
+                area_storage_path = None
             fa = FileArea(
                 tag=tag,
                 name=name,
@@ -1702,12 +1766,18 @@ def file_areas_bulk_import():
                 is_active=is_active,
                 is_subscribed=is_subscribed,
                 upload_permission='users',
+                storage_path=area_storage_path,
             )
             db.session.add(fa)
             imported += 1
         db.session.commit()
-        flash(f'Imported {imported} file areas, skipped {skipped} duplicates.',
-              'success')
+        msg = f'Imported {imported} file areas, skipped {skipped} duplicates.'
+        if dir_failures:
+            msg += (f' {len(dir_failures)} area(s) imported WITHOUT a storage '
+                    f'path (directory could not be created/didn\'t exist): '
+                    f'{", ".join(dir_failures[:10])}'
+                    f'{"…" if len(dir_failures) > 10 else ""}')
+        flash(msg, 'success' if not dir_failures else 'warning')
         return redirect(url_for('admin.file_areas_admin'))
 
     return render_template('admin/file_areas_bulk_import.html',

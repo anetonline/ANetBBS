@@ -14,6 +14,19 @@ Hub Management admin panel. This doc covers all of them.
 - **QWK** — packet-based, popular for Dove-Net. ANetBBS can
   download / upload QWK packets over HTTP/FTP.
 
+### Known BinkP limitations (deliberate scope, not bugs)
+
+- **FREQ (file request, `M_GET`) is not implemented.** ANetBBS never
+  sends one, and doesn't answer one from a peer either. File
+  distribution here is TIC-push only (see the TIC section below) —
+  legacy FREQ is rarely used over BinkP today and isn't planned.
+- **Outbound bundles are always sent uncompressed.** Inbound zipped
+  arcmail bundles ARE accepted and unpacked fine (a peer compressing
+  their side works), but ANetBBS itself never produces a compressed
+  `.pkt` bundle on send — spec-legal (compression is optional), just
+  an asymmetry worth knowing about if you're comparing outbound
+  bandwidth against a peer that does compress.
+
 ## ANotherNetwork — bundled by default
 
 Every fresh ANetBBS install seeds a real, working echomail/QWK network
@@ -114,6 +127,15 @@ one command per line in the body:
 +ALL / -ALL         subscribe / unsubscribe to everything available
 %LIST (or %QUERY)   reply with current subscriptions
 %HELP               reply with a help/command summary
+%RESCAN [AREA.TAG]  hub-only: re-queue every existing message in AREA.TAG
+                    (or every subscribed area if no tag given) for this
+                    node's hold queue -- a real backlog-catchup request,
+                    not a subscription change
+%COMPRESS GZIP      accepted, no-op (bundles are always sent uncompressed)
+%PASSWORD newpass   hub-only: change your own AreaFix/BinkP password --
+                    only reachable already authenticated with the OLD
+                    password, so this can't bootstrap a password on a
+                    node that doesn't have one set yet
 ```
 
 The bot replies with a netmail confirming what changed. If the
@@ -121,7 +143,15 @@ requester's FTN address matches a `BinkPNode` this BBS hosts as a hub
 peer (see Hub Management below), the change is scoped to that peer's
 own `EchoAreaNode` subscription rows instead of the global
 `EchoArea.is_subscribed` flag — so on a hub install, each downstream
-node keeps an independent subscription list.
+node keeps an independent subscription list. `%RESCAN`/`%PASSWORD` are
+hub-side-only (no-op on an upstream leaf request — there's no per-us
+hold queue for a network we poll rather than host, and no separate
+password to rotate from a leaf's perspective).
+
+Hub-side subscriptions never include `is_sysop_only` areas (e.g.
+InterBBS Wall/Last-Callers-sync/casino-score-sync machine-to-machine
+channels) — those can't be reached via `+TAG`/`+ALL` from any
+downstream node, same content gate enforced everywhere else.
 
 **Configuring the password**: each network has a `binkp_password`
 (the BinkP session secret) and an optional separate
@@ -133,8 +163,42 @@ both on the network's edit page.
 The sysop side of outbound AreaFix requests (subscribe/unsubscribe
 buttons on **Admin → Echomail Networks → Manage Areas**) queues the
 same kind of netmail automatically — see `send_areafix_request()` in
-`areafix.py`. All AreaFix traffic (in and out) is logged at
+`areafix.py`. There's also a free-form box on each network's admin
+page (**custom AreaFix command**, `POST /admin/echomail/networks/
+<id>/custom_areafix`) to send any raw command line straight to the
+uplink — `+TAG`, `%RESCAN <tag>`, `%COMPRESS GZIP`, anything the
+robot accepts above — with an optional `robot` form field
+(`robot=FileFix`) to target the FileFix robot instead. This is the only in-UI path to send
+`%RESCAN`. All AreaFix traffic (in and out) is logged at
 **Admin → Echomail Networks → AreaFix Log** (`/admin/echomail/areafix_log`).
+
+## Other admin utilities
+
+A few working routes worth knowing about that don't have their own
+nav entry:
+
+- **FTN AKAs** (`/admin/echomail/akas`) — self-service alternate-
+  address management for the logged-in admin's own account, directly
+  feeding the `UserAka` matching netmail routing already relies on.
+- **Test connection** (`POST /admin/echomail/networks/<id>/test`) —
+  live diagnostic button: BinkP does a real TCP connect, QWK does a
+  real FTP login + `LIST`, no mail is sent either way.
+- **Bad Areas** (`/admin/echomail/bad_areas`) — review queue for echo
+  tags arriving from peers that don't match any known/subscribed
+  area; promote to a real subscription or dismiss.
+- **Unclaimed Netmail** (`/admin/echomail/unclaimed_netmail`) —
+  companion to Bad Areas for netmail instead of echomail: inbound
+  netmail whose To: name/address never resolved to a local user
+  (`NetmailMessage.to_user_id IS NULL`) is otherwise invisible in
+  every inbox view (all of them filter by the logged-in user's own
+  identity) — this page lists it and lets an admin manually assign it
+  to the right account, firing the same notification the automatic
+  resolver would have.
+- **Bulk import areas** (`POST /admin/echomail/areas/bulk_import`) —
+  paste or upload a Fidonet-style AREAS.BBS/backbone file to
+  bulk-create areas instead of adding them one at a time.
+- **QWK quick-add** (`POST /admin/echomail/networks/<id>/qwk_quick_add`)
+  — bulk-add QWK areas from pasted `<conf_num> <name>` lines.
 
 ## Netmail — private FTN mail
 
