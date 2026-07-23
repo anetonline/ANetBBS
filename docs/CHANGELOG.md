@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.194`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.195`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.195 — Web: reorganized the Tools navbar dropdown (July 2026)
+
+- The Tools dropdown had grown to 24 flat items — split into 5 category landing pages (Community, Network Directory, Content, My Stuff, Info & Help), same treatment the Admin dropdown already got.
+
+Full suite verified clean (1324 passed, 2 skipped).
 
 ## v1.0b2.194 — Live bug fixes: FTP login crash, hub message delivery (July 2026)
 

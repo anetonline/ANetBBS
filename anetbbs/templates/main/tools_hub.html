@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cfg.title }} - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center">
+    <h1><i class="bi {{ cfg.icon }}"></i> {{ cfg.title }}</h1>
+    <a href="{{ url_for('main.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-house"></i> Home
+    </a>
+</div>
+
+<div class="row g-3 mt-1">
+    {% for item in cfg.tools %}
+        {% if item[0] != 'network_join.apply' or network_join_enabled %}
+        <div class="col-md-4 col-sm-6">
+            <a href="{{ url_for(item[0], **item[4]) }}" class="text-decoration-none">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi {{ item[2] }}"></i> {{ item[1] }}</h5>
+                        <p class="card-text small text-muted mb-0">{{ item[3] }}</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% endif %}
+    {% endfor %}
+    {% if not cfg.tools %}
+    <div class="col-12">
+        <p class="text-muted">
+            <i class="bi bi-lock"></i> Log in to see tools here.
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

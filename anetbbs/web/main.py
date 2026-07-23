@@ -2,7 +2,7 @@
 """
 Main blueprint for home page and general views
 """
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, abort
 from flask_login import current_user
 from datetime import datetime, timedelta
 
@@ -12,6 +12,87 @@ from ..models import (db, Board, Post, Message, UserSession, User,
 from ..features.access_control import evaluate_access
 
 main_bp = Blueprint('main', __name__)
+
+
+# Category landing pages for the navbar Tools dropdown -- replaces the
+# old single flat dropdown (24 items, screenshot-reported as "so long
+# it was crazy") with a short list of categories, same pattern already
+# used for the Admin dropdown (see admin.py's ADMIN_HUB_SECTIONS).
+# Each tool is (endpoint, title, icon, description) with two optional
+# trailing entries: a dict of url_for() kwargs, and an 'auth_required'
+# flag for items that were previously only shown to logged-in users
+# (preserves the exact same per-item gating the old dropdown had --
+# see tools_hub() below).
+TOOLS_HUB_SECTIONS = {
+    'community': {
+        'title': 'Community',
+        'icon': 'bi-people',
+        'tools': [
+            ("who.index", "Who's Online", 'bi-people', 'See who is connected right now', {}, True),
+            ('shoutbox.index', 'Shoutbox', 'bi-megaphone', 'Quick public one-liners', {}, True),
+            ('groups.index', 'Groups', 'bi-people-fill', 'User-created groups', {}, True),
+            ('leaderboard.index', 'Leaderboard', 'bi-trophy-fill', 'Top scores across every game', {}, True),
+            ('network_join.apply', 'Join Our Network', 'bi-diagram-3',
+             'Apply to join as an echomail/QWK node', {}, True),
+        ],
+    },
+    'directory': {
+        'title': 'Network Directory',
+        'icon': 'bi-globe2',
+        'tools': [
+            ('peers.index', 'BBS Directory', 'bi-globe2', 'Browse federated/peer BBSes', {}, True),
+            ('nodelist.browse', 'Nodelist', 'bi-diagram-3', 'FidoNet/network nodelist browser', {}, False),
+            ('finger.index', 'Finger', 'bi-search', 'Look up a user on this or a peer BBS', {}, True),
+            ('stats.index', 'Statistics', 'bi-graph-up', 'Site activity, top users, leaderboards', {}, False),
+        ],
+    },
+    'content': {
+        'title': 'Content',
+        'icon': 'bi-newspaper',
+        'tools': [
+            ('bulletins.index', 'Bulletins', 'bi-newspaper', 'Sysop-curated short notices', {}, True),
+            ('site_pages.view', 'BBS History', 'bi-clock-history', 'The story of this BBS', {'slug': 'history'}, True),
+            ('rss.index', 'RSS Reader', 'bi-rss-fill', 'Built-in feed aggregator', {}, True),
+            ('gallery.index', 'Image Galleries', 'bi-images', 'Browser-native image viewer', {}, True),
+            ('calendar.index', 'Calendar', 'bi-calendar3', 'Upcoming events', {}, True),
+            ('polls.index', 'Polls', 'bi-bar-chart', 'Vote and see results', {}, True),
+        ],
+    },
+    'personal': {
+        'title': 'My Stuff',
+        'icon': 'bi-person-workspace',
+        'tools': [
+            ('web_terminal.index', 'Web Terminal', 'bi-terminal-fill', 'Classic ANSI menus in your browser', {}, True),
+            ('personal_pages.my_pages', 'My Web Pages', 'bi-globe2', 'User-edited homepages on the BBS', {}, True),
+            ('gemini.index', 'Gemini Capsules', 'bi-stars', 'Your gemtext capsule', {}, True),
+            ('saved.index', 'Saved Messages', 'bi-bookmark-star', 'Messages you bookmarked', {}, True),
+        ],
+    },
+    'info': {
+        'title': 'Info & Help',
+        'icon': 'bi-info-circle',
+        'tools': [
+            ('main.tour', 'Tour', 'bi-compass', 'A brief walkthrough of the BBS', {}, False),
+            ('docs.index', 'Documentation', 'bi-book', 'Sysop + developer documentation', {}, False),
+            ('wiki.index', 'Wiki', 'bi-journal-text', 'Collaborative community wiki', {}, False),
+            ('guru.index', 'Ask Anet', 'bi-question-circle', 'Search the wiki with a Q&A door', {}, False),
+            ('main.about', 'About', 'bi-info-circle', 'About this BBS', {}, False),
+        ],
+    },
+}
+
+
+@main_bp.route('/tools/<section>')
+def tools_hub(section):
+    """Category landing page for the navbar Tools dropdown."""
+    cfg = TOOLS_HUB_SECTIONS.get(section)
+    if not cfg:
+        abort(404)
+    tools = cfg['tools']
+    if not current_user.is_authenticated:
+        tools = [t for t in tools if not t[5]]
+    cfg = dict(cfg, tools=tools)
+    return render_template('main/tools_hub.html', section=section, cfg=cfg)
 
 
 @main_bp.route('/')

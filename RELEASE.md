@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.195 — Web: reorganized the Tools navbar dropdown (July 2026)
+
+- The Tools dropdown had grown to 24 flat items — split into 5 category landing pages (Community, Network Directory, Content, My Stuff, Info & Help), same treatment the Admin dropdown already got.
+
+Full suite verified clean (1324 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.194 — Live bug fixes: FTP login crash, hub message delivery (July 2026)
 
 - Fixed a real FTP login crash on mixed-case usernames.

@@ -420,41 +420,20 @@
                         </ul>
                     </li>
 
-                    <!-- Tools dropdown — Polls / Nodelist / About -->
+                    <!-- Tools dropdown — categorized (was a single flat
+                         24-item list, reorganized into category landing
+                         pages the same way the Admin dropdown was, see
+                         main.py's TOOLS_HUB_SECTIONS / tools_hub()). -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-tools"></i> Tools
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
-                            {% if current_user.is_authenticated %}
-                            <li><a class="dropdown-item" href="{{ url_for('web_terminal.index') }}" style="color:var(--theme-primary);"><i class="bi bi-terminal-fill"></i> Web Terminal</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('who.index') }}" style="color:var(--theme-primary);"><i class="bi bi-people"></i> Who's Online</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('bulletins.index') }}" style="color:var(--theme-primary);"><i class="bi bi-newspaper"></i> Bulletins</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('site_pages.view', slug='history') }}" style="color:var(--theme-primary);"><i class="bi bi-clock-history"></i> BBS History</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('gemini.index') }}" style="color:var(--theme-primary);"><i class="bi bi-stars"></i> Gemini Capsules</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('personal_pages.my_pages') }}" style="color:var(--theme-primary);"><i class="bi bi-globe2"></i> My Web Pages</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('calendar.index') }}" style="color:var(--theme-primary);"><i class="bi bi-calendar3"></i> Calendar</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('groups.index') }}" style="color:var(--theme-primary);"><i class="bi bi-people-fill"></i> Groups</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('leaderboard.index') }}" style="color:var(--theme-primary);"><i class="bi bi-trophy-fill"></i> Leaderboard</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('finger.index') }}" style="color:var(--theme-primary);"><i class="bi bi-search"></i> Finger</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('peers.index') }}" style="color:var(--theme-primary);"><i class="bi bi-globe2"></i> BBS Directory</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('shoutbox.index') }}" style="color:var(--theme-primary);"><i class="bi bi-megaphone"></i> Shoutbox</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('gallery.index') }}" style="color:var(--theme-primary);"><i class="bi bi-images"></i> Image Galleries</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('rss.index') }}" style="color:var(--theme-primary);"><i class="bi bi-rss-fill"></i> RSS Reader</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('polls.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bar-chart"></i> Polls</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('saved.index') }}" style="color:var(--theme-primary);"><i class="bi bi-bookmark-star"></i> Saved Messages</a></li>
-                            {% if network_join_enabled %}
-                            <li><a class="dropdown-item" href="{{ url_for('network_join.apply') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Join Our Network</a></li>
-                            {% endif %}
-                            <li><hr class="dropdown-divider"></li>
-                            {% endif %}
-                            <li><a class="dropdown-item" href="{{ url_for('nodelist.browse') }}" style="color:var(--theme-primary);"><i class="bi bi-diagram-3"></i> Nodelist</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('stats.index') }}" style="color:var(--theme-primary);"><i class="bi bi-graph-up"></i> Statistics</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('main.tour') }}" style="color:var(--theme-primary);"><i class="bi bi-compass"></i> Tour</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('docs.index') }}" style="color:var(--theme-primary);"><i class="bi bi-book"></i> Documentation</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('wiki.index') }}" style="color:var(--theme-primary);"><i class="bi bi-journal-text"></i> Wiki</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('guru.index') }}" style="color:var(--theme-primary);"><i class="bi bi-question-circle"></i> Ask Anet</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('main.about') }}" style="color:var(--theme-primary);"><i class="bi bi-info-circle"></i> About</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='community') }}" style="color:var(--theme-primary);"><i class="bi bi-people"></i> Community</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='directory') }}" style="color:var(--theme-primary);"><i class="bi bi-globe2"></i> Network Directory</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='content') }}" style="color:var(--theme-primary);"><i class="bi bi-newspaper"></i> Content</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='personal') }}" style="color:var(--theme-primary);"><i class="bi bi-person-workspace"></i> My Stuff</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='info') }}" style="color:var(--theme-primary);"><i class="bi bi-info-circle"></i> Info & Help</a></li>
                         </ul>
                     </li>
 

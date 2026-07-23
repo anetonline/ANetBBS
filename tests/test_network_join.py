@@ -379,7 +379,14 @@ class NetworkJoinRouteTests(unittest.TestCase):
         deliberately logged-in-only (Jerry's explicit choice, not shown
         to anonymous visitors) and only rendered when the feature is
         actually reachable (hub mode + enabled), via a context processor
-        (_inject_network_join_enabled in anetbbs/web_app.py)."""
+        (_inject_network_join_enabled in anetbbs/web_app.py).
+
+        The Tools dropdown was later reorganized into category landing
+        pages (main.py's TOOLS_HUB_SECTIONS / tools_hub()) -- same real
+        problem as the Admin dropdown had, a flat list that grew too
+        long. "Join Our Network" now lives under Tools > Community
+        (/tools/community) instead of directly in the top navbar, but
+        the same three gating rules must still hold at its new home."""
         from anetbbs.models import db, User, NetworkJoinConfig
         with self.app.app_context():
             u = User.query.filter_by(username='navlinktest').first()
@@ -394,15 +401,16 @@ class NetworkJoinRouteTests(unittest.TestCase):
         self._enable_join_form()
         client = self.app.test_client()
 
-        # Logged out -- must not show even though the feature is enabled.
-        resp = client.get('/')
+        # Logged out -- must not show even though the feature is enabled
+        # (community hub page requires login, same as before).
+        resp = client.get('/tools/community')
         self.assertNotIn('Join Our Network', resp.get_data(as_text=True))
 
         # Logged in, enabled -- must show.
         with client.session_transaction() as sess:
             sess['_user_id'] = str(uid)
             sess['_fresh'] = True
-        resp = client.get('/')
+        resp = client.get('/tools/community')
         self.assertIn('Join Our Network', resp.get_data(as_text=True))
 
         # Logged in, disabled -- must not show.
@@ -410,7 +418,7 @@ class NetworkJoinRouteTests(unittest.TestCase):
             cfg = NetworkJoinConfig.get()
             cfg.enabled = False
             db.session.commit()
-        resp = client.get('/')
+        resp = client.get('/tools/community')
         self.assertNotIn('Join Our Network', resp.get_data(as_text=True))
 
     def test_approve_binkp_only_creates_one_node(self):
