@@ -25,7 +25,7 @@
             <dt class="col-sm-2">Subject</dt>
             <dd class="col-sm-10">{{ m.subject or '(no subject)' }}</dd>
             <dt class="col-sm-2">Date</dt>
-            <dd class="col-sm-10">{{ m.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+            <dd class="col-sm-10">{{ m.created_at|eastern('%Y-%m-%d %H:%M:%S %Z') }}</dd>
             {% if m.msgid %}
             <dt class="col-sm-2">MSGID</dt>
             <dd class="col-sm-10"><code>{{ m.msgid }}</code></dd>

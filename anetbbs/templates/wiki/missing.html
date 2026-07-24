@@ -10,7 +10,7 @@
 {% if deleted %}
     <div class="alert alert-warning">
         <p>This page existed (titled <strong>{{ deleted.title }}</strong>)
-           but was deleted on {{ deleted.updated_at.strftime('%Y-%m-%d') }}
+           but was deleted on {{ deleted.updated_at|eastern('%Y-%m-%d') }}
            {% if deleted.updated_by %}by {{ deleted.updated_by.username }}{% endif %}.
         </p>
         {% if current_user.is_authenticated and current_user.is_admin %}

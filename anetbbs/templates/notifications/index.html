@@ -21,7 +21,7 @@
                     <strong>{{ n.title or n.kind }}</strong>
                     <div>{{ n.body or '' }}</div>
                 </div>
-                <small class="text-muted">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                <small class="text-muted">{{ n.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
             </div>
             {% if n.target_url %}
             <form method="post" action="{{ url_for('notifications.mark_read', nid=n.id) }}" class="mt-1">

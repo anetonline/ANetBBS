@@ -82,7 +82,7 @@
             <td>{% if post.origin_bbs %}<span class="badge bg-info text-dark" title="Imported via InterBBS Wall">{{ post.origin_bbs }}</span>{% else %}<span class="text-muted small">local</span>{% endif %}</td>
             <td><code>{{ post.line1 }}</code></td>
             <td><code>{{ post.line2 or '' }}</code></td>
-            <td><small>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td><small>{{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
             <td>
                 {% if post.is_deleted %}
                 <form method="post" action="{{ url_for('wall_admin.restore', post_id=post.id) }}" style="display:inline">

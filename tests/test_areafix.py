@@ -154,8 +154,10 @@ class AreafixTests(unittest.TestCase):
             net = EchomailNetwork(name='AreafixHubTestNet', network_type='binkp',
                                   our_address='2:2/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Downstream', ftn_address='2:2/2',
-                             password='testpw123', is_active=True)
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.HUBTEST', name='Hub Test', network_id=net.id,
@@ -291,8 +293,10 @@ class AreafixTests(unittest.TestCase):
             net = EchomailNetwork(name='RescanNet', network_type='binkp',
                                   our_address='7:7/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Rescanner', ftn_address='7:7/2',
-                             password='testpw123', is_active=True)
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.RESCAN', name='Rescan Test', network_id=net.id,
@@ -366,8 +370,10 @@ class AreafixTests(unittest.TestCase):
             net = EchomailNetwork(name='AreafixSysopOnlyNet', network_type='binkp',
                                   our_address='3:3/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Downstream', ftn_address='3:3/2',
-                             password='testpw123', is_active=True)
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.SYSOPONLY', name='Sysop Only', network_id=net.id,
@@ -393,8 +399,10 @@ class AreafixTests(unittest.TestCase):
             net = EchomailNetwork(name='AreafixPlusAllSysopNet', network_type='binkp',
                                   our_address='3:4/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Downstream', ftn_address='3:4/2',
-                             password='testpw123', is_active=True)
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
             db.session.add(node)
             db.session.flush()
             public_area = EchoArea(tag='AF.PUBLIC', name='Public', network_id=net.id,
@@ -426,8 +434,10 @@ class AreafixTests(unittest.TestCase):
             net = EchomailNetwork(name='AreafixLegacyNullNet', network_type='binkp',
                                   our_address='3:5/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Downstream', ftn_address='3:5/2',
-                             password='testpw123', is_active=True)
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.LEGACY', name='Legacy', network_id=net.id,
@@ -444,6 +454,100 @@ class AreafixTests(unittest.TestCase):
 
             self.assertIn('subscribed', response)
             self.assertIsNotNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=area.id).first())
+
+    def test_hub_side_plus_all_never_subscribes_areas_from_other_networks(self):
+        """Real bug reported live: a downstream node's +ALL subscribed it
+        to EVERY echo area this hub relays across ALL networks, not just
+        the one network the node itself is a member of -- a cross-network
+        data leak. all_areas must be scoped to node.network_id."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            own_net = EchomailNetwork(name='AreafixCrossNetOwn', network_type='binkp',
+                                      our_address='9:1/1')
+            other_net = EchomailNetwork(name='AreafixCrossNetOther', network_type='binkp',
+                                        our_address='9:2/1')
+            db.session.add_all([own_net, other_net])
+            db.session.flush()
+            node = BinkPNode(name='CrossNetNode', ftn_address='9:1/2',
+                             password='testpw123', is_active=True,
+                             network_id=own_net.id)
+            db.session.add(node)
+            own_area = EchoArea(tag='AF.OWNNET', name='Own Net', network_id=own_net.id,
+                                is_active=True, is_subscribed=True)
+            other_area = EchoArea(tag='AF.OTHERNET', name='Other Net', network_id=other_net.id,
+                                  is_active=True, is_subscribed=True)
+            db.session.add_all([own_area, other_area])
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '9:1/2', 'testpw123', '+ALL\n')
+
+            self.assertIsNotNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=own_area.id).first())
+            self.assertIsNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=other_area.id).first(),
+                "+ALL must never subscribe a node to a DIFFERENT network's areas")
+
+    def test_hub_side_plus_tag_rejects_area_from_other_network(self):
+        """Same bug, single-tag form: a plain +TAG for an area belonging
+        to a network the requesting node isn't a member of must be
+        rejected, not silently allowed through."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            own_net = EchomailNetwork(name='AreafixCrossTagOwn', network_type='binkp',
+                                      our_address='9:3/1')
+            other_net = EchomailNetwork(name='AreafixCrossTagOther', network_type='binkp',
+                                        our_address='9:4/1')
+            db.session.add_all([own_net, other_net])
+            db.session.flush()
+            node = BinkPNode(name='CrossTagNode', ftn_address='9:3/2',
+                             password='testpw123', is_active=True,
+                             network_id=own_net.id)
+            db.session.add(node)
+            other_area = EchoArea(tag='AF.FOREIGNTAG', name='Foreign', network_id=other_net.id,
+                                  is_active=True, is_subscribed=True)
+            db.session.add(other_area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                node, '9:3/2', 'testpw123', '+AF.FOREIGNTAG\n')
+
+            self.assertNotIn('AF.FOREIGNTAG : subscribed', response)
+            self.assertIsNone(EchoAreaNode.query.filter_by(
+                node_id=node.id, echo_area_id=other_area.id).first())
+
+    def test_hub_side_unset_network_id_fails_closed_not_open(self):
+        """A legacy BinkPNode row with no network_id set (nullable column,
+        rows created before it existed) must see ZERO available areas,
+        never fall back to 'show everything' -- that fallback is exactly
+        the cross-network leak this fix closes."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchoAreaNode, BinkPNode
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='AreafixUnsetNetIdNet', network_type='binkp',
+                                  our_address='9:5/1')
+            db.session.add(net)
+            db.session.flush()
+            node = BinkPNode(name='NoNetIdNode', ftn_address='9:5/2',
+                             password='testpw123', is_active=True)
+            db.session.add(node)
+            area = EchoArea(tag='AF.NONETID', name='No Net Id', network_id=net.id,
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.commit()
+            self.assertIsNone(node.network_id)
+
+            response, log_kwargs = _process_node_request(
+                node, '9:5/2', 'testpw123', '+ALL\n')
+
+            self.assertIn('subscribed to 0 areas', response)
+            self.assertIsNone(EchoAreaNode.query.filter_by(
                 node_id=node.id, echo_area_id=area.id).first())
 
     def test_password_command_changes_node_password_when_authenticated(self):

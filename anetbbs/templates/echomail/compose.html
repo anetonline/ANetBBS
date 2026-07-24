@@ -18,7 +18,7 @@
             <i class="bi bi-chat-square-quote"></i>
             Replying to <strong>{{ original.from_name }}</strong> —
             <em>{{ original.subject or '(no subject)' }}</em>
-            <small class="text-muted">({{ original.created_at.strftime('%Y-%m-%d %H:%M') }})</small>
+            <small class="text-muted">({{ original.created_at|eastern('%Y-%m-%d %H:%M') }})</small>
             <span class="float-end">click to {% if original %}collapse/expand{% endif %}</span>
         </a>
     </div>

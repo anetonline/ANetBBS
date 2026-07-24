@@ -9,8 +9,8 @@
     <div class="card-header">{{ node.username }} via {{ node.protocol }}</div>
     <div class="card-body small">
         <p class="mb-1"><strong>Peer:</strong> {{ node.peer or '—' }}</p>
-        <p class="mb-1"><strong>Started:</strong> {{ node.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-        <p class="mb-1"><strong>Last seen:</strong> {{ node.last_seen.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        <p class="mb-1"><strong>Started:</strong> {{ node.started_at|eastern('%Y-%m-%d %H:%M:%S') }}</p>
+        <p class="mb-1"><strong>Last seen:</strong> {{ node.last_seen|eastern('%Y-%m-%d %H:%M:%S') }}</p>
         <p class="mb-1"><strong>Current page:</strong> <code>{{ node.page or '—' }}</code></p>
         <p class="mb-1"><strong>Last action:</strong> {{ node.action or '—' }}</p>
     </div>

@@ -15,7 +15,7 @@
         <div class="card">
             <div class="card-header">
                 <strong>r{{ a.rev_num }}</strong>
-                <small class="text-muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}
+                <small class="text-muted">{{ a.created_at|eastern('%Y-%m-%d %H:%M') }}
                     {% if a.author %}· {{ a.author.username }}{% endif %}</small>
             </div>
             <div class="card-body small">
@@ -27,7 +27,7 @@
         <div class="card">
             <div class="card-header">
                 <strong>r{{ b.rev_num }}</strong>
-                <small class="text-muted">{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}
+                <small class="text-muted">{{ b.created_at|eastern('%Y-%m-%d %H:%M') }}
                     {% if b.author %}· {{ b.author.username }}{% endif %}</small>
             </div>
             <div class="card-body small">

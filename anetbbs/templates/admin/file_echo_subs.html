@@ -54,7 +54,7 @@
                             <span class="badge bg-secondary">paused</span>
                         {% endif %}
                     </td>
-                    <td><small>{{ s.created_at.strftime('%Y-%m-%d') }}</small></td>
+                    <td><small>{{ s.created_at|eastern('%Y-%m-%d') }}</small></td>
                     <td>
                         <form method="post" style="display:inline;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

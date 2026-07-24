@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime
+from ..core.tz import fmt_eastern
 
 _PIPE_FG = {
     '00': '30', '01': '34', '02': '32', '03': '36',
@@ -204,7 +205,7 @@ def _footer(is_admin: bool, has_older: bool, has_newer: bool,
 
 def _render_post(post, is_admin: bool, user_c: str,
                  W: int, ascii_mode: bool) -> bytes:
-    ts       = post.created_at.strftime('%m/%d/%y %H:%M') if post.created_at else ''
+    ts       = fmt_eastern(post.created_at, '%m/%d/%y %H:%M', '')
     uname    = (post.display_name or post.username or '?')[:16]
     node_str = f'Node {post.node}' if post.node else ''
     del_tag  = f'  {_RD}[#{post.id}]{_RST}' if is_admin else ''

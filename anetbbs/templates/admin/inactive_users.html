@@ -27,7 +27,7 @@
             <td><input type="checkbox" name="user_id" value="{{ u.id }}"></td>
             <td><a href="{{ url_for('admin.manage_user', user_id=u.id) }}">{{ u.username }}</a></td>
             <td><small>{{ u.email }}</small></td>
-            <td><small>{{ u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never' }}</small></td>
+            <td><small>{{ u.last_login|eastern('%Y-%m-%d', 'never') }}</small></td>
             <td>{{ u.login_count or 0 }}</td>
         </tr>
         {% else %}

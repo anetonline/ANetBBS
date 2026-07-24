@@ -1,7 +1,21 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.201`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.203`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.203 — AreaFix/FileFix cross-network subscription leak (July 2026)
+
+- A downstream BinkP node's +ALL (or a plain +TAG for a tag belonging to another network) could subscribe it to echo/file areas from EVERY network this hub relays, not just the one it's actually a member of — a real cross-network data leak, found live. Hub-side AreaFix/FileFix now scope the available-area list to the requesting node's own network, failing closed (zero areas) rather than showing everything if a node's network isn't set.
+- New tools/cleanup_cross_network_subscriptions.py finds (dry-run) and removes (--apply) any bad subscription rows already created by the bug before this fix.
+
+Full suite verified clean (1547 passed, 2 skipped).
+
+## v1.0b2.202 — Netmail zone fix + Eastern time display (July 2026)
+
+- Fixed an outbound BinkP netmail bug where the @INTL zone kludge was skipped whenever our zone matched the recipient's zone — a downstream system with multiple network identities could file the mail under the wrong one, since FTS-0001's binary header has no zone field at all.
+- Timestamps across the web UI and terminal/PETSCII interfaces now display in Eastern time (EST/EDT) instead of raw UTC — database storage is unchanged.
+
+Full suite verified clean (1541 passed, 2 skipped).
 
 ## v1.0b2.201 — Bug fixes (July 2026)
 

@@ -56,7 +56,7 @@
           <td>
             {% if ev.last_run_at %}
               <span class="ev-status-{{ ev.last_status or 'skip' }}">{{ ev.last_status or '?' }}</span>
-              <span class="ev-meta">{{ ev.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+              <span class="ev-meta">{{ ev.last_run_at|eastern('%Y-%m-%d %H:%M %Z') }}</span>
               {% if ev.last_duration_ms %}<span class="ev-meta">({{ ev.last_duration_ms }} ms)</span>{% endif %}
               {% if ev.last_output %}
                 <button class="btn btn-link btn-sm p-0 ms-1 ev-show-out"
@@ -69,7 +69,7 @@
           </td>
           <td>
             {% if ev.is_enabled and v.next_run %}
-              <span class="ev-meta">{{ v.next_run.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+              <span class="ev-meta">{{ v.next_run|eastern('%Y-%m-%d %H:%M %Z') }}</span>
             {% else %}
               <span class="ev-meta">—</span>
             {% endif %}

@@ -54,9 +54,9 @@
                     <td>{{ b.user.username if b.user else '?' }}</td>
                     <td>{{ b.room or 'ALL' }}</td>
                     <td>{{ b.reason or '' }}</td>
-                    <td>{{ b.expires_at.strftime('%Y-%m-%d %H:%M') if b.expires_at else 'never' }}</td>
+                    <td>{{ b.expires_at|eastern('%Y-%m-%d %H:%M', 'never') }}</td>
                     <td>{{ b.issued_by.username if b.issued_by else '' }}</td>
-                    <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ b.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td>
                         <form method="post" style="display:inline;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

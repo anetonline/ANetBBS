@@ -62,12 +62,12 @@ class NetmailPointAddressRoundTripTests(unittest.TestCase):
         being sent and re-parsed -- this is exactly what happens when
         our own outbound .pkt is later imported (e.g. by the same
         listener that received the M_GOT for it, or by a peer echoing
-        it back). Uses different zones for the two sides (as the
-        boss-to-boss sanity check below does) so @INTL is actually
-        emitted -- _build_ftn_packet only emits @INTL when zones differ,
-        and this test is specifically about the @FMPT/@TOPT point fix,
-        not the separate (pre-existing, documented) zone-less fallback
-        used when @INTL is absent."""
+        it back). Uses different zones for the two sides purely as
+        realistic test data -- @INTL is now always emitted for netmail
+        regardless of whether zones match (see
+        test_binkp_intl_always_emitted.py), so that's no longer load-
+        bearing for this test; what's actually being verified here is
+        the @FMPT/@TOPT point-number fix."""
         msg = _FakeMsg(to_address='1200:1/2.5', from_address='1:114/30')
         parsed = self._build_and_parse(msg, our_addr='1:114/30')
         self.assertEqual(parsed['to_address'], '1200:1/2.5',
@@ -100,10 +100,10 @@ class ServerImportUsesParsedAddressesTests(unittest.TestCase):
         from unittest.mock import patch
         from anetbbs.echomail.binkp import _build_ftn_packet
 
-        # Different zones (as the boss-to-boss sanity check above uses)
-        # so @INTL is actually emitted by the send side -- this test is
-        # about the @FMPT/@TOPT point fix specifically, not the separate
-        # zone-less fallback used when @INTL is absent.
+        # Different zones purely as realistic test data -- @INTL is now
+        # always emitted for netmail regardless of zone match (see
+        # test_binkp_intl_always_emitted.py); this test is about the
+        # @FMPT/@TOPT point fix specifically.
         msg = _FakeMsg(to_address='1200:1/2.5', from_address='1:114/30',
                        subject='Point Test')
         pkt = _build_ftn_packet([msg], '1:114/30', '1:114/0')

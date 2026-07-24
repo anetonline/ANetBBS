@@ -5,6 +5,15 @@
 bcrypt>=4.0.0
 python-dotenv>=1.0.0
 
+# IANA timezone data for stdlib zoneinfo (anetbbs/core/tz.py — converts
+# stored UTC timestamps to US/Eastern for display). zoneinfo normally
+# reads the HOST OS's own tzdata, which isn't guaranteed present on
+# minimal Docker base images or every distro this project installs on
+# (see reference_pi_compat / install.sh's cross-distro history) — this
+# pure-Python package is zoneinfo's own documented fallback data source,
+# so EST/EDT conversion works even when the host has no system tzdata.
+tzdata>=2024.1
+
 # Web framework (Flask app)
 Flask>=3.1.0
 Flask-Login>=0.6.3

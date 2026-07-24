@@ -41,9 +41,9 @@
                 {% if field_config.show_email and user.show_email %}
                     <p><i class="bi bi-envelope"></i> {{ user.email }}</p>
                 {% endif %}
-                <p><i class="bi bi-calendar"></i> Joined {{ user.created_at.strftime('%Y-%m-%d') }}</p>
+                <p><i class="bi bi-calendar"></i> Joined {{ user.created_at|eastern('%Y-%m-%d') }}</p>
                 {% if user.last_login %}
-                    <p><i class="bi bi-clock"></i> Last login {{ user.last_login.strftime('%Y-%m-%d') }}</p>
+                    <p><i class="bi bi-clock"></i> Last login {{ user.last_login|eastern('%Y-%m-%d') }}</p>
                 {% endif %}
                 {% for cf in custom_fields_list %}
                     {% set val = custom_values.get(cf.id) %}
@@ -128,7 +128,7 @@
                             <div>
                                 <strong>{{ a.name }}</strong>
                                 <div class="text-muted small">{{ a.description }}</div>
-                                <div class="text-muted" style="font-size:0.7rem;">earned {{ a.earned_at.strftime('%Y-%m-%d') }}</div>
+                                <div class="text-muted" style="font-size:0.7rem;">earned {{ a.earned_at|eastern('%Y-%m-%d') }}</div>
                             </div>
                         </div>
                     </div>
@@ -149,7 +149,7 @@
                        style="background-color:var(--theme-card-bg);border-color:var(--theme-primary);color:var(--theme-primary);">
                         <div class="d-flex justify-content-between">
                             <strong>{{ post.subject }}</strong>
-                            <small>{{ post.created_at.strftime('%Y-%m-%d') }}</small>
+                            <small>{{ post.created_at|eastern('%Y-%m-%d') }}</small>
                         </div>
                         <small>in {{ post.board.name }}</small>
                     </a>

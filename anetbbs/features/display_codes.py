@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from ..core.tz import to_eastern
 
 
 # --- Resolvers ---------------------------------------------------------------
@@ -117,7 +118,14 @@ def apply(text: str, *, user=None, bbs_name: str = '', sysop: str = '',
         'sysop': sysop or '',
         'node': int(node or 1),
         'version': version or '',
-        'now': datetime.now(),
+        # Eastern, not raw server-OS-local time -- @TIME@/@DATE@/@DAY@/
+        # |DT/|TM all read this via a plain strftime call below, so this is
+        # the one place to fix rather than each of the 5 call sites.
+        # Previously datetime.now() (the HOST's own OS clock, whatever
+        # timezone that happens to be configured to -- inconsistent
+        # with the rest of the app's datetime.utcnow() convention, and
+        # silently wrong on any host not itself set to Eastern).
+        'now': to_eastern(datetime.utcnow()),
     }
 
     def _at_sub(m):

@@ -231,6 +231,22 @@ def create_app(config_name=None):
         except (ValueError, TypeError):
             return {}
 
+    @app.template_filter('eastern')
+    def eastern_filter(value, fmt='%Y-%m-%d %H:%M', default=''):
+        """Display a stored (naive-UTC) datetime column in US/Eastern
+        (EST/EDT, DST-aware) instead of raw UTC. Storage stays UTC
+        everywhere -- this is a display-only conversion, see
+        anetbbs/core/tz.py. `default` is returned as-is when value is
+        None, matching the `X.strftime(...) if X else 'y'` idiom this
+        replaces throughout the templates -- pass each site's own
+        existing fallback text through unchanged.
+
+        Use `%Z` in fmt to include the correct current abbreviation
+        (EST or EDT) instead of a hardcoded literal "UTC"/"ET" string.
+        """
+        from .core.tz import fmt_eastern
+        return fmt_eastern(value, fmt, default)
+
     @app.template_filter('linkify_images')
     def linkify_images(value):
         """Auto-embed image URLs (jpg/png/gif/webp) in plain text.

@@ -18,7 +18,7 @@
             <tbody>
             {% for t in pagination.items %}
                 <tr>
-                    <td><code>{{ t.received_at.strftime('%Y-%m-%d %H:%M') }}</code></td>
+                    <td><code>{{ t.received_at|eastern('%Y-%m-%d %H:%M') }}</code></td>
                     <td>
                         {% if t.status == 'filed' %}<span class="badge bg-success">filed</span>
                         {% elif t.status == 'error' %}<span class="badge bg-danger">error</span>

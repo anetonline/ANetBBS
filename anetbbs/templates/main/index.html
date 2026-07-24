@@ -84,7 +84,7 @@
                             <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
                                 <div class="d-flex w-100 justify-content-between">
                                     <h6 class="mb-1">{{ post.subject }}</h6>
-                                    <small>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                                    <small>{{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
                                 </div>
                                 <p class="mb-1">{{ post.content[:100] }}{% if post.content|length > 100 %}...{% endif %}</p>
                                 <small>by {{ post.author.username }} in {{ post.board.name }}</small>
@@ -133,7 +133,7 @@
                         <div class="mb-3">
                             <h6>{{ bulletin.title }}</h6>
                             <p class="small">{{ bulletin.content }}</p>
-                            <small class="text-muted">Posted {{ bulletin.created_at.strftime('%Y-%m-%d') }}</small>
+                            <small class="text-muted">Posted {{ bulletin.created_at|eastern('%Y-%m-%d') }}</small>
                         </div>
                         {% if not loop.last %}<hr style="border-color: #00ff00;">{% endif %}
                     {% endfor %}
@@ -214,7 +214,7 @@
                 {% for b in active_broadcasts %}
                 <div class="mb-2"><strong>{{ b.sender.username if b.sender else 'sysop' }}:</strong>
                     {{ b.text }}
-                    <div class="text-muted small">{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    <div class="text-muted small">{{ b.created_at|eastern('%Y-%m-%d %H:%M') }}</div>
                 </div>
                 {% endfor %}
             </div>
@@ -246,7 +246,7 @@
                 {% for s in recent_shouts %}
                 <div class="mb-1 small">
                     <strong>{{ s.user.username }}</strong>: {{ s.text }}
-                    <div class="text-muted" style="font-size:0.75rem;">{{ s.created_at.strftime('%H:%M') }}</div>
+                    <div class="text-muted" style="font-size:0.75rem;">{{ s.created_at|eastern('%H:%M') }}</div>
                 </div>
                 {% endfor %}
             </div>
@@ -267,7 +267,7 @@
                             {{ em.subject[:48] if em.subject else '(no subject)' }}
                         </a>
                         <div class="text-muted" style="font-size:0.75rem;">
-                            {{ em.from_name }} — {{ em.created_at.strftime('%m/%d %H:%M') }}
+                            {{ em.from_name }} — {{ em.created_at|eastern('%m/%d %H:%M') }}
                         </div>
                     </li>
                     {% endfor %}

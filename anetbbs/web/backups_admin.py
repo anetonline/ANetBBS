@@ -177,10 +177,11 @@ def _restore_helper() -> Optional[str]:
 @login_required
 def index():
     _admin_required()
+    from ..core.tz import fmt_eastern
     rows = _scan()
     for r in rows:
         r['size_human'] = _human_size(r['size_bytes'])
-        r['created_str'] = r['created_at'].strftime('%Y-%m-%d %H:%M UTC') if r['created_at'] else '?'
+        r['created_str'] = fmt_eastern(r['created_at'], '%Y-%m-%d %H:%M %Z', '?')
     helper = _restore_helper()
     return render_template('admin/backups.html',
                            rows=rows,

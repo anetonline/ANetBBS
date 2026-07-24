@@ -41,8 +41,8 @@
                             <i class="bi bi-pin text-muted"></i>
                         {% endif %}
                     </td>
-                    <td>{{ message.created_at.strftime('%Y-%m-%d') }}</td>
-                    <td>{{ message.expires_at.strftime('%Y-%m-%d') if message.expires_at else 'Never' }}</td>
+                    <td>{{ message.created_at|eastern('%Y-%m-%d') }}</td>
+                    <td>{{ message.expires_at|eastern('%Y-%m-%d', 'Never') }}</td>
                     <td>
                         <form method="post" action="{{ url_for('admin.toggle_pin', bulletin_id=message.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

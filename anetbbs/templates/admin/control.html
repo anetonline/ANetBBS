@@ -397,7 +397,7 @@
                 <td><small><code>{{ s.page or '' }}</code></small></td>
                 <td><small><code>{{ s.ip_address or '' }}</code></small></td>
                 <td><small>{{ (s.user_agent or '')[:40] }}</small></td>
-                <td><small>{{ s.last_seen.strftime('%H:%M:%S') if s.last_seen else '' }}</small></td>
+                <td><small>{{ s.last_seen|eastern('%H:%M:%S', '') }}</small></td>
             </tr>
         {% else %}
             <tr><td colspan="5" class="text-muted">Nobody online.</td></tr>

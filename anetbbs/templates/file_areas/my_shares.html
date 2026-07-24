@@ -32,7 +32,7 @@
                                readonly onclick="this.select();" style="font-size:0.75rem;">
                     </td>
                     <td>{{ r.download_count or 0 }}{% if r.max_downloads %}/{{ r.max_downloads }}{% endif %}</td>
-                    <td><small>{{ r.expires_at.strftime('%Y-%m-%d %H:%M') if r.expires_at else 'never' }}</small></td>
+                    <td><small>{{ r.expires_at|eastern('%Y-%m-%d %H:%M', 'never') }}</small></td>
                     <td>
                         {% if r.is_revoked %}<span class="badge bg-secondary">revoked</span>
                         {% elif not r.is_valid %}<span class="badge bg-warning text-dark">expired/maxed</span>

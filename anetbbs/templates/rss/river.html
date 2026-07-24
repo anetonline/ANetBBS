@@ -55,7 +55,7 @@
                  class="rss-title-link">{{ item.title or '(no title)' }}</a>
             </h6>
             <small class="text-muted text-nowrap flex-shrink-0">
-              {% if item.published_at %}{{ item.published_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+              {% if item.published_at %}{{ item.published_at|eastern('%m-%d %H:%M') }}{% else %}—{% endif %}
             </small>
           </div>
           {% if item.summary %}

@@ -18,6 +18,7 @@ import os
 import logging
 import re
 from datetime import datetime, timedelta
+from ..core.tz import fmt_eastern
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ class BBSMenuUI:
                 f"{'Where':<{_where_w}} {'Last seen':<12}{RESET}\r\n"
                 f"  {FG['gry']}{'─' * _sep_w}{RESET}\r\n")
             for u, proto, where, ts in rows:
-                tstr = ts.strftime('%H:%M:%S') if ts else '?'
+                tstr = fmt_eastern(ts, '%H:%M:%S', '?')
                 proto_color = (FG['grn'] if proto == 'telnet'
                                else FG['mag'] if proto == 'ssh'
                                else FG['yel'] if proto == 'web'
@@ -268,7 +269,7 @@ class BBSMenuUI:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner('Bulletins', _w))
             for i, (_, title, who, when, pinned, _) in enumerate(b_list, 1):
-                ts = when.strftime('%m-%d') if when else '?'
+                ts = fmt_eastern(when, '%m-%d', '?')
                 pin = (FG['yel'] + '*' + RESET) if pinned else ' '
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET}{pin} "
@@ -284,7 +285,7 @@ class BBSMenuUI:
                 idx = int(choice) - 1
                 if 0 <= idx < len(b_list):
                     _, title, who, when, _, content = b_list[idx]
-                    ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                    ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
                     await self._view_bulletin(title, who, ts, content or '')
             except ValueError:
                 pass
@@ -426,7 +427,7 @@ class BBSMenuUI:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(_bnr('PM Inbox', _w))
             for i, (_, subj, who, when, was_read, _) in enumerate(i_list, 1):
-                ts = when.strftime('%m-%d %H:%M') if when else '?'
+                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
                 mark = ' ' if was_read else '*'
                 await self.session.write(f"  {i:2d}.{mark} {subj[:_subj_w]:<{_subj_w}} from {who[:12]:<12} {ts}\r\n")
             choice = (await self.session.read_line("\r\nPick message (number) or Q: ") or '').strip()
@@ -436,7 +437,7 @@ class BBSMenuUI:
                 idx = int(choice) - 1
                 if 0 <= idx < len(i_list):
                     pm_id, subj, who, when, _, body = i_list[idx]
-                    ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                    ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
                     await self.session.write("\r\n" + "═" * _w + "\r\n")
                     await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
                     await self.session.write("─" * _w + "\r\n")
@@ -487,7 +488,7 @@ class BBSMenuUI:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(_bnr('Inter-BBS Instant Messages', _w))
             for i, (_, who, host, when, was_read, body) in enumerate(rows, 1):
-                ts = when.strftime('%m-%d %H:%M') if when else '?'
+                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
                 mark = ' ' if was_read else '*'
                 preview = body.replace('\r', ' ').replace('\n', ' ')[:_prev_w]
                 await self.session.write(
@@ -510,7 +511,7 @@ class BBSMenuUI:
 
             if cmd == 'V':
                 await self.session.write("\r\n" + "═" * _w + "\r\n")
-                ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
                 await self.session.write(f"  From: {who}\r\n  Host: {host}\r\n  Date: {ts}\r\n")
                 await self.session.write("─" * _w + "\r\n")
                 await self._page_lines(
@@ -1171,7 +1172,7 @@ class BBSMenuUI:
             status = req.status
             packet_id = req.packet_id
             bbs_name = req.bbs_name
-            date_str = req.created_at.strftime('%Y-%m-%d') if req.created_at else '?'
+            date_str = fmt_eastern(req.created_at, '%Y-%m-%d', '?')
             generated_password = req.generated_password
             deny_reason = req.deny_reason
 
@@ -1268,7 +1269,7 @@ class BBSMenuUI:
 
         def render_row_msg(idx, row, selected):
             _, subj, who, _, when, _ = row
-            ts = when.strftime('%m-%d') if when else '  ?  '
+            ts = fmt_eastern(when, '%m-%d', '  ?  ')
             s_col = FG['wht'] if not selected else ''
             return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
                     f"{s_col}{(subj or '(no subject)')[:COL_SUBJ]:<{COL_SUBJ}}{RESET} "
@@ -1292,7 +1293,7 @@ class BBSMenuUI:
             elif result[0] == 'enter':
                 last_sel = result[1]
                 _, subj, frm, to, when, body = m_list[last_sel]
-                ts = when.strftime('%Y-%m-%d %H:%M') if when else '?'
+                ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
                 # Strip SAUCE record: 0x1A marks end of ANSI art content.
                 body = (body or '')
                 _sa = body.find('\x1a')
@@ -1718,7 +1719,7 @@ class BBSMenuUI:
         if date and hasattr(date, 'strftime'):
             await self.session.write(
                 f"  {FG['yel']}Date:{RESET} "
-                f"{FG['wht']}{date.strftime('%Y-%m-%d')}{RESET}\r\n")
+                f"{FG['wht']}{fmt_eastern(date, '%Y-%m-%d')}{RESET}\r\n")
 
         if desc:
             await self.session.write('\r\n')
@@ -2773,7 +2774,7 @@ class BBSMenuUI:
 
             def render_row_items(idx, row, selected):
                 iid, title, ts, is_unread = row
-                ts_s  = ts.strftime('%m-%d') if ts else '  ?  '
+                ts_s  = fmt_eastern(ts, '%m-%d', '  ?  ')
                 mark  = f"{FG['yel']}*{RESET}" if is_unread else ' '
                 tcol  = FG['wht'] if is_unread else FG['gry']
                 n_col = f"{FG['grn']}{idx+1:>3}{RESET}"
@@ -2839,8 +2840,7 @@ class BBSMenuUI:
             title     = self._sanitize_cp437(item.title or '(no title)')
             link      = item.link or ''
             author    = self._sanitize_cp437(item.author or '')
-            pub_str   = (item.published_at.strftime('%Y-%m-%d %H:%M UTC')
-                         if item.published_at else '')
+            pub_str   = (fmt_eastern(item.published_at, '%Y-%m-%d %H:%M %Z', ''))
             image_url = item.image_url or ''
             feed_name = self._sanitize_cp437(item.feed.name)
             domain    = app.config.get('BBS_DOMAIN', '')
@@ -3054,7 +3054,7 @@ class BBSMenuUI:
 
             def render_row_river(idx, row, selected):
                 iid, title, feed_name, ts, is_unread = row
-                ts_s  = ts.strftime('%m-%d') if ts else '  ?  '
+                ts_s  = fmt_eastern(ts, '%m-%d', '  ?  ')
                 mark  = f"{FG['yel']}*{RESET}" if is_unread else ' '
                 tcol  = FG['wht'] if is_unread else FG['gry']
                 n_col = f"{FG['grn']}{idx+1:>3}{RESET}"
@@ -3492,8 +3492,8 @@ class BBSMenuUI:
                 ('Username', u.username),
                 ('Display name', u.display_name or '-'),
                 ('Email', u.email or '-'),
-                ('Joined', u.created_at.strftime('%Y-%m-%d') if u.created_at else '?'),
-                ('Last login', u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'never'),
+                ('Joined', fmt_eastern(u.created_at, '%Y-%m-%d', '?')),
+                ('Last login', fmt_eastern(u.last_login, '%Y-%m-%d %H:%M', 'never')),
                 ('Login count', str(u.login_count or 0)),
                 ('Admin', 'yes' if u.is_admin else 'no'),
                 ('Location', u.location or '-'),
@@ -4155,7 +4155,7 @@ async def _list_threads_v2(self, board_id, board_name):
         if not t_list:
             await self.session.write(f"  {FG['gry']}(no threads yet){RESET}\r\n")
         for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
-            ts = when.strftime('%m-%d %H:%M') if when else '?'
+            ts = fmt_eastern(when, '%m-%d %H:%M', '?')
             rep = f"[{n_replies}]" if n_replies else "   "
             await self.session.write(
                 f"  {FG['yel']}{BOLD}{i:2d}{RESET}"
@@ -4216,7 +4216,7 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
     col_w = ui_width(self.session)
     lines = []
     for i, p in enumerate(rendered):
-        ts = p['when'].strftime('%Y-%m-%d %H:%M') if p['when'] else '?'
+        ts = fmt_eastern(p['when'], '%Y-%m-%d %H:%M', '?')
         tag = '[OP]' if i == 0 else f'[Reply {i}]'
         lines.append(f'\x1b[36m{tag} \x1b[0m{p["subject"] or "(no subject)"}')
         lines.append(f'\x1b[36mFrom:\x1b[0m {p["author"]}    \x1b[36mDate:\x1b[0m {ts}')
@@ -4310,7 +4310,7 @@ async def _sysop_users(self):
         with _app().app_context():
             users = User.query.order_by(User.id).all()
             u_list = [(u.id, u.username, u.email or '-', u.is_active, u.is_admin,
-                       u.last_login.strftime('%Y-%m-%d') if u.last_login else 'never',
+                       fmt_eastern(u.last_login, '%Y-%m-%d', 'never'),
                        u.login_count or 0) for u in users]
         _w = ui_width(self.session)
         if not await write_menu_art(self.session, 'sysop_users'):
@@ -4495,7 +4495,7 @@ async def _sysop_bulletins(self):
     def render_row(idx, row, selected):
         bid, title, pinned, created, expires = row
         pin = f"{FG['yel']}PIN{RESET}" if pinned else '   '
-        ts = created.strftime('%Y-%m-%d') if created else '?'
+        ts = fmt_eastern(created, '%Y-%m-%d', '?')
         return f"  {pin} {FG['wht']}{bid:>4}{RESET}  {ts}  {FG['grn']}{title[:50]}{RESET}"
 
     def render_hint_extra(sel, total):
@@ -4800,7 +4800,7 @@ async def _sysop_games(self):
 
     def render_row(idx, row, selected):
         sid, gname, uid, node, started = row
-        ts = started.strftime('%H:%M') if started else '?'
+        ts = fmt_eastern(started, '%H:%M', '?')
         return (f"  {FG['wht']}{sid:>4}{RESET}  {FG['grn']}{gname[:24]:<24}{RESET} "
                 f"node {FG['cyan']}{node}{RESET}  since {FG['dim']}{ts}{RESET}")
 
@@ -5557,7 +5557,7 @@ async def _sysop_pages(self):
     def render_row(idx, row, selected):
         pid, uid, service, msg, answered, created = row
         mark = f"{FG['dim']}done{RESET}" if answered else f"{FG['yel']}NEW{RESET}"
-        ts = created.strftime('%m-%d %H:%M') if created else '?'
+        ts = fmt_eastern(created, '%m-%d %H:%M', '?')
         clean = (msg or '').replace('\n', ' ')
         return f"  [{mark}] {FG['wht']}{pid:>4}{RESET}  {ts}  {FG['grn']}{clean[:40]}{RESET}"
 
@@ -5771,7 +5771,7 @@ async def _sysop_callers(self):
 
     def render_row(idx, row, selected):
         cid, uname, service, started, origin = row
-        ts = started.strftime('%m-%d %H:%M') if started else '?'
+        ts = fmt_eastern(started, '%m-%d %H:%M', '?')
         tag = f" {FG['cyan']}[{origin}]{RESET}" if origin else ''
         return f"  {FG['dim']}{ts}{RESET}  {FG['grn']}{uname[:18]:<18}{RESET} {FG['gry']}{service}{RESET}{tag}"
 

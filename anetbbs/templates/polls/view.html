@@ -7,7 +7,7 @@
     <h1><i class="bi bi-bar-chart-fill"></i> {{ poll.question }}</h1>
     {% if poll.description %}<p>{{ poll.description }}</p>{% endif %}
     <p class="text-muted small">
-        by {{ poll.creator.username }} on {{ poll.created_at.strftime('%Y-%m-%d') }}
+        by {{ poll.creator.username }} on {{ poll.created_at|eastern('%Y-%m-%d') }}
         {% if not poll.is_active %}<span class="badge bg-secondary">closed</span>{% endif %}
     </p>
 </div>

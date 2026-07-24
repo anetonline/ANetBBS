@@ -77,7 +77,7 @@
               <small class="text-muted">
                 {% if feed.last_fetched_at %}
                   <i class="bi bi-clock"></i>
-                  {{ feed.last_fetched_at.strftime('%m-%d %H:%M') }}
+                  {{ feed.last_fetched_at|eastern('%m-%d %H:%M') }}
                 {% endif %}
                 {% if feed.last_error %}
                   <span class="text-danger ms-1" title="{{ feed.last_error }}">

@@ -19,7 +19,7 @@
             <tbody>
             {% for p in rows %}
                 <tr {% if not p.answered %}class="table-warning"{% endif %}>
-                    <td><code>{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td><code>{{ p.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</code></td>
                     <td>
                         {% if p.user %}
                             <a href="{{ url_for('admin.edit_user', user_id=p.user.id) }}">
@@ -33,7 +33,7 @@
                         {% if p.answered %}
                             <span class="badge bg-success">answered</span>
                             {% if p.answered_at %}
-                                <small class="text-muted">{{ p.answered_at.strftime('%H:%M') }}</small>
+                                <small class="text-muted">{{ p.answered_at|eastern('%H:%M') }}</small>
                             {% endif %}
                         {% else %}
                             <span class="badge bg-warning text-dark">pending</span>

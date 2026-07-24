@@ -141,7 +141,7 @@
                 {% for c in recent_callers %}
                 <li class="list-group-item py-1">
                     {{ c.username if c.username else '?' }}
-                    <small class="text-muted">{{ c.started_at.strftime('%m-%d %H:%M') }}</small>
+                    <small class="text-muted">{{ c.started_at|eastern('%m-%d %H:%M') }}</small>
                 </li>
                 {% else %}
                 <li class="list-group-item py-1 text-muted">No callers logged.</li>
@@ -233,7 +233,7 @@
               <td><strong>{{ ev.name }}</strong></td>
               <td><code class="small">{{ ev.handler_key }}</code></td>
               <td>
-                <span class="small">{{ ev.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+                <span class="small">{{ ev.last_run_at|eastern('%Y-%m-%d %H:%M %Z') }}</span>
                 <span class="text-muted small">({{ ev.relative_age }})</span>
               </td>
               <td>
@@ -273,7 +273,7 @@
                                 {% if user.is_admin %}<span class="badge bg-warning text-dark">Admin</span>{% endif %}
                             </td>
                             <td>{{ user.email }}</td>
-                            <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ user.created_at|eastern('%Y-%m-%d') }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -293,7 +293,7 @@
                         {% for user in recent_logins %}
                         <tr>
                             <td><a href="{{ url_for('admin.edit_user', user_id=user.id) }}">{{ user.username }}</a></td>
-                            <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login }}</td>
+                            <td>{{ user.last_login|eastern('%Y-%m-%d %H:%M') }}</td>
                             <td>{{ user.login_count }}</td>
                         </tr>
                         {% endfor %}

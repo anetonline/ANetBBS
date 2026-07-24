@@ -4,7 +4,7 @@
 {% block content %}
 <div class="bbs-header">
     <h1><i class="bi bi-file-text"></i> BinkP Session Transcript</h1>
-    <p>{{ log.network.name }} — {{ log.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+    <p>{{ log.network.name }} — {{ log.started_at|eastern('%Y-%m-%d %H:%M:%S') }}
        {% if log.status == 'success' %}<span style="color:#00ff00;">✓ success</span>
        {% elif log.status == 'error' %}<span style="color:#ff0000;">✗ error</span>
        {% else %}<span style="color:#ffff00;">~ {{ log.status }}</span>{% endif %}

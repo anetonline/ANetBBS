@@ -94,7 +94,7 @@
                 {% for log in recent_logs %}
                 <tr>
                     <td>{{ log.network.name }}</td>
-                    <td style="font-size:0.85rem;">{{ log.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td style="font-size:0.85rem;">{{ log.started_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td>{{ log.poll_type }}</td>
                     <td>
                         {% if log.status == 'success' %}<span style="color:#00ff00;">✓ success</span>

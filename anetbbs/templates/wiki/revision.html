@@ -7,7 +7,7 @@
     <i class="bi bi-clock-history"></i>
     Viewing revision <strong>r{{ rev.rev_num }}</strong> of
     <a href="{{ url_for('wiki.view', slug=page.slug) }}">{{ page.title }}</a>
-    — saved {{ rev.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+    — saved {{ rev.created_at|eastern('%Y-%m-%d %H:%M %Z') }}
     {% if rev.author %}by <a href="{{ url_for('profile.view_user', username=rev.author.username) }}">{{ rev.author.username }}</a>{% endif %}.
     {% if rev.edit_summary %}<br><em>“{{ rev.edit_summary }}”</em>{% endif %}
     <br>

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from .tz import fmt_eastern
 from typing import Dict, Optional, Any
 
 _ANSI_ESC_RE   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
@@ -1507,7 +1508,7 @@ class BBSSession:
             return ""
 
     def get_formatted_time(self) -> str:
-        return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        return fmt_eastern(datetime.utcnow(), '%Y-%m-%d %H:%M:%S %Z')
 
     async def clear_screen(self):
         """Clear the screen and move cursor to home position. ``self.write``
@@ -1611,7 +1612,7 @@ class BBSSession:
                 return
             await self.write('\r\n\x1b[1;33m=== Sysop Broadcasts ===\x1b[0m\r\n')
             for b in reversed(recents):  # oldest first
-                ts = b.created_at.strftime('%m/%d %H:%M')
+                ts = fmt_eastern(b.created_at, '%m/%d %H:%M')
                 sender = b.sender.username if b.sender else 'sysop'
                 await self.write(
                     f'\x1b[33m[{ts}] {sender}:\x1b[0m {b.text}\r\n')

@@ -42,7 +42,7 @@
             <td>{{ counts[feed.id] }}</td>
             <td>
                 {% if feed.last_fetched_at %}
-                <small>{{ feed.last_fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+                <small>{{ feed.last_fetched_at|eastern('%Y-%m-%d %H:%M %Z') }}</small>
                 {% else %}
                 <small class="text-muted">never</small>
                 {% endif %}

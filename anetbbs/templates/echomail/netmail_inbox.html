@@ -41,7 +41,7 @@
                             <td><a href="{{ url_for('echomail.read', area_id=nm.area.id, message_id=m.id) }}">{{ m.from_name }}</a></td>
                             <td>{{ m.to_name }}{% if m.to_address %} &lt;{{ m.to_address }}&gt;{% endif %}</td>
                             <td>{{ m.subject }}</td>
-                            <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ m.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                             <td>
                                 {% if m.direction == 'netmail' %}
                                     {% if m.sent_at %}

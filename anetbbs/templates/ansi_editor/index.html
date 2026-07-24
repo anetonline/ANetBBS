@@ -34,7 +34,7 @@
                         <code class="text-muted ms-2 small">{{ a.slug }}</code>
                     </td>
                     <td>{{ a.width }}×{{ a.height }}</td>
-                    <td><small>{{ a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '—' }}</small></td>
+                    <td><small>{{ a.updated_at|eastern('%Y-%m-%d %H:%M', '—') }}</small></td>
                     <td>{{ a.created_by.username if a.created_by else '?' }}</td>
                     <td>
                         <a href="{{ url_for('ansi_editor.edit', art_id=a.id) }}" class="btn btn-sm btn-outline-primary">edit</a>

@@ -10,6 +10,7 @@ fresh install still works without a sysop having to set up menus).
 import asyncio
 import logging
 from .bbs_ui import BBSMenuUI, _app
+from ..core.tz import fmt_eastern
 
 logger = logging.getLogger(__name__)
 
@@ -849,7 +850,7 @@ async def _act_oneliners(ui, args):
     for u, p, w in callers:
         await sess.write(
             f"  \x1b[1;33m{u:<20}\x1b[0m \x1b[1;30m{p:<8}\x1b[0m "
-            f"{w.strftime('%m-%d %H:%M')}\r\n")
+            f"{fmt_eastern(w, '%m-%d %H:%M')}\r\n")
     await sess.write("\r\n\x1b[1;36m=== Recent One-Liners ===\x1b[0m\r\n")
     if not ol:
         await sess.write("  (none yet)\r\n")

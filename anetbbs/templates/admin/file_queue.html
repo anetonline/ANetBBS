@@ -31,7 +31,7 @@
     <tbody>
     {% for e in entries %}
     <tr>
-        <td><small>{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+        <td><small>{{ e.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
         <td>{{ e.user.username if e.user else '?' }}</td>
         <td><code>{{ e.file_area.tag if e.file_area else '?' }}</code></td>
         <td><strong>{{ e.filename }}</strong></td>

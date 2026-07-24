@@ -25,7 +25,7 @@
                     <strong>{{ r.user.username if r.user else '?' }}</strong>:
                     {{ r.text }}
                 </span>
-                <small class="text-muted">{{ r.created_at.strftime('%m-%d %H:%M') }}</small>
+                <small class="text-muted">{{ r.created_at|eastern('%m-%d %H:%M') }}</small>
             </li>
         {% else %}
             <li class="list-group-item text-muted">No one-liners yet.</li>
@@ -42,7 +42,7 @@
             <li class="list-group-item">
                 <strong>{{ c.username or '?' }}</strong>
                 <span class="badge bg-secondary ms-1">{{ c.service or '?' }}</span>
-                <small class="text-muted ms-2">{{ c.started_at.strftime('%m-%d %H:%M') }}</small>
+                <small class="text-muted ms-2">{{ c.started_at|eastern('%m-%d %H:%M') }}</small>
             </li>
         {% else %}
             <li class="list-group-item text-muted">No callers logged.</li>

@@ -61,7 +61,7 @@
         <table class="table msg-meta mb-3" style="font-size:0.9rem;">
             <tr><th>From:</th><td>{{ msg.from_name or '' }}{% if msg.from_address %} &lt;{{ msg.from_address }}&gt;{% endif %}</td></tr>
             <tr><th>To:</th><td>{{ msg.to_name or 'All' }}{% if msg.to_address %} &lt;{{ msg.to_address }}&gt;{% endif %}</td></tr>
-            <tr><th>Date:</th><td>{{ msg.created_at.strftime('%a, %d %b %Y %H:%M UTC') }}</td></tr>
+            <tr><th>Date:</th><td>{{ msg.created_at|eastern('%a, %d %b %Y %H:%M %Z') }}</td></tr>
             <tr><th>Area:</th><td><a href="{{ url_for('echomail.area', area_id=echo_area.id) }}">{{ echo_area.name }}</a> ({{ echo_area.tag }})</td></tr>
             <tr><th>Network:</th><td>{{ echo_area.network.name }}</td></tr>
         </table>
@@ -100,7 +100,7 @@
         <span style="font-size:0.8rem; color:#00cc00;">
             <i class="bi bi-arrow-{{ 'down' if msg.direction == 'inbound' else 'up' }}-circle"></i>
             {{ msg.direction|capitalize }}
-            {% if msg.imported_at %} — received {{ msg.imported_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+            {% if msg.imported_at %} — received {{ msg.imported_at|eastern('%Y-%m-%d %H:%M') }}{% endif %}
         </span>
         <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=msg.id) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-reply"></i> Reply

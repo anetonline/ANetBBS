@@ -26,7 +26,7 @@
         <div class="border-bottom p-2">
             <div class="d-flex justify-content-between">
                 <strong>{{ n.author.username if n.author else '?' }}</strong>
-                <small class="text-muted">{{ n.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                <small class="text-muted">{{ n.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</small>
             </div>
             <pre style="white-space:pre-wrap;font-family:inherit;margin:4px 0 0 0;">{{ n.note }}</pre>
             <form method="post" style="display:inline;">

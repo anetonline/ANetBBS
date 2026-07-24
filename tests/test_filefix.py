@@ -112,17 +112,21 @@ class FilefixTests(unittest.TestCase):
             self.assertEqual(log_kwargs['request_type'], 'query')
 
     def test_hub_side_subscribe_creates_file_echo_subscription_not_echoareanode(self):
-        from anetbbs.models import db, FileArea, FileEchoSubscription, EchoAreaNode
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription, EchoAreaNode
         from anetbbs.echomail.filefix import _process_node_request
 
         with self.app.app_context():
-            area = FileArea(tag='FF.HUBTEST', name='Hub Test',
+            net = EchomailNetwork(name='FilefixHubTestNet', network_type='binkp',
+                                  our_address='2:2/1')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.HUBTEST', name='Hub Test', network_id=net.id,
                             is_active=True, is_subscribed=True)
             db.session.add(area)
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                '2:2/2', '2:2/2', 'testpw123', '+FF.HUBTEST\n', 'testpw123')
+                '2:2/2', '2:2/2', 'testpw123', '+FF.HUBTEST\n', 'testpw123', net.id)
 
             self.assertIn('+FF.HUBTEST : subscribed', response)
             sub = FileEchoSubscription.query.filter_by(
@@ -134,11 +138,15 @@ class FilefixTests(unittest.TestCase):
             self.assertEqual(EchoAreaNode.query.count(), 0)
 
     def test_hub_side_unsubscribe_removes_row(self):
-        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
         from anetbbs.echomail.filefix import _process_node_request
 
         with self.app.app_context():
-            area = FileArea(tag='FF.HUBUNSUB', name='Hub Unsub',
+            net = EchomailNetwork(name='FilefixHubUnsubNet', network_type='binkp',
+                                  our_address='3:3/1')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.HUBUNSUB', name='Hub Unsub', network_id=net.id,
                             is_active=True, is_subscribed=True)
             db.session.add(area)
             db.session.flush()
@@ -147,7 +155,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, _ = _process_node_request(
-                '3:3/3', '3:3/3', 'testpw123', '-FF.HUBUNSUB\n', 'testpw123')
+                '3:3/3', '3:3/3', 'testpw123', '-FF.HUBUNSUB\n', 'testpw123', net.id)
             self.assertIn('-FF.HUBUNSUB : unsubscribed', response)
             self.assertIsNone(FileEchoSubscription.query.filter_by(
                 file_area_id=area.id, peer_address='3:3/3').first())
@@ -197,10 +205,11 @@ class FilefixTests(unittest.TestCase):
             net = EchomailNetwork(name='FilefixE2EHub', network_type='binkp',
                                   our_address='4:4/1')
             db.session.add(net)
+            db.session.flush()
             node = BinkPNode(name='Downstream', ftn_address='4:4/2',
-                             password='x', is_active=True)
+                             password='x', is_active=True, network_id=net.id)
             db.session.add(node)
-            area = FileArea(tag='FF.E2EHUB', name='E2E Hub',
+            area = FileArea(tag='FF.E2EHUB', name='E2E Hub', network_id=net.id,
                             is_active=True, is_subscribed=True)
             db.session.add(area)
             db.session.flush()
@@ -303,7 +312,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                '5:5/5', '5:5/5', 'wrongpassword', '+FF.HUBPW\n', 'realpassword')
+                '5:5/5', '5:5/5', 'wrongpassword', '+FF.HUBPW\n', 'realpassword', None)
 
             self.assertFalse(log_kwargs['success'])
             self.assertEqual(log_kwargs['request_type'], 'badpw')
@@ -352,17 +361,21 @@ class FilefixTests(unittest.TestCase):
         """Same fix as areafix.py's hub side, identical rationale: a
         sysop-only file area must not be subscribable via a plain +TAG
         from any downstream node."""
-        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
         from anetbbs.echomail.filefix import _process_node_request
 
         with self.app.app_context():
-            area = FileArea(tag='FF.SYSOPONLY', name='Sysop Only',
+            net = EchomailNetwork(name='FilefixSysopOnlyNet', network_type='binkp',
+                                  our_address='3:3/1b')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.SYSOPONLY', name='Sysop Only', network_id=net.id,
                             is_active=True, is_subscribed=True, is_sysop_only=True)
             db.session.add(area)
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                '3:3/2', '3:3/2', '', '+FF.SYSOPONLY\n', '')
+                '3:3/2', '3:3/2', '', '+FF.SYSOPONLY\n', '', net.id)
 
             self.assertNotIn('subscribed', response)
             sub = FileEchoSubscription.query.filter_by(
@@ -370,26 +383,107 @@ class FilefixTests(unittest.TestCase):
             self.assertIsNone(sub)
 
     def test_hub_side_plus_all_excludes_sysop_only_areas(self):
-        from anetbbs.models import db, FileArea, FileEchoSubscription
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
         from anetbbs.echomail.filefix import _process_node_request
 
         with self.app.app_context():
-            public_area = FileArea(tag='FF.PUBLIC', name='Public',
+            net = EchomailNetwork(name='FilefixPlusAllNet', network_type='binkp',
+                                  our_address='3:4/1')
+            db.session.add(net)
+            db.session.flush()
+            public_area = FileArea(tag='FF.PUBLIC', name='Public', network_id=net.id,
                                    is_active=True, is_subscribed=True,
                                    is_sysop_only=False)
-            sysop_area = FileArea(tag='FF.INTERNAL', name='Internal',
+            sysop_area = FileArea(tag='FF.INTERNAL', name='Internal', network_id=net.id,
                                   is_active=True, is_subscribed=True,
                                   is_sysop_only=True)
             db.session.add_all([public_area, sysop_area])
             db.session.commit()
 
-            _process_node_request('3:4/2', '3:4/2', 'testpw123', '+ALL\n', 'testpw123')
+            _process_node_request('3:4/2', '3:4/2', 'testpw123', '+ALL\n', 'testpw123', net.id)
 
             self.assertIsNotNone(FileEchoSubscription.query.filter_by(
                 file_area_id=public_area.id, peer_address='3:4/2').first())
             self.assertIsNone(FileEchoSubscription.query.filter_by(
                 file_area_id=sysop_area.id, peer_address='3:4/2').first(),
                 '+ALL must never sweep in a sysop-only file area')
+
+    def test_hub_side_plus_all_never_subscribes_areas_from_other_networks(self):
+        """Real bug reported live, same class as areafix's: a downstream
+        node's +ALL subscribed it to file areas from EVERY network this
+        hub relays, not just the one it's actually a member of."""
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            own_net = EchomailNetwork(name='FilefixCrossNetOwn', network_type='binkp',
+                                      our_address='9:1/1')
+            other_net = EchomailNetwork(name='FilefixCrossNetOther', network_type='binkp',
+                                        our_address='9:2/1')
+            db.session.add_all([own_net, other_net])
+            db.session.flush()
+            own_area = FileArea(tag='FF.OWNNET', name='Own Net', network_id=own_net.id,
+                                is_active=True, is_subscribed=True)
+            other_area = FileArea(tag='FF.OTHERNET', name='Other Net', network_id=other_net.id,
+                                  is_active=True, is_subscribed=True)
+            db.session.add_all([own_area, other_area])
+            db.session.commit()
+
+            _process_node_request('9:1/2', '9:1/2', 'testpw123', '+ALL\n',
+                                  'testpw123', own_net.id)
+
+            self.assertIsNotNone(FileEchoSubscription.query.filter_by(
+                file_area_id=own_area.id, peer_address='9:1/2').first())
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=other_area.id, peer_address='9:1/2').first(),
+                "+ALL must never subscribe a node to a DIFFERENT network's file areas")
+
+    def test_hub_side_plus_tag_rejects_file_area_from_other_network(self):
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            own_net = EchomailNetwork(name='FilefixCrossTagOwn', network_type='binkp',
+                                      our_address='9:3/1')
+            other_net = EchomailNetwork(name='FilefixCrossTagOther', network_type='binkp',
+                                        our_address='9:4/1')
+            db.session.add_all([own_net, other_net])
+            db.session.flush()
+            other_area = FileArea(tag='FF.FOREIGNTAG', name='Foreign', network_id=other_net.id,
+                                  is_active=True, is_subscribed=True)
+            db.session.add(other_area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                '9:3/2', '9:3/2', 'testpw123', '+FF.FOREIGNTAG\n',
+                'testpw123', own_net.id)
+
+            self.assertNotIn('FF.FOREIGNTAG : subscribed', response)
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=other_area.id, peer_address='9:3/2').first())
+
+    def test_hub_side_unset_network_id_fails_closed_not_open(self):
+        """network_id=None (legacy row / lookup failure) must see ZERO
+        available file areas, never fall back to 'show everything'."""
+        from anetbbs.models import db, EchomailNetwork, FileArea, FileEchoSubscription
+        from anetbbs.echomail.filefix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixUnsetNetIdNet', network_type='binkp',
+                                  our_address='9:5/1')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.NONETID', name='No Net Id', network_id=net.id,
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = _process_node_request(
+                '9:5/2', '9:5/2', 'testpw123', '+ALL\n', 'testpw123', None)
+
+            self.assertIn('subscribed to 0 file areas', response)
+            self.assertIsNone(FileEchoSubscription.query.filter_by(
+                file_area_id=area.id, peer_address='9:5/2').first())
 
     def test_areafix_log_bot_column_defaults_to_areafix(self):
         """Pre-existing rows (all message-echo requests, from before this

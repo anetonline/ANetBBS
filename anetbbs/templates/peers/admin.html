@@ -132,7 +132,7 @@
           <td><strong>{{ s.label }}</strong></td>
           <td>{{ s.count }}</td>
           <td><small class="text-muted">
-            {{ s.last_updated.strftime('%Y-%m-%d %H:%M') if s.last_updated else 'Never' }}
+            {{ s.last_updated|eastern('%Y-%m-%d %H:%M', 'Never') }}
           </small></td>
           <td>
             <form method="post" class="d-inline">

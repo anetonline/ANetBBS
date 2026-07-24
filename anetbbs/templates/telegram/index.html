@@ -40,7 +40,7 @@
                         {{ m.body[:120] }}{% if m.body|length > 120 %}…{% endif %}
                         {% if m.is_crash %}<span class="badge bg-warning text-dark">CRASH</span>{% endif %}
                     </td>
-                    <td><small>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                    <td><small>{{ m.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
                 </tr>
             {% endfor %}
             </tbody>

@@ -22,7 +22,7 @@
         {% for p in results %}
             <li class="list-group-item">
                 <a href="{{ url_for('wiki.view', slug=p.slug) }}"><strong>{{ p.title }}</strong></a>
-                <small class="text-muted">— {{ p.updated_at.strftime('%Y-%m-%d') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
+                <small class="text-muted">— {{ p.updated_at|eastern('%Y-%m-%d') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
                 {% if p.summary %}<br><small class="text-muted">{{ p.summary }}</small>{% endif %}
             </li>
         {% endfor %}

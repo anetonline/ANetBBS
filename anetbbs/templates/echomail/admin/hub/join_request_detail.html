@@ -5,7 +5,7 @@
 <div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-file-earmark-person"></i> {{ req.bbs_name }}</h1>
-        <p>Applied {{ req.created_at.strftime('%Y-%m-%d %H:%M UTC') if req.created_at else '?' }}
+        <p>Applied {{ req.created_at|eastern('%Y-%m-%d %H:%M %Z', '?') }}
            {% if req.status == 'pending' %}<span class="badge bg-warning text-dark">pending</span>
            {% elif req.status == 'approved' %}<span class="badge bg-success">approved</span>
            {% else %}<span class="badge bg-danger">denied</span>{% endif %}
@@ -90,7 +90,7 @@
           <tr><th>IP Address</th><td class="font-monospace">{{ req.ip_address or '—' }}</td></tr>
           <tr><th>User Agent</th><td class="small">{{ req.user_agent or '—' }}</td></tr>
           {% if req.status != 'pending' %}
-          <tr><th>Reviewed</th><td>{{ req.reviewed_at.strftime('%Y-%m-%d %H:%M UTC') if req.reviewed_at else '?' }} by {{ req.reviewed_by or '—' }}</td></tr>
+          <tr><th>Reviewed</th><td>{{ req.reviewed_at|eastern('%Y-%m-%d %H:%M %Z', '?') }} by {{ req.reviewed_by or '—' }}</td></tr>
           {% if req.status == 'denied' %}
           <tr><th>Deny Reason</th><td>{{ req.deny_reason or '—' }}</td></tr>
           {% endif %}

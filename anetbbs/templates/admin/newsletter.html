@@ -29,7 +29,7 @@
     <tbody>
     {% for n in history %}
     <tr>
-        <td><small>{{ n.sent_at.strftime('%Y-%m-%d %H:%M') if n.sent_at else 'draft' }}</small></td>
+        <td><small>{{ n.sent_at|eastern('%Y-%m-%d %H:%M', 'draft') }}</small></td>
         <td>{{ n.subject }}</td>
         <td>{{ n.recipients_count }}</td>
         <td><small>{{ n.sent_by.username if n.sent_by else '?' }}</small></td>

@@ -42,7 +42,7 @@
                         {% endif %}
                     </td>
                     <td style="font-size:0.85rem;">
-                        {{ net.last_poll_at.strftime('%Y-%m-%d %H:%M') if net.last_poll_at else 'Never' }}
+                        {{ net.last_poll_at|eastern('%Y-%m-%d %H:%M', 'Never') }}
                     </td>
                     <td>{{ net.poll_interval_minutes or 60 }}m</td>
                     <td>

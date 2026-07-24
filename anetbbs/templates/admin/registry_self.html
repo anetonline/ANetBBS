@@ -51,10 +51,10 @@
                     <p class="text-muted">We have not yet contacted the hub. The daemon registers automatically on next tick; click below to force it now.</p>
                 {% else %}
                     {% if state.last_register_at %}
-                        <p class="small mb-1"><strong>Last register:</strong> <code>{{ state.last_register_at }}</code></p>
+                        <p class="small mb-1"><strong>Last register:</strong> <code>{{ state.last_register_at|eastern('%Y-%m-%d %H:%M:%S %Z') }}</code></p>
                     {% endif %}
                     {% if state.last_heartbeat_at %}
-                        <p class="small mb-1"><strong>Last heartbeat:</strong> <code>{{ state.last_heartbeat_at }}</code></p>
+                        <p class="small mb-1"><strong>Last heartbeat:</strong> <code>{{ state.last_heartbeat_at|eastern('%Y-%m-%d %H:%M:%S %Z') }}</code></p>
                     {% endif %}
                     {% set resp = state.last_response or {} %}
                     {% if resp.status %}

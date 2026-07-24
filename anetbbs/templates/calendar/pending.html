@@ -18,12 +18,12 @@
     <div class="d-flex justify-content-between align-items-start">
         <div>
             <strong>{{ e.title }}</strong>
-            <span class="text-muted ms-2 small">{{ e.starts_at.strftime('%a %Y-%m-%d %H:%M UTC') }}</span>
-            {% if e.ends_at %}<span class="text-muted small"> – {{ e.ends_at.strftime('%H:%M UTC') }}</span>{% endif %}
+            <span class="text-muted ms-2 small">{{ e.starts_at|eastern('%a %Y-%m-%d %H:%M %Z') }}</span>
+            {% if e.ends_at %}<span class="text-muted small"> – {{ e.ends_at|eastern('%H:%M %Z') }}</span>{% endif %}
             {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
             <div class="text-muted small mt-1">
                 Submitted by <strong>{{ e.created_by.username }}</strong>
-                on {{ e.created_at.strftime('%Y-%m-%d %H:%M') }}
+                on {{ e.created_at|eastern('%Y-%m-%d %H:%M') }}
             </div>
             {% if e.description %}<div class="small mt-1">{{ e.description }}</div>{% endif %}
         </div>

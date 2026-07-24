@@ -12,6 +12,7 @@ Can optionally show entries imported via InterBBS Last Callers sharing
 (anetbbs/echomail/interbbs_sync.py) tagged with their origin BBS name.
 """
 from .bbs_ui import _app
+from ..core.tz import fmt_eastern
 
 PAGE_SIZE = 20
 
@@ -68,7 +69,7 @@ async def show_last_callers(session, args=None):
 
     lines = ["\x1b[1;36m=== Last Callers ===\x1b[0m"]
     for username, service, started_at, origin_bbs in rows:
-        when = started_at.strftime('%m-%d %H:%M') if started_at else '?'
+        when = fmt_eastern(started_at, '%m-%d %H:%M', '?')
         origin_tag = f" \x1b[36m(via {origin_bbs})\x1b[0m" if origin_bbs else ""
         lines.append(
             f"  \x1b[1;33m{username:<20}\x1b[0m \x1b[1;30m{service:<8}\x1b[0m "

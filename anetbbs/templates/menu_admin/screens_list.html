@@ -52,7 +52,7 @@
         <td>{{ r.title or '' }}</td>
         <td>{% if r.is_active %}<i class="bi bi-check-lg text-success"></i>{% else %}<i class="bi bi-x text-muted"></i>{% endif %}</td>
         <td>{% if r.pause_after %}<span class="badge bg-warning">wait Enter</span>{% endif %}</td>
-        <td><small>{{ r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else '' }}</small></td>
+        <td><small>{{ r.updated_at|eastern('%Y-%m-%d %H:%M', '') }}</small></td>
         <td>
             <a href="{{ url_for('menu_admin.edit_screen', screen_id=r.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i></a>
             <form method="post" action="{{ url_for('menu_admin.delete_screen', screen_id=r.id) }}" class="d-inline" onsubmit="return confirm('Delete this screen?');">

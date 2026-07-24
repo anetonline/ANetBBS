@@ -275,9 +275,10 @@ def _local_releases(cfg):
     cur = _parse_version(VERSION)
     if cur:
         rows = [r for r in rows if r['parsed'] < cur]
+    from ..core.tz import fmt_eastern
     for r in rows:
-        r['mtime_str'] = datetime.utcfromtimestamp(r['mtime']) \
-                                 .strftime('%Y-%m-%d %H:%M UTC')
+        r['mtime_str'] = fmt_eastern(
+            datetime.utcfromtimestamp(r['mtime']), '%Y-%m-%d %H:%M %Z')
     return rows[:3]
 
 

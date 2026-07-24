@@ -106,12 +106,13 @@ def _scan(cfg):
                 st = os.stat(full)
             except OSError:
                 continue
+            from ..core.tz import fmt_eastern
             out.append({
                 'name': name,
                 'size': st.st_size,
                 'mtime': st.st_mtime,
-                'mtime_iso': datetime.utcfromtimestamp(st.st_mtime)
-                                     .strftime('%Y-%m-%d %H:%M UTC'),
+                'mtime_iso': fmt_eastern(
+                    datetime.utcfromtimestamp(st.st_mtime), '%Y-%m-%d %H:%M %Z'),
                 'mime': mimetypes.guess_type(name)[0] or 'application/octet-stream',
             })
     except OSError as exc:

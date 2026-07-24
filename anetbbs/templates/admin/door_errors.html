@@ -76,8 +76,8 @@
         {% for e in entries %}
         <details class="de-entry">
           <summary class="de-summary">
-            <strong>{{ e.ts.split('T')[1].split('.')[0] }}</strong>
-            <span class="de-meta">UTC · {{ e.relative_age }} ·</span>
+            <strong>{{ e.ts|eastern('%H:%M:%S %Z') }}</strong>
+            <span class="de-meta">{{ e.relative_age }} ·</span>
             door <code>{{ e.slug }}</code>
             user <code>{{ e.user }}</code>
             <span class="de-meta">— click to expand</span>

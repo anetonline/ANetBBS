@@ -12,6 +12,7 @@ shoutbox.
 import asyncio
 import logging
 from datetime import datetime
+from ..core.tz import fmt_eastern
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ async def run_chat_session(session):
                         await session.write(
                             f'  Node {n.slot}: {n.username} '
                             f'({n.protocol}) since '
-                            f'{n.connected_at.strftime("%H:%M")}\r\n')
+                            f'{fmt_eastern(n.connected_at, '%H:%M')}\r\n')
                 continue
             if line.startswith('/w '):
                 parts = line[3:].split(None, 1)

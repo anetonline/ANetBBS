@@ -51,7 +51,7 @@
                         </a>
                     </td>
                     <td>{{ '%.1f'|format(f.size / 1024) }} KB</td>
-                    <td>{{ f.mtime.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ f.mtime|eastern('%Y-%m-%d') }}</td>
                     <td>
                         {% if f.description %}
                         {% set short_desc = f.description.split('\n')[0][:120] %}

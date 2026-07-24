@@ -23,7 +23,7 @@
             {% if m == seed %}<span class="badge bg-primary">selected</span>{% endif %}
             {% if m.id == messages[0].id and m._depth == 0 %}<span class="badge bg-success">root</span>{% endif %}
         </span>
-        <span class="text-muted small">{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        <span class="text-muted small">{{ m.created_at|eastern('%Y-%m-%d %H:%M') }}</span>
     </div>
     <div class="card-body py-2">
         <div class="mb-1">

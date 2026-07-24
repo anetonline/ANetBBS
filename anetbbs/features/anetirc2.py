@@ -17,6 +17,7 @@ import asyncio
 import base64
 import datetime
 import os
+from ..core.tz import to_eastern
 import re
 import ssl
 import time
@@ -597,7 +598,12 @@ class _Screen:
         # Word-wrap all lines into display rows
         rows: list[str] = []
         for ln in lines:
-            ts  = datetime.datetime.fromtimestamp(ln.ts).strftime("%H:%M:%S")
+            # fromtimestamp() alone uses the HOST's own OS-local
+            # timezone (whatever that happens to be configured to) --
+            # inconsistent with the rest of the app; go through UTC
+            # explicitly first, then the shared Eastern converter.
+            ts_utc = datetime.datetime.fromtimestamp(ln.ts, tz=datetime.timezone.utc)
+            ts  = to_eastern(ts_utc).strftime("%H:%M:%S")
             pfx = f"[{ts}] * " if ln.status else f"[{ts}] <{ln.nick}> "
             pl  = len(pfx)
             avail = max(col_w - pl, 6)

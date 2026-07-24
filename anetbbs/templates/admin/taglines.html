@@ -38,7 +38,7 @@
                 <tr {% if not t.is_active %}class="text-muted"{% endif %}>
                     <td>{% if t.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
                     <td>{{ t.text }}</td>
-                    <td><small>{{ t.created_at.strftime('%Y-%m-%d') }}</small></td>
+                    <td><small>{{ t.created_at|eastern('%Y-%m-%d') }}</small></td>
                     <td>
                         <form method="post" style="display:inline;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

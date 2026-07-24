@@ -4,8 +4,8 @@
 <div class="bbs-header">
     <h1><i class="bi bi-person-gear"></i> Edit user — {{ user.username }}</h1>
     <p class="small text-muted">
-        Created {{ user.created_at.strftime('%Y-%m-%d') if user.created_at }} ·
-        Last login {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'never' }} ·
+        Created {{ user.created_at|eastern('%Y-%m-%d') }} ·
+        Last login {{ user.last_login|eastern('%Y-%m-%d %H:%M', 'never') }} ·
         {{ user.login_count or 0 }} logins
     </p>
 </div>
@@ -157,7 +157,7 @@
         <li class="list-group-item d-flex justify-content-between">
             <div>
                 <strong>{{ n.author.username if n.author else '?' }}</strong>
-                <small class="text-muted ms-2">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                <small class="text-muted ms-2">{{ n.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
                 <div class="mt-1" style="white-space: pre-wrap;">{{ n.note }}</div>
             </div>
             <form method="post" onsubmit="return confirm('Delete note?');">

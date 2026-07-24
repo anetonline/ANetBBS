@@ -25,7 +25,7 @@
     {% for m in mods %}
     <tr>
         <td><strong>{{ m.user.username if m.user else '?' }}</strong></td>
-        <td><small>{{ m.granted_at.strftime('%Y-%m-%d') }}</small></td>
+        <td><small>{{ m.granted_at|eastern('%Y-%m-%d') }}</small></td>
         <td>
             <form method="post" class="d-inline">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

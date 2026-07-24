@@ -27,10 +27,10 @@
             <dt class="col-sm-3">Stored at</dt>
             <dd class="col-sm-9"><code>{{ tic.stored_path or '(not filed)' }}</code></dd>
             <dt class="col-sm-3">Received</dt>
-            <dd class="col-sm-9">{{ tic.received_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+            <dd class="col-sm-9">{{ tic.received_at|eastern('%Y-%m-%d %H:%M:%S') }}</dd>
             {% if tic.processed_at %}
             <dt class="col-sm-3">Processed</dt>
-            <dd class="col-sm-9">{{ tic.processed_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+            <dd class="col-sm-9">{{ tic.processed_at|eastern('%Y-%m-%d %H:%M:%S') }}</dd>
             {% endif %}
         </dl>
     </div>

@@ -28,7 +28,7 @@
                         {% endif %}
                     </td>
                     <td>{{ it.sender }}</td>
-                    <td>{{ it.row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ it.row.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td><small class="text-muted">{{ it.row.notes or '' }}</small></td>
                     <td>
                         <form method="post" action="{{ url_for('saved.delete', saved_id=it.row.id) }}">

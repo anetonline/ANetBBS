@@ -178,13 +178,20 @@ def process_request(network, from_address, subject, body):
 
 
 def _process_node_request(peer_address, from_address, subject, body,
-                          node_password):
+                          node_password, network_id):
     """Hub side. Unlike areafix's EchoAreaNode (FK-keyed to BinkPNode.id),
     FileEchoSubscription is keyed by a raw peer_address string -- no
     BinkPNode row lookup needed for the subscription row itself, only for
     the leaf-vs-hub routing decision (done by the caller, which is also
     where node_password comes from -- see areafix._process_node_request's
     docstring for why a From: address alone isn't proof of identity).
+
+    network_id is the requesting BinkPNode's own network_id, passed
+    through by the caller (handle_filefix_netmail) for the same reason
+    areafix._process_node_request scopes all_areas by node.network_id --
+    without it a downstream node's +ALL/+TAG pulls in file areas from
+    EVERY network this hub relays, not just its own (identical
+    cross-network leak found live alongside the areafix one).
 
     Returns (reply_body_str, log_kwargs), same shape as process_request().
     """
@@ -213,10 +220,19 @@ def _process_node_request(peer_address, from_address, subject, body,
     # see areafix.py's _process_node_request for the full rationale.
     # isnot(True), not is_(False), for the same NULL-safety reason as
     # LASTCALLERS_HIDE_SYSOP's is_admin check.
+    #
+    # network_id filter: same live cross-network leak as areafix.py's
+    # hub side (see this function's docstring). FileArea.network_id is
+    # itself nullable (NULL == local-only area, never hatched to any
+    # downstream node -- see FileArea's class docstring), so filtering
+    # by network_id == network_id naturally also excludes those via SQL
+    # NULL-comparison semantics, which is the desired behavior. Fail
+    # CLOSED to zero areas if the requesting node's own network_id is
+    # unset, rather than falling back to "show everything".
     all_areas = (FileArea.query
-                .filter_by(is_active=True)
+                .filter_by(is_active=True, network_id=network_id)
                 .filter(FileArea.is_sysop_only.isnot(True))
-                .all())
+                .all()) if network_id is not None else []
     area_map = {a.tag.upper(): a for a in all_areas}
 
     out_lines = [f'FileFix robot (hub) for {peer_address}',
@@ -335,7 +351,7 @@ def handle_filefix_netmail(netmail_id):
     if downstream_node:
         response, log_kwargs = _process_node_request(
             downstream_node.ftn_address, nm.from_address, nm.subject,
-            nm.body, downstream_node.password)
+            nm.body, downstream_node.password, downstream_node.network_id)
     else:
         network = (EchomailNetwork.query.get(nm.network_id)
                    if nm.network_id else None)

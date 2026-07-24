@@ -299,10 +299,20 @@ def _process_node_request(node, from_address, subject, body):
     # read as "not sysop-only", not get excluded by SQL's three-valued
     # NULL logic (same defensive pattern as LASTCALLERS_HIDE_SYSOP's
     # is_admin check in features/lastcallers.py).
+    #
+    # Real gap found live in production: this used to have NO network_id
+    # filter at all, so a downstream node belonging to one FTN network
+    # could +ALL/+TAG subscribe to EVERY other echomail network this hub
+    # also relays -- a cross-network data leak, not just noise (observed
+    # live when a downstream node's +ALL pulled in every unrelated
+    # network's areas). node.network_id is nullable (legacy rows created
+    # before that column existed); fail CLOSED to zero areas rather than
+    # falling back to "show everything" if it's unset, since that
+    # fallback is exactly the bug being fixed here.
     all_areas = (EchoArea.query
-                .filter_by(is_active=True)
+                .filter_by(is_active=True, network_id=node.network_id)
                 .filter(EchoArea.is_sysop_only.isnot(True))
-                .all())
+                .all()) if node.network_id is not None else []
     area_map = {a.tag.upper(): a for a in all_areas}
 
     out_lines = [f'Areafix robot (hub) for node {node.ftn_address}',

@@ -17,7 +17,7 @@
             <tbody>
             {% for a in pagination.items %}
                 <tr>
-                    <td><code>{{ a.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td><code>{{ a.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</code></td>
                     <td><code>{{ a.ip_address }}</code></td>
                     <td>{{ a.username_attempted or '—' }}</td>
                     <td>

@@ -8,7 +8,7 @@
     </h1>
     <p class="small text-muted">
         Leader: <a href="{{ url_for('profile.view_user', username=g.leader.username) }}">{{ g.leader.username }}</a> ·
-        Founded {{ g.created_at.strftime('%Y-%m-%d') }} ·
+        Founded {{ g.created_at|eastern('%Y-%m-%d') }} ·
         {% if g.is_open %}Open{% else %}Invite-only{% endif %}
     </p>
 </div>
@@ -27,7 +27,7 @@
                     {{ m.user.username }}
                 </a>
                 {% if m.user.id == g.leader_id %}<span class="badge bg-warning ms-1">leader</span>{% endif %}
-                <small class="text-muted ms-2">since {{ m.joined_at.strftime('%Y-%m-%d') }}</small>
+                <small class="text-muted ms-2">since {{ m.joined_at|eastern('%Y-%m-%d') }}</small>
             </span>
             {% if current_user.is_authenticated and (current_user.id == g.leader_id or current_user.is_admin) and m.user.id != g.leader_id %}
                 <form method="post" action="{{ url_for('groups.kick', group_id=g.id) }}" class="d-inline">

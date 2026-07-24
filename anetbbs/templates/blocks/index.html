@@ -28,7 +28,7 @@
     {% for b in blocks %}
     <tr>
         <td><strong>{{ b.blocked.username if b.blocked else '?' }}</strong></td>
-        <td><small>{{ b.created_at.strftime('%Y-%m-%d') }}</small></td>
+        <td><small>{{ b.created_at|eastern('%Y-%m-%d') }}</small></td>
         <td><small class="text-muted">{{ b.reason or '' }}</small></td>
         <td>
             <form method="post" action="{{ url_for('blocks.remove', block_id=b.id) }}" class="d-inline">

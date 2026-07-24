@@ -4,7 +4,7 @@
 <div class="bbs-header">
     <h1><i class="bi bi-tv"></i> {{ post.subject }}</h1>
     <small>by <a href="{{ url_for('profile.view_user', username=post.author.username) }}">{{ post.author.username }}</a>
-        on {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+        on {{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
 </div>
 
 <div class="mb-3">

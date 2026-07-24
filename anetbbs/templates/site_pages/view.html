@@ -7,7 +7,7 @@
     <h1>{{ page.title }}</h1>
     {% if page.updated_at %}
     <p class="text-muted small">
-        Last updated {{ page.updated_at.strftime('%Y-%m-%d') }}
+        Last updated {{ page.updated_at|eastern('%Y-%m-%d') }}
         {% if page.updated_by %}by {{ page.updated_by.username }}{% endif %}
         {% if current_user.is_authenticated and current_user.is_admin %}
         — <a href="{{ url_for('site_pages.edit', slug=page.slug) }}">edit</a>

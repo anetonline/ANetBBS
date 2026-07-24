@@ -23,7 +23,7 @@
                         {% endif %}
                     </span>
                     <span><strong>{% if r.is_casino %}${{ '{:,}'.format(r.score) }}{% else %}{{ r.score }}{% endif %}</strong>
-                        <small class="text-muted ms-2">{{ r.when.strftime('%Y-%m-%d') }}</small></span>
+                        <small class="text-muted ms-2">{{ r.when|eastern('%Y-%m-%d') }}</small></span>
                 </li>
             {% endfor %}
         </ol>

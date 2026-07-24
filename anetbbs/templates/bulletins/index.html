@@ -22,10 +22,10 @@
                             <strong>{{ b.title }}</strong>
                         </a>
                     </td>
-                    <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ b.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td>
                         {% if b.expires_at %}
-                            <small class="text-muted">expires {{ b.expires_at.strftime('%Y-%m-%d') }}</small>
+                            <small class="text-muted">expires {{ b.expires_at|eastern('%Y-%m-%d') }}</small>
                         {% endif %}
                     </td>
                 </tr>

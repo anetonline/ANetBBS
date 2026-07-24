@@ -35,7 +35,7 @@
                     <td><input type="radio" name="b" value="{{ r.rev_num }}"
                                {% if loop.index == 1 %}checked{% endif %}></td>
                     <td><a href="{{ url_for('wiki.view_revision', slug=page.slug, rev_num=r.rev_num) }}">r{{ r.rev_num }}</a></td>
-                    <td><small>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                    <td><small>{{ r.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
                     <td>
                         {% if r.author %}<a href="{{ url_for('profile.view_user', username=r.author.username) }}">{{ r.author.username }}</a>
                         {% else %}<small class="text-muted">{{ r.author_ip or 'anon' }}</small>{% endif %}

@@ -98,7 +98,7 @@
             </div>
             <div class="upg-meta mt-2">
               {{ (upstream.size / 1024 / 1024) | round(1) }} MB &middot;
-              published {{ upstream.published_at }}<br>
+              published {{ upstream.published_at|eastern('%Y-%m-%d %H:%M %Z') }}<br>
               sha256 <code>{{ upstream.sha256[:16] }}…</code>
             </div>
           {% else %}

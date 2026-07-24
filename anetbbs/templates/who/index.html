@@ -45,7 +45,7 @@
                     {% if current_user.is_authenticated and current_user.is_admin %}
                     <td><code class="small">{{ r.ip }}</code></td>
                     {% endif %}
-                    <td><small>{{ r.last_seen.strftime('%H:%M:%S') }}</small></td>
+                    <td><small>{{ r.last_seen|eastern('%H:%M:%S') }}</small></td>
                 </tr>
             {% endfor %}
             </tbody>

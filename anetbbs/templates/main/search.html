@@ -54,7 +54,7 @@
                style="background-color:var(--theme-card-bg);border-color:var(--theme-primary);color:var(--theme-primary);">
                 <div class="d-flex justify-content-between">
                     <strong>{{ post.subject }}</strong>
-                    <small>{{ post.created_at.strftime('%Y-%m-%d') }}</small>
+                    <small>{{ post.created_at|eastern('%Y-%m-%d') }}</small>
                 </div>
                 <small>by {{ post.author.username }} in {{ post.board.name }}</small>
                 <p class="mb-0 small">{{ post.content[:150] }}{% if post.content|length > 150 %}...{% endif %}</p>
@@ -114,7 +114,7 @@
             {% for em in results.echomail %}
             <a href="{{ url_for('echomail.read', area_id=em.area_id, message_id=em.id) }}" class="list-group-item list-group-item-action">
                 <strong>{{ em.subject or '(no subject)' }}</strong>
-                <small class="text-muted ms-2">by {{ em.from_name }}, {{ em.created_at.strftime('%Y-%m-%d') }}</small>
+                <small class="text-muted ms-2">by {{ em.from_name }}, {{ em.created_at|eastern('%Y-%m-%d') }}</small>
                 <p class="mb-0 small">{{ (em.body or '')[:200] }}{% if (em.body or '')|length > 200 %}...{% endif %}</p>
             </a>
             {% endfor %}
@@ -131,7 +131,7 @@
             {% for f in results.files %}
             <a href="{{ url_for('files.download', file_id=f.id) }}" class="list-group-item list-group-item-action">
                 <strong>{{ f.original_filename }}</strong>
-                <small class="text-muted ms-2">{{ f.created_at.strftime('%Y-%m-%d') }}</small>
+                <small class="text-muted ms-2">{{ f.created_at|eastern('%Y-%m-%d') }}</small>
                 {% if f.description %}
                 <p class="mb-0 small">{{ f.description[:150] }}{% if f.description|length > 150 %}...{% endif %}</p>
                 {% endif %}
@@ -150,7 +150,7 @@
             {% for s in results.shouts %}
             <li class="list-group-item">
                 <strong>{{ s.user.username if s.user else '?' }}</strong>: {{ s.text }}
-                <small class="text-muted ms-2">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                <small class="text-muted ms-2">{{ s.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
             </li>
             {% endfor %}
         </ul>

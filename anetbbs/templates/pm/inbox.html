@@ -20,7 +20,7 @@
                     <td>{% if not msg.read_at %}<i class="bi bi-circle-fill text-primary" style="font-size:0.5rem;"></i>{% endif %}</td>
                     <td>{{ msg.sender.username }}</td>
                     <td><a href="{{ url_for('pm.read', message_id=msg.id) }}">{{ msg.subject }}</a></td>
-                    <td>{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ msg.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td>
                         <form method="post" action="{{ url_for('pm.delete', message_id=msg.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

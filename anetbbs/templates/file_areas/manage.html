@@ -68,7 +68,7 @@
                        class="text-info">{{ f.name }}</a>
                 </td>
                 <td class="text-nowrap text-muted small">{{ '%.1f'|format(f.size / 1024) }} KB</td>
-                <td class="text-nowrap text-muted small">{{ f.mtime.strftime('%Y-%m-%d') }}</td>
+                <td class="text-nowrap text-muted small">{{ f.mtime|eastern('%Y-%m-%d') }}</td>
                 <td>
                     {# Inline description editor — click Edit to expand #}
                     <div class="d-flex align-items-start gap-1">

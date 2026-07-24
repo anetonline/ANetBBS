@@ -30,7 +30,7 @@
         <td><code>{{ r.cidr }}</code></td>
         <td><small>{{ r.note or '' }}</small></td>
         <td><small>{{ r.added_by.username if r.added_by else '?' }}</small></td>
-        <td><small>{{ r.created_at.strftime('%Y-%m-%d') }}</small></td>
+        <td><small>{{ r.created_at|eastern('%Y-%m-%d') }}</small></td>
         <td>
             <form method="post" class="d-inline">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

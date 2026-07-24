@@ -71,7 +71,7 @@
                     </td>
                     <td>{{ msg.from_name or '' }}</td>
                     <td>{{ msg.to_name or 'All' }}</td>
-                    <td style="font-size:0.85rem; white-space:nowrap;">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td style="font-size:0.85rem; white-space:nowrap;">{{ msg.created_at|eastern('%Y-%m-%d %H:%M') }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

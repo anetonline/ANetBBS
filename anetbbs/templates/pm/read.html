@@ -11,7 +11,7 @@
     <div class="card-body">
         <p><strong>From:</strong> <a href="{{ url_for('profile.view_user', username=message.sender.username) }}">{{ message.sender.username }}</a></p>
         <p><strong>To:</strong> <a href="{{ url_for('profile.view_user', username=message.recipient.username) }}">{{ message.recipient.username }}</a></p>
-        <p><strong>Date:</strong> {{ message.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        <p><strong>Date:</strong> {{ message.created_at|eastern('%Y-%m-%d %H:%M') }}</p>
         <hr style="border-color: var(--theme-primary, #00ff00);">
         <button type="button" id="toggleMd" class="btn btn-link btn-sm p-0 mb-2">
             <i class="bi bi-markdown"></i> Toggle Markdown view
@@ -77,7 +77,7 @@
                         <strong>{{ m.sender.username if m.sender else '?' }}</strong>:
                         {{ m.subject or '(no subject)' }}
                     </a>
-                    <small>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                    <small>{{ m.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
                 </div>
                 <small class="text-muted">{{ (m.body or '')[:120] }}{% if (m.body or '')|length > 120 %}...{% endif %}</small>
             </li>

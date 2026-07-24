@@ -62,7 +62,7 @@
             <td>{{ s.game.name if s.game else s.game_id }}</td>
             <td>{{ s.score }}</td>
             <td><span class="badge bg-info text-dark" title="Imported via InterBBS score sharing">{{ s.origin_bbs }}</span></td>
-            <td><small>{{ s.achieved_at.strftime('%Y-%m-%d %H:%M') if s.achieved_at else '?' }}</small></td>
+            <td><small>{{ s.achieved_at|eastern('%Y-%m-%d %H:%M', '?') }}</small></td>
         </tr>
         {% endfor %}
     </tbody>

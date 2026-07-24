@@ -13,7 +13,7 @@
         {% if home and body_html %}
             <div class="wiki-meta">
                 <i class="bi bi-clock"></i>
-                Last edited {{ home.updated_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                Last edited {{ home.updated_at|eastern('%Y-%m-%d %H:%M %Z') }}
                 {% if home.updated_by %}
                     by <a href="{{ url_for('profile.view_user', username=home.updated_by.username) }}">{{ home.updated_by.username }}</a>
                 {% endif %}
@@ -44,7 +44,7 @@
                 {% for p in recent %}
                     <li class="list-group-item">
                         <a href="{{ url_for('wiki.view', slug=p.slug) }}">{{ p.title }}</a>
-                        <br><small class="text-muted">{{ p.updated_at.strftime('%m-%d %H:%M') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
+                        <br><small class="text-muted">{{ p.updated_at|eastern('%m-%d %H:%M') }}{% if p.updated_by %} · {{ p.updated_by.username }}{% endif %}</small>
                     </li>
                 {% else %}
                     <li class="list-group-item text-muted">No edits yet.</li>

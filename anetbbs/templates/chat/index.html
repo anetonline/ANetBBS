@@ -53,7 +53,7 @@
         <div id="chat-messages">
             {% for msg in recent_messages %}
                 <div class="chat-message">
-                    <span class="chat-timestamp">[{{ msg.created_at.strftime('%H:%M:%S') }}]</span>
+                    <span class="chat-timestamp">[{{ msg.created_at|eastern('%H:%M:%S') }}]</span>
                     <span class="chat-username">{{ msg.username }}</span>:
                     <span class="chat-text">{{ msg.message }}</span>
                 </div>

@@ -42,7 +42,7 @@
                     <td><strong>{{ m.sender_label or '(anon)' }}</strong></td>
                     <td><code>{{ m.sender_host }}</code></td>
                     <td><pre style="margin:0; white-space:pre-wrap; max-width:600px;">{{ m.body }}</pre></td>
-                    <td>{{ m.received_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ m.received_at|eastern('%Y-%m-%d %H:%M') }}</td>
                     <td class="text-nowrap">
                         {# Reply: pre-fill the send form with the original sender + host. #}
                         {% set reply_to = (m.sender_label or '').split('@')[0] %}

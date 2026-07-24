@@ -26,7 +26,7 @@
                     <td><a href="{{ url_for('polls.view_poll', poll_id=p.id) }}">{{ p.question }}</a></td>
                     <td>{{ p.creator.username }}</td>
                     <td>{{ p.options.count() }} options</td>
-                    <td>{{ p.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ p.created_at|eastern('%Y-%m-%d') }}</td>
                 </tr>
             {% endfor %}
             </tbody>
@@ -46,7 +46,7 @@
                 <tr>
                     <td><a href="{{ url_for('polls.view_poll', poll_id=p.id) }}">{{ p.question }}</a></td>
                     <td>{{ p.creator.username }}</td>
-                    <td>{{ p.closes_at.strftime('%Y-%m-%d') if p.closes_at else '—' }}</td>
+                    <td>{{ p.closes_at|eastern('%Y-%m-%d', '—') }}</td>
                 </tr>
             {% endfor %}
             </tbody>

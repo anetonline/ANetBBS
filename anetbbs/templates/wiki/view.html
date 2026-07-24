@@ -63,7 +63,7 @@
 
 <div class="wiki-meta">
     <i class="bi bi-clock"></i>
-    Last edited {{ page.updated_at.strftime('%Y-%m-%d %H:%M UTC') }}
+    Last edited {{ page.updated_at|eastern('%Y-%m-%d %H:%M %Z') }}
     {% if page.updated_by %}by <a href="{{ url_for('profile.view_user', username=page.updated_by.username) }}">{{ page.updated_by.username }}</a>{% endif %}
     · <a href="{{ url_for('wiki.history', slug=page.slug) }}">history</a>
     · {{ page.view_count or 0 }} view{{ '' if (page.view_count or 0) == 1 else 's' }}

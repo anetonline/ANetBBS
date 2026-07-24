@@ -60,7 +60,7 @@
                         {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
                     </td></tr>
                     <tr><th>Last Seen</th><td>
-                        {% if node.last_seen_at %}{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                        {% if node.last_seen_at %}{{ node.last_seen_at|eastern('%Y-%m-%d %H:%M %Z') }}
                         {% else %}<span class="text-muted">never connected</span>{% endif %}
                     </td></tr>
                     <tr><th>Areas</th><td>{{ node.subscriptions.count() }}</td></tr>
@@ -190,9 +190,9 @@
                         {% elif entry.status == 'pending' %}<span class="badge bg-warning text-dark">pending</span>
                         {% else %}<span class="badge bg-danger">{{ entry.status }}</span>{% endif %}
                     </td>
-                    <td style="font-size:0.8rem;">{{ entry.queued_at.strftime('%m-%d %H:%M') }}</td>
+                    <td style="font-size:0.8rem;">{{ entry.queued_at|eastern('%m-%d %H:%M') }}</td>
                     <td style="font-size:0.8rem;">
-                        {% if entry.sent_at %}{{ entry.sent_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+                        {% if entry.sent_at %}{{ entry.sent_at|eastern('%m-%d %H:%M') }}{% else %}—{% endif %}
                     </td>
                 </tr>
                 {% endfor %}

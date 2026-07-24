@@ -71,9 +71,9 @@
                         {% elif entry.status == 'pending' %}<span class="badge bg-warning text-dark">pending</span>
                         {% else %}<span class="badge bg-danger">{{ entry.status }}</span>{% endif %}
                     </td>
-                    <td style="font-size:0.8rem;">{{ entry.queued_at.strftime('%m-%d %H:%M') }}</td>
+                    <td style="font-size:0.8rem;">{{ entry.queued_at|eastern('%m-%d %H:%M') }}</td>
                     <td style="font-size:0.8rem;">
-                        {% if entry.sent_at %}{{ entry.sent_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+                        {% if entry.sent_at %}{{ entry.sent_at|eastern('%m-%d %H:%M') }}{% else %}—{% endif %}
                     </td>
                 </tr>
                 {% endfor %}

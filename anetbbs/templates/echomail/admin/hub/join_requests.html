@@ -69,7 +69,7 @@
       <td class="small font-monospace">{{ r.qwk_packet_id or '—' }}</td>
       <td class="small text-muted">{{ (r.notes or '')[:60] }}</td>
       <td class="small text-muted text-nowrap">
-        {{ r.created_at.strftime('%Y-%m-%d') if r.created_at else '?' }}
+        {{ r.created_at|eastern('%Y-%m-%d', '?') }}
       </td>
       <td class="text-end text-nowrap">
         <form method="POST"
@@ -150,7 +150,7 @@
         {% endif %}
       </td>
       <td class="small text-muted">
-        {{ r.reviewed_at.strftime('%Y-%m-%d') if r.reviewed_at else '?' }}
+        {{ r.reviewed_at|eastern('%Y-%m-%d', '?') }}
       </td>
       <td class="small">{{ r.reviewed_by or '—' }}</td>
       <td class="small text-muted">

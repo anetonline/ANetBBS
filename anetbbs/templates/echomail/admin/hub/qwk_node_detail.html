@@ -37,7 +37,7 @@
                         {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
                     </td></tr>
                     <tr><th>Last Poll</th><td>
-                        {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                        {% if node.last_poll_at %}{{ node.last_poll_at|eastern('%Y-%m-%d %H:%M %Z') }}
                         {% else %}<span class="text-muted">never polled</span>{% endif %}
                     </td></tr>
                     <tr><th>Conferences</th><td>{{ subscriptions|length }}</td></tr>

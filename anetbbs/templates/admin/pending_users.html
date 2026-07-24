@@ -19,7 +19,7 @@
     <tr>
         <td><strong>{{ u.username }}</strong></td>
         <td><small>{{ u.email }}</small></td>
-        <td><small>{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+        <td><small>{{ u.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
         <td class="text-nowrap">
             <form method="post" action="{{ url_for('admin.pending_user_action', user_id=u.id, action='approve') }}" class="d-inline">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

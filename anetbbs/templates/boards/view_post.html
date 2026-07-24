@@ -11,7 +11,7 @@
             {% if post.is_locked %}<i class="bi bi-lock-fill text-danger" title="Locked"></i>{% endif %}
             {{ post.subject }}
         </span>
-        <small>{{ post.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+        <small>{{ post.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</small>
     </div>
     <div class="card-body">
         <button type="button" id="postToggleMd" class="btn btn-link btn-sm p-0 mb-2">
@@ -112,7 +112,7 @@
                               <small class="text-muted">↳ depth {{ depth }}</small>
                             {% endif %}
                         </strong>
-                        <small>{{ reply.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                        <small>{{ reply.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</small>
                     </div>
                     <div class="ansi-body" style="white-space: pre-wrap;">{{ reply.content | msgbody_rich }}</div>
                     {% if reply.author and reply.author.signature %}

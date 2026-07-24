@@ -41,7 +41,7 @@
                     <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
                         <div class="d-flex w-100 justify-content-between">
                             <h6 class="mb-1">{{ post.subject }}</h6>
-                            <small>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                            <small>{{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
                         </div>
                         <p class="mb-1">{{ post.content[:150] }}{% if post.content|length > 150 %}...{% endif %}</p>
                         <small>

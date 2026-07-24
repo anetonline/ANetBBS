@@ -114,7 +114,7 @@
                         {{ r.sysop or '—' }}
                         {% if r.location %}<br><small class="text-muted">{{ r.location }}</small>{% endif %}
                     </td>
-                    <td><small>{{ r.last_seen_at.strftime('%Y-%m-%d') if r.last_seen_at else '' }}</small></td>
+                    <td><small>{{ r.last_seen_at|eastern('%Y-%m-%d', '') }}</small></td>
                     <td class="text-end">
                         <a href="{{ url_for('imsg.directory_who', entry_id=r.id) }}"
                            class="btn btn-outline-primary btn-sm">

@@ -52,7 +52,7 @@
                         {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
                     </td>
                     <td style="font-size:0.8rem;">
-                        {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% if node.last_poll_at %}{{ node.last_poll_at|eastern('%Y-%m-%d %H:%M') }}
                         {% else %}<span class="text-muted">never</span>{% endif %}
                     </td>
                     <td class="text-end">

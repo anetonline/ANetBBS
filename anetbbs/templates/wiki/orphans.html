@@ -15,7 +15,7 @@
     {% for p in orphans %}
     <li class="list-group-item">
         <a href="{{ url_for('wiki.view', slug=p.slug) }}">{{ p.title }}</a>
-        <small class="text-muted">— {{ p.updated_at.strftime('%Y-%m-%d') }}</small>
+        <small class="text-muted">— {{ p.updated_at|eastern('%Y-%m-%d') }}</small>
     </li>
     {% endfor %}
 </ul>

@@ -177,7 +177,7 @@
                     <tr><th>Last run</th>
                         <td>
                             {% if nodelist_event.row.last_run_at %}
-                                {{ nodelist_event.row.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                                {{ nodelist_event.row.last_run_at|eastern('%Y-%m-%d %H:%M %Z') }}
                                 {% if nodelist_event.row.last_status == 'ok' %}<span class="badge bg-success ms-1">ok</span>
                                 {% else %}<span class="badge bg-danger ms-1">{{ nodelist_event.row.last_status }}</span>{% endif %}
                             {% else %}
@@ -355,7 +355,7 @@
                 <p class="small">
                     Current: <code>{{ join_cfg.infopack_original_filename }}</code>
                     ({{ join_cfg.infopack_size }} bytes, uploaded
-                    {{ join_cfg.infopack_uploaded_at.strftime('%Y-%m-%d %H:%M UTC') if join_cfg.infopack_uploaded_at else '?' }})
+                    {{ join_cfg.infopack_uploaded_at|eastern('%Y-%m-%d %H:%M %Z', '?') }})
                     — <a href="{{ url_for('network_join.download_infopack', slug=(join_identity.slug if not join_identity.is_default else None)) }}">download</a>
                 </p>
                 {% if join_txt_members %}
@@ -426,7 +426,7 @@
                                 {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
                             </td>
                             <td style="font-size:0.8rem;">
-                                {% if node.last_seen_at %}{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+                                {% if node.last_seen_at %}{{ node.last_seen_at|eastern('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -455,7 +455,7 @@
                                 {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}
                             </td>
                             <td style="font-size:0.8rem;">
-                                {% if node.last_poll_at %}{{ node.last_poll_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+                                {% if node.last_poll_at %}{{ node.last_poll_at|eastern('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
                             </td>
                         </tr>
                         {% endfor %}

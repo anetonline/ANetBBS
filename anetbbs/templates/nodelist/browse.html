@@ -52,7 +52,7 @@
                     <td>{{ nl.day_of_year }}</td>
                     <td>{{ nl.release_date }}</td>
                     <td>{{ nl.entry_count }}</td>
-                    <td>{{ nl.imported_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ nl.imported_at|eastern('%Y-%m-%d %H:%M') }}</td>
                 </tr>
             {% endfor %}
             </tbody>

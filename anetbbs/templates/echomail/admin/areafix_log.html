@@ -61,7 +61,7 @@
             <tbody>
                 {% for row in rows %}
                 <tr>
-                    <td>{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '' }}</td>
+                    <td>{{ row.created_at|eastern('%Y-%m-%d %H:%M', '') }}</td>
                     <td>{{ networks[row.network_id].name if row.network_id in networks else '?' }}</td>
                     <td><code>{{ row.from_address or '' }}</code></td>
                     <td><span class="badge bg-secondary">{{ row.request_type }}</span></td>

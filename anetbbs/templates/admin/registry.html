@@ -89,9 +89,9 @@
                 </td>
                 <td>
                     <small>
-                        last hb: {% if e.last_heartbeat_at %}{{ e.last_heartbeat_at.strftime('%Y-%m-%d %H:%M') }}{% else %}never{% endif %}<br>
+                        last hb: {% if e.last_heartbeat_at %}{{ e.last_heartbeat_at|eastern('%Y-%m-%d %H:%M') }}{% else %}never{% endif %}<br>
                         last probe: {% if e.last_probe_at %}
-                            {{ e.last_probe_at.strftime('%Y-%m-%d %H:%M') }}
+                            {{ e.last_probe_at|eastern('%Y-%m-%d %H:%M') }}
                             {% if e.last_probe_ok %}<span class="text-success">✓</span>{% else %}<span class="text-danger">✗</span>{% endif %}
                             {% if e.consecutive_probe_failures %}({{ e.consecutive_probe_failures }} fail){% endif %}
                         {% else %}never{% endif %}

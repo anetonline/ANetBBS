@@ -41,7 +41,7 @@
             <td>{{ s.user.username }}</td>
             <td>{{ s.game.name }}</td>
             <td>{{ s.node_number }}</td>
-            <td>{{ s.started_at.strftime('%H:%M:%S') }}</td>
+            <td>{{ s.started_at|eastern('%H:%M:%S') }}</td>
             <td>active</td>
             <td>
                 <form method="post"

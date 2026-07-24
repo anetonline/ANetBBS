@@ -39,15 +39,23 @@ def new_event():
         if not title:
             flash('Title is required.', 'danger')
             return redirect(url_for('calendar.new_event'))
+        # The <input type="datetime-local"> field is timezone-agnostic
+        # by spec -- just wall-clock numbers -- and a submitter picks a
+        # time thinking in Eastern (this deployment's assumed local
+        # time), same as the calendar templates now display starts_at/
+        # ends_at in Eastern. Parse as Eastern, not UTC, or a
+        # submitted "7pm" event would display back as "7pm" but
+        # actually fire ~4-5 hours off.
+        from ..core.tz import from_eastern_input
         try:
-            starts_dt = datetime.strptime(starts, '%Y-%m-%dT%H:%M')
+            starts_dt = from_eastern_input(starts, '%Y-%m-%dT%H:%M')
         except ValueError:
             flash('Invalid start date.', 'danger')
             return redirect(url_for('calendar.new_event'))
         ends_dt = None
         if ends:
             try:
-                ends_dt = datetime.strptime(ends, '%Y-%m-%dT%H:%M')
+                ends_dt = from_eastern_input(ends, '%Y-%m-%dT%H:%M')
             except ValueError:
                 pass
         is_admin = getattr(current_user, 'is_admin', False)

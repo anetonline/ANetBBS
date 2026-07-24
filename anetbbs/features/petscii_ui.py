@@ -30,6 +30,7 @@ those cursor-addressed editors has any PETSCII-aware rendering to reuse.
 import re
 import textwrap
 from datetime import datetime, timedelta
+from ..core.tz import fmt_eastern
 
 from .petscii_codec import REVERSE_ON, REVERSE_OFF
 
@@ -957,8 +958,8 @@ async def _profile(session):
                 f'Username: {u.username}',
                 f'Display name: {u.display_name or "-"}',
                 f'Location: {u.location or "-"}',
-                f'Member since: {u.created_at.strftime("%Y-%m-%d") if u.created_at else "-"}',
-                f'Last login: {u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "-"}',
+                f'Member since: {fmt_eastern(u.created_at, '%Y-%m-%d', '-')}',
+                f'Last login: {fmt_eastern(u.last_login, '%Y-%m-%d %H:%M', '-')}',
                 f'Logins: {u.login_count or 0}',
                 '',
                 'Bio:',

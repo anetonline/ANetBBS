@@ -443,8 +443,21 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
         # lookup fails ("Invalid password" reply). Synchronet accepts
         # either form.
         if is_netmail:
-            if sz != mz:
-                kludge_head.append(f'INTL {mz}:{mn}/{mdd} {sz}:{sn}/{sd}')
+            # Always write @INTL, not just when our zone differs from the
+            # recipient's. FTS-0001's per-message binary routing header
+            # has NO zone field at all -- @INTL is the only place zone
+            # info travels on the wire -- and skipping it whenever zones
+            # happen to match assumes the receiving system will default
+            # untagged mail to that same zone. Confirmed false in
+            # practice: a real downstream node with multiple AKAs (a
+            # primary zone-1 FidoNet address plus a secondary zone-1200
+            # address for this network) filed a same-zone reply from us
+            # under its zone-1 identity instead -- "Craig Hendricks
+            # (1:1/4)" instead of "(1200:1/4)" -- because nothing on the
+            # wire said otherwise. @INTL is valid and universally
+            # supported by every real FTN mailer whether or not zones
+            # differ, so there's no downside to always including it.
+            kludge_head.append(f'INTL {mz}:{mn}/{mdd} {sz}:{sn}/{sd}')
             if sp:
                 kludge_head.append(f'FMPT {sp}')
             if mdp:

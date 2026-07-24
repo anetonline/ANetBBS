@@ -358,8 +358,14 @@ def search():
     user_filter = (request.args.get('user') or '').strip()
 
     def _parse(s):
+        # date_from/date_to are calendar days as the searcher thinks
+        # of them (Eastern) -- parse as Eastern local midnight, not
+        # UTC midnight, same reasoning as the CallerLog admin filter
+        # (see admin.py) -- otherwise the day boundary is off by the
+        # UTC offset.
         try:
-            return datetime.strptime(s, '%Y-%m-%d')
+            from ..core.tz import from_eastern_input
+            return from_eastern_input(s, '%Y-%m-%d')
         except (ValueError, TypeError):
             return None
 

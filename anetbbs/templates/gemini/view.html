@@ -4,7 +4,7 @@
 <div class="bbs-header">
     <h1>{{ capsule.title or user.username + "'s capsule" }}</h1>
     <p class="text-muted">by {{ user.username }} — last updated
-        {{ capsule.updated_at.strftime('%Y-%m-%d') }}
+        {{ capsule.updated_at|eastern('%Y-%m-%d') }}
         — <a href="{{ url_for('gemini.raw_gemtext', username=user.username) }}">raw .gmi</a></p>
 </div>
 <div class="card">

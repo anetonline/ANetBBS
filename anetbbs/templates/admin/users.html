@@ -51,8 +51,8 @@
                                 <i class="bi bi-circle-fill text-danger"></i> Banned
                             {% endif %}
                         </td>
-                        <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
-                        <td>{{ user.last_login.strftime('%Y-%m-%d') if user.last_login else 'Never' }}</td>
+                        <td>{{ user.created_at|eastern('%Y-%m-%d') }}</td>
+                        <td>{{ user.last_login|eastern('%Y-%m-%d', 'Never') }}</td>
                         <td>{{ user.login_count }}</td>
                         <td>
                             <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm btn-primary" title="Edit"><i class="bi bi-pencil"></i></a>

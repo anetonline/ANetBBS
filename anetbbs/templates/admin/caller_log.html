@@ -42,7 +42,7 @@
     <tbody>
     {% for c in pagination.items %}
     <tr>
-        <td><small>{{ c.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
+        <td><small>{{ c.started_at|eastern('%Y-%m-%d %H:%M:%S') }}</small></td>
         <td><strong>{{ c.username or '?' }}</strong></td>
         <td><span class="badge bg-secondary">{{ c.service or '?' }}</span></td>
         <td><code>{{ c.ip_address or '' }}</code></td>

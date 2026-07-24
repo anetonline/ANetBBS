@@ -76,7 +76,7 @@
           <div class="d-flex align-items-center gap-3 small text-muted">
             <span><i class="bi bi-envelope"></i> {{ area.total_messages or 0 }} msgs</span>
             {% if area.last_message_at %}
-            <span><i class="bi bi-clock"></i> {{ area.last_message_at.strftime('%Y-%m-%d') }}</span>
+            <span><i class="bi bi-clock"></i> {{ area.last_message_at|eastern('%Y-%m-%d') }}</span>
             {% endif %}
             <code style="font-size:.7rem; color:#00aa00;">{{ area.tag }}</code>
           </div>

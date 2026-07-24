@@ -21,7 +21,7 @@
                     <td>{{ (f.file_size / 1024) | round(1) }} KB</td>
                     <td>{{ f.mime_type }}</td>
                     <td>{{ f.download_count }}</td>
-                    <td>{{ f.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ f.created_at|eastern('%Y-%m-%d') }}</td>
                     <td>
                         <a href="{{ url_for('files.download', file_id=f.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-download"></i></a>
                         {% if current_user.is_authenticated and (current_user.id == f.uploader_id or current_user.is_admin) %}

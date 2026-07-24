@@ -61,7 +61,7 @@
     {% endif %}
     {% if item.published_at %}
     <span><i class="bi bi-calendar3"></i>
-      {{ item.published_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+      {{ item.published_at|eastern('%Y-%m-%d %H:%M %Z') }}</span>
     {% endif %}
     {% if item.link %}
     <a href="{{ item.link }}" target="_blank" rel="noopener"

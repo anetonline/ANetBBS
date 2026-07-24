@@ -35,9 +35,9 @@
                 {% for log in logs %}
                 <tr data-status="{{ log.status }}" {% if log.status == 'running' %}class="table-warning"{% endif %}>
                     <td>{{ log.network.name }}</td>
-                    <td style="font-size:0.8rem; white-space:nowrap;">{{ log.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td style="font-size:0.8rem; white-space:nowrap;">{{ log.started_at|eastern('%Y-%m-%d %H:%M:%S') }}</td>
                     <td style="font-size:0.8rem; white-space:nowrap;">
-                        {{ log.completed_at.strftime('%H:%M:%S') if log.completed_at else '—' }}
+                        {{ log.completed_at|eastern('%H:%M:%S', '—') }}
                     </td>
                     <td>{{ log.poll_type }}</td>
                     <td>

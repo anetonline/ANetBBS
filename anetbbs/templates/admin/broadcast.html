@@ -38,10 +38,10 @@
             <tbody>
             {% for b in recent %}
                 <tr>
-                    <td><code>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</code></td>
+                    <td><code>{{ b.created_at|eastern('%Y-%m-%d %H:%M') }}</code></td>
                     <td>{{ b.sender.username if b.sender else '?' }}</td>
                     <td>{{ b.text }}</td>
-                    <td>{{ b.expires_at.strftime('%Y-%m-%d %H:%M') if b.expires_at else 'permanent' }}</td>
+                    <td>{{ b.expires_at|eastern('%Y-%m-%d %H:%M', 'permanent') }}</td>
                 </tr>
             {% endfor %}
             </tbody>

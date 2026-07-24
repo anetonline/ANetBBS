@@ -72,7 +72,7 @@ class BulletinForm(FlaskForm):
     title = StringField('Title', validators=[DataRequired(), Length(max=200)])
     content = TextAreaField('Content', validators=[DataRequired()])
     is_pinned = BooleanField('Pinned')
-    expires_at = StringField('Expires At (YYYY-MM-DD HH:MM, leave blank for no expiry)', validators=[Optional()])
+    expires_at = StringField('Expires At (Eastern time, YYYY-MM-DD HH:MM, leave blank for no expiry)', validators=[Optional()])
     submit = SubmitField('Save Bulletin')
 
 
@@ -184,7 +184,8 @@ def dashboard():
             relative = f'{int(delta.total_seconds() // 3600)}h ago'
         else:
             relative = f'{delta.days}d ago'
-        system_info['last_upgraded_at'] = upgraded_at.strftime('%Y-%m-%d %H:%M UTC')
+        from ..core.tz import fmt_eastern
+        system_info['last_upgraded_at'] = fmt_eastern(upgraded_at, '%Y-%m-%d %H:%M %Z')
         system_info['last_upgraded_relative'] = relative
     except OSError:
         system_info['last_upgraded_at'] = None
@@ -728,7 +729,10 @@ def add_bulletin():
         expires_at = None
         if form.expires_at.data:
             try:
-                expires_at = datetime.strptime(form.expires_at.data, '%Y-%m-%d %H:%M')
+                # Field label says "(Eastern time)" -- parse it as
+                # such, not as UTC, matching edit_bulletin() above.
+                from ..core.tz import from_eastern_input
+                expires_at = from_eastern_input(form.expires_at.data, '%Y-%m-%d %H:%M')
             except ValueError:
                 flash('Invalid date format. Use YYYY-MM-DD HH:MM', 'danger')
                 return render_template('admin/bulletin_form.html', form=form, title='Add Bulletin')
@@ -761,11 +765,17 @@ def edit_bulletin(bulletin_id):
     message = Message.query.get_or_404(bulletin_id)
     form = BulletinForm(obj=message)
 
+    from ..core.tz import fmt_eastern, from_eastern_input
+
     if form.validate_on_submit():
         expires_at = None
         if form.expires_at.data:
             try:
-                expires_at = datetime.strptime(form.expires_at.data, '%Y-%m-%d %H:%M')
+                # Sysop is editing a field that was pre-filled in
+                # Eastern (below) -- must parse it back as Eastern too,
+                # not as if it were still UTC, or the stored value
+                # silently shifts by the UTC offset on every edit.
+                expires_at = from_eastern_input(form.expires_at.data, '%Y-%m-%d %H:%M')
             except ValueError:
                 flash('Invalid date format. Use YYYY-MM-DD HH:MM', 'danger')
                 return render_template('admin/bulletin_form.html', form=form, title='Edit Bulletin', message=message)
@@ -782,7 +792,7 @@ def edit_bulletin(bulletin_id):
         form.content.data = message.content
         form.is_pinned.data = message.is_pinned
         if message.expires_at:
-            form.expires_at.data = message.expires_at.strftime('%Y-%m-%d %H:%M')
+            form.expires_at.data = fmt_eastern(message.expires_at, '%Y-%m-%d %H:%M')
 
     return render_template('admin/bulletin_form.html', form=form, title='Edit Bulletin', message=message)
 
@@ -2282,10 +2292,15 @@ def caller_log():
     if service:
         q = q.filter(CallerLog.service == service)
     try:
+        # date_from/date_to are calendar days as the sysop thinks of
+        # them (Eastern) -- parse as Eastern local midnight, not UTC
+        # midnight, or the day boundary is off by the UTC offset and
+        # can include/exclude entries from the wrong day at the edges.
+        from ..core.tz import from_eastern_input
         if date_from:
-            q = q.filter(CallerLog.started_at >= datetime.strptime(date_from, '%Y-%m-%d'))
+            q = q.filter(CallerLog.started_at >= from_eastern_input(date_from, '%Y-%m-%d'))
         if date_to:
-            q = q.filter(CallerLog.started_at < datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1))
+            q = q.filter(CallerLog.started_at < from_eastern_input(date_to, '%Y-%m-%d') + timedelta(days=1))
     except ValueError:
         pass
     pagination = q.order_by(CallerLog.started_at.desc()).paginate(

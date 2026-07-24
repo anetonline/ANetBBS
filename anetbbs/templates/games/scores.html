@@ -56,7 +56,7 @@
                 {{ score.score }}
                 {% endif %}
             </td>
-            <td>{{ score.achieved_at.strftime('%Y-%m-%d') }}</td>
+            <td>{{ score.achieved_at|eastern('%Y-%m-%d') }}</td>
         </tr>
         {% endfor %}
     </tbody>

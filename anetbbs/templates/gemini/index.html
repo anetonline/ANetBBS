@@ -14,7 +14,7 @@
                     <a href="{{ url_for('gemini.view', username=c.user.username) }}">
                         {{ c.title or c.user.username + "'s capsule" }}
                     </a>
-                    <small class="text-muted">{{ c.updated_at.strftime('%Y-%m-%d') }}</small>
+                    <small class="text-muted">{{ c.updated_at|eastern('%Y-%m-%d') }}</small>
                 </li>
             {% endfor %}
         </ul>

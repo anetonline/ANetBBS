@@ -74,7 +74,7 @@
                             <strong>{{ a.user }}</strong>
                             earned <em>{{ a.name }}</em>
                         </span>
-                        <small class="text-muted">{{ a.when.strftime('%m-%d %H:%M') }}</small>
+                        <small class="text-muted">{{ a.when|eastern('%m-%d %H:%M') }}</small>
                     </li>
                 {% endfor %}
                 </ul>

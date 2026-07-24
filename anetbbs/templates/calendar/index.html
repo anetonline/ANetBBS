@@ -22,7 +22,7 @@
         {% for e in upcoming %}
             <li class="list-group-item">
                 <strong>{{ e.title }}</strong>
-                <span class="text-muted ms-2">{{ e.starts_at.strftime('%a %Y-%m-%d %H:%M UTC') }}</span>
+                <span class="text-muted ms-2">{{ e.starts_at|eastern('%a %Y-%m-%d %H:%M %Z') }}</span>
                 {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
                 {% if e.description %}<div class="text-muted small">{{ e.description }}</div>{% endif %}
                 {% if current_user.is_authenticated and (current_user.is_admin or e.created_by_id == current_user.id) %}
@@ -45,7 +45,7 @@
         <ul class="list-group list-group-flush">
         {% for e in past %}
             <li class="list-group-item text-muted">
-                {{ e.title }} — {{ e.starts_at.strftime('%Y-%m-%d') }}
+                {{ e.title }} — {{ e.starts_at|eastern('%Y-%m-%d') }}
             </li>
         {% endfor %}
         </ul>
