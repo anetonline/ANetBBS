@@ -132,12 +132,62 @@ class NetmailAccessControlTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn(b'AreaFix bot leak test', resp.data)
 
-    def test_admin_sent_still_shows_areafix_bot_traffic(self):
-        self._make_areafix_bot_reply('Admin should see bot traffic')
+    def test_admin_sent_hides_areafix_bot_traffic(self):
+        """Real live complaint (2026-07-24): every AreaFix/FileFix command
+        a downstream node sent landed in the sysop's personal Netmail
+        Inbox/Sent as if it were 1-on-1 human mail, purely because the
+        admin catch-all address matches the hub's own bare address that
+        robot netmail is addressed to/from. This got far more visible
+        after the v1.0b2.201 dedup-exemption fix stopped silently
+        dropping repeat AreaFix commands. AreafixLog already gives
+        admins a proper dedicated view of every request+response, so
+        robot netmail is now excluded from the personal inbox/sent
+        views entirely (previously this test asserted the opposite --
+        superseded by direct sysop feedback)."""
+        self._make_areafix_bot_reply('Admin should not see bot traffic here')
         client = self._client_as(self.admin_id)
         resp = client.get('/netmail/sent')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'Admin should see bot traffic', resp.data)
+        self.assertNotIn(b'Admin should not see bot traffic here', resp.data)
+
+    def test_admin_inbox_hides_areafix_bot_request(self):
+        """Same fix, inbound direction: a downstream node's inbound
+        AreaFix/FileFix command (to_name='AreaFix') must not clutter
+        the personal inbox either, even for the admin catch-all."""
+        from anetbbs.models import db, NetmailMessage
+        with self.app.app_context():
+            nm = NetmailMessage(
+                network_id=self.net_id, from_address='6:6/2', from_name='Craig',
+                to_address=self.our_address, to_name='AreaFix',
+                subject='Admin should not see this areafix request',
+                body='+ALL\n', direction='inbound', status='received',
+                to_user_id=None)
+            db.session.add(nm)
+            db.session.commit()
+
+        client = self._client_as(self.admin_id)
+        resp = client.get('/netmail/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'Admin should not see this areafix request', resp.data)
+
+    def test_regular_user_inbox_hides_filefix_bot_request_too(self):
+        from anetbbs.models import db, NetmailMessage
+        with self.app.app_context():
+            nm = NetmailMessage(
+                network_id=self.net_id, from_address='6:6/2', from_name='Craig',
+                to_address='', to_name='FileFix',
+                subject='Filefix request not shown',
+                body='+ALL\n', direction='inbound', status='received',
+                to_user_id=self.regular_id)
+            db.session.add(nm)
+            db.session.commit()
+
+        client = self._client_as(self.regular_id)
+        resp = client.get('/netmail/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'Filefix request not shown', resp.data,
+                         'robot netmail must stay hidden from the personal '
+                         'inbox even when explicitly linked via to_user_id')
 
     # ---- read() direct access ----
 

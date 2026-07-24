@@ -26,6 +26,27 @@ from ..echomail.routing import (parse_address, find_network_for_address,
 
 netmail_bp = Blueprint('netmail', __name__, url_prefix='/netmail')
 
+# Same alias list binkp_server.py's dispatch uses to recognize AreaFix/
+# FileFix robot netmail (anetbbs/echomail/binkp_server.py, ~line 1560).
+_ROBOT_NAMES = ('areafix', 'area fix', 'areamgr', 'filefix', 'file fix', 'filemgr')
+
+
+def _not_robot_netmail(name_column):
+    """Real gap found live: every AreaFix/FileFix command Craig's node
+    sent landed in the sysop's personal Netmail Inbox as ordinary mail
+    (the admin catch-all address in _user_addresses() matches the hub's
+    own bare address, which robot netmail is addressed to/from). This
+    got a lot more visible after the v1.0b2.201 dedup-exemption fix,
+    which correctly stopped silently dropping repeat AreaFix commands --
+    previously the clutter was accidentally hidden by the same bug that
+    dropped real commands. AreafixLog already captures every request +
+    response for admin review (see web/echomail_admin.py's areafix_log
+    view), so robot netmail doesn't need to also appear as 1-on-1 mail.
+    NULL-safe: a message with no name recorded is never a robot message.
+    """
+    return db.or_(name_column.is_(None),
+                  db.func.lower(name_column).notin_(_ROBOT_NAMES))
+
 
 def _user_addresses(user):
     """All FTN addresses associated with this user — used to filter inbox/sent.
@@ -71,6 +92,7 @@ def inbox():
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'inbound',
         NetmailMessage.deleted_by_recipient.is_(False),
+        _not_robot_netmail(NetmailMessage.to_name),
     )
     name_clauses = [
         NetmailMessage.to_user_id == current_user.id,
@@ -110,6 +132,7 @@ def sent():
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'outbound',
         NetmailMessage.deleted_by_sender.is_(False),
+        _not_robot_netmail(NetmailMessage.from_name),
     )
     name_clauses = [
         NetmailMessage.from_user_id == current_user.id,

@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.204 — AreaFix/FileFix netmail no longer clutters the personal inbox (July 2026)
+
+- Every AreaFix/FileFix request and bot reply was appearing in the sysop's personal Netmail Inbox/Sent as if it were 1-on-1 mail, since the admin catch-all address matches the hub's own bare address that robot netmail is addressed to/from. This got far more visible after v1.0b2.201's dedup-exemption fix correctly stopped silently dropping repeat AreaFix commands. Robot netmail (AreaFix/FileFix/AreaMgr/FileMgr) is now excluded from the personal Netmail Inbox/Sent views — it's already fully logged in the dedicated admin AreaFix Log view.
+
+Full suite verified clean (1549 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.203 — AreaFix/FileFix cross-network subscription leak (July 2026)
 
 - A downstream BinkP node's +ALL (or a plain +TAG for a tag belonging to another network) could subscribe it to echo/file areas from EVERY network this hub relays, not just the one it's actually a member of — a real cross-network data leak, found live. Hub-side AreaFix/FileFix now scope the available-area list to the requesting node's own network, failing closed (zero areas) rather than showing everything if a node's network isn't set.
