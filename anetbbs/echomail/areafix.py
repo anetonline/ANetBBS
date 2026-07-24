@@ -403,14 +403,21 @@ def _process_node_request(node, from_address, subject, body):
                     if area is None:
                         out_lines.append(f'%RESCAN {arg} : ERROR — area not available')
                     else:
-                        n = toss_area_messages(area.id, node_id=node.id)
+                        # force=True: %RESCAN means "resend", including
+                        # messages already delivered once before -- see
+                        # toss_area_messages()'s own docstring for the real
+                        # bug this fixes (a 2nd rescan always reported "0
+                        # messages" without this, since the 1st rescan's
+                        # hold-queue rows had already flipped to 'sent').
+                        n = toss_area_messages(area.id, node_id=node.id, force=True)
                         affected.append(area.tag)
                         out_lines.append(f'%RESCAN {arg} : queued {n} message(s)')
                 else:
                     subs = EchoAreaNode.query.filter_by(node_id=node.id).all()
                     total = 0
                     for row in subs:
-                        total += toss_area_messages(row.echo_area_id, node_id=node.id)
+                        total += toss_area_messages(row.echo_area_id, node_id=node.id,
+                                                    force=True)
                     out_lines.append(
                         f'%RESCAN : queued {total} message(s) across '
                         f'{len(subs)} subscribed area(s)')

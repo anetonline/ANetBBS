@@ -153,14 +153,29 @@ def toss_message(message_id: int, exclude_peer_address: str = None) -> int:
     return created
 
 
-def toss_area_messages(area_id: int, node_id: int = None) -> int:
+def toss_area_messages(area_id: int, node_id: int = None, force: bool = False) -> int:
     """Queue all messages in an area that haven't been queued for a node yet.
 
     If node_id is given, only queues for that specific node (used when a node
     newly subscribes and requests a catchup).  If node_id is None, queues for
     all subscribed nodes that are missing entries.
 
-    Returns total new BinkPHoldQueue entries created.
+    force: real live bug found via AreaFix's %RESCAN (which calls this with
+    force=True) -- BinkPHoldQueue rows are never deleted, only flipped to
+    status='sent' (see mark_sent_for_node()), and the UniqueConstraint on
+    (node_id, message_id) means a message can only ever have ONE hold-queue
+    row per node, ever. Without `force`, a message that already has a row
+    (pending OR sent) is treated as "already queued" and skipped -- correct
+    for the normal new-subscription-catchup use of this function, but it
+    means %RESCAN's entire purpose (force a resend of already-delivered
+    backlog) silently did nothing the second time it was called for the
+    same area/node: every message's row was already 'sent' from the first
+    rescan, so every subsequent one reported "0 messages" forever after.
+    With force=True, an existing row is reset back to 'pending' (not
+    duplicate-inserted, which would violate the unique constraint) so
+    get_pending_for_node() picks it up again on the next delivery attempt.
+
+    Returns total BinkPHoldQueue entries created or reactivated.
     """
     from ..models import (
         db, EchomailMessage, BinkPNode, EchoAreaNode, BinkPHoldQueue,
@@ -187,31 +202,39 @@ def toss_area_messages(area_id: int, node_id: int = None) -> int:
     if not subs:
         return 0
 
-    # Fetch all existing hold entries for these messages in one query.
+    # Fetch all existing hold entries for these messages in one query --
+    # full row objects (not just id tuples) so `force` can update them
+    # in place rather than only checking membership.
     msg_ids = [m.id for m in messages]
     node_ids = [s.node_id for s in subs]
-    existing = set()
+    existing = {}
     for row in (
         BinkPHoldQueue.query
         .filter(
             BinkPHoldQueue.message_id.in_(msg_ids),
             BinkPHoldQueue.node_id.in_(node_ids),
         )
-        .with_entities(BinkPHoldQueue.node_id, BinkPHoldQueue.message_id)
         .all()
     ):
-        existing.add((row.node_id, row.message_id))
+        existing[(row.node_id, row.message_id)] = row
 
     created = 0
     for sub in subs:
         for msg in messages:
-            if (sub.node_id, msg.id) not in existing:
+            key = (sub.node_id, msg.id)
+            row = existing.get(key)
+            if row is None:
                 db.session.add(BinkPHoldQueue(
                     node_id=sub.node_id,
                     message_id=msg.id,
                     status='pending',
                     queued_at=datetime.utcnow(),
                 ))
+                created += 1
+            elif force and row.status != 'pending':
+                row.status = 'pending'
+                row.sent_at = None
+                row.queued_at = datetime.utcnow()
                 created += 1
 
     if created:

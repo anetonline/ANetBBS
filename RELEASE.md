@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.205 — AreaFix %RESCAN could only ever be used once per area/node (July 2026)
+
+- After the first %RESCAN for a given area, every subsequent %RESCAN request (from the same node, same area) silently reported "0 messages" instead of re-queuing anything. Root cause: hold-queue rows are never deleted once delivered, only marked sent, and a database constraint means a message can only ever have one hold-queue row per node — so a repeat %RESCAN always found everything "already queued" and skipped it. %RESCAN now correctly resets already-delivered rows back to pending instead of skipping them, so a resend request actually resends.
+
+Full suite verified clean (1550 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.204 — AreaFix/FileFix netmail no longer clutters the personal inbox (July 2026)
 
 - Every AreaFix/FileFix request and bot reply was appearing in the sysop's personal Netmail Inbox/Sent as if it were 1-on-1 mail, since the admin catch-all address matches the hub's own bare address that robot netmail is addressed to/from. This got far more visible after v1.0b2.201's dedup-exemption fix correctly stopped silently dropping repeat AreaFix commands. Robot netmail (AreaFix/FileFix/AreaMgr/FileMgr) is now excluded from the personal Netmail Inbox/Sent views — it's already fully logged in the dedicated admin AreaFix Log view.

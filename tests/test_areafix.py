@@ -322,6 +322,65 @@ class AreafixTests(unittest.TestCase):
             self.assertEqual(
                 BinkPHoldQueue.query.filter_by(node_id=node.id).count(), 3)
 
+    def test_hub_side_repeat_rescan_requeues_again_not_zero(self):
+        """Real live bug: after delivering (and the poller marking sent)
+        a %RESCAN's hold-queue rows, a SECOND %RESCAN for the same area
+        always reported '0 messages' -- BinkPHoldQueue rows are never
+        deleted (only flipped to status='sent'), and a UniqueConstraint
+        on (node_id, message_id) means toss_area_messages() could only
+        ever create ONE row per message per node, ever. Fixed via a
+        force=True flag that resets an existing row back to 'pending'
+        instead of skipping it."""
+        from anetbbs.models import (db, EchomailNetwork, EchoArea, EchoAreaNode,
+                                    BinkPNode, BinkPHoldQueue, EchomailMessage)
+        from anetbbs.echomail.areafix import _process_node_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='RepeatRescanNet', network_type='binkp',
+                                  our_address='7:8/1')
+            db.session.add(net)
+            db.session.flush()
+            node = BinkPNode(name='RepeatRescanner', ftn_address='7:8/2',
+                             password='testpw123', is_active=True,
+                             network_id=net.id)
+            db.session.add(node)
+            db.session.flush()
+            area = EchoArea(tag='AF.RERESCAN', name='Repeat Rescan', network_id=net.id,
+                            is_active=True, is_subscribed=True)
+            db.session.add(area)
+            db.session.flush()
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, from_name='Sysop',
+                to_name='All', subject='Backlog', body='x',
+                direction='inbound'))
+            db.session.add(EchoAreaNode(node_id=node.id, echo_area_id=area.id))
+            db.session.commit()
+
+            # First rescan queues it, then simulate a successful delivery
+            # (the poller's own mark_sent_for_node() flips status to
+            # 'sent' without deleting the row -- reproduce that here).
+            response1, _ = _process_node_request(
+                node, '7:8/2', 'testpw123', '%RESCAN AF.RERESCAN\n')
+            self.assertIn('queued 1 message(s)', response1)
+            row = BinkPHoldQueue.query.filter_by(node_id=node.id).first()
+            row.status = 'sent'
+            db.session.commit()
+
+            # Second rescan for the same area/node must re-queue it, not
+            # report 0 -- that was the exact live bug.
+            response2, _ = _process_node_request(
+                node, '7:8/2', 'testpw123', '%RESCAN AF.RERESCAN\n')
+            self.assertIn('queued 1 message(s)', response2,
+                          'a repeat %RESCAN must re-queue already-delivered '
+                          'messages, not silently report 0 forever after')
+            self.assertEqual(
+                BinkPHoldQueue.query.filter_by(node_id=node.id).count(), 1,
+                'must reset the existing row back to pending, not insert '
+                'a duplicate (node_id, message_id) row -- violates the '
+                'unique constraint')
+            refreshed = BinkPHoldQueue.query.filter_by(node_id=node.id).first()
+            self.assertEqual(refreshed.status, 'pending')
+
     def test_hub_side_bare_rescan_requeues_every_subscribed_area(self):
         from anetbbs.models import (db, EchomailNetwork, EchoArea, EchoAreaNode,
                                     BinkPNode, BinkPHoldQueue, EchomailMessage)

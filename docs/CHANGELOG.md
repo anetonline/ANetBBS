@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.204`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.205`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.205 — AreaFix %RESCAN could only ever be used once per area/node (July 2026)
+
+- After the first %RESCAN for a given area, every subsequent %RESCAN request (from the same node, same area) silently reported "0 messages" instead of re-queuing anything. Root cause: hold-queue rows are never deleted once delivered, only marked sent, and a database constraint means a message can only ever have one hold-queue row per node — so a repeat %RESCAN always found everything "already queued" and skipped it. %RESCAN now correctly resets already-delivered rows back to pending instead of skipping them, so a resend request actually resends.
+
+Full suite verified clean (1550 passed, 2 skipped).
 
 ## v1.0b2.204 — AreaFix/FileFix netmail no longer clutters the personal inbox (July 2026)
 
