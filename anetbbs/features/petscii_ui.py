@@ -712,6 +712,9 @@ async def _pm_read(session, msg_id):
         msg = PrivateMessage.query.get(msg_id)
         if msg is None:
             return
+        my_id = _user_id(session)
+        if msg.recipient_id != my_id and msg.sender_id != my_id:
+            return
         sender = User.query.get(msg.sender_id)
         sender_name = sender.username if sender else '?'
         lines = [f'From: {sender_name}', f'Subject: {msg.subject}', '']

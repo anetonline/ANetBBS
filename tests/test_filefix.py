@@ -122,7 +122,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                '2:2/2', '2:2/2', '', '+FF.HUBTEST\n', '')
+                '2:2/2', '2:2/2', 'testpw123', '+FF.HUBTEST\n', 'testpw123')
 
             self.assertIn('+FF.HUBTEST : subscribed', response)
             sub = FileEchoSubscription.query.filter_by(
@@ -147,7 +147,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, _ = _process_node_request(
-                '3:3/3', '3:3/3', '', '-FF.HUBUNSUB\n', '')
+                '3:3/3', '3:3/3', 'testpw123', '-FF.HUBUNSUB\n', 'testpw123')
             self.assertIn('-FF.HUBUNSUB : unsubscribed', response)
             self.assertIsNone(FileEchoSubscription.query.filter_by(
                 file_area_id=area.id, peer_address='3:3/3').first())
@@ -383,7 +383,7 @@ class FilefixTests(unittest.TestCase):
             db.session.add_all([public_area, sysop_area])
             db.session.commit()
 
-            _process_node_request('3:4/2', '3:4/2', '', '+ALL\n', '')
+            _process_node_request('3:4/2', '3:4/2', 'testpw123', '+ALL\n', 'testpw123')
 
             self.assertIsNotNone(FileEchoSubscription.query.filter_by(
                 file_area_id=public_area.id, peer_address='3:4/2').first())

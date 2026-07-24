@@ -99,6 +99,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, WALL_AREA_TAG)
             area.is_sysop_only = False
             db.session.commit()
@@ -268,6 +269,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, WallPost
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, WALL_AREA_TAG)
             db.session.add(EchomailMessage(
                 area_id=area.id, network_id=net.id, msg_id='MSG-1',
@@ -295,6 +297,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, EchoArea, WallPost
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area1 = ensure_special_area(net, WALL_AREA_TAG)
             # Simulate a second area somehow carrying the same tag (e.g.
             # a duplicate-tag network topology) with an identical msg_id.
@@ -331,6 +334,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, WallPost
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, WALL_AREA_TAG)
             db.session.add(EchomailMessage(
                 area_id=area.id, network_id=net.id, msg_id=None,
@@ -351,6 +355,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, WallPost
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, WALL_AREA_TAG)
             db.session.add(EchomailMessage(
                 area_id=area.id, network_id=net.id, msg_id='REPEAT-1',
@@ -370,6 +375,7 @@ class InterbbsSyncTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, WallPost
         with self.app.app_context():
             net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, WALL_AREA_TAG)
             db.session.add(EchomailMessage(
                 area_id=area.id, network_id=net.id, msg_id='MOD-1',
@@ -533,6 +539,7 @@ class InterbbsLastCallersTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, EchoArea, CallerLog
         with self.app.app_context():
             net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
             area1 = ensure_special_area(net, LASTCALLERS_AREA_TAG)
             area2 = EchoArea(network_id=net.id, tag='ANET_LASTCALLERS_DUP',
                              name='dup', is_active=True, is_subscribed=True)
@@ -564,6 +571,7 @@ class InterbbsLastCallersTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, CallerLog
         with self.app.app_context():
             net = self._network()
+            self.app.config['LASTCALLERS_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, LASTCALLERS_AREA_TAG)
             db.session.add(EchomailMessage(
                 area_id=area.id, network_id=net.id, msg_id=None,
@@ -772,6 +780,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, GameScore
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             game = self._game(slug='zztestgame', share=True)
             db.session.add(EchomailMessage(
@@ -796,6 +805,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, GameScore
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             self._game(slug='zztestgame', share=False)  # opted OUT locally
             db.session.add(EchomailMessage(
@@ -815,6 +825,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, GameScore
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             # No local 'zztestgame' game exists at all in this test.
             db.session.add(EchomailMessage(
@@ -834,6 +845,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, GameScore, User
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             self._game(slug='zztestgame', share=True)
             db.session.add(EchomailMessage(
@@ -862,6 +874,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             game = self._game(slug='zztestgame', share=True)
             before = game.play_count or 0
@@ -884,6 +897,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, EchoArea, GameScore
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area1 = ensure_special_area(net, GAMES_AREA_TAG)
             area2 = EchoArea(network_id=net.id, tag='ANET_GAMESCORES_DUP',
                              name='dup', is_active=True, is_subscribed=True)
@@ -911,6 +925,7 @@ class InterbbsScoresTests(unittest.TestCase):
         from anetbbs.models import db, EchomailMessage, GameScore
         with self.app.app_context():
             net = self._network()
+            self.app.config['GAMES_INTERBBS_NETWORK_ID'] = net.id
             area = ensure_special_area(net, GAMES_AREA_TAG)
             self._game(slug='zztestgame', share=True)
             db.session.add(EchomailMessage(

@@ -10,8 +10,25 @@ from wtforms.validators import DataRequired, Length
 from flask_wtf import FlaskForm
 
 from ..models import db, Board, Post, BoardSubscription, BoardLastRead
+from ..features.access_control import evaluate_access
 
 boards_bp = Blueprint('boards', __name__, url_prefix='/boards')
+
+
+def _check_board_access(board):
+    """Abort 403 if the current user cannot access this board.
+
+    Real gap found in a full application-wide access-control audit:
+    Board.min_access_level is admin-configurable and enforced as a
+    WRITE-gate fallback in new_post(), but was never checked on any
+    READ path at all -- list_boards()/view_board()/view_post()/
+    view_post_ansi() had no @login_required and never consulted this
+    field, so a sysop restricting a board to registered/VIP/sysop
+    users only still left it fully readable (including full text
+    search) to anonymous visitors and any logged-in user regardless
+    of level."""
+    if not evaluate_access(current_user, board.min_access_level):
+        abort(403)
 
 
 class PostForm(FlaskForm):
@@ -30,7 +47,9 @@ class ReplyForm(FlaskForm):
 @boards_bp.route('/')
 def list_boards():
     """List all message boards"""
-    boards = Board.query.filter_by(is_active=True).order_by(Board.order).all()
+    boards = [b for b in
+             Board.query.filter_by(is_active=True).order_by(Board.order).all()
+             if evaluate_access(current_user, b.min_access_level)]
 
     # Per-user last-read map for unread counts.
     last_read = {}
@@ -77,10 +96,11 @@ def list_boards():
 def view_board(board_id):
     """View posts in a specific board"""
     board = Board.query.get_or_404(board_id)
-    
+
     if not board.is_active:
         abort(404)
-    
+    _check_board_access(board)
+
     # Pagination
     page = request.args.get('page', 1, type=int)
     per_page = 20
@@ -194,6 +214,7 @@ def new_post(board_id):
 def view_post(post_id):
     """View a specific post and the full reply tree below it."""
     post = Post.query.get_or_404(post_id)
+    _check_board_access(post.board)
 
     # Walk all descendants iteratively (depth-first) so the template
     # can render reply-to-reply threads with indentation. We bound
@@ -229,6 +250,7 @@ def view_post_ansi(post_id):
     codes and CP437 high bytes. Useful for posts that paste ANSI art."""
     from ..features.ansi_html import to_html
     post = Post.query.get_or_404(post_id)
+    _check_board_access(post.board)
     rendered = to_html(post.content or '')
     return render_template('boards/view_ansi.html', post=post, rendered=rendered)
 
@@ -469,6 +491,12 @@ def search_posts():
         return render_template('boards/search.html', q=q, results=[])
 
     pat = f'%{q.lower()}%'
+    # Real gap found in a full application-wide access-control audit:
+    # this route's own docstring already claimed to skip inaccessible
+    # boards ("Skips posts in boards the current user can't see"), but
+    # the query never actually filtered on min_access_level -- fetch a
+    # wider batch and drop rows the user can't see, same pattern as
+    # list_boards() above.
     rows = (db.session.query(Post, Board)
             .join(Board, Post.board_id == Board.id)
             .filter(Board.is_active.is_(True))
@@ -476,6 +504,8 @@ def search_posts():
                 db.func.lower(Post.subject).like(pat),
                 db.func.lower(Post.content).like(pat)))
             .order_by(Post.created_at.desc())
-            .limit(100)
+            .limit(300)
             .all())
+    rows = [(post, board) for post, board in rows
+           if evaluate_access(current_user, board.min_access_level)][:100]
     return render_template('boards/search.html', q=q, results=rows)

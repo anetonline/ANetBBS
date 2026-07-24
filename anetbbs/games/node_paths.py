@@ -144,11 +144,24 @@ def build_token_context(*, user, node_number: int, drop_file_path: str = '',
     same `_u()` accessor pattern as `dropfile.py`.
     """
     def _u(field, default=''):
+        # Real injection gap found in a full access-control audit:
+        # these values (username/display_name/email/location) are
+        # user-controlled and get spliced verbatim into generated
+        # DOSBox .conf / dosemu2 .bat autoexec content downstream
+        # (door_runner.py's _build_dos_command/_build_dosemu_command) --
+        # an embedded CR/LF let a crafted profile field inject extra
+        # DOS/DOSBox commands into that boot sequence. Stripping CR/LF
+        # here, at the one place all of them funnel through, closes it
+        # for every %-token that carries user data, not just username.
         if user is None:
             return default
         if isinstance(user, dict):
-            return user.get(field, default)
-        return getattr(user, field, default)
+            val = user.get(field, default)
+        else:
+            val = getattr(user, field, default)
+        if isinstance(val, str):
+            val = val.replace('\r', '').replace('\n', '')
+        return val
 
     nd = node_dir(node_number)
     sec = 255 if _u('is_admin') else 50

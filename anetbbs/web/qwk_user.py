@@ -91,7 +91,14 @@ def _build_qwk_blob(user):
                 .order_by(EchomailMessage.created_at).all())
         for m in rows:
             body = (m.body or '').replace('\n', '\xe3')
-            body_bytes = body.encode('latin-1', errors='replace')
+            # Real bug found live: a web-composed message can contain
+            # genuine Unicode characters (pasted box-drawing art) rather
+            # than latin-1-wrapped raw bytes -- encode_body_cp437()
+            # recovers the correct CP437 byte instead of a blanket
+            # encode('latin-1', errors='replace') silently turning them
+            # into '?'.
+            from ..features.wire_encoding import encode_body_cp437
+            body_bytes = encode_body_cp437(body)
             # Pad body to 128-byte blocks; minimum 1 block.
             block_count = max(1, (len(body_bytes) + 127) // 128 + 1)
             # Header is 128 bytes.

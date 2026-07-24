@@ -98,14 +98,22 @@ def tools_hub(section):
 @main_bp.route('/')
 def index():
     """Home page"""
-    # Get recent posts
-    recent_posts = Post.query.order_by(Post.created_at.desc()).limit(10).all()
-    
+    # Get recent posts. Fetch extra and filter through evaluate_access()
+    # -- same access-control gap as search()/boards.py had (fixed
+    # elsewhere in this audit): a board's min_access_level must be
+    # enforced on every read path, not just direct board/post views.
+    recent_posts = [p for p in Post.query.order_by(Post.created_at.desc())
+                    .limit(50).all()
+                    if p.board and evaluate_access(
+                        current_user, p.board.min_access_level,
+                        bypass_admin=True)][:10]
+
     # Get pinned messages/bulletins
     bulletins = Message.query.filter_by(is_pinned=True).order_by(Message.created_at.desc()).limit(5).all()
-    
+
     # Get board statistics
-    boards = Board.query.filter_by(is_active=True).order_by(Board.order).all()
+    boards = [b for b in Board.query.filter_by(is_active=True).order_by(Board.order).all()
+             if evaluate_access(current_user, b.min_access_level, bypass_admin=True)]
     
     # "Active Users" = non-banned users who have logged in within the
     # last 30 days. Matches the admin dashboard's definition. Previously
@@ -145,9 +153,12 @@ def index():
                                                       SysopBroadcast.expires_at > datetime.utcnow()))
                                        .order_by(SysopBroadcast.created_at.desc())
                                        .limit(3).all()), [])
-    latest_echomail = _safe(lambda: (EchomailMessage.query
-                                     .order_by(EchomailMessage.created_at.desc())
-                                     .limit(8).all()), [])
+    latest_echomail = _safe(lambda: [
+        m for m in EchomailMessage.query
+        .order_by(EchomailMessage.created_at.desc()).limit(50).all()
+        if m.area and evaluate_access(
+            current_user, m.area.min_access_level,
+            is_sysop_only=m.area.is_sysop_only, bypass_admin=True)][:8], [])
     file_area_count = _safe(lambda: FileArea.query.filter_by(is_active=True).count(), 0)
     today_stats = {
         'posts': _safe(lambda: Post.query.filter(Post.created_at >= today).count(), 0),

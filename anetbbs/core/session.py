@@ -1223,10 +1223,21 @@ class BBSSession:
             break
 
         result = self.user_manager.create_user(username, password, email)
-        if result == 'ok':
+        if result in ('ok', 'ok_pending'):
             await self.write("\r\nRegistration successful!\r\n")
             await self._show_ansi_screen('newuser')
-            self.user = self.user_manager.authenticate(username, password)
+            # 'ok_pending' (NUV_ENABLED) means this account needs sysop
+            # approval before it can log in -- use the ungated internal
+            # lookup (safe: it's the account this same request just
+            # created) only long enough to collect security questions /
+            # the newuser questionnaire, same as the web registration
+            # flow does. authenticate() would correctly refuse it, since
+            # granting a real logged-in session here is exactly the
+            # NUV-approval bypass this fix closes.
+            if result == 'ok_pending':
+                self.user = self.user_manager.get_user_dict_by_username(username)
+            else:
+                self.user = self.user_manager.authenticate(username, password)
             # Password-recovery security questions (same as web registration).
             try:
                 await self._collect_security_questions()
@@ -1238,6 +1249,13 @@ class BBSSession:
                 await self._run_newuser_questionnaire()
             except Exception:
                 pass
+            if result == 'ok_pending':
+                self.user = None
+                await self.write(
+                    "\r\n\x1b[1;33mYour account is awaiting sysop approval "
+                    "and cannot log in yet. Please try again later.\x1b[0m\r\n")
+                await asyncio.sleep(1)
+                return False
             await asyncio.sleep(1)
             return True
         elif result == 'email_taken':

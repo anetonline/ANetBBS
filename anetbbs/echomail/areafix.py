@@ -263,7 +263,15 @@ def _process_node_request(node, from_address, subject, body):
     """
     expected_pw = (getattr(node, 'password', None) or '').strip()
     provided_pw = (subject or '').strip()
-    if expected_pw and expected_pw != provided_pw:
+    # Real gap found in a full access-control audit, same class as the
+    # %PASSWORD guard's own documented reasoning below: this used to
+    # only REJECT when a password was configured AND wrong -- a node
+    # with no password set at all sailed straight through with zero
+    # real authentication. No admin-UI path leaves a node's password
+    # empty today (defense-in-depth, not currently exploitable), but
+    # require a real, matching password unconditionally rather than
+    # relying on that.
+    if not expected_pw or expected_pw != provided_pw:
         return ("Areafix: password incorrect or missing — no changes made.\n", {
             'from_address': from_address, 'request_type': 'badpw',
             'area_tags': '', 'response': 'bad areafix password', 'success': False})

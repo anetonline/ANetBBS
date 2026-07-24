@@ -32,6 +32,27 @@ def _active_sessions():
     return GameSession.query.filter_by(status='active')
 
 
+def _user_access():
+    """Anonymous visitor's implicit access_level for gating purposes.
+
+    Mirrors lobby()'s own inline convention (0, not evaluate_access()'s
+    10-for-anonymous default) -- kept consistent with that comment
+    rather than introduced fresh here.
+    """
+    if current_user.is_authenticated:
+        return getattr(current_user, 'access_level', 10) or 10
+    return 0
+
+
+def _game_accessible(game):
+    """Real gap found in a full access-control audit: Game.min_access_level
+    was enforced only on the lobby listing query -- every other route that
+    resolves a game by slug (detail/play/dos-frame/score/wallet, plus the
+    start_game socket handler) skipped it entirely, so a level-gated game
+    hidden from the lobby was still fully playable/scoreable by slug."""
+    return _user_access() >= (game.min_access_level or 0)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -96,6 +117,8 @@ def lobby():
 def detail(slug):
     """Game detail page with leaderboard."""
     game = Game.query.filter_by(slug=slug, is_active=True, web_enabled=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
     top_scores = (GameScore.query
                   .filter_by(game_id=game.id)
                   .order_by(GameScore.score.desc())
@@ -115,6 +138,8 @@ def detail(slug):
 def play(slug):
     """Launch a game for the current user."""
     game = Game.query.filter_by(slug=slug, is_active=True, web_enabled=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
 
     if game.game_type == 'builtin_web':
         module = game.web_game_module or slug
@@ -162,6 +187,8 @@ def dos_frame(slug):
     """Standalone isolated page for EmulatorJS — served with COOP/COEP headers
     so dosbox_pure can use SharedArrayBuffer without affecting the main BBS pages."""
     game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
     if game.game_type != 'door_dos_browser':
         abort(400)
     resp = make_response(render_template('games/play_jsdos_frame.html', game=game))
@@ -175,8 +202,15 @@ def dos_frame(slug):
 def submit_score(slug):
     """Accept a score submission from a web game (AJAX)."""
     game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
     data = request.get_json(silent=True) or {}
-    score_value = int(data.get('score', 0))
+    # Sanity bound, not a full fix (HIGH finding from a full audit): these
+    # games compute their own score client-side with no server replay, so
+    # a crafted request can claim any score for any game -- a hard
+    # ceiling at least blocks garbage/overflow values from landing
+    # directly on the global leaderboard.
+    score_value = max(0, min(int(data.get('score', 0)), 100_000_000))
     details = data.get('details', {})
 
     entry = GameScore(
@@ -246,6 +280,9 @@ def handle_start_game(data):
     slug = data.get('game_slug', '')
     game = Game.query.filter_by(slug=slug, is_active=True).first()
     if not game or game.game_type == 'builtin_web':
+        emit('game_error', {'message': 'Game not found or not a terminal game.'})
+        return
+    if not _game_accessible(game):
         emit('game_error', {'message': 'Game not found or not a terminal game.'})
         return
 
@@ -515,6 +552,9 @@ def _wallet_json(w):
 def get_wallet(slug):
     if slug not in CASINO_SLUGS:
         abort(404)
+    game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
     week = _week_start()
     start = _casino_start_bal(slug)
     wallet = WebGameWallet.query.filter_by(
@@ -543,20 +583,37 @@ def update_wallet(slug):
     if slug not in CASINO_SLUGS:
         abort(404)
     game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
+    if not _game_accessible(game):
+        abort(403)
     data = request.get_json(silent=True) or {}
     new_bal = max(0, int(data.get('balance', 0)))
     week = _week_start()
     start = _casino_start_bal(slug)
 
+    # Sanity guards, not a full fix: all 4 casino games run their deck/
+    # payout logic entirely client-side and this endpoint historically
+    # took the client's claimed final balance verbatim (CRITICAL finding
+    # from a full access-control audit) -- a crafted request could set
+    # any balance directly, including forging a #1 leaderboard peak_balance
+    # entry below. A real fix means moving bet/payout math server-side;
+    # short of that, bound both the absolute balance and how much a
+    # single request can move it, so the trivial "set balance to
+    # 999999999" exploit is blocked even though slow, plausible-looking
+    # cheating within these bounds isn't caught.
+    MAX_ABS_BALANCE = start * 500
+    MAX_DELTA_PER_UPDATE = max(start * 20, 5000)
+    new_bal = min(new_bal, MAX_ABS_BALANCE)
+
     entry = None
     wallet = WebGameWallet.query.filter_by(
         user_id=current_user.id, game_slug=slug).first()
     if wallet is None:
+        clamped_bal = min(new_bal, start + MAX_DELTA_PER_UPDATE)
         wallet = WebGameWallet(
             user_id=current_user.id, game_slug=slug,
-            balance=new_bal, peak_balance=new_bal,
-            starting_balance=start, week_start=week,
-            last_active=datetime.utcnow(),
+            balance=clamped_bal,
+            peak_balance=max(clamped_bal, start), starting_balance=start,
+            week_start=week, last_active=datetime.utcnow(),
         )
         db.session.add(wallet)
     else:
@@ -567,6 +624,8 @@ def update_wallet(slug):
             wallet.last_active = datetime.utcnow()
             db.session.commit()
             return _wallet_json(wallet)
+        if new_bal > wallet.balance + MAX_DELTA_PER_UPDATE:
+            new_bal = wallet.balance + MAX_DELTA_PER_UPDATE
         wallet.balance = new_bal
         wallet.last_active = datetime.utcnow()
         if new_bal > wallet.peak_balance:

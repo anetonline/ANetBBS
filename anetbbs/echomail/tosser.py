@@ -262,3 +262,89 @@ def mark_sent_for_node(node_id: int, message_ids: list) -> int:
         row.sent_at = now
     db.session.commit()
     return len(updated)
+
+
+def get_pending_netmail_for_node(node):
+    """Return queued outbound NetmailMessage rows addressed to a specific
+    downstream BinkPNode.
+
+    Companion to get_pending_for_node() (echomail), added for a real live
+    bug: the BinkP inbound listener flushed the echomail hold queue to a
+    connecting downstream node but never queried for queued outbound
+    NETMAIL at all -- poller.py's own outbound-dial path (_do_poll) has
+    always gathered both in the same batch, but a node that only ever
+    calls IN to its hub (the normal relationship -- the hub doesn't
+    usually dial a leaf node on a schedule) never triggers that path.
+    Confirmed live: a sysop's own reply to a downstream node's test
+    netmail, and every AreaFix bot auto-reply queued for that node, sat
+    in NetmailMessage.status='queued' indefinitely -- a backlog spanning
+    over a week of never-sent AreaFix replies alone.
+
+    Matched by the node's OWN address (both the exact stored form and its
+    bare, no-@domain form -- to_address on the netmail row and
+    node.ftn_address aren't guaranteed to share the same one of the two
+    equally-valid forms, mirroring the @domain/bare ambiguity the BinkP
+    listener's own peer-address matching already has to handle), not
+    just network_id -- a network can have several downstream nodes, each
+    with its own hold queue, and netmail must never cross-deliver to
+    whichever one happens to connect first. If the node has no
+    ftn_address on file (should not normally happen), falls back to
+    network_id-only so mail still gets delivered rather than silently
+    stuck again -- matches this codebase's established fail-open stance
+    for AKA/address resolution elsewhere in the BinkP listener.
+    """
+    from ..models import NetmailMessage
+
+    if not node.network_id:
+        return []
+    node_addrs = []
+    if node.ftn_address:
+        node_addrs.append(node.ftn_address)
+        bare = node.ftn_address.split('@', 1)[0]
+        if bare and bare not in node_addrs:
+            node_addrs.append(bare)
+    query = NetmailMessage.query.filter(
+        NetmailMessage.network_id == node.network_id,
+        NetmailMessage.direction == 'outbound',
+        NetmailMessage.status == 'queued')
+    if node_addrs:
+        query = query.filter(NetmailMessage.to_address.in_(node_addrs))
+    return query.all()
+
+
+def get_pending_netmail_for_network(network_id: int):
+    """Return queued outbound NetmailMessage rows for a whole network.
+
+    Used by the BinkP inbound listener's network-peer branch (a
+    connecting peer matched against EchomailNetwork rather than a
+    specific BinkPNode) -- there's no individual node address to
+    disambiguate against here, so this matches poller.py's own
+    network_id-only netmail gather exactly. Same underlying gap as
+    get_pending_netmail_for_node() above -- see its docstring.
+    """
+    from ..models import NetmailMessage
+
+    return NetmailMessage.query.filter(
+        NetmailMessage.network_id == network_id,
+        NetmailMessage.direction == 'outbound',
+        NetmailMessage.status == 'queued').all()
+
+
+def mark_netmail_sent(netmail_rows: list) -> int:
+    """Mark a list of NetmailMessage rows as sent. Returns count updated.
+
+    Companion to mark_sent_for_node() (echomail/BinkPHoldQueue) -- mirrors
+    the sent_at/status/is_sent update poller.py's _do_poll() already does
+    for its own outbound_nm batch after a successful send.
+    """
+    from ..models import db
+
+    if not netmail_rows:
+        return 0
+    now = datetime.utcnow()
+    for nm in netmail_rows:
+        nm.sent_at = now
+        nm.status = 'sent'
+        nm.is_sent = True
+    db.session.commit()
+    return len(netmail_rows)

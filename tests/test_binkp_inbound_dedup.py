@@ -205,6 +205,49 @@ class InboundDedupTests(unittest.TestCase):
                 from_name='SBBSecho', subject='Area Management Request').all()
             self.assertEqual(len(rows), 1)
 
+    def test_areafix_netmail_with_repeated_subject_is_not_deduped(self):
+        """Real live bug found via a downstream node's actual AreaFix
+        test traffic: our own inbound-listener content dedup fallback
+        (mirroring poller.py's, added for the SBBSecho "Area Management
+        Request" flood) matched a fresh AreaFix "%help" command against
+        an earlier, unrelated netmail from the same sender that
+        happened to reuse the same subject -- silently dropping the
+        command with no error, logged only as "Imported 0 messages".
+        AreaFix/FileFix netmail is a command, not a duplicate broadcast,
+        and must always import (and dispatch) regardless of subject
+        reuse; only the exact-MSGID dedup should ever suppress it."""
+        from anetbbs.echomail.binkp import _build_ftn_packet
+        from anetbbs.echomail import binkp_server
+
+        net_id = self._make_network()
+        msg1 = _FakeMsg(area=None, from_name='Craig Hendricks',
+                        to_name='areafix', subject='Whyf6ou8N45LQvNc',
+                        body='first request',
+                        msg_id='1200:1/4@anet aaaa1111',
+                        to_address='1:114/0', from_address='1:114/30')
+        msg2 = _FakeMsg(area=None, from_name='Craig Hendricks',
+                        to_name='areafix', subject='Whyf6ou8N45LQvNc',
+                        body='%help',
+                        msg_id='1200:1/4@anet bbbb2222',
+                        to_address='1:114/0', from_address='1:114/30')
+        pkt1 = _build_ftn_packet([msg1], '1:114/30', '1:114/0')
+        pkt2 = _build_ftn_packet([msg2], '1:114/30', '1:114/0')
+
+        with self.app.app_context():
+            first = binkp_server._import_pkt_payload(pkt1, net_id, 'a.pkt')
+            second = binkp_server._import_pkt_payload(pkt2, net_id, 'b.pkt')
+            self.assertEqual(first, 1)
+            self.assertEqual(second, 1,
+                            'a robot-addressed netmail must import even '
+                            'when sender+subject+network match an earlier '
+                            'unrelated message -- it is a distinct command, '
+                            'this is the exact live AreaFix bug')
+
+            from anetbbs.models import NetmailMessage
+            rows = NetmailMessage.query.filter_by(
+                from_name='Craig Hendricks', subject='Whyf6ou8N45LQvNc').all()
+            self.assertEqual(len(rows), 2)
+
     def test_content_dedup_does_not_over_trigger_on_different_subject(self):
         """Guard against the content-based fallback being too broad --
         a genuinely different message from the same sender must still

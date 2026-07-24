@@ -1951,14 +1951,27 @@ def render_message_body_lines(body: str) -> list:
     """
     from .ansi_html import to_ansi_lines, _HAS_CURSOR_POS, _HAS_BLOCK_ART
 
-    # CP437 decode — body is stored as latin-1 mojibake from DB.
-    try:
-        raw = (body or '').encode('latin-1', errors='replace')
-    except Exception:
-        raw = b''
-    cp437_str    = raw.decode('cp437', errors='replace')
-    body_unicode = ''.join(chr(b) if 0x01 <= b <= 0x1F else c
-                           for b, c in zip(raw, cp437_str))
+    # CP437 decode — body is stored as latin-1 mojibake from DB for
+    # wire-composed messages (BinkP/QWK). Real bug found live (same
+    # class as web/render_msg.py's now-fixed _decode_charset(), fixed
+    # here too): a message composed through the web UI stores genuine
+    # already-decoded Unicode text instead -- box-drawing characters a
+    # user pasted directly (codepoints above 0xFF, which a real latin-1
+    # decode of raw bytes could never produce) were getting silently
+    # turned into '?' by the old unconditional
+    # encode('latin-1', errors='replace') below. Decode per character:
+    # only byte-representable characters (0-0xFF) go through the CP437
+    # round-trip; anything already outside that range passes through
+    # untouched, so a message with a genuine mix of raw CP437 bytes and
+    # real Unicode characters still renders correctly.
+    out = []
+    for c in (body or ''):
+        b = ord(c)
+        if b > 0xFF or 0x01 <= b <= 0x1F:
+            out.append(c)
+            continue
+        out.append(bytes([b]).decode('cp437', errors='replace'))
+    body_unicode = ''.join(out)
 
     # Pipe codes (|NN Synchronet/Mystic format) → ANSI SGR.
     if '|' in body_unicode:

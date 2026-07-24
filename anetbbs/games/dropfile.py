@@ -12,12 +12,25 @@ from pathlib import Path
 
 def _u(user, field, default=None):
     """Read `field` from a user that may be a SQLAlchemy model OR a plain dict
-    (telnet/SSH/rlogin sessions store user as a dict)."""
+    (telnet/SSH/rlogin sessions store user as a dict).
+
+    Real field-injection gap found in a full access-control audit: these
+    fixed-position, newline-delimited drop-file formats trust every field
+    verbatim -- a username/email containing an embedded CR/LF injected
+    extra physical lines, shifting every subsequent positional field
+    (including DOOR.SYS's security-level line) out from under the door
+    game reading it. Stripping CR/LF here, the one place every field in
+    this module funnels through, closes it for all three formats.
+    """
     if user is None:
         return default
     if isinstance(user, dict):
-        return user.get(field, default)
-    return getattr(user, field, default)
+        val = user.get(field, default)
+    else:
+        val = getattr(user, field, default)
+    if isinstance(val, str):
+        val = val.replace('\r', '').replace('\n', '')
+    return val
 
 
 def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',

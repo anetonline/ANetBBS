@@ -913,8 +913,15 @@ class ANetCraft:
     # ── save / load ──────────────────────────────────────────────────────────
 
     def _save_path(self) -> Path:
+        # Real path-traversal bug found in a full access-control audit:
+        # username was spliced into the save filename with no
+        # sanitization, unlike the identical pattern in
+        # features/darkforces_term.py -- a username containing '/'/'..'
+        # could read/overwrite another player's save or write outside
+        # SAVE_DIR entirely.
         SAVE_DIR.mkdir(parents=True, exist_ok=True)
-        return SAVE_DIR / f'{self.username}.json'
+        safe_name = ''.join(c for c in self.username if c.isalnum() or c in '-_') or 'player'
+        return SAVE_DIR / f'{safe_name}.json'
 
     def save(self):
         # Fold the active dimension into the cache so every dimension the

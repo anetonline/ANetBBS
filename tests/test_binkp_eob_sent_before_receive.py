@@ -253,6 +253,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
                  patch.object(EchomailMessage, 'sent_at', _FakeColumn('sent_at')), \
                  patch.object(db, 'init_app', lambda app: None), \
                  patch.object(db, 'session', _NoOpSession()), \
+                 patch('anetbbs.echomail.tosser.get_pending_netmail_for_network', lambda network_id: []), \
                  patch.object(mod, '_receive_files', _tracking_receive_files):
                 writer = _FakeWriter()
                 reader = _ScriptedReader(frames)
@@ -308,6 +309,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
                  patch.object(EchomailMessage, 'sent_at', _FakeColumn('sent_at')), \
                  patch.object(db, 'init_app', lambda app: None), \
                  patch.object(db, 'session', _NoOpSession()), \
+                 patch('anetbbs.echomail.tosser.get_pending_netmail_for_network', lambda network_id: []), \
                  patch.object(mod, '_import_pkt_payload', _tracking_import_pkt_payload):
                 writer = _FakeWriter()
                 reader = _ScriptedReader(frames)

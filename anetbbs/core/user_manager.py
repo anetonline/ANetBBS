@@ -87,8 +87,28 @@ class UserManager:
             return row is not None
 
     def create_user(self, username: str, password: str, email: str) -> str:
-        """Create a new user. Returns 'ok', 'username_taken', or 'email_taken'."""
+        """Create a new user. Returns 'ok', 'ok_pending', 'username_taken',
+        or 'email_taken'. 'ok_pending' means the account was created but
+        is_verified=False (NUV_ENABLED) -- the caller must NOT treat this
+        the same as 'ok' by logging the new account straight in; it needs
+        sysop approval first, exactly like the web registration path.
+
+        Real access-control gap found in a full audit: this used to
+        always create is_verified=True (the model default) regardless of
+        NUV_ENABLED, so a NUV-gated BBS's sysop-approval queue only ever
+        applied to accounts created via the web -- anyone could dial in
+        over telnet/SSH/rlogin, self-register, and skip the queue
+        entirely. Mirrors web/auth.py's register() route.
+        """
         from anetbbs.models import User
+
+        nuv_on = False
+        try:
+            from anetbbs.config import get_config
+            cfg = get_config(os.environ.get('FLASK_ENV', 'production'))
+            nuv_on = bool(getattr(cfg, 'NUV_ENABLED', False))
+        except Exception:
+            pass
 
         with _Session() as s:
             if s.execute(
@@ -105,6 +125,7 @@ class UserManager:
                 password_hash=generate_password_hash(password),
                 is_active=True,
                 is_admin=False,
+                is_verified=(not nuv_on),
                 created_at=datetime.utcnow(),
                 login_count=0,
             )
@@ -114,7 +135,34 @@ class UserManager:
             except IntegrityError:
                 s.rollback()
                 return 'email_taken'
+            if nuv_on:
+                try:
+                    from anetbbs.features.notify import notify_admins
+                    from anetbbs.features.bbs_ui import _app
+                    with _app().app_context():
+                        notify_admins(
+                            'nuv_pending',
+                            title=f'New user pending approval: {user.username}',
+                            body=f'{user.username} ({user.email}) registered '
+                                 f'via terminal and is waiting for NUV sysop '
+                                 f'approval.',
+                            target_url='/admin/pending-users')
+                except Exception:
+                    pass
+                return 'ok_pending'
             return 'ok'
+
+    def get_user_dict_by_username(self, username: str) -> Optional[Dict]:
+        """Internal lookup with NO password/lock/verification gating --
+        for post-registration bookkeeping (security questions, newuser
+        questionnaire) on an account this same request just created.
+        Never use this to grant session access; use authenticate()."""
+        from anetbbs.models import User
+        with _Session() as s:
+            user = s.execute(
+                select(User).where(func.lower(User.username) == username.lower())
+            ).scalar_one_or_none()
+            return self._user_to_dict(user) if user else None
 
     def authenticate(self, username: str, password: str) -> Optional[Dict]:
         """Return user dict on success, None on failure."""
@@ -129,6 +177,15 @@ class UserManager:
             if not user.is_active:
                 return None
             if not check_password_hash(user.password_hash, password):
+                return None
+            # Real access-control gap found in a full audit: neither of
+            # these was ever checked here, unlike web/auth.py's login()
+            # -- a sysop-locked account, or one still awaiting NUV/email
+            # approval, logged in over telnet/SSH/rlogin exactly as if
+            # nothing were wrong.
+            if getattr(user, 'is_locked', False):
+                return None
+            if not getattr(user, 'is_verified', True) and not user.is_admin:
                 return None
             # Update login bookkeeping (same fields the web app maintains)
             user.last_login = datetime.utcnow()

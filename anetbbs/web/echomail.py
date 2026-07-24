@@ -24,6 +24,39 @@ def _check_area_access(echo_area):
         abort(403)
 
 
+def _owns_netmail_echomail(msg, user):
+    """Real gap found in a full application-wide access-control audit,
+    same class of bug as web/netmail.py's now-fixed _user_addresses():
+    QWK-style 1-on-1 netmail routed into an EchomailMessage row (any
+    EchoArea tagged 'NETMAIL' -- a separate mechanism from the real
+    NetmailMessage table web/netmail.py uses) had NO per-user scoping
+    at all -- netmail_inbox() showed the last 100 messages from every
+    network's NETMAIL area to any logged-in user, and read() had no
+    ownership check either, so even after adding the list-view filter
+    the message would still be readable directly by URL. Only admins
+    get the "see everything" catch-all -- learned from the netmail.py
+    bug not to extend that to a blanket address match for regular
+    users."""
+    if getattr(user, 'is_admin', False):
+        return True
+    # Match only against a non-empty candidate name -- an empty
+    # msg.to_name/from_name must never match an empty uname/dname (a
+    # user with no display_name set), which would otherwise falsely
+    # "own" every netmail with a blank recipient/sender field.
+    names = {n for n in ((user.username or '').lower(),
+                        (getattr(user, 'display_name', None) or '').lower())
+            if n}
+    if names and (msg.to_name or '').lower() in names:
+        return True
+    if names and (msg.from_name or '').lower() in names:
+        return True
+    from ..models import UserAka
+    addrs = {a.address for a in UserAka.query.filter_by(user_id=user.id).all()}
+    if addrs and (msg.to_address in addrs or msg.from_address in addrs):
+        return True
+    return False
+
+
 class ComposeForm(FlaskForm):
     """Form for composing or replying to echomail messages."""
     area_id = SelectField('Echo Area', coerce=int)
@@ -214,7 +247,19 @@ def thread(area_id, message_id):
 def read(area_id, message_id):
     """Read a single echomail message."""
     echo_area = EchoArea.query.get_or_404(area_id)
+    # Real gap found in a full application-wide access-control audit:
+    # every OTHER route in this file (area, thread, compose, next_unread)
+    # calls _check_area_access() -- this direct-by-message-ID route never
+    # did, so a sysop-only or high-min_access_level area was correctly
+    # hidden from every listing but still readable by anyone who could
+    # guess/iterate a sequential message_id.
+    _check_area_access(echo_area)
     msg = EchomailMessage.query.filter_by(id=message_id, area_id=area_id).first_or_404()
+    # NETMAIL-tagged areas carry 1-on-1 private mail (QWK-routed), not
+    # broadcast echomail -- see _owns_netmail_echomail()'s own docstring
+    # for the real bug this closes.
+    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(msg, current_user):
+        abort(403)
 
     # Mark as read + advance lastread pointer
     if not EchomailReadStatus.query.filter_by(
@@ -385,10 +430,13 @@ def compose(area_id, reply_to_id=None):
 def netmail_inbox():
     """List netmail (private 1-on-1 messages) the user can see.
 
-    For now we show all messages in any 'NETMAIL' echo area on any active
-    network — the parser routes inbound private QWK messages there. Per-user
-    filtering by recipient name is left for a future revision since QWK
-    netmail traditionally relies on the BBS sysop reviewing inbound mail.
+    Real gap found in a full application-wide access-control audit --
+    same bug class as web/netmail.py's now-fixed _user_addresses(): this
+    used to show the last 100 messages from EVERY network's NETMAIL area
+    to ANY logged-in user with zero recipient filtering at all. Now
+    scoped via _owns_netmail_echomail() (admins still see everything --
+    the historical "sysop reviews inbound mail" catch-all, but only for
+    admins now, not every user).
     """
     networks = EchomailNetwork.query.filter_by(is_active=True).all()
     netmail_areas = []
@@ -399,7 +447,8 @@ def netmail_inbox():
         msgs = (EchomailMessage.query
                 .filter_by(area_id=area.id)
                 .order_by(EchomailMessage.created_at.desc())
-                .limit(100).all())
+                .limit(200).all())
+        msgs = [m for m in msgs if _owns_netmail_echomail(m, current_user)][:100]
         netmail_areas.append({'network': net, 'area': area, 'messages': msgs})
     return render_template('echomail/netmail_inbox.html',
                            netmail_areas=netmail_areas)

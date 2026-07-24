@@ -263,7 +263,19 @@ def sync_wall_inbound(app, params):
     imported = 0
     skipped_no_msgid = 0
     try:
-        area_ids = [a.id for a in EchoArea.query.filter_by(tag=WALL_AREA_TAG).all()]
+        # Real gap found in a full access-control audit: this used to
+        # look up ANET_WALL areas by tag ALONE, across every network on
+        # the install -- not just the one network.py's own outbound
+        # relay is scoped to (see _configured_network's docstring). A
+        # peer authenticated on any OTHER BinkP network could get an
+        # ANET_WALL-tagged area auto-created for it (binkp_server.py's
+        # unknown-tag handling) and inject fake Wall posts. Scoping the
+        # lookup to the same configured network closes that.
+        network = _configured_network(app.config.get('WALL_INTERBBS_NETWORK_ID'))
+        if network is None:
+            return True, 'no ANET_WALL network configured'
+        area_ids = [a.id for a in EchoArea.query.filter_by(
+            tag=WALL_AREA_TAG, network_id=network.id).all()]
         if not area_ids:
             return True, 'no ANET_WALL areas configured'
 
@@ -286,9 +298,10 @@ def sync_wall_inbound(app, params):
             lines = body.split('\n', 1)
             line1 = _wf_apply(lines[0])[:200]
             line2 = _wf_apply(lines[1])[:200] if len(lines) > 1 else None
+            from_name = _wf_apply(msg.from_name or '?')
             wp = WallPost(
-                username=(msg.from_name or '?')[:80],
-                display_name=(msg.from_name or '?')[:100],
+                username=from_name[:80],
+                display_name=from_name[:100],
                 line1=line1, line2=line2,
                 origin_bbs=_origin_from_message(msg),
                 remote_msg_id=msg.msg_id,
@@ -309,12 +322,18 @@ def sync_lastcallers_inbound(app, params):
     function's docstring for the dedup/loop-prevention reasoning, which
     applies identically here."""
     from ..models import db, EchoArea, EchomailMessage, CallerLog
+    from ..features.word_filter import apply as _wf_apply
     from datetime import datetime as _dt
 
     imported = 0
     skipped_no_msgid = 0
     try:
-        area_ids = [a.id for a in EchoArea.query.filter_by(tag=LASTCALLERS_AREA_TAG).all()]
+        # Same network-scoping gap and fix as sync_wall_inbound above.
+        network = _configured_network(app.config.get('LASTCALLERS_INTERBBS_NETWORK_ID'))
+        if network is None:
+            return True, 'no ANET_LASTCALLERS network configured'
+        area_ids = [a.id for a in EchoArea.query.filter_by(
+            tag=LASTCALLERS_AREA_TAG, network_id=network.id).all()]
         if not area_ids:
             return True, 'no ANET_LASTCALLERS areas configured'
 
@@ -334,7 +353,7 @@ def sync_lastcallers_inbound(app, params):
                 continue
 
             body_lines = (msg.body or '').split('\n')
-            service = (body_lines[0].strip() if body_lines else '')[:20] or 'unknown'
+            service = _wf_apply((body_lines[0].strip() if body_lines else '') or 'unknown')[:20]
             started_at = None
             if len(body_lines) > 1 and body_lines[1].strip():
                 try:
@@ -342,7 +361,7 @@ def sync_lastcallers_inbound(app, params):
                 except Exception:
                     started_at = None
             cl = CallerLog(
-                username=(msg.from_name or '?')[:80],
+                username=_wf_apply(msg.from_name or '?')[:80],
                 service=service,
                 started_at=started_at or _dt.utcnow(),
                 origin_bbs=_origin_from_message(msg),
@@ -472,7 +491,12 @@ def sync_scores_inbound(app, params):
     skipped_no_msgid = 0
     skipped_no_local_game = 0
     try:
-        area_ids = [a.id for a in EchoArea.query.filter_by(tag=GAMES_AREA_TAG).all()]
+        # Same network-scoping gap and fix as sync_wall_inbound above.
+        network = _configured_network(app.config.get('GAMES_INTERBBS_NETWORK_ID'))
+        if network is None:
+            return True, 'no ANET_GAMESCORES network configured'
+        area_ids = [a.id for a in EchoArea.query.filter_by(
+            tag=GAMES_AREA_TAG, network_id=network.id).all()]
         if not area_ids:
             return True, 'no ANET_GAMESCORES areas configured'
 

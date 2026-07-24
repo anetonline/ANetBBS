@@ -192,6 +192,22 @@ async def _act_exec(ui, args):
     import asyncio
     import os as _os
 
+    # Defense-in-depth backstop found in a full access-control audit:
+    # the engine's dispatch has no per-action_type gate of its own --
+    # access is enforced purely by min_access filtering which hotkeys
+    # are even offered (see build_hotkey_map()). That's fine for most
+    # action types since their own handlers re-check (e.g. 'sysop'
+    # hard-checks is_admin downstream), but exec runs an arbitrary
+    # sysop-configured shell command as the BBS service user with NO
+    # such backstop -- a custom menu item left at the model's default
+    # min_access=0 (confirmed: menu_admin.py's own seed_samples() ships
+    # exactly this footgun) would otherwise let any logged-in user run
+    # it. This action type is sysop-only by design (see docstring); make
+    # that non-optional regardless of the menu item's own min_access.
+    if not (ui.session.user or {}).get('is_admin'):
+        await ui.session.write("\r\nAccess denied.\r\n")
+        return None
+
     if not args:
         await ui.session.write("\r\nMenu config error: exec action_args required.\r\n")
         return None

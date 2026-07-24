@@ -155,7 +155,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='2:2/1')
             db.session.add(net)
             node = BinkPNode(name='Downstream', ftn_address='2:2/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.HUBTEST', name='Hub Test', network_id=net.id,
@@ -164,7 +164,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                node, '2:2/2', '', '+AF.HUBTEST\n')
+                node, '2:2/2', 'testpw123', '+AF.HUBTEST\n')
 
             self.assertIn('+AF.HUBTEST : subscribed', response)
             sub = EchoAreaNode.query.filter_by(
@@ -292,7 +292,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='7:7/1')
             db.session.add(net)
             node = BinkPNode(name='Rescanner', ftn_address='7:7/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.RESCAN', name='Rescan Test', network_id=net.id,
@@ -312,7 +312,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                node, '7:7/2', '', '%RESCAN AF.RESCAN\n')
+                node, '7:7/2', 'testpw123', '%RESCAN AF.RESCAN\n')
 
             self.assertIn('queued 3 message(s)', response)
             self.assertEqual(
@@ -328,7 +328,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='8:8/1')
             db.session.add(net)
             node = BinkPNode(name='BareRescanner', ftn_address='8:8/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             area_a = EchoArea(tag='AF.BARE.A', name='A', network_id=net.id,
@@ -348,7 +348,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                node, '8:8/2', '', '%RESCAN\n')
+                node, '8:8/2', 'testpw123', '%RESCAN\n')
 
             self.assertIn('queued 2 message(s) across 2 subscribed area(s)', response)
             self.assertEqual(
@@ -367,7 +367,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='3:3/1')
             db.session.add(net)
             node = BinkPNode(name='Downstream', ftn_address='3:3/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.SYSOPONLY', name='Sysop Only', network_id=net.id,
@@ -376,7 +376,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                node, '3:3/2', '', '+AF.SYSOPONLY\n')
+                node, '3:3/2', 'testpw123', '+AF.SYSOPONLY\n')
 
             self.assertNotIn('subscribed', response)
             sub = EchoAreaNode.query.filter_by(
@@ -394,7 +394,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='3:4/1')
             db.session.add(net)
             node = BinkPNode(name='Downstream', ftn_address='3:4/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             public_area = EchoArea(tag='AF.PUBLIC', name='Public', network_id=net.id,
@@ -406,7 +406,7 @@ class AreafixTests(unittest.TestCase):
             db.session.add_all([public_area, sysop_area])
             db.session.commit()
 
-            _process_node_request(node, '3:4/2', '', '+ALL\n')
+            _process_node_request(node, '3:4/2', 'testpw123', '+ALL\n')
 
             self.assertIsNotNone(EchoAreaNode.query.filter_by(
                 node_id=node.id, echo_area_id=public_area.id).first())
@@ -427,7 +427,7 @@ class AreafixTests(unittest.TestCase):
                                   our_address='3:5/1')
             db.session.add(net)
             node = BinkPNode(name='Downstream', ftn_address='3:5/2',
-                             password='', is_active=True)
+                             password='testpw123', is_active=True)
             db.session.add(node)
             db.session.flush()
             area = EchoArea(tag='AF.LEGACY', name='Legacy', network_id=net.id,
@@ -440,7 +440,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = _process_node_request(
-                node, '3:5/2', '', '+AF.LEGACY\n')
+                node, '3:5/2', 'testpw123', '+AF.LEGACY\n')
 
             self.assertIn('subscribed', response)
             self.assertIsNotNone(EchoAreaNode.query.filter_by(
@@ -475,9 +475,14 @@ class AreafixTests(unittest.TestCase):
 
     def test_password_command_rejected_when_node_has_no_password_set(self):
         """SECURITY: a node with no password configured must not be able
-        to bootstrap one via %PASSWORD -- the surrounding auth check
-        only rejects a WRONG password, not a MISSING one, so this needs
-        its own explicit guard."""
+        to bootstrap one via %PASSWORD. Originally this exercised a
+        %PASSWORD-specific guard because the surrounding auth check only
+        rejected a WRONG password, not a MISSING one -- that surrounding
+        check was later hardened (full access-control audit) to reject
+        a missing password unconditionally too, so this now gets caught
+        by the earlier, general gate. Kept as a regression test for the
+        core guarantee either way: no password bootstrap without real
+        authentication."""
         from anetbbs.models import db, EchomailNetwork, EchoArea, BinkPNode
         from anetbbs.echomail.areafix import _process_node_request
 
@@ -494,7 +499,8 @@ class AreafixTests(unittest.TestCase):
             response, log_kwargs = _process_node_request(
                 node, '7:2/2', '', '%PASSWORD Whatever123\n')
 
-            self.assertIn('ERROR', response)
+            self.assertIn('password incorrect or missing', response)
+            self.assertFalse(log_kwargs['success'])
             refreshed = BinkPNode.query.get(node_id)
             self.assertEqual(refreshed.password, '',
                              'must not silently set a password on an '

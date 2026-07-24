@@ -15,8 +15,29 @@ from werkzeug.utils import secure_filename
 
 from ..models import db, FileUpload, FileArea
 from ..features.archive_meta import extract_archive_description
+from ..features.access_control import evaluate_access
 
 files_bp = Blueprint('files', __name__, url_prefix='/files')
+
+
+def _visible_to(user, area):
+    """Is an upload scoped to this file area visible to this user?
+
+    Real gap found in a full application-wide access-control audit:
+    this gallery (FileUpload, optionally file_area_id-scoped) never
+    consulted FileArea.min_access_level/is_sysop_only at all, unlike
+    the equivalent, already-fixed _visible_to() in file_areas.py --
+    a file uploaded into a sysop-only or VIP-gated area was still
+    fully listed and directly downloadable by anyone. None (a
+    top-level, unscoped upload) is always visible.
+    """
+    if area is None:
+        return True
+    if not area.is_active:
+        return False
+    return evaluate_access(user, area.min_access_level,
+                           is_sysop_only=area.is_sysop_only,
+                           bypass_admin=True)
 
 
 class UploadForm(FlaskForm):
@@ -35,7 +56,8 @@ def allowed_file(filename):
 @files_bp.route('/')
 def list_files():
     """List all uploaded files"""
-    uploads = FileUpload.query.order_by(FileUpload.created_at.desc()).all()
+    uploads = [u for u in FileUpload.query.order_by(FileUpload.created_at.desc()).all()
+              if _visible_to(current_user, u.file_area)]
     return render_template('files/list.html', uploads=uploads)
 
 
@@ -187,6 +209,9 @@ def upload():
 def download(file_id):
     """Download a file"""
     upload_obj = FileUpload.query.get_or_404(file_id)
+
+    if not _visible_to(current_user, upload_obj.file_area):
+        abort(403)
 
     uploads_dir = current_app.config.get('UPLOADS_DIR', os.path.join(current_app.config['DATA_DIR'], 'uploads'))
 

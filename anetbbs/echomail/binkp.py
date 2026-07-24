@@ -229,6 +229,19 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
     """
     def _parse_ftn(addr):
         try:
+            # Real bug found live: a qualified address with NO point
+            # number but a domain suffix (e.g. '1200:1/4@anet' -- this
+            # network's own convention) was never stripped of '@anet'
+            # before splitting node from point, so node_point ended up
+            # as the literal string '4@anet' -- int('4@anet') always
+            # raised, silently falling back to 1:1/1.0 for EVERY
+            # outbound packet destined to this network. Confirmed via
+            # the downstream node's own tosser log ("Importing ...
+            # from 1200:1/1 to 1:1/1" -- our own hub's real address
+            # correctly parsed, but the destination corrupted to the
+            # fallback). Strip the domain suffix first, exactly like
+            # the qualified-address convention (addr@domain) requires.
+            addr = addr.split('@', 1)[0]
             zone, rest = addr.split(':')
             net, node_point = rest.split('/')
             node = node_point.split('.')[0]
@@ -508,15 +521,23 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
 
         # Encode using the declared charset.  UTF-8 is the only multi-byte
         # one we honor here — everything else round-trips as 8-bit (CP437).
+        # Real bug found live: a message composed through the web UI can
+        # contain genuine Unicode characters (e.g. pasted box-drawing art)
+        # rather than latin-1-wrapped raw bytes -- a blanket
+        # encode('latin-1', errors='replace') silently turned every one
+        # of those into '?' in the outbound packet. encode_body_cp437()
+        # (features/wire_encoding.py) recovers the correct CP437 byte for
+        # genuine Unicode characters instead of destroying them.
+        from ..features.wire_encoding import encode_body_cp437
         chrs_upper = chrs.upper()
         if chrs_upper.startswith(('UTF-8', 'UTF8')):
             encoded = msg_assembled.encode('utf-8', errors='replace') + b'\x00'
         else:
-            encoded = msg_assembled.encode('latin-1', errors='replace') + b'\x00'
+            encoded = encode_body_cp437(msg_assembled) + b'\x00'
 
-        from_b = (msg.from_name or 'Sysop').encode('latin-1', errors='replace')[:35] + b'\x00'
-        to_b = (msg.to_name or 'All').encode('latin-1', errors='replace')[:35] + b'\x00'
-        subj_b = (msg.subject or '').encode('latin-1', errors='replace')[:71] + b'\x00'
+        from_b = encode_body_cp437(msg.from_name or 'Sysop')[:35] + b'\x00'
+        to_b = encode_body_cp437(msg.to_name or 'All')[:35] + b'\x00'
+        subj_b = encode_body_cp437(msg.subject or '')[:71] + b'\x00'
         date_b = now.strftime('%d %b %y  %H:%M:%S').encode('ascii') + b'\x00'
 
         # FTS-0001 packed message header: msg_type + 12 routing bytes,

@@ -167,7 +167,14 @@ def _build_qwk_hub_packet(node: QWKNode) -> bytes:
             if getattr(msg, 'reply_id', None) and '@REPLY:' not in body_raw:
                 body_raw = f'@REPLY: {msg.reply_id}\n' + body_raw
             body_text = body_raw.replace('\n', '\xe3').replace('\r', '')
-            body_encoded = body_text.encode('latin-1', errors='replace')
+            # Real bug found live: a web-composed message can contain
+            # genuine Unicode characters (pasted box-drawing art) rather
+            # than latin-1-wrapped raw bytes -- encode_body_cp437()
+            # recovers the correct CP437 byte instead of a blanket
+            # encode('latin-1', errors='replace') silently turning them
+            # into '?'.
+            from ..features.wire_encoding import encode_body_cp437
+            body_encoded = encode_body_cp437(body_text)
             remainder = len(body_encoded) % QWK_BLOCK_SIZE
             if remainder:
                 body_encoded += b' ' * (QWK_BLOCK_SIZE - remainder)
@@ -180,11 +187,11 @@ def _build_qwk_hub_packet(node: QWKNode) -> bytes:
             header[1:8] = str(total_msgs).encode('ascii')[:7].ljust(7)
             date_str = (msg.created_at or datetime.utcnow()).strftime('%m-%d-%y%H:%M').encode('ascii')[:13].ljust(13)
             header[8:21] = date_str
-            to_b = (msg.to_name or 'All').encode('latin-1', errors='replace')[:25].ljust(25)
+            to_b = encode_body_cp437(msg.to_name or 'All')[:25].ljust(25)
             header[21:46] = to_b
-            from_b = (msg.from_name or '').encode('latin-1', errors='replace')[:25].ljust(25)
+            from_b = encode_body_cp437(msg.from_name or '')[:25].ljust(25)
             header[46:71] = from_b
-            subj_b = (msg.subject or '').encode('latin-1', errors='replace')[:25].ljust(25)
+            subj_b = encode_body_cp437(msg.subject or '')[:25].ljust(25)
             header[71:96] = subj_b
             header[108:116] = b'0'.rjust(8)
             header[116:122] = str(num_chunks).encode('ascii')[:6].rjust(6)

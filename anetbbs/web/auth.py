@@ -11,7 +11,7 @@ from flask import (Blueprint, render_template, redirect, url_for, flash,
                    request, current_app, session as flask_session)
 from flask_login import login_user, logout_user, login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, SelectField
-from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
+from wtforms.validators import DataRequired, EqualTo, Length, Regexp, ValidationError
 from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
@@ -186,7 +186,20 @@ class RegisterForm(FlaskForm):
     """Registration form"""
     username = StringField('Username', validators=[
         DataRequired(),
-        Length(min=3, max=80, message='Username must be between 3 and 80 characters')
+        Length(min=3, max=80, message='Username must be between 3 and 80 characters'),
+        # Real gap found in a full access-control audit: this had no
+        # character restriction at all, unlike terminal registration's
+        # equivalent (core/session.py's handle_registration(), which
+        # has always required this exact charset) -- a web-registered
+        # username containing '/'/'..'/CR/LF could break path
+        # construction (features/anetcraft.py's save-file path,
+        # separately fixed) or field-injection into DOS door dropfiles
+        # (games/dropfile.py) and DOSBox/dosemu autoexec generation
+        # (games/door_runner.py).
+        Regexp(r"^[A-Za-z0-9][A-Za-z0-9 ._'\-]{1,79}$",
+              message="Username must start with a letter or digit, and only "
+                      "use letters, digits, spaces, dot, apostrophe, hyphen, "
+                      "or underscore.")
     ])
     email = StringField('Email', validators=[DataRequired(), Email()])
     password = PasswordField('Password', validators=[
@@ -462,6 +475,16 @@ def register():
                 current_app.logger.warning(
                     'Verification email send failed for %s: %s', user.username, err)
             return render_template('auth/verify_sent.html', email=user.email)
+
+        if start_unverified:
+            # Real access-control gap found in a full audit: with NUV_ENABLED
+            # on and email verification off, execution used to fall straight
+            # through to login_user() below -- logging the brand-new,
+            # still-unverified account in immediately and completely
+            # bypassing the sysop-approval queue this whole code path exists
+            # to enforce. login()'s own is_verified check (above) only ever
+            # runs on a LATER, separate login -- never here.
+            return render_template('auth/pending_approval.html', username=user.username)
 
         flash(f'Account created successfully! Welcome, {user.username}!', 'success')
         login_user(user, remember=True)

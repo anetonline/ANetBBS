@@ -651,8 +651,21 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         sent_count = 0
         with app.app_context():
             if downstream_node_id is not None:
-                from .tosser import get_pending_for_node, mark_sent_for_node
-                outbound = get_pending_for_node(downstream_node_id)
+                from .tosser import (
+                    get_pending_for_node, mark_sent_for_node,
+                    get_pending_netmail_for_node, mark_netmail_sent,
+                )
+                outbound_echo = get_pending_for_node(downstream_node_id)
+                # Queued outbound NetmailMessage rows were NEVER flushed
+                # via this inbound-listener path before -- see
+                # get_pending_netmail_for_node()'s docstring for the full
+                # story (confirmed live: a sysop's own netmail reply, and
+                # a week-plus backlog of AreaFix auto-replies, both stuck
+                # in status='queued' because this node only ever calls IN).
+                outbound_nm = get_pending_netmail_for_node(node)
+
+                from .poller import _NetmailAdapter
+                outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
                 if outbound:
                     pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
                     fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
@@ -660,8 +673,10 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                                     peer, recv_state, inbound_files,
                                                     transcript=transcript)
                     if accepted:
-                        mark_sent_for_node(downstream_node_id,
-                                           [m.id for m in outbound])
+                        if outbound_echo:
+                            mark_sent_for_node(downstream_node_id,
+                                               [m.id for m in outbound_echo])
+                        mark_netmail_sent(outbound_nm)
                         sent_count = len(outbound)
                     else:
                         logger.warning('Hold-queue .pkt not accepted by %s — '
@@ -693,11 +708,23 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         db.session.commit()
             elif net_id is not None:
                 from ..models import EchomailMessage
-                outbound = EchomailMessage.query.filter_by(
+                from .tosser import get_pending_netmail_for_network, mark_netmail_sent
+                from .poller import _NetmailAdapter
+                outbound_echo = EchomailMessage.query.filter_by(
                     network_id=net_id,
                     direction='outbound',
                     sent_at=None,
                 ).all()
+                # Same gap as the downstream-node branch above (see
+                # get_pending_netmail_for_node()'s docstring for the full
+                # story): queued outbound netmail was never flushed via
+                # this inbound-listener path either, only via poller.py's
+                # outbound dial. No per-node address to disambiguate here
+                # -- this branch matches a whole EchomailNetwork (one
+                # designated counterpart), same as poller.py's own
+                # network_id-only netmail gather.
+                outbound_nm = get_pending_netmail_for_network(net_id)
+                outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
                 if outbound:
                     pkt_bytes = _build_ftn_packet(
                         outbound, matched_our_address, remote_addr,
@@ -711,8 +738,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                                     transcript=transcript)
                     if accepted:
                         now = datetime.utcnow()
-                        for m in outbound:
+                        for m in outbound_echo:
                             m.sent_at = now
+                        mark_netmail_sent(outbound_nm)
                         db.session.commit()
                         sent_count = len(outbound)
                     else:
@@ -1513,10 +1541,30 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # comment for why this compares sender+subject+network
             # only, not body (confirmed live the body isn't
             # byte-identical across resends).
+            #
+            # EXCEPT for netmail addressed to a robot (AreaFix/FileFix
+            # and their aliases): each one is a distinct command a
+            # sysop is issuing, not a duplicate informational broadcast,
+            # and it's completely ordinary for a sysop testing/retrying
+            # AreaFix commands to resend with an identical subject line
+            # (their client often doesn't vary it) within the 48h
+            # window. Confirmed live: a downstream node's repeated
+            # AreaFix "%help" request was silently swallowed here every
+            # time after the first because an earlier netmail from the
+            # same address happened to reuse the same subject -- logged
+            # only as "Imported 0 messages", no error, and the AreaFix
+            # bot below never even ran since the netmail never made it
+            # into netmails_to_process. The exact-MSGID dedup above
+            # still guards against a literal retransmit of the same
+            # packet, which is the only case that's a true duplicate.
+            _to_lower = (m.get('to_name') or '').strip().lower()
+            _is_robot_netmail = _to_lower in (
+                'areafix', 'area fix', 'areamgr',
+                'filefix', 'file fix', 'filemgr')
             _from_name = (m['from_name'] or '')[:120]
             _subject = (m['subject'] or '')[:200]
             _cutoff = datetime.utcnow() - timedelta(hours=48)
-            if NetmailMessage.query.filter(
+            if not _is_robot_netmail and NetmailMessage.query.filter(
                     NetmailMessage.network_id == network_id,
                     NetmailMessage.direction == 'inbound',
                     NetmailMessage.from_name == _from_name,

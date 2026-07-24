@@ -203,6 +203,46 @@ class ContentDedupTests(_BaseTestCase):
             self.assertEqual(
                 NetmailMessage.query.filter_by(direction='inbound').count(), 1)
 
+    def test_areafix_netmail_with_repeated_subject_is_not_deduped(self):
+        """Real live bug: a downstream node resent an AreaFix "%help"
+        command to us with the SAME subject line its client had already
+        used for an earlier, unrelated test message from the same
+        address within the dedup window. The content-based dedup
+        fallback silently swallowed the AreaFix command -- zero error,
+        just "Imported 0 messages" -- because it treated a robot
+        command the same as an informational broadcast. AreaFix/FileFix
+        netmail must always import and dispatch, regardless of subject
+        reuse; only the exact-MSGID dedup should ever apply to it."""
+        app = _fresh_app(str(Path(self._tmp.name) / 'areafix_dedup.db'))
+        net_id = self._make_network(app)
+        from anetbbs.models import EchomailNetwork, NetmailMessage
+        from anetbbs.echomail.poller import _import_netmail
+        with app.app_context():
+            net = EchomailNetwork.query.get(net_id)
+            first = {
+                'msg_id': 'aaaa-1111', 'to_name': 'areafix',
+                'to_address': '1200:1/1',
+                'from_name': 'Craig Hendricks', 'from_address': '1200:1/4',
+                'subject': 'Whyf6ou8N45LQvNc', 'body': 'first request',
+            }
+            second = {
+                'msg_id': 'bbbb-2222', 'to_name': 'areafix',
+                'to_address': '1200:1/1',
+                'from_name': 'Craig Hendricks', 'from_address': '1200:1/4',
+                'subject': 'Whyf6ou8N45LQvNc', 'body': '%help',
+            }
+            self.assertEqual(_import_netmail(net, first), 1)
+            self.assertEqual(_import_netmail(net, second), 1,
+                            'a robot-addressed netmail must import even '
+                            'when sender+subject+network match an earlier '
+                            'unrelated message -- it is a distinct command')
+            # Both inbound commands must be stored -- the AreaFix bot also
+            # fires for each one (dispatched from within _import_netmail())
+            # and sends its own outbound reply netmail, so the inbound
+            # count is the meaningful assertion here, not the raw total.
+            self.assertEqual(
+                NetmailMessage.query.filter_by(direction='inbound').count(), 2)
+
     def test_stale_match_outside_window_is_not_deduped(self):
         app = _fresh_app(str(Path(self._tmp.name) / 'stale.db'))
         net_id = self._make_network(app)

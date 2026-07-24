@@ -73,24 +73,157 @@ def _decode_charset(text: str, chrs: str = '') -> str:
 
     Bodies enter the DB as latin-1 (1:1 byte->codepoint), so we round-trip
     back to bytes and decode with the right codec.
+
+    Real bug found live: that byte-preserving round-trip is only true for
+    messages that arrived over the wire (BinkP/QWK) -- a message composed
+    directly through the web/terminal UI stores genuine already-decoded
+    Unicode text, never latin-1-wrapped bytes. A first fix skipped the
+    whole round-trip whenever ANY codepoint was above 0xFF (proof it
+    can't be raw latin-1-wrapped bytes, which top out at 0xFF) -- correct
+    for a purely-Unicode message, but a real pasted Moebius CP437 export
+    demonstrated the flaw: it was overwhelmingly raw CP437-as-latin-1
+    mojibake, EXCEPT one corner glyph that came through the clipboard as
+    a genuine Unicode character (U+0152 Œ) instead of staying
+    byte-preserved. That one outlier made the all-or-nothing check skip
+    translating the entire message, including every other, genuinely
+    raw-byte box-drawing character. Decode per character instead: only
+    characters that are actually byte-representable (0-0xFF) go through
+    the round-trip; anything already outside that range passes through
+    untouched, whatever the rest of the message needs.
     """
     if not text:
         return text
-    raw = text.encode('latin-1', errors='replace')
     chrs_upper = (chrs or '').upper()
     if chrs_upper.startswith(('UTF-8', 'UTF8')):
+        # Multi-byte codec -- unlike CP437/latin-1 this can't be split
+        # per character (a single decoded character can span several
+        # raw-byte positions), so this path keeps the original
+        # all-or-nothing check. It's specific to @CHRS-declared wire
+        # messages (a genuinely byte-oriented source), not the locally-
+        # composed/mixed-content case the fix above addresses.
+        if any(ord(c) > 0xFF for c in text):
+            return text
+        raw = text.encode('latin-1', errors='replace')
         return raw.decode('utf-8', errors='replace')
     if chrs_upper.startswith('LATIN-1') or chrs_upper.startswith('ISO-8859'):
-        return raw.decode('latin-1', errors='replace')
+        # Identity for any byte-representable char; genuine Unicode
+        # chars pass through unchanged either way.
+        return text
     # Default: CP437 (FTN/QWK standard, also what Synchronet emits).
     # CP437 maps bytes 0x01–0x1F to graphic Unicode points (smileys, arrows,
     # etc.) — in particular 0x1B → U+2190 (←) instead of U+001B (ESC).
     # That breaks _ansi_to_html's \x1b regex so every ANSI sequence leaks
-    # through as visible text.  Restore the original byte value for any
-    # control character; CP437 is a single-byte codec so len(raw)==len(decoded).
-    decoded = raw.decode('cp437', errors='replace')
-    return ''.join(chr(b) if 0x01 <= b <= 0x1F else c
-                   for b, c in zip(raw, decoded))
+    # through as visible text. Restore the original byte value for any
+    # control character (real ANSI escapes in a pasted message must
+    # survive this untouched).
+    out = []
+    for c in text:
+        b = ord(c)
+        if b > 0xFF:
+            out.append(c)
+            continue
+        if 0x01 <= b <= 0x1F:
+            out.append(c)
+            continue
+        out.append(bytes([b]).decode('cp437', errors='replace'))
+    return ''.join(out)
+
+
+# Any of these mark a line as NOT plain wrapped prose -- box-drawing,
+# block/shade art, or a horizontal-rule-style run of repeated symbol
+# chars. Reflow must never touch these (real regression risk: this is
+# exactly the kind of content project history has broken before).
+_ART_CHARS_RE = re.compile(
+    r'[─-▟\xb0\xb1\xb2\xdb\xdc\xdd\xde\xdf]')
+_RULE_LINE_RE = re.compile(r'^\s*([=\-*#~^_])\1{4,}\s*$')
+_LIST_OR_QUOTE_RE = re.compile(r'^\s*(\d+[.)]|[-*•>|])\s')
+_REFLOW_MIN_LEN = 60  # a line at least this long plausibly hit a wrap column
+_TRAILING_WORD_RE = re.compile(r"[A-Za-z']+$")
+_LEADING_WORD_RE = re.compile(r"^[A-Za-z']+")
+
+_reflow_spellchecker = None
+_reflow_spellchecker_tried = False
+
+
+def _get_reflow_spellchecker():
+    """Same lazy, degrade-silently pattern as features/anedit.py's spell
+    check -- pyspellchecker bundles its own dictionary, no network/file."""
+    global _reflow_spellchecker, _reflow_spellchecker_tried
+    if not _reflow_spellchecker_tried:
+        _reflow_spellchecker_tried = True
+        try:
+            from spellchecker import SpellChecker
+            _reflow_spellchecker = SpellChecker()
+        except ImportError:
+            _reflow_spellchecker = None
+    return _reflow_spellchecker
+
+
+def _looks_like_art(line: str) -> bool:
+    return bool(_ART_CHARS_RE.search(line) or _RULE_LINE_RE.match(line))
+
+
+def _join_wrap_point(cur: str, nxt: str) -> str:
+    """Join `cur` and `nxt` at a hard-wrap point, deciding whether the
+    original wrap fell mid-word (no space belongs) or between two words
+    (a space belongs) -- genuinely ambiguous from the bytes alone (e.g.
+    "...and al" / "l things..." could be the word "al" followed by "l",
+    or "all" split mid-word). Disambiguate the only way that's actually
+    reliable: try both readings and prefer whichever is a real
+    dictionary word. Falls back to a space (the far more common case,
+    and the safe default when the spellchecker package is unavailable
+    or the merged word isn't recognized -- e.g. informal words like
+    "putzing" that a standard dictionary doesn't carry)."""
+    cur_m = _TRAILING_WORD_RE.search(cur)
+    nxt_m = _LEADING_WORD_RE.search(nxt)
+    if cur_m and nxt_m:
+        sp = _get_reflow_spellchecker()
+        if sp is not None:
+            merged = cur_m.group(0) + nxt_m.group(0)
+            if not sp.unknown([merged]):
+                prefix = cur[:cur_m.start()]
+                suffix = nxt[nxt_m.end():]
+                return prefix + merged + suffix
+    return cur.rstrip() + ' ' + nxt.lstrip()
+
+
+def reflow_hard_wrapped_body(text: str) -> str:
+    """Rejoin lines that look like a fixed-column hard-wrap artifact
+    rather than an intentional break.
+
+    Real bug reported live: a message from a real Synchronet/SBBSecho
+    peer hard-wraps long paragraphs at a fixed column (~79 chars) using
+    real line-break bytes with no word-boundary awareness and no
+    soft-wrap marker -- FTS-0001 compliant, but every one of those
+    breaks renders as a real paragraph break here (correctly, per spec),
+    producing choppy, sometimes mid-word-split output for any sender
+    whose wrap width differs from ours.
+
+    Conservative on purpose: only joins a line to the next when the
+    current line is close to a typical wrap width AND neither line looks
+    like art, a rule, a list item, or a quote -- ASCII-art borders,
+    origin lines, and quoted replies must never be touched.
+    """
+    if not text or '\x1b' in text:
+        return text
+    lines = text.split('\n')
+    out = []
+    i = 0
+    while i < len(lines):
+        cur = lines[i]
+        while (i + 1 < len(lines)
+               and len(cur) >= _REFLOW_MIN_LEN
+               and cur.strip() != ''
+               and lines[i + 1].strip() != ''
+               and not _looks_like_art(cur)
+               and not _looks_like_art(lines[i + 1])
+               and not lines[i + 1][:1].isspace()
+               and not _LIST_OR_QUOTE_RE.match(lines[i + 1])):
+            cur = _join_wrap_point(cur, lines[i + 1])
+            i += 1
+        out.append(cur)
+        i += 1
+    return '\n'.join(out)
 
 
 def _ansi_to_html(text: str) -> str:
@@ -213,6 +346,7 @@ def render_msg_body(text, chrs: str = '') -> Markup:
     if not text:
         return Markup('')
     decoded = _decode_charset(str(text), chrs)
+    decoded = reflow_hard_wrapped_body(decoded)
     # QWK 0xE3 separators can land anywhere inside a CSI sequence (between
     # ESC and '[', or anywhere in the parameter string).  Strip \n from any
     # position within an escape sequence so the renderer's regex matches.

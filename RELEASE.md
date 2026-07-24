@@ -1,3 +1,29 @@
+# ANetBBS v1.0b2.201 — Bug fixes (July 2026)
+
+- AreaFix/FileFix netmail could be silently discarded as a duplicate if it reused the same subject as an earlier, unrelated message from the same sender — every later command from that sender was dropped instead of processed.
+- Queued outbound netmail (sysop replies, AreaFix/FileFix bot responses) was never actually sent to a downstream node or peer network during an inbound BinkP session — only echomail was flushed, so affected netmail could sit unsent indefinitely.
+
+Full suite verified clean (1526 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.200 — Bug fixes (July 2026)
+
+- Follow-up fix to v199's message display improvements: mixed CP437/Unicode content now renders correctly in all cases.
+
+Full suite verified clean (1502 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.199 — Bug fixes + display improvements (July 2026)
+
+- Security and access-control fixes across the web, terminal, and network layers.
+- Fixed message display issues (CP437/Unicode rendering, word-wrap on inbound messages).
+
+Full suite verified clean (1501 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.198 — Bug fixes (July 2026)
 
 - Minor bug fixes.

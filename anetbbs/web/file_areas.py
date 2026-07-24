@@ -548,8 +548,22 @@ def create_share(area_id, filename):
     area = FileArea.query.get_or_404(area_id)
     if not _visible_to(current_user, area):
         abort(403)
-    if not area.storage_path or not os.path.isfile(
-            os.path.join(area.storage_path, filename)):
+    if not area.storage_path or not os.path.isdir(area.storage_path):
+        flash('File not found.', 'danger')
+        return redirect(url_for('file_areas.view_area', area_id=area.id))
+
+    # Real gap found in a full application-wide access-control audit:
+    # this route never applied the same normpath+realpath traversal
+    # guard download()/thumbnail() (above) already use -- a crafted
+    # `filename` (e.g. `../../../etc/passwd`) made the existence check
+    # an oracle (success/failure reveals whether an arbitrary path
+    # exists on the server) and would have persisted a SharedFileLink
+    # pointing outside the area's storage directory either way.
+    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
+        flash('File not found.', 'danger')
+        return redirect(url_for('file_areas.view_area', area_id=area.id))
+    if not os.path.isfile(full):
         flash('File not found.', 'danger')
         return redirect(url_for('file_areas.view_area', area_id=area.id))
 
@@ -583,9 +597,14 @@ def fetch_shared(token):
     if link is None or not link.is_valid:
         abort(404)
     area = link.file_area
-    if not area or not area.storage_path:
+    if not area or not area.storage_path or not os.path.isdir(area.storage_path):
         abort(404)
-    fpath = os.path.join(area.storage_path, link.filename)
+    # Defense-in-depth: create_share() now blocks a traversal filename
+    # from ever being stored, but re-check here too in case a
+    # SharedFileLink row predates that fix.
+    fpath = os.path.normpath(os.path.join(area.storage_path, link.filename))
+    if not fpath.startswith(os.path.realpath(area.storage_path) + os.sep):
+        abort(404)
     if not os.path.isfile(fpath):
         abort(404)
     # Update audit fields BEFORE serving so the count is right even if the

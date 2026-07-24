@@ -941,8 +941,20 @@ def _import_netmail(network, msg_data: dict) -> int:
     # never-deduped rows (from the body check never matching) made that
     # query slower every single cycle. See also the received_at index
     # added in v1.0b2.145 -- this filter was previously unindexed too.
+    # EXCEPT for netmail addressed to a robot (AreaFix/FileFix and
+    # their aliases) -- see binkp_server.py's matching fix for the full
+    # story: each one is a distinct command, not a duplicate broadcast,
+    # and a sysop resending an AreaFix request often reuses the same
+    # subject. Applying this dedup to robot netmail silently drops
+    # real commands with zero error. The exact-MSGID check above still
+    # catches a literal retransmit of the same packet.
+    to_name = (msg_data.get('to_name') or '').strip()
+    _is_robot_netmail = to_name.lower() in (
+        'areafix', 'area fix', 'areamgr',
+        'filefix', 'file fix', 'filemgr')
+
     recent_cutoff = datetime.utcnow() - timedelta(hours=_CONTENT_DEDUP_WINDOW_HOURS)
-    content_dup = NetmailMessage.query.filter(
+    content_dup = None if _is_robot_netmail else NetmailMessage.query.filter(
         NetmailMessage.network_id == network.id,
         NetmailMessage.direction == 'inbound',
         NetmailMessage.from_name == from_name,
@@ -953,7 +965,6 @@ def _import_netmail(network, msg_data: dict) -> int:
     if content_dup:
         return 0
 
-    to_name = (msg_data.get('to_name') or '').strip()
     to_address = (msg_data.get('to_address') or '').strip()
     to_user = resolve_netmail_recipient(to_name, to_address, network)
 

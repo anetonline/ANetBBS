@@ -362,7 +362,13 @@ def _build_rep_packet(messages, packet_id: str, hub_id: str = '') -> bytes:
             body_raw = f'@MSGID: {msgid_str}\n' + body_raw
 
         body_text = body_raw.replace('\r\n', '\xe3').replace('\r', '\xe3').replace('\n', '\xe3')
-        body_encoded = body_text.encode('latin-1', errors='replace')
+        # Real bug found live: a web-composed message can contain genuine
+        # Unicode characters (pasted box-drawing art) rather than
+        # latin-1-wrapped raw bytes -- encode_body_cp437() recovers the
+        # correct CP437 byte instead of a blanket encode('latin-1',
+        # errors='replace') silently turning them into '?'.
+        from ..features.wire_encoding import encode_body_cp437
+        body_encoded = encode_body_cp437(body_text)
         # Pad body to 128-byte block boundary (spaces, as Synchronet does)
         remainder = len(body_encoded) % QWK_BLOCK_SIZE
         if remainder:
@@ -382,11 +388,11 @@ def _build_rep_packet(messages, packet_id: str, hub_id: str = '') -> bytes:
         header[1:8] = conf_num_str
         date_str = datetime.utcnow().strftime('%m-%d-%y%H:%M').encode('ascii')[:13].ljust(13)
         header[8:21] = date_str
-        to_b = (msg.to_name or 'All').encode('latin-1', errors='replace')[:25].ljust(25)
+        to_b = encode_body_cp437(msg.to_name or 'All')[:25].ljust(25)
         header[21:46] = to_b
-        from_b = (msg.from_name or 'Sysop').encode('latin-1', errors='replace')[:25].ljust(25)
+        from_b = encode_body_cp437(msg.from_name or 'Sysop')[:25].ljust(25)
         header[46:71] = from_b
-        subj_b = (msg.subject or '').encode('latin-1', errors='replace')[:25].ljust(25)
+        subj_b = encode_body_cp437(msg.subject or '')[:25].ljust(25)
         header[71:96] = subj_b
         # bytes 96..107: password (12 spaces, unused for REP)
         # bytes 108..115: reference message number (ASCII, right-justified)

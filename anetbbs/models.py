@@ -106,6 +106,14 @@ class User(UserMixin, db.Model):
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)
+    # Sysop account lock (admin.py's lock_user()/edit_user() toggle this).
+    # Real bug found in a full access-control audit: this column never
+    # existed -- every read went through getattr(user, 'is_locked', False)
+    # (a defensive pattern that silently masked the missing column), and
+    # every write (admin.py:2028/2258) was setting a plain, never-persisted
+    # Python attribute. The "Lock User" admin feature has never actually
+    # locked anyone out, on the web OR the terminal.
+    is_locked = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     # Relationships
     posts = db.relationship('Post', backref='author', lazy='dynamic', cascade='all, delete-orphan')

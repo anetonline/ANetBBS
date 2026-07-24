@@ -220,6 +220,7 @@ class FinishBeforeImportOrderingTests(unittest.TestCase):
                  patch.object(EchomailMessage, 'sent_at', _FakeColumn('sent_at')), \
                  patch.object(db, 'init_app', lambda app: None), \
                  patch.object(db, 'session', _NoOpSession()), \
+                 patch('anetbbs.echomail.tosser.get_pending_netmail_for_network', lambda network_id: []), \
                  patch.object(mod, '_finish_session', _tracking_finish_session), \
                  patch.object(mod, '_import_pkt_payload', _tracking_import_pkt_payload):
                 writer = _FakeWriter()

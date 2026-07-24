@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
 from flask import Blueprint, Response, request
+from flask_login import current_user
 
 from ..models import db, ShoutboxPost, Post, Message, EchomailMessage
+from ..features.access_control import evaluate_access
 
 
 feeds_bp = Blueprint('feeds', __name__, url_prefix='/feed')
@@ -68,7 +70,9 @@ def posts_rss():
     base = request.host_url.rstrip('/')
     items = []
     try:
-        rows = (Post.query.order_by(Post.created_at.desc()).limit(50).all())
+        rows = (Post.query.order_by(Post.created_at.desc()).limit(200).all())
+        rows = [p for p in rows if p.board and evaluate_access(
+            current_user, p.board.min_access_level, bypass_admin=True)][:50]
         for p in rows:
             items.append({
                 'title': p.subject or (p.content or '')[:60],
@@ -110,7 +114,10 @@ def echomail_rss():
     try:
         rows = (EchomailMessage.query
                 .order_by(EchomailMessage.created_at.desc())
-                .limit(50).all())
+                .limit(200).all())
+        rows = [e for e in rows if e.area and evaluate_access(
+            current_user, e.area.min_access_level,
+            is_sysop_only=e.area.is_sysop_only, bypass_admin=True)][:50]
         for e in rows:
             items.append({
                 'title': f'[{(e.area.tag if e.area else "?")}] {e.subject or "(no subject)"}',

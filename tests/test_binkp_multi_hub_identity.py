@@ -301,7 +301,23 @@ class _BinkpHandlerHarness:
                  patch.object(mod, '_build_ftn_packet', _sync_fake_build_ftn_packet), \
                  patch.object(mod, '_send_pkt_file', _fake_send_pkt_file), \
                  patch.object(tosser_mod, 'get_pending_for_node', lambda node_id: pending), \
-                 patch.object(tosser_mod, 'mark_sent_for_node', lambda node_id, ids: None):
+                 patch.object(tosser_mod, 'mark_sent_for_node', lambda node_id, ids: None), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda network_id: []), \
+                 patch.object(tosser_mod, 'mark_netmail_sent', lambda rows: 0):
+                # _handle_connection() now also queries queued outbound
+                # NetmailMessage rows on both the downstream_node_id and
+                # net_id branches (real live bug: netmail queued for a
+                # node/network was never flushed via this inbound-
+                # listener path at all -- see get_pending_netmail_for_
+                # node()'s docstring in tosser.py). This harness predates
+                # that too -- same "NetmailMessage.query falls through to
+                # the real descriptor + _NoOpSession()" hazard as the
+                # HatchQueue.query gap above, avoided the same way: patch
+                # the gathering/marking functions directly rather than
+                # NetmailMessage.query itself. Empty by default -- none
+                # of the existing tests in this harness care about
+                # netmail flushing.
                 writer = _FakeWriter()
                 reader = _ScriptedReader(
                     _standard_script(remote_addr, remote_pwd, include_got=include_got))

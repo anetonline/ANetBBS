@@ -801,6 +801,10 @@ def _lightweight_migrate(app):
     _ensure_column('boards', 'category', "VARCHAR(80) DEFAULT ''")
     # Users: NUV verification flag.
     _ensure_column('users', 'is_verified', 'BOOLEAN NOT NULL DEFAULT 1')
+    # Users: sysop account-lock flag. Real bug found in a full audit --
+    # this column never existed on old installs, so admin.py's "Lock
+    # User" toggle silently never persisted anything.
+    _ensure_column('users', 'is_locked', 'BOOLEAN NOT NULL DEFAULT 0')
     # User profile fields (added across releases; many old DBs missing them)
     _ensure_column('users', 'display_name', 'VARCHAR(100)')
     _ensure_column('users', 'bio', 'TEXT')

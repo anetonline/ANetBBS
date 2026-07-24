@@ -190,7 +190,10 @@ def _process_node_request(peer_address, from_address, subject, body,
     """
     expected_pw = (node_password or '').strip()
     provided_pw = (subject or '').strip()
-    if expected_pw and expected_pw != provided_pw:
+    # Same gap and fix as areafix._process_node_request(): a node with
+    # no password set at all must never sail through with zero real
+    # authentication.
+    if not expected_pw or expected_pw != provided_pw:
         return ("FileFix: password incorrect or missing — no changes made.\n", {
             'from_address': from_address, 'request_type': 'badpw',
             'area_tags': '', 'response': 'bad filefix password',
