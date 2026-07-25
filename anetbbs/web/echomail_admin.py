@@ -359,7 +359,7 @@ def test_connection(network_id):
                 is_ftp = True   # DOVE-Net is always FTP
 
             if is_ftp:
-                import ftplib
+                import ftplib  # nosec B402 -- FTP hub distribution is an intentional QWK transport
                 from urllib.parse import urlparse, unquote
                 # Pull host/user/pass from the URL if present, else from
                 # the form fields.
@@ -402,7 +402,7 @@ def test_connection(network_id):
             else:
                 import urllib.request
                 url = f'http://{network.qwk_host}:{network.qwk_port or 80}/'
-                urllib.request.urlopen(url, timeout=10)
+                urllib.request.urlopen(url, timeout=10)  # nosec B310 -- admin-configured QWK hub host/port, not user input
                 flash(f'QWK HTTP reachable: {network.qwk_host}:{network.qwk_port}.',
                       'success')
     except Exception as exc:

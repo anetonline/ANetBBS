@@ -45,7 +45,6 @@ matching ANetCRAFT's own movement feel exactly.
 """
 import asyncio
 import copy
-import io
 import json
 import logging
 import math
@@ -2075,7 +2074,6 @@ async def detect_sixel_support(session):
     if uid is not None:
         try:
             from ..web_app import create_app
-            from ..config import get_config
             from ..models import User
             app = create_app(os.environ.get('FLASK_ENV', 'production'))
             with app.app_context():

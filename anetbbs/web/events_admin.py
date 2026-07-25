@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 
 from flask import (Blueprint, flash, redirect, render_template, request,
                    url_for, current_app, jsonify)
-from flask_login import current_user, login_required
+from flask_login import login_required
 
 from ..models import db, ScheduledEvent
 from ..events.runner import compute_next_run, fire

@@ -5,7 +5,7 @@ Routes mounted under /admin/bbs-menus/.
 import json
 import os
 from flask import Blueprint, render_template, redirect, url_for, request, flash
-from flask_login import login_required, current_user
+from flask_login import login_required
 
 from ..models import db, BbsMenu, BbsMenuItem, BbsAnsiScreen
 from .access_control import require_admin as _admin_required

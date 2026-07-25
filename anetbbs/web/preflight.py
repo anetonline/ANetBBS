@@ -28,7 +28,7 @@ import time
 from typing import List
 
 from flask import Blueprint, current_app, render_template
-from flask_login import current_user, login_required
+from flask_login import login_required
 from sqlalchemy import text
 
 from ..models import db

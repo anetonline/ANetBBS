@@ -23,14 +23,14 @@ Auth model:
   - Admins can lock, delete, rename slugs, and edit locked pages.
 """
 import difflib
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import (Blueprint, render_template, request, redirect,
                    url_for, abort, flash, jsonify, current_app)
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func
 
-from ..models import db, WikiPage, WikiRevision, User, Post
+from ..models import db, WikiPage, WikiRevision, Post
 from ..wiki.slug import slugify
 from ..wiki.render import render as render_wiki, extract_outgoing_links
 

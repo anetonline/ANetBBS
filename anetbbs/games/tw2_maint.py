@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 

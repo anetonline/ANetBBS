@@ -360,7 +360,7 @@ def render_msg_body(text, chrs: str = '') -> Markup:
     # row/col so artifact \n between them have no visual effect on those rows.
     if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
         decoded = decoded.replace('\n', '')
-    return Markup(_linkify(decoded, embed_images=False))
+    return Markup(_linkify(decoded, embed_images=False))  # nosec B704 -- _linkify() escape()s all literal text and URLs
 
 
 def render_msg_body_rich(text, chrs: str = '') -> Markup:
@@ -381,4 +381,4 @@ def render_msg_body_rich(text, chrs: str = '') -> Markup:
     decoded = _pipe_to_ansi(decoded)
     if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
         decoded = decoded.replace('\n', '')
-    return Markup(_linkify(decoded, embed_images=True))
+    return Markup(_linkify(decoded, embed_images=True))  # nosec B704 -- _linkify() escape()s all literal text and URLs

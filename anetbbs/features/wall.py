@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime
 from ..core.tz import fmt_eastern
 
 _PIPE_FG = {

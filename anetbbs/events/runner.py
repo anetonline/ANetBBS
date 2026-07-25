@@ -266,16 +266,17 @@ def _tick(app) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────
 _started = False
+_scheduler_thread = None
 _lock = threading.Lock()
 
 
 def start_event_scheduler(app, tick_sec: int = _TICK_SEC) -> threading.Thread:
     """Background sweeper. Idempotent — calling twice doesn't spawn two
     threads. Returns the live thread either way."""
-    global _started
+    global _started, _scheduler_thread
     with _lock:
         if _started:
-            return _scheduler_thread  # type: ignore
+            return _scheduler_thread
         def _loop():
             # Initial delay so other startup work finishes first.
             time.sleep(45)
@@ -290,7 +291,7 @@ def start_event_scheduler(app, tick_sec: int = _TICK_SEC) -> threading.Thread:
                              daemon=True)
         t.start()
         _started = True
-        globals()['_scheduler_thread'] = t
+        _scheduler_thread = t
         logger.info('Event scheduler started (tick=%ss)', tick_sec)
         return t
 

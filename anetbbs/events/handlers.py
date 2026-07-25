@@ -307,7 +307,10 @@ def shell(app, params):
         return False, 'shell handler: command param is required'
     timeout = int(params.get('timeout', 60))
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True,
+        # cmd is sysop-authored config on an admin_required-gated
+        # ScheduledEvent row (see this handler's own docstring) -- same
+        # "no sandbox, sysop-trust" scope as bbs_ui.py's exec action.
+        r = subprocess.run(cmd, shell=True, capture_output=True,  # nosec B602
                            timeout=timeout)
         stdout = r.stdout.decode('utf-8', errors='replace')
         stderr = r.stderr.decode('utf-8', errors='replace')

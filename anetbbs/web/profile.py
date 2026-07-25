@@ -4,7 +4,7 @@ User profile blueprint - enhanced with avatars, bio, themes
 """
 import os
 import uuid
-from flask import Blueprint, render_template, redirect, url_for, flash, abort, request, current_app, send_from_directory
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory
 from flask_login import login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, TextAreaField, BooleanField, SelectField, DateField
 from wtforms.validators import DataRequired, EqualTo, Length, Optional, ValidationError
@@ -14,8 +14,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, Post, Theme, UserSession, UserAka, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue, get_builtin_field_config
-from ..echomail.routing import parse_address
+from ..models import db, User, Post, Theme, UserSession, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue, get_builtin_field_config
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
 
@@ -152,18 +151,43 @@ def view_user(username):
     """View a user's profile"""
     user = User.query.filter_by(username=username).first_or_404()
 
-    # Get user's recent posts
-    recent_posts = Post.query.filter_by(author_id=user.id)\
-        .order_by(Post.created_at.desc())\
-        .limit(10)\
-        .all()
+    # Real gap found in a pre-release access-control audit, same class
+    # already fixed once in boards.py's search_posts() (see its own
+    # comment): this used to query Post directly with no board-level
+    # min_access_level check at all, so a profile page leaked post
+    # subjects + board names from restricted/sysop-only boards to ANY
+    # visitor -- including anonymous ones, since this route has no
+    # @login_required either. Drop rows the CURRENT VIEWER (not the
+    # profile owner) can't see, same pattern.
+    from ..models import Board
+    from ..features.access_control import evaluate_access
 
-    # Get statistics
+    # Stats: an accurate visible-count needs every one of the user's
+    # posts checked, not just a capped recent batch -- but only 2
+    # lightweight columns per row, not full Post objects.
+    all_rows = (db.session.query(Post.parent_id, Board.min_access_level)
+               .join(Board, Post.board_id == Board.id)
+               .filter(Post.author_id == user.id)
+               .filter(Board.is_active.is_(True))
+               .all())
+    visible_rows = [r for r in all_rows if evaluate_access(current_user, r[1])]
     stats = {
-        'total_posts': Post.query.filter_by(author_id=user.id).count(),
-        'total_replies': Post.query.filter_by(author_id=user.id).filter(Post.parent_id.isnot(None)).count(),
+        'total_posts': len(visible_rows),
+        'total_replies': len([r for r in visible_rows if r[0] is not None]),
         'account_age': (datetime.utcnow().date() - user.created_at.date()).days,
     }
+
+    # Recent-posts list: separate capped fetch, only the 10 most recent
+    # visible ones are ever shown.
+    candidate_rows = (db.session.query(Post, Board)
+                     .join(Board, Post.board_id == Board.id)
+                     .filter(Post.author_id == user.id)
+                     .filter(Board.is_active.is_(True))
+                     .order_by(Post.created_at.desc())
+                     .limit(100)
+                     .all())
+    recent_posts = [post for post, board in candidate_rows
+                    if evaluate_access(current_user, board.min_access_level)][:10]
 
     online = is_user_online(user)
     avatar = get_avatar_url(user)

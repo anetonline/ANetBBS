@@ -572,7 +572,12 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
         default_hold=bool(getattr(network, 'default_hold', False)),
         default_direct=bool(getattr(network, 'default_direct', False)),
     )
-    data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+    # Fallback changed from '/tmp' to 'data' (bandit B108 sweep, pre-
+    # release audit): config.py's ECHOMAIL_DATA_DIR is always set in
+    # practice, so this default is defensive-only, but inbound echomail
+    # is real user data -- the same "don't default real data into /tmp"
+    # lesson already learned once for backups (see backups_admin.py).
+    data_dir = app.config.get('ECHOMAIL_DATA_DIR', 'data')
 
     # Real gap found in a full echomail-subsystem audit: this always
     # passed hatch_items=[], so a downstream node's FileFix subscription
@@ -624,7 +629,7 @@ def _run_client(network, outbound_messages, app, transcript=None):
             default_hold=bool(getattr(network, 'default_hold', False)),
             default_direct=bool(getattr(network, 'default_direct', False)),
         )
-        data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+        data_dir = app.config.get('ECHOMAIL_DATA_DIR', 'data')
         # Pick up any pending hatch-out files for this peer (the network's
         # hub_address is the destination we're polling). Older subscriptions
         # may target the hub directly; newer ones may target other downstream
@@ -693,7 +698,7 @@ def _run_client(network, outbound_messages, app, transcript=None):
             upload_url=getattr(network, 'qwk_upload_url', '') or '',
             hub_id=getattr(network, 'qwk_hub_id', '') or '',
         )
-        data_dir = app.config.get('ECHOMAIL_DATA_DIR', '/tmp')
+        data_dir = app.config.get('ECHOMAIL_DATA_DIR', 'data')
         return client.poll(outbound_messages=outbound_messages, data_dir=data_dir)
 
     else:

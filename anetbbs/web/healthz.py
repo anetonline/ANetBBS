@@ -17,7 +17,6 @@ easier for legitimate monitors.
 from __future__ import annotations
 
 import logging
-import os
 import socket
 import time
 

@@ -12,7 +12,7 @@ from flask import (
     Blueprint, render_template, request, redirect, url_for, flash,
     abort,
 )
-from flask_login import login_required, current_user
+from flask_login import login_required
 from werkzeug.utils import secure_filename
 
 from .gallery import (

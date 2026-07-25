@@ -20,7 +20,7 @@ from datetime import datetime
 
 from flask import (Blueprint, current_app, flash,
                    redirect, render_template, url_for)
-from flask_login import current_user, login_required
+from flask_login import login_required
 
 
 logger = logging.getLogger(__name__)

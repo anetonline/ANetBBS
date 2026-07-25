@@ -19,10 +19,9 @@ import struct
 import zipfile
 import logging
 from datetime import datetime
-from functools import wraps
 
 from flask import (Blueprint, request, abort, send_file,
-                   current_app, g, jsonify)
+                   current_app, jsonify)
 
 from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)

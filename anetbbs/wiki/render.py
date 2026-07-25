@@ -90,6 +90,18 @@ def render(body, known_slugs=None):
          attr_list, toc, sane_lists.
       3. Sanitize via bleach with a small whitelist that allows our
          wiki-link class plus headings / tables / images / code.
+
+    Real XSS gap found in a pre-release security audit: step 3 used to
+    be wrapped in `try/except ImportError: pass`, so if bleach happened
+    to be missing (a hard requirement per setup.py, but a stale/partial
+    venv could still lack it) the RAW, unsanitized markdown output went
+    straight into Markup() -- and python-markdown passes embedded raw
+    HTML through unchanged by default. Wiki editing only requires
+    @login_required (any registered user, not admin-only -- see
+    web/wiki.py's edit()), so this was reachable by any account, not
+    just trusted sysops, and would fire for every visitor of that page.
+    Now: if bleach is unavailable, fall back to the same safe escape-
+    then-render path already used when `markdown` itself is missing.
     """
     if not body:
         return Markup('')
@@ -97,6 +109,9 @@ def render(body, known_slugs=None):
 
     # Step 1: wiki-links → HTML anchors
     pre = preprocess_wikilinks(body, known_slugs)
+
+    def _escaped_fallback():
+        return '<p>' + str(escape(pre)).replace('\n', '<br>') + '</p>'
 
     # Step 2: markdown
     try:
@@ -108,37 +123,40 @@ def render(body, known_slugs=None):
             output_format='html5',
         )
     except ImportError:
-        # Bare-bones fallback — escape and preserve newlines.
-        html = '<p>' + str(escape(pre)).replace('\n', '<br>') + '</p>'
+        # No markdown package — escape and just preserve newlines.
+        return Markup(_escaped_fallback())  # nosec B704 -- _escaped_fallback() escape()s pre
 
     # Step 3: sanitize
     try:
         import bleach as _bleach
-        allowed_tags = _bleach.sanitizer.ALLOWED_TAGS | {
-            'p', 'pre', 'br', 'hr', 'div', 'span',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-            'table', 'thead', 'tbody', 'tr', 'th', 'td',
-            'img', 'sup', 'sub', 'kbd', 'mark', 'ins', 'del',
-        }
-        allowed_attrs = {
-            'a': ['href', 'title', 'class', 'id', 'name'],
-            'img': ['src', 'alt', 'title', 'width', 'height'],
-            'span': ['class', 'id'],
-            'div': ['class', 'id'],
-            'h1': ['id'], 'h2': ['id'], 'h3': ['id'],
-            'h4': ['id'], 'h5': ['id'], 'h6': ['id'],
-            'th': ['align', 'colspan', 'rowspan'],
-            'td': ['align', 'colspan', 'rowspan'],
-            'code': ['class'],
-        }
-        html = _bleach.clean(
-            html, tags=allowed_tags, attributes=allowed_attrs,
-            protocols=['http', 'https', 'mailto', 'ftp', 'gopher'],
-            strip=True)
     except ImportError:
-        pass
+        # bleach missing: do NOT emit the unsanitized markdown output
+        # (see docstring) -- degrade to the same safe plain-text path.
+        return Markup(_escaped_fallback())  # nosec B704 -- _escaped_fallback() escape()s pre
 
-    return Markup(html)
+    allowed_tags = _bleach.sanitizer.ALLOWED_TAGS | {
+        'p', 'pre', 'br', 'hr', 'div', 'span',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'img', 'sup', 'sub', 'kbd', 'mark', 'ins', 'del',
+    }
+    allowed_attrs = {
+        'a': ['href', 'title', 'class', 'id', 'name'],
+        'img': ['src', 'alt', 'title', 'width', 'height'],
+        'span': ['class', 'id'],
+        'div': ['class', 'id'],
+        'h1': ['id'], 'h2': ['id'], 'h3': ['id'],
+        'h4': ['id'], 'h5': ['id'], 'h6': ['id'],
+        'th': ['align', 'colspan', 'rowspan'],
+        'td': ['align', 'colspan', 'rowspan'],
+        'code': ['class'],
+    }
+    html = _bleach.clean(
+        html, tags=allowed_tags, attributes=allowed_attrs,
+        protocols=['http', 'https', 'mailto', 'ftp', 'gopher'],
+        strip=True)
+
+    return Markup(html)  # nosec B704 -- bleach.clean() output, allowlisted tags/attrs
 
 
 def extract_outgoing_links(body):

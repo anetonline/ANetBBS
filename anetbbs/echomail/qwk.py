@@ -273,8 +273,11 @@ def _parse_messages_dat(data: bytes, conferences: dict):
             # re-download of the same content is now caught — mirroring
             # the outbound stable-ID fallback below in _build_rep_packet().
             fallback_key = f'{conf_num}|{from_name}|{to_name}|{subject}|{date}|{clean["body"]}'
+            # usedforsecurity=False: MD5 here is a stable content-hash
+            # fingerprint, not a security/cryptographic use.
             msg_id = 'QWK-' + hashlib.md5(
-                fallback_key.encode('utf-8', errors='replace')).hexdigest()
+                fallback_key.encode('utf-8', errors='replace'),
+                usedforsecurity=False).hexdigest()
         messages.append({
             'from_name': from_name,
             'to_name': to_name or 'All',
@@ -354,9 +357,11 @@ def _build_rep_packet(messages, packet_id: str, hub_id: str = '') -> bytes:
                 msgid_str = existing_id
             else:
                 # Generate a stable unique ID from content so re-polls don't
-                # create duplicate MSGIDs.
+                # create duplicate MSGIDs. usedforsecurity=False: content
+                # fingerprint, not a security/cryptographic use.
                 digest = hashlib.md5(
-                    f'{packet_id}{getattr(msg,"id",i)}{msg.subject}{msg.from_name}'.encode()
+                    f'{packet_id}{getattr(msg,"id",i)}{msg.subject}{msg.from_name}'.encode(),
+                    usedforsecurity=False
                 ).hexdigest()[:8]
                 msgid_str = f'{packet_id.upper()}_{digest}_{int(time.time()):x}'
             body_raw = f'@MSGID: {msgid_str}\n' + body_raw
@@ -490,7 +495,7 @@ class QWKClient:
             req.add_header('Authorization', f'Basic {creds}')
         return req
 
-    def poll(self, outbound_messages=None, data_dir: str = '/tmp'):
+    def poll(self, outbound_messages=None, data_dir: str = 'data'):
         """
         Download a QWK packet, parse messages, upload REP for outbound.
 
@@ -506,7 +511,7 @@ class QWKClient:
                 qwk_data = self._ftp_download(qwk_url)
             else:
                 req = self._add_basic_auth(urllib.request.Request(qwk_url))
-                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # nosec B310 -- admin-configured QWK hub URL, not user input
                     qwk_data = resp.read()
         except Exception as exc:
             # Some exceptions (e.g. a bare connection timeout) have an
@@ -530,7 +535,7 @@ class QWKClient:
                 else:
                     req = self._add_basic_auth(
                         urllib.request.Request(rep_url, data=rep_data, method='PUT'))
-                    with urllib.request.urlopen(req, timeout=self.timeout):
+                    with urllib.request.urlopen(req, timeout=self.timeout):  # nosec B310 -- admin-configured QWK hub URL, not user input
                         pass
                 result['sent'] = len(outbound_messages)
             except Exception as exc:
@@ -547,7 +552,7 @@ class QWKClient:
         and includes that in the error so the sysop can see what files
         actually exist on the hub.
         """
-        import ftplib
+        import ftplib  # nosec B402 -- FTP is an intentional supported transport (QNET-FTP), not accidental
         import io as _io
         from urllib.parse import urlparse, unquote
         u = urlparse(url)
@@ -625,7 +630,7 @@ class QWKClient:
 
     def _ftp_upload(self, url, data):
         """Upload bytes via FTP/FTPS to the path in the URL."""
-        import ftplib
+        import ftplib  # nosec B402 -- FTP is an intentional supported transport (QNET-FTP), not accidental
         import io as _io
         from urllib.parse import urlparse, unquote
         u = urlparse(url)

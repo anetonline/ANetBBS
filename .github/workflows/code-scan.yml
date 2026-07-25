@@ -1,0 +1,73 @@
+# .github/workflows/code-scan.yml
+#
+# Static analysis for the actual application code -- complementary to
+# pip-audit.yml (which checks *dependencies* for known CVEs, not our own
+# code). Added in a pre-release audit after finding this project had zero
+# lint/security-scanner CI despite ~84,000 lines of Python: bandit caught
+# two real stored-XSS gaps (markdown/wiki renderers silently emitting
+# unsanitized HTML if bleach happened to be missing) and an unsafe tarfile
+# extraction in the upgrade wizard; pyflakes caught a genuine NameError bug
+# (a terminal feature referencing an unimported name) that crashed on every
+# successful use.
+#
+# bandit: -ll (medium+ severity only) -- the low-severity bucket is
+# dominated by well-established, deliberate patterns for this codebase
+# (best-effort try/except, non-crypto `random` for games, list-form
+# subprocess calls) and would be pure noise at full strictness. Reads
+# .bandit for the project-wide B104 skip (server apps binding 0.0.0.0 by
+# design) plus inline `# nosec <ID> -- <reason>` comments triaged case by
+# case elsewhere.
+#
+# pyflakes: --select=F via flake8 would add style noise; pyflakes alone
+# only checks real correctness issues (undefined names, unused imports,
+# redefinitions) with zero configuration and zero false-positive-prone
+# type annotations to retrofit.
+#
+# Both run against anetbbs/ only -- doors/ and anetbbs/games/sbbs_doors/
+# are vendored third-party door-game source, not ours to lint.
+
+name: code-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Run bandit (medium+ severity)
+        run: bandit -r anetbbs/ -ll -c .bandit
+
+  pyflakes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pyflakes
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyflakes
+
+      - name: Run pyflakes
+        run: pyflakes anetbbs/

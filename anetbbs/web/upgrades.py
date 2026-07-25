@@ -36,9 +36,9 @@ from datetime import datetime
 from typing import Optional
 
 import requests
-from flask import (Blueprint, abort, current_app, jsonify, redirect,
+from flask import (Blueprint, current_app, jsonify,
                    render_template, request, url_for)
-from flask_login import current_user, login_required
+from flask_login import login_required
 
 from ..version import VERSION
 from .preflight import _check_sudo_escalation
@@ -315,7 +315,7 @@ def check():
 
 # === Install ================================================================
 
-_UPGRADE_LOG_PATH = '/tmp/anetbbs_upgrade.log'
+_UPGRADE_LOG_PATH = '/tmp/anetbbs_upgrade.log'  # nosec B108 -- transient progress log, safe to lose across reboot
 _INSTALL_LOCK = threading.Lock()
 _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
 

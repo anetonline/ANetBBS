@@ -52,7 +52,7 @@ def _sanitize_html(html):
                          strip=True, strip_comments=True)
     # Make bare links clickable
     clean = bleach.linkify(clean, skip_tags=['pre', 'code'])
-    return Markup(clean)
+    return Markup(clean)  # nosec B704 -- bleach.clean()+linkify() output, allowlisted tags/attrs
 
 rss_bp = Blueprint('rss', __name__, url_prefix='/rss')
 

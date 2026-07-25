@@ -1,7 +1,20 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.207`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.208`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.208 — Pre-release security audit, batch 1 (July 2026)
+
+First installment of a full pre-release code audit. Added bandit + pyflakes to CI (there was no lint/security-scanner CI at all before this). Real fixes found, not just tooling:
+
+- Two stored-XSS gaps: the Markdown renderer (message/netmail bodies) and the wiki page renderer both silently fell back to emitting raw, unsanitized HTML if the bleach sanitizer library happened to be missing. The Markdown one is reachable via echomail/netmail from external FidoNet peers; the wiki one via any logged-in user's edit, not just admins. Both now fail safe instead.
+- Access-control leak: public profile pages showed post subjects and board names from restricted/sysop-only boards to any visitor, including anonymous ones — the same class of bug already fixed once in board search.
+- SSRF hardening on the RSS sixel-image preview (scheme-restricted to http/https).
+- An unsafe tar extraction in the upgrade wizard (path-traversal protection added).
+- A real crash bug: sending a private message in the terminal always crashed right after the message was saved, due to a missing import.
+- ~70 dead imports cleaned up across the codebase.
+
+Full suite verified clean (1577 passed, 2 skipped). This is the first of several planned batches — more to follow covering docs/wiki accuracy, the rest of the access-control sweep, and the install/upgrade paths.
 
 ## v1.0b2.207 — Wiki content now self-heals on update; docs accuracy + coverage pass (July 2026)
 

@@ -133,7 +133,7 @@ def _ip_country_blocked(ip):
 
         import urllib.request, json as _json
         url = f'http://ip-api.com/json/{ip}?fields=countryCode'
-        with urllib.request.urlopen(url, timeout=2) as resp:
+        with urllib.request.urlopen(url, timeout=2) as resp:  # nosec B310 -- hardcoded ip-api.com host, only the query param varies
             data = _json.loads(resp.read())
         country = (data.get('countryCode') or '').upper()
 

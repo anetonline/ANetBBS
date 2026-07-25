@@ -47,7 +47,7 @@ def fetch_list(url: str = DEFAULT_LIST_URL, timeout: float = 30.0) -> str:
     if url.startswith(('ftp://', 'ftps://')):
         return _fetch_ftp(url, timeout)
     import urllib.request
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310 -- admin-configured registry/directory URL, not user input
         data = resp.read()
     try:
         return data.decode('utf-8')
@@ -56,7 +56,7 @@ def fetch_list(url: str = DEFAULT_LIST_URL, timeout: float = 30.0) -> str:
 
 
 def _fetch_ftp(url: str, timeout: float) -> str:
-    import ftplib
+    import ftplib  # nosec B402 -- FTP directory listing is an intentional MSP feature
     import io
     u = urlparse(url)
     host = u.hostname

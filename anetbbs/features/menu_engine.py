@@ -7,7 +7,6 @@ hotkey items, and dispatches the user's choice to the appropriate action.
 Falls back to a hard-coded default menu if no menus are configured (so a
 fresh install still works without a sysop having to set up menus).
 """
-import asyncio
 import logging
 from .bbs_ui import BBSMenuUI, _app
 from ..core.tz import fmt_eastern

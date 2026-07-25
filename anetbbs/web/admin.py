@@ -3263,7 +3263,7 @@ def _run_sysop_command(cmd):
         path = cmd[5:].strip()
         if path not in ('/var/log/syslog', '/var/log/messages',
                         '/var/log/anetbbs.log',
-                        '/tmp/anetbbs_dos_dosbox.log'):
+                        '/tmp/anetbbs_dos_dosbox.log'):  # nosec B108 -- allowlist itself, not an unsafe write/read target
             return 'tail: only allowed paths: /var/log/syslog, /var/log/messages, /var/log/anetbbs.log, /tmp/anetbbs_dos_dosbox.log'
         try:
             with open(path) as fh:

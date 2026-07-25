@@ -13,7 +13,7 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
 from flask_login import login_required, current_user
 
 from ..models import db, Nodelist, NodelistEntry
-from ..echomail.nodelist import import_nodelist, import_from_path, search
+from ..echomail.nodelist import import_from_path, search
 
 nodelist_bp = Blueprint('nodelist', __name__, url_prefix='/nodelist')
 

@@ -1,0 +1,8 @@
+# B104 (hardcoded_bind_all_interfaces): ANetBBS is a multi-protocol server
+# (telnet/SSH/rlogin/web/FTP/finger/BinkP/MSP/MRC) -- binding 0.0.0.0 (or a
+# sysop-configured host) is the actual point of every one of those listeners,
+# not an oversight. ~21 legitimate hits across config.py defaults and the
+# individual protocol servers; suppressed project-wide rather than 21 inline
+# `# nosec` comments. Every other finding class is triaged case-by-case with
+# an inline `# nosec <ID> -- <reason>` comment instead of a blanket skip.
+skips: ['B104']

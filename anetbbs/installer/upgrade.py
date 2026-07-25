@@ -50,7 +50,20 @@ def main():
         tmp = Path(tempfile.mkdtemp(prefix='anetbbs-upgrade-'))
         try:
             with tarfile.open(src_path, 'r:gz') as tf:
-                tf.extractall(tmp)
+                # PEP 706 safe-extraction filter (Python 3.12+) rejects
+                # tar entries that would escape `tmp` via `../` paths,
+                # absolute paths, or symlink tricks. hasattr guard for
+                # older Python (the `filter` kwarg itself doesn't exist
+                # pre-3.12), matching the compatibility pattern Python's
+                # own tarfile docs recommend.
+                if hasattr(tarfile, 'data_filter'):
+                    tf.extractall(tmp, filter='data')
+                else:
+                    # Residual risk on Python <3.12 only (no filter kwarg
+                    # available): this is a manually-invoked sysop CLI
+                    # wizard pointed at a file path the sysop chose, not
+                    # a network-triggered extraction.
+                    tf.extractall(tmp)  # nosec B202
         except Exception as exc:
             err(f'Failed to extract: {exc}')
             sys.exit(1)
@@ -257,7 +270,7 @@ def main():
     web_port = _read_env_value(install_dir / '.env', 'WEB_PORT', '5000')
     for _ in range(10):
         try:
-            with urllib.request.urlopen(
+            with urllib.request.urlopen(  # nosec B310 -- fixed localhost health-check target
                     f'http://127.0.0.1:{web_port}/healthz', timeout=2) as r:
                 if r.status == 200:
                     healthy = True

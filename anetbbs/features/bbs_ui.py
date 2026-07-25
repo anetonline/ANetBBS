@@ -471,7 +471,7 @@ class BBSMenuUI:
             rows = [(m.id, m.sender_label or '?', m.sender_host or '?',
                      m.received_at, m.is_read, m.body or '') for m in ims]
 
-        from .ansi_ui import banner as _bnr, footer as _ftr, FG as _F, RESET as _R, ui_width as _uw
+        from .ansi_ui import banner as _bnr, FG as _F, RESET as _R, ui_width as _uw
         _w = _uw(self.session)
         _prev_w = max(30, _w - 36)
         if not rows:
@@ -716,7 +716,7 @@ class BBSMenuUI:
 
     async def list_echo_areas(self):
         """Network chooser → per-network area list → read area."""
-        from anetbbs.models import EchoArea, EchomailNetwork, EchomailMessage
+        from anetbbs.models import EchoArea, EchomailNetwork
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         _user_level = int((self.session.user or {}).get('access_level', 10))
@@ -881,7 +881,7 @@ class BBSMenuUI:
         """
         import re
         from anetbbs.models import db, QWKNode, QWKNodeRequest
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+        from .ansi_ui import banner, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         user     = self.session.user or {}
         user_id  = user.get('id')
@@ -1130,7 +1130,7 @@ class BBSMenuUI:
         it from -- live-caught exactly this way (v1.0b2.37).
         """
         from anetbbs.models import db, QWKNodeRequest as _QNR
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+        from .ansi_ui import banner, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         hub_hostname = (registry_url.split('//', 1)[-1] or 'the hub') if registry_url else 'the hub'
         if is_hub:
@@ -1380,7 +1380,7 @@ class BBSMenuUI:
                              .filter(FileArea.min_access_level <= user_level)
                              .order_by(FileArea.name).all())
 
-                from anetbbs.web.file_areas import _scan_area as _disk_scan
+
 
                 area_rows = []
                 for a in areas:
@@ -1750,7 +1750,7 @@ class BBSMenuUI:
     async def _batch_download(self, files, web_base, protos):
         """Prompt for protocol once, then sequentially send multiple files."""
         from .xfer import send_file
-        from .ansi_ui import FG, RESET, BOLD
+        from .ansi_ui import FG, RESET
 
         if not protos:
             await self.session.write(
@@ -2116,7 +2116,7 @@ class BBSMenuUI:
         render_hint(sel, total)  — sync: returns the status+hints string
         Returns ('enter', idx) | ('key', char) | ('quit',)
         """
-        from .ansi_ui import FG, RESET, BOLD, footer, ui_width
+        from .ansi_ui import FG, ui_width
 
         if not rows:
             return ('quit',)
@@ -2332,7 +2332,7 @@ class BBSMenuUI:
         lines        : list of body text strings (plain, pre-wrapped)
         hint_str     : key-hint footer string
         """
-        from .ansi_ui import FG, RESET, BOLD, footer, ui_width
+        from .ansi_ui import FG, ui_width
 
         EOL      = '\x1b[K'
         NORM     = '\x1b[0m'
@@ -2500,9 +2500,23 @@ class BBSMenuUI:
         return buf.decode('latin-1', errors='replace')
 
     async def _rss_render_sixel(self, image_url, width_px=280):
-        """Download image_url and emit sixel to terminal. Returns True if OK."""
+        """Download image_url and emit sixel to terminal. Returns True if OK.
+
+        Real SSRF-hardening gap found in a pre-release security audit:
+        image_url comes from an individual RSS item, not the sysop-chosen
+        feed source itself -- a subscribed feed's publisher (or anyone
+        who compromises it) controls each item's content, including this
+        URL. Scheme-restricted to http(s) so a malicious item can't use
+        file:// to read local files off the server via urlopen (the
+        underlying private/internal-IP SSRF surface is a separate, lower-
+        severity residual risk noted but not fully closed here — same
+        trust model as any other server-side image-embed feature).
+        """
         import shutil, subprocess, tempfile, os, urllib.request as _ur
+        from urllib.parse import urlparse as _urlparse
         if not shutil.which('img2sixel'):
+            return False
+        if _urlparse(image_url).scheme not in ('http', 'https'):
             return False
         tmp = None
         try:
@@ -2512,7 +2526,7 @@ class BBSMenuUI:
             fd, tmp = tempfile.mkstemp(suffix=f'.{ext}')
             os.close(fd)
             req = _ur.Request(image_url, headers={'User-Agent': 'ANetBBS/1.0'})
-            with _ur.urlopen(req, timeout=6) as resp:
+            with _ur.urlopen(req, timeout=6) as resp:  # nosec B310 -- scheme restricted to http(s) above
                 with open(tmp, 'wb') as f:
                     f.write(resp.read(1024 * 512))
             result = subprocess.run(
@@ -2537,7 +2551,7 @@ class BBSMenuUI:
     def _html_to_text(html):
         """Convert HTML to readable plain text (for terminal pager)."""
         from html.parser import HTMLParser
-        from html import unescape as _ue
+
         import re as _re
 
         BLOCK = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -2575,7 +2589,7 @@ class BBSMenuUI:
     async def show_rss(self):
         """RSS feed list with arrow-key lightbar."""
         from anetbbs.models import RssFeed, RssItem, RssReadStatus, db
-        from .ansi_ui import banner, footer, FG, RESET, BOLD, ui_width
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
         from sqlalchemy import func
 
         uid        = (self.session.user or {}).get('id')
@@ -2955,7 +2969,7 @@ class BBSMenuUI:
         async def _show_pager():
             # The pager renders a banner itself as its first header rows.
             # We inline the banner into hdr_lines by prepending it.
-            from .ansi_ui import banner as _bn, BG, ui_width as _uw
+            from .ansi_ui import ui_width as _uw
             _pw = _uw(self.session)
             full_hdr = []
             # banner outputs rows 2-4; row 1 is blank (before banner \r\n)
@@ -3717,7 +3731,7 @@ BBSMenuUI._post_compose = _post_compose
 
 async def _send_pm(self):
     from anetbbs.models import db, User, PrivateMessage
-    from .ansi_ui import banner, FG, RESET, ui_width
+    from .ansi_ui import banner, FG, RESET, BOLD, ui_width
     _w = ui_width(self.session)
     await self.session.write('\x1b[2J\x1b[H')
     await self.session.write(banner('Send Private Message', _w))
@@ -3757,7 +3771,7 @@ async def _compose_echomail(self):
     """Compose an echomail — network-first, then area, then message."""
     from anetbbs.models import db, EchoArea, EchomailMessage, EchomailNetwork
     from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
-    from collections import OrderedDict
+
 
     user_level = int((self.session.user or {}).get('access_level', 10))
     is_admin   = bool((self.session.user or {}).get('is_admin'))
@@ -4091,7 +4105,7 @@ async def _edit_profile(self):
     prompt-per-field loop. Loops back to the picker after each edit so
     multiple fields can be changed in one visit; Q/Esc exits. Password
     is never shown here (change_password() is the separate flow)."""
-    from anetbbs.models import db, User, Theme
+    from anetbbs.models import User, Theme
     from .ansi_ui import banner, ui_width
 
     def _fetch_rows():
@@ -4446,7 +4460,7 @@ BBSMenuUI._sysop_edit_user = _sysop_edit_user
 
 async def _sysop_boards(self):
     from anetbbs.models import db, Board
-    from .ansi_ui import write_menu_art, banner, menu_item, footer, FG, RESET, BOLD, prompt as _p, ui_width
+    from .ansi_ui import write_menu_art, banner, menu_item, footer, FG, RESET, prompt as _p, ui_width
     while True:
         with _app().app_context():
             boards = Board.query.order_by(Board.order, Board.name).all()
@@ -5901,7 +5915,7 @@ async def _sysop_node_monitor(self):
     process (unlike a web-originated page reply, which is not).
     """
     from anetbbs.models import db, NodeActivity, UserActivity
-    from .ansi_ui import FG, RESET, BOLD
+    from .ansi_ui import FG, RESET
 
     def _fetch_rows():
         with _app().app_context():

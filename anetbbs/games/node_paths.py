@@ -38,7 +38,7 @@ def temp_root() -> str:
             return os.path.join(str(data_dir), 'temp')
     except Exception:
         pass
-    return '/tmp/anetbbs-temp'
+    return '/tmp/anetbbs-temp'  # nosec B108 -- scratch dir fallback only, DATA_DIR-based path used above when available
 
 
 def node_dir(node_number: int) -> str:

@@ -77,7 +77,7 @@ def discover():
         })
 
     # 3. /tmp anetbbs-vNNN extracted directories.
-    for d in glob.glob('/tmp/anetbbs-v*'):
+    for d in glob.glob('/tmp/anetbbs-v*'):  # nosec B108 -- this IS the /tmp cleanup tool, scanning /tmp is the point
         p = Path(d)
         if p.is_dir():
             items.append({
@@ -86,7 +86,7 @@ def discover():
             })
 
     # 4. /tmp anetbbs-rebuilt-vNNN.tar.gz tarballs.
-    for f in glob.glob('/tmp/anetbbs-rebuilt-v*.tar.gz'):
+    for f in glob.glob('/tmp/anetbbs-rebuilt-v*.tar.gz'):  # nosec B108 -- cleanup tool, scanning /tmp is the point
         p = Path(f)
         items.append({
             'path': p, 'size': _human_size(p), 'kind': 'tmp-tarball',
@@ -94,7 +94,7 @@ def discover():
         })
 
     # 5. /tmp upgrade scratch dirs from the wizard.
-    for d in glob.glob('/tmp/anetbbs-upgrade-*'):
+    for d in glob.glob('/tmp/anetbbs-upgrade-*'):  # nosec B108 -- cleanup tool, scanning /tmp is the point
         p = Path(d)
         items.append({
             'path': p, 'size': _human_size(p), 'kind': 'tmp-upgrade',

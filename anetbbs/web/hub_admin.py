@@ -19,10 +19,10 @@ import os
 import threading
 
 from flask import (Blueprint, render_template, redirect, url_for,
-                   flash, request, abort, jsonify, current_app)
+                   flash, request, abort, current_app)
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, IntegerField,
-                     BooleanField, PasswordField, SelectMultipleField, SelectField)
+                     BooleanField, PasswordField, SelectField)
 from wtforms.validators import DataRequired, Length, Optional, NumberRange, Regexp
 from flask_wtf import FlaskForm
 

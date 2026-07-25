@@ -32,8 +32,8 @@ import time
 from datetime import datetime
 
 from flask import (Blueprint, abort, current_app, render_template,
-                   request, send_from_directory)
-from flask_login import current_user, login_required
+                   send_from_directory)
+from flask_login import current_user
 
 
 logger = logging.getLogger(__name__)

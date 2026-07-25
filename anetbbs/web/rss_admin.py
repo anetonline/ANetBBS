@@ -1,7 +1,7 @@
 """Admin CRUD for RSS feeds — sysop adds/edits/removes feeds."""
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash)
-from flask_login import login_required, current_user
+from flask_login import login_required
 
 from ..models import db, RssFeed, RssItem
 from .access_control import require_admin as _admin_required

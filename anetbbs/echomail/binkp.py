@@ -861,7 +861,7 @@ class BinkPClient:
     # Public API
     # ------------------------------------------------------------------
 
-    def poll(self, outbound_messages=None, data_dir: str = '/tmp',
+    def poll(self, outbound_messages=None, data_dir: str = 'data',
              hatch_items=None):
         """
         Connect to the hub, send outbound messages + queued hatch files,

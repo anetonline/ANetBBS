@@ -19,8 +19,6 @@ daemon thread by `anetbbs.main` when `FTP_ENABLED=true`.
 """
 import logging
 import os
-import shutil
-from datetime import datetime
 
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.filesystems import AbstractedFS

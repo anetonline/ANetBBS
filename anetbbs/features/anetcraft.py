@@ -20,7 +20,6 @@ Q            : quit & save                 C        : open/close craft menu
 import asyncio
 import json
 import math
-import os
 import random
 import time
 from pathlib import Path

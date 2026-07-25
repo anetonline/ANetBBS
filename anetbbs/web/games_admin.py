@@ -7,7 +7,7 @@ from datetime import datetime
 
 from flask import (Blueprint, render_template, redirect, url_for,
                    flash, current_app)
-from flask_login import login_required, current_user
+from flask_login import login_required
 from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, SelectField, IntegerField,
                      BooleanField, SubmitField)
@@ -265,7 +265,6 @@ def clear_stale_sessions():
 # unsupervised playtesting before a public launch.
 
 import os as _os
-import shutil as _shutil
 
 
 def _tw2_db_dir():

@@ -19,7 +19,7 @@ import time
 from datetime import datetime, timedelta
 
 from flask import (Blueprint, current_app, jsonify, render_template)
-from flask_login import current_user, login_required
+from flask_login import login_required
 
 from ..models import db, RegistryEntry
 from .access_control import require_admin_or_403 as _require_admin

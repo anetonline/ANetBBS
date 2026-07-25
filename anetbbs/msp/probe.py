@@ -20,7 +20,7 @@ peers that's fine — anything bigger would need an async/parallel rewrite.
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .systat import query_systat
 

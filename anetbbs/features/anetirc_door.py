@@ -17,7 +17,7 @@ def _find_binary():
         return None
     # Ensure executable — silently fixes deployments where tar preserved 0644
     try:
-        os.chmod(path, 0o755)
+        os.chmod(path, 0o755)  # nosec B103 -- standard rwxr-xr-x on a bundled binary, not world-writable
     except OSError:
         pass
     return path

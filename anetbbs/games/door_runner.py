@@ -266,7 +266,7 @@ def _ensure_mps_compiled(mps_path, cwd):
     try:
         result = subprocess.run(
             [mplc, mps_path],
-            cwd=cwd or os.path.dirname(mps_path) or '/tmp',
+            cwd=cwd or os.path.dirname(mps_path) or '/tmp',  # nosec B108 -- subprocess cwd scratch default, no persistent data written
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
@@ -326,7 +326,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         anchor = (game.synchronet_exec_dir or game.synchronet_script_path
                   or game.working_directory)
     else:
-        anchor = game.working_directory or '/tmp'
+        anchor = game.working_directory or '/tmp'  # nosec B108 -- subprocess cwd scratch default
 
     # Expand tokens BEFORE path resolution so `%P` (per-node temp dir)
     # works as both the working_directory AND inside executable_path /
@@ -334,8 +334,8 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
     anchor = _xp(anchor)
     wd_raw = _xp(game.working_directory or '')
     cwd_raw = (wd_raw or
-               (os.path.dirname(_resolve_path(anchor)) if anchor else '/tmp'))
-    cwd = _resolve_path(cwd_raw) or '/tmp'
+               (os.path.dirname(_resolve_path(anchor)) if anchor else '/tmp'))  # nosec B108 -- subprocess cwd scratch default
+    cwd = _resolve_path(cwd_raw) or '/tmp'  # nosec B108 -- subprocess cwd scratch default
 
     if game.game_type == 'door_dos':
         return _build_dos_command(game, node_number, cwd, token_ctx=token_ctx,
@@ -546,7 +546,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         _module = getattr(game, 'web_game_module', '') or ''
         if not _module:
             raise ValueError('builtin_python game has no web_game_module set')
-        return [_sys.executable, _runner, _module], '/tmp'
+        return [_sys.executable, _runner, _module], '/tmp'  # nosec B108 -- subprocess cwd scratch default
 
     raise ValueError(f'Unsupported door game_type: {game.game_type!r}')
 
@@ -980,7 +980,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
             os.makedirs(_dosemu_dir, exist_ok=True)
             _boot_log = os.path.join(_dosemu_dir, 'boot.log')
         except OSError:
-            _boot_log = '/tmp/dosemu_boot.log'
+            _boot_log = '/tmp/dosemu_boot.log'  # nosec B108 -- transient debug log, safe to lose
         logger.info('dosemu2: using raw binary %s', _raw_bin)
     else:
         _exe = dosemu_path
@@ -2627,7 +2627,7 @@ async def play_dos_game_telnet(game, user, session, bbs_name='ANetBBS',
         xvfb = which('xvfb-run')
         if xvfb:
             cmd = [xvfb, '-a'] + cmd
-    log_path = '/tmp/anetbbs_dos_dosbox.log'
+    log_path = '/tmp/anetbbs_dos_dosbox.log'  # nosec B108 -- transient debug log, safe to lose
     try:
         proc = subprocess.Popen(
             cmd, cwd=game_dir,

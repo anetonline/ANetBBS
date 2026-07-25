@@ -1889,9 +1889,12 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
     def _absroot(p):
         return p if os.path.isabs(p) else os.path.abspath(
             os.path.join(_bbs_root, p))
-    exec_dir = _absroot(game.synchronet_exec_dir or '/tmp/sbbs/exec')
+    # Scratch defaults for an unconfigured Synchronet-compat door;
+    # game.synchronet_exec_dir/script_path (admin-configured) are used
+    # when set.
+    exec_dir = _absroot(game.synchronet_exec_dir or '/tmp/sbbs/exec')  # nosec B108
     game_dir = _absroot(os.path.dirname(
-        game.synchronet_script_path or '/tmp') or '/tmp')
+        game.synchronet_script_path or '/tmp') or '/tmp')  # nosec B108
     data_dir = os.path.join(os.path.dirname(exec_dir), 'data')
     text_dir = os.path.join(os.path.dirname(exec_dir), 'text')
     mods_dir = os.path.join(os.path.dirname(exec_dir), 'mods')

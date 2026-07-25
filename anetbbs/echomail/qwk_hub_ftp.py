@@ -146,7 +146,6 @@ def _write_empty_packet(path: str, hub_id: str, packet_id: str = ''):
 def _write_qwk_packet(path: str, hub_id: str, packet_id: str,
                       conferences: dict, messages_by_conf: dict):
     """Write a complete QWK packet zip to *path*."""
-    import struct, time
     control = _build_control_dat(hub_id, conferences, packet_id)
     messages_dat = _build_messages_dat(messages_by_conf, packet_id)
     buf = io.BytesIO()

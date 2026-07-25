@@ -271,7 +271,7 @@ def create_app(config_name=None):
                        'border:1px solid var(--theme-border);"><br>')
             last = m.end()
         out.append(escape(value[last:]))
-        return Markup(''.join(out).replace('\n', '<br>'))
+        return Markup(''.join(out).replace('\n', '<br>'))  # nosec B704 -- every segment escape()d above
 
     from .web.render_msg import (render_msg_body as _render_msg_body,
                                    render_msg_body_rich as _render_msg_body_rich)
@@ -309,7 +309,7 @@ def create_app(config_name=None):
         from .web.render_msg import _ansi_to_html, _pipe_to_ansi
         if not value:
             return Markup('')
-        return Markup(_ansi_to_html(_pipe_to_ansi(str(value))))
+        return Markup(_ansi_to_html(_pipe_to_ansi(str(value))))  # nosec B704 -- _ansi_to_html() escape()s all literal text
 
     @app.template_filter('strip_ansi')
     def strip_ansi_filter(value):
@@ -319,7 +319,7 @@ def create_app(config_name=None):
         if not value:
             return Markup('')
         clean = _re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', str(value))
-        return Markup(str(escape(clean)))
+        return Markup(str(escape(clean)))  # nosec B704 -- escape()d immediately above
 
     @app.template_filter('markdown')
     def markdown_filter(value):
@@ -327,14 +327,33 @@ def create_app(config_name=None):
 
         Uses the `markdown` package if available, with sane defaults: hard line
         breaks (so users don't have to type two spaces at end of line), fenced
-        code, tables. The output is run through an HTML cleaner via Markup
-        only if `bleach` is also available — otherwise we fall back to a
-        minimal escape-then-render which is still safe because we never
-        allow embedded raw HTML in the source.
+        code, tables. The output is run through an HTML cleaner via bleach
+        before ever reaching Markup().
+
+        Real XSS gap found in a pre-release security audit: the previous
+        version wrapped the bleach pass in `try/except ImportError: pass`,
+        which meant that if bleach happened to be missing (both it and
+        `markdown` are hard requirements per setup.py/requirements.txt, but
+        an install with a stale/partial venv that predates bleach being
+        added, or a broken pip sync, could still be missing it) the RAW,
+        UNSANITIZED markdown output went straight into Markup() -- and
+        python-markdown passes embedded raw HTML through unchanged by
+        default. This filter renders echomail/netmail bodies, which can
+        originate from untrusted external FidoNet/QWK network peers, not
+        just local users -- a compromised or malicious peer could have
+        shipped a stored-XSS payload that would fire for anyone viewing it
+        on an install missing bleach. Now: if bleach is unavailable, fall
+        back to the SAME safe escape-then-render path already used when
+        `markdown` itself is missing, instead of ever emitting
+        unsanitized HTML.
         """
         from markupsafe import Markup, escape
         if not value:
             return Markup('')
+
+        def _escaped_fallback():
+            return '<p>' + str(escape(value)).replace('\n', '<br>') + '</p>'
+
         try:
             import markdown as _md
             html = _md.markdown(
@@ -344,20 +363,23 @@ def create_app(config_name=None):
             )
         except ImportError:
             # No markdown package — escape and just preserve newlines.
-            html = '<p>' + str(escape(value)).replace('\n', '<br>') + '</p>'
-        # Optional bleach pass to whitelist tags
+            return Markup(_escaped_fallback())  # nosec B704 -- _escaped_fallback() escape()s value
+
         try:
             import bleach as _bleach
-            allowed = _bleach.sanitizer.ALLOWED_TAGS | {
-                'p', 'pre', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-                'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img'}
-            html = _bleach.clean(html, tags=allowed,
-                                 attributes={'a': ['href', 'title'],
-                                             'img': ['src', 'alt', 'title']},
-                                 strip=True)
         except ImportError:
-            pass
-        return Markup(html)
+            # bleach missing: do NOT emit the unsanitized markdown output
+            # (see docstring) -- degrade to the same safe plain-text path.
+            return Markup(_escaped_fallback())  # nosec B704 -- _escaped_fallback() escape()s value
+
+        allowed = _bleach.sanitizer.ALLOWED_TAGS | {
+            'p', 'pre', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img'}
+        html = _bleach.clean(html, tags=allowed,
+                             attributes={'a': ['href', 'title'],
+                                         'img': ['src', 'alt', 'title']},
+                             strip=True)
+        return Markup(html)  # nosec B704 -- bleach.clean() output, allowlisted tags/attrs
     
     # Register blueprints
     from .web.auth import auth_bp
@@ -1025,8 +1047,13 @@ def _seed_default_hub_identity(app, engine, _sa):
                        'qwk_node_requests'):
             try:
                 with engine.begin() as conn:
+                    # _table is one of the fixed literal names in the
+                    # tuple above, never request-influenced; SQL bind
+                    # params can't parameterize identifiers, so f-string
+                    # interpolation of a hardcoded name list is the
+                    # correct approach here, not a shortcut.
                     conn.execute(_sa.text(
-                        f'UPDATE {_table} SET hub_identity_id = :hid '
+                        f'UPDATE {_table} SET hub_identity_id = :hid '  # nosec B608
                         f'WHERE hub_identity_id IS NULL'), {'hid': default_id})
             except Exception as exc:
                 app.logger.warning(

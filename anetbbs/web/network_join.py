@@ -25,7 +25,7 @@ cookie for CSRF token storage fine.
 import logging
 from datetime import datetime, timedelta
 
-from flask import (Blueprint, render_template, redirect, url_for,
+from flask import (Blueprint, render_template,
                    flash, request, abort, current_app, send_from_directory)
 from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, BooleanField, SubmitField)
