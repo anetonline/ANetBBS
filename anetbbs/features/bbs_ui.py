@@ -1781,14 +1781,31 @@ class BBSMenuUI:
             await self.session.write(f"{FG['red']}Unknown protocol.{RESET}\r\n")
             return
 
+        from .file_quota import check_quota, consume_quota
+
         for idx, f in enumerate(files, 1):
             fpath = f['path']
             name  = f['name']
+            size  = f['size'] if isinstance(f.get('size'), int) else 0
             if not fpath or not os.path.isfile(fpath):
                 await self.session.write(
                     f"  {FG['red']}[{idx}/{len(files)}] {name}: "
                     f"file not on disk - skipped{RESET}\r\n")
                 continue
+
+            # Daily download quota (FR: Firehawke, 2026-07-24) -- checked
+            # per file since usage accumulates across the batch. Once
+            # exceeded, every remaining file would also fail, so stop
+            # the batch here rather than check-and-skip each one. Wrapped
+            # in app_context() like every other DB-touching block here.
+            with _app().app_context():
+                quota_ok, quota_msg = check_quota(self.session.user, size)
+            if not quota_ok:
+                await self.session.write(
+                    f"\r\n{FG['red']}{quota_msg}{RESET}\r\n"
+                    f"{FG['red']}Stopping batch -- "
+                    f"{len(files) - idx + 1} file(s) not sent.{RESET}\r\n")
+                break
 
             await self.session.write(
                 f"\r\n{FG['grn']}[{idx}/{len(files)}] Sending {name} ...{RESET}\r\n"
@@ -1803,6 +1820,8 @@ class BBSMenuUI:
             if ok:
                 await self.session.write(
                     f"\r\n{FG['grn']}[OK] {name}{RESET}\r\n")
+                with _app().app_context():
+                    consume_quota(self.session.user, size)
             else:
                 await self.session.write(
                     f"\r\n{FG['red']}[FAILED] {name}{RESET}\r\n")
@@ -1892,6 +1911,23 @@ class BBSMenuUI:
                 f"{FG['red']}Unknown protocol choice.{RESET}\r\n")
             return
 
+        # Daily download quota (FR: Firehawke, 2026-07-24) -- see
+        # features/file_quota.py. Checked here, right before the actual
+        # transfer starts, not earlier -- the W=Web URL branch above
+        # re-enters the web download route, which enforces its own
+        # check independently, so gating it again here would be a
+        # false-negative source (double-counting) rather than a gap.
+        # Wrapped in app_context() like every other DB-touching block in
+        # this method (no ambient context here).
+        from .file_quota import check_quota, consume_quota
+        quota_size = size if isinstance(size, int) else 0
+        with _app().app_context():
+            quota_ok, quota_msg = check_quota(self.session.user, quota_size)
+        if not quota_ok:
+            await self.session.write(f"\r\n{FG['red']}{quota_msg}{RESET}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
         await self.session.write(
             f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
             f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")
@@ -1902,6 +1938,9 @@ class BBSMenuUI:
         except Exception as exc:
             logger.exception('send_file failed for %s: %s', fpath, exc)
             ok = False
+        if ok and quota_size:
+            with _app().app_context():
+                consume_quota(self.session.user, quota_size)
 
         if ok:
             await self.session.write(

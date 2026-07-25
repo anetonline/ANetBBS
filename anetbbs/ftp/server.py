@@ -345,6 +345,60 @@ class AnetbbsFTPHandler(FTPHandler):
         except Exception:
             logger.exception('FTP: on_file_received hook failed')
 
+    def ftp_RETR(self, file):
+        """Daily download quota (FR: Firehawke, 2026-07-24) -- checked
+        here, before the transfer starts, unlike on_file_received's
+        post-hoc upload check (a RETR can be rejected outright with a
+        clean FTP error response; a STOR has already landed on disk by
+        the time pyftpdlib calls its own post-transfer hook). Skipped
+        for anonymous logins (no local User row to attribute usage to,
+        same scope decision as web/files.py's anonymous-accessible
+        download route) and QWK node sessions (bulk offline-mail packet
+        retrieval, not the file-area leeching this feature targets).
+        `file` is already an absolute filesystem path here, same as
+        on_file_received()'s own `file` argument above."""
+        if (self.app is not None and self.username != 'anonymous'
+                and self._qwk_node_id is None):
+            try:
+                with self.app.app_context():
+                    from ..models import User
+                    from ..features.file_quota import check_quota
+                    user = User.query.filter(
+                        User.username.ilike(self.username)).first()
+                    if user is not None:
+                        try:
+                            size = os.path.getsize(file)
+                        except OSError:
+                            size = 0
+                        ok, msg = check_quota(user, size)
+                        if not ok:
+                            self.respond(f'550 {msg}')
+                            return
+            except Exception:
+                logger.exception('FTP: quota check failed for %s', self.username)
+        return super().ftp_RETR(file)
+
+    def on_file_sent(self, file):
+        """Companion to ftp_RETR's pre-check -- records usage after a
+        successful RETR. See ftp_RETR's docstring for the anon/QWK skip."""
+        if (self.app is None or self.username == 'anonymous'
+                or self._qwk_node_id is not None):
+            return
+        try:
+            with self.app.app_context():
+                from ..models import User
+                from ..features.file_quota import consume_quota
+                user = User.query.filter(
+                    User.username.ilike(self.username)).first()
+                if user is not None:
+                    try:
+                        size = os.path.getsize(file)
+                    except OSError:
+                        size = 0
+                    consume_quota(user, size)
+        except Exception:
+            logger.exception('FTP: on_file_sent quota hook failed')
+
     def _parent_area_tag(self, file_path):
         """The parent directory of an uploaded file, RELATIVE to the
         session's home dir, is the area's symlink name (== `FileArea.tag`

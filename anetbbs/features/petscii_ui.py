@@ -891,7 +891,7 @@ async def _files_download(session, row):
     so xfer.py's existing telnet IAC-escaping already applies correctly
     with no PETSCII-specific changes needed there."""
     import os
-    name, _size, _desc, path = row
+    name, size, _desc, path = row
     if not path or not os.path.isfile(path):
         await _write_wrapped(session, f'{name}: file not found on server disk.')
         await session.read_line('Press ENTER...')
@@ -905,6 +905,18 @@ async def _files_download(session, row):
         await session.read_line('Press ENTER...')
         return
 
+    # Daily download quota (FR: Firehawke, 2026-07-24) -- see
+    # features/file_quota.py. Wrapped in _app_ctx() like every other
+    # DB-touching block in this module (no ambient app context here).
+    from .file_quota import check_quota, consume_quota
+    quota_size = size if isinstance(size, int) else 0
+    with _app_ctx():
+        quota_ok, quota_msg = check_quota(session.user, quota_size)
+    if not quota_ok:
+        await _write_wrapped(session, quota_msg)
+        await session.read_line('Press ENTER...')
+        return
+
     await _write_wrapped(
         session, f'Starting XMODEM send of {name} -- start your '
                 f'terminal\'s receive now.')
@@ -914,6 +926,9 @@ async def _files_download(session, row):
         ok = await send_file(session, path, 'xmodem')
     except Exception:
         ok = False
+    if ok and quota_size:
+        with _app_ctx():
+            consume_quota(session.user, quota_size)
     await _write_wrapped(
         session, f'{name}: transfer complete.' if ok else
         f'{name}: transfer failed or was cancelled.')

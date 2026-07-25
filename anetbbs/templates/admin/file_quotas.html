@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Daily File Download Quotas{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-cloud-download"></i> Daily File Download Quotas</h1>
+    <p class="small text-muted">
+        Caps how much a user can download per day (web + terminal + FTP),
+        based on their access level. A user gets whichever tier below
+        has the HIGHEST access level they still qualify for — e.g. tiers
+        at level 50 and 100 give a level-75 user the level-50 quota, not
+        the level-100 one. A level with no tier configured at or below
+        it is unlimited. Admins always bypass. Resets at Eastern
+        midnight. Echomail/netmail, door games, and the admin panel are
+        never affected — file-area, file-gallery, and FTP downloads only.
+        Anonymous FTP logins and QWK-node FTP sessions are never quota'd
+        (no local account to attribute usage to, or out of scope).
+    </p>
+</div>
+
+<form method="post" class="card p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="row g-2">
+        <div class="col-md-4">
+            <label class="form-label small mb-0">Minimum access level</label>
+            <input type="number" name="min_access_level" class="form-control" placeholder="50" required>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small mb-0">Daily quota (MB)</label>
+            <input type="number" step="1" min="1" name="quota_mb" class="form-control" placeholder="500" required>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary w-100"><i class="bi bi-plus"></i> Add tier</button>
+        </div>
+    </div>
+</form>
+
+<table class="table table-sm">
+    <thead><tr><th>Min access level</th><th>Daily quota</th><th></th></tr></thead>
+    <tbody>
+    {% for t in rows %}
+    <tr>
+        <td>{{ t.min_access_level }}</td>
+        <td>{{ '%.0f'|format(t.daily_quota_bytes / 1024 / 1024) }} MB</td>
+        <td>
+            <form method="post" class="d-inline" onsubmit="return confirm('Delete this tier?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="tier_id" value="{{ t.id }}">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="text-muted">No quota tiers configured — downloads are unlimited for everyone.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

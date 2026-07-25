@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.205`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.206`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.206 — Daily file download quota by access level (July 2026)
+
+New feature — admins can now cap how much a user downloads per day, scaled by access level, so one user can't tag-leech the entire file base overnight.
+
+- Configure tiers under Admin > File System > Download Quotas: a list of (minimum access level, daily quota in MB) pairs. A user gets whichever tier has the highest access level they still qualify for — a level 75 user with tiers set at 50 and 100 gets the level-50 quota, not the level-100 one. No tier configured at or below a level means unlimited downloads for that level. Admins always bypass.
+- Enforced everywhere a file can be downloaded: the web file-area and file-gallery download routes, ANSI telnet/SSH terminal (single and batch ZMODEM/YMODEM/XMODEM downloads), the PETSCII/C64 terminal (XMODEM), and FTP (RETR).
+- Resets at Eastern midnight.
+
+Full suite verified clean (1567 passed, 2 skipped).
 
 ## v1.0b2.205 — AreaFix %RESCAN could only ever be used once per area/node (July 2026)
 

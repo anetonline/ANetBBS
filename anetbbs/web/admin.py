@@ -275,6 +275,7 @@ ADMIN_HUB_SECTIONS = {
             ('admin.file_echo_subs', 'File-Echo Subs', 'bi-arrow-left-right', 'File-echo distribution subscriptions'),
             ('file_queue.index', 'File Queue', 'bi-shield-check', 'Uploads pending approval/scan'),
             ('admin.tic_log', 'TIC Log', 'bi-truck', 'FidoNet file-echo transfer log'),
+            ('admin.file_quotas', 'Download Quotas', 'bi-cloud-download', 'Daily download limits by access level'),
         ],
     },
     'content': {
@@ -3033,6 +3034,42 @@ def newuser_questions():
             .order_by(NewUserQuestion.sort_order,
                       NewUserQuestion.id).all())
     return render_template('admin/newuser_questions.html', rows=rows)
+
+
+@admin_bp.route('/file-quotas', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def file_quotas():
+    """CRUD for FileQuotaTier rows -- daily download quota by access
+    level (FR: Firehawke, 2026-07-24). See features/file_quota.py's
+    module docstring for the "highest qualifying tier wins" rule."""
+    from ..models import FileQuotaTier
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'add':
+            level = request.form.get('min_access_level', type=int)
+            quota_mb = request.form.get('quota_mb', type=float)
+            if level is None or quota_mb is None or quota_mb <= 0:
+                flash('Enter a valid access level and quota.', 'danger')
+            elif FileQuotaTier.query.filter_by(min_access_level=level).first():
+                flash(f'A tier for access level {level} already exists.', 'danger')
+            else:
+                db.session.add(FileQuotaTier(
+                    min_access_level=level,
+                    daily_quota_bytes=int(quota_mb * 1024 * 1024)))
+                db.session.commit()
+                flash('Quota tier added.', 'success')
+        elif action == 'delete':
+            tid = request.form.get('tier_id', type=int)
+            t = FileQuotaTier.query.get(tid)
+            if t:
+                db.session.delete(t)
+                db.session.commit()
+                flash('Quota tier deleted.', 'success')
+        return redirect(url_for('admin.file_quotas'))
+    rows = (FileQuotaTier.query
+            .order_by(FileQuotaTier.min_access_level.desc()).all())
+    return render_template('admin/file_quotas.html', rows=rows)
 
 
 @admin_bp.route('/time-budgets', methods=['GET', 'POST'])

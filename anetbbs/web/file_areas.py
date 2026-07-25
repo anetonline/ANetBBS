@@ -340,6 +340,17 @@ def download(area_id, filename):
         except Exception:
             pass
 
+    # Daily download quota (FR: Firehawke, 2026-07-24) -- see
+    # features/file_quota.py's module docstring for the tier-resolution
+    # rule. Checked before the counter bump below so a rejected
+    # download doesn't get counted.
+    from ..features.file_quota import check_quota, consume_quota
+    file_size = os.path.getsize(full)
+    ok, quota_msg = check_quota(current_user, file_size)
+    if not ok:
+        flash(quota_msg, 'danger')
+        return redirect(url_for('file_areas.view_area', area_id=area.id))
+
     # Bump download counter (best-effort).
     try:
         from ..models import FileRatio, db as _db
@@ -347,11 +358,12 @@ def download(area_id, filename):
         if r is None:
             r = FileRatio(user_id=current_user.id)
             _db.session.add(r)
-        r.bytes_downloaded = (r.bytes_downloaded or 0) + os.path.getsize(full)
+        r.bytes_downloaded = (r.bytes_downloaded or 0) + file_size
         r.files_downloaded = (r.files_downloaded or 0) + 1
         _db.session.commit()
     except Exception:
         pass
+    consume_quota(current_user, file_size)
 
     # send_from_directory handles directory traversal safely.
     return send_from_directory(area.storage_path, filename, as_attachment=True)

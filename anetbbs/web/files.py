@@ -215,9 +215,21 @@ def download(file_id):
 
     uploads_dir = current_app.config.get('UPLOADS_DIR', os.path.join(current_app.config['DATA_DIR'], 'uploads'))
 
+    # Daily download quota (FR: Firehawke, 2026-07-24) -- see
+    # features/file_quota.py. Anonymous visitors (no login_required on
+    # this route) have no user_id to attribute usage to, so check_quota/
+    # consume_quota are no-ops for them -- same as today's unenforced
+    # behavior, not a new gap this feature introduces.
+    from ..features.file_quota import check_quota, consume_quota
+    ok, quota_msg = check_quota(current_user, upload_obj.file_size or 0)
+    if not ok:
+        flash(quota_msg, 'danger')
+        return redirect(url_for('files.list_files'))
+
     # Increment download count
     upload_obj.download_count = (upload_obj.download_count or 0) + 1
     db.session.commit()
+    consume_quota(current_user, upload_obj.file_size or 0)
 
     return send_from_directory(
         uploads_dir,

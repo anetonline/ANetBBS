@@ -2404,6 +2404,55 @@ class FileRatio(db.Model):
                                                        uselist=False))
 
 
+class FileQuotaTier(db.Model):
+    """Admin-configured daily download quota tier (FR: Firehawke, 2026-07-24).
+
+    One row per (min_access_level, daily_quota_bytes) pair. A user's
+    actual quota is whichever tier has the HIGHEST min_access_level
+    that the user's own access_level still qualifies for -- e.g. tiers
+    at level 50 and 100: a level-75 user gets the level-50 tier's quota
+    (the highest one they clear), NOT the level-100 tier. A level-10
+    user with no tier at or below their level configured gets no quota
+    (unlimited) -- quotas are opt-in per level band, not a default cap.
+    Admins always bypass quota entirely, same convention as
+    evaluate_access()'s bypass_admin default.
+    """
+    __tablename__ = 'file_quota_tiers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    min_access_level = db.Column(db.Integer, nullable=False, unique=True, index=True)
+    daily_quota_bytes = db.Column(db.BigInteger, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FileQuotaUsage(db.Model):
+    """Per-user daily download-bytes counter for FileQuotaTier enforcement.
+
+    Lazy day-bucket pattern (same convention as WebGameWallet's
+    week_start -- see anetbbs/web/games.py's _week_start()): one row per
+    user, `day` holds the current bucket's date string, and a request
+    whose stored `day` doesn't match today's resets bytes_used_today to
+    0 in place rather than a background job pruning/rolling old rows.
+    `day` is Eastern-calendar-day (anetbbs.core.tz.EASTERN), not bare
+    server-local wall clock -- deliberately diverges from
+    WebGameWallet's precedent since this feature is new (no existing
+    behavior to preserve) and Eastern is this codebase's now-established
+    convention for anything day-boundary-sensitive that faces a user.
+    """
+    __tablename__ = 'file_quota_usage'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        unique=True, nullable=False, index=True)
+    day = db.Column(db.String(10), nullable=False)   # 'YYYY-MM-DD', Eastern
+    bytes_used_today = db.Column(db.BigInteger, default=0, nullable=False)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow,
+                             onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('file_quota_usage',
+                                                       uselist=False))
+
+
 class NewUserQuestion(db.Model):
     """Sysop-defined question shown on registration. Answer stored
     verbatim per user in NewUserAnswer."""
