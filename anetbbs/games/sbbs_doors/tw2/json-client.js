@@ -32,9 +32,9 @@ function JSONClient(dbroot) {
     // and port. We're file-backed, so dbroot becomes the directory holding
     // <scope>.json files.
     //
-    // ANetBBS override: the bundled door source tree lives under
-    // /home/stingray/anetbbs/anetbbs/games/sbbs_doors/tw2/ (owned by
-    // stingray), but the anetbbs-web service runs as uid 998. Writing
+    // ANetBBS override: the bundled door source tree lives under the
+    // install directory (owned by the install user), but the
+    // anetbbs-web service runs as a separate service uid. Writing
     // runtime state into the source tree requires a chown that does not
     // survive update.sh. door_runner.py exports ANETBBS_TW2_DB_DIR pointing
     // at {install}/data/sbbs_doors/tw2/db/ (writable by the runtime user

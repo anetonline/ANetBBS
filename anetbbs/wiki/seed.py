@@ -1238,7 +1238,7 @@ back to the menu.
 
 A BBS-scene chat network — connects sysops and users across many
 BBSes through one central hub. Default ANetBBS connects to the public
-hub at `mrc.bottomlessabyss.net:5000`. Both the web (`/mrc/`) and
+hub at `mrc.bottomlessabyss.net:5001`. Both the web (`/mrc/`) and
 terminal MRC clients talk through the same local bridge, so web and
 terminal users share rooms and a single trust identity.
 
@@ -1291,7 +1291,7 @@ There is no web admin page for the bridge — it's configured by editing
 first setup) and restarting the `anetbbs-mrc-bridge` service:
 
 - `mrc_host` / `mrc_port` — the hub to connect to (default
-  `mrc.bottomlessabyss.net` / `5000`)
+  `mrc.bottomlessabyss.net` / `5001`)
 - `identify_required_mode` — if `true`, callers must `/identify`
   before they can chat at all. **Defaults to `false`** — `/identify`
   is optional "MRC Trust," not a gate, unless a sysop deliberately
@@ -1591,6 +1591,19 @@ The BBS file library — uploads, downloads, descriptions, areas.
   same file areas — anonymous access is read-only and limited to
   active, non-sysop-only areas; logged-in users can also upload
   where an area's upload permission allows it. Default port `21`.
+
+## Daily download quota
+
+Sysops can cap how much a user downloads per day, scaled by access
+level, under `/admin/file-quotas` (Admin > File System > Download
+Quotas) — a list of (minimum access level, daily quota in MB) tiers. A
+user gets whichever tier has the highest access level they still
+qualify for; a level with no tier configured at or below it has
+unlimited downloads. Admins always bypass. The quota is enforced
+everywhere a file can be downloaded — web, terminal (Zmodem/Ymodem/
+Xmodem), PETSCII (Xmodem), and FTP — and resets at Eastern midnight.
+If you hit your quota mid-download, the transfer is rejected outright
+with a message showing how much you have left.
 
 ## Uploading
 
@@ -1970,6 +1983,47 @@ table and worked examples: [[Scheduled Events]].
 - Logs: `/opt/anetbbs/logs/` (rotated)
 - Doors: `/opt/anetbbs/doors/<name>/`
 - Echomail spool: `/opt/anetbbs/data/echomail/binkp/{inbound,outbound}/`
+
+## Admin tools reference
+
+Smaller admin pages that don't warrant their own wiki page, grouped by
+what they manage. All are under **Admin** in the navbar.
+
+**Users & access**
+
+| Tool | Path | What it does |
+|------|------|--------------|
+| New User Questions | `/admin/newuser-questions` | Custom sign-up questions shown right after registration; answers are stored per user. |
+| Inactive Users | `/admin/inactive-users?days=N` | Accounts with no login in N days (default 90) — mass PM, deactivate, or delete. |
+| Registration Attempts | `/admin/registration-attempts` | Paginated log of every signup attempt, success and failure. |
+| Chat Bans | `/admin/chat-bans` | Mute a user from MRC chat — one room or all, optional expiry. Expired bans auto-clear the next time you open the page. |
+| Time Budgets | `/admin/time-budgets` | Per-user daily time-online allowance / time-bank balance. |
+
+**Messages**
+
+| Tool | Path | What it does |
+|------|------|--------------|
+| Default Echo Subs | `/admin/default-echos` | Toggles which echo areas are subscribed install-wide — a global default, not yet a per-new-user template. |
+
+**Network**
+
+| Tool | Path | What it does |
+|------|------|--------------|
+| IRC Server Presets | `/admin/irc-presets` | The sysop-curated server list shown in the terminal [[IRC Client]] menu. |
+
+**System**
+
+| Tool | Path | What it does |
+|------|------|--------------|
+| Setup Wizard | `/admin/setup-wizard` | First-run config — BBS name, sysop info, theme, seed MOTDs, default echoes. Idempotent, safe to re-run any time. |
+| Preflight Checklist | `/admin/preflight/` | Green/red pre-launch readiness probes (disk space, DNS, firewall, email config, and more) with a one-line fix for anything that fails. Meant for right after install and again just before announcing the BBS publicly. |
+| Security Updates | `/admin/security/` | Shows the daily 04:00 UTC OS-package security-patch report; "run scan now" runs it on demand instead of waiting. |
+| Door Errors | `/admin/door-errors/` | Parses `logs/door-errors.log` (crash traces from the door wrapper) into a readable list; clear it once you've acknowledged the breakage. |
+| Connection Test | `/admin/connection-test` | Probes telnet/SSH/rlogin/web/finger/IRC/BinkP ports against any host (defaults to your own) — latency plus whatever banner comes back. Handy for "is my firewall actually open" from the sysop seat itself. |
+| Activity Log | `/admin/activity` | Paginated feed of user activity, filterable by type/user/IP. |
+| Check for Updates | `/admin/upgrades/` | Compares your local version against the configured registry and offers one-click download + install — sha256-verified against the same API response before anything is extracted. |
+| Logon/Logoff Modules | `/admin/login-modules/` | Attach an action — graffiti wall, an ANSI screen, a shell command, or a native/Python door — to run automatically at logon or logoff. |
+| Pre-update Backups | `/admin/backups/` | Browse the snapshots `update.sh` takes before every upgrade (`.env`, both databases, systemd units, nginx config if present). Restore `.env` or the database from one, or delete old ones. Only the 3 most recent are kept. |
 
 ## See also
 
@@ -3876,12 +3930,45 @@ repository — this wiki page is the player-facing summary.
 ]
 
 
-def seed_initial_pages(force=False):
+def _page_never_manually_edited(page):
+    """True if every WikiRevision for this page was system-generated
+    (initial seed or a prior auto-sync) -- never a real logged-in
+    sysop/user edit. web/wiki.py's edit() route is @login_required and
+    always calls _save_revision(..., current_user), so a genuine human
+    edit always has a non-NULL author_id; seed-authored revisions
+    always use author_id=None (see below). Used to gate sync_unedited
+    so it can never clobber a sysop's own wiki customization."""
+    return (WikiRevision.query
+           .filter_by(page_id=page.id)
+           .filter(WikiRevision.author_id.isnot(None))
+           .first() is None)
+
+
+def seed_initial_pages(force=False, sync_unedited=False):
     """Insert the initial wiki content if it isn't there yet.
 
-    Idempotent — only adds a page if its slug doesn't already exist
-    (or `force=True` to rewrite). Each page gets an initial `r1`
-    revision so history isn't empty.
+    Idempotent by default -- only adds a page if its slug doesn't
+    already exist. Each page gets an initial `r1` revision so history
+    isn't empty.
+
+    Real gap found live: because this was idempotent-only, once a
+    page's slug existed, NO later content fix made to SEED here ever
+    reached an already-seeded install -- across several past "docs/
+    wiki accuracy pass" sessions, fixes landed in this file but never
+    actually shipped to any install that had already seeded that page,
+    only to brand-new ones. A live sysop found stale paths/service
+    names/ports that had already been fixed in SEED long ago.
+
+    force=True unconditionally overwrites EVERY matching page,
+    including ones a sysop has hand-edited via the wiki UI -- kept
+    for completeness but not safe for automated/unattended use.
+
+    sync_unedited=True (the safe fix, used from the app startup path)
+    refreshes only pages the sysop has never personally touched (see
+    _page_never_manually_edited) and only when the content actually
+    differs, so an update.sh-triggered restart keeps untouched pages
+    current with the shipped SEED automatically, while never touching
+    a page any real edit has ever landed on.
     """
     try:
         from flask import current_app
@@ -3898,9 +3985,14 @@ def seed_initial_pages(force=False):
                 .replace('{bbs_name}', bbs_name)
                 .replace('{sysop_name}', sysop_name))
         existing = WikiPage.query.filter_by(slug=slug).first()
-        if existing and not force:
+        do_refresh = force
+        if existing and not force and sync_unedited:
+            if (_page_never_manually_edited(existing)
+                    and (existing.title != title or existing.body != body)):
+                do_refresh = True
+        if existing and not do_refresh:
             continue
-        if existing and force:
+        if existing and do_refresh:
             existing.title = title
             existing.body = body
             existing.is_deleted = False
@@ -3919,7 +4011,8 @@ def seed_initial_pages(force=False):
                     .filter_by(page_id=page.id).scalar() or 0) + 1
         rev = WikiRevision(page_id=page.id, rev_num=next_rev,
                            title=title, body=body,
-                           edit_summary='Initial seed content',
+                           edit_summary=('Initial seed content' if next_rev == 1
+                                         else 'Automatic sync from updated seed content'),
                            author_id=None, author_ip=None)
         db.session.add(rev)
         added += 1

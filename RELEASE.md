@@ -1,3 +1,14 @@
+# ANetBBS v1.0b2.207 — Wiki content now self-heals on update; docs accuracy + coverage pass (July 2026)
+
+- Real root cause found: the in-app wiki's seed function was idempotent-only — once a page existed, no later content fix ever reached an already-seeded install, across several past docs/wiki accuracy sessions. Fixed: on every startup, any wiki page you haven't personally edited is now automatically refreshed to match the current shipped content; anything you've edited yourself is never touched.
+- Fixed a wrong MRC hub port in the wiki (was showing 5000, real port is 5001), and a doc page that presented the retired anetbbs-telnet/anetbbs-ssh services as current instead of the unified anetbbs.service.
+- Documented the new daily file download quota feature (wiki + docs/07-file-areas.md).
+- Added wiki coverage for ~16 admin tools that had none: New User Questions, Inactive Users, Registration Attempts, Chat Bans, Time Budgets, Default Echo Subs, IRC Server Presets, Setup Wizard, Preflight Checklist, Security Updates, Door Errors, Connection Test, Activity Log, Check for Updates, Logon/Logoff Modules, and Pre-update Backups.
+
+Full suite verified clean (1572 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.206 — Daily file download quota by access level (July 2026)
 
 New feature — admins can now cap how much a user downloads per day, scaled by access level, so one user can't tag-leech the entire file base overnight.

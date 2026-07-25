@@ -57,9 +57,10 @@ So `lord.sh -drop {dropdir}` works.
 
 ## Safety
 
-`exec` runs whatever the sysop configured, **as the user that runs
-anetbbs-telnet/anetbbs-ssh**. There is no sandbox. Treat this as a
-sysop-trust feature only. Never let regular users edit menu items.
+`exec` runs whatever the sysop configured, **as the user that runs the
+`anetbbs` service** (telnet/SSH/rlogin all run inside this one unified
+service). There is no sandbox. Treat this as a sysop-trust feature
+only. Never let regular users edit menu items.
 
 ## Sample weather door
 

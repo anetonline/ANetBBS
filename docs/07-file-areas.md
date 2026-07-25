@@ -56,6 +56,24 @@ Ports to open on the firewall: `21/tcp` (control) and the configured
 `FTP_TLS_CERTFILE` + `FTP_TLS_KEYFILE` (reuse your nginx
 Let's Encrypt cert).
 
+## Daily download quota
+
+**Admin → File System → Download Quotas** (`/admin/file-quotas`) caps
+how much a user can download per day, scaled by access level — so one
+user can't tag-leech the whole file base overnight.
+
+Configure a list of `(minimum access level, daily quota in MB)` tiers.
+A user gets whichever tier has the **highest** access level they still
+qualify for — e.g. tiers at level 50 and 100 give a level-75 user the
+level-50 quota, not the level-100 one. A level with no tier configured
+at or below it downloads unlimited. Admins always bypass.
+
+Enforced everywhere a file can be downloaded: the web file-area and
+file-gallery routes, ANSI telnet/SSH (Zmodem/Ymodem/Xmodem, single and
+batch), PETSCII (Xmodem), and FTP (`RETR`) — anonymous FTP logins and
+QWK-node FTP sessions are exempt (no local account to attribute usage
+to, or out of scope respectively). Usage resets at Eastern midnight.
+
 ## Upload moderation queue
 
 Set `FILE_MOD_QUEUE_ENABLED=true` in `.env` to require sysop approval

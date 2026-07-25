@@ -1836,11 +1836,15 @@ def _create_default_data():
     db.session.commit()
 
     # ─── Wiki seed pages ─────────────────────────────────────────────
-    # Best-effort: fill the wiki with starter docs on a fresh install.
-    # Idempotent — only inserts pages whose slug doesn't already exist.
+    # Best-effort: fill the wiki with starter docs on a fresh install,
+    # AND keep already-seeded installs' untouched pages current with
+    # this version's content (sync_unedited=True) -- see
+    # seed_initial_pages()'s own docstring for the real bug this fixes
+    # (content fixes to SEED never reached any already-seeded install
+    # before this). Never touches a page a sysop has actually edited.
     try:
         from .wiki.seed import seed_initial_pages
-        seed_initial_pages()
+        seed_initial_pages(sync_unedited=True)
     except Exception as exc:  # pylint: disable=broad-except
         # Don't let a wiki seed failure stop the rest of startup —
         # log it and move on.
