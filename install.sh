@@ -39,10 +39,17 @@ DEF_ENABLE_TELNET="y"
 DEF_ENABLE_SSH="y"
 DEF_ENABLE_NGINX="y"
 DEF_ENABLE_SSL="n"
-BBS_VERSION="1.3.7"
 
 # ─── Source directory (where install.sh lives) ─────────────────────────────────
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Real gap found in a pre-release audit: this used to be a separately
+# hardcoded BBS_VERSION="1.3.7" here (and in update.sh) that never
+# tracked the actual ANetBBS release at all -- drifted from day one,
+# three different disconnected values existed across install.sh/
+# update.sh/mrc/bridge/config.example.json by the time this was found.
+# Read the real version the same way update.sh already does for its
+# own OLD_VERSION/NEW_VERSION comparison.
+BBS_VERSION="$(cat "$SOURCE_DIR/VERSION" 2>/dev/null || echo unknown)"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UNINSTALL
@@ -1467,7 +1474,14 @@ ok "anetbbs-web.service"
 # .env on the v1.0a release line. The collapsed design just trusts .env.
 # This replaces the legacy anetbbs-telnet.service + anetbbs-ssh.service
 # pair, which silently fought each other for ports.
-if [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]]; then
+#
+# Always written, even if the sysop declines both Telnet and SSH here:
+# this same unit also owns rlogin/FTP/PETSCII40/PETSCII80, which the
+# wizard doesn't prompt for and can only be turned on later by hand-
+# editing .env — without the unit file on disk, there'd be nothing to
+# `systemctl enable --now` for those. update.sh already takes this same
+# unconditional-if-missing approach for upgrades; this matches it for
+# fresh installs.
 cat > /etc/systemd/system/anetbbs.service << SVCEOF
 [Unit]
 Description=ANetBBS terminal protocols (telnet / ssh / rlogin)
@@ -1497,7 +1511,6 @@ RestartSec=5
 WantedBy=multi-user.target
 SVCEOF
 ok "anetbbs.service"
-fi
 
 # ─── MRC Bridge service ────────────────────────────────────────────────────────
 if [[ "$ENABLE_MRC" == "y" ]]; then
@@ -2066,7 +2079,6 @@ if [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]]; then
     proto_label=""
     [[ "$ENABLE_TELNET" == "y" ]] && proto_label+="telnet "
     [[ "$ENABLE_SSH" == "y" ]]    && proto_label+="ssh "
-    [[ "$RLOGIN_ENABLED" == "true" ]] && proto_label+="rlogin "
     show_status "anetbbs"        "Terminal protocols (${proto_label% })"
 fi
 [[ "$ENABLE_FINGER" == "y" ]] && show_status "anetbbs-finger" "Finger server"

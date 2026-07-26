@@ -49,8 +49,8 @@ maps to a `Game` model row (sysop creates via `/admin/games/`) with a
 | `door_dosemu` | dosemu2, virtual COM1 bridged to caller's PTY (no FOSSIL) | `DOOR.SYS` | DOS doors that need dosemu2 specifically instead of DOSBox |
 | `door_native` | Direct exec, stdio piped to caller | configurable | Linux-native doors (Java, Go, …) |
 | `door_synchronet` | Real `jsexec` if present, otherwise Node + our compat shim | `DOOR32.SYS` | Synchronet `.js` doors (LORD-JS, MajorMUD-JS, dorkit-based doors) |
-| `door_mystic` | `mystic` binary running compiled `.mpx` script | Mystic-style | Mystic Pascal-script doors (`.mpx` precompiled) |
-| `door_mystic_mps` | Auto-compile `.mps` → `.mpx` via `mplc`, then run | Mystic-style | Mystic source doors (`.mps`) |
+| `door_mystic` | Runs a Python door script via a `mystic_bbs` compat shim | Mystic-style | Mystic-API Python doors (`.py`) |
+| `door_mystic_mps` | Auto-compiles `.mps` → `.mpx` via `mplc`, then runs the real `mystic` binary | Mystic-style | Mystic Pascal source/bytecode doors (`.mps`/`.mpx`) |
 | `door_rlogin` | Outbound rlogin to remote BBS game-server | none — passes user identity | DoorParty, A-Net Online, Synchronet xtrn servers |
 | `door_telnet` | Outbound telnet to remote game server, no pre-auth handshake | none | TWGS (Trade Wars Game Server) and similar telnet-only remotes |
 | `builtin_web` | Flask-routed browser game (xterm.js not needed) | none | Pure-web mini-games (Snake, 2048, Hangman…) |
@@ -125,28 +125,29 @@ same generic way every other door type gets them.
 See [`15-synchronet-compat.md`](15-synchronet-compat.md) for the
 complete shim API surface and known gaps.
 
-### Writing a Mystic Pascal door
+### Writing a Mystic-style door
 
 ANetBBS ships the full Mystic 1.12 A48 runtime at
 `<install>/vendor/mystic/` — sysop doesn't need to install Mystic
 separately. The runtime includes `mplc` (compiler), `mystic` (script
 interpreter), `mide` (script editor), and the full data/menus/themes.
 
-For a `.mps` source door:
+For a `.mps` Pascal source door (or a pre-compiled `.mpx`):
 - `game_type`: `door_mystic_mps`
-- `executable_path`: `/usr/local/bin/mystic`
-- `command_line_args`: `-d %f -e <path-to-script.mps>`
-- The wrapper auto-runs `mplc script.mps` on launch if `.mpx` is older
-  than `.mps`.
+- `mystic_script_path`: path to the `.mps`/`.mpx` file
+- Runs the real `mystic` binary via `MYSTIC_BBS_PATH` (default
+  `/usr/local/bin/mystic`), auto-compiling `.mps` → `.mpx` with `mplc`
+  on launch if the bytecode is missing or older than the source. If
+  `mplc` isn't installed, it falls back to assuming the script is
+  already compiled.
 
-For a pre-compiled `.mpx`:
+For a Mystic-API Python door:
 - `game_type`: `door_mystic`
-- `command_line_args`: `-d %f -e <path-to-script.mpx>`
-
-Mystic Python (`.py`) doors run via a fake `mystic_bbs` module that
-maps Mystic's BBS API onto our compat helpers. Drop a `.py` script
-that does `from mystic_bbs import *` and you're a few function calls
-from a working door.
+- `mystic_script_path`: path to the `.py` script
+- Runs via a fake `mystic_bbs` module that maps Mystic's BBS API onto
+  our compat helpers. Drop a `.py` script that does
+  `from mystic_bbs import *` and you're a few function calls from a
+  working door.
 
 ### rlogin out-dial doors
 
@@ -241,16 +242,19 @@ class MyThing(db.Model):
     user = db.relationship('User', backref='my_things')
 ```
 
-Then generate a migration:
-
-```bash
-cd <install>
-venv/bin/flask db migrate -m "add my_things"
-venv/bin/flask db upgrade
-```
-
-Migrations are stored in `migrations/` and run automatically on every
-service start.
+There's no `migrations/` directory and no `flask db migrate`/`upgrade`
+step in this project, despite Flask-Migrate being wired up in
+`web_app.py` — schema changes are picked up automatically instead: an
+auto-sweep in `_lightweight_migrate()` (`web_app.py`) walks
+`db.metadata.sorted_tables` on every app start and `ALTER TABLE ADD
+COLUMN`s anything the model declares that the live DB is missing (new
+tables come from the regular `db.create_all()` call right before it).
+For a brand new table like `MyThing` above, that's all you need —
+just restart the app (or re-run `update.sh` on a real install) and the
+table appears. Only reach for a hand-written `_ensure_column()` call in
+`_lightweight_migrate()` if you need a specific default/NOT NULL
+constraint the generic permissive sweep doesn't give you (see that
+function's own comments for examples).
 
 ### Adding a sysop admin page
 
@@ -261,9 +265,10 @@ Two patterns:
 2. **Make a sub-blueprint** for larger features (see `echomail_admin.py`
    or `gallery_admin.py`).
 
-Either way, add the page to the admin nav at
-`templates/admin/_nav.html` (auto-included by every admin page) and
-make sure the route has both `@login_required` and your `is_admin` gate.
+Either way, add the page to the `ADMIN_HUB_SECTIONS` dict at the top
+of `anetbbs/web/admin.py` (each category page's tool list is built
+from this, not a separate nav template) and make sure the route has
+both `@login_required` and your `is_admin` gate.
 
 ### Real-time / WebSocket features
 
@@ -362,10 +367,10 @@ together.
 
 ## Outbound notifications / webhooks
 
-Three outbound channels are built in:
+Two outbound channels are built in:
 - **Webhooks** — generic POST to a URL, configured at `/admin/webhooks/`
-- **Telegram** — set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in `.env`
-- **Email** — sysop newsletter, SMTP via `EMAIL_*` env vars
+- **Email** — outgoing SMTP is a DB-backed `SmtpConfig` row, edited at
+  Admin → SMTP / Email — not `.env` variables
 
 To fire one from your feature code:
 

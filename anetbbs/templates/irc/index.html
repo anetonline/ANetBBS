@@ -53,27 +53,27 @@
         <div>
             <label class="form-label mb-0" style="font-size:0.75rem;">Server</label>
             <input id="cfg_server" type="text" class="form-control form-control-sm"
-                   value="{{ saved.server if saved else 'irc.libera.chat' }}" style="width:160px;">
+                   value="{{ saved.server if saved else (default_preset.server if default_preset else 'irc.libera.chat') }}" style="width:160px;">
         </div>
         <div>
             <label class="form-label mb-0" style="font-size:0.75rem;">Port</label>
             <input id="cfg_port" type="number" class="form-control form-control-sm"
-                   value="{{ saved.port if saved else 6667 }}" style="width:80px;">
+                   value="{{ saved.port if saved else (default_preset.port if default_preset else 6667) }}" style="width:80px;">
         </div>
         <div class="form-check mb-1">
             <input id="cfg_ssl" class="form-check-input" type="checkbox"
-                   {% if saved and saved.use_ssl %}checked{% endif %}>
+                   {% if (saved and saved.use_ssl) or (not saved and default_preset and default_preset.use_ssl) %}checked{% endif %}>
             <label class="form-check-label" for="cfg_ssl" style="font-size:0.85rem;">SSL</label>
         </div>
         <div>
             <label class="form-label mb-0" style="font-size:0.75rem;">Nick</label>
             <input id="cfg_nick" type="text" class="form-control form-control-sm"
-                   value="{{ saved.nick if saved else default_nick }}" style="width:120px;">
+                   value="{{ saved.nick if saved else ((default_preset.default_nick if default_preset and default_preset.default_nick else default_nick)) }}" style="width:120px;">
         </div>
         <div>
             <label class="form-label mb-0" style="font-size:0.75rem;">Auto-join channels (comma)</label>
             <input id="cfg_channels" type="text" class="form-control form-control-sm"
-                   value="{{ saved.channels if saved else '' }}"
+                   value="{{ saved.channels if saved else (default_preset.channels if default_preset else '') }}"
                    placeholder="#hangout,#bbs" style="width:220px;">
         </div>
         <div>
@@ -314,7 +314,17 @@
         addLine(d.target, `<span class="action">* ${escapeHtml(d.from)} ${d.text}</span>`, 'action');
     });
     socket.on('irc_notice', d => {
-        addLine(d.target || '(server)', `-${escapeHtml(d.from)}- ${d.html || ''}`, 'system');
+        // Real gap found live: notices never called ensureChannel(), so a
+        // NOTICE-only reply (NickServ/ChanServ almost always reply this
+        // way) landed in a tab that visually never existed -- the text
+        // was captured but there was nothing to click to see it.
+        const target = d.target || '(server)';
+        ensureChannel(target);
+        addLine(target, `-${escapeHtml(d.from)}- ${d.html || ''}`, 'system');
+    });
+    socket.on('irc_switch', d => {
+        ensureChannel(d.channel);
+        if (d.switch) switchChannel(d.channel);
     });
     socket.on('irc_join', d => {
         ensureChannel(d.channel);
@@ -510,7 +520,14 @@
         if (line.startsWith('/')) {
             socket.emit('irc_send', { line });
         } else {
-            const target = currentChannel.startsWith('#') ? currentChannel : '';
+            // Real gap found live: this used to only pass a target for
+            // "#channel"-looking tabs, silently falling back to whatever
+            // the SERVER'S current_channel happened to be for any DM tab
+            // (clicking a DM tab in the sidebar never told the server) --
+            // plain text typed while looking at a DM could go to the
+            // wrong place with no visible error. Any real tab except the
+            // synthetic "(server)" one is a valid PRIVMSG target.
+            const target = (currentChannel && currentChannel !== '(server)') ? currentChannel : '';
             socket.emit('irc_send', { line, target });
         }
         input.value = '';

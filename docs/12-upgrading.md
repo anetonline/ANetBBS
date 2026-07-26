@@ -16,7 +16,10 @@ The update script (8 steps):
 2. Backs up `.env`, the SQLite database(s) (via `sqlite3 .backup`, a
    consistent snapshot even with the service still running), the
    systemd unit files, and the nginx site config to a timestamped
-   directory under `/tmp/anetbbs-backup-YYYYMMDDHHMMSS/`. This backup
+   directory under `data/backups/anetbbs-backup-YYYYMMDDHHMMSS/`
+   (inside your install dir — moved off `/tmp` after a real incident
+   where a Pi's `/tmp` turned out to be a small RAM-backed tmpfs and
+   the backup didn't survive). This backup
    does **not** include `data/` or `logs/` — those are never touched
    by the update in the first place (see "What's safe to skip" below),
    so there's nothing to restore for them.
@@ -62,15 +65,15 @@ background. Progress is streamed to the browser log viewer.
 
 If you need to undo a bad upgrade yourself, the backup directory path
 is printed during the update — it looks like
-`/tmp/anetbbs-backup-YYYYMMDDHHMMSS/` (note: **`/tmp`, not next to your
-install** — and it doesn't survive a reboot, since it's `/tmp`). Find
-it with `ls -dt /tmp/anetbbs-backup-* | head -1` if you didn't note it
-down. Restore with:
+`/opt/anetbbs/data/backups/anetbbs-backup-YYYYMMDDHHMMSS/` (inside
+your install dir, so it survives a reboot). Find it with
+`ls -dt /opt/anetbbs/data/backups/anetbbs-backup-* | head -1` if you
+didn't note it down. Restore with:
 
 ```
 sudo systemctl stop anetbbs-web anetbbs anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp
-sudo cp /tmp/anetbbs-backup-YYYYMMDDHHMMSS/.env.bak /opt/anetbbs/.env
-sudo cp /tmp/anetbbs-backup-YYYYMMDDHHMMSS/anetbbs.db.bak /opt/anetbbs/data/anetbbs.db
+sudo cp /opt/anetbbs/data/backups/anetbbs-backup-YYYYMMDDHHMMSS/.env.bak /opt/anetbbs/.env
+sudo cp /opt/anetbbs/data/backups/anetbbs-backup-YYYYMMDDHHMMSS/anetbbs.db.bak /opt/anetbbs/data/anetbbs.db
 sudo systemctl start anetbbs-web anetbbs anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp
 ```
 

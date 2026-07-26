@@ -619,12 +619,28 @@ def fetch_shared(token):
         abort(404)
     if not os.path.isfile(fpath):
         abort(404)
+    # Daily download quota: this endpoint has no logged-in requester to
+    # charge, so attribute it to the share's creator instead -- without
+    # this, any user could self-issue a share link for a file they can
+    # already see and re-fetch it anonymously to route unlimited
+    # downloads around their own quota. Real gap found in a pre-release
+    # audit.
+    from ..features.file_quota import check_quota, consume_quota
+    from ..models import User as _User
+    creator = _User.query.get(link.created_by_id)
+    if creator is not None:
+        file_size = os.path.getsize(fpath)
+        ok, _quota_msg = check_quota(creator, file_size)
+        if not ok:
+            abort(429)
     # Update audit fields BEFORE serving so the count is right even if the
     # user aborts the download mid-stream.
     link.download_count = (link.download_count or 0) + 1
     link.last_accessed_at = datetime.datetime.utcnow()
     link.last_accessed_ip = _client_ip()
     db.session.commit()
+    if creator is not None:
+        consume_quota(creator, file_size)
     return send_from_directory(area.storage_path, link.filename,
                                as_attachment=True)
 

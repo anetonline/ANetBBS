@@ -33,6 +33,7 @@ it's worth a real explanation update both this file and the wiki page.
 | Snake | `snake` | Eat, grow, don't hit the walls. |
 | Galaga | `galaga` | Arcade shooter — waves of aliens, dive-bombing bosses. |
 | Breakout | `breakout` | Arkanoid-style brick breaker with power-ups. |
+| ANetDarkForces | `darkforces` | First-person raycasting shooter — 10-sector campaign, 7 weapons, 8 enemy types, 3 save slots. |
 
 ## Strategy
 

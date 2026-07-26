@@ -1,3 +1,55 @@
+# ANetBBS v1.0b2.212 — Access-control audit batch, web IRC client fixes, full docs/wiki accuracy pass (July 2026)
+
+**Access-control fixes** (Phase 1 of the pre-release audit, remaining routes):
+- Vote tallies on private netmail/PMs were readable by anyone who could guess the message id — the read-only tally endpoint skipped the same visibility check the actual voting endpoint enforces.
+- The leaderboard page leaked restricted/sysop-only board names and activity (post counts, top posters, reactions) to any visitor.
+- Game Center's global scoreboard and per-game leaderboard both skipped the level-gating check every other game route already enforces — a gated game's name and scores were visible by id.
+- A user could self-issue an anonymous file-share link for something they can already see and re-download it repeatedly to route around their own daily download quota.
+
+**Web IRC client** (reported live — commands looked broken, had to fall back to the terminal client):
+- `/msg target text` never echoed anything back to the sender, so e.g. `/msg nickserv identify ...` looked like it silently did nothing.
+- A private reply from someone else (NickServ's included, since those are almost always sent as a NOTICE) landed in a browser tab that was never actually created — captured but invisible.
+- Added `/query <nick>` and `/help`.
+- The connect form's default server ignored Admin → IRC Server Presets entirely, always falling back to a hardcoded irc.libera.chat — now uses the sysop's configured default the same way the terminal client already does.
+
+**Docs/wiki accuracy pass** — first full systematic sweep of all 52 wiki pages and 30 docs files (previous passes were reactive to specific bug reports). ~22 stale/wrong claims fixed: wrong routes (several pages pointed at URLs that don't exist), a wiki page describing an SSH public-key-auth feature that was never built (and is in fact intentionally disabled), swapped Mystic Python/Pascal door-type descriptions, a stale `/tmp` backup path doc (moved to the install dir a while back), a missing built-in game (ANetDarkForces) absent from two different game listings, and more.
+
+Full suite verified clean (1601 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.211 — Pre-release audit, batch 3: install/update script fixes (July 2026)
+
+Full re-read of install.sh and update.sh (the actual Full Release critical path) via two independent audit passes, cross-checked against current code. Real bugs found and fixed:
+
+- install.sh only wrote the anetbbs.service systemd unit if the sysop enabled Telnet or SSH during setup — but that same service also owns rlogin/FTP/PETSCII40/PETSCII80, which are documented as "enable later by editing .env" and have no unit to start without it. A sysop who declined both Telnet and SSH but later turned on PETSCII or FTP had nothing to `systemctl enable`. Now always written, matching how update.sh already handles it.
+- update.sh's self-healing MRC bridge config generator (used when config.json is missing, e.g. upgrading a pre-MRC-bridge install) hardcoded the bridge's web_listen_port to 8080 instead of reading the real value from .env — silently mismatched nginx's proxy target on any install using a non-default web port.
+- update.sh's rollback-on-failure path only restored the production database backup, never the dev database backup, even though both are backed up unconditionally up front. An install running against anetbbs_dev.db (via DATABASE_URL) had no real rollback if an update failed partway.
+- Removed a harmless but dead RLOGIN_ENABLED check in install.sh's install summary (rlogin isn't wizard-configurable, the variable was never actually set).
+
+Full suite verified clean; targeted upgrade/install test files re-run clean (27 passed).
+
+Note for later: a cosmetic-only rollback gap was also found (legacy anetbbs-telnet/anetbbs-ssh unit files can be resurrected-but-disabled after a rollback that follows the telnet+ssh-unification migration) — doesn't break anything, left as-is.
+
+---
+
+# ANetBBS v1.0b2.210 — Pre-release audit, batch 2: install/update version-string fix (July 2026)
+
+- Fixed a 3-way inconsistent hardcoded version string used for the MRC bridge `platform_info` field: `install.sh` and `update.sh` both had a stale, unrelated `BBS_VERSION="1.3.7"` literal (matching no real ANetBBS version, ever), and `mrc/bridge/config.example.json` had a third, different stale value (`"1.3.20"`). `install.sh` now derives `BBS_VERSION` dynamically from the `VERSION` file; `update.sh` reuses its existing `NEW_VERSION` variable instead of a separate hardcoded one; the example config now uses an obvious placeholder instead of a fake-looking real version number.
+- Part of the pre-Full-Release audit (install/upgrade path re-verification).
+
+Full suite verified clean (1588 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.209 — Prepare for the v1.0.0 stable release version format (July 2026)
+
+Getting ready for Full Release: v1.0.0 will be a plain stable version number (no alpha/beta marker), not a continuation of the beta build-number sequence. This build teaches every part of the update pipeline to recognize and correctly rank that new format alongside the existing vX.Y[ab]Z.NN beta/alpha form — shipping it now, ahead of the actual v1.0.0 tarball, so every install (including this one) has already updated its understanding before the cutover happens. Covers: the update-checker's version parser and comparison logic, the tarball-name matcher, the release-notes "what's new" panel, and the privileged upgrade wrapper's argument validation (plus its existing self-healing patcher, extended with a 3rd migration step, so an older already-deployed wrapper upgrades itself automatically on next use — no manual server-side intervention needed).
+
+Full suite verified clean (1588 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.208 — Pre-release security audit, batch 1 (July 2026)
 
 First installment of a full pre-release code audit. Added bandit + pyflakes to CI (there was no lint/security-scanner CI at all before this). Real fixes found, not just tooling:

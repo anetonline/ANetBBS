@@ -19,8 +19,6 @@ ok()    { echo -e "  ${GREEN}✅ $*${NC}"; }
 skip()  { echo -e "  ${YELLOW}⏭  $*${NC}"; }
 bad()   { echo -e "  ${RED}❌ $*${NC}"; }
 
-BBS_VERSION="1.3.7"
-
 # ─── Root check ────────────────────────────────────────────────────────────────
 if [[ "$EUID" -ne 0 ]]; then
     fail "This script must be run as root."
@@ -1205,16 +1203,22 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     info "Generating MRC bridge config.json ..."
     mkdir -p "$INSTALL_DIR/mrc/bridge"
     BBS_NAME="${EXISTING_ENV[BBS_NAME]:-ANetBBS}"
+    # web_listen_port must match the bridge's actual listen port
+    # (install.sh derives it as WEB_PORT+1, written to .env as
+    # MRC_BRIDGE_PORT) -- a hardcoded 8080 here would silently mismatch
+    # on any install using a non-default WEB_PORT, the same class of bug
+    # already fixed for the nginx proxy_pass patch a bit further down.
+    MRC_LISTEN_PORT="${EXISTING_ENV[MRC_BRIDGE_PORT]:-8080}"
     cat > "$MRC_BRIDGE_CONFIG" << MRCEOF
 {
   "mrc_host": "mrc.bottomlessabyss.net",
   "mrc_port": 5001,
   "use_ssl": true,
   "bridge_bbs": "$BBS_NAME",
-  "platform_info": "ANETBBS/Linux.$(uname -m)/$BBS_VERSION",
+  "platform_info": "ANETBBS/Linux.$(uname -m)/$NEW_VERSION",
   "capabilities": ["MCI", "MSGEXT", "CTCP"],
   "web_listen_host": "127.0.0.1",
-  "web_listen_port": 8080,
+  "web_listen_port": $MRC_LISTEN_PORT,
   "message_rate_seconds": 0.5,
   "iamhere_interval_seconds": 60,
   "log_level": "INFO",
@@ -1652,7 +1656,15 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
     else
         warn "Critical service failed to start. Rolling back from backup..."
         cp "$BACKUP_DIR/.env.bak" "$ENV_FILE"
+        # Restore both DBs, same "don't try to guess which is real"
+        # reasoning as the backup step above -- DATABASE_URL decides
+        # which file Step 7's migration actually touched, and restoring
+        # the untouched one is a harmless no-op. Restoring only
+        # anetbbs.db.bak here left anetbbs_dev.db (when that's the one
+        # DATABASE_URL actually pointed at) stuck in its post-migration
+        # state with no rollback -- a real gap found in a pre-release audit.
         [[ -f "$BACKUP_DIR/anetbbs.db.bak" ]] && cp "$BACKUP_DIR/anetbbs.db.bak" "$DB_FILE"
+        [[ -f "$BACKUP_DIR/anetbbs_dev.db.bak" ]] && cp "$BACKUP_DIR/anetbbs_dev.db.bak" "$INSTALL_DIR/data/anetbbs_dev.db"
         if [[ -d "$BACKUP_DIR/code" ]]; then
             info "Restoring application code from pre-update snapshot..."
             # --delete removes anything the failed update added that wasn't

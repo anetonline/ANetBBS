@@ -404,10 +404,12 @@ def _extract_release_notes_for(cfg):
     if not m:
         return None
     start = m.start()
-    # Anchor the closing boundary at "## Changes since v1.0aZ.NN" lines
-    # that don't mention our current version.
+    # Anchor the closing boundary at the next version header line that
+    # doesn't mention our current version -- either the beta/alpha form
+    # (v1.0aZ.NN) or the stable form (v1.0.Z, since the v1.0.0
+    # milestone).
     rest = text[m.end():]
-    end_m = re.search(r'\n#{1,3} .*v\d+\.\d+[ab]\d+\.\d+', rest)
+    end_m = re.search(r'\n#{1,3} .*v\d+\.\d+(?:[ab]\d+\.\d+|\.\d+)', rest)
     if end_m:
         end = m.end() + end_m.start()
     else:

@@ -239,7 +239,16 @@ def scores():
     period = request.args.get('period', 'all')  # 'all' or 'monthly'
     game_id = request.args.get('game_id', type=int)
 
-    query = GameScore.query
+    # _game_accessible() gaps are a known bug class here (see its own
+    # docstring) -- this route resolves scores by game_id and lists every
+    # game, so it needs the same filter as detail()/play()/etc.
+    all_games = [g for g in Game.query.filter_by(is_active=True).order_by(Game.name).all()
+                 if _game_accessible(g)]
+    accessible_ids = {g.id for g in all_games}
+    if game_id and game_id not in accessible_ids:
+        game_id = None
+
+    query = GameScore.query.filter(GameScore.game_id.in_(accessible_ids))
     if game_id:
         query = query.filter_by(game_id=game_id)
     if period == 'monthly':
@@ -248,7 +257,6 @@ def scores():
         query = query.filter(GameScore.achieved_at >= cutoff)
 
     top_scores = query.order_by(GameScore.score.desc()).limit(50).all()
-    all_games = Game.query.filter_by(is_active=True).order_by(Game.name).all()
 
     return render_template(
         'games/scores.html',
@@ -658,6 +666,8 @@ def scoreboard():
     try:
         games = _G.query.filter_by(is_active=True).order_by(_G.name).all()
         for g in games:
+            if not _game_accessible(g):
+                continue
             top = (_GS.query.filter_by(game_id=g.id)
                    .order_by(_GS.score.desc())
                    .limit(10).all())

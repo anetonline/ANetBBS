@@ -406,16 +406,13 @@ Replace hostname / port to match your BBS.
 ## Why SSH over telnet?
 
 - Encrypted in transit
-- Auth handled by SSH before you ever see the BBS menu — username
-  pre-fills, optional password is also accepted
-- Public-key auth works for accounts that have one registered
+- The SSH client's own username/password prompt IS the BBS login —
+  whatever you type there is captured and used to auto-login into the
+  menu system, no second prompt
+- Public-key auth is intentionally disabled server-side (the BBS needs
+  a real password to auto-login with, and public-key auth would skip
+  that step) — any client falls back to password auth automatically
 - Some networks block port 23 outright; SSH usually gets through
-
-## SSH key auth
-
-Register your public key from `/profile/edit` → SSH Keys.
-Multiple keys per user are fine. Key auth bypasses the password
-prompt.
 
 ## What you can do over SSH
 
@@ -1019,8 +1016,8 @@ confuse the two when troubleshooting.
 
 ## Debugging
 
-- `/admin/games/<id>/test` does a launch from the admin view (sysop
-  account, time/idle limits respected).
+- Launch the door yourself as a normal user (sysop account) from the
+  Game Center — there's no separate admin-side test-launch button.
 - The Game row has a **Last error** field that the bridge writes to
   on launch failure.
 - For DOS doors, run DOSBox interactively to see what the bridge is
@@ -1190,7 +1187,7 @@ since v279.
 ## Cleanup contract
 
 - Never delete files inside the door's working dir on shutdown
-  — see [[Doors#don-t-touch-the-door-s-working-dir]].
+  — see [[Doors#dont-touch-the-doors-working-dir]].
 - Do clean up tempfiles in `/tmp/dosbridge-<pid>-*`.
 - Do reap the DOSBox process — orphan Xvfb processes are a known
   bug class.
@@ -1281,7 +1278,7 @@ and users across many BBSes through a central hub.
 
 ## Connecting
 
-Built in. The `mrc-bridge` systemd service runs alongside the BBS and
+Built in. The `anetbbs-mrc-bridge` systemd service runs alongside the BBS and
 keeps one persistent, BBS-wide connection to the hub — every web and
 terminal user shares it. Both `/mrc/` (web) and the terminal Chat
 menu's MRC option talk through this same bridge.
@@ -1436,7 +1433,7 @@ One-on-one mail between local users. Distinct from [[Echomail]]
 
 ## Send
 
-- Web: `/pm/send`
+- Web: `/messages/compose`
 - Terminal: main menu *N* on systems with the v2 main menu
 
 The compose form takes a recipient username, subject, and body.
@@ -1444,14 +1441,13 @@ Markdown is supported in the body.
 
 ## Inbox
 
-`/pm/inbox` (web) or main menu *P* (terminal). Unread messages
+`/messages/` (web) or main menu *P* (terminal). Unread messages
 have a bold/yellow row. The badge in the top nav shows the unread
 count.
 
-## Reply / forward
+## Reply
 
-Standard `>` quoting for replies; forward includes a "Fwd:" prefix
-on the subject.
+Standard `>` quoting for replies.
 
 ## Block list
 
@@ -1461,8 +1457,7 @@ users can't PM you; you can still see their public posts.
 ## Deletion
 
 Soft-delete only — the message is hidden from your inbox but still
-exists for the other party. Sysops can hard-delete from
-`/admin/users/<id>/pm/`.
+exists for the other party.
 """),
 
     # ------------------------------------------------------------------
@@ -1548,13 +1543,17 @@ count. `/imsg/` is your inbox.
 ## Network reachability
 
 You need TCP 18 reachable from the outside, OR your messages will
-arrive but you can't be paged back. `/admin/peers/health` runs a
-self-test against a list of MSP-speaking BBSes.
+arrive but you can't be paged back. `/admin/peers/` runs a SYSTAT
+probe against federation-hub peers (ANotherNetwork registry entries)
+as a general "is my BBS reachable" health check — it isn't MSP-specific,
+but the same reachability it confirms is what MSP paging needs too.
 
 ## Directory
 
-`/imsg/directory/` shows the BBS directory the sysop has curated.
-Add to it under `/admin/peers/`.
+`/imsg/directory/` shows the BBS directory. It's populated by pulling
+a `sbbsimsg.lst`/`anetbbs.lst` file from a master directory URL — the
+"Directory refresh" button on that page (`/imsg/directory/refresh`) —
+not by manually adding entries in admin.
 
 ## Encoding
 
@@ -2581,7 +2580,7 @@ an IP ban under `/admin/ip-bans/`.
 
 Every kick writes a `UserActivity` row with `activity_type='kick_node'`,
 the slot, the target username, the reason, and the sysop's
-username + IP — `/admin/audit/` shows the trail.
+username + IP — `/admin/activity` shows the trail.
 
 ## The terminal has its own, separate Node Monitor — with messaging
 
@@ -2652,8 +2651,11 @@ sudo -u anetbbs sqlite3 /opt/anetbbs/data/anetbbs.db \\
 ```
 
 cron this every 6 hours during the day if you want point-in-time
-recovery. (There's also a one-click "Download DB Backup" button in
-Admin → Backups for an on-demand copy through the web UI.)
+recovery. Admin → Backups lets you restore `.env` or the DB from an
+existing `update.sh`-generated snapshot (or delete one) through the
+web UI — there's no on-demand "download the live DB right now" button
+there, so for your own off-site copies use the `sqlite3 .backup`
+command above directly.
 
 ## Off-site
 
@@ -3033,7 +3035,7 @@ visible only.
 ## Privacy
 
 Author IP is not exposed in the public history view; only the
-username is. Sysops can see IP through `/admin/audit/`.
+username is. Sysops can see IP through `/admin/activity`.
 
 ## See also
 
@@ -3292,7 +3294,7 @@ line (`@MSGID:`, `@INTL`, `@TZUTC`) automatically.
 
 ## Inbox
 
-`/netmail/inbox`. Unread netmail shows in the badge in the nav.
+`/netmail/`. Unread netmail shows in the badge in the nav.
 
 ## AreaFix
 
@@ -3377,13 +3379,16 @@ In 2026 it's still useful for:
 
 ## Download
 
-`/qwk/` — choose which areas and time range. The BBS bundles them
-into a `.QWK` file you can download.
+`/qwk/` explains the feature; the actual packet comes from
+`/qwk/download`, which bundles every active area's messages unread
+since your last download automatically — there's no area or
+date-range picker, it's always "everything new."
 
 ## Upload
 
-A `.REP` (reply) packet uploads to the same `/qwk/` endpoint. The
-BBS parses it and posts your replies to the right boards / echos.
+A `.REP` (reply) packet posts to `/qwk/upload` (a separate endpoint
+from download). The BBS parses it and posts your replies to the
+right boards / echos.
 
 ## Readers
 
@@ -3768,6 +3773,10 @@ Play. Most games track your score on a shared leaderboard
 - **Galaga** — arcade shooter, waves of aliens, dive-bombing bosses.
 - **Breakout** — Arkanoid-style brick breaker with power-ups (wide
   paddle, multi-ball, laser cannon).
+- **ANetDarkForces** — a first-person raycasting shooter, ANetBBS's
+  own take on the genre. Raid the Dark Forces' hideout across a
+  10-sector campaign — 7 weapons, 8 enemy types, secrets, keycard
+  vaults, explosive barrels. 3 save slots tied to your account.
 
 ## Strategy
 

@@ -131,5 +131,16 @@ def vote_tally():
         return jsonify({'error': 'bad id'}), 400
     if msg_type not in ('post', 'echomail', 'netmail', 'pm'):
         return jsonify({'error': 'bad type'}), 400
+    # netmail/pm are private 1-on-1 content -- _can_vote_on() enforces the
+    # same read-access check cast_vote() does. Without this, anyone (even
+    # anonymous) could learn a private message's vote tally just by
+    # guessing its id -- a real gap found in a pre-release audit.
+    # Anonymous visitors can never pass the netmail/pm ownership check
+    # (there's no current_user to own anything), so short-circuit before
+    # _can_vote_on() touches current_user.id/.is_admin for those types.
+    if msg_type in ('netmail', 'pm') and not current_user.is_authenticated:
+        return jsonify({'error': 'not visible / not found'}), 404
+    if not _can_vote_on(msg_type, msg_id):
+        return jsonify({'error': 'not visible / not found'}), 404
     user_id = current_user.id if current_user.is_authenticated else None
     return jsonify(get_tally(msg_type, msg_id, user_id))

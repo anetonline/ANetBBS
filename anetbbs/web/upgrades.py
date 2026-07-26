@@ -3,10 +3,11 @@
 Two halves living in the same module:
 
 * **Public-ish API** at ``/api/releases/latest`` — returns JSON describing
-  the newest ``ANetBBS-vX.Y[ab]Z.NN.tar.gz`` in the configured downloads
-  directory. Every install exposes this. The canonical "what's the latest
-  alpha?" answer comes from whichever host is configured as ``REGISTRY_URL``,
-  but the endpoint runs everywhere so a private
+  the newest ``ANetBBS-vX.Y[ab]Z.NN.tar.gz`` (beta/alpha) or
+  ``ANetBBS-vX.Y.Z.tar.gz`` (stable, since v1.0.0) in the configured
+  downloads directory. Every install exposes this. The canonical "what's
+  the latest alpha?" answer comes from whichever host is configured as
+  ``REGISTRY_URL``, but the endpoint runs everywhere so a private
   network of peers can serve their own line.
 * **Sysop UI** at ``/admin/upgrades/`` — admin-only. Shows current
   ``VERSION``, polls the configured upstream, compares, and offers a
@@ -62,22 +63,42 @@ _RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
 
 # === Version handling ========================================================
 
-# Versions look like: v1.0a2.36 (alpha) or v1.0b1.1 (beta).
-# Major.Minor + 'a'/'b' + Phase + '.' + Point.
-_VERSION_RE = re.compile(r'^v(\d+)\.(\d+)([ab])(\d+)\.(\d+)$')
+# Versions look like: v1.0a2.36 (alpha), v1.0b1.1 (beta), or v1.0.0 (a
+# stable/full release, added for the v1.0.0 milestone -- Major.Minor +
+# either ('a'/'b' + Phase + '.' + Point) for a beta/alpha build, or a
+# plain '.' + Patch for a stable release).
+_VERSION_RE = re.compile(
+    r'^v(?P<major>\d+)\.(?P<minor>\d+)(?:'
+    r'(?P<phase>[ab])(?P<phase_num>\d+)\.(?P<point>\d+)'
+    r'|'
+    r'\.(?P<patch>\d+)'
+    r')$'
+)
 
 
 def _parse_version(s: str):
     """Return a 5-tuple (major, minor, phase_order, phase_num, point) or None.
-    phase_order: 0=alpha, 1=beta — so beta > alpha of the same release."""
+
+    phase_order: 0=alpha, 1=beta, 2=stable/full-release -- so a stable
+    v1.0.0 always outranks EVERY v1.0 alpha/beta build regardless of
+    build number, and stable releases sort among themselves by patch
+    number (phase_num slot doubles as the patch number, point fixed
+    at 0). See this module's own docstring for why the version string
+    itself doesn't carry a build counter for stable releases the way
+    beta builds do -- v1.0.0/v1.0.1/... is plain semver-style, not a
+    continuation of the beta build-number sequence.
+    """
     if not s:
         return None
     m = _VERSION_RE.match(s.strip())
     if not m:
         return None
-    major, minor, phase_char, phase_num, point = m.groups()
-    phase_order = 0 if phase_char == 'a' else 1
-    return (int(major), int(minor), phase_order, int(phase_num), int(point))
+    major, minor = int(m.group('major')), int(m.group('minor'))
+    if m.group('phase'):
+        phase_order = 0 if m.group('phase') == 'a' else 1
+        return (major, minor, phase_order,
+                int(m.group('phase_num')), int(m.group('point')))
+    return (major, minor, 2, int(m.group('patch')), 0)
 
 
 def _version_newer(remote: str, local: str) -> bool:
@@ -93,7 +114,7 @@ def _version_newer(remote: str, local: str) -> bool:
 # === Tarball scan ============================================================
 
 _TARBALL_RE = re.compile(
-    r'^ANetBBS-(v\d+\.\d+[ab]\d+\.\d+)\.tar\.gz$'
+    r'^ANetBBS-(v\d+\.\d+(?:[ab]\d+\.\d+|\.\d+))\.tar\.gz$'
 )
 
 
@@ -321,17 +342,40 @@ _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
 
 
 def _patch_wrapper_if_needed(wrapper: str) -> None:
-    """Patch run_upgrade.sh in-place if it still has the alpha-only version
-    regex that rejects beta (b) version strings.  Silently no-ops on any
-    error so a failed patch never blocks the upgrade attempt."""
+    """Patch run_upgrade.sh in-place if it still has an outdated version
+    regex that would reject a version string a NEWER release actually
+    uses. Two historical steps chained here, applied in order (each is
+    a no-op if its `old` pattern isn't present, so this is safe to run
+    against a wrapper already on any of the three generations):
+
+    1. alpha-only -> alpha+beta (from when beta version strings were
+       introduced).
+    2. alpha+beta-only -> alpha+beta+stable (from the v1.0.0 milestone,
+       which introduced a plain `vX.Y.Z` stable-release form alongside
+       the existing `vX.Y[ab]Z.NN` beta/alpha form).
+
+    Silently no-ops on any error so a failed patch never blocks the
+    upgrade attempt -- worst case the live wrapper stays one generation
+    behind and the upgrade fails with a clear regex-mismatch message
+    the sysop can act on, same as before this self-heal existed at all.
+    """
     try:
         with open(wrapper, 'r', encoding='utf-8') as f:
             src = f.read()
-        old = r'^v[0-9]+\.[0-9]+a[0-9]+\.[0-9]+$'
-        new = r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$'
-        if old in src:
+        steps = [
+            (r'^v[0-9]+\.[0-9]+a[0-9]+\.[0-9]+$',
+             r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$'),
+            (r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$',
+             r'^v[0-9]+\.[0-9]+([ab][0-9]+\.[0-9]+|\.[0-9]+)$'),
+        ]
+        changed = False
+        for old, new in steps:
+            if old in src:
+                src = src.replace(old, new)
+                changed = True
+        if changed:
             with open(wrapper, 'w', encoding='utf-8') as f:
-                f.write(src.replace(old, new))
+                f.write(src)
     except Exception:
         pass
 

@@ -25,7 +25,7 @@ from flask import Blueprint, render_template, request
 from flask_login import login_required, current_user
 from flask_socketio import emit
 
-from ..models import db, IrcServerConfig
+from ..models import db, IrcServerConfig, IrcPreset
 from ..features.irc_format import to_html as _irc_to_html, strip_codes as _irc_strip
 
 
@@ -305,6 +305,17 @@ class _IrcSession:
 
         if command == 'PRIVMSG' and len(params) >= 1:
             target = params[0]
+            # A PRIVMSG whose target is OUR OWN nick is a direct message --
+            # per the IRC protocol the "target" param is always the
+            # recipient, so on a DM that's always self.nick, not something
+            # that distinguishes one conversation from another. Route it
+            # by the SENDER instead so the client can group it into a
+            # per-contact pane (e.g. a NickServ reply lands in a "NickServ"
+            # tab, not one shared bucket literally named after yourself).
+            # Real gap found live: /msg nickserv ... replies were silently
+            # dropped into an untitled, never-created UI tab.
+            if target == self.nick and sender:
+                target = sender
             text = trailing
             # CTCP ACTION → render as "* nick action"
             if text.startswith('\x01ACTION ') and text.endswith('\x01'):
@@ -347,9 +358,15 @@ class _IrcSession:
                     'plain': _irc_strip(text),
                 })
         elif command == 'NOTICE' and len(params) >= 1:
+            notice_target = params[0]
+            # Same self-targeted-DM routing fix as PRIVMSG above -- this is
+            # the more common case in practice, since NickServ/ChanServ
+            # replies are conventionally sent as NOTICE, not PRIVMSG.
+            if notice_target == self.nick and sender:
+                notice_target = sender
             self._emit('irc_notice', {
                 'from': sender or 'server',
-                'target': params[0],
+                'target': notice_target,
                 'html': _irc_to_html(trailing),
             })
         elif command == 'JOIN':
@@ -496,8 +513,20 @@ def index():
     """IRC web client page."""
     saved = (IrcServerConfig.query
              .filter_by(user_id=current_user.id).first())
+    # Real gap found live: with no per-user saved config, the connect form
+    # fell back to a hardcoded irc.libera.chat/6667/no-SSL -- completely
+    # ignoring Admin -> IRC Server Presets, which only ever drove the
+    # TERMINAL IRC client (features/irc_chat.py), never this page. Use the
+    # sysop's top-priority active preset as the same kind of fallback here.
+    default_preset = None
+    if saved is None:
+        default_preset = (IrcPreset.query
+                          .filter_by(is_active=True)
+                          .order_by(IrcPreset.order, IrcPreset.name)
+                          .first())
     return render_template('irc/index.html',
                            saved=saved,
+                           default_preset=default_preset,
                            default_nick=current_user.username)
 
 
@@ -640,7 +669,36 @@ def register_socketio_handlers(socketio):
             elif cmd == 'msg' and arg:
                 target_msg = arg.split(None, 1)
                 if len(target_msg) == 2:
-                    sess.send_raw(f'PRIVMSG {target_msg[0]} :{target_msg[1]}')
+                    msg_target, msg_body = target_msg
+                    sess.send_raw(f'PRIVMSG {msg_target} :{msg_body}')
+                    # Real gap found live: /msg never echoed anything back to
+                    # the sender (IRC servers don't echo your own PRIVMSGs),
+                    # so e.g. `/msg nickserv identify ...` looked like it did
+                    # nothing at all -- you'd only find out it worked if
+                    # NickServ's reply happened to land somewhere visible,
+                    # which it usually didn't (see the irc_switch emit below).
+                    emit('irc_message', {
+                        'from': sess.nick, 'target': msg_target,
+                        'html': _irc_to_html(msg_body),
+                        'plain': _irc_strip(msg_body),
+                        'self': True})
+                    # Ensure a tab exists for this DM target client-side --
+                    # without this, a reply from msg_target (very often a
+                    # NOTICE, e.g. NickServ) has nowhere visible to land.
+                    emit('irc_switch', {'channel': msg_target, 'switch': False})
+            elif cmd == 'query' and arg:
+                # Classic IRC client convention: open/focus a private
+                # message pane with a nick, without sending anything yet.
+                target_nick = arg.strip().split()[0]
+                sess.current_channel = target_nick
+                emit('irc_switch', {'channel': target_nick, 'switch': True})
+            elif cmd == 'help':
+                emit('irc_system', {'text': (
+                    'Commands: /join #chan [key], /part [#chan], /nick '
+                    'newnick, /msg target text, /query nick, /switch '
+                    'target, /me action, /whois nick, /list [pattern], '
+                    '/topic [#chan] text, /mode args, /ctcp nick TYPE '
+                    '[args], /raw|/quote text, /quit [message]')})
             elif cmd == 'me' and arg and sess.current_channel:
                 sess.send_raw(f'PRIVMSG {sess.current_channel} :\x01ACTION {arg}\x01')
             elif cmd == 'whois' and arg:
@@ -680,7 +738,7 @@ def register_socketio_handlers(socketio):
                 sess.send_raw(arg)
             elif cmd == 'switch' and arg.strip():
                 sess.current_channel = arg.strip().split()[0]
-                emit('irc_system', {'text': f'Now sending to {sess.current_channel}'})
+                emit('irc_switch', {'channel': sess.current_channel, 'switch': True})
             else:
                 emit('irc_error', {'message': f'Unknown command: /{cmd}'})
             return

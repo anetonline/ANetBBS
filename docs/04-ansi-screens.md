@@ -155,7 +155,7 @@ above can — it always shows the standard banner.
 
 ## SAUCE
 
-When you import an `.ans` file into the **ANSI Editor** (`/ansi/`),
+When you import an `.ans` file into the **ANSI Editor** (`/admin/ansi/`),
 the import wizard auto-detects the SAUCE trailer (the 128-byte
 metadata block at end), strips it cleanly so you don't get garbage
 rows, and shows the title/author/group as a flash message.
