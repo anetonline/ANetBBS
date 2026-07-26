@@ -589,7 +589,7 @@ class _Screen:
         return "".join(o)
 
     def draw_chat(self, lines: list[_Line], scroll: int, show_users: bool) -> str:
-        w, h   = self.w, self.h
+        h      = self.h
         sp     = self._split(show_users)
         col_w  = sp - 4
         top    = 3; bot = h - 4

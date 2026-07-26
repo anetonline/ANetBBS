@@ -362,8 +362,8 @@ class _Screen:
 
         # Row 23: bottom border + hints
         hints = (
-            f" /?:Help  ^W:Send  ^S:Draft  ^F:Find  "
-            f"/m:Mark  ^Z:Undo  ^R:Redo  /t:Theme "
+            " /?:Help  ^W:Send  ^S:Draft  ^F:Find  "
+            "/m:Mark  ^Z:Undo  ^R:Redo  /t:Theme "
         )
         ph  = W - 2 - len(hints)
         rph = "═" * max(ph, 0)
@@ -491,15 +491,6 @@ class _Screen:
             return (_mv(22, 2) + t['stat_bg'] + t['info']
                     + msg + _reset())
 
-        left  = f" {dirty} {ln}  {col}  {wc}  {cc}  "
-        right = f"  [{mode}]  {th} "
-        mid_w = _TW - len(left) - len(right)
-        mid_w = max(mid_w, 0)
-
-        line = (t['stat_bg'] + left
-                + t['stat_hi'] + f"[{mode}]" + t['stat_bg']
-                + " " * (mid_w + 2)
-                + th + " " + _reset())
         # Simpler, safe version:
         stat = f"{dirty} {ln}  {col}  {wc}  {cc}  [{mode}]  {th}"
         stat = stat[:_TW].ljust(_TW)
@@ -1495,7 +1486,6 @@ class ANEdit:
                 break
             ch = key.upper() if len(key) == 1 else None
             if ch and ch in '0123456789ABCDEF':
-                idx   = int(ch, 16)
                 shift = key != key.lower() and key.isalpha()
                 code  = f"|1{ch}" if shift else f"|0{ch}"
                 for c in code:
@@ -1725,8 +1715,9 @@ def _format_quote(raw: str, width: int = 74) -> list:
         if not clean.strip():
             lines_out.append('>')
             continue
-        # Word-wrap at (width - 2) to leave room for '> '
-        avail = width - 2
+        # Word-wrap to leave room for '> ' -- the check below compares
+        # against len(line), which already includes that 2-char prefix,
+        # so it self-accounts without a separate reserved-width constant.
         words = clean.split()
         line  = '> '
         for w in words:

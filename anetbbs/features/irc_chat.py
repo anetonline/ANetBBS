@@ -65,7 +65,11 @@ class IRCChat(BaseChatSystem):
     def _load_presets(self):
         """Return list of active IrcPreset rows ordered by order,name."""
         try:
-            from ..web.admin import admin_bp  # noqa — just trigger app init
+            # Plain pyflakes has no `# noqa` suppression -- this import is
+            # only here to trigger app init as a side effect, so give it a
+            # real reference to count as "used".
+            from ..web.admin import admin_bp
+            assert admin_bp is not None
             from ..models import IrcPreset
             from ..features.bbs_ui import _app
             with _app().app_context():

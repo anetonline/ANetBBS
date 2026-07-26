@@ -563,7 +563,7 @@ def next_unread(area_id):
 @login_required
 def mark_all_read(area_id):
     """Mark all messages in an area as read for the current user."""
-    echo_area = EchoArea.query.get_or_404(area_id)
+    EchoArea.query.get_or_404(area_id)
 
     # Find messages not yet read
     already_read = {

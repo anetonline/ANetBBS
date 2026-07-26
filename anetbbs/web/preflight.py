@@ -256,7 +256,7 @@ def _check_listener(name, port, cfg, *, required=False):
         st = 'fail' if required else 'warn'
         return _check(f'{name} listener (:{p})', st,
                       f'no listener on 127.0.0.1:{p} ({exc.__class__.__name__})',
-                      f'systemctl status anetbbs* and check logs for bind failures.')
+                      'systemctl status anetbbs* and check logs for bind failures.')
 
 
 def _check_sudoers():

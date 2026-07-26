@@ -119,7 +119,7 @@ def refresh(app, url: str = None) -> int:
 
 def start_refresher(app):
     """Spawn a daemon thread that refreshes the directory once a day."""
-    global _refresher_thread, _stop_event
+    global _refresher_thread
     if not app.config.get('SBBSIMSG_AUTO_REFRESH', True):
         logger.info('sbbsimsg auto-refresh disabled')
         return

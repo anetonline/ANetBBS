@@ -334,7 +334,7 @@ class BBSMenuUI:
         # Base 30-37 -- BOLD is already combined alongside every use of
         # these below, so bare aixterm 90-97 (unrecognized by MagiTerm/
         # NetRunner/PuTTY) isn't needed here.
-        CYAN = '\x1b[36m'; YEL = '\x1b[33m'; WHT = '\x1b[37m'
+        CYAN = '\x1b[36m'; WHT = '\x1b[37m'
         DIM = '\x1b[37m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'
 
         # Header
@@ -2152,7 +2152,7 @@ class BBSMenuUI:
             hint = render_hint(sel, len(rows))
             await self.session.write(f'{_at(self._LB_HINT_ROW)}{hint}{EOL}')
             # Hide cursor at a safe spot
-            await self.session.write(f'\x1b[24;1H')
+            await self.session.write('\x1b[24;1H')
 
         async def _draw_row(idx):
             if scroll <= idx < scroll + self._LB_VISIBLE:
@@ -2366,7 +2366,7 @@ class BBSMenuUI:
                 f'\x1b[{sep_row};1H{FG["gry"]}{"─" * ui_width(self.session)}{NORM}{EOL}')
             await self.session.write(
                 f'\x1b[{hint_row};1H{hint_str}{pct}{EOL}')
-            await self.session.write(f'\x1b[24;1H')
+            await self.session.write('\x1b[24;1H')
 
         await _draw()
 
@@ -2667,7 +2667,6 @@ class BBSMenuUI:
                         f"{tot:>5}  {u_str}")
 
             def render_hint_rss(sel, total):
-                row = feed_rows[sel]
                 n = f"{FG['cyan']}{sel+1}/{total}{RESET} "
                 return (f"  {n}"
                         f"{FG['cyan']}Up/Dn{RESET}=move  "
@@ -2926,7 +2925,7 @@ class BBSMenuUI:
         _w = ui_width(self.session)
         _art_w = max(72, _w - 4)
         hdr = []
-        hdr.append(f"\x1b[2J\x1b[H")  # written by pager via draw(), not here
+        hdr.append("\x1b[2J\x1b[H")  # written by pager via draw(), not here
         # We build them as plain strings; _rss_pager starts at row 2.
         hdr_lines = []
         hdr_lines.append(
@@ -5113,7 +5112,7 @@ async def _sysop_events(self):
                 db.session.commit()
 
     async def _run_now(ui, row):
-        eid, name = row[0], row[1]
+        eid = row[0]
         app = _app()
         with app.app_context():
             ok, out = fire(app, eid)
@@ -5480,7 +5479,7 @@ async def _sysop_webhooks(self):
             await ui.session.read_line("Press Enter...")
             return
         secret = (await ui.session.read_line(
-            f"Bearer secret (blank = keep current): ") or '').strip() or cur_secret
+            "Bearer secret (blank = keep current): ") or '').strip() or cur_secret
         with _app().app_context():
             if wid:
                 w = Webhook.query.get(wid)
@@ -5761,7 +5760,7 @@ async def _sysop_registry(self):
             return f"{FG['cyan']}P{RESET}=probe now  {FG['cyan']}Q{RESET}=back"
 
         async def _probe(u, row):
-            pid, name, host = row[0], row[1], row[2]
+            pid = row[0]
             from anetbbs.web.peer_health import _systat_probe
             with _app().app_context():
                 p = PeerBbs.query.get(pid)
@@ -5946,7 +5945,7 @@ async def _sysop_node_monitor(self):
     async def _do_kick(ui, row):
         slot, uid, uname, *_ = row
         reason = (await ui.session.read_line(
-            f"\r\nKick reason [Disconnected by sysop]: ") or '').strip()
+            "\r\nKick reason [Disconnected by sysop]: ") or '').strip()
         reason = (reason or 'Disconnected by sysop')[:200]
         with _app().app_context():
             live = NodeActivity.query.filter_by(slot=slot).first()

@@ -11,7 +11,12 @@ _ANSI_ESC_RE   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 _ANSI_ESC_RE_B = re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
 
 logger = logging.getLogger(__name__)
-from .protocols import SessionProtocol  # noqa: F401  load-bearing import: telnet/SSH service crash without it (see CHANGELOG v152)
+from .protocols import SessionProtocol
+# Plain `pyflakes` (unlike flake8) has no `# noqa` suppression, so this
+# needs a real reference to count as "used": telnet/SSH crashes without
+# this import (see CHANGELOG v152) even though nothing here calls it
+# directly -- it's load-bearing for a side effect at import time.
+assert SessionProtocol is not None
 from ..features.chat import ChatManager
 from ..features.games import GameManager
 from .user_manager import UserManager
@@ -380,8 +385,7 @@ class BBSSession:
             # ESC sequence (arrows etc.) — drain a few bytes and ignore.
             if ch == b'\x1b':
                 try:
-                    rest = await asyncio.wait_for(self.reader.read(2),
-                                                   timeout=0.05)
+                    await asyncio.wait_for(self.reader.read(2), timeout=0.05)
                     # If it was a longer sequence, leave the rest in the
                     # buffer — most function keys are <=4 bytes total.
                 except (asyncio.TimeoutError, Exception):

@@ -29,7 +29,7 @@ _listen_sock = None
 
 def start_msp_server(app):
     """Spawn the MSP listener thread. Idempotent."""
-    global _server_thread, _stop_event
+    global _server_thread
     if not app.config.get('MSP_ENABLED', True):
         logger.info('MSP server disabled by configuration')
         return
@@ -44,7 +44,6 @@ def start_msp_server(app):
 
 def stop_msp_server():
     """Signal the MSP server to stop and close the listening socket."""
-    global _stop_event, _listen_sock
     _stop_event.set()
     if _listen_sock is not None:
         try:

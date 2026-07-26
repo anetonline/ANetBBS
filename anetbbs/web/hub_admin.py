@@ -925,7 +925,7 @@ def qwk_subscribe_all(node_id):
 @_admin_required
 def qwk_reset_hwm(node_id):
     """Reset the high-water mark for a specific area (node will re-receive all messages)."""
-    node = QWKNode.query.get_or_404(node_id)
+    QWKNode.query.get_or_404(node_id)
     area_id = request.form.get('area_id', type=int)
     if area_id:
         row = QWKNodeLastSent.query.filter_by(

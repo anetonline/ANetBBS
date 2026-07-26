@@ -700,7 +700,7 @@ def board_moderators(board_id):
 @admin_required
 def move_board(board_id, direction):
     """Move board up or down in order"""
-    board = Board.query.get_or_404(board_id)
+    Board.query.get_or_404(board_id)
     boards = Board.query.order_by(Board.order).all()
     idx = next((i for i, b in enumerate(boards) if b.id == board_id), None)
 
@@ -2839,6 +2839,17 @@ def _setup_wizard_impl():
         federation_register = request.form.get('federation_register') == 'on'
         seed_motds = request.form.getlist('motd')
         seed_dial = request.form.get('seed_dial') == 'on'
+
+        # Real gap found in a pre-release audit: the wizard's BBS Name
+        # field was captured from the form but never actually persisted
+        # anywhere -- silently ignored regardless of federation
+        # registration, unlike sysop_name/sysop_email/bbs_location below.
+        if bbs_name:
+            try:
+                _write_env_keys(_env_path(), {'BBS_NAME': bbs_name})
+                current_app.config['BBS_NAME'] = bbs_name
+            except Exception as exc:
+                flash(f'BBS name update failed: {exc}', 'warning')
 
         # Federation self-registration. The plumbing already exists for
         # daily heartbeats; this just persists the sysop's metadata to

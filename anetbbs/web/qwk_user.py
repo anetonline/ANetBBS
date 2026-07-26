@@ -179,7 +179,6 @@ def upload():
         return redirect(url_for('qwk_user.index'))
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
-            names = [n.upper() for n in z.namelist()]
             target = next((n for n in z.namelist()
                            if n.upper().endswith('.MSG')
                            or n.upper() == 'MESSAGES.DAT'), None)

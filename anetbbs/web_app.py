@@ -1934,8 +1934,7 @@ def main():
     
     # Get configuration
     config_name = os.environ.get('FLASK_ENV', 'development')
-    config_class = get_config(config_name)
-    
+
     host = app.config['WEB_HOST']
     port = app.config['WEB_PORT']
     debug = app.config['DEBUG']

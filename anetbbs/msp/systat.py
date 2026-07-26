@@ -32,7 +32,7 @@ _listen_sock = None
 
 def start_systat_server(app):
     """Spawn the SYSTAT/Finger UDP listener thread. Idempotent."""
-    global _server_thread, _stop_event
+    global _server_thread
     if not app.config.get('SYSTAT_ENABLED', True):
         logger.info('SYSTAT server disabled by configuration')
         return
@@ -46,7 +46,6 @@ def start_systat_server(app):
 
 
 def stop_systat_server():
-    global _stop_event, _listen_sock
     _stop_event.set()
     if _listen_sock is not None:
         try:

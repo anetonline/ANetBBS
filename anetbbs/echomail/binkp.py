@@ -354,12 +354,14 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
     from .kludges import build_message, make_msgid, kludges_from_json
     import json as _json
 
-    # FTS-0001 §5.2 attribute bits
+    # FTS-0001 §5.2 attribute bits actually set by this function. (Two
+    # more bits exist in the spec -- Local 0x0100 and KillSent 0x0080 --
+    # but neither applies to outbound packet building: Local is the
+    # receiver-side "posted on this BBS" flag, and KillSent isn't a
+    # per-message send-time decision this function makes.)
     ATTR_PRIVATE   = 0x0001
     ATTR_CRASH     = 0x0002
-    ATTR_LOCAL     = 0x0100
     ATTR_HOLD      = 0x0200
-    ATTR_KILLSENT  = 0x0080
 
     body = b''
     for msg in messages:

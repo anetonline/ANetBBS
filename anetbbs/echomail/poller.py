@@ -93,7 +93,7 @@ def start_poller(app):
     Start the background poller thread.
     Should be called once after the Flask app is fully initialized.
     """
-    global _poller_thread, _stop_event
+    global _poller_thread
 
     if not app.config.get('ECHOMAIL_POLL_ENABLED', True):
         logger.info("Echomail poller disabled by configuration")
@@ -116,7 +116,6 @@ def start_poller(app):
 
 def stop_poller():
     """Signal the poller thread to stop."""
-    global _stop_event
     _stop_event.set()
 
 

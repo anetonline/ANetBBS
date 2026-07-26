@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.212`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.213`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.213 — Pre-release audit #2: pyflakes CI gate green (July 2026)
+
+The new pyflakes CI job (added last batch) was failing on ~40 pre-existing findings across ~20 files that predated the CI gate itself — none were new regressions from recent work. All genuinely dead code (unused local variables, redundant f-string prefixes with no interpolation, `global` declarations that were never needed since the function only mutated the object in place rather than rebinding the name). Also fixed 2 spots where a `# noqa` comment was silently doing nothing: plain `pyflakes` (unlike flake8) has no inline suppression syntax at all, so two "load-bearing side-effect import" cases now use a real reference instead of a comment to satisfy the checker.
+
+One small real bug found along the way: the sysop setup wizard's BBS Name field was captured from the form but never actually persisted anywhere — silently ignored on every submission. Now writes to `.env` like the other wizard fields.
+
+Full suite verified clean (1601 passed, 2 skipped). bandit re-verified clean (0 medium/high).
 
 ## v1.0b2.212 — Access-control audit batch, web IRC client fixes, full docs/wiki accuracy pass (July 2026)
 

@@ -1465,7 +1465,6 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         door_session.pts_path = _dosemu_pts_path
 
     _ansi_probed_flag = [False] if game.game_type == 'door_dosemu' else None
-    _esc_sent = None
 
     with _sessions_lock:
         _sessions[gs.id] = door_session

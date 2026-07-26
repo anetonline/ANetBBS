@@ -976,7 +976,6 @@ class ANetCraft:
         return _MP.get('host') == self.username
 
     def _mp_join(self):
-        global _MP
         if not _MP:
             if SHARED_SAVE.exists():
                 try:
@@ -1137,7 +1136,6 @@ class ANetCraft:
         bx, by = p.bx(), p.by()
 
         foot_blk  = w.get(bx, by + 1)
-        head_blk  = w.get(bx, by - 1)
         body_blk  = w.get(bx, by)
         p.in_water = body_blk == 14 or foot_blk == 14
 
@@ -1655,7 +1653,7 @@ class ANetCraft:
             mob.on_ground = False
             return
 
-        bx, by = mob.bx(), mob.by()
+        by = mob.by()
         mob.vy = min(mob.vy + GRAV, 3.0)
         nx = mob.x + mob.vx
         ny = mob.y + mob.vy
