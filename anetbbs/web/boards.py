@@ -11,6 +11,7 @@ from flask_wtf import FlaskForm
 
 from ..models import db, Board, Post, BoardSubscription, BoardLastRead
 from ..features.access_control import evaluate_access
+from ..features.rate_limit import rate_limit, _user_or_ip
 
 boards_bp = Blueprint('boards', __name__, url_prefix='/boards')
 
@@ -133,6 +134,13 @@ def view_board(board_id):
 
 @boards_bp.route('/<int:board_id>/new', methods=['GET', 'POST'])
 @login_required
+# Real gap found in a full message-boards security audit: no flood
+# protection at all on board posting, unlike /api/vote (60/min) or
+# /imsg/send (30/hr) elsewhere in this codebase. GET requests (just
+# viewing the form) also count against the bucket, same as /auth/login's
+# own rate_limit usage -- generous enough (20/5min) that no legitimate
+# user should ever notice it.
+@rate_limit('board_post', limit=20, window=300, key_fn=_user_or_ip)
 def new_post(board_id):
     """Create a new post in a board"""
     board = Board.query.get_or_404(board_id)
@@ -184,16 +192,31 @@ def new_post(board_id):
             from ..features.notify import notify, notify_mentions
             url = url_for('boards.view_post', post_id=post.id)
             notify_mentions(f'{clean_subject}\n{clean_content}',
-                            current_user.username, target_url=url)
-            # Fan out to board subscribers (excluding the author).
+                            current_user.username, target_url=url,
+                            min_access_level=board.min_access_level)
+            # Fan out to board subscribers (excluding the author). Real
+            # gap found in a full message-boards security audit:
+            # subscribe() previously had no board-access check at all,
+            # so a below-level user could subscribe to a restricted
+            # board and get every future post's subject/author leaked
+            # via this loop -- subscribe() is now gated too, but this
+            # also re-checks per-subscriber in case a board's own
+            # min_access_level was raised after someone subscribed.
+            from ..models import User
+            from ..features.access_control import evaluate_access
             subs = (BoardSubscription.query
                     .filter_by(board_id=post.board_id).all())
             for s in subs:
-                if s.user_id != current_user.id:
-                    notify(s.user_id, 'subscription',
-                           title=f'New post in {post.board.name}',
-                           body=f'{current_user.username}: {clean_subject}',
-                           target_url=url)
+                if s.user_id == current_user.id:
+                    continue
+                sub_user = User.query.get(s.user_id)
+                if sub_user is None or not evaluate_access(
+                        sub_user, board.min_access_level):
+                    continue
+                notify(s.user_id, 'subscription',
+                       title=f'New post in {post.board.name}',
+                       body=f'{current_user.username}: {clean_subject}',
+                       target_url=url)
         except Exception:
             pass
         try:
@@ -257,6 +280,7 @@ def view_post_ansi(post_id):
 
 @boards_bp.route('/post/<int:post_id>/reply', methods=['POST'])
 @login_required
+@rate_limit('board_post', limit=20, window=300, key_fn=_user_or_ip)
 def reply_post(post_id):
     """Reply to a post (or to one of its descendants for nested threading).
 
@@ -265,6 +289,21 @@ def reply_post(post_id):
     so threads can nest beyond one level.
     """
     parent_post = Post.query.get_or_404(post_id)
+
+    # Real gap found in a full message-boards security audit: unlike
+    # new_post(), this route had NO board-access check at all -- not
+    # even the read-level gate, let alone min_write_level. Any
+    # authenticated user (access_level 0 included) could POST a reply
+    # into a sysop-only/VIP-restricted board's thread just by knowing
+    # or guessing a post_id, bypassing both gates entirely.
+    _check_board_access(parent_post.board)
+    if not current_user.is_admin:
+        board = parent_post.board
+        write_lvl = (board.min_write_level
+                     if board.min_write_level is not None
+                     else board.min_access_level)
+        if (current_user.access_level or 0) < write_lvl:
+            abort(403)
 
     # Walk up to find the thread root so we always redirect there.
     root = parent_post
@@ -352,7 +391,8 @@ def reply_post(post_id):
                        body=clean_content[:280],
                        target_url=url)
             notify_mentions(clean_content, current_user.username,
-                            target_url=url)
+                            target_url=url,
+                            min_access_level=parent_post.board.min_access_level)
         except Exception:
             pass
         try:
@@ -410,9 +450,18 @@ def subscribe(board_id):
     existing = BoardSubscription.query.filter_by(
         user_id=current_user.id, board_id=board.id).first()
     if existing:
+        # Always allow unsubscribing, even if access was revoked after
+        # the fact -- only NEW subscriptions need the access check below.
         db.session.delete(existing); db.session.commit()
         flash(f'Unsubscribed from {board.name}.', 'info')
     else:
+        # Real gap found in a full message-boards security audit: this
+        # had no board-access check at all -- a below-level user could
+        # subscribe to a sysop-only/VIP-restricted board and get every
+        # future post's subject/author leaked via new_post()'s
+        # subscriber-notification fan-out, with zero further action
+        # needed after this one request.
+        _check_board_access(board)
         db.session.add(BoardSubscription(
             user_id=current_user.id, board_id=board.id))
         db.session.commit()
@@ -465,6 +514,11 @@ def react(post_id):
     """Toggle a reaction on a post."""
     from ..models import PostReaction
     post = Post.query.get_or_404(post_id)
+    # Real gap found in a full message-boards security audit: no
+    # board-access check at all -- any authenticated user could react
+    # to (and thereby confirm the existence/content-adjacent metadata
+    # of) a post in a board they can't read, just by knowing post_id.
+    _check_board_access(post.board)
     kind = (request.form.get('kind') or '').strip().lower()
     if kind not in ('like', 'heart', 'lol', 'wow', 'sad'):
         abort(400)

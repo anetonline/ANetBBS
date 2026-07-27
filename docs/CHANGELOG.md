@@ -1,7 +1,30 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.220`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.221`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.221 — Full message-boards security audit (July 2026)
+
+Phase 3 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web `boards.py` routes, terminal ANSI + PETSCII board posting/threading), every finding personally verified against the real code before fixing. This phase's earlier passes (echomail/QWK, then file-areas) had already fixed the equivalent READ-side gap (`test_boards_access_control.py`); this pass found the same bug class had never been mirrored to the WRITE and interaction side.
+
+**High:**
+- **`reply_post()` had ZERO board-access enforcement** — not even the read-level gate `view_post()` already has, let alone `Board.min_write_level`. Any authenticated user, regardless of `access_level`, could POST a reply into a sysop-only/VIP-restricted board's thread just by knowing or guessing a `post_id`. Fixed to check both, matching `new_post()`'s existing pattern.
+- **`subscribe()` had no access check** — a below-level user could subscribe to a restricted board and have every future post's subject/author leaked via `new_post()`'s subscriber-notification fan-out, with zero further action needed after the initial subscribe. Fixed (unsubscribing still always works, even if access was revoked after the fact).
+- **`notify_mentions()` leaked restricted board content via `@mentions`** — a post in a sysop-only/VIP board that mentions any username pushed that user a live notification containing up to 280 characters of the restricted content, regardless of their own access level. `notify_mentions()` now takes an optional `min_access_level` and skips mentioned users who don't meet it; both board call sites (new post, reply) now pass the post's board level.
+- **Terminal board posting (ANSI + PETSCII) checked neither `Board.min_write_level` nor `Post.is_locked` at all.** Unlike the web routes, any authenticated telnet/SSH/rlogin/PETSCII user could post/reply regardless of a board's configured posting level or a moderator having locked the thread. PETSCII's new-thread path ('N') was already correctly gated on write-level — only its reply path ('R') was missing it, the same "fix applied to one sibling, not the other" pattern this project keeps finding. Both terminal composers now gate on a single choke point (`_post_compose`/`_board_post`) so neither caller can be the weak link.
+
+**Medium:**
+- `votes.py`'s `_can_vote_on()` only checked existence for `post`/`echomail` message types, never the board/area's own `min_access_level`, despite the module's own docstring claiming otherwise — any authenticated user (or, via the unauthenticated `/api/vote/tally` lookup, any anonymous visitor) could vote on or read the tally of a restricted post/echo-area message by id. Both branches fixed.
+- `react()` had no board-access check — an IDOR letting any authenticated user confirm a restricted post's existence and react to it by id. Fixed.
+- `saved.py`'s bookmark feature let a user save any `post_id` regardless of board access, permanently showing its subject/author on their own `/saved/` page even though visiting the real thread would 403. Fixed for the `post` kind (this phase's scope); echomail/netmail/pm bookmarking have their own separate access models, noted but not touched here.
+- `/sitemap.xml` enumerated every board and its 500 most recent posts — including sysop-only/VIP-restricted ones — to any unauthenticated crawler, unlike every other listing route in this codebase. Now filtered the same way.
+- No flood protection at all on board posting, unlike `/api/vote` (60/min) or `/imsg/send` (30/hr) elsewhere in this codebase — added a 20-per-5-minutes rate limit shared between new posts and replies.
+- Terminal board posts skipped the sysop word-filter blocklist entirely — web already runs subject/content through it. Both terminal composers now do too.
+- Closed a latent IDOR defense-in-depth gap: `read_thread_v2()`/`_thread_read()` never re-verified a fetched post's `board_id` matched the `board_id` they were called with — not currently reachable (today's only callers always pre-scope correctly) but now closed so a future "jump to post #"/search/notification-deep-link feature can't reopen it silently.
+
+**Deliberately deferred** (noted here, not fixed): `webhooks.fire('post', ...)` broadcasts full post content to every configured webhook with no per-board scoping — an admin who wires up a "new post" mirror also silently mirrors restricted-board content externally. Requires an admin to have configured a webhook in the first place (admin-trust-boundary, same posture as other admin-configured integrations in this codebase), and per-board webhook scoping is a feature addition, not a bug fix, so left as a known limitation for now.
+
+~30 new/updated tests across 2 new test files (`test_boards_write_security_audit_v221.py`, `test_boards_terminal_security_audit_v221.py`). Full suite verified clean: 1732 passed, 2 skipped.
 
 ## v1.0b2.220 — Full file-areas security audit (July 2026)
 

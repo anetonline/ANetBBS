@@ -459,7 +459,7 @@ async def _thread_read(session, post_id, board_id, board_name):
     with _app_ctx():
         from ..models import Post, User
         root = Post.query.get(post_id)
-        if root is None:
+        if root is None or root.board_id != board_id:
             return
         root_author = User.query.get(root.author_id)
         lines = [f'Subject: {root.subject}',
@@ -481,6 +481,30 @@ async def _thread_read(session, post_id, board_id, board_name):
 
 
 async def _board_post(session, board_id, parent_id=None, default_subject=''):
+    # Access control: single choke point for both the 'N' new-thread
+    # caller (_board_threads, which already gated this on can_write) and
+    # 'R' reply (_thread_read, which previously did NOT) -- checked here
+    # too so neither caller can be the one weak link. Mirrors web/
+    # boards.py's new_post() min_write_level gate and reply_post()'s
+    # is_locked gate, found missing from the reply path in a full
+    # message-boards security audit.
+    level = _access_level(session)
+    with _app_ctx():
+        from ..models import Board, Post
+        board = Board.query.get(board_id)
+        if board is None:
+            return
+        if level < (board.min_write_level or 0):
+            await session.write("\r\nYou don't have permission to post here.\r\n")
+            await session.read_line('Press ENTER...')
+            return
+        if parent_id is not None:
+            root = Post.query.get(parent_id)
+            if root is not None and root.is_locked and level < 100:
+                await session.write('\r\nThis thread is locked.\r\n')
+                await session.read_line('Press ENTER...')
+                return
+
     await _header(session, 'New Post' if parent_id is None else 'Reply')
     default_subj = f'Re: {default_subject}' if default_subject else ''
     prompt = f'Subject{f" [{default_subj}]" if default_subj else ""}: '
@@ -496,6 +520,15 @@ async def _board_post(session, board_id, parent_id=None, default_subject=''):
         return
     with _app_ctx():
         from ..models import db, Post
+        # Sysop-configured word-filter blocklist -- see bbs_ui.py's
+        # _post_compose for the matching ANSI-side fix/comment. Must
+        # run INSIDE the app context -- apply() queries WordFilter.
+        try:
+            from .word_filter import apply as _wf_apply
+            subject = _wf_apply(subject)
+            body = _wf_apply(body)
+        except Exception:
+            pass
         post = Post(board_id=board_id, author_id=_user_id(session),
                     parent_id=parent_id, subject=subject[:200], content=body)
         db.session.add(post)

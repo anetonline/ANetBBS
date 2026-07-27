@@ -83,6 +83,16 @@ steps. Read this whole file before exposing the BBS to the internet.
   escaped `data/qwk-hub/` outward with full read/write/delete
   permission. Now regex-validated at both the public form and the
   approval handler (defense in depth).
+- **Message-board access control now enforced on writes and interactions,
+  not just reads.** A full audit found `reply_post()` had no board-access
+  check at all (any authenticated user could reply into a restricted
+  board's thread by guessing a post_id), and the same missing-check
+  pattern on `subscribe()`, `react()`, saved-message bookmarking, the
+  `/api/vote` endpoints, `@mention` notifications, and `/sitemap.xml`.
+  Terminal (telnet/SSH/rlogin/PETSCII) board posting also checked
+  neither the board's configured posting level nor a moderator-locked
+  thread at all. All now consistently gated the same way the read paths
+  already were.
 - **SECRET_KEY guard.** If `SECRET_KEY` is the dev default and the app
   is started in production mode (`FLASK_ENV=production` or
   `config_name='production'`), it raises `RuntimeError` and refuses to

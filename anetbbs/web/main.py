@@ -325,15 +325,30 @@ def sitemap_xml():
                     '/groups/', '/bulletins/']
     for p in static_paths:
         out.append(f'<url><loc>{_xe(base + p)}</loc></url>')
+    # Real gap found in a full message-boards security audit: unlike
+    # every other listing route in this codebase, the sitemap never
+    # filtered on Board.min_access_level -- sysop-only/VIP-restricted
+    # boards and posts were fully enumerable (board_id, post_id,
+    # lastmod) by any unauthenticated crawler. This route has no
+    # @login_required, so current_user is Flask-Login's
+    # AnonymousUserMixin here -- evaluate_access() treats that as
+    # access_level 0, so only genuinely public boards/posts survive,
+    # which is the correct behavior for a public sitemap anyway.
     try:
-        for b in _B.query.filter_by(is_active=True).all():
+        visible_boards = [b for b in _B.query.filter_by(is_active=True).all()
+                          if evaluate_access(current_user, b.min_access_level)]
+        for b in visible_boards:
             out.append(f'<url><loc>{_xe(base)}/boards/{b.id}</loc></url>')
     except Exception:
         db.session.rollback()
+        visible_boards = []
     try:
+        visible_board_ids = {b.id for b in visible_boards}
         recent = (_P.query.filter_by(parent_id=None)
                   .order_by(_P.created_at.desc()).limit(500).all())
         for p in recent:
+            if p.board_id not in visible_board_ids:
+                continue
             lm = p.updated_at or p.created_at
             stamp = lm.strftime('%Y-%m-%d') if lm else ''
             out.append(

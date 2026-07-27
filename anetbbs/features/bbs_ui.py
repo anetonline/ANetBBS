@@ -3668,9 +3668,39 @@ async def _maybe_prompt_tagline(ui):
 
 
 async def _post_compose(self, board_id, board_name, parent_id=None):
-    from anetbbs.models import db, Post
+    from anetbbs.models import db, Post, Board
     from .ansi_ui import banner, FG, RESET, BOLD, ui_width
     from .anedit import launch_anedit
+
+    # Access control: web/boards.py's new_post() enforces Board.
+    # min_write_level and reply_post() enforces Post.is_locked -- this
+    # terminal composer (the single choke point for both the 'N' new-
+    # thread and 'R'/'N' reply-from-ANView callers, see list_threads_v2/
+    # read_thread_v2 below) checked neither, so any authenticated user
+    # could post/reply here regardless of a board's configured posting
+    # level or a moderator having locked the thread.
+    user = self.session.user or {}
+    is_admin = bool(user.get('is_admin'))
+    with _app().app_context():
+        board = Board.query.get(board_id)
+        if board is None:
+            return
+        if not is_admin:
+            write_lvl = (board.min_write_level
+                        if board.min_write_level is not None
+                        else board.min_access_level)
+            if int(user.get('access_level', 0) or 0) < write_lvl:
+                await self.session.write(
+                    f"\r\n  {FG['red']}You don't have permission to post here.{RESET}\r\n")
+                await self.session.read_line("  Press Enter...")
+                return
+        if parent_id and not is_admin:
+            root = Post.query.get(parent_id)
+            if root is not None and root.is_locked:
+                await self.session.write(
+                    f"\r\n  {FG['red']}This thread is locked.{RESET}\r\n")
+                await self.session.read_line("  Press Enter...")
+                return
 
     # Gather quote text when replying
     quote = ""
@@ -3712,6 +3742,20 @@ async def _post_compose(self, board_id, board_name, parent_id=None):
         return
 
     with _app().app_context():
+        # Sysop-configured word-filter blocklist -- web/boards.py's
+        # new_post()/reply_post() already run subject/content through
+        # this before saving; neither terminal composer (this one or
+        # PETSCII's _board_post) did, so a blocklisted word/phrase was
+        # fully enforced on web but freely postable from telnet/SSH/
+        # rlogin/PETSCII. Must run INSIDE the app context -- apply()
+        # queries the WordFilter table.
+        try:
+            from .word_filter import apply as _wf_apply
+            subject = _wf_apply(subject)
+            body = _wf_apply(body)
+        except Exception:
+            pass
+
         p = Post(board_id=board_id, author_id=self.session.user['id'],
                  parent_id=parent_id, subject=subject[:200], content=body)
         db.session.add(p)
@@ -4254,6 +4298,15 @@ async def _read_thread_v2(self, post_id, board_id, board_name):
     from .ansi_ui import ui_width
     with _app().app_context():
         root = Post.query.get(post_id)
+        # Defense in depth: the only current caller (_list_threads_v2)
+        # always supplies a post_id already scoped to board_id, so this
+        # isn't reachable today -- but there's no re-check here if that
+        # ever changes (a future "jump to post #"/search/notification
+        # deep-link feature), unlike most other post-by-id lookups in
+        # this codebase. Cheap to close now rather than rely on every
+        # future caller remembering to pre-filter correctly.
+        if root is not None and root.board_id != board_id:
+            return
         if not root:
             return
         posts = [root] + list(root.replies.order_by(Post.created_at).all())

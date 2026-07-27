@@ -113,10 +113,22 @@ def notify_admins(kind, title='', body='', target_url=''):
         notify(admin_id, kind, title=title, body=body, target_url=target_url)
 
 
-def notify_mentions(text, sender_name, target_url=''):
+def notify_mentions(text, sender_name, target_url='', min_access_level=None):
     """Scan `text` for @mentions and notify each mentioned user.
     Skips self-mentions, unknown usernames, and users who've blocked
-    the sender."""
+    the sender.
+
+    Real gap found in a full message-boards security audit: this had no
+    concept of the mentioned text's own access gating -- a post in a
+    sysop-only/VIP-restricted board that @-mentions someone below that
+    level pushed them a live notification (including up to 280 chars of
+    the restricted content in `body`) despite them never being able to
+    read the board itself. `min_access_level`, when given, is checked
+    against each mentioned user via the same shared `evaluate_access()`
+    gate every read route in this project already uses -- callers with
+    no access-gated context (PMs, the public shoutbox) simply omit it
+    and get the old unfiltered behavior.
+    """
     if not text:
         return 0
     found = set(m.lower() for m in _MENTION_RE.findall(text))
@@ -142,6 +154,10 @@ def notify_mentions(text, sender_name, target_url=''):
             continue
         if u is None:
             continue
+        if min_access_level is not None:
+            from .access_control import evaluate_access
+            if not evaluate_access(u, min_access_level):
+                continue
         # Suppress if this user has blocked the sender.
         if sender is not None:
             try:

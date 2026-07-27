@@ -1,3 +1,21 @@
+# ANetBBS v1.0b2.221 — Full message-boards security audit (July 2026)
+
+Phase 3 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web `boards.py`, terminal ANSI + PETSCII posting/threading), every finding personally verified before fixing. Same root pattern throughout: the READ-side gap on boards was already fixed in an earlier pass — this pass found it was never mirrored to the WRITE/interaction side.
+
+**High:**
+- `reply_post()` had zero board-access enforcement at all (not read-level, not write-level) — any authenticated user could reply into a restricted board's thread by guessing a post_id. Fixed.
+- `subscribe()` had no access check, letting a below-level user get every future restricted-board post leaked via the subscriber-notification fan-out. Fixed.
+- `notify_mentions()` pushed up to 280 chars of restricted board content to any @-mentioned user regardless of their access level. Now access-filtered.
+- Terminal board posting (ANSI + PETSCII) checked neither the board's posting level nor a locked-thread flag at all — PETSCII's reply path specifically missed a check its own new-thread path already had. Both fixed via a single choke point per platform.
+
+**Medium:** `votes.py`'s vote/tally lookup, `react()`, and `saved.py`'s bookmark feature all had the same missing-board-access-check IDOR pattern — fixed. `/sitemap.xml` enumerated restricted boards/posts to unauthenticated crawlers — now filtered. No flood protection on board posting — added a 20/5min rate limit. Terminal posts skipped the sysop word-filter blocklist — now applied. Closed a latent IDOR defense-in-depth gap in the terminal thread reader.
+
+**Deferred:** webhook broadcasts aren't board-scoped (admin-trust-boundary, feature addition not a bug fix) — noted as a known limitation.
+
+~30 new/updated tests. Full suite verified clean (1732 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.220 — Full file-areas security audit (July 2026)
 
 Phase 2 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web file-area routes, FTP server), every finding personally verified before fixing.

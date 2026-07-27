@@ -26,10 +26,27 @@ votes_bp = Blueprint('votes', __name__, url_prefix='/api')
 # Visibility / existence checks per message type. Each returns True if
 # the current user is allowed to vote on the message id, False if not.
 def _can_vote_on(msg_type, msg_id):
+    # Real gap found in a full message-boards security audit: this
+    # module's own docstring claims "the route checks visibility per
+    # message_type," but the post/echomail branches only checked
+    # existence, never the board/area's own min_access_level -- any
+    # authenticated user (cast_vote) or even an anonymous visitor
+    # (vote_tally, which only pre-blocks netmail/pm) could vote on or
+    # read the tally of a sysop-only/VIP-restricted board post or echo
+    # area message just by knowing/guessing its id.
     if msg_type == 'post':
-        return Post.query.filter_by(id=msg_id).first() is not None
+        post = Post.query.filter_by(id=msg_id).first()
+        if post is None:
+            return False
+        from ..features.access_control import evaluate_access
+        return evaluate_access(current_user, post.board.min_access_level)
     if msg_type == 'echomail':
-        return EchomailMessage.query.filter_by(id=msg_id).first() is not None
+        msg = EchomailMessage.query.filter_by(id=msg_id).first()
+        if msg is None:
+            return False
+        from ..features.access_control import evaluate_access
+        return evaluate_access(current_user, msg.area.min_access_level,
+                               is_sysop_only=msg.area.is_sysop_only)
     if msg_type == 'netmail':
         nm = NetmailMessage.query.filter_by(id=msg_id).first()
         if nm is None:

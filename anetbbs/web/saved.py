@@ -83,9 +83,22 @@ def add():
     if kind not in _KIND_LABELS or not target_id:
         flash('Invalid save target.', 'danger')
         return redirect(request.referrer or url_for('saved.index'))
-    if _resolve(kind, target_id) is None:
+    target = _resolve(kind, target_id)
+    if target is None:
         flash('Target not found.', 'danger')
         return redirect(request.referrer or url_for('saved.index'))
+    # Real gap found in a full message-boards security audit: bookmarking
+    # a board post had no access check at all -- a below-level user
+    # could save any post_id and have its subject/author permanently
+    # displayed on their own /saved/ page even though visiting the real
+    # thread would correctly 403. Scoped to 'post' here (this phase's
+    # audit scope); echomail/netmail/pm bookmarking have their own
+    # separate access models not covered by this pass.
+    if kind == 'post':
+        from ..features.access_control import evaluate_access
+        if not evaluate_access(current_user, target.board.min_access_level):
+            flash('Target not found.', 'danger')
+            return redirect(request.referrer or url_for('saved.index'))
     existing = SavedMessage.query.filter_by(
         user_id=current_user.id, kind=kind, target_id=target_id).first()
     if existing:
