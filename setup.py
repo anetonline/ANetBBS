@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0b2.post221",
+    version="1.0b2.post222",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -63,6 +63,16 @@ setup(
         # bundles its own dictionary, imported lazily and degrades silently
         # if ever missing — see requirements.txt for the full rationale.
         'pyspellchecker>=0.8.0',
+        # IANA timezone data for stdlib zoneinfo (anetbbs/core/tz.py —
+        # Eastern-time display) — zoneinfo's documented fallback when
+        # the host has no system tzdata (minimal Docker images, some
+        # distros). Was in requirements.txt but missing here since it
+        # was added (v1.0b2.202) — same "backfilled after the fact" gap
+        # this list has hit before with requests/aiosmtpd/aiosmtplib.
+        # update.sh/upgrade.py only ever run `pip install -e .`, never
+        # `pip install -r requirements.txt`, so an existing install
+        # upgrading through either path never picked this up.
+        'tzdata>=2024.1',
     ],
     entry_points={
         'console_scripts': [

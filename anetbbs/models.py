@@ -1896,6 +1896,16 @@ class Webhook(db.Model):
     last_status = db.Column(db.Integer)
     last_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Real gap found in a full message-boards security audit: 'post'
+    # webhooks fired for EVERY board with no way to scope one to a
+    # single board -- an admin wiring up a public "new post" Discord/
+    # Slack mirror also silently mirrored sysop-only/VIP-restricted
+    # board content to that external channel. NULL (the default) means
+    # "all boards", matching the pre-existing behavior for anyone who
+    # already has one configured. Only meaningful for event='post';
+    # fire() ignores it for every other event type.
+    board_id = db.Column(db.Integer, db.ForeignKey('boards.id'), nullable=True)
+    board = db.relationship('Board')
 
 
 class Achievement(db.Model):

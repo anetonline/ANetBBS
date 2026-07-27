@@ -1138,8 +1138,24 @@ def _create_default_data():
             board = Board(**board_data)
             db.session.add(board)
     
-    # Create default admin user if it doesn't exist
-    if not User.query.filter_by(username='admin').first():
+    # Create a fallback admin user only if NO admin account exists at all.
+    # Real gap found in a full install/update re-verify audit: this used
+    # to check specifically for a user named literally 'admin' -- but
+    # install.sh's own wizard creates the sysop's chosen account (e.g.
+    # "ANetBBS Sysop", from the SYSOP_NAME prompt) by calling
+    # create_app() first, which runs this function BEFORE install.sh's
+    # own explicit account-creation code even gets a chance to run. Since
+    # the wizard's account is (almost) never literally named "admin",
+    # every fresh install.sh install silently ended up with TWO
+    # full-admin accounts: the sysop's chosen one, and this unlisted
+    # fallback with a random password only ever shown in a log line /
+    # data/admin_password.txt. Checking is_admin instead of the literal
+    # username means any already-provisioned admin (by install.sh, by
+    # Docker's entrypoint, or by hand) correctly suppresses this
+    # fallback; only a truly bare `db.create_all()` with zero admins
+    # (e.g. running the Flask app directly with no setup at all) still
+    # gets one bootstrapped, same as before.
+    if not User.query.filter_by(is_admin=True).first():
         # Generate a one-time random password instead of hardcoding 'admin123'.
         # Print + persist it so the sysop can find it on first install.
         # (secrets is imported at module level now — used again below for

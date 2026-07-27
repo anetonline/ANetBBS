@@ -253,11 +253,20 @@ class Config:
     WIKI_MIN_DAYS = int(os.environ.get('WIKI_MIN_DAYS', '3'))
 
     # Inter-BBS Instant Messaging (MSP / RFC 1312)
-    MSP_ENABLED = True
+    # Real gap found in a full install/update re-verify audit: unlike
+    # every sibling *_ENABLED flag in this file, these two were
+    # hardcoded True -- install.sh's wizard writes MSP_ENABLED=false/
+    # SYSTAT_ENABLED=false to .env whenever a sysop declines the
+    # "privileged ports 18/11" prompt, and Admin -> Settings' own MSP
+    # toggle writes the same, but neither ever took effect: both
+    # listeners started on every boot regardless, and the live-override
+    # in current_app.config only "worked" until the next restart, when
+    # this hardcoded default silently won again.
+    MSP_ENABLED = os.environ.get('MSP_ENABLED', 'true').lower() == 'true'
     MSP_BIND_HOST = '0.0.0.0'
     MSP_PORT = int(os.environ.get('MSP_PORT', '18'))
     # SYSTAT / ActiveUser UDP service (Synchronet IMSG companion)
-    SYSTAT_ENABLED = True
+    SYSTAT_ENABLED = os.environ.get('SYSTAT_ENABLED', 'true').lower() == 'true'
     SYSTAT_BIND_HOST = '0.0.0.0'
     SYSTAT_PORT = int(os.environ.get('SYSTAT_PORT', '11'))
     # Inter-BBS directory (sbbsimsg.lst from Vertrauen)

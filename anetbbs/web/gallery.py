@@ -7,17 +7,27 @@ with the legacy DSR locations so existing data shows up automatically.
 """
 
 import json
+import mimetypes
 import threading
+import zipfile
 from pathlib import Path
 from flask import (
     Blueprint, current_app, render_template, send_from_directory,
-    abort, request,
+    abort, request, Response,
 )
 from flask_login import login_required
 
 gallery_bp = Blueprint('gallery', __name__, url_prefix='/gallery')
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.gif', '.png', '.bmp', '.webp'}
+# Digital Showroom-style zip galleries (the format Jerry's TIC-fed file
+# areas -- e.g. a daily NASA photo feed -- already arrive in): one image
+# per zip, sysop points a gallery at the same directory a file area
+# already unpacks TIC into, and each zip is browsed/thumbnailed by
+# extracting its one image member in memory, never to disk. A zip with
+# more than one image inside just shows the first (by name) -- matches
+# the one-photo-per-archive convention this feed format is built around.
+ARCHIVE_EXTS = {'.zip'}
 _CONFIG_LOCK = threading.Lock()
 
 # Seeded on first run if no config file exists. Empty by default -- the

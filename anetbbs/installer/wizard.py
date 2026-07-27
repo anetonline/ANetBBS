@@ -307,8 +307,7 @@ def main():
         print(f'  SSH:          {C_CYAN}ssh -p {ssh_port} {admin_user}@{domain or "localhost"}{C_RESET}')
     print()
     print(f'{C_GREEN}Next steps:{C_RESET}')
-    print('  1. Start services: sudo systemctl start anetbbs-web '
-          'anetbbs-telnet anetbbs-ssh')
+    print('  1. Start services: sudo systemctl start anetbbs-web anetbbs')
     print('  2. Visit /admin/checklist to verify everything is configured')
     print('  3. /admin/control panel for live ops')
     print()
@@ -332,30 +331,49 @@ def _install_systemd_units(install_dir, web_port, tel, ssh, rl):
         ('Group=anetbbs', f'Group={user}'),
     ]
 
+    # Real gap found in a full install/update re-verify audit: this used
+    # to copy anetbbs-telnet.service + anetbbs-ssh.service + anetbbs-
+    # rlogin.service verbatim from deploy/ -- but telnet/SSH/rlogin have
+    # been ONE combined anetbbs.service for a while now (Ubuntu's
+    # systemd EnvironmentFile directive wins over per-unit Environment=
+    # overrides, so those old split units couldn't reliably share .env
+    # and ended up fighting each other for ports -- see deploy/
+    # anetbbs.service's own comment). anetbbs-rlogin.service doesn't
+    # even exist as a file in deploy/ any more, so that part silently
+    # no-op'd too. Every install.sh/update.sh-provisioned system already
+    # writes the single combined unit; this wizard was the one place
+    # still installing the broken legacy trio, meaning telnet/SSH/
+    # rlogin were effectively non-functional for anyone using this
+    # installer. Also inject the same AmbientCapabilities grant install.
+    # sh/update.sh add so FTP (port 21, enabled later by hand in .env,
+    # same as install.sh's flow) doesn't silently fail to bind.
     installed = []
-    for unit in ('anetbbs-web.service', 'anetbbs-telnet.service',
-                 'anetbbs-ssh.service', 'anetbbs-rlogin.service',
-                 'anetbbs-mrc-bridge.service'):
+    for unit in ('anetbbs-web.service', 'anetbbs.service'):
         src = units_dir / unit
         if not src.exists():
             continue
         body = src.read_text()
         for old, new in common_replacements:
             body = body.replace(old, new)
+        if 'AmbientCapabilities=' not in body:
+            body = body.replace(
+                'ExecStart=',
+                'AmbientCapabilities=CAP_NET_BIND_SERVICE\n'
+                'CapabilityBoundingSet=CAP_NET_BIND_SERVICE\nExecStart=',
+                1)
         (target_dir / unit).write_text(body)
         installed.append(unit)
 
     subprocess.run(['systemctl', 'daemon-reload'], check=False)
 
-    # Enable each unit so it auto-starts on boot. We pick which protocols
-    # to enable based on which the sysop turned on in the wizard.
-    enable_list = ['anetbbs-web.service']
-    if tel and 'anetbbs-telnet.service' in installed:
-        enable_list.append('anetbbs-telnet.service')
-    if ssh and 'anetbbs-ssh.service' in installed:
-        enable_list.append('anetbbs-ssh.service')
-    if rl and 'anetbbs-rlogin.service' in installed:
-        enable_list.append('anetbbs-rlogin.service')
+    # Enable each unit so it auto-starts on boot. anetbbs.service is one
+    # shared process for telnet/SSH/rlogin/FTP/PETSCII -- enable it if
+    # the sysop turned on any of the protocols this wizard prompts for.
+    enable_list = []
+    if 'anetbbs-web.service' in installed:
+        enable_list.append('anetbbs-web.service')
+    if (tel or ssh or rl) and 'anetbbs.service' in installed:
+        enable_list.append('anetbbs.service')
     for unit in enable_list:
         subprocess.run(['systemctl', 'enable', unit],
                        check=False, capture_output=True)

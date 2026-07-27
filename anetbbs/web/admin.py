@@ -3234,18 +3234,24 @@ def theme_builder():
 @login_required
 @admin_required
 def webhooks_admin():
-    from ..models import Webhook
+    from ..models import Webhook, Board
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'add':
+            event = (request.form.get('event') or 'shout').strip()
+            # board_id only means anything for 'post' -- ignore it for
+            # every other event type so a stray form value (or a form
+            # bug) can't silently scope a non-post webhook to nothing.
+            board_id = request.form.get('board_id', type=int) if event == 'post' else None
             w = Webhook(
                 name=(request.form.get('name') or '').strip(),
                 url=(request.form.get('url') or '').strip(),
-                event=(request.form.get('event') or 'shout').strip(),
+                event=event,
                 method=(request.form.get('method') or 'POST').strip(),
                 template=(request.form.get('template') or '').strip() or None,
                 secret=(request.form.get('secret') or '').strip() or None,
-                is_active=bool(request.form.get('is_active')))
+                is_active=bool(request.form.get('is_active')),
+                board_id=board_id or None)
             if not w.name or not w.url:
                 flash('Name + URL required.', 'danger')
             else:
@@ -3259,7 +3265,8 @@ def webhooks_admin():
             db.session.delete(w); db.session.commit()
         return redirect(url_for('admin.webhooks_admin'))
     rows = Webhook.query.order_by(Webhook.event, Webhook.name).all()
-    return render_template('admin/webhooks.html', rows=rows)
+    boards = Board.query.order_by(Board.name).all()
+    return render_template('admin/webhooks.html', rows=rows, boards=boards)
 
 
 @admin_bp.route('/console', methods=['GET', 'POST'])

@@ -1,3 +1,25 @@
+# ANetBBS v1.0b2.222 — Full install/update re-verify + webhook board scoping (July 2026)
+
+Phase 4, the FINAL phase, of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (install.sh, update.sh + the installer package), every finding personally verified before fixing.
+
+**High:**
+- `anetbbs-upgrade` (the in-app upgrade wizard) never actually restarted the real running service — it referenced legacy unit names that don't exist on any current install, so it silently rsynced new code in but kept serving pre-upgrade code indefinitely. Fixed.
+- Same wizard's rsync could have wiped a sysop's doors/ tree and MRC bridge config — missing the same excludes `update.sh` already has after a real prior incident. Fixed.
+- Every fresh `install.sh` install silently created two full-admin accounts (the sysop's chosen one, plus an unlisted auto-generated "admin" fallback). Fixed at the root cause plus a cleanup step.
+- The alternative `anetbbs-install` Python wizard installed broken legacy systemd units — telnet/SSH/rlogin were effectively non-functional through that documented, supported path. Fixed.
+- `TRUST_PROXY_HEADERS` (new in v1.0b2.218) was never set by install.sh even in its default production+nginx mode — every visitor's IP appeared as 127.0.0.1 to Flask, silently breaking IP bans/rate-limiting on a stock install. Fixed.
+- `MSP_ENABLED`/`SYSTAT_ENABLED` were hardcoded True regardless of what the sysop configured. Fixed.
+
+**Medium:** a dead env-var-passing path between the web "Check for Updates" button and update.sh; a missing disk-space preflight in the in-app upgrade wizard; `tzdata` missing from setup.py (present in requirements.txt since v1.0b2.202, so upgrades never picked it up); FTP/PETSCII firewall ports never mentioned in the install summary.
+
+**Follow-up (requested):** webhooks can now be scoped to a single board, so a "new post" mirror doesn't leak restricted-board content externally.
+
+~20 new tests. Full suite verified clean (1744 passed, 2 skipped).
+
+**This closes the 4-phase audit list.**
+
+---
+
 # ANetBBS v1.0b2.221 — Full message-boards security audit (July 2026)
 
 Phase 3 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web `boards.py`, terminal ANSI + PETSCII posting/threading), every finding personally verified before fixing. Same root pattern throughout: the READ-side gap on boards was already fixed in an earlier pass — this pass found it was never mirrored to the WRITE/interaction side.

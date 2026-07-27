@@ -31,6 +31,16 @@
             <div class="col-md-1 d-flex align-items-end">
                 <div class="form-check"><input class="form-check-input" type="checkbox" name="is_active" id="cb_a" checked><label for="cb_a" class="form-check-label">on</label></div>
             </div>
+            <div class="col-md-6">
+                <label class="form-label">Board (only used for the <code>post</code> event — leave as "All boards" for any other event)</label>
+                <select name="board_id" class="form-select">
+                    <option value="">All boards</option>
+                    {% for b in boards %}
+                    <option value="{{ b.id }}">{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Scoping to one board stops a restricted/sysop-only board's posts from being mirrored externally.</div>
+            </div>
             <div class="col-md-12">
                 <label class="form-label">Body template (optional, JSON; placeholders <code>{user} {text} {content}</code>)</label>
                 <textarea name="template" rows="3" class="form-control" style="font-family:monospace;" placeholder='{"content": "{content}"}'></textarea>
@@ -45,12 +55,13 @@
 <div class="card">
     <div class="card-body p-0">
         <table class="table table-sm mb-0">
-            <thead><tr><th>On</th><th>Event</th><th>Name</th><th>URL</th><th>Last status</th><th></th></tr></thead>
+            <thead><tr><th>On</th><th>Event</th><th>Board</th><th>Name</th><th>URL</th><th>Last status</th><th></th></tr></thead>
             <tbody>
             {% for r in rows %}
                 <tr {% if not r.is_active %}class="text-muted"{% endif %}>
                     <td>{% if r.is_active %}<span class="badge bg-success">on</span>{% else %}<span class="badge bg-secondary">off</span>{% endif %}</td>
                     <td><code>{{ r.event }}</code></td>
+                    <td>{% if r.event == 'post' %}{{ r.board.name if r.board else 'All boards' }}{% else %}—{% endif %}</td>
                     <td>{{ r.name }}</td>
                     <td><small><code>{{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}</code></small></td>
                     <td><small>{{ r.last_status or '—' }}{% if r.last_error %} <span class="text-danger">err</span>{% endif %}</small></td>
@@ -70,7 +81,7 @@
                     </td>
                 </tr>
             {% else %}
-                <tr><td colspan="6" class="text-muted text-center p-3">No webhooks configured.</td></tr>
+                <tr><td colspan="7" class="text-muted text-center p-3">No webhooks configured.</td></tr>
             {% endfor %}
             </tbody>
         </table>

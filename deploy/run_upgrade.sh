@@ -122,7 +122,16 @@ log "extracted to $INNER"
 # detached via the caller's nohup/setsid so we keep going.
 log "running update.sh"
 cd "$INNER"
-ANETBBS_UPGRADE_RUN=1 INSTALL_DIR="$INSTALL_DIR" bash update.sh \
+# Real gap found in a full install/update re-verify audit: update.sh's
+# own argument parser unconditionally resets INSTALL_DIR="" before
+# reading --install-dir from argv, which silently discards the env var
+# this script used to pass instead -- update.sh then re-derived the
+# install dir itself (from the systemd unit's WorkingDirectory=, or a
+# bare /opt/anetbbs fallback), usually landing on the same path by
+# coincidence, but making the whole point of resolving INSTALL_DIR here
+# from /etc/anetbbs.install dead plumbing. Pass it as the real flag
+# update.sh actually parses.
+ANETBBS_UPGRADE_RUN=1 bash update.sh --install-dir "$INSTALL_DIR" \
     || fail "update.sh exited non-zero"
 
 log "upgrade to $VERSION complete"

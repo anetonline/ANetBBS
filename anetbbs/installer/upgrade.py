@@ -120,6 +120,26 @@ def main():
         warn('Aborted by sysop — go take a backup, then re-run.')
         sys.exit(0)
 
+    # 3b. Disk-space preflight. Real gap found in a full install/update
+    # re-verify audit: update.sh already has this check (added after a
+    # real incident where a sysop's disk hit zero mid-update and
+    # corrupted the install beyond recovery) but this second, separate
+    # upgrade tool never got the same fix. Same 500MB floor.
+    MIN_FREE_MB = 500
+    try:
+        free_mb = shutil.disk_usage(install_dir).free // (1024 * 1024)
+    except Exception:
+        free_mb = None
+    if free_mb is not None and free_mb < MIN_FREE_MB:
+        err(f'Only {free_mb}MB free on {install_dir} — need at least '
+            f'{MIN_FREE_MB}MB. Free up space first (old backups under '
+            f'data/backups/, old logs/uploads), then re-run. Refusing to '
+            f'proceed: running out of space mid-upgrade can corrupt the '
+            f'install past recovery.')
+        sys.exit(1)
+    if free_mb is not None:
+        ok(f'{free_mb}MB free on {install_dir}')
+
     # 4. Snapshot
     step('Snapshotting current install')
     stamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
@@ -141,21 +161,57 @@ def main():
             warn(f'  could not snapshot {piece}: {exc}')
 
     # 5. Stop services
+    # Real gap found in a full install/update re-verify audit: this
+    # listed the legacy pre-merge unit names (anetbbs-telnet/anetbbs-ssh/
+    # anetbbs-rlogin), which update.sh itself actively removes as cruft
+    # -- telnet/SSH/rlogin/FTP/PETSCII40/80/LMTP have all been one
+    # combined `anetbbs.service` for a while now (Ubuntu's systemd
+    # EnvironmentFile directive winning over per-unit Environment=
+    # overrides meant the old split units couldn't reliably share .env
+    # and fought each other for ports). Since `systemctl stop`/`start`
+    # on a nonexistent unit just no-ops (or is skipped by the existence
+    # check at step 9 below), this wizard silently never touched the
+    # real running process at all -- it kept serving pre-upgrade code
+    # for every terminal protocol and FTP indefinitely after a
+    # supposedly-successful upgrade.
     step('Stopping services')
-    for unit in ('anetbbs-web', 'anetbbs-telnet', 'anetbbs-ssh',
-                 'anetbbs-rlogin', 'anetbbs-mrc-bridge'):
+    for unit in ('anetbbs-web', 'anetbbs', 'anetbbs-mrc-bridge'):
         _run(['systemctl', 'stop', unit], capture_output=True)
     _run(['pkill', '-9', '-f', 'gunicorn'], capture_output=True)
     ok('Services stopped')
 
     # 6. Rsync the new code in
+    # Real gap found in a full install/update re-verify audit: this
+    # exclude list was missing /doors/, /gallery-config.json, and every
+    # mrc/bridge/* carve-out update.sh's own rsync call has — those were
+    # added there specifically after a real v195-era incident where a
+    # --delete deploy wiped the doors/ tree (DSR, BotWars, RDQ3, the
+    # 6500-GIF library) from a production install. That fix was never
+    # mirrored to this second, separate upgrade tool. Also anchored the
+    # patterns to the tree root (leading /) to match update.sh exactly,
+    # since an unanchored 'data/' can match a nested directory of that
+    # name anywhere in the source tree, not just the top-level one.
     step('Applying update')
     _run([
         'rsync', '-a',
-        '--exclude=data/', '--exclude=.env', '--exclude=venv/',
-        '--exclude=*.db', '--exclude=logs/',
+        '--exclude=/.env', '--exclude=/data/', '--exclude=/venv/',
+        '--exclude=*.db', '--exclude=/logs/',
+        '--exclude=/doors/', '--exclude=/gallery-config.json',
+        '--exclude=/mrc/bridge/config.json',
+        '--exclude=/mrc/bridge/config/',
+        '--exclude=/mrc/bridge/data/',
+        '--exclude=/mrc/bridge/data-*/',
+        '--exclude=/mrc/bridge/logs/',
+        '--exclude=/mrc/bridge/*.db',
+        '--exclude=/mrc/bridge/*.db-shm',
+        '--exclude=/mrc/bridge/*.db-wal',
         f'{src}/', f'{install_dir}/',
     ], check=True)
+    if (src / 'doors').is_dir():
+        info('  doors/ left untouched (excluded to protect sysop-customized '
+             'installs). To pick up bundled door updates from this release, '
+             'use update.sh instead — it does an arch-aware per-file sync; '
+             'this wizard intentionally does not.')
     # Copy pre-bundled game ZIPs — static assets, not user data.
     dos_src = src / 'data' / 'dos-games'
     if dos_src.is_dir():
@@ -252,8 +308,8 @@ def main():
     # at boot. Skip enable for ones that don't exist (rlogin / mrc-bridge
     # are optional).
     step('Starting + enabling services')
-    for unit in ('anetbbs-web', 'anetbbs-telnet', 'anetbbs-ssh',
-                 'anetbbs-rlogin', 'anetbbs-mrc-bridge'):
+    for unit in ('anetbbs-web', 'anetbbs', 'anetbbs-mrc-bridge',
+                 'anetbbs-finger', 'anetbbs-binkp'):
         # Check unit exists before enable/start
         r = subprocess.run(['systemctl', 'cat', unit],
                            capture_output=True, text=True)
@@ -306,13 +362,11 @@ def main():
     print(f'  Version:       {C_CYAN}{new_ver}{C_RESET}')
     print()
     print(f'{C_GREEN}If anything looks off, roll back manually with:{C_RESET}')
-    print('  sudo systemctl stop anetbbs-web anetbbs-telnet '
-          'anetbbs-ssh anetbbs-rlogin')
+    print('  sudo systemctl stop anetbbs-web anetbbs')
     print(f'  sudo cp -a {backup_root}/.env {install_dir}/.env')
     print(f'  sudo rsync -a --delete {backup_root}/data/ '
           f'{install_dir}/data/')
-    print('  sudo systemctl start anetbbs-web anetbbs-telnet '
-          'anetbbs-ssh anetbbs-rlogin')
+    print('  sudo systemctl start anetbbs-web anetbbs')
     print()
 
 
@@ -331,8 +385,7 @@ def _rollback(install_dir, backup_root):
     warn('Rolling back...')
     try:
         # Stop first
-        for unit in ('anetbbs-web', 'anetbbs-telnet', 'anetbbs-ssh',
-                     'anetbbs-rlogin', 'anetbbs-mrc-bridge'):
+        for unit in ('anetbbs-web', 'anetbbs', 'anetbbs-mrc-bridge'):
             subprocess.run(['systemctl', 'stop', unit], capture_output=True)
         # Restore .env
         envb = backup_root / '.env'
@@ -344,8 +397,7 @@ def _rollback(install_dir, backup_root):
             subprocess.run(['rsync', '-a', '--delete', f'{datab}/',
                             f'{install_dir}/data/'])
         # Restart
-        for unit in ('anetbbs-web', 'anetbbs-telnet', 'anetbbs-ssh',
-                     'anetbbs-rlogin'):
+        for unit in ('anetbbs-web', 'anetbbs'):
             subprocess.run(['systemctl', 'start', unit], capture_output=True)
         ok('Rolled back to pre-upgrade state.')
     except Exception as exc:

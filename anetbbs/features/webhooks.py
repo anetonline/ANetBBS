@@ -46,6 +46,15 @@ def fire(event, payload):
         return
 
     for w in rows:
+        # Real gap found in a full message-boards security audit: a
+        # 'post' webhook fired for every board with no way to scope it
+        # to one -- see Webhook.board_id's own comment. Only enforced
+        # for 'post' (the only event carrying a board_id in its
+        # payload); other event types ignore board_id entirely.
+        if event == 'post' and w.board_id is not None \
+                and payload.get('board_id') != w.board_id:
+            continue
+
         url = w.url
         secret = w.secret
         template = w.template

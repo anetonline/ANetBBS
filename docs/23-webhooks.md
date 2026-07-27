@@ -34,12 +34,22 @@ login, from every service, with no way to scope it to "web logins
 only" short of checking `service` in your own receiving code (see the
 payload table below).
 
+**Exception: `post` webhooks can be scoped to a single board.** The
+Add form's Board dropdown (ignored for every other event) defaults to
+"All boards" — the original, still-supported behavior. Picking a
+specific board means this webhook only fires for posts/replies in
+that board, which matters if you're mirroring a public board's
+activity externally and don't want a sysop-only or VIP-restricted
+board's content leaking into that same external channel.
+
 ## Creating a webhook
 
 Fields on the Add form:
 
 - **Name** — free text, admin-list display only.
 - **Event** — one of the eight above.
+- **Board** (only used for `post`) — leave as "All boards", or pick
+  one to scope this webhook to that board only.
 - **URL** — where the POST goes. The placeholder in the form is a
   Discord incoming-webhook URL, since that's the most common target.
 - **On** — checkbox, enabled by default. Unchecking disables delivery

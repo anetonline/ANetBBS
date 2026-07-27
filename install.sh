@@ -1152,6 +1152,19 @@ WEB_HOST=0.0.0.0
 WEB_BIND=$WEB_BIND
 WEB_PORT=$WEB_PORT
 
+# Trust X-Forwarded-For/X-Forwarded-Proto/X-Forwarded-Host from the
+# reverse proxy in front of Flask (via Werkzeug's ProxyFix) so IP bans,
+# country blocking, and login rate-limiting see the real visitor IP
+# instead of nginx's own loopback address. Only ever set true here when
+# THIS installer is also the one that set up nginx in front of the app
+# AND opened only 80/443 in the firewall (never WEB_PORT itself) -- see
+# the UFW section below. If you enabled nginx yourself after the fact,
+# or you're running behind some other reverse proxy this installer
+# didn't configure, set this to true by hand only once you've confirmed
+# Flask itself is not directly reachable from outside — see
+# docs/SECURITY.md's X-Forwarded-For section before changing this.
+TRUST_PROXY_HEADERS=$([[ "$ENABLE_NGINX" == "y" ]] && echo true || echo false)
+
 # Application
 BBS_NAME=$BBS_NAME
 BBS_DESCRIPTION=$BBS_DESC
@@ -1339,6 +1352,22 @@ with app.app_context():
         print('UPDATED')
     else:
         print('PRESERVED')
+
+    # create_app() above already ran _create_default_data(), which
+    # bootstraps a fallback account literally named "admin" (random
+    # password, logged once) if NO admin existed yet -- on a truly
+    # fresh install that fires before this script's own \$ADMIN_USER
+    # creation above, leaving two full-admin accounts. Clean up that
+    # fallback now if it's redundant: a different username than the one
+    # just configured, and never actually used (last_login is NULL) --
+    # never touches an "admin"-named account the sysop has actually
+    # logged into, since that would mean it's the one they're using.
+    if '$ADMIN_USER' != 'admin':
+        stray = User.query.filter_by(username='admin', is_admin=True).first()
+        if stray is not None and stray.last_login is None:
+            db.session.delete(stray)
+            db.session.commit()
+            print('STRAY_ADMIN_REMOVED')
 ADMINEOF
 )
 ADMIN_RC=$?
@@ -1349,6 +1378,8 @@ if [[ $ADMIN_RC -eq 0 ]]; then
                      ok "Existing sysop account preserved ($ADMIN_USER) — password NOT changed (use --force to reset it)" ;;
         *)           ok "Admin account configured ($ADMIN_USER)" ;;
     esac
+    [[ "$ADMIN_RESULT" == *STRAY_ADMIN_REMOVED* ]] && \
+        ok "Removed an unused, auto-generated 'admin' fallback account (superseded by $ADMIN_USER)"
 else
     # ★ FIX 5b: If running as service user fails, try as root then fix ownership
     warn "Retrying admin setup as root..."
@@ -1385,6 +1416,16 @@ with app.app_context():
         print('UPDATED')
     else:
         print('PRESERVED')
+
+    # See the matching comment in the first admin-setup attempt above --
+    # create_app() may have bootstrapped a redundant fallback "admin"
+    # account before \$ADMIN_USER was created; clean it up if unused.
+    if '$ADMIN_USER' != 'admin':
+        stray = User.query.filter_by(username='admin', is_admin=True).first()
+        if stray is not None and stray.last_login is None:
+            db.session.delete(stray)
+            db.session.commit()
+            print('STRAY_ADMIN_REMOVED')
 ADMINEOF2
 )
     ADMIN_RC2=$?
@@ -1394,6 +1435,8 @@ ADMINEOF2
                          ok "Existing sysop account preserved ($ADMIN_USER) — password NOT changed (use --force to reset it)" ;;
             *)           ok "Admin account configured ($ADMIN_USER)" ;;
         esac
+        [[ "$ADMIN_RESULT2" == *STRAY_ADMIN_REMOVED* ]] && \
+            ok "Removed an unused, auto-generated 'admin' fallback account (superseded by $ADMIN_USER)"
     else
         warn "Could not configure admin account (you can use default: admin / admin123)"
     fi
@@ -2129,6 +2172,19 @@ elif [[ "$INSTALL_MODE" == "behind" ]]; then
         echo -e "  ${DIM}  from deploy/anetbbs-nginx.conf.template into your server block.${NC}"
     fi
 fi
+
+# Real gap found in a full install/update re-verify audit: FTP and
+# PETSCII40/80 are off by default and not wizard-prompted (sysop
+# enables them later by editing .env, same pattern as rlogin) -- but
+# unlike every wizard-prompted transport, this installer never opens
+# their ports in UFW and never told the sysop they'd need to. Shown
+# unconditionally since these can be turned on at any time regardless
+# of install mode.
+echo ""
+echo -e "  ${DIM}FTP and PETSCII40/80 are off by default (enable in .env, restart${NC}"
+echo -e "  ${DIM}anetbbs.service). If you turn them on, also open their firewall${NC}"
+echo -e "  ${DIM}ports yourself: FTP needs 21/tcp + 40000-40050/tcp (passive data);${NC}"
+echo -e "  ${DIM}PETSCII40/80 need 6400/tcp and 6401/tcp respectively.${NC}"
 
 echo ""
 echo -e "${BOLD}  Access URLs:${NC}"
