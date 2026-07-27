@@ -120,12 +120,24 @@ async def _read_rlogin_header(reader):
     if first != b'\x00':
         raise ValueError(f'Expected NUL, got {first!r}')
 
+    # Real gap found in a full auth-security audit: this loop had no cap
+    # on total accumulated size or iteration count -- a client that never
+    # sends the 3 required NUL bytes could force unbounded buffer growth
+    # (a DoS against this connection's memory) before IncompleteReadError/
+    # EOF ever fires. A real rlogin header (two usernames + a terminal
+    # speed string) is well under a few hundred bytes; 4096 is generous
+    # headroom, not a realistic legitimate size.
+    _MAX_HEADER_BYTES = 4096
     raw = b''
     while True:
         chunk = await reader.read(256)
         if not chunk:
             raise asyncio.IncompleteReadError(raw, None)
         raw += chunk
+        if len(raw) > _MAX_HEADER_BYTES:
+            raise ValueError(
+                f'rlogin header exceeded {_MAX_HEADER_BYTES} bytes without '
+                f'completing (missing NUL terminators?)')
         # We need three NUL-terminated strings
         parts = raw.split(b'\x00')
         if len(parts) >= 4:

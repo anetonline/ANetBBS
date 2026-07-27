@@ -12,7 +12,7 @@ The public dict shape returned by `authenticate()` is preserved for compatibilit
 with `core/session.py`.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +47,80 @@ class UserManager:
     def __init__(self, data_dir: str = "data"):
         # data_dir kept for backward-compat with the old signature; unused now
         self.data_dir = data_dir
+
+    @staticmethod
+    def _check_ip_and_rate_limit(ip: str) -> bool:
+        """Return True if this IP must be blocked from even attempting a
+        password check (already banned, or just tripped the rate limit
+        and got auto-banned here). Mirrors web/auth.py's
+        _ip_is_banned()/_login_rate_exceeded()/_auto_ban_ip() -- same
+        AutoBanConfig/IpBan/IpWhitelist models, same policy, kept as its
+        own local copy rather than importing from anetbbs.web.auth to
+        avoid a core-package-depends-on-web-package layering inversion
+        (core/ has no other dependency on web/ anywhere in this
+        codebase). Uses the same sliding-window bucket primitive
+        (features/rate_limit.py's _check()) the web login route uses,
+        just called directly instead of through its Flask-route
+        decorator wrapper.
+        """
+        import ipaddress as _ipa
+        from anetbbs.models import db, IpBan, IpWhitelist, AutoBanConfig
+        from anetbbs.features.bbs_ui import _app
+        from anetbbs.features.rate_limit import _check as _rl_check
+
+        def _cidr_match(ip_str, cidr_list):
+            try:
+                addr = _ipa.ip_address(ip_str)
+            except ValueError:
+                return False
+            for entry in cidr_list:
+                try:
+                    if addr in _ipa.ip_network(entry, strict=False):
+                        return True
+                except ValueError:
+                    if entry == ip_str:
+                        return True
+            return False
+
+        try:
+            with _app().app_context():
+                whitelisted_cidrs = [r.cidr for r in
+                                     IpWhitelist.query.with_entities(IpWhitelist.cidr).all()]
+                if _cidr_match(ip, whitelisted_cidrs):
+                    return False
+
+                now = datetime.utcnow()
+                banned_cidrs = [r.cidr for r in IpBan.query.all()
+                                if not (r.expires_at and r.expires_at < now)]
+                if _cidr_match(ip, banned_cidrs):
+                    return True
+
+                cfg = AutoBanConfig.get()
+                if not cfg.enabled:
+                    return False
+                if _rl_check(f'terminal_login:{ip}', cfg.attempt_limit,
+                            cfg.window_seconds):
+                    return False
+
+                # Rate limit tripped -- auto-ban, same policy as
+                # web/auth.py's _auto_ban_ip().
+                if IpBan.query.filter_by(cidr=ip).first():
+                    return True
+                expires_at = (now + timedelta(hours=cfg.ban_duration_hours)
+                             if cfg.ban_duration_hours else None)
+                db.session.add(IpBan(
+                    cidr=ip, banned_by_id=None, expires_at=expires_at,
+                    reason=f'Auto-ban: terminal login rate limit exceeded '
+                           f'({cfg.attempt_limit} attempts / '
+                           f'{cfg.window_seconds // 60 or 1} min)'))
+                db.session.commit()
+                return True
+        except Exception:
+            # Fail open on infrastructure trouble (DB hiccup, etc.) --
+            # matches web/auth.py's own _ip_is_banned()/_auto_ban_ip()
+            # stance of never locking out real logins over a transient
+            # error in the ban-checking machinery itself.
+            return False
 
     @staticmethod
     def _user_to_dict(user) -> Dict:
@@ -132,8 +206,21 @@ class UserManager:
             s.add(user)
             try:
                 s.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 s.rollback()
+                # Real bug found in a full auth-security audit: this
+                # unconditionally reported 'email_taken' regardless of
+                # WHICH unique constraint actually fired -- on a genuine
+                # race (two concurrent registrations of the same
+                # username, both passing the pre-checks above before
+                # either commits), the username collision surfaced here
+                # instead, and the second registrant was told an account
+                # with their EMAIL already existed, which was false.
+                # Both username and email have their own unique
+                # constraint (models.py), and the underlying DB driver's
+                # error text names which one fired.
+                if 'username' in str(exc.orig).lower():
+                    return 'username_taken'
                 return 'email_taken'
             if nuv_on:
                 try:
@@ -164,9 +251,31 @@ class UserManager:
             ).scalar_one_or_none()
             return self._user_to_dict(user) if user else None
 
-    def authenticate(self, username: str, password: str) -> Optional[Dict]:
-        """Return user dict on success, None on failure."""
+    def authenticate(self, username: str, password: str,
+                     ip: Optional[str] = None) -> Optional[Dict]:
+        """Return user dict on success, None on failure.
+
+        Real gap found in a full auth-security audit: web/auth.py's
+        /login route has always been protected by an IP ban check and a
+        configurable rate-limit-triggered auto-ban (AutoBanConfig) --
+        this telnet/SSH/rlogin/PETSCII path (every terminal transport
+        calls into this one function) had ZERO equivalent. A client
+        could retry username/password combinations forever with no
+        delay, counter, or lockout at all -- worse on SSH specifically,
+        since asyncssh's own validate_password() always returns True
+        (by design, to capture the password for the prefill flow) so
+        even the SSH layer itself never rejects a login attempt.
+        `ip` is optional (best-effort) so a caller that genuinely can't
+        resolve a peer address doesn't lose the ability to authenticate
+        at all -- but every real caller in core/session.py now passes
+        one.
+        """
         from anetbbs.models import User
+
+        if ip:
+            blocked = self._check_ip_and_rate_limit(ip)
+            if blocked:
+                return None
 
         with _Session() as s:
             user = s.execute(

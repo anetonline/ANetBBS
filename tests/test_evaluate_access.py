@@ -27,11 +27,56 @@ class _FakeUser:
 class EvaluateAccessPureTests(unittest.TestCase):
     """No Flask/DB needed -- evaluate_access() has no such dependency."""
 
-    def test_none_user_defaults_to_level_10_not_admin(self):
+    def test_none_user_is_anonymous_level_0_not_10(self):
+        """SECURITY: this function's own docstring has always promised
+        None == anonymous == access_level 0 -- the implementation
+        previously fell through to a level-10 ("registered") default
+        instead, silently granting every anonymous visitor "registered
+        users only" access on any board/area/feed using the standard
+        default min_access_level=10. Only min_level=0 (public) may pass
+        for an anonymous caller."""
         from anetbbs.features.access_control import evaluate_access
-        self.assertTrue(evaluate_access(None, min_level=10))
+        self.assertTrue(evaluate_access(None, min_level=0))
+        self.assertFalse(evaluate_access(None, min_level=1))
+        self.assertFalse(evaluate_access(None, min_level=10))
         self.assertFalse(evaluate_access(None, min_level=20))
         self.assertFalse(evaluate_access(None, is_sysop_only=True))
+
+    def test_flask_login_anonymous_user_mixin_is_treated_as_level_0(self):
+        """The REAL anonymous object every web caller actually passes is
+        Flask-Login's AnonymousUserMixin -- not None. It has
+        is_authenticated=False and no access_level attribute at all, so
+        this must be caught the same way None is, not fall through to
+        the "assume registered" default meant for genuinely-
+        authenticated callers missing the attribute for some other
+        reason."""
+        from anetbbs.features.access_control import evaluate_access
+
+        class _FakeAnonymousUserMixin:
+            is_authenticated = False
+            is_admin = False
+
+        anon = _FakeAnonymousUserMixin()
+        self.assertTrue(evaluate_access(anon, min_level=0))
+        self.assertFalse(evaluate_access(anon, min_level=10))
+
+    def test_authenticated_user_missing_access_level_still_defaults_to_10(self):
+        """A genuinely-authenticated caller (is_authenticated=True, or no
+        such attribute at all -- e.g. a plain terminal dict) that's
+        missing access_level for some other reason must still get the
+        old "assume registered" default, not be wrongly treated as
+        anonymous."""
+        from anetbbs.features.access_control import evaluate_access
+
+        class _FakeAuthedNoLevel:
+            is_authenticated = True
+            is_admin = False
+
+        self.assertTrue(evaluate_access(_FakeAuthedNoLevel(), min_level=10))
+        self.assertFalse(evaluate_access(_FakeAuthedNoLevel(), min_level=20))
+        # Plain dict with no is_authenticated key at all -- the terminal/
+        # session.user shape this module is designed to also support.
+        self.assertTrue(evaluate_access({'is_admin': False}, min_level=10))
 
     def test_level_gate(self):
         from anetbbs.features.access_control import evaluate_access

@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 from datetime import datetime, timedelta
+from sqlalchemy.exc import IntegrityError
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
                    request, current_app, session as flask_session)
@@ -27,10 +28,26 @@ _geoip_lock = threading.Lock()
 
 
 def _client_ip():
-    """Best-effort client IP — honors X-Forwarded-For if behind a proxy."""
-    fwd = request.headers.get('X-Forwarded-For', '')
-    if fwd:
-        return fwd.split(',')[0].strip()
+    """Best-effort client IP.
+
+    Real gap found in a full auth-security audit: this used to read the
+    client-supplied X-Forwarded-For header directly, with no concept of
+    whether the request actually came through a trusted reverse proxy --
+    any direct connection (bypassing the sysop's real nginx, if any)
+    could set an arbitrary value here to (a) spoof past the IP-ban and
+    country-block checks below, or (b) worse, make the login-rate-limit
+    auto-ban land on an arbitrary VICTIM IP instead of the attacker's
+    own, since features/rate_limit.py's bucket is keyed on the real
+    request.remote_addr while this function used to read the spoofable
+    header instead -- a mismatch that meant the attacker's own
+    throttling reset normally while an innocent IP got banned. Now just
+    request.remote_addr, matching rate_limit.py's own key exactly.
+    web_app.py's ProxyFix (opt-in via TRUST_PROXY_HEADERS, see its own
+    comment there) is the ONLY place X-Forwarded-For is trusted, and
+    only rewrites remote_addr itself when the sysop has explicitly
+    confirmed Flask sits behind their own trusted proxy -- so this
+    function doesn't need to know or care which case it's in.
+    """
     return request.remote_addr or ''
 
 
@@ -425,7 +442,25 @@ def register():
             success=True,
             user_agent=(request.headers.get('User-Agent') or '')[:255],
         ))
-        db.session.flush()   # get user.id before saving answers
+        # Real gap found in a full auth-security audit: no try/except
+        # existed around this flush -- validate_username()/
+        # validate_email() above already pre-check for a collision, but
+        # on a genuine race (two concurrent registrations of the same
+        # username/email, both passing that pre-check before either
+        # commits) the flush here raised an unhandled IntegrityError,
+        # surfacing as a raw 500 instead of a friendly "already taken"
+        # message. Same fix already made for the identical gap in
+        # core/user_manager.py's create_user() (the terminal
+        # registration path).
+        try:
+            db.session.flush()   # get user.id before saving answers
+        except IntegrityError as exc:
+            db.session.rollback()
+            if 'username' in str(exc.orig).lower():
+                flash('That username is already taken.', 'danger')
+            else:
+                flash('That email address is already registered.', 'danger')
+            return render_template('auth/register.html', form=form)
 
         # Save security questions chosen during registration
         for i, (q_field, a_field) in enumerate([
@@ -563,12 +598,27 @@ class ResetPasswordForm(FlaskForm):
 
 
 @auth_bp.route('/forgot', methods=['GET', 'POST'])
+@rate_limit('forgot_password', limit=10, window=300)
 def forgot_password():
     """Request a password-reset token by username or email.
 
     If the account has security questions, the user is redirected to the
     self-service verify page.  Otherwise the token is logged to the journal
     and the sysop passes the link out-of-band.
+
+    SECURITY: found in a full auth-security audit -- this used to redirect
+    to the security-question verify page ONLY when a real, active account
+    with security answers matched, and fall through to a generic "if that
+    account exists" message otherwise. Since registration requires 3
+    security questions, that redirect target was itself a reliable
+    username/email enumeration oracle for almost every real account. Now
+    EVERY submission with a syntactically plausible identifier redirects
+    to the SAME verify page -- a nonexistent account (or one with no
+    security questions on file) gets a random DECOY question that can
+    never be answered correctly, indistinguishable from the real flow by
+    redirect target or page content. An account that genuinely has no
+    security questions still gets its real reset token issued/emailed in
+    the background here, same as before -- only the visible page changes.
     """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
@@ -578,18 +628,15 @@ def forgot_password():
         ident = form.identifier.data.strip()
         user = (User.query.filter_by(username=ident).first()
                 or User.query.filter_by(email=ident).first())
-        if user and user.is_active:
-            answers = list(user.security_answers)
-            if answers:
-                import random
-                chosen = random.choice(answers)
-                nonce = secrets.token_urlsafe(24)
-                flask_session['sq_nonce'] = nonce
-                flask_session['sq_user_id'] = user.id
-                flask_session['sq_answer_id'] = chosen.id
-                return redirect(url_for('auth.security_question_verify'))
 
-            # No security questions — send email or fall back to sysop-copy-link
+        real_answers = list(user.security_answers) if (user and user.is_active) else []
+
+        if user and user.is_active and not real_answers:
+            # No security questions on file -- this account's real
+            # recovery path is the email/journal token, same as always.
+            # Still shown the decoy verify page below so the existence
+            # of this account isn't distinguishable from one with real
+            # security questions or one that doesn't exist at all.
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user.id,
@@ -600,7 +647,6 @@ def forgot_password():
             db.session.commit()
             reset_url = url_for('auth.reset_password', token=token,
                                 _external=True)
-            # Try sending by email; fall back to journal log.
             from ..mailer import smtp_enabled, send_password_reset_email
             if smtp_enabled():
                 send_password_reset_email(user, reset_url)
@@ -610,50 +656,95 @@ def forgot_password():
                     user.username, reset_url)
             _log_activity(user.id, 'password_reset_requested')
 
-        from ..mailer import smtp_enabled as _se
-        if _se():
-            flash('If that account exists, a password-reset link has been sent to the registered email address.',
-                  'success')
+        nonce = secrets.token_urlsafe(24)
+        flask_session['sq_nonce'] = nonce
+        flask_session['sq_attempts'] = 0
+        if real_answers:
+            import random
+            chosen = random.choice(real_answers)
+            flask_session['sq_user_id'] = user.id
+            flask_session['sq_answer_id'] = chosen.id
+            flask_session.pop('sq_decoy_question', None)
         else:
-            flash('If that account exists, a password-reset link has been issued. '
-                  'Contact the sysop to receive your reset link.',
-                  'success')
-        return redirect(url_for('auth.login'))
+            # No real account/question to bind to -- a fixed-pool decoy
+            # question that can never be answered correctly. Deterministic
+            # per identifier (not re-randomized on every submit) so a
+            # user who mistypes and resubmits sees a consistent question,
+            # same as the real flow always shows the same chosen question.
+            import hashlib
+            idx = int(hashlib.sha256(ident.encode('utf-8', errors='replace'))
+                      .hexdigest(), 16) % len(SECURITY_QUESTIONS)
+            flask_session['sq_user_id'] = None
+            flask_session['sq_answer_id'] = None
+            flask_session['sq_decoy_question'] = SECURITY_QUESTIONS[idx]
+        return redirect(url_for('auth.security_question_verify'))
 
     return render_template('auth/forgot_password.html', form=form)
 
 
+def _clear_sq_session():
+    for key in ('sq_nonce', 'sq_user_id', 'sq_answer_id', 'sq_decoy_question',
+               'sq_attempts'):
+        flask_session.pop(key, None)
+
+
 @auth_bp.route('/forgot/verify', methods=['GET', 'POST'])
+@rate_limit('security_question_verify', limit=10, window=300)
 def security_question_verify():
-    """Self-service password recovery via security question."""
+    """Self-service password recovery via security question.
+
+    SECURITY: found in a full auth-security audit -- no rate limit or
+    attempt cap existed, and session state was never cleared on a wrong
+    guess, so the SAME question could be brute-forced indefinitely in
+    one browser session with no throttle beyond typing speed. Now caps
+    at 5 guesses per /forgot session (tracked in flask_session, reset by
+    a fresh /forgot submission) on top of the route-level rate limit,
+    and also handles the decoy-question case forgot_password() sets up
+    for a nonexistent/answerless account -- see that function's own
+    docstring for why.
+    """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
 
     nonce = flask_session.get('sq_nonce')
-    user_id = flask_session.get('sq_user_id')
-    answer_id = flask_session.get('sq_answer_id')
-    if not nonce or not user_id or not answer_id:
+    if not nonce:
         flash('Session expired. Please try again.', 'warning')
         return redirect(url_for('auth.forgot_password'))
 
-    qa = UserSecurityAnswer.query.get(answer_id)
-    if qa is None or qa.user_id != user_id:
-        flask_session.pop('sq_nonce', None)
-        flask_session.pop('sq_user_id', None)
-        flask_session.pop('sq_answer_id', None)
+    user_id = flask_session.get('sq_user_id')
+    answer_id = flask_session.get('sq_answer_id')
+    decoy_question = flask_session.get('sq_decoy_question')
+
+    qa = None
+    if user_id and answer_id:
+        qa = UserSecurityAnswer.query.get(answer_id)
+        if qa is None or qa.user_id != user_id:
+            _clear_sq_session()
+            flash('Session expired. Please try again.', 'warning')
+            return redirect(url_for('auth.forgot_password'))
+        question = qa.question
+    elif decoy_question:
+        question = decoy_question
+    else:
+        _clear_sq_session()
         flash('Session expired. Please try again.', 'warning')
         return redirect(url_for('auth.forgot_password'))
 
     error = None
     if request.method == 'POST':
+        attempts = flask_session.get('sq_attempts', 0) + 1
+        flask_session['sq_attempts'] = attempts
+        if attempts > 5:
+            _clear_sq_session()
+            flash('Too many attempts. Please start over.', 'danger')
+            return redirect(url_for('auth.forgot_password'))
+
         raw = request.form.get('answer', '').strip()
         if not raw:
             error = 'Please enter your answer.'
-        elif qa.check_answer(raw):
+        elif qa is not None and qa.check_answer(raw):
             # Correct — issue reset token and send user straight to reset page
-            flask_session.pop('sq_nonce', None)
-            flask_session.pop('sq_user_id', None)
-            flask_session.pop('sq_answer_id', None)
+            _clear_sq_session()
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user_id,
@@ -665,10 +756,12 @@ def security_question_verify():
             _log_activity(user_id, 'password_reset_via_security_question')
             return redirect(url_for('auth.reset_password', token=token))
         else:
+            # Decoy questions (qa is None) always land here -- there is
+            # no correct answer, by design.
             error = 'Incorrect answer. Please try again.'
 
     return render_template('auth/security_question_verify.html',
-                           question=qa.question, error=error)
+                           question=question, error=error)
 
 
 @auth_bp.route('/reset/<token>', methods=['GET', 'POST'])
@@ -717,6 +810,7 @@ def verify_email(token):
 
 
 @auth_bp.route('/verify/resend', methods=['GET', 'POST'])
+@rate_limit('resend_verification', limit=10, window=300)
 def resend_verification():
     """Let an unverified user request a new verification email."""
     if current_user.is_authenticated:

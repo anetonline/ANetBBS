@@ -1,7 +1,36 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.216`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.218`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.218 — Full auth/session security audit (July 2026)
+
+First item of a 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Three parallel research passes (web auth, terminal auth, access-control primitives + rate limiting/session config), every finding personally verified against the real code before fixing. This is the single most security-critical batch shipped this project — see `docs/SECURITY.md` for the sysop-facing summary of what changed.
+
+**Critical:**
+- **`evaluate_access()`'s anonymous default was 10, not 0.** The shared read-access gate behind boards, echomail areas, QWK, RSS, and file areas fell through to access_level 10 ("registered") for a logged-out visitor instead of 0, contradicting its own docstring — an anonymous visitor silently passed the "registered users only" gate on anything using the standard default. This directly defeated a fix `boards.py`'s own code comments describe having already made. Independently confirmed by `games.py`'s own hand-rolled workaround for the exact same bug.
+- **`X-Forwarded-For` was trusted unconditionally, with no reverse-proxy boundary**, in four places (`web/auth.py`, `web/file_areas.py`, `web/registry.py`, `web/network_join.py`). A direct connection could spoof it to bypass IP bans/country blocks, dodge every per-IP rate limiter, or — worst case — make the login-rate-limit auto-ban land on an arbitrary victim IP instead of the attacker's own (the rate-limit bucket was keyed on the real IP, but the auto-ban target read the spoofable header). Fixed via a new opt-in `TRUST_PROXY_HEADERS` setting (off by default) that wires up Werkzeug's `ProxyFix` at the WSGI layer — the only place the header is trusted now, and only when a sysop has confirmed Flask sits behind their own trusted proxy.
+- **Telnet/SSH/rlogin/PETSCII login had zero rate-limiting or lockout of any kind**, unlike the web login (protected by IP bans + a configurable auto-ban). Worse on SSH specifically, since asyncssh's own password validator always accepts by design (to support the "client already sent credentials" convenience flow) — the SSH layer itself never rejected an attempt either. Every terminal transport funnels through one `UserManager.authenticate()` call, so this closes it in one place: the same `AutoBanConfig`/`IpBan` policy the web login already enforces.
+
+**High:**
+- **`/auth/forgot` was a reliable username/email enumeration oracle.** Since registration requires 3 security questions, the redirect target (security-question verify page vs. a generic "if that account exists" message) reliably revealed whether an account existed for almost every real user. Fixed so every submission redirects to the same verify page — a nonexistent (or answerless) account now gets a random, unanswerable decoy question, indistinguishable from a real one by redirect target or page content. An answerless account's real recovery path (email/journal token) still fires normally in the background.
+- **Security-question brute force had no rate limit or attempt cap** — a wrong guess left the session state untouched, so the same question could be retried indefinitely. Now capped at 5 attempts per recovery session plus a route-level rate limit, matching `/auth/forgot`'s own new limit.
+
+**Medium:**
+- rlogin's header parser (`_read_rlogin_header`) had no cap on accumulated buffer size — a client that never completed the handshake could grow it unbounded. Now capped at 4096 bytes (real headers are a few hundred at most).
+- Terminal `read_line()`/`read_password()` had no length cap either — same unbounded-growth risk for username/password/every other terminal text prompt. Capped at 2048/256 chars respectively; excess input is silently truncated rather than causing a failure.
+- `web/auth.py`'s `/auth/forgot` and `/auth/verify/resend` had no rate limiting at all (only `/auth/login` and `/auth/register` did) — both added.
+
+**Low (functional, not security):**
+- `UserManager.create_user()` (terminal registration) mislabeled a genuine username-collision race as an email collision, telling the second registrant their *email* was taken when it was actually their username. `web/auth.py`'s `register()` had the identical race with no handling at all (raw 500 instead of a friendly message). Both fixed the same way: inspect which unique constraint actually fired.
+
+~40 new/updated tests across ~15 new test files. Full suite verified clean (1680 passed, 2 skipped).
+
+## v1.0b2.217 — Uncapped admin pending-queue lists (July 2026)
+
+Follow-up from the previous version's audit report: two admin pending-request lists (**Network Join Requests**, **QWK Node Requests**) had no cap at all, unlike their "recently reviewed" counterparts (capped at 50) — both are fed by public, unauthenticated forms, so a spam/scan burst could grow either list unbounded and slow the page down. Capped at 500 (well above any realistic legitimate backlog), with a warning flash if the cap is ever actually hit so a real flood beyond it isn't silently hidden from the sysop — every pending item still needs an actual decision, so just truncating it silently would be worse than the slow-page problem this fixes.
+
+Full suite verified clean.
 
 ## v1.0b2.216 — Full echomail/QWK subsystem audit (July 2026)
 

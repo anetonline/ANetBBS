@@ -65,6 +65,25 @@ def create_app(config_name=None):
     config_class = get_config(config_name)
     app.config.from_object(config_class)
 
+    # Real gap found in a full auth-security audit: without this,
+    # request.remote_addr behind install.sh's own generated nginx reverse
+    # proxy is ALWAYS nginx's own loopback address, and every piece of
+    # code that wants the real visitor IP (web/auth.py's IP ban/country-
+    # block/rate-limit-auto-ban, the who's-online session tracker just
+    # below) either silently operates on the wrong address or -- worse,
+    # as auth.py did before this fix -- falls back to manually trusting
+    # the client-supplied X-Forwarded-For header with no proxy-trust
+    # boundary at all, which any direct connection can spoof. ProxyFix
+    # is the standard, well-tested fix: trust exactly one X-Forwarded-For
+    # hop and rewrite request.remote_addr itself, so every downstream
+    # consumer gets the correct value with no per-call-site changes.
+    # Strictly opt-in (see TRUST_PROXY_HEADERS's own comment in
+    # config.py) -- unsafe to enable on an install where Flask is
+    # directly reachable from the internet.
+    if app.config.get('TRUST_PROXY_HEADERS'):
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     # Refuse to boot in production with the dev SECRET_KEY fallback.
     # In dev, just log a loud warning so the sysop sees it.
     # Bypass with ANETBBS_SCHEMA_MIGRATE_ONLY=1 — the upgrade wizard's

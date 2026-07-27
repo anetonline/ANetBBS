@@ -231,6 +231,22 @@ class Config:
     # Leave blank to disable. Lookup results are cached in-memory for 1 hour.
     BLOCKED_COUNTRIES = os.environ.get('BLOCKED_COUNTRIES', '')
 
+    # Real gap found in a full auth-security audit: web/auth.py's IP-ban,
+    # country-block, and login-rate-limit auto-ban ALL trusted the
+    # client-supplied X-Forwarded-For header unconditionally, with no
+    # concept of whether the request actually came through a trusted
+    # reverse proxy. Anyone connecting directly could spoof it to bypass
+    # their own ban/country-block, or to make the auto-ban land on an
+    # arbitrary victim IP instead of themselves. Off by default (fail
+    # closed) -- a sysop running behind install.sh's own generated nginx
+    # config (the documented, recommended deployment) sets this true so
+    # the real visitor IP is used instead of nginx's own loopback
+    # address; an install with Flask directly exposed to the internet
+    # must leave this false, or an attacker's own spoofed header would
+    # be trusted as gospel.
+    TRUST_PROXY_HEADERS = os.environ.get(
+        'TRUST_PROXY_HEADERS', 'false').lower() == 'true'
+
     # Wiki edit gate — minimum requirements to edit any wiki page.
     # Set both to 0 to disable the gate entirely.
     WIKI_MIN_POSTS = int(os.environ.get('WIKI_MIN_POSTS', '5'))

@@ -242,12 +242,18 @@ class AdminReviewNotificationTests(unittest.TestCase):
         import re
         token = re.search(r'name="csrf_token" value="([^"]+)"',
                           get_resp.get_data(as_text=True))
+        # X-Forwarded-For is deliberately ignored now (TRUST_PROXY_HEADERS
+        # defaults to False -- see the auth-security audit fix) -- use
+        # environ_overrides to simulate a distinct REAL peer address
+        # instead, so this test's own /join/ submission doesn't collide
+        # with another test's request against the rate limiter's 30s
+        # per-IP floor.
         resp = client.post('/join/', data={
             'csrf_token': token.group(1) if token else '',
             'name': 'NotifyTester', 'bbs_name': 'NotifyTestBBS',
             'email': 'notify@example.com', 'binkp_ftn_address': '1:1/888',
             'rules_ack': 'y',
-        }, headers={'X-Forwarded-For': '203.0.113.10'})
+        }, environ_overrides={'REMOTE_ADDR': '203.0.113.10'})
         self.assertEqual(resp.status_code, 200)
 
         with self.app.app_context():
@@ -282,7 +288,7 @@ class AdminReviewNotificationTests(unittest.TestCase):
             'name': 'OptOutTester', 'bbs_name': 'OptOutTestBBS',
             'email': 'optout@example.com', 'binkp_ftn_address': '1:1/889',
             'rules_ack': 'y',
-        }, headers={'X-Forwarded-For': '203.0.113.20'})
+        }, environ_overrides={'REMOTE_ADDR': '203.0.113.20'})
 
         with self.app.app_context():
             n = Notification.query.filter_by(

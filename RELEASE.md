@@ -1,3 +1,32 @@
+# ANetBBS v1.0b2.218 — Full auth/session security audit (July 2026)
+
+The single most security-critical batch shipped this project. Three parallel research passes (web auth, terminal auth, access-control primitives), every finding personally verified before fixing. See `docs/SECURITY.md` for the full sysop-facing summary.
+
+**Critical:**
+- `evaluate_access()`'s anonymous default was 10 ("registered"), not 0 — an anonymous visitor silently passed the "registered users only" gate on boards/echomail/QWK/RSS/file areas using the standard default.
+- `X-Forwarded-For` was trusted unconditionally in four places, letting a direct connection spoof past IP bans/rate limits, or make the login auto-ban land on an arbitrary victim IP. Fixed via an opt-in `TRUST_PROXY_HEADERS` setting + Werkzeug's ProxyFix.
+- Telnet/SSH/rlogin/PETSCII login had ZERO rate-limiting or lockout, unlike the web login — now shares the same IP-ban/auto-ban policy.
+
+**High:**
+- `/auth/forgot` was a reliable username/email enumeration oracle via its redirect target — fixed with a uniform redirect + unanswerable decoy question for nonexistent accounts.
+- Security-question brute force had no rate limit or attempt cap — now capped at 5 attempts + rate-limited.
+
+**Medium:** rlogin header parser and terminal read_line/read_password had no length caps (memory DoS risk) — now bounded. `/auth/forgot` and `/auth/verify/resend` had no rate limiting — added.
+
+**Low:** two registration race-condition bugs (wrong error message / raw 500) fixed on both the web and terminal registration paths.
+
+~40 new/updated tests. Full suite verified clean (1680 passed, 2 skipped).
+
+---
+
+# ANetBBS v1.0b2.217 — Uncapped admin pending-queue lists (July 2026)
+
+Two admin pending-request lists (Network Join Requests, QWK Node Requests) had no cap, unlike their reviewed counterparts — both fed by public unauthenticated forms. Capped at 500 with a warning flash if hit, so a real flood isn't silently hidden.
+
+Full suite verified clean.
+
+---
+
 # ANetBBS v1.0b2.216 — Full echomail/QWK subsystem audit (July 2026)
 
 Sysop asked for a full pass over echomail/QWK — every error/gap, docs kept in sync. Five parallel research passes (BinkP transport, AreaFix/FileFix, QWK, web admin layer, docs/wiki), every finding personally verified against the real code before fixing. 20 real bugs fixed, most with new regression tests.

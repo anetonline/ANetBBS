@@ -194,11 +194,46 @@ class AutoBanTests(unittest.TestCase):
         client = self.app.test_client()
         for _ in range(3):
             client.post('/auth/login',
-                        data={'username': 'nope', 'password': 'wrong'},
-                        headers={'X-Forwarded-For': '198.51.100.1'})
+                        data={'username': 'nope', 'password': 'wrong'})
 
         with self.app.app_context():
-            self.assertIsNotNone(IpBan.query.filter_by(cidr='198.51.100.1').first())
+            # The test client's real remote_addr (Werkzeug defaults to
+            # 127.0.0.1) must be what gets banned.
+            self.assertIsNotNone(IpBan.query.filter_by(cidr='127.0.0.1').first())
+
+    def test_spoofed_x_forwarded_for_is_ignored_by_default(self):
+        """SECURITY: found in a full auth-security audit -- _client_ip()
+        used to trust a client-supplied X-Forwarded-For header
+        unconditionally, so an attacker could make the auto-ban land on
+        an arbitrary VICTIM IP instead of their own by spoofing this
+        header on the request that trips the rate limit, while their own
+        real IP (what the rate-limit bucket is actually keyed on) never
+        gets banned at all. TRUST_PROXY_HEADERS defaults to False
+        (fail closed) -- the spoofed value must be completely ignored,
+        and the ban must land on the real connecting IP instead."""
+        from anetbbs.models import db, AutoBanConfig, IpBan
+        with self.app.app_context():
+            self.assertFalse(self.app.config.get('TRUST_PROXY_HEADERS'),
+                             'TRUST_PROXY_HEADERS must default to False')
+            cfg = AutoBanConfig.get()
+            cfg.enabled = True
+            cfg.attempt_limit = 2
+            cfg.window_seconds = 60
+            db.session.commit()
+
+        client = self.app.test_client()
+        for _ in range(3):
+            client.post('/auth/login',
+                        data={'username': 'nope', 'password': 'wrong'},
+                        headers={'X-Forwarded-For': '203.0.113.99'})
+
+        with self.app.app_context():
+            self.assertIsNone(
+                IpBan.query.filter_by(cidr='203.0.113.99').first(),
+                'a spoofed X-Forwarded-For must never be banned in its place')
+            self.assertIsNotNone(
+                IpBan.query.filter_by(cidr='127.0.0.1').first(),
+                'the real connecting IP must be banned instead')
 
 
 if __name__ == '__main__':

@@ -267,6 +267,24 @@ class BBSSession:
         self._buffer = bytearray()
         self.user: Optional[Dict[str, Any]] = None
 
+    def _client_ip(self) -> Optional[str]:
+        """Best-effort peer IP for this connection -- used to rate-limit/
+        ban-check login attempts (see UserManager.authenticate()'s `ip`
+        param). Mirrors the same get_extra_info('peername') pattern
+        already used for CallerLog/presence tracking further down this
+        file, just callable before a login attempt instead of only
+        after one succeeds. Returns None (not '') on failure so
+        authenticate()'s `if ip:` check correctly treats "couldn't
+        determine it" as "skip the check" rather than trying to look up
+        an empty-string IP."""
+        try:
+            addr = self.writer.get_extra_info('peername')
+        except Exception:
+            return None
+        if not addr:
+            return None
+        return addr[0] if isinstance(addr, tuple) else str(addr)
+
     @property
     def chat_manager(self):
         if self._chat_manager is None:
@@ -492,6 +510,17 @@ class BBSSession:
         """Read a password char-by-char, echoing '*' for each one. Standard
         terminals echo locally; we send a backspace+'*' to overwrite each char
         as the user types. Backspace removes the last star."""
+        # Real gap found in a full auth-security audit: no cap existed on
+        # how much a client could type here before pressing Enter -- a
+        # client that never sends \r could hold this loop open
+        # indefinitely, growing the in-memory buffer without bound (a
+        # per-connection memory DoS). No real password needs anywhere
+        # close to this; extra input beyond the cap is silently dropped
+        # (still consumed from the stream, still echoed as '*', so the
+        # loop keeps making forward progress) rather than raising, so a
+        # legitimately-long paste just gets truncated instead of the
+        # whole login attempt failing outright.
+        _MAX_PASSWORD_CHARS = 256
         if prompt:
             await self.write(prompt)
         chars = []
@@ -533,7 +562,8 @@ class BBSSession:
                 # and auth always fails.
                 from ..features.petscii_codec import decode_char
                 ch = decode_char(ch[0]).encode('utf-8')
-            chars.append(ch)
+            if len(chars) < _MAX_PASSWORD_CHARS:
+                chars.append(ch)
             await self.write('*')
         return b''.join(chars).decode('utf-8', errors='replace').strip()
 
@@ -1034,7 +1064,8 @@ class BBSSession:
             if self._prefill_password:
                 try:
                     user = self.user_manager.authenticate(
-                        self._prefill_username, self._prefill_password)
+                        self._prefill_username, self._prefill_password,
+                        ip=self._client_ip())
                 except Exception:
                     user = None
                 if user:
@@ -1052,7 +1083,8 @@ class BBSSession:
             await self.write(f"\r\n=== Login as {self._prefill_username} ===\r\n\r\n")
             password = await self.read_password(f"Password for {self._prefill_username}: ")
             if password:
-                user = self.user_manager.authenticate(self._prefill_username, password)
+                user = self.user_manager.authenticate(
+                    self._prefill_username, password, ip=self._client_ip())
                 if user:
                     self.user = user
                     await self.write(f"\r\nWelcome back, {self._prefill_username}!\r\n")
@@ -1160,7 +1192,7 @@ class BBSSession:
         if not password:
             return False
 
-        user = self.user_manager.authenticate(username, password)
+        user = self.user_manager.authenticate(username, password, ip=self._client_ip())
         if user:
             self.user = user
             await self.write(f"\r\nWelcome back, {username}!\r\n")
@@ -1242,7 +1274,8 @@ class BBSSession:
             if result == 'ok_pending':
                 self.user = self.user_manager.get_user_dict_by_username(username)
             else:
-                self.user = self.user_manager.authenticate(username, password)
+                self.user = self.user_manager.authenticate(
+                    username, password, ip=self._client_ip())
             # Password-recovery security questions (same as web registration).
             try:
                 await self._collect_security_questions()
@@ -1439,11 +1472,22 @@ class BBSSession:
         except Exception as e:
             logger.debug("write failed: %s", e)
 
-    async def read_line(self, prompt: str = "") -> str:
-        """Read a line of input with echo"""
+    async def read_line(self, prompt: str = "", max_len: int = 2048) -> str:
+        """Read a line of input with echo.
+
+        Real gap found in a full auth-security audit: no cap existed on
+        line length -- used for username/email/security-answer prompts
+        among many other things, a client that never sends \\r could hold
+        this loop open indefinitely, growing the buffer without bound (a
+        per-connection memory DoS). 2048 is generous headroom for every
+        legitimate use of this shared helper (menu choices, usernames,
+        single lines of composed text); extra input beyond max_len is
+        silently dropped (still consumed from the stream, still echoed,
+        so the loop keeps making forward progress) rather than raising.
+        """
         if prompt:
             await self.write(prompt)
-        
+
         line = bytearray()
         while True:
             try:
@@ -1491,11 +1535,13 @@ class BBSSession:
                         # arrives with the wrong case and auth always fails.
                         from ..features.petscii_codec import decode_char
                         logical_ch = decode_char(char[0])
-                        line.extend(logical_ch.encode(self.encoding, errors='replace'))
+                        if len(line) < max_len:
+                            line.extend(logical_ch.encode(self.encoding, errors='replace'))
                         if self.echo:
                             await self.write(logical_ch)
                     else:
-                        line.extend(char)
+                        if len(line) < max_len:
+                            line.extend(char)
                         if self.echo:
                             await self.write(char.decode(self.encoding))
 

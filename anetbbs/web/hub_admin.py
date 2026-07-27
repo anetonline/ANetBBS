@@ -1013,8 +1013,22 @@ def hold_queue():
 @_admin_required
 def qwk_node_requests():
     """List all QWK node applications submitted from the BBS terminal."""
-    pending  = (QWKNodeRequest.query.filter_by(status='pending')
-                .order_by(QWKNodeRequest.created_at.asc()).all())
+    # Real gap found in a full echomail-subsystem audit: unlike `reviewed`
+    # below, `pending` had no cap at all -- fed by a public, unauthenticated
+    # self-registration endpoint, so a spam/scan burst could grow this
+    # list unbounded and slow the page down. Capped generously (well
+    # above any realistic legitimate backlog) rather than the tight
+    # 50 used for `reviewed`, since every pending item still needs a
+    # sysop's actual decision -- silently hiding one would be worse than
+    # the slow-page problem this fixes. Flash a warning if the cap is
+    # ever actually hit, so a real backlog beyond it isn't invisible.
+    pending_q = QWKNodeRequest.query.filter_by(status='pending')
+    pending_count = pending_q.count()
+    if pending_count > 500:
+        flash(f'{pending_count} pending QWK node requests -- showing the '
+              f'oldest 500. Review/clear some before more can be seen.',
+              'warning')
+    pending  = pending_q.order_by(QWKNodeRequest.created_at.asc()).limit(500).all()
     reviewed = (QWKNodeRequest.query.filter(QWKNodeRequest.status != 'pending')
                 .order_by(QWKNodeRequest.reviewed_at.desc()).limit(50).all())
     return render_template('echomail/admin/hub/qwk_node_requests.html',
@@ -1233,7 +1247,20 @@ def join_requests():
     if identity_filter:
         pending_q = pending_q.filter_by(hub_identity_id=identity_filter)
         reviewed_q = reviewed_q.filter_by(hub_identity_id=identity_filter)
-    pending  = pending_q.order_by(NetworkJoinRequest.created_at.asc()).all()
+    # Real gap found in a full echomail-subsystem audit: unlike `reviewed`
+    # below, `pending` had no cap at all -- fed by the public, unauthenticated
+    # /join/ form, so a spam/scan burst could grow this list unbounded and
+    # slow the page down. Capped generously (well above any realistic
+    # legitimate backlog) rather than the tight 50 used for `reviewed`,
+    # since every pending item still needs a sysop's actual decision --
+    # silently hiding one would be worse than the slow-page problem this
+    # fixes. Flash a warning if the cap is ever actually hit.
+    pending_count = pending_q.count()
+    if pending_count > 500:
+        flash(f'{pending_count} pending network join requests -- showing '
+              f'the oldest 500. Review/deny some before more can be seen.',
+              'warning')
+    pending  = pending_q.order_by(NetworkJoinRequest.created_at.asc()).limit(500).all()
     reviewed = reviewed_q.order_by(NetworkJoinRequest.reviewed_at.desc()).limit(50).all()
     identities = HubIdentity.query.order_by(HubIdentity.name).all()
     return render_template('echomail/admin/hub/join_requests.html',

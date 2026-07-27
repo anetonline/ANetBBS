@@ -55,10 +55,20 @@ def _require_hub_mode():
 
 
 def _peer_ip():
-    """Best-effort source IP, honoring X-Forwarded-For when nginx is in
-    front."""
-    fwd = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
-    return fwd or (request.remote_addr or '')
+    """Best-effort source IP, used as the key for _ratelimit_check() below.
+
+    Real gap found in a full auth-security audit: this trusted a
+    client-supplied X-Forwarded-For header unconditionally, with no
+    trusted-proxy boundary -- any direct connection could set an
+    arbitrary value to dodge the registration rate limit entirely
+    (a fresh fake source_ip every request never trips the same bucket
+    twice). web_app.py's ProxyFix (opt-in via TRUST_PROXY_HEADERS) is
+    now the only place XFF is trusted, rewriting request.remote_addr
+    itself when the sysop has confirmed Flask sits behind their own
+    trusted proxy -- see web/auth.py's _client_ip() for the full
+    writeup of this same fix.
+    """
+    return request.remote_addr or ''
 
 
 def _problem(status, msg):

@@ -21,6 +21,22 @@ steps. Read this whole file before exposing the BBS to the internet.
   - `/auth/login` — sysop-configurable via Admin → IP Bans (default 10
     attempts / 5 min / IP); exceeding it **auto-bans the source IP**
     for a sysop-configurable duration (default 1 hour, 0 = permanent)
+  - **Telnet/SSH/rlogin/PETSCII login** — the same IP-ban list and
+    auto-ban threshold above apply here too, not just the web login.
+    Found missing entirely in a full auth-security audit; every
+    terminal transport shares one `UserManager.authenticate()` call, so
+    this closes it for all of them in one place, including SSH (whose
+    own `validate_password()` always accepts by design, to capture the
+    password for the "client sent credentials with the connection"
+    convenience flow — it was never a real auth boundary on its own).
+  - `/auth/forgot` and `/auth/forgot/verify` (10 / 5 min / IP each) —
+    the security-question recovery flow. Also found and fixed in the
+    same audit: a wrong guess no longer lets the same question be
+    retried indefinitely (capped at 5 attempts per recovery session),
+    and the flow no longer reveals whether an account exists via its
+    redirect target — every submission lands on the same verify page,
+    with a random, unanswerable decoy question for an account that
+    doesn't exist (or has no security questions on file).
   - `/imsg/send` — 30 messages / hour / user
   - `/api/vote` — 60 votes / min / user
 - **`/auth/register` rate limit** (3 attempts / hour / IP) — unlike the
@@ -28,6 +44,18 @@ steps. Read this whole file before exposing the BBS to the internet.
   (`RegistrationAttempt`), not the shared `rate_limit` decorator. It
   persists across restarts — the in-memory-only caveat under Known
   limitations below does **not** apply to registration.
+- **`X-Forwarded-For` is untrusted by default.** IP bans, country
+  blocking, and every rate limiter above key off the real
+  `request.remote_addr`, not a client-supplied header — found in a full
+  auth-security audit that the header was previously trusted
+  unconditionally, letting a direct connection spoof it to dodge a ban
+  or (worse) make the login auto-ban land on an arbitrary victim IP
+  instead of the attacker's own. If you run behind your own reverse
+  proxy (e.g. the nginx config `install.sh` sets up), set
+  `TRUST_PROXY_HEADERS=true` in `.env` so the real visitor IP is used
+  instead of the proxy's own loopback address — **only enable this if
+  Flask is never directly reachable from the internet**, since it tells
+  the app to trust whatever the nearest hop claims.
 - **Path traversal mitigated** — uploads stored under UUID filenames; the
   `download` route uses `send_from_directory` against the configured
   uploads dir.
@@ -42,6 +70,12 @@ steps. Read this whole file before exposing the BBS to the internet.
   config also sets `Secure` (cookie only sent over HTTPS).
 - **Optional virus scan** on uploads if `clamav-daemon` is installed —
   infected files are deleted before the DB row is created.
+- **Anonymous visitors default to access_level 0.** Found and fixed in a
+  full auth-security audit: the shared `evaluate_access()` gate (boards,
+  echomail areas, QWK, RSS, file areas — everything with a configurable
+  `min_access_level`) fell through to level 10 ("registered") for a
+  logged-out visitor instead of 0, silently granting anonymous access to
+  anything gated at the standard "registered users only" level.
 
 ## What you MUST do for production
 

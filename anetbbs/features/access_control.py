@@ -42,7 +42,35 @@ def evaluate_access(user, min_level=0, *, is_sysop_only=False, bypass_admin=True
         return True
     if is_sysop_only and not is_admin:
         return False
-    user_level = _get(user, 'access_level', 10) or 10
+    # Real bug found in a full auth/access-control audit: this function's
+    # OWN docstring promises "None is treated as an anonymous user
+    # (access_level 0...)", but the fallback here was `_get(user,
+    # 'access_level', 10) or 10` -- and the REAL anonymous object every
+    # caller actually passes is Flask-Login's stock AnonymousUserMixin
+    # (no custom subclass registered), which is NOT None and has no
+    # `access_level` attribute at all, so the lookup fell through to the
+    # default 10 for every logged-out visitor. Since every gated model's
+    # min_access_level defaults to 10 ("0=public, 10=registered"), an
+    # anonymous visitor silently passed the "registered users only" gate
+    # on every board/area/feed using the default -- directly defeating
+    # the fix boards.py's own _check_board_access() docstring describes
+    # closing ("a sysop restricting a board... still left it fully
+    # readable... to anonymous visitors"): that fix never actually
+    # worked for the common case. Detect anonymous via `is_authenticated`
+    # (Flask-Login's own duck-typed signal: False on AnonymousUserMixin,
+    # True on UserMixin) rather than an attribute-presence check, so a
+    # genuinely-authenticated caller missing `access_level` for some
+    # other reason still gets the old "assume registered" default
+    # instead of being wrongly treated as anonymous. A plain dict with no
+    # `is_authenticated` key (the terminal/session.user case this module
+    # is designed to also support) defaults to "not anonymous", matching
+    # existing behavior for that caller shape.
+    is_anonymous = user is None or not _get(user, 'is_authenticated', True)
+    if is_anonymous:
+        return 0 >= (min_level or 0)
+    user_level = _get(user, 'access_level', None)
+    if user_level is None:
+        user_level = 10
     return user_level >= (min_level or 0)
 
 

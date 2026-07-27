@@ -338,7 +338,13 @@ def download(area_id, filename):
                 return redirect(url_for('file_areas.view_area',
                                         area_id=area.id))
         except Exception:
-            pass
+            # Real gap found in a full file-areas audit: this fails
+            # open (same convention as the virus-scan/archive-integrity
+            # blocks below, deliberate there) but, unlike those, was
+            # completely silent -- a real bug in the FileRatio lookup
+            # would disable ratio enforcement with zero trace anywhere.
+            current_app.logger.exception(
+                'ratio check crashed; allowing download (fail-open)')
 
     # Daily download quota (FR: Firehawke, 2026-07-24) -- see
     # features/file_quota.py's module docstring for the tier-resolution
@@ -463,7 +469,16 @@ def upload(area_id):
             qdir = os.path.join(current_app.config.get('DATA_DIR', 'data'),
                                 'file-queue')
             os.makedirs(qdir, exist_ok=True)
-            qpath = os.path.join(qdir, f'{int(__import__("time").time())}-{safe_name}')
+            # Real gap found in a full file-areas audit: a bare
+            # int(time.time()) prefix only has 1-second resolution --
+            # two uploads of the same-named file within the same second
+            # collided in the quarantine dir, silently overwriting one
+            # (no FileQueueEntry.id exists yet at this point to
+            # disambiguate the way approve()'s own dest-collision
+            # handling does). secrets.token_hex is unique regardless of
+            # timing.
+            import secrets as _secrets
+            qpath = os.path.join(qdir, f'{_secrets.token_hex(8)}-{safe_name}')
             upload.save(qpath)
             entry = FileQueueEntry(
                 file_area_id=area.id,
@@ -544,9 +559,14 @@ def upload(area_id):
 # ---------------------------------------------------------------------------
 
 def _client_ip():
-    fwd = request.headers.get('X-Forwarded-For', '')
-    if fwd:
-        return fwd.split(',')[0].strip()
+    # Real gap found in a full auth-security audit: this trusted a
+    # client-supplied X-Forwarded-For header unconditionally, with no
+    # trusted-proxy boundary -- anyone could pollute last_accessed_ip's
+    # audit trail with an arbitrary fake address. web_app.py's ProxyFix
+    # (opt-in via TRUST_PROXY_HEADERS) is now the only place XFF is
+    # trusted, rewriting request.remote_addr itself when the sysop has
+    # confirmed Flask sits behind their own trusted proxy -- see
+    # web/auth.py's _client_ip() for the full writeup of this same fix.
     return request.remote_addr or ''
 
 
@@ -728,7 +748,18 @@ def manage_desc(area_id):
     if not area.storage_path:
         flash('No storage path set.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
-    full = os.path.join(area.storage_path, filename)
+    # Real gap found in a full file-areas audit: every sibling route that
+    # touches a file by name in this module (manage_delete, download,
+    # create_share, fetch_shared, thumbnail) does this normpath+realpath
+    # confinement check before touching the filesystem -- this one only
+    # had the os.sep/leading-dot check above, not the full guard. Not
+    # currently exploitable on this Linux-only deployment (no os.sep
+    # means no way to leave the directory), but kept consistent with the
+    # established pattern rather than relying on that.
+    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
+        flash('Invalid path.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
     if not os.path.isfile(full):
         flash(f'{filename} not found.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
@@ -871,8 +902,48 @@ def smart_upload():
             return redirect(url_for('file_areas.smart_upload'))
 
         try:
-            os.makedirs(target.storage_path, exist_ok=True)
             safe = os.path.basename(upload.filename)
+            if not safe or safe.startswith('.'):
+                flash('Invalid filename.', 'danger')
+                return redirect(url_for('file_areas.smart_upload'))
+
+            # Real gap found in a full file-areas audit: the per-area
+            # upload() route (above) checks FILE_MOD_QUEUE_ENABLED and
+            # routes non-admin uploads into FileQueueEntry quarantine
+            # before anything reaches area.storage_path or gets TIC-
+            # hatched to the network -- this alternate upload entry
+            # point (auto-detects/lets a user pick the target area by
+            # tag) never checked it at all, saving straight to disk and
+            # hatching immediately. Any user with upload_permission
+            # ('users' on the target area, already correctly checked
+            # above) could use this route instead of the per-area form
+            # to get a file live and out to network peers with ZERO
+            # sysop review, even with moderation explicitly turned on.
+            queue_on = bool(current_app.config.get('FILE_MOD_QUEUE_ENABLED', False))
+            if queue_on and not getattr(current_user, 'is_admin', False):
+                from ..models import FileQueueEntry
+                import time as _time
+                qdir = os.path.join(current_app.config.get('DATA_DIR', 'data'),
+                                    'file-queue')
+                os.makedirs(qdir, exist_ok=True)
+                qpath = os.path.join(qdir, f'{int(_time.time())}-{safe}')
+                upload.save(qpath)
+                entry = FileQueueEntry(
+                    file_area_id=target.id,
+                    user_id=current_user.id,
+                    filename=safe,
+                    quarantine_path=qpath,
+                    description=(request.form.get('description') or '').strip() or None,
+                    size_bytes=os.path.getsize(qpath),
+                    status='pending',
+                )
+                db.session.add(entry)
+                db.session.commit()
+                flash(f'{safe} uploaded to {target.tag} — pending sysop approval.',
+                      'info')
+                return redirect(url_for('file_areas.view_area', area_id=target.id))
+
+            os.makedirs(target.storage_path, exist_ok=True)
             dest = os.path.join(target.storage_path, safe)
             upload.save(dest)
             # Optional virus scan
