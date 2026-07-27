@@ -223,11 +223,20 @@ class PollerImportMessageNotificationTests(_BaseTestCase):
 
 class BinkpListenerImportNotificationTests(_BaseTestCase):
     def _make_network(self, app):
-        from anetbbs.models import db, EchomailNetwork
+        from anetbbs.models import db, EchomailNetwork, EchoArea
         with app.app_context():
             net = EchomailNetwork(name='ListenerNet', network_type='binkp',
                                   our_address='1:114/30', hub_address='1:114/0')
             db.session.add(net)
+            db.session.flush()
+            # A real inbound-listener session no longer auto-creates
+            # unrecognized areas (unknown BinkP tags now route to
+            # BadAreaLog for sysop review, matching poller.py's already-
+            # correct outbound-dial receive path) -- needs a pre-existing,
+            # subscribed area to import into.
+            db.session.add(EchoArea(network_id=net.id, tag='LIVEAREA',
+                                    name='Live Area', is_active=True,
+                                    is_subscribed=True))
             db.session.commit()
             return net.id
 

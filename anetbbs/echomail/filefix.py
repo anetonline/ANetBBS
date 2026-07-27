@@ -109,7 +109,12 @@ def process_request(network, from_address, subject, body):
     expected_pw = (getattr(network, 'areafix_password', None)
                   or getattr(network, 'binkp_password', None) or '').strip()
     provided_pw = (subject or '').strip()
-    if expected_pw and expected_pw != provided_pw:
+    # Same gap as areafix.process_request()'s own documented fix (same
+    # class as _process_node_request() below): this only ever REJECTED
+    # when a password was configured AND wrong -- a network with no
+    # areafix_password/binkp_password set at all sailed straight
+    # through with zero real authentication.
+    if not expected_pw or expected_pw != provided_pw:
         return ("FileFix: password incorrect or missing — no changes made.\n", {
             'network_id': network.id,
             'from_address': from_address, 'request_type': 'badpw',
@@ -202,6 +207,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     # authentication.
     if not expected_pw or expected_pw != provided_pw:
         return ("FileFix: password incorrect or missing — no changes made.\n", {
+            'network_id': network_id,
             'from_address': from_address, 'request_type': 'badpw',
             'area_tags': '', 'response': 'bad filefix password',
             'success': False, 'bot': 'filefix'})
@@ -209,6 +215,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     cmds = parse_request(body)
     if not cmds:
         return (_help_text(), {
+            'network_id': network_id,
             'from_address': from_address, 'request_type': 'help',
             'area_tags': '', 'response': 'help text returned', 'success': True,
             'bot': 'filefix',
@@ -317,6 +324,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     db.session.commit()
     response = '\n'.join(out_lines) + '\n'
     return (response, {
+        'network_id': network_id,
         'from_address': from_address,
         'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),

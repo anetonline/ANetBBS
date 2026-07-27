@@ -57,7 +57,7 @@ class FilefixTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='FilefixLeafNet', network_type='binkp',
-                                  our_address='1:1/1')
+                                  our_address='1:1/1', areafix_password='leafpw123')
             db.session.add(net)
             db.session.flush()
             a1 = FileArea(tag='FF.SUBBED', name='Subbed', network_id=net.id,
@@ -68,7 +68,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
 
             response, log_kwargs = process_request(
-                net, '1:1/2', '', '-FF.SUBBED\n+FF.NOTSUBBED\n')
+                net, '1:1/2', 'leafpw123', '-FF.SUBBED\n+FF.NOTSUBBED\n')
 
             self.assertIn('-FF.SUBBED : unsubscribed', response)
             self.assertIn('+FF.NOTSUBBED : subscribed', response)
@@ -80,20 +80,47 @@ class FilefixTests(unittest.TestCase):
             self.assertFalse(refreshed_a1.is_subscribed)
             self.assertTrue(refreshed_a2.is_subscribed)
 
+    def test_leaf_side_no_password_configured_rejects_not_bypasses(self):
+        """SECURITY: same fix as areafix.process_request() -- a network
+        with no areafix_password/binkp_password configured must fail
+        CLOSED, not apply subscription changes to anyone who can get
+        netmail addressed to "filefix" relayed to this system."""
+        from anetbbs.models import db, EchomailNetwork, FileArea
+        from anetbbs.echomail.filefix import process_request
+
+        with self.app.app_context():
+            net = EchomailNetwork(name='FilefixNoPwNet', network_type='binkp',
+                                  our_address='1:1/1')
+            db.session.add(net)
+            db.session.flush()
+            area = FileArea(tag='FF.NOPW', name='No Pw', network_id=net.id,
+                            is_active=True, is_subscribed=False)
+            db.session.add(area)
+            db.session.commit()
+
+            response, log_kwargs = process_request(
+                net, '1:1/2', '', '+FF.NOPW\n')
+
+            self.assertFalse(log_kwargs['success'])
+            self.assertEqual(log_kwargs['request_type'], 'badpw')
+            refreshed = FileArea.query.filter_by(tag='FF.NOPW').first()
+            self.assertFalse(refreshed.is_subscribed,
+                             'no changes must be applied without a real password')
+
     def test_leaf_side_percent_list(self):
         from anetbbs.models import db, EchomailNetwork, FileArea
         from anetbbs.echomail.filefix import process_request
 
         with self.app.app_context():
             net = EchomailNetwork(name='FilefixListNet', network_type='binkp',
-                                  our_address='1:1/1')
+                                  our_address='1:1/1', areafix_password='listpw123')
             db.session.add(net)
             db.session.flush()
             db.session.add(FileArea(tag='FF.LISTED', name='Listed', network_id=net.id,
                                     is_active=True, is_subscribed=True))
             db.session.commit()
 
-            response, _ = process_request(net, '1:1/2', '', '%LIST\n')
+            response, _ = process_request(net, '1:1/2', 'listpw123', '%LIST\n')
             self.assertIn('FF.LISTED', response)
 
     def test_leaf_side_plain_list_request_logs_as_query_not_unsubscribe(self):
@@ -104,11 +131,11 @@ class FilefixTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='FilefixQueryLogNet', network_type='binkp',
-                                  our_address='6:7/1')
+                                  our_address='6:7/1', areafix_password='querypw123')
             db.session.add(net)
             db.session.commit()
 
-            response, log_kwargs = process_request(net, '6:7/2', '', '%LIST\n')
+            response, log_kwargs = process_request(net, '6:7/2', 'querypw123', '%LIST\n')
             self.assertEqual(log_kwargs['request_type'], 'query')
 
     def test_hub_side_subscribe_creates_file_echo_subscription_not_echoareanode(self):
@@ -166,7 +193,8 @@ class FilefixTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='FilefixE2ELeaf', network_type='binkp',
-                                  our_address='1:1/1', hub_address='1:1/2')
+                                  our_address='1:1/1', hub_address='1:1/2',
+                                  areafix_password='e2eleaffilefixpw')
             db.session.add(net)
             db.session.flush()
             area = FileArea(tag='FF.E2ELEAF', name='E2E Leaf', network_id=net.id,
@@ -176,7 +204,7 @@ class FilefixTests(unittest.TestCase):
 
             inbound = NetmailMessage(
                 network_id=net.id, from_address='1:1/2', to_address='1:1/1',
-                from_name='Hub', to_name='filefix', subject='filefix',
+                from_name='Hub', to_name='filefix', subject='e2eleaffilefixpw',
                 body='+FF.E2ELEAF\n', direction='inbound', status='received')
             db.session.add(inbound)
             db.session.commit()

@@ -266,7 +266,16 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
     messages = _parse_messages_dat(msg_bytes, conferences)
     imported = 0
 
-    # Pick a default network (the first active BinkP/QWK network we know).
+    # Fallback network for the rare case an area has no network_id of its
+    # own (the first active BinkP/QWK network we know) -- real bug found
+    # in a full echomail-subsystem audit: this used to be preferred OVER
+    # area.network_id whenever ANY active network existed (essentially
+    # always), so on any multi-network install every message imported
+    # here got mistagged with an arbitrary "first active network" instead
+    # of the network the target echo area actually belongs to. Same
+    # "network misattribution" bug class already fixed once for BinkP
+    # (downstream-node network misattribution, multi-hub-identity net_id
+    # loss) -- reappeared here, unfixed, in the QWK HTTP-hub sibling path.
     default_net = EchomailNetwork.query.filter_by(is_active=True).first()
     net_id = default_net.id if default_net else None
 
@@ -278,20 +287,44 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
                          node.packet_id, conf_num)
             continue
 
-        em = EchomailMessage(
-            area_id=area.id,
-            network_id=net_id or area.network_id,
-            from_name=(m['from_name'] or '')[:100],
-            to_name=(m['to_name'] or 'All')[:100],
-            subject=(m['subject'] or '')[:200],
-            body=m['body'],
-            msg_id=m.get('msg_id'),
-            reply_id=m.get('reply_id'),
-            direction='inbound',
-            created_at=datetime.utcnow(),
-            imported_at=datetime.utcnow(),
-        )
-        db.session.add(em)
+        # Real gap found in a full echomail-subsystem audit: this REP
+        # importer never deduplicated by msg_id before inserting, unlike
+        # the BinkP import paths (poller.py's _import_message(),
+        # binkp_server.py's _import_pkt_payload()), which both check for
+        # an existing (msg_id, area_id) row first. A node re-uploading
+        # the same REP (a retried request after a dropped connection, a
+        # client resubmission after a timed-out ack) duplicated every
+        # message in it.
+        msg_id = m.get('msg_id')
+        if msg_id and EchomailMessage.query.filter_by(
+                msg_id=msg_id, area_id=area.id).first():
+            continue
+
+        # SAVEPOINT-isolated per message, same pattern already used in
+        # qwk_hub_ftp.py's process_rep_upload() -- a single bad message
+        # (constraint violation, unexpected field) must not poison the
+        # whole batch/abort the upload uncommitted with no trace.
+        try:
+            with db.session.begin_nested():
+                em = EchomailMessage(
+                    area_id=area.id,
+                    network_id=area.network_id or net_id,
+                    from_name=(m['from_name'] or '')[:100],
+                    to_name=(m['to_name'] or 'All')[:100],
+                    subject=(m['subject'] or '')[:200],
+                    body=m['body'],
+                    msg_id=m.get('msg_id'),
+                    reply_id=m.get('reply_id'),
+                    direction='inbound',
+                    created_at=datetime.utcnow(),
+                    imported_at=datetime.utcnow(),
+                )
+                db.session.add(em)
+        except Exception:
+            logger.exception('QWK hub REP from %s: error importing message '
+                             '(this message skipped, earlier ones in this '
+                             'batch are unaffected)', node.packet_id)
+            continue
         area.total_messages = (area.total_messages or 0) + 1
         area.last_message_at = datetime.utcnow()
         imported += 1
@@ -358,7 +391,16 @@ def upload_rep(packet_id_rep: str):
     if not rep_bytes:
         abort(400, description='Empty REP packet')
 
-    n = import_rep_packet(node, rep_bytes)
+    # Per-message failures are already isolated inside import_rep_packet()
+    # (SAVEPOINT per message) -- this catches anything from the packet-
+    # level parse (a malformed MESSAGES.DAT) so a bad upload gets a clean
+    # error response instead of a raw 500 with no diagnostic for the node.
+    try:
+        n = import_rep_packet(node, rep_bytes)
+    except Exception:
+        logger.exception('QWK hub REP from %s: packet-level import failure',
+                         node.packet_id)
+        abort(400, description='Could not parse REP packet')
     return f'OK {n} messages imported\r\n', 200
 
 

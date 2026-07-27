@@ -182,7 +182,16 @@ def process_request(network, from_address, subject, body):
     expected_pw = (getattr(network, 'areafix_password', None)
                   or getattr(network, 'binkp_password', None) or '').strip()
     provided_pw = (subject or '').strip()
-    if expected_pw and expected_pw != provided_pw:
+    # Real gap found in a full echomail-subsystem audit: this only ever
+    # REJECTED when a password was configured AND wrong -- a network
+    # with no areafix_password/binkp_password set at all (plausible for
+    # a leaf that never got around to configuring one) sailed straight
+    # through with zero real authentication, letting ANY inbound
+    # netmail addressed to "areafix" (spoofable From:) unsubscribe/
+    # resubscribe every echo area. Same bug class already fixed once in
+    # _process_node_request() below -- the fix was never mirrored back
+    # here. Matches this function's own docstring's claimed intent.
+    if not expected_pw or expected_pw != provided_pw:
         return ("Areafix: password incorrect or missing — no changes made.\n", {
             'network_id': network.id,
             'from_address': from_address, 'request_type': 'badpw',
@@ -273,12 +282,14 @@ def _process_node_request(node, from_address, subject, body):
     # relying on that.
     if not expected_pw or expected_pw != provided_pw:
         return ("Areafix: password incorrect or missing — no changes made.\n", {
+            'network_id': node.network_id,
             'from_address': from_address, 'request_type': 'badpw',
             'area_tags': '', 'response': 'bad areafix password', 'success': False})
 
     cmds = parse_request(body)
     if not cmds:
         return (_help_text(), {
+            'network_id': node.network_id,
             'from_address': from_address, 'request_type': 'help',
             'area_tags': '', 'response': 'help text returned', 'success': True,
         })
@@ -455,6 +466,7 @@ def _process_node_request(node, from_address, subject, body):
     db.session.commit()
     response = '\n'.join(out_lines) + '\n'
     return (response, {
+        'network_id': node.network_id,
         'from_address': from_address,
         'request_type': _classify_request_type(cmds),
         'area_tags': ','.join(affected),

@@ -51,14 +51,16 @@ class QwkUserRepUploadPartialRollbackTests(unittest.TestCase):
             db.session.add(net)
             db.session.commit()
             # conf_num in the legacy positional scheme this route uses is
-            # a 1-based index into EchoArea.query.filter_by(is_active=True)
-            # -- find our own test area's real position rather than
-            # assuming an empty DB (create_app() auto-seeds default areas).
+            # a 1-based index into _qwk_accessible_areas(user) -- find our
+            # own test area's real position rather than assuming an empty
+            # DB (create_app() auto-seeds default areas), using the exact
+            # same helper the route itself uses to build/consume that list.
             area = EchoArea(network_id=net.id, tag='REPUP', name='Rep Upload Test',
                             is_active=True, min_access_level=0)
             db.session.add(area)
             db.session.commit()
-            areas = EchoArea.query.filter_by(is_active=True).all()
+            from anetbbs.web.qwk_user import _qwk_accessible_areas
+            areas = _qwk_accessible_areas(user)
             cls.conf_num = next(i for i, a in enumerate(areas, 1) if a.id == area.id)
             cls.area_id = area.id
 

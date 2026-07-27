@@ -168,9 +168,14 @@ page (**custom AreaFix command**, `POST /admin/echomail/networks/
 <id>/custom_areafix`) to send any raw command line straight to the
 uplink — `+TAG`, `%RESCAN <tag>`, `%COMPRESS GZIP`, anything the
 robot accepts above — with an optional `robot` form field
-(`robot=FileFix`) to target the FileFix robot instead. This is the only in-UI path to send
-`%RESCAN`. All AreaFix traffic (in and out) is logged at
-**Admin → Echomail Networks → AreaFix Log** (`/admin/echomail/areafix_log`).
+(`robot=FileFix`) to target the FileFix robot instead. There are also
+two dedicated buttons that trigger the same re-toss without needing the
+raw command form: a per-area **Rescan** button on **Manage Areas**
+(`POST /admin/echomail/areas/<id>/rescan`) and a per-network
+**Rescan All** button (`POST /admin/echomail/networks/<id>/rescan_all`).
+All AreaFix (and FileFix) traffic is logged at
+**Admin → Echomail Networks → AreaFix Log** (`/admin/echomail/areafix_log`),
+with a Bot column and an AreaFix/FileFix filter.
 
 ## Other admin utilities
 
@@ -362,7 +367,11 @@ regular per-network echomail admin every install has:
     areas](07-file-areas.md#hatched-files-tic) for how files get
     queued in the first place; no manual step needed, files uploaded
     to any `ANN.FILES.*`-style network-attached area queue themselves
-    automatically.
+    automatically. Links to two dedicated log pages for drilling into
+    the raw queue rows: **TIC Out Log** (`/admin/hatch-log` — every
+    outbound hatch item, pending/sent/failed, which peer, retry count,
+    last error, filterable by status) and **TIC In Log**
+    (`/admin/tic-log` — inbound TIC manifests received).
   - **Join Form** — enable/configure the public application page
     described below.
 

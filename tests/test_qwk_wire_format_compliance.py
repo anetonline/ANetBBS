@@ -159,11 +159,14 @@ class QwkUserBlobHeaderTests(_QwkDbTestBase):
             db.session.commit()
 
             # create_app() auto-seeds a bunch of default active areas --
-            # count what's actually there rather than assuming an empty
-            # DB, since only the *structure* is under test here.
-            expected_count = EchoArea.query.filter_by(is_active=True).count()
+            # count what this user can actually access (same helper the
+            # route itself uses, which now gates by access level/
+            # sysop-only -- a blanket is_active count would overcount if
+            # any seeded default area is sysop-only) rather than assuming
+            # an empty DB, since only the *structure* is under test here.
+            from anetbbs.web.qwk_user import _build_qwk_blob, _qwk_accessible_areas
+            expected_count = len(_qwk_accessible_areas(user))
 
-            from anetbbs.web.qwk_user import _build_qwk_blob
             blob = _build_qwk_blob(user)
 
             with zipfile.ZipFile(blob) as zf:

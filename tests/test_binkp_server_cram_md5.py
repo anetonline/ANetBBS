@@ -127,6 +127,28 @@ class VerifyBinkpPasswordTests(unittest.TestCase):
         self.assertFalse(_verify_binkp_password(
             '', 'CRAM-MD5-deadbeef', challenge))
 
+    def test_no_password_configured_accepts_binkp_clients_dash_sentinel(self):
+        """binkp.py's own outbound client sends the literal placeholder
+        "-" for M_PWD when it has no password configured (a real BinkP
+        convention -- M_PWD historically couldn't carry an empty value).
+        Two unsecured links (e.g. two ANetBBS installs both intentionally
+        configured with no BinkP password) must actually authenticate,
+        not silently fail because our blank stored password only ever
+        matched a literal empty M_PWD, never our own client's "-"."""
+        from anetbbs.echomail.binkp_server import _verify_binkp_password
+        self.assertTrue(_verify_binkp_password('', '-', b'x' * 32))
+
+    def test_no_password_configured_still_accepts_literal_empty_pwd(self):
+        from anetbbs.echomail.binkp_server import _verify_binkp_password
+        self.assertTrue(_verify_binkp_password('', '', b'x' * 32))
+
+    def test_password_configured_rejects_dash_sentinel(self):
+        """The "-" fallback must only apply when WE have no password
+        configured -- a peer sending "-" against a network that DOES
+        require a password must still be rejected."""
+        from anetbbs.echomail.binkp_server import _verify_binkp_password
+        self.assertFalse(_verify_binkp_password('realpassword', '-', b'x' * 32))
+
 
 class InboundPollTypeTests(unittest.TestCase):
     """Pure unit tests for _inbound_poll_type() -- part of the fix for a

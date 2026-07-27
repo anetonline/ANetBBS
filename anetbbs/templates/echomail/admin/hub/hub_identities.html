@@ -63,6 +63,7 @@
                     <td class="text-end">
                         {% if not identity.is_default %}
                         <form method="POST" action="{{ url_for('hub_admin.set_default_hub_identity', identity_id=identity.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-primary">Make Default</button>
                         </form>
                         {% endif %}

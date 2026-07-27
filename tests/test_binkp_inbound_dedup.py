@@ -83,12 +83,22 @@ class InboundDedupTests(unittest.TestCase):
         self.app = _fresh_app(str(Path(self._tmp.name) / 'inbound_dedup.db'))
 
     def _make_network(self):
-        from anetbbs.models import db, EchomailNetwork
+        from anetbbs.models import db, EchomailNetwork, EchoArea
         with self.app.app_context():
             net = EchomailNetwork(name='TestNet', network_type='binkp',
                                   our_address='1:114/30',
                                   hub_address='1:114/0')
             db.session.add(net)
+            db.session.flush()
+            # A real inbound-listener session no longer auto-creates
+            # unrecognized areas (see binkp_server.py's own audit fix --
+            # unknown BinkP tags now route to BadAreaLog for sysop review
+            # instead of silently appearing, same as poller.py's already-
+            # correct outbound-dial receive path), so this dedup test
+            # needs a pre-existing, subscribed area to import into.
+            db.session.add(EchoArea(network_id=net.id, tag='TEST_AREA',
+                                    name='Test Area', is_active=True,
+                                    is_subscribed=True))
             db.session.commit()
             return net.id
 

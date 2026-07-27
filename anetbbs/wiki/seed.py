@@ -1927,11 +1927,15 @@ admin surface appears at `/admin/echomail/hub/`:
 - **Join Form** (`/admin/echomail/hub/join/requests`) — a SEPARATE
   review queue from Node requests above, for the public self-service
   `/join/` application form (see [[ANotherNetwork]]) — a prospective
-  member fills it out, uploads/confirms their `*NETMAIL.NA` and echo/
-  file-echo picks, and it lands here for approval. Approving
-  auto-creates the BinkP and/or QWK node record(s) and emails
-  credentials; a rules-file upload and other config for the form
-  itself live under **Join Form** too.
+  member fills in their BBS name/location/software/telnet address, an
+  optional BinkP address (crash/hold) and/or QWK packet ID, notes, and
+  acknowledges the rules; no file upload or echo/file-echo picker is
+  part of the form. Each pending application has a full detail/View
+  page before you decide, with Approve/Deny/Archive actions right
+  there. Approving auto-creates the BinkP and/or QWK node record(s)
+  (BinkP node numbers auto-assign from the hub's own configured
+  zone:net) and emails credentials; a rules-file upload and other
+  config for the form itself live under **Join Form** too.
 - **Generation & Distribution** — generate the nodelist right now
   (in addition to its weekly schedule), preview a QWK packet for a
   node without marking anything as sent, and see TIC/file
@@ -3315,6 +3319,13 @@ separate allow-list page. To see incoming AreaFix requests and how
 they were handled, check the AreaFix Log at
 `/admin/echomail/areafix_log`.
 
+FileFix (`FileFix@<your-node>`, also `File Fix`/`FileMgr`) is the
+file-echo counterpart — same idea, same password (Subject-line,
+FTS-0024), same `+TAG`/`-TAG`/`+ALL`/`-ALL`/`%LIST`/`%HELP` grammar,
+but for file-area subscriptions instead of message areas. It shares
+the AreaFix Log page above (a **Bot** column and filter distinguish
+AreaFix from FileFix rows), rather than having a separate log.
+
 ## Encryption
 
 Bare FidoNet netmail is not encrypted. For secrets, encrypt the
@@ -3483,7 +3494,9 @@ File areas that carry a TIC file-echo are managed at
 `/admin/file-areas` — each one is a `FileArea` row attached to an
 `EchomailNetwork` (`network_id` set). For each: which local storage
 path to drop into, and (under `/admin/file-echo-subs`) which peers
-are subscribed to receive it.
+are subscribed to receive it. A downstream peer can also self-serve
+their own subscriptions via netmail to the [[Netmail#AreaFix|FileFix]]
+robot instead of the sysop managing it by hand.
 
 ## Forwarding
 
@@ -3522,6 +3535,15 @@ to.
 left in place (not moved) and the TIC row is flagged `status='error'`
 with an `error_message` describing the mismatch (expected vs. actual
 CRC) — visible in the TIC admin log for manual review.
+
+## Admin logs
+
+Inbound and outbound get separate log pages: **TIC In Log**
+(`/admin/tic-log`) for manifests received, **TIC Out Log**
+(`/admin/hatch-log`) for the `HatchQueue` items described above —
+pending/sent/failed, which peer, retry count, and the last delivery
+error if one occurred, filterable by status. Both are linked from the
+Hub Management TIC/File Distribution tab.
 
 ## See also
 

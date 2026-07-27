@@ -142,8 +142,18 @@ class HubIdentityForm(FlaskForm):
 
 
 class QWKNodeForm(FlaskForm):
-    packet_id = StringField('Packet ID (up to 8 chars, e.g. MYNODE)',
-                            validators=[DataRequired(), Length(max=8)])
+    # Real gap found in a full echomail-subsystem audit: the self-service
+    # QWK node application API (web/qwk_hub.py's apply endpoint) already
+    # validates packet_id against ^[A-Z0-9]{2,8}$ specifically because it
+    # flows unvalidated into filesystem paths (ensure_node_dir(), the FTP
+    # server's per-node home dir) -- this admin form had no such
+    # constraint, just Length(max=8), so a sysop-entered (or an approved-
+    # request-derived) packet_id containing e.g. "../" could escape
+    # data_dir/qwk-hub/.
+    packet_id = StringField('Packet ID (2-8 chars, A-Z/0-9 only, e.g. MYNODE)',
+                            validators=[DataRequired(), Length(min=2, max=8),
+                                       Regexp(r'^[A-Za-z0-9]+$',
+                                             message='Packet ID must be letters and digits only.')])
     name = StringField('BBS Name', validators=[DataRequired(), Length(max=100)])
     sysop = StringField('Sysop Name', validators=[Optional(), Length(max=100)])
     email = StringField('Sysop Email', validators=[Optional(), Length(max=200)])
@@ -1023,6 +1033,16 @@ def approve_qwk_request(req_id):
         return redirect(url_for('hub_admin.qwk_node_requests'))
 
     pid = req.packet_id.upper()
+    # Defense in depth: packet_id flows into filesystem paths
+    # (ensure_node_dir(), the FTP server's per-node home dir) once this
+    # becomes a real QWKNode -- re-validate here rather than trusting
+    # whatever a request's own creation path already enforced (same
+    # reasoning as the admin QWKNodeForm's own packet_id validator).
+    import re as _re
+    if not _re.match(r'^[A-Z0-9]{2,8}$', pid):
+        flash(f'Packet ID {pid!r} is not valid (2-8 letters/digits only) '
+              f'— deny this request.', 'danger')
+        return redirect(url_for('hub_admin.qwk_node_requests'))
     if QWKNode.query.filter_by(packet_id=pid).first():
         flash(f'Packet ID {pid} is already taken — deny this request or edit first.', 'danger')
         return redirect(url_for('hub_admin.qwk_node_requests'))

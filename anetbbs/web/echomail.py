@@ -205,7 +205,19 @@ def thread(area_id, message_id):
         abort(404)
     _check_area_access(echo_area)
 
-    seed = EchomailMessage.query.get_or_404(message_id)
+    # Real gap found in a full echomail-subsystem audit: every sibling
+    # message-by-ID lookup in this file (read(), compose()'s reply_to_id)
+    # scopes the query by area_id -- this one used a bare get_or_404(),
+    # so a logged-in user could seed a thread view with a message_id from
+    # ANY area (sysop-only, restricted min_access_level, or a NETMAIL
+    # area they don't own), bypassing both _check_area_access() above
+    # (which only validates THIS route's own area_id) and the NETMAIL
+    # ownership check read() enforces. The seed message's from/to/subject/
+    # body get rendered regardless of which area it actually belongs to.
+    seed = EchomailMessage.query.filter_by(
+        id=message_id, area_id=area_id).first_or_404()
+    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(seed, current_user):
+        abort(403)
     # Walk up to find root.
     root = seed
     seen_ids = {root.id}
@@ -563,7 +575,14 @@ def next_unread(area_id):
 @login_required
 def mark_all_read(area_id):
     """Mark all messages in an area as read for the current user."""
-    EchoArea.query.get_or_404(area_id)
+    # Real gap found in a full echomail-subsystem audit: every sibling
+    # area-scoped route in this file (area, thread, read, compose,
+    # next_unread) calls _check_area_access() -- this one didn't, letting
+    # a user without access to a sysop-only/high-min_access_level area
+    # write EchomailReadStatus/EchomailLastRead rows scoped to its
+    # message IDs, and confirm the area exists via 200-vs-404.
+    echo_area = EchoArea.query.get_or_404(area_id)
+    _check_area_access(echo_area)
 
     # Find messages not yet read
     already_read = {

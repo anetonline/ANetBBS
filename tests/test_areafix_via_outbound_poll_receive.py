@@ -54,7 +54,8 @@ class AreafixViaOutboundPollReceiveTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='AreafixOutboundPollNet', network_type='binkp',
-                                  our_address='4:4/1', hub_address='4:4/2')
+                                  our_address='4:4/1', hub_address='4:4/2',
+                                  areafix_password='outpollpw')
             db.session.add(net)
             db.session.flush()
             area = EchoArea(tag='AF.OUTPOLL', name='Out Poll Test', network_id=net.id,
@@ -64,14 +65,15 @@ class AreafixViaOutboundPollReceiveTests(unittest.TestCase):
 
             # Shape matches what BinkPClient.poll()'s 'received' list
             # produces for a netmail (no area_tag) -- see
-            # _import_message()'s own "no AREA: kludge" branch.
+            # _import_message()'s own "no AREA: kludge" branch. `subject`
+            # carries the AreaFix password (FTS-0024), not the robot name.
             msg_data = {
                 'area_tag': None,
                 'from_name': 'Hub',
                 'from_address': '4:4/2',
                 'to_name': 'areafix',
                 'to_address': '4:4/1',
-                'subject': 'areafix',
+                'subject': 'outpollpw',
                 'body': '+AF.OUTPOLL\n',
             }
 
@@ -95,7 +97,8 @@ class AreafixViaOutboundPollReceiveTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='FilefixOutboundPollNet', network_type='binkp',
-                                  our_address='4:5/1', hub_address='4:5/2')
+                                  our_address='4:5/1', hub_address='4:5/2',
+                                  areafix_password='ffoutpollpw')
             db.session.add(net)
             db.session.flush()
             area = FileArea(tag='FF.OUTPOLL', name='FF Out Poll Test', network_id=net.id,
@@ -109,7 +112,7 @@ class AreafixViaOutboundPollReceiveTests(unittest.TestCase):
                 'from_address': '4:5/2',
                 'to_name': 'filefix',
                 'to_address': '4:5/1',
-                'subject': 'filefix',
+                'subject': 'ffoutpollpw',
                 'body': '+FF.OUTPOLL\n',
             }
 

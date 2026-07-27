@@ -163,8 +163,23 @@ def parse_line(line, state):
     flags = parse_flags(flag_part)
 
     kw = keyword_type.lower()
+    # Real bug found in a full echomail-subsystem audit: a point-address
+    # row (e.g. "12.5" -- node 12, point 5) made int(raw_node) raise
+    # ValueError here and return None immediately, well before the
+    # dedicated point-parsing block further down ever ran -- that block
+    # was dead code, unreachable for exactly the input it exists to
+    # handle. Every point address in any imported nodelist was silently
+    # dropped. Parse the point-aware form up front instead; Zone/Net/
+    # Host/Region coordinator rows are never dotted in practice, so this
+    # doesn't change behavior for them.
+    point_number = 0
     try:
-        node_number = int(raw_node)
+        if '.' in raw_node:
+            n_str, p_str = raw_node.split('.', 1)
+            node_number = int(n_str)
+            point_number = int(p_str)
+        else:
+            node_number = int(raw_node)
     except ValueError:
         return None
 
@@ -182,16 +197,6 @@ def parse_line(line, state):
         if raw_node.isdigit():
             node_number = int(raw_node)
             keyword_type = ''
-
-    # Point address support (e.g. "12.5" — node 12, point 5)
-    point_number = 0
-    if isinstance(raw_node, str) and '.' in raw_node:
-        try:
-            n_str, p_str = raw_node.split('.', 1)
-            node_number = int(n_str)
-            point_number = int(p_str)
-        except ValueError:
-            pass
 
     return {
         'zone': state.current_zone,

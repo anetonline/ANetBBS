@@ -122,7 +122,9 @@ the file-area equivalent of echomail. It runs in both directions:
 
 If you've subscribed to file echos via FidoNet, the TIC processor
 (`anetbbs/echomail/tic.py`) auto-files incoming `.tic` packets into the
-matching area. Audit at **Admin → TIC Log** (`/admin/tic-log`).
+matching area. Audit at **Admin → TIC In Log** (`/admin/tic-log`) — its
+outbound counterpart, **TIC Out Log** (`/admin/hatch-log`), covers the
+queue described below.
 
 ### Outbound — automatic, no manual step
 
@@ -154,10 +156,13 @@ are unaffected — nothing is queued for those.
 Delivery happens on the next BinkP poll per peer. A sysop running this
 BBS as a network hub can see the outbound queue's current
 pending/failed counts on the **TIC / File Distribution** tab of **Admin
-→ Echomail Networks → Hub Management** (`/admin/echomail/hub/`) — see
-[doc 6](06-echomail.md) for the full Hub Management writeup. That view
-is hub-operator-only (gated by `REGISTRY_MODE_ENABLED`); the plain
-**Admin → TIC Log** audit page above is available on every install.
+→ Echomail Networks → Hub Management** (`/admin/echomail/hub/`), which
+links through to the **TIC Out Log** (`/admin/hatch-log`) for the full
+per-item detail (which file, which peer, retry count, last error) — see
+[doc 6](06-echomail.md) for the full Hub Management writeup. That
+dashboard view is hub-operator-only (gated by `REGISTRY_MODE_ENABLED`);
+the plain **Admin → TIC In/Out Log** audit pages above are available on
+every install.
 
 ## FileFix — subscription requests from peers
 
@@ -196,8 +201,9 @@ The sysop side of outbound FileFix requests (subscribe/unsubscribe
 buttons on file-area management pages) queues the same kind of netmail
 automatically — see `send_areafix_request(..., robot_name='FileFix')`
 in `areafix.py` (FileFix reuses AreaFix's outbound sender directly).
-Traffic is logged in the same **Admin → Echomail Networks → AreaFix
-Log** table AreaFix uses (`bot='filefix'` distinguishes the rows).
+Traffic is logged on the same **Admin → Echomail Networks → AreaFix
+Log** page AreaFix uses (`/admin/echomail/areafix_log`) — a **Bot**
+column and an AreaFix/FileFix filter distinguish the rows.
 
 ## Shareable links
 

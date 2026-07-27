@@ -380,6 +380,20 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                 if area is None:
                     continue
 
+                # Real gap found in a full echomail-subsystem audit: this
+                # REP importer never deduplicated by msg_id before
+                # inserting, unlike the BinkP import paths (poller.py's
+                # _import_message(), binkp_server.py's
+                # _import_pkt_payload()), which both check for an
+                # existing (msg_id, area_id) row first. A node re-
+                # uploading the same REP (a retried STOR after a dropped
+                # FTP connection, a resubmission after a timed-out ack)
+                # duplicated every message in it.
+                msg_id = msg_dict.get('msg_id')
+                if msg_id and EchomailMessage.query.filter_by(
+                        msg_id=msg_id, area_id=area.id).first():
+                    continue
+
                 # Real bug found in a full echomail-subsystem audit: a
                 # bare db.session.rollback() here rolls back the ENTIRE
                 # open transaction, not just this one message -- so any

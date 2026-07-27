@@ -121,7 +121,10 @@ def drafts():
     if addrs:
         name_clauses.append(NetmailMessage.from_address.in_(addrs))
     q = q.filter(db.or_(*name_clauses))
-    msgs = q.order_by(NetmailMessage.created_at.desc()).all()
+    # inbox()/sent() both cap at .limit(200) -- this one didn't, found in
+    # a full echomail-subsystem audit. Scoped to the current user only so
+    # low practical risk, but inconsistent with its siblings.
+    msgs = q.order_by(NetmailMessage.created_at.desc()).limit(200).all()
     return render_template('netmail/list.html', messages=msgs, folder='drafts')
 
 

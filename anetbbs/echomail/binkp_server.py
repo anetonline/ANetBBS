@@ -209,6 +209,17 @@ def _verify_binkp_password(stored_password, remote_pwd, challenge_bytes):
         expected = hmac.new(stored.encode('latin-1'), challenge_bytes,
                             hashlib.md5).hexdigest()
         return digest.lower() == expected.lower()
+    # binkp.py's client (our own outbound-dial side) sends the literal
+    # placeholder "-" for M_PWD when it has no password configured --
+    # a real-world BinkP convention (M_PWD historically couldn't carry
+    # an empty value). Two unsecured links (an ANetBBS install with no
+    # password dialing another with no password configured, e.g. a
+    # sysop testing a leaf link before adding real credentials) never
+    # actually authenticated, because a blank `stored` password only
+    # ever matched a literal empty M_PWD, never binkp.py's own "-"
+    # sentinel for the exact same "no password" state.
+    if not stored and remote in ('', '-'):
+        return True
     return stored == remote
 
 
@@ -1480,6 +1491,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     from ..models import db, EchomailMessage, EchoArea, NetmailMessage, EchomailNetwork
     from .kludges import find_kludge
     from .routing import resolve_netmail_recipient
+    from .poller import _record_bad_area
 
     network = EchomailNetwork.query.get(network_id)
 
@@ -1500,11 +1512,38 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # ECHOMAIL — route to area
             area = EchoArea.query.filter_by(
                 network_id=network_id, tag=m['area_tag']).first()
+            # Real gap found in a full echomail-subsystem audit: this
+            # path (a peer connecting IN to deliver mail) auto-created a
+            # brand-new, immediately-active, immediately-subscribed
+            # EchoArea for ANY unrecognized tag -- any peer that could
+            # complete a BinkP handshake (a downstream node, or the hub
+            # that already dials us) could make new echo areas silently
+            # appear with zero sysop review, and it never re-checked an
+            # EXISTING area's is_subscribed/is_active before importing
+            # into it either. poller.py's own _import_message() (the
+            # outbound-poll receive path) already routes unrecognized/
+            # unsubscribed BinkP tags to BadAreaLog instead (SBBSecho's
+            # BadAreaFile semantics) -- this listener path never got the
+            # same treatment.
             if area is None:
-                area = EchoArea(network_id=network_id,
-                                tag=m['area_tag'], name=m['area_tag'])
-                db.session.add(area)
-                db.session.flush()
+                _record_bad_area(
+                    network, m['area_tag'], m,
+                    reason='unknown',
+                    title=f"Unknown echomail area: {m['area_tag']} on {network.name if network else network_id}",
+                    body=f"Inbound mail arrived tagged for {m['area_tag']!r}, "
+                         f"which this BBS does not carry. Review under "
+                         f"Admin -> Echomail -> Bad Areas.")
+                continue
+            if not area.is_subscribed or not area.is_active:
+                _record_bad_area(
+                    network, m['area_tag'], m,
+                    reason='unsubscribed',
+                    title=f"Mail dropped for unsubscribed area: {m['area_tag']} on {network.name if network else network_id}",
+                    body=f"Inbound mail arrived for {m['area_tag']!r}, which "
+                         f"this BBS carries but is not subscribed to (or has "
+                         f"deactivated). Review under Admin -> Echomail -> "
+                         f"Bad Areas.")
+                continue
 
             # Deduplicate by MSGID, same as poller.py's _import_message()
             # (the outbound-poll import path) already does. This path --

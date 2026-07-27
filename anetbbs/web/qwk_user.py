@@ -16,9 +16,38 @@ from flask import Blueprint, send_file, request, redirect, url_for, flash, rende
 from flask_login import login_required, current_user
 
 from ..models import (db, EchomailMessage, EchoArea, EchomailLastRead)
+from ..features.access_control import evaluate_access
 
 
 qwk_user_bp = Blueprint('qwk_user', __name__, url_prefix='/qwk')
+
+
+def _qwk_accessible_areas(user):
+    """Active areas this user may see via QWK, in a stable order.
+
+    Real gap found in a full echomail-subsystem audit: every other
+    echomail entry point in this codebase (web/echomail.py) gates areas
+    through evaluate_access()/min_access_level/is_sysop_only -- this QWK
+    path queried EchoArea.query.filter_by(is_active=True).all() with NO
+    access filtering at all, so any logged-in user's QWK download
+    included messages from sysop-only/restricted areas, and upload let
+    them post INTO those same areas via REP import (full read+write
+    bypass). Also explicit .order_by(EchoArea.id) -- conf_num is a
+    1-based index into this exact list, independently re-queried by
+    download() and upload(); an unordered query relies on incidental SQL
+    row order, which isn't guaranteed stable between two separate calls.
+    (A truly stable per-user conf_num mapping across area-set CHANGES
+    between a user's download and later upload -- the same problem
+    QWKNodeLastSent.conf_number solves for federated hub nodes -- would
+    need a persistent per-user table; not addressed here, only the
+    access-control gap and same-request-window ordering determinism.)
+    """
+    q = EchoArea.query.filter_by(is_active=True).order_by(EchoArea.id)
+    if getattr(user, 'is_admin', False):
+        return q.all()
+    return [a for a in q.all()
+            if evaluate_access(user, a.min_access_level,
+                               is_sysop_only=a.is_sysop_only, bypass_admin=True)]
 
 
 def _last_read_map(user_id):
@@ -39,8 +68,8 @@ def _build_qwk_blob(user):
     bbs_name = os.environ.get('BBS_NAME', 'ANetBBS')
     sysop = os.environ.get('SYSOP_NAME', 'Sysop')
 
-    # Active areas user is subscribed to (or all active if no filter).
-    areas = EchoArea.query.filter_by(is_active=True).all()
+    # Active areas this user has access to.
+    areas = _qwk_accessible_areas(user)
     last_read = _last_read_map(user.id)
 
     # Conference list — one numeric id per area.
@@ -169,6 +198,16 @@ def upload():
     """Accept a .REP packet from the user. We extract MESSAGES.DAT
     and import each message as outbound echomail in the matching area
     (matched by conference number)."""
+    from ..models import UserAccessFlags
+    # Real gap found in a full echomail-subsystem audit: download()
+    # checks UserAccessFlags.no_qwk and blocks the download, but upload()
+    # never checked it at all -- a user whose QWK access was suspended
+    # could still upload REP replies and post messages.
+    flags = UserAccessFlags.query.filter_by(user_id=current_user.id).first()
+    if flags and flags.no_qwk:
+        flash('Your QWK access has been suspended.', 'danger')
+        return redirect(url_for('qwk_user.index'))
+
     upload = request.files.get('rep')
     if not upload or not upload.filename:
         flash('No .REP file selected.', 'danger')
@@ -198,8 +237,10 @@ def upload():
     pos = 128
     imported = 0
     # Load area list once outside the loop — conf_num is a 1-based index
-    # into the same ordered list _build_qwk_blob used when producing the packet.
-    areas = EchoArea.query.filter_by(is_active=True).all()
+    # into the same ordered, access-filtered list _build_qwk_blob used
+    # when producing the packet (see _qwk_accessible_areas()'s own
+    # docstring for why this must match, not just filter is_active).
+    areas = _qwk_accessible_areas(current_user)
     while pos + 128 <= len(data):
         header = data[pos:pos + 128]
         pos += 128

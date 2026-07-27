@@ -466,10 +466,24 @@ def _do_poll_node(app, node):
 
     transcript_lines = []
     try:
-        from .tosser import get_pending_for_node, mark_sent_for_node
+        from .tosser import (get_pending_for_node, mark_sent_for_node,
+                             get_pending_netmail_for_node, mark_netmail_sent)
         from ..models import EchomailMessage as _EM_PRE
 
-        outbound = get_pending_for_node(node.id)
+        outbound_echo = get_pending_for_node(node.id)
+        # Real gap found in a full echomail-subsystem audit: this only
+        # ever gathered the echomail hold queue -- binkp_server.py's
+        # inbound-listener downstream_node_id branch already gathers
+        # BOTH echomail and netmail for this exact node (see
+        # get_pending_netmail_for_node()'s own docstring for the
+        # original bug this closed on that path), but the hub-initiated
+        # "Poll Node" dial-OUT direction never got the same fix -- a
+        # sysop's reply or AreaFix auto-reply queued for a node stayed
+        # stuck in NetmailMessage.status='queued' unless that node
+        # happened to dial IN first, even after explicitly clicking
+        # "Poll Node".
+        outbound_nm = get_pending_netmail_for_node(node)
+        outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
 
         # Snapshot BEFORE import, same as _do_poll(), so the tosser
         # fan-out below can find exactly the rows this poll just added.
@@ -501,11 +515,18 @@ def _do_poll_node(app, node):
                 err_bits.append(f'{dropped} dropped (loop/unknown/unsub)')
             log.error_message = ', '.join(err_bits)
 
-        # Same ack-gating as _do_poll() -- only mark the hold queue sent
-        # if the node actually acknowledged the batch (see
-        # test_poller_ack_gated_stamping.py for why this matters).
+        # Same ack-gating as _do_poll() -- only mark the hold queue (and
+        # queued netmail) sent if the node actually acknowledged the
+        # batch (see test_poller_ack_gated_stamping.py for why this
+        # matters). Marked separately, not via a shared `outbound` id
+        # list, since mark_sent_for_node() expects BinkPHoldQueue ids
+        # specifically -- outbound also contains _NetmailAdapter-wrapped
+        # NetmailMessage rows, which mark_netmail_sent() handles instead.
         if result.get('sent', 0) and outbound:
-            mark_sent_for_node(node.id, [m.id for m in outbound])
+            if outbound_echo:
+                mark_sent_for_node(node.id, [m.id for m in outbound_echo])
+            if outbound_nm:
+                mark_netmail_sent(outbound_nm)
         elif outbound:
             logger.warning(
                 "Poller: node %s (%s) -- did not acknowledge outbound "
@@ -890,7 +911,12 @@ def _import_message(network, msg_data: dict) -> int:
         fire('echomail', {'from_name': msg.from_name, 'subject': msg.subject,
                           'area_tag': area_tag, 'content': msg.body})
     except Exception:
-        pass
+        # Webhooks are best-effort by design (a broken/unreachable
+        # webhook target must never block real mail import), but a
+        # completely silent swallow left no trace at all when one
+        # failed -- at least log it at debug level.
+        logger.debug("Echomail: webhook fire failed for msg in %s", area_tag,
+                    exc_info=True)
 
     from .notify_reply import maybe_notify_recipient
     maybe_notify_recipient(msg, area, network)

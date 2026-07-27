@@ -1,3 +1,29 @@
+# ANetBBS v1.0b2.216 — Full echomail/QWK subsystem audit (July 2026)
+
+Sysop asked for a full pass over echomail/QWK — every error/gap, docs kept in sync. Five parallel research passes (BinkP transport, AreaFix/FileFix, QWK, web admin layer, docs/wiki), every finding personally verified against the real code before fixing. 20 real bugs fixed, most with new regression tests.
+
+**Security fixes:**
+- **AreaFix/FileFix leaf-side password bypass**: `process_request()` in both `areafix.py` and `filefix.py` only ever rejected a request when a password was configured AND wrong — a network with no `areafix_password`/`binkp_password` set at all sailed straight through with zero authentication, letting any spoofable inbound netmail addressed to "areafix"/"filefix" freely subscribe/unsubscribe every echo/file area. The hub-side sibling function had already been fixed for this exact bug class in an earlier session — the fix was never mirrored back to the leaf-side function. Fixed both.
+- **Cross-area message leak**: `echomail.thread()` fetched its seed message by bare ID with no `area_id` scoping, unlike every sibling route in the file — a logged-in user could view a message's from/to/subject/body from a sysop-only or restricted-access area by URL.
+- **QWK bypassed all echo-area access control**: `/qwk/download` and `/qwk/upload` had zero gating, unlike every other echomail entry point — any logged-in user's QWK packet included sysop-only/restricted area content, and REP upload let them post into those same areas.
+- **BinkP inbound listener auto-created echo areas with no review**: any peer that completed a BinkP handshake caused an unrecognized `AREA:` tag to silently create a new, immediately-active, immediately-subscribed echo area. Now routes to BadAreaLog for sysop review, matching the outbound-dial receive path's existing behavior.
+- Minor: missing CSRF token on the hub-identity "Make Default" button; `QWKNodeForm.packet_id` and the QWK node-request approval path had no regex validation, unlike the self-service API (packet_id flows into filesystem paths).
+
+**Functional fixes:**
+- "Poll Node" (hub dials out to a downstream node) never flushed that node's queued netmail.
+- Nodelist import silently dropped every point-address entry (`12.5` style).
+- QWK HTTP-hub REP import tagged every message with an arbitrary network on multi-network installs; added per-message error isolation and msg_id dedup, mirroring fixes already made once in the sibling FTP-hub importer.
+- Two intentionally-unsecured ANetBBS BinkP links couldn't authenticate with each other (client's `-` placeholder for "no password" wasn't recognized by the server).
+- AreaFix/FileFix hub-side log rows never recorded `network_id`, hiding downstream-node activity from the network filter.
+
+**New: AreaFix Log now shows which bot handled each row** (Bot column + filter).
+
+**Docs/wiki**: fixed a wrong `%RESCAN` claim, a fabricated Network Join field list, added FileFix mentions, cross-referenced the TIC Out Log.
+
+Full suite verified clean (1639 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.215 — Hub-management logging pass + Network Join fixes (July 2026)
 
 Sysop asked for a TIC-out log for hub management and to make sure hub-management logging is complete, plus two Network Join Requests fixes.

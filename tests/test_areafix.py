@@ -51,7 +51,14 @@ class AreafixTests(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_leaf_side_subscribe_and_unsubscribe_no_password_configured(self):
+    def test_leaf_side_no_password_configured_rejects_not_bypasses(self):
+        """SECURITY: a network with no areafix_password/binkp_password
+        configured at all must fail CLOSED (reject every request), not
+        sail through unauthenticated -- same guarantee already enforced
+        on the hub side (_process_node_request). Previously this only
+        rejected on a WRONG password, never a missing one, so any
+        spoofed netmail addressed to "areafix" could freely flip every
+        EchoArea.is_subscribed flag on an unconfigured leaf network."""
         from anetbbs.models import db, EchomailNetwork, EchoArea
         from anetbbs.echomail.areafix import process_request
 
@@ -70,14 +77,16 @@ class AreafixTests(unittest.TestCase):
             response, log_kwargs = process_request(
                 net, '1:1/2', '', '-AF.SUBBED\n+AF.NOTSUBBED\n')
 
-            self.assertIn('-AF.SUBBED : unsubscribed', response)
-            self.assertIn('+AF.NOTSUBBED : subscribed', response)
-            self.assertTrue(log_kwargs['success'])
+            self.assertFalse(log_kwargs['success'])
+            self.assertEqual(log_kwargs['request_type'], 'badpw')
+            self.assertIn('password', response.lower())
 
             refreshed_a1 = EchoArea.query.filter_by(tag='AF.SUBBED').first()
             refreshed_a2 = EchoArea.query.filter_by(tag='AF.NOTSUBBED').first()
-            self.assertFalse(refreshed_a1.is_subscribed)
-            self.assertTrue(refreshed_a2.is_subscribed)
+            self.assertTrue(refreshed_a1.is_subscribed,
+                            'no changes must be applied without a real password')
+            self.assertFalse(refreshed_a2.is_subscribed,
+                             'no changes must be applied without a real password')
 
     def test_leaf_side_wrong_password_rejects_without_applying_changes(self):
         from anetbbs.models import db, EchomailNetwork, EchoArea
@@ -204,7 +213,8 @@ class AreafixTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='AreafixE2ELeaf', network_type='binkp',
-                                  our_address='1:1/1', hub_address='1:1/2')
+                                  our_address='1:1/1', hub_address='1:1/2',
+                                  areafix_password='e2eleafpw')
             db.session.add(net)
             db.session.flush()
             area = EchoArea(tag='AF.E2ELEAF', name='E2E Leaf', network_id=net.id,
@@ -214,7 +224,7 @@ class AreafixTests(unittest.TestCase):
 
             inbound = NetmailMessage(
                 network_id=net.id, from_address='1:1/2', to_address='1:1/1',
-                from_name='Hub', to_name='areafix', subject='areafix',
+                from_name='Hub', to_name='areafix', subject='e2eleafpw',
                 body='+AF.E2ELEAF\n', direction='inbound', status='received')
             db.session.add(inbound)
             db.session.commit()
@@ -715,11 +725,12 @@ class AreafixTests(unittest.TestCase):
 
         with self.app.app_context():
             net = EchomailNetwork(name='AreafixQueryLogNet', network_type='binkp',
-                                  our_address='6:6/1', hub_address='6:6/2')
+                                  our_address='6:6/1', hub_address='6:6/2',
+                                  areafix_password='querylogpw')
             db.session.add(net)
             db.session.commit()
 
-            response, log_kwargs = process_request(net, '6:6/2', '', '%LIST\n')
+            response, log_kwargs = process_request(net, '6:6/2', 'querylogpw', '%LIST\n')
             self.assertEqual(log_kwargs['request_type'], 'query')
 
     def test_help_text_lists_every_accepted_command(self):

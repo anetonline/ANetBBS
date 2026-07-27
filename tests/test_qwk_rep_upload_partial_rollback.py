@@ -98,23 +98,42 @@ class QwkRepUploadPartialRollbackTests(unittest.TestCase):
         # process_rep_upload() does `from ..models import ... EchomailMessage`
         # freshly inside the function on every call, so the patch target
         # is the real anetbbs.models.EchomailMessage (what that local
-        # import binds to), not qwk_hub_ftp's own namespace.
+        # import binds to), not qwk_hub_ftp's own namespace. A plain
+        # stand-in function won't do any more -- process_rep_upload() now
+        # also does a msg_id-dedup EchomailMessage.query.filter_by(...)
+        # lookup BEFORE construction (see test_qwk_rep_msgid_dedup.py),
+        # so the replacement must still expose a real `.query`. __new__
+        # returning an already-fully-built real instance means Python
+        # won't re-run __init__ on it (the returned object isn't an
+        # instance of this stand-in class).
         import anetbbs.models as models_mod
         real_cls = models_mod.EchomailMessage
         call_count = {'n': 0}
 
-        def _flaky_echomail_message(*args, **kwargs):
-            call_count['n'] += 1
-            if call_count['n'] == 2:
-                raise ValueError('simulated per-message import failure')
-            return real_cls(*args, **kwargs)
+        class _QueryProxy:
+            # `.query` must resolve LAZILY -- real_cls.query itself needs
+            # an active app_context (Flask-SQLAlchemy's scoped session),
+            # which doesn't exist yet at this class body's definition
+            # time; process_rep_upload() opens its own app_context
+            # internally, by which point this descriptor's __get__ runs.
+            def __get__(self, obj, owner):
+                return real_cls.query
+
+        class _FlakyEchomailMessage:
+            query = _QueryProxy()
+
+            def __new__(cls, *args, **kwargs):
+                call_count['n'] += 1
+                if call_count['n'] == 2:
+                    raise ValueError('simulated per-message import failure')
+                return real_cls(*args, **kwargs)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             rep_path = os.path.join(tmpdir, 'PARTFAIL.rep')
             with open(rep_path, 'wb') as f:
                 f.write(rep_bytes)
 
-            with patch.object(models_mod, 'EchomailMessage', _flaky_echomail_message):
+            with patch.object(models_mod, 'EchomailMessage', _FlakyEchomailMessage):
                 count = qwk_hub_ftp.process_rep_upload(node_id, rep_path, self.app)
 
         # Only the first message actually persisted -- count must
