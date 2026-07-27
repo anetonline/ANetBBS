@@ -29,7 +29,7 @@ from flask import (Blueprint, render_template,
                    flash, request, abort, current_app, send_from_directory)
 from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, BooleanField, SubmitField)
-from wtforms.validators import DataRequired, Length, Optional, Email
+from wtforms.validators import DataRequired, Length, Optional, Email, Regexp
 
 from ..models import db, NetworkJoinConfig, NetworkJoinRequest, HubIdentity
 from ..echomail.network_join import join_dir_for_identity
@@ -88,7 +88,17 @@ class JoinApplicationForm(FlaskForm):
 
     qwk_packet_id = StringField(
         'QWK Packet ID (leave blank if BinkP only)',
-        validators=[Optional(), Length(max=8)])
+        # Real gap found in a full FTP-server security audit: unlike
+        # QWKNodeForm (hub_admin.py) and the self-service QWK apply API
+        # (qwk_hub.py), this public/unauthenticated field had no charset
+        # check -- just Length(max=8) -- yet flows into a filesystem
+        # path (the FTP server's per-node QWK home dir) once approved.
+        # "../../.." is exactly 8 chars. hub_admin.py's approve_join_
+        # request() now also re-validates server-side as defense in
+        # depth, but reject garbage at submission time too.
+        validators=[Optional(), Length(max=8),
+                   Regexp(r'^[A-Za-z0-9]+$',
+                         message='QWK Packet ID must be letters and digits only.')])
 
     notes = TextAreaField('Notes', validators=[Optional(), Length(max=2000)])
 

@@ -1,7 +1,13 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.218`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.219`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.219 — Hotfix: PETSCII/multinode login crash (July 2026)
+
+Emergency fix, live-caught immediately after v1.0b2.218 deployed: **PETSCII terminal login was completely broken**, and the multinode "Who's Online" screen crashed the same way.
+
+- **FIX (critical, live-caught):** `features/petscii_ui.py`'s profile screen and `features/multinode.py`'s node list both used an f-string like `f'...{fmt_eastern(x, '%Y-%m-%d')}...'` — a single-quoted f-string with a single-quoted argument nested inside its `{}`. That's valid on Python 3.12 (PEP 701 relaxed the rule), which is what this dev sandbox runs, so `py_compile` here never caught it — but it's a hard `SyntaxError` on Python 3.10/3.11, which is what production actually runs, so the module failed to even import there. Fixed by switching the outer f-string to double quotes in both spots. Swept the whole `anetbbs/` tree for the same quote-nesting pattern (a custom scanner, since this dev environment's Python version can't detect it) — confirmed these were the only two instances.
 
 ## v1.0b2.218 — Full auth/session security audit (July 2026)
 

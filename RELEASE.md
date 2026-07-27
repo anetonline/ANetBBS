@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.219 — Hotfix: PETSCII/multinode login crash (July 2026)
+
+Emergency fix, live-caught right after v1.0b2.218 deployed: **PETSCII terminal login was completely broken** ("Menu error: f-string: unmatched '(' "), and the multinode "Who's Online" screen crashed the same way.
+
+Root cause: an f-string like `f'...{fmt_eastern(x, '%Y-%m-%d')}...'` — a single-quoted f-string with a single-quoted argument nested inside its `{}`. Valid on Python 3.12 (this dev sandbox), a hard `SyntaxError` on Python 3.10/3.11 (what production runs) — so `py_compile` here never caught it. Fixed in `features/petscii_ui.py` and `features/multinode.py`; swept the whole `anetbbs/` tree for the same pattern and confirmed no other instances.
+
+---
+
 # ANetBBS v1.0b2.218 — Full auth/session security audit (July 2026)
 
 The single most security-critical batch shipped this project. Three parallel research passes (web auth, terminal auth, access-control primitives), every finding personally verified before fixing. See `docs/SECURITY.md` for the full sysop-facing summary.

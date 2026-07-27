@@ -14,6 +14,7 @@ the QWK_HUB_ID setting in Admin → Settings.  Set it to something short like
 FTP support: the same logic runs after FTP login (FTP handler calls
 build_qwk_for_node / import_rep_for_node directly).
 """
+import hmac
 import io
 import struct
 import zipfile
@@ -46,7 +47,7 @@ def _auth_node():
         packet_id=auth.username.strip().upper(),
         is_active=True,
     ).first()
-    if node is None or node.password != auth.password:
+    if node is None or not hmac.compare_digest(node.password, auth.password or ''):
         logger.warning('QWK hub: bad auth for %r', auth.username)
         abort(401, description='QWK hub: invalid credentials')
     return node

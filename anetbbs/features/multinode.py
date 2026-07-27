@@ -199,7 +199,7 @@ async def run_chat_session(session):
                         await session.write(
                             f'  Node {n.slot}: {n.username} '
                             f'({n.protocol}) since '
-                            f'{fmt_eastern(n.connected_at, '%H:%M')}\r\n')
+                            f"{fmt_eastern(n.connected_at, '%H:%M')}\r\n")
                 continue
             if line.startswith('/w '):
                 parts = line[3:].split(None, 1)

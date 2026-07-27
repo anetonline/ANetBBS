@@ -922,11 +922,14 @@ def smart_upload():
             queue_on = bool(current_app.config.get('FILE_MOD_QUEUE_ENABLED', False))
             if queue_on and not getattr(current_user, 'is_admin', False):
                 from ..models import FileQueueEntry
-                import time as _time
+                import secrets as _secrets
                 qdir = os.path.join(current_app.config.get('DATA_DIR', 'data'),
                                     'file-queue')
                 os.makedirs(qdir, exist_ok=True)
-                qpath = os.path.join(qdir, f'{int(_time.time())}-{safe}')
+                # See upload()'s own matching comment -- unique token
+                # instead of a 1-second-resolution timestamp avoids a
+                # same-second same-filename collision in quarantine.
+                qpath = os.path.join(qdir, f'{_secrets.token_hex(8)}-{safe}')
                 upload.save(qpath)
                 entry = FileQueueEntry(
                     file_area_id=target.id,

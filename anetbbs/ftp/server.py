@@ -17,6 +17,7 @@ This module is `serve_forever`-style, intended to run inside the main
 `anetbbs.service` process — the entry point `run()` is started in a
 daemon thread by `anetbbs.main` when `FTP_ENABLED=true`.
 """
+import hmac
 import logging
 import os
 
@@ -25,6 +26,73 @@ from pyftpdlib.filesystems import AbstractedFS
 from pyftpdlib.handlers import FTPHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _check_ip_and_rate_limit(app, ip):
+    """Return True if this IP must be blocked from even attempting a
+    password check (already banned, or just tripped the rate limit and
+    got auto-banned here). Mirrors core/user_manager.py's
+    UserManager._check_ip_and_rate_limit() -- same AutoBanConfig/IpBan/
+    IpWhitelist models and policy, kept as its own local copy (own
+    'ftp_login:<ip>' rate-limit bucket, separate from 'login' (web) and
+    'terminal_login:<ip>' (telnet/SSH/rlogin)) rather than importing
+    across package boundaries. Fails open on any infrastructure error,
+    same posture as every other caller of these models.
+    """
+    if not ip:
+        return False
+    import ipaddress as _ipa
+    from datetime import datetime, timedelta
+    from ..models import db, IpBan, IpWhitelist, AutoBanConfig
+    from ..features.rate_limit import _check as _rl_check
+
+    def _cidr_match(ip_str, cidr_list):
+        try:
+            addr = _ipa.ip_address(ip_str)
+        except ValueError:
+            return False
+        for entry in cidr_list:
+            try:
+                if addr in _ipa.ip_network(entry, strict=False):
+                    return True
+            except ValueError:
+                if entry == ip_str:
+                    return True
+        return False
+
+    try:
+        with app.app_context():
+            whitelisted_cidrs = [r.cidr for r in
+                                 IpWhitelist.query.with_entities(IpWhitelist.cidr).all()]
+            if _cidr_match(ip, whitelisted_cidrs):
+                return False
+
+            now = datetime.utcnow()
+            banned_cidrs = [r.cidr for r in IpBan.query.all()
+                            if not (r.expires_at and r.expires_at < now)]
+            if _cidr_match(ip, banned_cidrs):
+                return True
+
+            cfg = AutoBanConfig.get()
+            if not cfg.enabled:
+                return False
+            if _rl_check(f'ftp_login:{ip}', cfg.attempt_limit, cfg.window_seconds):
+                return False
+
+            if IpBan.query.filter_by(cidr=ip).first():
+                return True
+            expires_at = (now + timedelta(hours=cfg.ban_duration_hours)
+                         if cfg.ban_duration_hours else None)
+            db.session.add(IpBan(
+                cidr=ip, banned_by_id=None, expires_at=expires_at,
+                reason=f'Auto-ban: FTP login rate limit exceeded '
+                       f'({cfg.attempt_limit} attempts / '
+                       f'{cfg.window_seconds // 60 or 1} min)'))
+            db.session.commit()
+            return True
+    except Exception:
+        logger.exception('FTP: IP ban/rate-limit check failed for %s', ip)
+        return False
 
 
 def _public_area_filter(area):
@@ -176,6 +244,15 @@ class AnetbbsAuthorizer(DummyAuthorizer):
         # lookups always agree regardless of what case anyone typed.
         if username == 'anonymous':
             return super().validate_authentication(username, password, handler)
+
+        # Brute-force protection -- FTP had zero rate-limiting/lockout,
+        # unlike web (AutoBanConfig/IpBan) and terminal (same models via
+        # UserManager._check_ip_and_rate_limit). Checked before any DB
+        # lookup so a banned/rate-limited IP can't even probe usernames.
+        remote_ip = getattr(handler, 'remote_ip', None)
+        if _check_ip_and_rate_limit(self.app, remote_ip):
+            raise AuthenticationFailed('Too many attempts. Try again later.')
+
         from ..models import User, QWKNode
         with self.app.app_context():
             # 1. Try BBS user.
@@ -184,6 +261,15 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                 User.is_active.is_(True),
             ).first()
             if user is not None and user.check_password(password):
+                # Same account-standing gates as web/auth.py's login() and
+                # core/user_manager.py's authenticate() -- FTP previously
+                # only checked is_active, so a locked-out or not-yet-
+                # verified (NUV) account could still fully authenticate
+                # and read/write every non-sysop file area over FTP.
+                if getattr(user, 'is_locked', False):
+                    raise AuthenticationFailed('This account is locked.')
+                if not getattr(user, 'is_verified', True) and not user.is_admin:
+                    raise AuthenticationFailed('Account awaiting verification/approval.')
                 home = self.admin_root if user.is_admin else self.user_root
                 perm = 'elradfmwM' if user.is_admin else 'elradfmw'
                 if self.has_user(username):
@@ -193,11 +279,17 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                 return
 
             # 2. Try QWK node (packet_id as username, plaintext password).
+            # hmac.compare_digest instead of `==` -- constant-time, avoids
+            # a (low-value but real) timing side channel on the stored
+            # plaintext secret. Storage itself stays plaintext by design,
+            # same as BinkPNode.password: both are shared secrets the
+            # server must read back verbatim (QWK/BinkP session auth,
+            # AreaFix passthrough), not hashable login credentials.
             node = (QWKNode.query
                     .filter_by(is_active=True)
                     .filter(QWKNode.packet_id.ilike(username))
                     .first())
-            if node is not None and node.password == password:
+            if node is not None and hmac.compare_digest(node.password, password):
                 # self.qwk_root is ALREADY <DATA_DIR>/qwk-hub (set at
                 # construction, see run() below) -- do NOT pass it to
                 # ensure_node_dir(), which appends its own 'qwk-hub'
@@ -320,6 +412,29 @@ class AnetbbsFTPHandler(FTPHandler):
                         os.path.basename(file), user.username, area.tag, allowed)
                     return
 
+                # Optional ClamAV scan -- the web upload routes
+                # (files.py, file_areas.py) all scan on the way in;
+                # this hook was the one path that let a file go
+                # straight to disk (and become downloadable) with no
+                # scan at all. Same fail-open posture as those routes:
+                # a missing/broken scanner never blocks a legitimate
+                # upload, only a positive match does.
+                try:
+                    from ..features.virus_scan import scan_path
+                    result = scan_path(file)
+                    if result.infected:
+                        try:
+                            os.remove(file)
+                        except OSError:
+                            pass
+                        logger.warning(
+                            'FTP: rejected upload %s by %s (virus detected: %s)',
+                            os.path.basename(file), user.username, result.signature)
+                        return
+                except Exception:
+                    logger.exception(
+                        'FTP: virus scan crashed for %s; allowing file', file)
+
                 size = 0
                 try:
                     size = os.path.getsize(file)
@@ -342,6 +457,76 @@ class AnetbbsFTPHandler(FTPHandler):
                     user.username, os.path.basename(file), size, area.tag)
         except Exception:
             logger.exception('FTP: on_file_received hook failed')
+
+    def _area_write_allowed(self, path):
+        """Guard for DELE/RNFR/RNTO/MKD/RMD -- pyftpdlib grants regular
+        users a flat 'elradfmw' over the whole session home dir (see
+        AnetbbsAuthorizer.validate_authentication), so without this,
+        upload_permission='none'/'sysop' areas (meant to be sysop-
+        curated/read-only for regular users) could still be deleted
+        from, renamed within, or have directories created/removed by
+        any user who could merely browse them -- on_file_received only
+        ever gated STOR. Admin sessions and QWK-node sessions (which
+        manage their own per-node hub dir, not a FileArea storage_path)
+        are exempt, same as elsewhere in this handler.
+        """
+        if self.app is None or self._qwk_node_id is not None or self.username == 'anonymous':
+            return True
+        try:
+            with self.app.app_context():
+                from ..models import User, FileArea
+                user = User.query.filter(
+                    User.username.ilike(self.username)).first()
+                if user is None or user.is_admin:
+                    return True
+                area_tag = self._parent_area_tag(path)
+                if not area_tag:
+                    return True
+                area = FileArea.query.filter_by(tag=area_tag).first()
+                if area is None:
+                    return True
+                if area.upload_permission == 'none' or (
+                        area.upload_permission == 'sysop' and not user.is_admin):
+                    logger.warning(
+                        'FTP: blocked write op on %s by %s (area %s '
+                        'permission=%s)', path, self.username, area.tag,
+                        area.upload_permission)
+                    return False
+        except Exception:
+            logger.exception('FTP: area write-permission check failed for %s',
+                             self.username)
+            return True  # fail-open, same posture as ftp_RETR's quota check
+        return True
+
+    def ftp_DELE(self, path):
+        if not self._area_write_allowed(path):
+            self.respond('550 Permission denied for this area.')
+            return
+        return super().ftp_DELE(path)
+
+    def ftp_RNFR(self, path):
+        if not self._area_write_allowed(path):
+            self.respond('550 Permission denied for this area.')
+            return
+        return super().ftp_RNFR(path)
+
+    def ftp_RNTO(self, path):
+        if not self._area_write_allowed(path):
+            self.respond('550 Permission denied for this area.')
+            return
+        return super().ftp_RNTO(path)
+
+    def ftp_MKD(self, path):
+        if not self._area_write_allowed(path):
+            self.respond('550 Permission denied for this area.')
+            return
+        return super().ftp_MKD(path)
+
+    def ftp_RMD(self, path):
+        if not self._area_write_allowed(path):
+            self.respond('550 Permission denied for this area.')
+            return
+        return super().ftp_RMD(path)
 
     def ftp_RETR(self, file):
         """Daily download quota (FR: Firehawke, 2026-07-24) -- checked

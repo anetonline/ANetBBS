@@ -1406,11 +1406,27 @@ def approve_join_request(req_id):
             flash(f'BinkP address {binkp_address} is already taken '
                   f'-- deny this request or edit first.', 'danger')
             return redirect(url_for('hub_admin.join_requests'))
-    if req.qwk_packet_id and QWKNode.query.filter_by(
-            packet_id=req.qwk_packet_id).first():
-        flash(f'QWK packet ID {req.qwk_packet_id} is already taken '
-              f'-- deny this request or edit first.', 'danger')
-        return redirect(url_for('hub_admin.join_requests'))
+    qwk_pid = None
+    if req.qwk_packet_id:
+        qwk_pid = req.qwk_packet_id.strip().upper()
+        # Defense in depth, same check as approve_qwk_request(): this
+        # form field is public and unauthenticated (network_join.py's
+        # JoinApplicationForm only enforces Length(max=8), no charset
+        # regex), and it flows straight into a filesystem path as this
+        # QWK node's FTP home dir (AnetbbsAuthorizer.
+        # validate_authentication -> os.path.join(qwk_root, packet_id)).
+        # A value like "../../.." is exactly 8 chars and would otherwise
+        # sail through untouched.
+        import re as _re
+        if not _re.match(r'^[A-Z0-9]{2,8}$', qwk_pid):
+            flash(f'QWK packet ID {qwk_pid!r} is not valid (2-8 letters/'
+                  f'digits only) -- deny this request or edit it first.',
+                  'danger')
+            return redirect(url_for('hub_admin.join_requests'))
+        if QWKNode.query.filter_by(packet_id=qwk_pid).first():
+            flash(f'QWK packet ID {qwk_pid} is already taken '
+                  f'-- deny this request or edit first.', 'danger')
+            return redirect(url_for('hub_admin.join_requests'))
 
     binkp_password = qwk_password = None
     if req.binkp_ftn_address:
@@ -1440,10 +1456,10 @@ def approve_join_request(req_id):
         req.binkp_node_id = binkp_node.id
         req.generated_binkp_password = binkp_password
 
-    if req.qwk_packet_id:
+    if qwk_pid:
         qwk_password = ''.join(secrets.choice(alphabet) for _ in range(16))
         qwk_node = QWKNode(
-            packet_id=req.qwk_packet_id,
+            packet_id=qwk_pid,
             name=req.bbs_name,
             sysop=req.name,
             email=req.email,
@@ -1472,7 +1488,7 @@ def approve_join_request(req_id):
             lines += [f'BinkP address: {binkp_address}',
                       f'BinkP session password: {binkp_password}', '']
         if qwk_password:
-            lines += [f'QWK packet ID: {req.qwk_packet_id}',
+            lines += [f'QWK packet ID: {qwk_pid}',
                       f'QWK password: {qwk_password}', '']
         ok, err = send_email(req.email, 'Your network join application was approved',
                              '\n'.join(lines))
