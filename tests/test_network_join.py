@@ -422,6 +422,12 @@ class NetworkJoinRouteTests(unittest.TestCase):
         self.assertNotIn('Join Our Network', resp.get_data(as_text=True))
 
     def test_approve_binkp_only_creates_one_node(self):
+        """Real installs always have a default HubIdentity (auto-created
+        by _lightweight_migrate() on first run, zone=1200/net=1 unless a
+        sysop customized NetworkJoinConfig beforehand) -- so approval
+        auto-numbers from THAT even with NetworkJoinConfig's own
+        zone/net left unset, per the identity-fallback fix. The
+        applicant's own proposed address ('1:1/444') is not used."""
         from anetbbs.models import db, NetworkJoinRequest, BinkPNode
         with self.app.app_context():
             req = NetworkJoinRequest(
@@ -442,7 +448,8 @@ class NetworkJoinRouteTests(unittest.TestCase):
             self.assertIsNone(req.qwk_node_id)
             self.assertIsNotNone(req.generated_binkp_password)
             node = BinkPNode.query.get(req.binkp_node_id)
-            self.assertEqual(node.ftn_address, '1:1/444')
+            self.assertEqual(node.ftn_address, '1200:1/2')
+            self.assertNotEqual(node.ftn_address, '1:1/444')
 
     def test_approve_qwk_only_creates_one_node(self):
         from anetbbs.models import db, NetworkJoinRequest, QWKNode
@@ -615,6 +622,12 @@ class NetworkJoinRouteTests(unittest.TestCase):
         resp = client.get('/admin/echomail/hub/join/requests')
         body = resp.get_data(as_text=True)
         self.assertIn(f'/admin/echomail/hub/join/requests/{req_id}', body)
+        # Real sysop report: "you should be able to view first" -- the
+        # BBS Name text was already a link to the detail page, but with
+        # no other visible affordance suggesting so next to the
+        # prominent Approve/Deny buttons. An explicit "View" action in
+        # the Actions column makes that discoverable.
+        self.assertIn('View', body)
 
     def test_reviewed_table_shows_generated_password(self):
         from anetbbs.models import db, NetworkJoinRequest

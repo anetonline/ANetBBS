@@ -1483,6 +1483,30 @@ def tic_detail(tic_id):
                            tic=tic, seenby=seenby, path=path)
 
 
+@admin_bp.route('/hatch-log')
+@login_required
+@admin_required
+def hatch_log():
+    """Sysop view of outbound TIC/file-echo delivery -- the counterpart
+    to tic_log() (inbound). Real gap: the Hub admin page's "TIC" tab only
+    ever showed two aggregate counters (Pending/Failed) with no way to
+    see WHICH file is queued for WHICH peer, when it was queued, or (once
+    record_hatch_attempt_failure() started actually being called -- see
+    tic.py) why a delivery attempt failed and how many times it's been
+    retried. Sysop report: "need a tic out log for hub management."
+    """
+    from ..models import HatchQueue
+    page = max(1, int(request.args.get('page', 1) or 1))
+    status_filter = (request.args.get('status') or '').strip()
+    q = HatchQueue.query
+    if status_filter in ('pending', 'sent', 'failed'):
+        q = q.filter_by(status=status_filter)
+    pagination = (q.order_by(HatchQueue.queued_at.desc())
+                  .paginate(page=page, per_page=50, error_out=False))
+    return render_template('admin/hatch_log.html', pagination=pagination,
+                           status_filter=status_filter)
+
+
 def _resolve_storage_dir(storage_path, create_dir, tag):
     """Real gap: a sysop typing a Storage Path that doesn't exist on
     disk yet used to be saved silently -- uploads to that area would

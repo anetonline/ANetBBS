@@ -1142,10 +1142,13 @@ def areafix_log():
     from ..models import AreafixLog
     page = request.args.get('page', 1, type=int)
     network_filter = request.args.get('network_id', type=int)
+    bot_filter = (request.args.get('bot') or '').strip()
 
     q = AreafixLog.query
     if network_filter:
         q = q.filter_by(network_id=network_filter)
+    if bot_filter in ('areafix', 'filefix'):
+        q = q.filter_by(bot=bot_filter)
     pagination = (q.order_by(AreafixLog.created_at.desc())
                   .paginate(page=page, per_page=50, error_out=False))
     networks = {n.id: n for n in EchomailNetwork.query.all()}
@@ -1154,7 +1157,8 @@ def areafix_log():
                            pagination=pagination,
                            networks=networks,
                            all_networks=list(networks.values()),
-                           network_filter=network_filter)
+                           network_filter=network_filter,
+                           bot_filter=bot_filter)
 
 
 @echomail_admin_bp.route('/akas', methods=['GET', 'POST'])

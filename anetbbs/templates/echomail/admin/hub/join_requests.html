@@ -72,12 +72,17 @@
         {{ r.created_at|eastern('%Y-%m-%d', '?') }}
       </td>
       <td class="text-end text-nowrap">
+        <a href="{{ url_for('hub_admin.join_request_detail', req_id=r.id) }}"
+           class="btn btn-sm btn-outline-primary">
+          <i class="bi bi-eye"></i> View
+        </a>
+
         <form method="POST"
               action="{{ url_for('hub_admin.approve_join_request', req_id=r.id) }}"
               class="d-inline"
               onsubmit="return confirm('Approve {{ r.bbs_name }} and create their node account(s)?')">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-sm btn-success">
+          <button class="btn btn-sm btn-success ms-1">
             <i class="bi bi-check-circle"></i> Approve
           </button>
         </form>

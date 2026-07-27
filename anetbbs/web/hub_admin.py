@@ -1332,11 +1332,28 @@ def approve_join_request(req_id):
 
     identity_id = req.hub_identity_id or _default_hub_identity_id()
     cfg = NetworkJoinConfig.get(hub_identity_id=identity_id)
+    identity = HubIdentity.query.get(identity_id)
+    # Real gap: NetworkJoinConfig.binkp_zone/binkp_net had to be
+    # configured SEPARATELY (Join Form admin tab) from the hub's own
+    # HubIdentity.binkp_zone/binkp_net (set once, already used by
+    # nodelist() and the default outbound-address fallback below) for
+    # auto-numbering to kick in at all -- otherwise this silently fell
+    # back to whatever address the applicant typed into the public form
+    # verbatim. A sysop who'd already told the system its own zone:net
+    # elsewhere had no reason to expect a second, redundant place to
+    # set it, and got surprised by un-auto-numbered approvals. Falling
+    # back to the identity's own zone/net means auto-numbering works out
+    # of the box for the common single-identity case; NetworkJoinConfig
+    # still wins when explicitly set, for the unusual case of wanting
+    # join-approved nodes numbered under a different zone:net than the
+    # hub's own.
+    zone = cfg.binkp_zone or (identity.binkp_zone if identity else None)
+    net = cfg.binkp_net or (identity.binkp_net if identity else None)
     binkp_address = None
     if req.binkp_ftn_address:
-        binkp_address = (_next_binkp_node_address(cfg.binkp_zone, cfg.binkp_net,
+        binkp_address = (_next_binkp_node_address(zone, net,
                                                    hub_identity_id=identity_id)
-                          if cfg.binkp_zone and cfg.binkp_net
+                          if zone and net
                           else req.binkp_ftn_address.strip())
         if BinkPNode.query.filter_by(ftn_address=binkp_address).first():
             flash(f'BinkP address {binkp_address} is already taken '

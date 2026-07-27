@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}TIC Out Log - Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-file-earmark-arrow-up"></i> TIC Out Log</h1>
+        <p>Outbound FidoNet file-echo deliveries — files hatched here or received via TIC and re-distributed to subscribed peers.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('admin.tic_log') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-file-earmark-arrow-down"></i> TIC In Log
+        </a>
+        <a href="{{ url_for('hub_admin.index', gen_tab='tic') }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Hub Admin
+        </a>
+    </div>
+</div>
+
+<div class="mb-3">
+    <div class="btn-group btn-group-sm" role="group">
+        <a href="{{ url_for('admin.hatch_log') }}"
+           class="btn btn-outline-primary {% if not status_filter %}active{% endif %}">All</a>
+        <a href="{{ url_for('admin.hatch_log', status='pending') }}"
+           class="btn btn-outline-primary {% if status_filter == 'pending' %}active{% endif %}">Pending</a>
+        <a href="{{ url_for('admin.hatch_log', status='sent') }}"
+           class="btn btn-outline-primary {% if status_filter == 'sent' %}active{% endif %}">Sent</a>
+        <a href="{{ url_for('admin.hatch_log', status='failed') }}"
+           class="btn btn-outline-primary {% if status_filter == 'failed' %}active{% endif %}">Failed</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Queued</th><th>Status</th><th>Area</th><th>File</th>
+                <th>Peer</th><th>Size</th><th>Retries</th><th>Sent / Last Error</th>
+            </tr></thead>
+            <tbody>
+            {% for h in pagination.items %}
+                <tr>
+                    <td><code>{{ h.queued_at|eastern('%Y-%m-%d %H:%M') }}</code></td>
+                    <td>
+                        {% if h.status == 'sent' %}<span class="badge bg-success">sent</span>
+                        {% elif h.status == 'failed' %}<span class="badge bg-danger">failed</span>
+                        {% elif h.status == 'pending' %}<span class="badge bg-secondary">pending</span>
+                        {% else %}<span class="badge bg-warning text-dark">{{ h.status }}</span>{% endif %}
+                    </td>
+                    <td><code>{{ h.file_area.tag if h.file_area else '?' }}</code></td>
+                    <td>{{ h.filename or '?' }}</td>
+                    <td><code>{{ h.peer_address or '' }}</code></td>
+                    <td>{{ h.size_bytes or 0 }}</td>
+                    <td>{{ h.retry_count or 0 }}</td>
+                    <td>
+                        {% if h.status == 'sent' %}
+                            <small class="text-muted">{{ h.sent_at|eastern('%Y-%m-%d %H:%M', '') }}</small>
+                        {% elif h.error_message %}
+                            <small class="text-danger">{{ h.error_message }}</small>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8" class="text-muted text-center p-3">No outbound TIC activity yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination">
+        {% if pagination.has_prev %}<li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Prev</a></li>{% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ pagination.page }}/{{ pagination.pages }}</span></li>
+        {% if pagination.has_next %}<li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Next</a></li>{% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

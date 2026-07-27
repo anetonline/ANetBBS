@@ -7,9 +7,9 @@
         <div>
             <h2 class="mb-1"><i class="bi bi-journal-text"></i> AreaFix Log</h2>
             <p class="text-muted mb-0">
-                Audit trail of AreaFix subscription/unsubscription requests
-                — both inbound (other nodes asking us to add areas) and
-                outbound (us asking a hub to add areas).
+                Audit trail of AreaFix (echomail) and FileFix (file-echo)
+                subscription/unsubscription requests — both inbound (other
+                nodes asking us) and outbound (us asking a hub).
             </p>
         </div>
         <div>
@@ -33,6 +33,14 @@
                     {% endfor %}
                 </select>
             </div>
+            <div class="col-md-3">
+                <label class="form-label form-label-sm">Filter by bot:</label>
+                <select name="bot" class="form-select form-select-sm">
+                    <option value="">Both</option>
+                    <option value="areafix" {% if bot_filter == 'areafix' %}selected{% endif %}>AreaFix</option>
+                    <option value="filefix" {% if bot_filter == 'filefix' %}selected{% endif %}>FileFix</option>
+                </select>
+            </div>
             <div class="col-md-2">
                 <button class="btn btn-primary btn-sm">Filter</button>
             </div>
@@ -50,6 +58,7 @@
             <thead>
                 <tr>
                     <th>Time</th>
+                    <th>Bot</th>
                     <th>Network</th>
                     <th>From</th>
                     <th>Type</th>
@@ -62,6 +71,13 @@
                 {% for row in rows %}
                 <tr>
                     <td>{{ row.created_at|eastern('%Y-%m-%d %H:%M', '') }}</td>
+                    <td>
+                        {% if row.bot == 'filefix' %}
+                            <span class="badge bg-info text-dark">FileFix</span>
+                        {% else %}
+                            <span class="badge bg-primary">AreaFix</span>
+                        {% endif %}
+                    </td>
                     <td>{{ networks[row.network_id].name if row.network_id in networks else '?' }}</td>
                     <td><code>{{ row.from_address or '' }}</code></td>
                     <td><span class="badge bg-secondary">{{ row.request_type }}</span></td>
@@ -85,7 +101,7 @@
                 {% if pagination.has_prev %}
                 <li class="page-item">
                     <a class="page-link"
-                       href="?page={{ pagination.prev_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}">Prev</a>
+                       href="?page={{ pagination.prev_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}">Prev</a>
                 </li>
                 {% endif %}
                 <li class="page-item active">
@@ -96,7 +112,7 @@
                 {% if pagination.has_next %}
                 <li class="page-item">
                     <a class="page-link"
-                       href="?page={{ pagination.next_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}">Next</a>
+                       href="?page={{ pagination.next_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}">Next</a>
                 </li>
                 {% endif %}
             </ul>

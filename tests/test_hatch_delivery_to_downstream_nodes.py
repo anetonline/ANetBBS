@@ -220,11 +220,12 @@ class SendHatchItemsInboundListenerTests(_DbTestBase):
                     return True
 
                 with patch.object(binkp_server, '_send_pkt_file', _fake_send_pkt_file):
-                    sent_ids = asyncio.run(binkp_server._send_hatch_items(
+                    sent_ids, failures = asyncio.run(binkp_server._send_hatch_items(
                         None, None, [item], '1200:1/1', '1200:1/2',
                         {'name': None, 'size': 0, 'buf': bytearray()}, []))
 
                 self.assertEqual(sent_ids, [item.id])
+                self.assertEqual(failures, [])
                 self.assertIn('inbound_test.zip', sent_filenames)
                 self.assertIn('inbound_test.tic', sent_filenames)
 
@@ -258,11 +259,13 @@ class SendHatchItemsInboundListenerTests(_DbTestBase):
                     return False
 
                 with patch.object(binkp_server, '_send_pkt_file', _fake_send_pkt_file):
-                    sent_ids = asyncio.run(binkp_server._send_hatch_items(
+                    sent_ids, failures = asyncio.run(binkp_server._send_hatch_items(
                         None, None, [item], '1200:1/1', '1200:1/2',
                         {'name': None, 'size': 0, 'buf': bytearray()}, []))
 
                 self.assertEqual(sent_ids, [])
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(failures[0][0].id, item.id)
 
 
 if __name__ == '__main__':

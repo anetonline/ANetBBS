@@ -599,7 +599,10 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
         if row is not None:
             row.status = 'sent'
             row.sent_at = datetime.utcnow()
-    if out.get('hatched_ids'):
+    for failed_item, message in out.get('hatch_failures', []):
+        from .tic import record_hatch_attempt_failure
+        record_hatch_attempt_failure(failed_item, message)
+    if out.get('hatched_ids') or out.get('hatch_failures'):
         db.session.commit()
     return out
 
@@ -648,7 +651,10 @@ def _run_client(network, outbound_messages, app, transcript=None):
             if row is not None:
                 row.status = 'sent'
                 row.sent_at = datetime.utcnow()
-        if out.get('hatched_ids'):
+        for failed_item, message in out.get('hatch_failures', []):
+            from .tic import record_hatch_attempt_failure
+            record_hatch_attempt_failure(failed_item, message)
+        if out.get('hatched_ids') or out.get('hatch_failures'):
             db.session.commit()
         return out
 

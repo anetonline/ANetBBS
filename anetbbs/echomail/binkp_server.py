@@ -701,16 +701,19 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                  .order_by(HatchQueue.queued_at)
                                  .all())
                 if pending_hatch:
-                    hatched_ids = await _send_hatch_items(
+                    hatched_ids, hatch_failures = await _send_hatch_items(
                         reader, writer, pending_hatch, matched_our_address,
                         peer, recv_state, inbound_files, transcript=transcript)
-                    if hatched_ids:
+                    if hatched_ids or hatch_failures:
                         now = datetime.utcnow()
                         for hid in hatched_ids:
                             row = HatchQueue.query.get(hid)
                             if row is not None:
                                 row.status = 'sent'
                                 row.sent_at = now
+                        from .tic import record_hatch_attempt_failure
+                        for failed_item, message in hatch_failures:
+                            record_hatch_attempt_failure(failed_item, message)
                         db.session.commit()
             elif net_id is not None:
                 from ..models import EchomailMessage
@@ -771,16 +774,19 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                  .order_by(HatchQueue.queued_at)
                                  .all()) if net_hub_address else []
                 if pending_hatch:
-                    hatched_ids = await _send_hatch_items(
+                    hatched_ids, hatch_failures = await _send_hatch_items(
                         reader, writer, pending_hatch, matched_our_address,
                         peer, recv_state, inbound_files, transcript=transcript)
-                    if hatched_ids:
+                    if hatched_ids or hatch_failures:
                         now = datetime.utcnow()
                         for hid in hatched_ids:
                             row = HatchQueue.query.get(hid)
                             if row is not None:
                                 row.status = 'sent'
                                 row.sent_at = now
+                        from .tic import record_hatch_attempt_failure
+                        for failed_item, message in hatch_failures:
+                            record_hatch_attempt_failure(failed_item, message)
                         db.session.commit()
 
         await _send_cmd(writer, CMD_EOB, transcript=transcript)
@@ -1408,10 +1414,17 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
     _run_client()'s already-correct hatch-out for the OTHER direction
     (a leaf dialing out to its upstream hub).
 
-    Returns a list of HatchQueue.id values successfully sent.
+    Returns (sent_ids, failures) -- sent_ids is a list of HatchQueue.id
+    values successfully sent, failures is a list of (item, message)
+    tuples for ones that weren't (same shape as binkp.py's _send_hatch).
+    Both callers run inside the same app_context this coroutine does, so
+    holding onto the ORM item across the await is safe -- no detached-
+    instance risk (see binkp_server.py's own notes elsewhere on that
+    hazard for objects that DO cross an app_context boundary).
     """
     from .tic import build_tic_text
     sent_ids = []
+    failures = []
     for item in hatch_items:
         try:
             with open(item.binary_path, 'rb') as f:
@@ -1419,6 +1432,7 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
         except OSError as exc:
             logger.error('Hatch (inbound listener): cannot read binary %s: %s',
                         item.binary_path, exc)
+            failures.append((item, f'cannot read binary: {exc}'))
             continue
 
         accepted = await _send_pkt_file(reader, writer, item.filename, binary,
@@ -1426,6 +1440,7 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
         if not accepted:
             logger.warning('Hatch (inbound listener): peer did not ack %s',
                            item.filename)
+            failures.append((item, f"peer didn't ack binary {item.filename}"))
             continue
 
         tic_text = build_tic_text(item, our_address)
@@ -1436,12 +1451,13 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
         if not accepted:
             logger.warning('Hatch (inbound listener): peer did not ack %s',
                            tic_name)
+            failures.append((item, f"peer didn't ack manifest {tic_name}"))
             continue
 
         sent_ids.append(item.id)
         logger.info('Hatch (inbound listener): shipped %s + %s to %s',
                     item.filename, tic_name, peer)
-    return sent_ids
+    return sent_ids, failures
 
 
 def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,

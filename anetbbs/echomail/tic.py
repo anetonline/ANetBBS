@@ -42,6 +42,33 @@ from ..models import db, TicFile, FileArea, FileEchoSubscription, HatchQueue
 logger = logging.getLogger(__name__)
 
 
+# HatchQueue.retry_count/error_message/status ("pending / sent / failed")
+# were part of the model from the start (see its own docstring: "Failures
+# bump retry_count; we cap at retry_max and mark failed") but neither
+# delivery path (binkp.py's _send_hatch, binkp_server.py's
+# _send_hatch_items) ever actually wrote to them -- a failed attempt was
+# indistinguishable from one never even tried, and the hub admin page's
+# "Failed" counter was permanently 0. Real sysop report: "need a tic out
+# log for hub management" surfaced this while looking for exactly this
+# information. HATCH_RETRY_MAX caps retries so a permanently-broken
+# subscription (deleted peer, bad address) eventually stops being
+# retried forever and surfaces as 'failed' in the log instead of sitting
+# in 'pending' indefinitely with no visible sign anything is wrong.
+HATCH_RETRY_MAX = 20
+
+
+def record_hatch_attempt_failure(item, message):
+    """Record one failed outbound delivery attempt on a HatchQueue row.
+
+    Bumps retry_count and stores the reason; flips status to 'failed'
+    once HATCH_RETRY_MAX is exceeded so it stops being retried forever.
+    Caller is responsible for committing."""
+    item.retry_count = (item.retry_count or 0) + 1
+    item.error_message = message
+    if item.retry_count >= HATCH_RETRY_MAX:
+        item.status = 'failed'
+
+
 _LINE_RE = re.compile(r'^\s*(\w+)\s+(.*?)\s*$')
 
 

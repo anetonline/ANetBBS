@@ -877,10 +877,12 @@ class BinkPClient:
         Returns:
             dict with 'received' (list of parsed message dicts),
                       'sent' (count of outbound messages sent),
-                      'hatched_ids' (HatchQueue ids successfully shipped).
+                      'hatched_ids' (HatchQueue ids successfully shipped),
+                      'hatch_failures' (list of (item, message) tuples for
+                      hatch items that were attempted but not acked).
         """
         import os as _os
-        result = {'received': [], 'sent': 0, 'hatched_ids': []}
+        result = {'received': [], 'sent': 0, 'hatched_ids': [], 'hatch_failures': []}
         # Persistent inbound path — the prior /tmp default was tmpfs on
         # most distros so anything stashed vanished on restart. Computed
         # once here since _wait_got()/_send_messages() may now also need
@@ -895,7 +897,8 @@ class BinkPClient:
             if outbound_messages:
                 result['sent'] = self._send_messages(outbound_messages, data_dir)
             if hatch_items:
-                result['hatched_ids'] = self._send_hatch(hatch_items)
+                result['hatched_ids'], result['hatch_failures'] = \
+                    self._send_hatch(hatch_items)
             result['received'] = self._receive_messages(data_dir)
             if self._interleaved_received:
                 result['received'].extend(self._interleaved_received)
@@ -906,10 +909,15 @@ class BinkPClient:
     def _send_hatch(self, hatch_items):
         """Ship pending HatchQueue rows: binary file + .tic manifest pair.
 
-        Returns a list of HatchQueue.id values successfully sent. The caller
-        is responsible for flipping their status to 'sent' in the DB."""
+        Returns (sent_ids, failures) -- sent_ids is a list of HatchQueue.id
+        values successfully sent, failures is a list of (item, message)
+        tuples for ones that weren't. The caller (same app-context/thread,
+        no ORM detached-instance risk) is responsible for applying both --
+        flipping sent ids' status to 'sent' and recording failures via
+        tic.py's record_hatch_attempt_failure() -- in the DB."""
         from .tic import build_tic_text
         sent_ids = []
+        failures = []
         for item in hatch_items:
             # 1. Binary file
             try:
@@ -918,6 +926,7 @@ class BinkPClient:
             except OSError as exc:
                 logger.error("Hatch: cannot read binary %s: %s",
                              item.binary_path, exc)
+                failures.append((item, f'cannot read binary: {exc}'))
                 continue
             mtime = int(datetime.utcnow().timestamp())
             self._send_cmd(CMD_FILE,
@@ -925,6 +934,7 @@ class BinkPClient:
             self._send_data(binary)
             if not self._wait_got():
                 logger.warning("Hatch: peer didn't ack %s", item.filename)
+                failures.append((item, f"peer didn't ack binary {item.filename}"))
                 continue
 
             # 2. TIC manifest — same basename with .tic suffix
@@ -936,12 +946,13 @@ class BinkPClient:
             self._send_data(tic_bytes)
             if not self._wait_got():
                 logger.warning("Hatch: peer didn't ack %s", tic_name)
+                failures.append((item, f"peer didn't ack manifest {tic_name}"))
                 continue
 
             sent_ids.append(item.id)
             logger.info("Hatch: shipped %s + %s to %s",
                         item.filename, tic_name, item.peer_address)
-        return sent_ids
+        return sent_ids, failures
 
     def _wait_got(self, timeout_sec: float = None) -> bool:
         """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail).

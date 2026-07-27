@@ -1,7 +1,23 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.214`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.215`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.215 — Hub-management logging pass + Network Join fixes (July 2026)
+
+Sysop asked for a TIC-out log for hub management and to make sure hub-management logging is complete, plus two Network Join Requests fixes.
+
+**TIC/file-echo delivery logging** — `HatchQueue.retry_count`/`error_message`/`status='failed'` were part of the model from the start (its own docstring: "Failures bump retry_count; we cap at retry_max and mark failed"), but neither delivery path (outbound-dial in `binkp.py`, inbound-listener in `binkp_server.py`) ever actually wrote to them — a failed delivery attempt was silently indistinguishable from one never even tried, and the Hub admin page's "Failed" counter was permanently 0. Now both paths record every failed attempt (bumping `retry_count`, storing the reason) and give up after 20 attempts, flipping the row to `failed` instead of retrying forever with zero visibility.
+
+**New TIC Out Log** (`/admin/hatch-log`) — the Hub admin "TIC" tab only ever showed two aggregate counters with no way to see what's actually queued, for which peer, or why something failed. New page lists every outbound hatch item (pending/sent/failed, filterable), linked from the Hub TIC tab alongside the existing (previously orphaned — no nav link anywhere) TIC In Log.
+
+**AreaFix Log now shows which bot handled each row** — FileFix (file-echo subscriptions) has always logged into the same `AreafixLog` table as AreaFix (echomail subscriptions), distinguished only by an unshown `bot` column. The page was titled/described as AreaFix-only, with FileFix activity silently commingled and unlabeled. Added a Bot column + filter.
+
+**Network Join Requests**:
+- Node auto-numbering (added v1.0b2.83) only fired when `NetworkJoinConfig.binkp_zone`/`binkp_net` were configured *separately* from the hub's own `HubIdentity.binkp_zone`/`binkp_net` (already set and used elsewhere — nodelist, default outbound address). A sysop who'd already told the system its own zone:net had no reason to expect a second, redundant setting, and approvals silently used whatever address the applicant typed into the public form instead of auto-numbering. Now falls back to the hub identity's own zone/net; `NetworkJoinConfig`'s fields still override when explicitly set.
+- Added an explicit "View" button to the pending requests list (the full detail page already existed, linked only via the BBS Name text — easy to miss next to the prominent Approve/Deny buttons).
+
+Full suite verified clean (1618 passed, 2 skipped).
 
 ## v1.0b2.214 — TIC/file-echo hatch-out: third delivery direction fixed (July 2026)
 

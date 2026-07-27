@@ -184,8 +184,8 @@ class UpstreamHubInboundHatchOutTests(unittest.TestCase):
                                          transcript=None):
             captured['hatch_calls'].append(list(hatch_items))
             if send_hatch_result is not None:
-                return send_hatch_result
-            return [item.id for item in hatch_items]
+                return send_hatch_result, []
+            return [item.id for item in hatch_items], []
 
         frames = [
             (True, _cmd_payload(mod.CMD_ADR, remote_addr)),

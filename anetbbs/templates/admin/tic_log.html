@@ -3,9 +3,19 @@
 {% block title %}TIC Log - Admin{% endblock %}
 
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-file-earmark-arrow-down"></i> TIC Log</h1>
-    <p>Inbound FidoNet file-echo manifests.</p>
+<div class="bbs-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-file-earmark-arrow-down"></i> TIC In Log</h1>
+        <p>Inbound FidoNet file-echo manifests.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('admin.hatch_log') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-file-earmark-arrow-up"></i> TIC Out Log
+        </a>
+        <a href="{{ url_for('hub_admin.index', gen_tab='tic') }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Hub Admin
+        </a>
+    </div>
 </div>
 
 <div class="card">
