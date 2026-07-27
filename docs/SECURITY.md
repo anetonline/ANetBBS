@@ -29,6 +29,12 @@ steps. Read this whole file before exposing the BBS to the internet.
     own `validate_password()` always accepts by design, to capture the
     password for the "client sent credentials with the connection"
     convenience flow — it was never a real auth boundary on its own).
+  - **FTP login** — same models, its own `ftp_login:<ip>` bucket. Found
+    missing in the same audit's follow-up pass over the FTP server; the
+    FTP login path also only checked `User.is_active`, never
+    `is_locked`/`is_verified` (unlike every other login surface) — a
+    locked-out or not-yet-approved account could still fully
+    authenticate over FTP. Both fixed.
   - `/auth/forgot` and `/auth/forgot/verify` (10 / 5 min / IP each) —
     the security-question recovery flow. Also found and fixed in the
     same audit: a wrong guess no longer lets the same question be
@@ -61,7 +67,22 @@ steps. Read this whole file before exposing the BBS to the internet.
   uploads dir.
 - **Per-area file upload permission** — each `FileArea` carries a
   `upload_permission` of `users` / `sysop` / `none`. The upload route
-  enforces it before writing.
+  enforces it before writing. The FTP server now enforces the same
+  permission on `DELE`/`RNFR`/`RNTO`/`MKD`/`RMD` too, not just `STOR` —
+  found in a full FTP-server audit that regular FTP users had a flat
+  read/write grant over their whole session, letting them delete/rename
+  inside areas they had no upload permission to.
+- **FTP uploads are virus-scanned too**, matching every web upload
+  route — found in the same audit that this was the one upload path
+  that skipped it entirely.
+- **QWK node public-form path traversal closed.** The public,
+  unauthenticated network-join application form's `qwk_packet_id` field
+  used to accept any 8-character string with no charset check, and that
+  value flows straight into the FTP server's per-node home directory
+  path once a sysop approves the request — `"../../.."` would have
+  escaped `data/qwk-hub/` outward with full read/write/delete
+  permission. Now regex-validated at both the public form and the
+  approval handler (defense in depth).
 - **SECRET_KEY guard.** If `SECRET_KEY` is the dev default and the app
   is started in production mode (`FLASK_ENV=production` or
   `config_name='production'`), it raises `RuntimeError` and refuses to

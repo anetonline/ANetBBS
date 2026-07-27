@@ -1,7 +1,29 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.219`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.220`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.220 — Full file-areas security audit (July 2026)
+
+Phase 2 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web file-area routes, FTP server), every finding personally verified against the real code before fixing.
+
+**High:**
+- **`smart_upload()` moderation-queue bypass.** The per-area `upload()` route already routed non-admin uploads into `FileQueueEntry` quarantine when `FILE_MOD_QUEUE_ENABLED` was on — its sibling `smart_upload()` route (auto-detects/lets a user pick the target area by tag) never checked the flag at all, saving straight to disk and TIC-hatching to network peers immediately. Any user with upload permission on the target area could use this route instead of the per-area form to get a file live with zero sysop review, even with moderation explicitly turned on. Fixed to match `upload()`'s quarantine behavior exactly (admins still bypass the queue, same as before).
+- **FTP login bypassed account-lock and NUV-verification gates.** `AnetbbsAuthorizer.validate_authentication()` only checked `User.is_active` — unlike web login and every terminal transport, it never checked `is_locked` or `is_verified`. A locked-out or not-yet-approved account could still fully authenticate over FTP and read/write every non-sysop file area. Now checks both, with the same admin bypass on `is_verified` the other login paths use.
+- **Zero brute-force protection on FTP auth.** No `AutoBanConfig`/`IpBan`/rate-limit integration anywhere in the FTP server — the same bug class already fixed for telnet/SSH/rlogin/PETSCII in v1.0b2.218, unaddressed on this transport. Fixed with the same models, a dedicated `ftp_login:<ip>` rate-limit bucket.
+- **CRITICAL — unsanitized QWK packet_id from the public network-join form flowed into a filesystem path.** The public, unauthenticated network-join application form's `qwk_packet_id` field only enforced `Length(max=8)` — no charset check — unlike the admin `QWKNodeForm` and the self-service QWK apply API, both of which already regex-validate specifically because `packet_id` becomes the FTP server's per-node home directory (`os.path.join(qwk_root, packet_id.upper())`). `"../../.."` is exactly 8 characters. Once a sysop approved such a request, that string became a real `QWKNode.packet_id` and, on the node's next FTP login, its session root — escaping `data/qwk-hub/` outward with full read/write/delete/rename/mkdir permission. Fixed at both layers: the public form now rejects non-alphanumeric input at submission time, and `approve_join_request()` re-validates server-side as defense in depth (matching the sibling `QWKNodeRequest` approval flow's existing precedent).
+
+**Medium:**
+- Regular FTP users got a flat read/write permission over their entire session home directory, so `upload_permission='none'`/`'sysop'` areas (meant to be sysop-curated/read-only for regular users) could still be deleted from, renamed within, or have directories created/removed — the existing upload-permission check only ever gated `STOR`. Added a pre-check on `DELE`/`RNFR`/`RNTO`/`MKD`/`RMD` mirroring the same area permission.
+- FTP uploads never went through the ClamAV scan every web upload route uses — `on_file_received()` wrote straight to a `FileUpload` row with zero AV check. Added the same scan-and-reject (fail-open on scanner errors, matching the web routes' posture).
+- QWK node password comparisons (FTP login and the QWK hub's HTTP Basic Auth) used `!=`/`==` instead of a constant-time comparison — a low-value but real timing side channel. Switched both to `hmac.compare_digest`. Storage itself stays plaintext by design, same as `BinkPNode.password`: both are shared secrets the server must read back verbatim (QWK/BinkP session auth, AreaFix passthrough), not hashable login credentials.
+- `manage_desc()` was missing the path-traversal confinement check its sibling `manage_delete()` already has.
+- Ratio-enforcement crashes were silently swallowed (`except Exception: pass`) instead of logged — a real bug in the check would have disabled ratio enforcement with zero trace.
+- Quarantine filenames used a 1-second-resolution timestamp prefix, risking a same-second collision; switched to `secrets.token_hex`.
+
+**Deliberately deferred** (noted here, not fixed): a quota TOCTOU race in `features/file_quota.py`, and a `FileQueueEntry.approve()` TOCTOU — both low-severity (soft caps / admin-only double-click edge cases), not worth the added row-locking complexity right now.
+
+~40 new/updated tests across 3 new test files. Full suite verified clean: 1703 passed, 2 skipped.
 
 ## v1.0b2.219 — Hotfix: PETSCII/multinode login crash (July 2026)
 

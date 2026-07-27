@@ -1,3 +1,23 @@
+# ANetBBS v1.0b2.220 — Full file-areas security audit (July 2026)
+
+Phase 2 of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (web file-area routes, FTP server), every finding personally verified before fixing.
+
+**Critical:**
+- Unsanitized QWK `packet_id` from the public network-join form flowed straight into a filesystem path (the FTP server's per-node home dir) — `"../../.."` passed the old `Length(max=8)`-only check cleanly, and once a sysop approved the request it became a real escape-the-data-dir FTP session root. Fixed at both the public form (charset validation) and the approval handler (server-side re-check, defense in depth).
+
+**High:**
+- `smart_upload()` (the auto-detect-target-area upload route) never checked `FILE_MOD_QUEUE_ENABLED` — any user could bypass sysop moderation review entirely via this route while the per-area `upload()` route correctly quarantined. Fixed to match.
+- FTP login only checked `User.is_active`, never `is_locked`/`is_verified` — a locked-out or unapproved account could still fully authenticate over FTP. Fixed.
+- Zero brute-force protection on FTP auth (same bug class fixed for telnet/SSH/rlogin in v1.0b2.218, missed on this transport). Fixed with the same `AutoBanConfig`/`IpBan` models.
+
+**Medium:** regular FTP users had unrestricted DELE/RNFR/RNTO/MKD/RMD regardless of area upload permission (now gated); FTP uploads skipped the ClamAV scan every web route uses (now scanned); QWK node password comparisons used `!=`/`==` instead of constant-time `hmac.compare_digest`; a path-traversal guard was missing on `manage_desc()`; ratio-enforcement crashes were silently swallowed instead of logged; quarantine filenames had a timestamp-collision risk.
+
+**Deferred:** a file-quota TOCTOU race and a `FileQueueEntry.approve()` TOCTOU — both low-severity, noted not fixed.
+
+~40 new/updated tests. Full suite verified clean (1703 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.219 — Hotfix: PETSCII/multinode login crash (July 2026)
 
 Emergency fix, live-caught right after v1.0b2.218 deployed: **PETSCII terminal login was completely broken** ("Menu error: f-string: unmatched '(' "), and the multinode "Who's Online" screen crashed the same way.
