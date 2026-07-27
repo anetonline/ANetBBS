@@ -1,3 +1,17 @@
+# ANetBBS v1.0b2.214 — TIC/file-echo hatch-out: third delivery direction fixed (July 2026)
+
+Sysop-reported "TIC isn't working right" led to a full re-audit of the TIC/file-echo pipeline. The manifest parsing, security checks, and two of the three BinkP delivery directions were already correct and covered by tests from an earlier audit — but the third was silently missing:
+
+- **Upstream hub dialing IN to us never flushed pending file-echo hatch-out.** binkp_server.py's inbound listener already handled outbound echomail/netmail correctly for this direction (the hub calls us), and already handled file-echo hatch-out for the *other* two directions (we dial our hub; a downstream node dials us) — but never queried `HatchQueue` at all when the connecting peer matched by network `hub_address` instead of a specific node. A file subscribed via FileFix to go out to the hub would sit in `status='pending'` forever unless the sysop happened to poll out to the hub first themselves, with the admin's "Pending" counter the only visible symptom.
+
+Added regression tests for the fixed direction and fixed 8 existing BinkP-listener tests whose hand-rolled query fakes needed to account for the new `HatchQueue` lookup.
+
+Also documented a real-world dosemu2 gotcha reported live: `ERROR: MFS: failed to get xattrs for .../TWERR.LOG, Numerical result out of range` when running door games (e.g. TW2002) means the filesystem `/opt` (or wherever DOS game data lives) is mounted without the `user_xattr` option — dosemu2's MFS layer needs it. Fix is an fstab mount-option change, not an ANetBBS bug.
+
+Full suite verified clean (1605 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.213 — Pre-release audit #2: pyflakes CI gate green (July 2026)
 
 The new pyflakes CI job (added last batch) was failing on ~40 pre-existing findings across ~20 files that predated the CI gate itself — none were new regressions from recent work. All genuinely dead code (unused local variables, redundant f-string prefixes with no interpolation, `global` declarations that were never needed since the function only mutated the object in place rather than rebinding the name). Also fixed 2 spots where a `# noqa` comment was silently doing nothing: plain `pyflakes` (unlike flake8) has no inline suppression syntax at all, so two "load-bearing side-effect import" cases now use a real reference instead of a comment to satisfy the checker.

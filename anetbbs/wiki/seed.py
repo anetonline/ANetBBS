@@ -2251,6 +2251,15 @@ See also [[BinkP Setup]], [[Echomail]], and [[ANotherNetwork]].
   set"** → export `TERM` and pass `-td` in your script (relevant if
   you're driving dosemu2 from a scheduled event's shell handler, not
   just doors).
+- **`door_dosemu` game crashes with `ERROR: MFS: failed to get
+  xattrs for .../SOMEFILE.LOG, Numerical result out of range`** →
+  the filesystem your DOS game data lives on (e.g. `/opt`) is
+  mounted without the `user_xattr` option, which dosemu2's MFS host
+  passthrough needs. Not an ANetBBS bug — add it in `/etc/fstab`:
+  ```
+  UUID=xxxx-xxxx /opt   ext4   defaults,user_xattr   0   2
+  ```
+  then `sudo mount -o remount /opt` (or reboot) and relaunch the door.
 
 See also [[Doors]], [[Door Setup]], [[LORD Setup]], [[DosBridge]],
 and [[DOS Door Recipe]].

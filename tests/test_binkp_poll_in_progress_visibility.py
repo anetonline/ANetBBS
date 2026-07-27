@@ -206,7 +206,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
         status='running' must exist right after the peer authenticates
         -- well before any file transfer, session completion, or error."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
 
         network = _FakeEchomailNetwork(
             id=7, hub_address='1:200/100', network_type='binkp',
@@ -222,6 +222,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
 
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        HatchQueue.query = _FakeQuery([])
         session = _HistorySession(EchomailPollLog)
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         try:
@@ -239,6 +240,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
             del EchomailNetwork.query
             del EchomailMessage.query
             del EchomailPollLog.query
+            del HatchQueue.query
 
         self.assertGreaterEqual(len(session.commit_snapshots), 1,
                                 'expected at least one commit for the poll log row')

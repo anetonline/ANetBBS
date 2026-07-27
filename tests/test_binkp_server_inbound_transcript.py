@@ -105,6 +105,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def get(self, _id):
         return self._rows[0] if self._rows else None
 
@@ -197,7 +200,7 @@ def _minimal_fts_packet():
 class InboundTranscriptTests(unittest.TestCase):
     def test_inbound_session_saves_a_frame_by_frame_transcript(self):
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
 
         network = _FakeEchomailNetwork(
             id=1, hub_address='1:200/100', network_type='binkp',
@@ -216,6 +219,7 @@ class InboundTranscriptTests(unittest.TestCase):
         EchomailMessage.query = _FakeQuery([])
         session = _CapturingSession()
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -232,6 +236,7 @@ class InboundTranscriptTests(unittest.TestCase):
             del EchomailNetwork.query
             del EchomailMessage.query
             del EchomailPollLog.query
+            del HatchQueue.query
 
         log_rows = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(log_rows), 1, 'expected exactly one poll log row')

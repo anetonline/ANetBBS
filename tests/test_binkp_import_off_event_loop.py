@@ -107,6 +107,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def get(self, _id):
         return self._rows[0] if self._rows else None
 
@@ -167,7 +170,7 @@ def _minimal_fts_packet():
 class ImportOffEventLoopTests(unittest.TestCase):
     def test_slow_import_does_not_block_a_concurrent_watchdog(self):
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, HatchQueue, db
 
         SLOW_IMPORT_SECONDS = 0.4
 
@@ -193,6 +196,7 @@ class ImportOffEventLoopTests(unittest.TestCase):
 
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        HatchQueue.query = _FakeQuery([])
 
         watchdog_ticks = []
         # Shared baseline captured BEFORE either coroutine starts, so a
@@ -236,6 +240,7 @@ class ImportOffEventLoopTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         self.assertTrue(watchdog_ticks, 'watchdog never got to run at all')
 

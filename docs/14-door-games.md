@@ -562,6 +562,20 @@ python3 tools/prepare_dos_games.py \
   in `<install>/data/temp/nodeN/dosbox.conf` — `serial1=nullmodem
   port:NNNN` should match what the bridge is listening on.
 
+- **`door_dosemu` game crashes with `ERROR: MFS: failed to get xattrs
+  for /opt/anetbbs/data/games/.../SOMEFILE.LOG, Numerical result out
+  of range`** — dosemu2's MFS (host filesystem passthrough) layer
+  needs the `user_xattr` mount option on whatever filesystem your DOS
+  game data actually lives on. Most distros don't enable it by
+  default. Fix is an `fstab` mount-option change, not an ANetBBS
+  setting — find the mount backing your install dir (e.g. `/opt`) and
+  add `user_xattr`:
+  ```
+  # /opt was on /dev/nvme1n1p1 in this example
+  UUID=f99cf1b0-b2c7-4bdf-9d75-4e19b30bf558 /opt   ext4   defaults,user_xattr   0   2
+  ```
+  then `sudo mount -o remount /opt` (or reboot) and relaunch the door.
+
 See also: [`05-external-programs.md`](05-external-programs.md) for
 ad-hoc menu `exec` items (which use a different, simpler substitution
 vocabulary — `{user}`, `{userid}`, `{dropdir}`).

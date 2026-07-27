@@ -426,6 +426,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     net_default_crash = False
     net_default_hold = False
     net_default_direct = False
+    # HatchQueue.peer_address for this network's hub, captured as a plain
+    # scalar for the same detached-instance reason as the fields above --
+    # needed later (net_id branch, file-echo hatch-out) to look up any
+    # pending TIC/file-echo items queued FOR our upstream hub.
+    net_hub_address = ''
     # id of the EchomailPollLog row created at session start (upstream
     # network sessions only -- see its creation site for why). None means
     # either no such row was created (downstream-node session) or the
@@ -471,6 +476,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             net_default_crash = bool(getattr(network, 'default_crash', False))
             net_default_hold = bool(getattr(network, 'default_hold', False))
             net_default_direct = bool(getattr(network, 'default_direct', False))
+            net_hub_address = network.hub_address or ''
             # Create the EchomailPollLog row NOW, at the start of the
             # session, not only after it completes (the prior behavior --
             # see step "9." far below). Real FR from a sysop: "no place to
@@ -746,6 +752,36 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     else:
                         logger.warning('Outbound .pkt was not accepted by %s — '
                                        'leaving in queue for retry', remote_addr)
+
+                from ..models import HatchQueue
+                # Same gap as the downstream_node_id branch above (see
+                # _send_hatch_items()'s own docstring for the full story),
+                # just for the OTHER direction: our upstream hub dialing
+                # IN to us, rather than a downstream leaf dialing in.
+                # FileFix subscriptions targeting our hub queue HatchQueue
+                # rows keyed by peer_address == network.hub_address (same
+                # value poller.py's _run_client() already sends correctly
+                # when WE dial OUT to the hub) -- but a two-way BinkP
+                # session where the hub calls US never flushed them, so a
+                # file echo we're subscribed to send upstream just sat in
+                # 'pending' forever unless we happened to poll out first.
+                pending_hatch = (HatchQueue.query
+                                 .filter(HatchQueue.peer_address == net_hub_address,
+                                         HatchQueue.status == 'pending')
+                                 .order_by(HatchQueue.queued_at)
+                                 .all()) if net_hub_address else []
+                if pending_hatch:
+                    hatched_ids = await _send_hatch_items(
+                        reader, writer, pending_hatch, matched_our_address,
+                        peer, recv_state, inbound_files, transcript=transcript)
+                    if hatched_ids:
+                        now = datetime.utcnow()
+                        for hid in hatched_ids:
+                            row = HatchQueue.query.get(hid)
+                            if row is not None:
+                                row.status = 'sent'
+                                row.sent_at = now
+                        db.session.commit()
 
         await _send_cmd(writer, CMD_EOB, transcript=transcript)
         _flush_transcript_checkpoint(app, poll_log_id, transcript, peer)

@@ -115,6 +115,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def get(self, _id):
         return self._rows[0] if self._rows else None
 
@@ -184,7 +187,7 @@ def _minimal_fts_packet():
 class FinishBeforeImportOrderingTests(unittest.TestCase):
     def test_finish_session_runs_before_import_pkt_payload(self):
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, HatchQueue, db
 
         order = []
 
@@ -213,6 +216,7 @@ class FinishBeforeImportOrderingTests(unittest.TestCase):
 
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -229,6 +233,7 @@ class FinishBeforeImportOrderingTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         self.assertEqual(order, ['finish_session', 'import_pkt_payload'],
                          'BinkP session must finish/close before importing '

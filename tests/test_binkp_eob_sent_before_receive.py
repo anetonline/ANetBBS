@@ -126,6 +126,9 @@ class _FakeQuery:
         extra = [('eq', k, v) for k, v in kwargs.items()]
         return _FakeQuery(self._rows, self._predicates + extra)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def get(self, _id):
         return self._rows[0] if self._rows else None
 
@@ -217,7 +220,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
         patching _receive_files and checking the writer already has a
         CMD_EOB frame queued by the time it runs."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, HatchQueue, db
 
         eob_sent_before_receive = []
 
@@ -246,6 +249,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
 
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -261,6 +265,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         self.assertEqual(eob_sent_before_receive, [True],
                          'our own M_EOB must be sent BEFORE _receive_files() '
@@ -273,7 +278,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
         file, the peer starts delivering ITS OWN file. Must not be
         silently dropped."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, HatchQueue, db
 
         imported = []
 
@@ -302,6 +307,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
 
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([outbound_msg])
+        HatchQueue.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -317,6 +323,7 @@ class EobSentBeforeReceiveTests(unittest.TestCase):
         finally:
             del EchomailNetwork.query
             del EchomailMessage.query
+            del HatchQueue.query
 
         self.assertEqual(imported, ['theirs.pkt'],
                          'a file the peer interleaves while we are still '
