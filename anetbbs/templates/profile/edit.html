@@ -199,6 +199,13 @@
                     {% if form.sixel_mode.description %}
                     <small class="text-muted">{{ form.sixel_mode.description }}</small>
                     {% endif %}
+                    <div class="mb-1 mt-3">
+                        {{ form.cursor_style.label(class="form-label") }}
+                        {{ form.cursor_style(class="form-select") }}
+                    </div>
+                    {% if form.cursor_style.description %}
+                    <small class="text-muted">{{ form.cursor_style.description }}</small>
+                    {% endif %}
                 </div>
             </div>
         </div>

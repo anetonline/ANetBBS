@@ -10,6 +10,14 @@ from typing import Dict, Optional, Any
 _ANSI_ESC_RE   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 _ANSI_ESC_RE_B = re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
 
+# Synchronet-style spinning cursor (User.cursor_style == 'spinning') --
+# rotates while genuinely idle waiting for the next keystroke, then
+# erases itself the instant real input arrives. Tick interval loosely
+# matches Synchronet's own K_SPIN feel; not configurable, this is a
+# cosmetic/accessibility choice, not something worth a setting-for-a-setting.
+_SPIN_CHARS = ('|', '/', '-', '\\')
+_SPIN_TICK_SECONDS = 0.5
+
 logger = logging.getLogger(__name__)
 from .protocols import SessionProtocol
 # Plain `pyflakes` (unlike flake8) has no `# noqa` suppression, so this
@@ -373,6 +381,105 @@ class BBSSession:
         
         return bytes(box)
 
+    async def _read_byte_maybe_spinning(self, n=1, overall_timeout=None):
+        """Read n bytes from the transport, blocking exactly like
+        `self.reader.read(n)` -- except when the user has the
+        'spinning' cursor preference set, in which case it redraws a
+        rotating |/-\\ glyph in place at short intervals while
+        genuinely idle waiting for the next byte, then erases it the
+        instant real input arrives.
+
+        Mirrors Synchronet's own K_SPIN: confirmed (via their BAJA
+        scripting docs) that it's a mode flag passed to the blocking
+        input-read call itself, not a separate always-running
+        background task. Building it the same way here means every
+        input primitive that routes through this helper gets spinning
+        "for free" with no extra state to track across screens, and it
+        can never keep spinning after a real keystroke arrives (unlike
+        a standalone timer task, which would need explicit cancellation
+        at every call site).
+
+        This is the ONLY read call site that checks cursor_style --
+        sub-reads inside an already-started escape sequence (CSI
+        continuation bytes, password entry, etc.) intentionally keep
+        using a plain `self.reader.read()`/`read_raw()` call, since
+        spinning only matters while waiting for the FIRST byte of a
+        new keystroke, not during the sub-100ms parsing of a sequence
+        already in flight.
+
+        overall_timeout: if given, raises asyncio.TimeoutError once
+        this many seconds have elapsed with no byte received at all --
+        lets read_raw's existing idle-timeout disconnect keep working
+        even while spinning is also enabled (short spin ticks accrue
+        toward the same overall deadline, rather than each tick
+        resetting it).
+        """
+        # Only single-byte "waiting for a keystroke" reads ever spin --
+        # a hypothetical future n>1 bulk read (file transfers use their
+        # own raw self.reader.read() calls, never this helper, but
+        # guard anyway) must never have spin-glyph bytes injected into
+        # what could be a binary data stream.
+        cursor_style = 'default'
+        if n == 1 and isinstance(self.user, dict):
+            cursor_style = self.user.get('cursor_style') or 'default'
+        if cursor_style != 'spinning':
+            if overall_timeout:
+                return await asyncio.wait_for(self.reader.read(n),
+                                              timeout=overall_timeout)
+            return await self.reader.read(n)
+        idx = 0
+        elapsed = 0.0
+        while True:
+            tick = _SPIN_TICK_SECONDS
+            if overall_timeout is not None:
+                remaining = overall_timeout - elapsed
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                tick = min(tick, remaining)
+            try:
+                data = await asyncio.wait_for(self.reader.read(n),
+                                              timeout=tick)
+            except asyncio.TimeoutError:
+                elapsed += tick
+                if overall_timeout is not None and elapsed >= overall_timeout:
+                    raise
+                idx = (idx + 1) % len(_SPIN_CHARS)
+                try:
+                    # Draw the glyph, then back the cursor up so the
+                    # next real keystroke's echo lands exactly where
+                    # the user expects it, not one column to the right.
+                    await self.write(_SPIN_CHARS[idx] + '\b')
+                except Exception:
+                    pass
+                continue
+            if data:
+                try:
+                    # Erase the last-drawn glyph so it doesn't linger
+                    # once real input starts arriving.
+                    await self.write(' \b')
+                except Exception:
+                    pass
+            return data
+
+    async def _maybe_send_steady_cursor(self):
+        """FR from Winzlo (accessibility): a blinking cursor makes
+        iOS/macOS zoom's "follow keyboard focus" repeatedly recenter
+        the screen on it, fighting anyone trying to look elsewhere
+        (e.g. a menu) while connected -- confirmed reproducible across
+        four separate SSH clients. DECSCUSR Ps=4 asks the client for a
+        steady (non-blinking) underline cursor -- matches the shape
+        most terminal clients already show by default, just without
+        the blink. Sent once at login rather than on every prompt; a
+        client that doesn't understand DECSCUSR harmlessly ignores it
+        (well-supported xterm extension). No-op for every cursor_style
+        other than 'steady' -- 'default' changes nothing, 'spinning' is
+        handled entirely by _read_byte_maybe_spinning instead."""
+        if isinstance(self.user, dict) and self.user.get('cursor_style') == 'steady':
+            try:
+                await self.write('\x1b[4 q')
+            except Exception:
+                pass
+
     async def read_key(self, prompt: str = '') -> str:
         """Read a single keystroke and return it (uppercase ASCII).
 
@@ -388,7 +495,7 @@ class BBSSession:
             await self.write(prompt)
         while True:
             try:
-                ch = await self.reader.read(1)
+                ch = await self._read_byte_maybe_spinning(1)
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
             if not ch:
@@ -432,7 +539,7 @@ class BBSSession:
         fragmented by a partial stream.read() return."""
         while True:
             try:
-                ch = await self.reader.read(1)
+                ch = await self._read_byte_maybe_spinning(1)
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
             if not ch:
@@ -1418,11 +1525,8 @@ class BBSSession:
         a permanently-EOF stream."""
         try:
             timeout = getattr(self, 'idle_timeout', 0) or 0
-            if timeout > 0:
-                data = await asyncio.wait_for(self.reader.read(n),
-                                              timeout=timeout)
-            else:
-                data = await self.reader.read(n)
+            data = await self._read_byte_maybe_spinning(
+                n, overall_timeout=timeout if timeout > 0 else None)
             if not data:
                 raise CarrierLost('client disconnected')
             return await self.handle_telnet_command(data)
@@ -1719,6 +1823,8 @@ class BBSSession:
 
             if not await self.login_screen():
                 return
+
+            await self._maybe_send_steady_cursor()
 
             # Multinode slot acquisition — claim a node 1..BBS_NODES so
             # the user shows up on the multinode roster. If all nodes are

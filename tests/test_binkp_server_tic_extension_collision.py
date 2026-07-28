@@ -78,6 +78,27 @@ class TicExtensionCollisionTests(unittest.TestCase):
             self.assertFalse(_looks_like_mail_bundle_ext(ext),
                              f'{ext!r} should not match the mail-bundle pattern')
 
+    def test_tif_and_crt_extensions_are_never_treated_as_mail_bundles(self):
+        """Found during a proactive sweep for more instances of this bug
+        class (not yet live-caught): the 't[cdih][0-9a-f]' branch's
+        comment claimed the point character was already digit-only, but
+        the regex itself still used [0-9a-f] -- so '.tif' (TIFF images,
+        t+i+f), '.tie', and '.tid' all still collided. Separately,
+        '.crt' (TLS certificates) collides via the '[cdih]rt' branch,
+        a fixed 4-letter flavor set rather than an over-broad character
+        class, so it's excluded by name instead (same mechanism as
+        '.tic') -- keeping '.cut' (an intentional, already-tested
+        match) working."""
+        from anetbbs.echomail.binkp_server import _looks_like_mail_bundle_ext
+        for ext in ('photo.tif', 'scan.TIF', 'ties.tie', 'x.tid',
+                    'cert.crt', 'server.crt'):
+            self.assertFalse(_looks_like_mail_bundle_ext(ext),
+                             f'{ext!r} should not match the mail-bundle pattern')
+        # .cut must still match -- it's a genuine, already-tested
+        # intentional collision on the same [cdih]ut branch as .crt's
+        # [cdih]rt, not something this fix should touch.
+        self.assertTrue(_looks_like_mail_bundle_ext('mail.cut'))
+
     def test_extract_packets_writes_the_whole_zip_when_mod_member_present(self):
         """End-to-end: a zip containing an innocent .mod file alongside
         other art assets must extract as EMPTY (not mail), so the

@@ -1,3 +1,17 @@
+# ANetBBS v1.0b2.230 — Terminal cursor style: steady/spinning options for accessibility (July 2026)
+
+Feature request from Winzlo: a blinking cursor fights iOS/macOS zoom's "follow keyboard focus," repeatedly recentering the screen — confirmed across four SSH clients. New opt-in `Profile → Cursor style` preference (terminal + web): **Steady** sends a one-time DECSCUSR steady-cursor code at login; **Spinning** shows a Synchronet-style rotating glyph while idle waiting for input, implemented the same way Synchronet's own `K_SPIN` works (a mode flag on the blocking input-read call, not a separate background task) so it works everywhere with no extra state. 15 new tests.
+
+Also documents the new ANetBBS IRC server (`irc.a-net.online`, ports 6667/6697, `#ANetBBS`).
+
+---
+
+# ANetBBS v1.0b2.229 — Two more instances of the same TIC extension-collision bug, caught proactively (July 2026)
+
+After three live-caught incidents in two days (`.tic`, then `.mod`), swept for other instances of the same mistake before they could bite live too. Found two: `.tif`/`.tie`/`.tid` (the regex's own comment claimed the point character was digit-only, but it still used hex `[0-9a-f]`, not `[0-9]`) and `.crt` (TLS certificates, excluded by name like `.tic`, keeping `.cut`'s genuine intentional match working). Neither had actually bitten yet — found by deliberately testing every branch against plausible real extensions. 2 new tests.
+
+---
+
 # ANetBBS v1.0b2.228 — Admin cleanup for `inbound/processed/`, Poll Log fix completed (July 2026)
 
 New "Clear Processed Files" action on Admin → TIC In Log — `inbound/processed/` (where successfully-filed TIC originals go, never auto-deleted) had no cleanup anywhere and just grows forever. Pick an age threshold in days, confirm, delete anything older. Sysop-triggered only, confirmation required, never runs automatically.

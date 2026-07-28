@@ -93,14 +93,34 @@ logger = logging.getLogger(__name__)
 # different, much more common extension. Real Mystic point-bundle
 # numbers are a small decimal count, never a letter, so the point
 # character is restricted to a plain digit here.
+#
+# Third gap, found on inspection (not yet live-caught) while auditing
+# for more instances of the same mistake: the 't[cdih][0-9a-f]' branch
+# below claimed (in the comment on _looks_like_mail_bundle_ext, and in
+# THIS comment above) to already be digit-only, but the regex itself
+# still used the hex range [0-9a-f] -- so 't' + 'i'/'c'/'d'/'h' + any
+# of a-f still matched. That let extremely common, unrelated
+# extensions collide: '.tif' (TIFF images -- t+i+f) and '.tie'/'.tid'
+# (t+i+e/d). Narrowed to plain digits, matching what the comments
+# already claimed. '.crt' (TLS certificates) has the same collision
+# risk via the '[cdih]rt' branch -- that one's a fixed 4-letter flavor
+# set, not an overly-broad character class, so it's excluded by name
+# below instead (same mechanism as '.tic'), keeping '.cut' (an
+# already-tested, intentional match) working.
 _PKT_EXT_RE = re.compile(
     r'^\.(?:'
     r'pkt'
     r'|[cdih]ut|[cdih]rt'
-    r'|t[cdih][0-9a-f]'
+    r'|t[cdih][0-9]'
     r'|(?:mo|tu|we|th|fr|sa|su)[0-9]'
     r')$',
     re.IGNORECASE)
+
+# Extensions that coincidentally match _PKT_EXT_RE above but must never
+# be treated as mail, regardless -- either a universal FTN filename
+# ('.tic') or a common real-world format ('.crt') that happens to fit
+# one of the Mystic bundle patterns by coincidence.
+_MAIL_BUNDLE_EXT_EXCLUSIONS = frozenset({'.tic', '.crt'})
 
 
 def _is_fts_packet(payload):
@@ -132,7 +152,7 @@ def _looks_like_mail_bundle_ext(name):
     the TIC scanner, never the mail importer.
     """
     ext = os.path.splitext(name)[1].lower()
-    if ext == '.tic':
+    if ext in _MAIL_BUNDLE_EXT_EXCLUSIONS:
         return False
     return bool(_PKT_EXT_RE.match(ext))
 

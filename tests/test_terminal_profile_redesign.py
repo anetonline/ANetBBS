@@ -62,6 +62,11 @@ class ProfileFieldListTests(unittest.TestCase):
         codepage_values = {v for _l, v in _PROFILE_CODEPAGE_CHOICES}
         self.assertEqual(codepage_values, {'cp437', 'utf8'})
 
+    def test_cursor_choice_values_match_model_columns(self):
+        from anetbbs.features.bbs_ui import _PROFILE_CURSOR_CHOICES
+        cursor_values = {v for _l, v in _PROFILE_CURSOR_CHOICES}
+        self.assertEqual(cursor_values, {'default', 'steady', 'spinning'})
+
 
 class ProfileFieldRoundTripTests(unittest.TestCase):
     @classmethod
@@ -170,6 +175,17 @@ class ProfileFieldRoundTripTests(unittest.TestCase):
             u.sixel_mode = 'forced_on'
             db.session.commit()
             self.assertEqual(User.query.get(uid).sixel_mode, 'forced_on')
+
+    def test_cursor_style_round_trip(self):
+        app = _fresh_app(str(Path(self._tmp.name) / 'cursor.db'))
+        uid = self._make_user(app)
+        from anetbbs.models import db, User
+        with app.app_context():
+            u = User.query.get(uid)
+            self.assertEqual(u.cursor_style, 'default')  # model default
+            u.cursor_style = 'steady'
+            db.session.commit()
+            self.assertEqual(User.query.get(uid).cursor_style, 'steady')
 
     def test_codepage_and_language_round_trip(self):
         app = _fresh_app(str(Path(self._tmp.name) / 'cplang.db'))

@@ -136,6 +136,7 @@ class UserManager:
             "is_locked": bool(getattr(user, 'is_locked', False)),
             "access_level": getattr(user, 'access_level', None) or 10,
             "codepage": getattr(user, 'codepage', None) or 'cp437',
+            "cursor_style": getattr(user, 'cursor_style', None) or 'default',
             "language": getattr(user, 'language', None) or 'en',
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login": user.last_login.isoformat() if user.last_login else None,

@@ -103,6 +103,16 @@ class User(UserMixin, db.Model):
     # which supports sixel but doesn't self-report via DA1), or
     # 'forced_off' (never use it, even if detected).
     sixel_mode = db.Column(db.String(10), default='auto')
+    # Terminal cursor style: 'default' (unchanged client behavior),
+    # 'steady' (DECSCUSR non-blinking cursor -- accessibility request,
+    # FR from Winzlo: a blinking cursor makes iOS/macOS zoom's "follow
+    # keyboard focus" repeatedly recenter the screen, fighting anyone
+    # trying to look elsewhere), or 'spinning' (Synchronet-style
+    # rotating |/-\ glyph while genuinely idle waiting for input --
+    # confirmed via Synchronet's own BAJA docs that K_SPIN is a mode
+    # flag on the input-read call itself, not a separate background
+    # task, so it's implemented the same way here).
+    cursor_style = db.Column(db.String(10), default='default')
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)

@@ -421,5 +421,7 @@ shared state in `tearDownClass`). Add tests for new features under
 - **Email** — `a-net-online@proton.me`
 - **GitHub issues** — bug reports + feature requests on the
   `anetonline/anetbbs` repo
+- **IRC** — `irc.a-net.online`, port `6667` (plain) or `6697` (SSL),
+  room `#ANetBBS`
 
 If you build something cool, send a PR and we'll bundle it.

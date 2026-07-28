@@ -60,6 +60,16 @@ class UpdateProfileForm(FlaskForm):
         "most terminals answer honestly, but some (e.g. Windows Terminal over "
         "SSH) support sixel without saying so. Use Always On to force it "
         "for those, or Always Off if you just don't want it."))
+    cursor_style = SelectField('Terminal Cursor (telnet/SSH)', validators=[Optional()], choices=[
+        ('default', 'Default (unchanged)'),
+        ('steady', 'Steady, no blink (accessibility)'),
+        ('spinning', 'Spinning (Synchronet-style)'),
+    ], description=(
+        "Only affects telnet/SSH terminal sessions. Steady disables cursor "
+        "blink -- useful if a blinking cursor fights accessibility tools "
+        "that follow keyboard focus (e.g. iOS/macOS zoom). Spinning shows a "
+        "rotating |/-\\ character while idle waiting for a keystroke, "
+        "matching classic Synchronet BBS behavior."))
     submit = SubmitField('Update Profile')
 
     def __init__(self, original_email, *args, **kwargs):
@@ -264,6 +274,7 @@ def edit():
         current_user.theme_id = theme_id if theme_id and theme_id != 0 else None
 
         current_user.sixel_mode = form.sixel_mode.data or 'auto'
+        current_user.cursor_style = form.cursor_style.data or 'default'
 
         # Handle avatar upload
         if form.avatar_file.data and form.avatar_file.data.filename:
@@ -316,6 +327,7 @@ def edit():
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
         form.sixel_mode.data = current_user.sixel_mode or 'auto'
+        form.cursor_style.data = current_user.cursor_style or 'default'
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)

@@ -4046,6 +4046,9 @@ _PROFILE_SIXEL_CHOICES = (('Automatic (detect)', 'auto'),
                           ('Always on', 'forced_on'),
                           ('Always off', 'forced_off'))
 _PROFILE_CODEPAGE_CHOICES = (('CP437 (DOS classic)', 'cp437'), ('UTF-8', 'utf8'))
+_PROFILE_CURSOR_CHOICES = (('Default (unchanged)', 'default'),
+                           ('Steady, no blink (accessibility)', 'steady'),
+                           ('Spinning (Synchronet-style)', 'spinning'))
 
 
 async def _edit_profile_field(self, kind, attr, label):
@@ -4122,6 +4125,17 @@ async def _edit_profile_field(self, kind, attr, label):
                 u.codepage = value
                 db.session.commit()
 
+    elif kind == 'cursor':
+        picked, value = await self._pick_choice('Cursor Style', list(_PROFILE_CURSOR_CHOICES))
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.cursor_style = value
+                db.session.commit()
+            await self.session.write(
+                f"\r\n{FG['cyan']}Takes effect next time you connect.{RESET}\r\n")
+            await self.session.read_line("Press Enter...")
+
     elif kind == 'lang':
         # No enforced list of valid language codes exists anywhere in
         # this codebase (MenuTranslation's docstring only gives
@@ -4175,6 +4189,9 @@ async def _edit_profile(self):
             rows.append(('codepage', 'codepage', 'Codepage',
                         dict((v, l) for l, v in _PROFILE_CODEPAGE_CHOICES).get(
                             u.codepage or 'cp437', u.codepage)))
+            rows.append(('cursor', 'cursor_style', 'Cursor style',
+                        dict((v, l) for l, v in _PROFILE_CURSOR_CHOICES).get(
+                            u.cursor_style or 'default', u.cursor_style)))
             rows.append(('lang', 'language', 'Language code', u.language or 'en'))
             return rows
 

@@ -248,4 +248,5 @@ This is a **beta** release. Known rough edges:
 - Single-process rate limits — fine for one gunicorn worker; needs an
   external store for multi-worker setups.
 
-Issues and patches welcome.
+Issues and patches welcome. Chat/discussion: IRC at `irc.a-net.online`
+(port `6667` plain, `6697` SSL), room `#ANetBBS`.

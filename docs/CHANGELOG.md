@@ -1,7 +1,28 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.228`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.230`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.230 — Terminal cursor style: steady/spinning options for accessibility (July 2026)
+
+Feature request from Winzlo: a blinking cursor makes iOS/macOS zoom's "follow keyboard focus" repeatedly recenter the screen on it, fighting anyone trying to look elsewhere (e.g. a menu) while connected — confirmed reproducible across four separate SSH clients (Terminator, PuTTY, WebSSH, ShellFish). ANetBBS never sent any cursor-blink control codes itself; the blinking is entirely client-rendered, so the fix is a new opt-in per-user preference (`Profile → Cursor style`, editable in both the terminal profile editor and the web Profile page):
+
+- **Default** — unchanged behavior.
+- **Steady** — sends a one-time DECSCUSR (`ESC[4 q`) at login asking for a non-blinking underline cursor. No ongoing work needed once sent; a client that doesn't understand DECSCUSR harmlessly ignores it.
+- **Spinning** — a Synchronet-style rotating `|/-\` glyph shown while genuinely idle waiting for a keystroke, matching classic BBS behavior. Confirmed via Synchronet's own BAJA scripting docs that their `K_SPIN` feature is a mode flag on the blocking input-read call itself, not a separate background task — built the same way here (`_read_byte_maybe_spinning()` in `anetbbs/core/session.py`), so every input primitive that routes through it (`read_key`, `read_key_arrow`, `read_line`) gets spinning "for free" with no extra state to track across screens, and it can never keep spinning after a real keystroke arrives.
+
+`read_raw()`'s existing idle-timeout disconnect (unrelated feature, pre-existing) still works correctly with spinning enabled — short spin ticks accrue toward the same overall deadline rather than resetting it each tick.
+
+15 new tests. Also documents the new ANetBBS IRC server (`irc.a-net.online`, ports 6667/6697, `#ANetBBS`) in README and the development docs.
+
+## v1.0b2.229 — Two more instances of the same TIC extension-collision bug, caught proactively (July 2026)
+
+After three live-caught incidents in two days (`.tic`, then `.mod`), did a targeted sweep for other instances of the same mistake in `_PKT_EXT_RE` before they could bite live too — found two, both confirmed with real regex execution, not eyeballing:
+
+- **`.tif`/`.tie`/`.tid` (TIFF images among them — a very common format).** The `t[cdih][0-9a-f]` branch's own comment already claimed the point character was digit-only, but the regex itself still used the hex range `[0-9a-f]` — so `t` + a `[cdih]` letter + any hex digit (`a`-`f`, not just `0`-`9`) still matched. Narrowed to plain digits, matching what the comment already said it should be.
+- **`.crt` (TLS certificates).** Collides via the `[cdih]rt` branch — a fixed 4-letter flavor-code set rather than an overly broad character class, so this one's excluded by extension name instead (same mechanism as `.tic`), keeping `.cut` (a genuine, already-tested intentional match on the same branch) working.
+
+Neither had actually bitten yet, unlike the first two — found by deliberately testing every branch of the regex against plausible real-world extensions rather than waiting for the next one to show up in a live feed. 2 new tests.
 
 ## v1.0b2.228 — Admin cleanup for `inbound/processed/`, Poll Log fix completed (July 2026)
 
