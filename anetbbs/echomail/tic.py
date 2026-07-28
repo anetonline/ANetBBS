@@ -107,7 +107,21 @@ def parse_tic(content):
         elif key == 'ldesc':
             result['ldesc'].append(val)
         elif key == 'crc':
-            result['crc'] = val.lower().strip()
+            # Real gap found live: some TIC generators (older DOS-era
+            # tools especially) write the CRC32 without zero-padding to
+            # 8 hex digits (e.g. "a1b2c3" instead of "00a1b2c3") --
+            # _crc32_file() below always formats its own result as
+            # exactly 8 digits, so an unpadded manifest value failed
+            # the equality check every single time regardless of
+            # whether the file was actually intact, permanently
+            # blocking that TIC from ever filing (retried and failed
+            # identically on every subsequent scan). Zero-pad here so
+            # both sides compare on equal footing; also strip a stray
+            # "0x" prefix some tools emit.
+            crc_val = val.lower().strip()
+            if crc_val.startswith('0x'):
+                crc_val = crc_val[2:]
+            result['crc'] = crc_val.zfill(8) if crc_val else ''
         elif key == 'size':
             try:
                 result['size'] = int(val)
@@ -202,6 +216,24 @@ def process_tic(tic_path, inbound_dir):
 
     bin_path = os.path.join(inbound_dir, safe_filename)
     if not os.path.isfile(bin_path):
+        # Real gap found live: some FTN mailers uppercase (or otherwise
+        # re-case) filenames on the wire regardless of the case the
+        # TIC's own File: field uses -- an exact-case lookup on a
+        # case-sensitive Linux filesystem then never finds a binary
+        # that's genuinely sitting right there under a different case,
+        # permanently blocking that TIC (retried and failed identically
+        # on every subsequent scan; the binary just accumulates in
+        # inbound_dir forever alongside every other stuck one). Fall
+        # back to a case-insensitive match before giving up.
+        try:
+            actual_name = next(
+                (f for f in os.listdir(inbound_dir)
+                 if f.lower() == safe_filename.lower()), None)
+        except OSError:
+            actual_name = None
+        if actual_name:
+            bin_path = os.path.join(inbound_dir, actual_name)
+    if not os.path.isfile(bin_path):
         tic.status = 'error'
         tic.error_message = f'binary not found at {bin_path!r}'
         db.session.commit()
@@ -280,6 +312,32 @@ def process_tic(tic_path, inbound_dir):
     tic.processed_at = datetime.datetime.utcnow()
     tic.status = 'filed'
     db.session.commit()
+
+    # Real gap found live ("files piled up in inbound"): the binary was
+    # only ever COPIED into area.storage_path -- the original .tic
+    # manifest and the binary itself were never removed from
+    # inbound_dir on success, so every TIC ever received (successfully
+    # filed or not) accumulated there forever with no way to tell, from
+    # a directory listing alone, which ones were actually stuck vs.
+    # already filed fine and just never swept. Move both out to a
+    # processed/ subdir (never delete outright -- matches this
+    # project's usual "keep it recoverable" posture elsewhere) so
+    # inbound_dir only ever holds things still awaiting or failing
+    # processing. Best-effort: a cleanup failure here must never
+    # downgrade a TIC that already successfully filed.
+    try:
+        processed_dir = os.path.join(inbound_dir, 'processed')
+        os.makedirs(processed_dir, exist_ok=True)
+        for src in (bin_path, tic_path):
+            if src and os.path.isfile(src):
+                dst = os.path.join(processed_dir, os.path.basename(src))
+                if os.path.exists(dst):
+                    os.remove(src)
+                else:
+                    shutil.move(src, dst)
+    except OSError:
+        logger.exception('TIC %s: could not clean up inbound after filing',
+                         tic.filename)
 
     # Auto-import nodelist if this file area is a nodelist distribution echo
     # (e.g. Z1DAILY for FidoNet, tqwinfo for TQWnet). The nodelist text might

@@ -62,13 +62,13 @@
 <form method="post" action="{{ url_for('gallery_admin.upload', slug=gallery.slug) }}"
       enctype="multipart/form-data" id="upload-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="form-label">Upload images
-        <span class="text-muted small">(jpg, jpeg, gif, png, bmp, webp — multiple allowed)</span>
+    <label class="form-label">Upload images or zip archives
+        <span class="text-muted small">(jpg, jpeg, gif, png, bmp, webp, zip — multiple allowed; a zip should hold one photo, Digital Showroom-style)</span>
     </label>
     <div class="dropzone" id="dropzone">
         <i class="bi bi-cloud-arrow-up" style="font-size:2rem;"></i><br>
         <input type="file" name="files" id="files-input" multiple
-               accept="image/jpeg,image/gif,image/png,image/bmp,image/webp"
+               accept="image/jpeg,image/gif,image/png,image/bmp,image/webp,application/zip"
                class="form-control mt-2" style="max-width:600px;margin:auto;">
     </div>
     <button type="submit" class="btn btn-primary">

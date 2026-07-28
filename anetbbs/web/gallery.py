@@ -77,13 +77,45 @@ def _get_gallery_by_slug(slug):
 
 
 def _list_images(path):
+    """Gallery entries under `path` -- despite the name, this includes
+    both raw image files AND .zip archives (each holding one photo,
+    Digital Showroom-style); the browse grid and the /img/ route below
+    both treat a zip entry exactly like an image file, just with the
+    actual bytes coming from inside the archive instead of straight off
+    disk. Kept as one list/one function (rather than a separate zip
+    list) since both feed the exact same template loop and route today.
+    """
     p = Path(path)
     if not p.is_dir():
         return []
     return sorted(
         f.name for f in p.iterdir()
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTS
+        if f.is_file() and f.suffix.lower() in (IMAGE_EXTS | ARCHIVE_EXTS)
     )
+
+
+def _first_image_in_zip(zip_path):
+    """Return (member_name, mimetype) for the first image-looking member
+    in a zip, or None if it has none / can't be opened. 'First' = sorted
+    by name, skipping directory entries and macOS junk -- matches the
+    one-photo-per-archive convention these TIC-fed feeds are built
+    around; a zip with more than one image just shows the first."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            candidates = sorted(
+                n for n in zf.namelist()
+                if not n.endswith('/')
+                and '__MACOSX' not in n
+                and not Path(n).name.startswith('.')
+                and Path(n).suffix.lower() in IMAGE_EXTS
+            )
+            if not candidates:
+                return None
+            name = candidates[0]
+            mimetype = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+            return name, mimetype
+    except (zipfile.BadZipFile, OSError):
+        return None
 
 
 @gallery_bp.route('/')
@@ -143,4 +175,15 @@ def image(slug, filename):
         abort(404)
     if not safe_path.is_file():
         abort(404)
+    if safe_path.suffix.lower() in ARCHIVE_EXTS:
+        found = _first_image_in_zip(safe_path)
+        if not found:
+            abort(404)
+        member_name, mimetype = found
+        try:
+            with zipfile.ZipFile(safe_path) as zf:
+                data = zf.read(member_name)
+        except (zipfile.BadZipFile, OSError, KeyError):
+            abort(404)
+        return Response(data, mimetype=mimetype)
     return send_from_directory(str(root), filename)

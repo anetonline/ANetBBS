@@ -61,14 +61,55 @@ for g in rows:
 PYEOF
 }
 
-# List image files (matching the web gallery's extension set) in a
-# directory, one per line, sorted.
+# List gallery entries (images + .zip archives) in a directory, one per
+# line, sorted -- mirrors _list_images() in anetbbs/web/gallery.py,
+# including its zip-archive support (Digital Showroom-style one-photo-
+# per-zip TIC feeds).
 list_images() {
     local dir="$1"
     find "$dir" -maxdepth 1 -type f \
         \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' \
-           -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.webp' \) \
+           -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.webp' \
+           -o -iname '*.zip' \) \
         2>/dev/null | sort
+}
+
+# Extract the first image-looking member from a zip to a fresh temp
+# file and print its path (nothing on failure) -- mirrors
+# _first_image_in_zip() in anetbbs/web/gallery.py exactly (same skip
+# rules for __MACOSX/dotfiles, same "first by name" convention).
+# Caller removes the temp file after rendering it.
+extract_zip_image() {
+    local zip_file="$1"
+    python3 - "$zip_file" <<'PYEOF'
+import sys, zipfile, tempfile, os
+from pathlib import Path
+
+IMAGE_EXTS = {'.jpg', '.jpeg', '.gif', '.png', '.bmp', '.webp'}
+
+zip_path = sys.argv[1]
+try:
+    with zipfile.ZipFile(zip_path) as zf:
+        candidates = sorted(
+            n for n in zf.namelist()
+            if not n.endswith('/')
+            and '__MACOSX' not in n
+            and not Path(n).name.startswith('.')
+            and Path(n).suffix.lower() in IMAGE_EXTS
+        )
+        if not candidates:
+            sys.exit(1)
+        name = candidates[0]
+        data = zf.read(name)
+except Exception:
+    sys.exit(1)
+
+suffix = Path(name).suffix.lower()
+fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix='anet-gallery-')
+with os.fdopen(fd, 'wb') as f:
+    f.write(data)
+print(tmp_path)
+PYEOF
 }
 
 render_image() {
@@ -79,15 +120,29 @@ render_image() {
     clear_screen
     echo "  $(basename "$file")"
     echo ""
+
+    local render_file="$file" extracted=""
+    if [[ "$file" == *.[Zz][Ii][Pp] ]]; then
+        extracted=$(extract_zip_image "$file")
+        if [[ -z "$extracted" || ! -f "$extracted" ]]; then
+            echo "  (no image found inside this archive)"
+            echo ""
+            pause
+            return
+        fi
+        render_file="$extracted"
+    fi
+
     if [[ "$RENDER_MODE" == "s" && "$HAVE_SIXEL" -eq 1 ]]; then
-        img2sixel -w "$((cols * 9))" "$file" 2>/dev/null \
+        img2sixel -w "$((cols * 9))" "$render_file" 2>/dev/null \
             || echo "  (img2sixel failed to render this file)"
     elif [[ "$HAVE_CHAFA" -eq 1 ]]; then
-        chafa --size="${cols}x$((lines - 4))" "$file" 2>/dev/null \
+        chafa --size="${cols}x$((lines - 4))" "$render_file" 2>/dev/null \
             || echo "  (chafa failed to render this file)"
     else
         echo "  (no working renderer for this mode)"
     fi
+    [[ -n "$extracted" ]] && rm -f "$extracted"
     echo ""
     pause
 }

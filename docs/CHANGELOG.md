@@ -1,7 +1,18 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.222`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.223`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.223 — Zip-archive image galleries (July 2026)
+
+Jerry asked for image galleries to support the same one-photo-per-zip layout Digital Showroom (Codefenix's Synchronet gallery door) already uses — several of his TIC-fed file areas (a daily NASA photo feed among them) arrive in exactly that shape, and pointing a gallery straight at that same directory previously showed nothing, since only loose image files were recognized.
+
+- **FEATURE: gallery directories can now hold `.zip` archives** alongside (or instead of) loose image files. Each zip is treated as one gallery entry — its one image member is extracted **in memory only, never to disk** — for both the thumbnail grid and the full-size view. A zip with more than one image inside just shows the first (sorted by name, skipping `__MACOSX/` junk and dotfiles); a zip with no images inside 404s cleanly if someone clicks it. Works transparently through the existing gallery config — no new per-gallery setting, just point the `path` at a directory with zips in it (e.g. the same `storage_path` a matching file area already unpacks its TIC feed into).
+- Extended to every gallery surface: the public browse grid, the admin file-manager thumbnail grid (same underlying route), and admin drag-and-drop upload (now accepts `.zip` alongside images).
+- Also extended the terminal fallback viewer (`deploy/anet-gallery.sh`, chafa/img2sixel for legacy telnet/SSH callers) with the same zip-extraction logic, so the two gallery surfaces don't drift — matching this project's now-familiar "web vs. terminal sibling path" pattern from the recent audit series.
+- 14 new tests (`test_gallery_zip_archives.py`).
+
+**Also fixes a live CI failure**: an in-progress edit toward this feature (added-but-not-yet-used imports in `anetbbs/web/gallery.py`) got synced to GitHub mid-edit and failed the `pyflakes` gate. That's what the failed check on the previous push was — nothing wrong with v1.0b2.222's actual audit content, just this feature caught mid-flight. Confirmed clean now: `pyflakes anetbbs/` and `bandit -r anetbbs/ -ll` both pass locally, matching CI exactly.
 
 ## v1.0b2.222 — Full install/update re-verify + webhook board scoping (July 2026)
 

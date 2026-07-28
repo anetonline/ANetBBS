@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 
 from .gallery import (
     _load_config, _save_config, _list_images, _get_gallery_by_slug,
-    IMAGE_EXTS,
+    IMAGE_EXTS, ARCHIVE_EXTS,
 )
 from .access_control import require_admin as _admin_required
 
@@ -189,7 +189,7 @@ def upload(slug):
         if not name:
             skipped += 1; continue
         ext = Path(name).suffix.lower()
-        if ext not in IMAGE_EXTS:
+        if ext not in IMAGE_EXTS and ext not in ARCHIVE_EXTS:
             skipped += 1; continue
         dest = root / name
         # If the file already exists, append a numeric suffix.

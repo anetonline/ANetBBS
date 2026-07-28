@@ -1,3 +1,13 @@
+# ANetBBS v1.0b2.223 — Zip-archive image galleries (July 2026)
+
+Image galleries can now point at a directory of `.zip` archives (one photo per zip, Digital Showroom-style) instead of only loose image files — matches how several TIC-fed file areas already arrive (e.g. a daily NASA photo feed), so a gallery can point straight at that same directory with no conversion step. Each zip's one image is extracted in memory only, never to disk, for both thumbnails and full-size view. Extended to the public gallery, the admin file manager, admin upload, and the terminal (chafa/img2sixel) fallback viewer.
+
+Also fixes the CI failure on the previous push — an in-progress edit toward this feature got synced mid-edit and failed the pyflakes gate; nothing wrong with v1.0b2.222's actual content. Confirmed clean now.
+
+14 new tests. Full suite verified clean (1754 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.222 — Full install/update re-verify + webhook board scoping (July 2026)
 
 Phase 4, the FINAL phase, of the 4-part audit list (auth/session core, file areas, message boards, install/update re-verify). Two parallel research passes (install.sh, update.sh + the installer package), every finding personally verified before fixing.

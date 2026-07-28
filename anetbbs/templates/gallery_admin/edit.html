@@ -36,7 +36,10 @@
     <input type="text" name="path" class="form-control" required
            value="{{ g.path if g else '' }}"
            placeholder="/opt/anetbbs/gallery/photos">
-    <div class="form-text">Directory will be auto-created if it doesn't exist.</div>
+    <div class="form-text">Directory will be auto-created if it doesn't exist.
+        Can hold plain image files, .zip archives (one photo per zip,
+        Digital Showroom-style — great for pointing straight at a TIC-fed
+        file area's storage path), or a mix of both.</div>
 </div>
 <div class="mb-3">
     <label class="form-label">Description (optional)</label>

@@ -46,7 +46,18 @@ Schema:
 - `sort_order` — lower numbers appear first; ties broken by label.
 
 Files at the path are picked up if their extension matches:
-`.jpg .jpeg .gif .png .bmp .webp` (case-insensitive).
+`.jpg .jpeg .gif .png .bmp .webp` (case-insensitive) — or `.zip`.
+
+**Zip archives (Digital Showroom-style)**: point a gallery at a
+directory that holds one photo per `.zip` instead of (or alongside)
+loose image files, and each archive is thumbnailed/viewed by extracting
+its one image member on the fly — nothing is ever unpacked to disk.
+This is the format some TIC-fed file areas already arrive in (e.g. a
+daily NASA photo feed) — you can point a gallery straight at the same
+`storage_path` a matching file area already unpacks TIC into, with zero
+extra conversion step. A zip with more than one image inside just shows
+the first (by name); a zip with no images inside 404s cleanly if
+someone clicks it.
 
 The deploy rsync should `--exclude=gallery-config.json` so deploys
 don't clobber a sysop's gallery list. The default deploy command in
@@ -105,6 +116,10 @@ modern xterm).
 Quality is much lower than the web viewer (chafa converts pixels to
 character cells). For real photographic quality, point users at the
 web `/gallery/` URL.
+
+Zip-archive entries work here too — the script shells out to `python3`
+to extract the one image inside to a temp file, renders that, then
+deletes it.
 
 That install-root path isn't arbitrary: `SERVICE_USER` is a system
 account (`useradd -r`) with no real home directory, and `$INSTALL_DIR`
