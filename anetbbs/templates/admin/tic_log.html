@@ -9,6 +9,12 @@
         <p>Inbound FidoNet file-echo manifests.</p>
     </div>
     <div>
+        <form method="post" action="{{ url_for('admin.tic_rescan') }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i class="bi bi-arrow-repeat"></i> Rescan Inbound Now
+            </button>
+        </form>
         <a href="{{ url_for('admin.hatch_log') }}" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-file-earmark-arrow-up"></i> TIC Out Log
         </a>

@@ -346,7 +346,7 @@ INFO log level. It used to create a real `EchomailPollLog` row every
 time, but since the poller loop re-checks every network once a
 minute, that flooded the admin UI's poll log with dozens of identical
 entries within about 20 minutes of uptime on a freshly-started hub
-(live-caught on Jerry's own install), drowning out real poll activity.
+(live-caught on the reference install), drowning out real poll activity.
 The areas themselves stay visible either way — this only stops the
 pointless outbound connection attempt and its logging noise, nothing
 else is affected.

@@ -20,12 +20,15 @@ Usage:
     python -m anetbbs.echomail.binkp_server
 """
 import os
+import re
+import io
 import logging
 import asyncio
 import struct
 import hashlib
 import hmac
 import secrets
+import zipfile
 from datetime import datetime, timedelta
 
 from .binkp import (
@@ -37,6 +40,116 @@ from .binkp import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# FidoNet hubs deliver mail in several wrappers:
+#
+#   * Raw FTS-0001 type-2 packet — bytes 18-19 == 02 00 / 02 01.
+#     Extension typically .pkt, but Mystic ships point-targeted variants:
+#       .pkt              standard
+#       .cut .crt         crash mail
+#       .dut .drt         direct mail
+#       .iut .irt         immediate mail
+#       .hut .hrt         hold mail
+#       .t<flavor><hex>   point-targeted (.th5 = hold for point .5,
+#                          .we3 = weekly echomail for point .3, etc.)
+#
+#   * ZIP-compressed mail bundle (FTS-5003 / standard FidoNet). Magic
+#     bytes 50 4B 03 04 = "PK..".  Inside is one or more .pkt files.
+#     Mystic and binkd default to ZIP for echomail to save bandwidth;
+#     if we don't extract these the entire feed is silently dropped.
+#
+# Strategy: detect by content (magic bytes), extract any .pkt files
+# inside ZIPs, then import each. Fall back to the extension regex.
+#
+# Mail-file extension acceptance. Several FTN conventions coexist:
+#   .pkt                — raw FTS-0001 packet (any tosser)
+#   .[cdih]ut/.[cdih]rt — Mystic point flavors (crash/direct/
+#                         immediate/hold, 'ut' = unzipped, 'rt' = ARC)
+#   .t[a-z][0-9a-z]     — point-targeted bundles per Mystic naming
+#   .(mo|tu|we|th|fr|sa|su)[0-9a-z]
+#                       — FTS-5003 day-of-week bundled mail for nodes,
+#                         where the prefix is the local day at the
+#                         sending hub and the trailing char is a
+#                         per-file sequence (0..9, then a..z = 36 per day).
+# The OLD regex only matched `we<hex>` (Wednesday only) which made
+# Friday-bundled mail (`.frk`, `.frl`, …) get silently filed as
+# non-mail and dropped. Mystic hubs delivering to a node use these
+# by default. Pattern below now covers all 7 days and 36-char
+# sequence space.
+#
+# Module-level (not a per-connection closure) so it's directly
+# testable and isn't recompiled/redefined on every single inbound
+# session -- previously lived inline inside _handle_connection().
+_PKT_EXT_RE = re.compile(
+    r'^\.(?:'
+    r'pkt'
+    r'|[cdih]ut|[cdih]rt'
+    r'|t[cdih][0-9a-f]'
+    r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
+    r')$',
+    re.IGNORECASE)
+
+
+def _is_fts_packet(payload):
+    return len(payload) >= 60 and payload[18:20] in (b'\x02\x00', b'\x02\x01')
+
+
+def _is_zip(payload):
+    return len(payload) >= 4 and payload[:4] == b'PK\x03\x04'
+
+
+def _looks_like_mail_bundle_ext(name):
+    """Real gap found live: the 't[cdih][0-9a-f]' branch above
+    (Mystic point-targeted bundle names like .tc1/.td2/.th3)
+    ALSO coincidentally matches the universal FTN '.tic' TIC-
+    manifest extension itself -- 't' + 'i' (in [cdih]) + 'c'
+    (a valid hex digit in [0-9a-f]). Every inbound .tic manifest
+    was silently misrouted into this mail-packet extractor
+    instead of ever reaching the "write to inbound for TIC
+    processing" branch below -- and since a TIC manifest's
+    plain text never parses as a real FTS-0001 packet, it just
+    vanished with zero trace: not imported as mail (nothing to
+    parse), not filed as a TIC (never wrote to inbound_dir),
+    not even logged as an error. Confirmed live: a downstream
+    Synchronet/binkd node's own sender log showed the .tic
+    genuinely transmitted successfully right after its paired
+    binary, but no matching receive ever appeared anywhere in
+    our own logs. '.tic' is excluded here regardless of the
+    coincidental regex match -- it must always fall through to
+    the TIC scanner, never the mail importer.
+    """
+    ext = os.path.splitext(name)[1].lower()
+    if ext == '.tic':
+        return False
+    return bool(_PKT_EXT_RE.match(ext))
+
+
+def _extract_packets(name, payload):
+    """Yield (inner_name, inner_bytes) for every FTS-0001 packet found
+    in this file — directly, or after unzipping a mail bundle."""
+    if _is_zip(payload):
+        try:
+            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    try:
+                        inner = zf.read(info.filename)
+                    except Exception as exc:
+                        logger.warning('Failed to read %s from %s: %s',
+                                       info.filename, name, exc)
+                        continue
+                    if _is_fts_packet(inner) or _looks_like_mail_bundle_ext(
+                            info.filename):
+                        yield (info.filename, inner)
+                    else:
+                        logger.info('Skipping non-packet %s inside %s',
+                                    info.filename, name)
+        except zipfile.BadZipFile as exc:
+            logger.warning('Bad ZIP %s: %s', name, exc)
+    elif _is_fts_packet(payload) or _looks_like_mail_bundle_ext(name):
+        yield (name, payload)
 
 
 def _new_app():
@@ -832,85 +945,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         #    long this takes has no further bearing on the peer's own
         #    session/protocol timing.
         #
-        # FidoNet hubs deliver mail in several wrappers:
-        #
-        #   * Raw FTS-0001 type-2 packet — bytes 18-19 == 02 00 / 02 01.
-        #     Extension typically .pkt, but Mystic ships point-targeted variants:
-        #       .pkt              standard
-        #       .cut .crt         crash mail
-        #       .dut .drt         direct mail
-        #       .iut .irt         immediate mail
-        #       .hut .hrt         hold mail
-        #       .t<flavor><hex>   point-targeted (.th5 = hold for point .5,
-        #                          .we3 = weekly echomail for point .3, etc.)
-        #
-        #   * ZIP-compressed mail bundle (FTS-5003 / standard FidoNet). Magic
-        #     bytes 50 4B 03 04 = "PK..".  Inside is one or more .pkt files.
-        #     Mystic and binkd default to ZIP for echomail to save bandwidth;
-        #     if we don't extract these the entire feed is silently dropped.
-        #
-        # Strategy: detect by content (magic bytes), extract any .pkt files
-        # inside ZIPs, then import each. Fall back to the extension regex.
-        import re as _re
-        import io as _io
-        import zipfile as _zipfile
-        # Mail-file extension acceptance. Several FTN conventions coexist:
-        #   .pkt                — raw FTS-0001 packet (any tosser)
-        #   .[cdih]ut/.[cdih]rt — Mystic point flavors (crash/direct/
-        #                         immediate/hold, 'ut' = unzipped, 'rt' = ARC)
-        #   .t[a-z][0-9a-z]     — point-targeted bundles per Mystic naming
-        #   .(mo|tu|we|th|fr|sa|su)[0-9a-z]
-        #                       — FTS-5003 day-of-week bundled mail for nodes,
-        #                         where the prefix is the local day at the
-        #                         sending hub and the trailing char is a
-        #                         per-file sequence (0..9, then a..z = 36 per day).
-        # The OLD regex only matched `we<hex>` (Wednesday only) which made
-        # Friday-bundled mail (`.frk`, `.frl`, …) get silently filed as
-        # non-mail and dropped. Mystic hubs delivering to a node use these
-        # by default. Pattern below now covers all 7 days and 36-char
-        # sequence space.
-        _PKT_EXT_RE = _re.compile(
-            r'^\.(?:'
-            r'pkt'
-            r'|[cdih]ut|[cdih]rt'
-            r'|t[cdih][0-9a-f]'
-            r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
-            r')$',
-            _re.IGNORECASE)
-
-        def _is_fts_packet(payload):
-            return len(payload) >= 60 and payload[18:20] in (b'\x02\x00', b'\x02\x01')
-
-        def _is_zip(payload):
-            return len(payload) >= 4 and payload[:4] == b'PK\x03\x04'
-
-        def _extract_packets(name, payload):
-            """Yield (inner_name, inner_bytes) for every FTS-0001 packet found
-            in this file — directly, or after unzipping a mail bundle."""
-            if _is_zip(payload):
-                try:
-                    with _zipfile.ZipFile(_io.BytesIO(payload)) as zf:
-                        for info in zf.infolist():
-                            if info.is_dir():
-                                continue
-                            try:
-                                inner = zf.read(info.filename)
-                            except Exception as exc:
-                                logger.warning('Failed to read %s from %s: %s',
-                                               info.filename, name, exc)
-                                continue
-                            if _is_fts_packet(inner) or _PKT_EXT_RE.match(
-                                    os.path.splitext(info.filename)[1]):
-                                yield (info.filename, inner)
-                            else:
-                                logger.info('Skipping non-packet %s inside %s',
-                                            info.filename, name)
-                except _zipfile.BadZipFile as exc:
-                    logger.warning('Bad ZIP %s: %s', name, exc)
-            elif _is_fts_packet(payload) or _PKT_EXT_RE.match(
-                    os.path.splitext(name)[1]):
-                yield (name, payload)
-
+        # File classification (FTS-0001 packet vs. ZIP mail bundle vs.
+        # everything else) is handled by the module-level _extract_packets()
+        # / _is_fts_packet() / _is_zip() / _looks_like_mail_bundle_ext()
+        # helpers above -- see their docstrings for the wrapper formats
+        # this accepts and the .tic-collision bug their extraction fixed.
         def _debug_manifest(fname, buf):
             """Same purpose as binkp.py's _debug_manifest, duplicated here
             because this is a genuinely separate inbound path: the answering

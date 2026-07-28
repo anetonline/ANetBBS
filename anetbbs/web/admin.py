@@ -1470,6 +1470,41 @@ def tic_log():
     return render_template('admin/tic_log.html', pagination=pagination)
 
 
+@admin_bp.route('/tic-log/rescan', methods=['POST'])
+@login_required
+@admin_required
+def tic_rescan():
+    """Manually re-run the TIC inbound scan right now, instead of only
+    ever happening as a side effect of a BinkP session completing.
+
+    Real gap found live: there was previously no way to trigger this
+    outside of an actual poll/inbound connection -- a sysop diagnosing
+    a stuck TIC (or one who just deployed a fix and wants to confirm it
+    worked) had no button, only SSH + a one-off script. Same inbound_dir
+    resolution binkp.py/binkp_server.py both already use.
+    """
+    from ..echomail.tic import scan_inbound
+    inbound_dir = (os.environ.get('BINKP_INBOUND_DIR')
+                  or os.path.join(current_app.config.get('DATA_DIR', 'data'),
+                                  'binkp', 'inbound'))
+    if not os.path.isdir(inbound_dir):
+        flash(f'Inbound directory does not exist: {inbound_dir}', 'danger')
+        return redirect(url_for('admin.tic_log'))
+    try:
+        n = scan_inbound(inbound_dir)
+    except Exception as exc:
+        current_app.logger.exception('Manual TIC rescan failed')
+        flash(f'Rescan failed: {exc}', 'danger')
+        return redirect(url_for('admin.tic_log'))
+    if n:
+        flash(f'Rescanned {inbound_dir} — processed {n} TIC file(s). '
+              f'See below for status.', 'success')
+    else:
+        flash(f'Rescanned {inbound_dir} — no unprocessed .tic files found.',
+              'info')
+    return redirect(url_for('admin.tic_log'))
+
+
 @admin_bp.route('/tic-log/<int:tic_id>')
 @login_required
 @admin_required

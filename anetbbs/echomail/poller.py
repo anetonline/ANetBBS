@@ -233,8 +233,8 @@ def _do_poll(app, network):
     # network row pointing at itself), not a real poll attempt, and the
     # poller loop re-checks every network once a minute. Logging a full
     # PollLog row for it every single minute drowned the real activity
-    # out of the admin UI's poll log -- live-caught after Jerry's own
-    # hub had been running for under 20 minutes and the log was already
+    # out of the admin UI's poll log -- live-caught after a hub had
+    # been running for under 20 minutes and the log was already
     # dozens of rows deep. A single debug-level log line (invisible at
     # the default INFO level) is enough for anyone actually debugging
     # this specific thing; the web UI shouldn't see it at all.

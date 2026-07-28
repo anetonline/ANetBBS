@@ -1,3 +1,23 @@
+# ANetBBS v1.0b2.225 — TIC manifests never reaching the inbound scanner at all (July 2026)
+
+v1.0b2.224 fixed three real bugs in TIC processing, but a live diagnostic run afterward showed zero `.tic` files anywhere in `inbound/` — only binaries. The processor was never the actual bottleneck. Root cause, confirmed with help from a peer's own sender-side BinkP log: the inbound BinkP listener's file-classification regex (meant to catch Mystic's point-targeted mail-bundle extensions like `.tc1`/`.td2`) also coincidentally matches `.tic` itself, so every inbound TIC manifest was silently misrouted into the mail-packet importer and discarded — never reaching the scanner, never logged as a failure. Fixed by excluding `.tic` explicitly. Also adds a manual "Rescan Inbound Now" button on Admin → TIC In Log, so a sysop can force a rescan on demand instead of waiting for another BinkP session or a service restart.
+
+6 new tests plus a full binkp/binkp_server regression sweep (199 tests), all clean.
+
+---
+
+# ANetBBS v1.0b2.224 — TIC inbound processing fixes (July 2026)
+
+Live-caught: TIC files were piling up in `inbound/` unprocessed (a newly-subscribed ANotherNetwork ANSI-art feed named as the reported example). Three real gaps in `process_tic()`, all classic FTN/TIC interop rough edges:
+
+- CRC comparison didn't tolerate unpadded manifest CRC values (common from older TIC generators) — a file whose real CRC started with a zero nibble failed the check forever, every retry, permanently.
+- Binary lookup was exact-case only — Linux is case-sensitive, and mailers commonly re-case filenames on the wire regardless of the TIC's own `File:` field. A binary sitting right there under a different case was never found.
+- Successfully-filed TICs were never cleaned up from `inbound/` — only ever copied elsewhere, so every TIC ever received (success or failure) piled up there forever with no way to tell which were actually stuck.
+
+All three fixed; a genuinely wrong CRC and a genuinely missing binary are both still correctly rejected. 10 new tests. Full suite verified clean (1764 passed, 2 skipped).
+
+---
+
 # ANetBBS v1.0b2.223 — Zip-archive image galleries (July 2026)
 
 Image galleries can now point at a directory of `.zip` archives (one photo per zip, Digital Showroom-style) instead of only loose image files — matches how several TIC-fed file areas already arrive (e.g. a daily NASA photo feed), so a gallery can point straight at that same directory with no conversion step. Each zip's one image is extracted in memory only, never to disk, for both thumbnails and full-size view. Extended to the public gallery, the admin file manager, admin upload, and the terminal (chafa/img2sixel) fallback viewer.
@@ -1916,7 +1936,7 @@ Follow-up to a competitive gap analysis against Synchronet and Mystic BBS. Ships
 # ANetBBS v1.0b2.22 — Paginate the web Changelog page (July 2026)
 
 - FEATURE: `/docs/CHANGELOG` was rendering the entire, ever-growing `docs/CHANGELOG.md` as one markdown pass on every page load, getting slower to load release after release. Now paginated at 15 version-entries per page (newest first, matching the file's existing order), with Prev/Next + page-number navigation styled to match the site's active theme. Other docs pages are unaffected — this is CHANGELOG-specific, since it's the only doc that grows unbounded over time. Verified with a direct test against the live route: page 1 shows the newest entry, page 2 differs from page 1, and an out-of-range page number clamps to the last valid page instead of erroring.
-- Also fixed the CHANGELOG.md header's "Current release" line, which had been stuck at `v1.0b1.6` for a long time while every actual release moved past it — Jerry caught this looking at the deployed Pi3 copy. Added a note to the version-bump checklist so this line gets updated alongside the changelog's new top entry going forward, not just occasionally.
+- Also fixed the CHANGELOG.md header's "Current release" line, which had been stuck at `v1.0b1.6` for a long time while every actual release moved past it — caught looking at the deployed Pi3 copy. Added a note to the version-bump checklist so this line gets updated alongside the changelog's new top entry going forward, not just occasionally.
 
 ---
 

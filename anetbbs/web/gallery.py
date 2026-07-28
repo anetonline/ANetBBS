@@ -20,7 +20,7 @@ from flask_login import login_required
 gallery_bp = Blueprint('gallery', __name__, url_prefix='/gallery')
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.gif', '.png', '.bmp', '.webp'}
-# Digital Showroom-style zip galleries (the format Jerry's TIC-fed file
+# Digital Showroom-style zip galleries (the format some TIC-fed file
 # areas -- e.g. a daily NASA photo feed -- already arrive in): one image
 # per zip, sysop points a gallery at the same directory a file area
 # already unpacks TIC into, and each zip is browsed/thumbnailed by
