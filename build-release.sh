@@ -6,7 +6,8 @@
 # ANetBBS-<version>/ — required by run_upgrade.sh which looks for
 # a single subdirectory after extraction to find update.sh.
 #
-# Naming matches the auto-update regex: ANetBBS-(v\d+\.\d+a\d+\.\d+)\.tar\.gz
+# Naming matches the auto-update regex: ANetBBS-(v\d+\.\d+(?:[ab]\d+\.\d+|\.\d+))\.tar\.gz
+# (covers alpha/beta build-number form AND the stable vMAJOR.MINOR.PATCH form)
 #
 # --- Why this builds from git instead of a raw directory walk -----------
 # The previous version of this script tarred the working directory

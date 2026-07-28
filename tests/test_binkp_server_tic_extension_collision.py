@@ -49,6 +49,55 @@ class TicExtensionCollisionTests(unittest.TestCase):
         self.assertTrue(_looks_like_mail_bundle_ext('mail.cut'))
         self.assertTrue(_looks_like_mail_bundle_ext('mail.we3'))
 
+    def test_mod_extension_is_never_treated_as_a_mail_bundle(self):
+        """Real live-caught collision: a 48MB TIC-distributed zip
+        (mist0226.zip, ANN.FILES.ANSIART) had a MELODIA-*.MOD tracker
+        module member inside. The day-of-week branch's point-number
+        character class used to accept any alphanumeric char, so '.mod'
+        (mo + d) matched "Monday point-bundle" -- misrouting one member
+        as bogus mail (imported as 0 messages) and, because ANY match
+        makes the whole extract non-empty, silently dropping the ENTIRE
+        zip instead of ever writing it to inbound_dir for TIC filing.
+        Confirmed live via journalctl: "Imported 0 messages from
+        MELODIA-JAMES_BROWN_IS_DEAD.MOD into network 5", and the zip
+        was genuinely absent from inbound/ and inbound/processed/
+        afterward."""
+        from anetbbs.echomail.binkp_server import _looks_like_mail_bundle_ext
+        self.assertFalse(_looks_like_mail_bundle_ext('MELODIA-JAMES_BROWN_IS_DEAD.MOD'))
+        self.assertFalse(_looks_like_mail_bundle_ext('anything.mod'))
+        self.assertFalse(_looks_like_mail_bundle_ext('ANYTHING.MOD'))
+
+    def test_other_extensions_that_would_have_collided_under_the_old_class(self):
+        """The old [0-9a-z] point-character class was broad enough to
+        false-positive on plenty of real, common extensions beyond just
+        .mod -- confirm the digit-only fix protects these too, not just
+        the one that happened to bite live."""
+        from anetbbs.echomail.binkp_server import _looks_like_mail_bundle_ext
+        for ext in ('save.sav', 'image.sun', 'archive.wee',
+                    'mobile.mob', 'file.tux'):
+            self.assertFalse(_looks_like_mail_bundle_ext(ext),
+                             f'{ext!r} should not match the mail-bundle pattern')
+
+    def test_extract_packets_writes_the_whole_zip_when_mod_member_present(self):
+        """End-to-end: a zip containing an innocent .mod file alongside
+        other art assets must extract as EMPTY (not mail), so the
+        caller falls through to writing the raw zip to inbound_dir --
+        exactly the real live scenario."""
+        import io
+        import zipfile
+        from anetbbs.echomail.binkp_server import _extract_packets
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as zf:
+            zf.writestr('SOME-ART.ANS', b'not mail')
+            zf.writestr('SOME-TUNE.MOD', b'not mail either, just a tracker module')
+        zip_bytes = buf.getvalue()
+
+        results = list(_extract_packets('mist0226.zip', zip_bytes))
+        self.assertEqual(results, [],
+                         'a zip with only art/tracker files must never be '
+                         'treated as containing mail packets')
+
     def test_extract_packets_skips_a_tic_file_instead_of_yielding_it(self):
         from anetbbs.echomail.binkp_server import _extract_packets
         tic_content = (

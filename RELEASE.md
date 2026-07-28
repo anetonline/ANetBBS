@@ -1,3 +1,31 @@
+# ANetBBS v1.0b2.228 — Admin cleanup for `inbound/processed/`, Poll Log fix completed (July 2026)
+
+New "Clear Processed Files" action on Admin → TIC In Log — `inbound/processed/` (where successfully-filed TIC originals go, never auto-deleted) had no cleanup anywhere and just grows forever. Pick an age threshold in days, confirm, delete anything older. Sysop-triggered only, confirmation required, never runs automatically.
+
+**FIX: v1.0b2.227's Poll Log fix was incomplete** — the new `files_received` counter was added and incremented correctly but never actually used in the final `messages_received` value, so the log kept showing "Received: 0" for TIC-only sessions. Live-caught immediately when testing the v227 fix. Now actually used.
+
+4 new tests.
+
+---
+
+# ANetBBS v1.0b2.227 — Third TIC extension collision (`.mod`), Poll Log undercounting, TRUST_PROXY_HEADERS upgrade gap (July 2026)
+
+**FIX (critical, live-caught): `.mod` tracker music files inside a TIC zip caused the whole zip to silently vanish.** Third instance of the extension-collision bug class: the Mystic day-of-week point-bundle regex accepted any alphanumeric point character, so `.mod` collided with "Monday point-bundle". A 46MB TIC zip with a `MELODIA-*.MOD` module inside got entirely misrouted as mail and was never written to `inbound_dir` — genuinely missing from disk despite a clean, fully-acknowledged transfer. Point character is now restricted to a plain digit, matching the real convention.
+
+**FIX: inbound Poll Log showed "Received: 0" for sessions that clearly received real data** — the counter only tracked imported mail messages, never TIC files. Now counts both.
+
+**FIX: `update.sh` warns if `TRUST_PROXY_HEADERS` is missing** from an existing install's `.env` — live-caught on bbs.a-net.fyi itself, visitor IPs were silently showing as nginx's loopback address instead of the real client. Only ever written by a fresh `install.sh` run; existing installs upgrading via `update.sh` never got it backfilled. Not auto-set (can't safely detect an arbitrary reverse-proxy setup) — warns and lets the sysop decide.
+
+---
+
+# ANetBBS v1.0b2.226 — TIC manifests with a DOS 8.3-truncated filename couldn't find their own binary (July 2026)
+
+Right after v1.0b2.225 let `.tic` manifests reach the scanner for the first time, live testing surfaced a second, different gap: some TIC generators write a classic 8.3-truncated name in the manifest's `File:` field even though the actual attached binary keeps its real, longer filename on the wire — e.g. manifest says `white_pa.zip`, the file that arrived is `white_paper_3.0.zip`. Confirmed live: 6 files in one batch all matched this pattern, byte-identical in size to their long-named counterparts. `process_tic()`'s binary lookup now also tries each candidate's own 8.3-truncated form against the manifest name — safe even in the rare case of a coincidental match, since size/CRC checks immediately after still reject anything that doesn't actually match.
+
+9 new tests. Full TIC/hatch/areafix/filefix regression sweep clean.
+
+---
+
 # ANetBBS v1.0b2.225 — TIC manifests never reaching the inbound scanner at all (July 2026)
 
 v1.0b2.224 fixed three real bugs in TIC processing, but a live diagnostic run afterward showed zero `.tic` files anywhere in `inbound/` — only binaries. The processor was never the actual bottleneck. Root cause, confirmed with help from a peer's own sender-side BinkP log: the inbound BinkP listener's file-classification regex (meant to catch Mystic's point-targeted mail-bundle extensions like `.tc1`/`.td2`) also coincidentally matches `.tic` itself, so every inbound TIC manifest was silently misrouted into the mail-packet importer and discarded — never reaching the scanner, never logged as a failure. Fixed by excluding `.tic` explicitly. Also adds a manual "Rescan Inbound Now" button on Admin → TIC In Log, so a sysop can force a rescan on demand instead of waiting for another BinkP session or a service restart.

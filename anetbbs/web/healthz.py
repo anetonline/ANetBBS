@@ -90,7 +90,7 @@ def healthz():
     Body:
         {
           "status": "ok"|"degraded",
-          "version": "v1.0a2.43",
+          "version": "v1.0.0",
           "db_ok": true|false,
           "uptime_sec": <int seconds since this worker started>,
           "started_at": "<ISO-8601 UTC>",

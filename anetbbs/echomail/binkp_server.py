@@ -81,12 +81,24 @@ logger = logging.getLogger(__name__)
 # Module-level (not a per-connection closure) so it's directly
 # testable and isn't recompiled/redefined on every single inbound
 # session -- previously lived inline inside _handle_connection().
+# Second real gap found live in the day-of-week branch below: it
+# originally allowed ANY alphanumeric point character ([0-9a-z]), not
+# just a digit -- meaning `.mod` (a music tracker module, extremely
+# common inside ANSI-art/demoscene zips, exactly what ANN.FILES.ANSIART
+# carries) collided with 'mo' (Monday) + 'd'. Confirmed live: a 46MB
+# TIC-distributed zip with a .mod member inside got entirely misrouted
+# as a "mail packet" (one bogus member "imported" as 0 messages) and
+# the whole zip was silently never written to inbound_dir at all --
+# same failure shape as the .tic collision above, just triggered by a
+# different, much more common extension. Real Mystic point-bundle
+# numbers are a small decimal count, never a letter, so the point
+# character is restricted to a plain digit here.
 _PKT_EXT_RE = re.compile(
     r'^\.(?:'
     r'pkt'
     r'|[cdih]ut|[cdih]rt'
     r'|t[cdih][0-9a-f]'
-    r'|(?:mo|tu|we|th|fr|sa|su)[0-9a-z]'
+    r'|(?:mo|tu|we|th|fr|sa|su)[0-9]'
     r')$',
     re.IGNORECASE)
 
@@ -1010,6 +1022,16 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         # threading primitive is needed here beyond to_thread() itself.
         def _import_and_log():
             imported_total = 0
+            # Real gap found live: a session that received a large TIC
+            # binary + manifest (nothing else) showed "Received: 0" in
+            # the admin Poll Log even though real data clearly came in
+            # (confirmed via the raw transcript) -- messages_received
+            # only ever counted imported echomail/netmail packets, never
+            # TIC files/binaries written straight to inbound_dir. Track
+            # those separately and fold them into the same total below,
+            # same "don't discard real activity" fix as the comment on
+            # the poll-log-writing block further down.
+            files_received = 0
             if inbound_files:
                 with app.app_context():
                     inbound_dir = None
@@ -1057,6 +1079,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                 os.makedirs(inbound_dir, exist_ok=True)
                                 with open(os.path.join(inbound_dir, safe_name), 'wb') as f:
                                     f.write(payload)
+                                files_received += 1
                                 # Visible-by-default log so the sysop can spot
                                 # mystery files that don't match the regex /
                                 # magic bytes — easier diagnosis than digging
@@ -1111,11 +1134,12 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         if log is None:
                             log = EchomailPollLog(network_id=net_id, started_at=session_started_at)
                             db.session.add(log)
-                        log.poll_type = _inbound_poll_type(imported_total, sent_count)
+                        total_received = imported_total + files_received
+                        log.poll_type = _inbound_poll_type(total_received, sent_count)
                         log.completed_at = datetime.utcnow()
                         log.status = 'success'
                         log.messages_sent = sent_count
-                        log.messages_received = imported_total
+                        log.messages_received = total_received
                         # Real gap this closes: outbound polls have saved
                         # a frame-by-frame transcript since v1.0b2.47 (see
                         # _log_transcript above); inbound sessions -- a

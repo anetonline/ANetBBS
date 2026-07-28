@@ -1505,6 +1505,63 @@ def tic_rescan():
     return redirect(url_for('admin.tic_log'))
 
 
+@admin_bp.route('/tic-log/clear-processed', methods=['POST'])
+@login_required
+@admin_required
+def tic_clear_processed():
+    """Delete files from inbound/processed/ older than a sysop-chosen
+    number of days.
+
+    process_tic() moves successfully-filed originals to processed/
+    rather than deleting them (matches this project's usual
+    keep-it-recoverable posture) -- but nothing ever cleans that
+    directory up, so it grows unbounded forever on a busy TIC feed
+    (confirmed live: a single 41MB file already sitting in it, another
+    48MB one that would have joined it). Sysop-triggered only, with an
+    explicit age threshold and a confirm prompt in the template --
+    never auto-run, since a wrong auto-delete of sysop data is exactly
+    the class of mistake this project works hard to avoid elsewhere.
+    """
+    try:
+        days = int(request.form.get('days', '30'))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(1, days)
+
+    inbound_dir = (os.environ.get('BINKP_INBOUND_DIR')
+                  or os.path.join(current_app.config.get('DATA_DIR', 'data'),
+                                  'binkp', 'inbound'))
+    processed_dir = os.path.join(inbound_dir, 'processed')
+    if not os.path.isdir(processed_dir):
+        flash(f'No processed/ directory found at {processed_dir}', 'info')
+        return redirect(url_for('admin.tic_log'))
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    deleted = 0
+    freed_bytes = 0
+    for name in os.listdir(processed_dir):
+        path = os.path.join(processed_dir, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            mtime = datetime.utcfromtimestamp(os.stat(path).st_mtime)
+            if mtime < cutoff:
+                freed_bytes += os.path.getsize(path)
+                os.remove(path)
+                deleted += 1
+        except OSError as exc:
+            current_app.logger.warning('Failed to remove %s: %s', path, exc)
+
+    if deleted:
+        freed_mb = freed_bytes / (1024 * 1024)
+        flash(f'Deleted {deleted} file(s) older than {days} day(s), '
+              f'freeing {freed_mb:.1f} MB.', 'success')
+    else:
+        flash(f'No files older than {days} day(s) found in {processed_dir}.',
+              'info')
+    return redirect(url_for('admin.tic_log'))
+
+
 @admin_bp.route('/tic-log/<int:tic_id>')
 @login_required
 @admin_required

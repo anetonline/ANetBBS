@@ -701,6 +701,23 @@ else
     ok ".env is up to date — no new keys needed"
 fi
 
+# TRUST_PROXY_HEADERS is deliberately NOT in .env.example -- it's not
+# in "add the default" here alongside everything else above:
+# whether it's safe depends on whether a reverse proxy genuinely sits
+# in front of this specific install, which this script can't reliably
+# detect (nginx configs are sometimes at a custom path/filename, not
+# the one install.sh generates -- confirmed live on a real install).
+# Blindly backfilling a value here would either wrongly enable
+# header-trust on an install with no proxy (letting any direct
+# connection spoof its IP) or leave it wrongly disabled behind a real
+# proxy (every visitor logs as the proxy's own address, useless for
+# banning). install.sh writes this correctly for fresh installs; an
+# existing install upgrading through this path has always been silent
+# about it until now -- loud and manual beats silent and wrong here.
+if ! grep -q '^TRUST_PROXY_HEADERS=' "$ENV_FILE" 2>/dev/null; then
+    warn "TRUST_PROXY_HEADERS is not set in .env. If this install sits behind nginx or another reverse proxy, visitor IPs (bans, audit logs) will show as the proxy's own address until you add TRUST_PROXY_HEADERS=true and restart. If Flask is exposed directly with no proxy in front, leave this unset."
+fi
+
 # ─── Step 7: Update database schema (non-destructive) ─────────────────────────
 step "Step 7/8: Updating database schema"
 

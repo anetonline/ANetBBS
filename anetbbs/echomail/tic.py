@@ -148,6 +148,17 @@ def _crc32_file(path, blocksize=65536):
     return f'{h & 0xffffffff:08x}'
 
 
+def _dos83_truncate(name):
+    """Return the classic DOS 8.3 form of a filename: the base name
+    (everything before the last '.') truncated to 8 characters, plus
+    the extension truncated to 3. Used as a fallback when a TIC
+    manifest's File: field is itself 8.3-truncated but the actual
+    attached binary kept its real, longer filename."""
+    base, ext = os.path.splitext(name)
+    ext = ext[1:4] if ext.startswith('.') else ext[:3]
+    return f'{base[:8]}.{ext}' if ext else base[:8]
+
+
 def process_tic(tic_path, inbound_dir):
     """Process a single .tic file. Returns the TicFile DB row.
 
@@ -229,6 +240,29 @@ def process_tic(tic_path, inbound_dir):
             actual_name = next(
                 (f for f in os.listdir(inbound_dir)
                  if f.lower() == safe_filename.lower()), None)
+        except OSError:
+            actual_name = None
+        if actual_name:
+            bin_path = os.path.join(inbound_dir, actual_name)
+    if not os.path.isfile(bin_path):
+        # Second real gap found live: some TIC generators write a
+        # classic DOS 8.3-truncated name in the File: field (first 8
+        # chars of the base name + the extension) even though the
+        # actual attached/hatched binary keeps its real, longer
+        # filename on the wire -- e.g. manifest says "white_pa.zip"
+        # but the file that actually arrived is "white_paper_3.0.zip".
+        # Confirmed live: six files in one batch all matched this
+        # pattern exactly, each with an identical byte size to its
+        # long-named counterpart already sitting in inbound_dir. Fall
+        # back to comparing each candidate's own 8.3-truncated form
+        # against the manifest name. Safe even if this ever matches
+        # the wrong file by coincidence -- the size/CRC checks right
+        # below still reject it before anything gets filed.
+        try:
+            actual_name = next(
+                (f for f in os.listdir(inbound_dir)
+                 if _dos83_truncate(f).lower() == safe_filename.lower()),
+                None)
         except OSError:
             actual_name = None
         if actual_name:

@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.225`, July 2026) — Full release: **August 1 2026**
+**Status: beta** (`v1.0b2.226`, July 2026) — Full release: **August 1 2026**
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.225.tar.gz
-cd ANetBBS-v1.0b2.225
+tar xzf ANetBBS-v1.0b2.226.tar.gz
+cd ANetBBS-v1.0b2.226
 sudo bash install.sh
 ```
 
@@ -39,8 +39,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0b2.225.tar.gz
-cd ANetBBS-v1.0b2.225
+tar xzf ANetBBS-v1.0b2.226.tar.gz
+cd ANetBBS-v1.0b2.226
 sudo bash update.sh
 ```
 
@@ -247,6 +247,5 @@ This is a **beta** release. Known rough edges:
   dies with a `ReferenceError` and the missing stub will get added.
 - Single-process rate limits — fine for one gunicorn worker; needs an
   external store for multi-worker setups.
-- Test coverage is light. Real-world testing during beta is encouraged — file issues on GitHub.
 
 Issues and patches welcome.

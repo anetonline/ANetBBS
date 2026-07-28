@@ -1,7 +1,29 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.225`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.228`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.228 — Admin cleanup for `inbound/processed/`, Poll Log fix completed (July 2026)
+
+Requested after confirming `inbound/processed/` (where `process_tic()` moves successfully-filed TIC originals, never deleting them) has no cleanup anywhere — it just grows forever, already sitting at 41MB+ on a single active TIC feed. New "Clear Processed Files" action on Admin → TIC In Log: pick an age threshold in days, confirm, delete anything older. Sysop-triggered only, with a confirmation prompt — never runs automatically, matching this project's usual caution around deleting sysop data.
+
+- **FIX: v1.0b2.227's Poll Log fix was incomplete.** The new `files_received` counter was added and correctly incremented, but never actually folded into the value written to `EchomailPollLog.messages_received` — the log kept showing "Received: 0" for TIC-only sessions exactly as before, live-caught immediately by testing the v1.0b2.227 fix against a real inbound session. Now actually used.
+
+4 new tests.
+
+## v1.0b2.227 — Third TIC extension collision (`.mod`), inbound Poll Log undercounting, TRUST_PROXY_HEADERS upgrade gap (July 2026)
+
+Live-caught, same day as v1.0b2.226, while watching a real inbound poll against the just-deployed fix:
+
+- **FIX (critical, live-caught): `.mod` tracker music files inside a TIC-distributed zip caused the whole zip to silently vanish.** Third instance of the extension-collision bug class first found in v1.0b2.225: the Mystic day-of-week point-bundle branch (`(?:mo|tu|we|th|fr|sa|su)[0-9a-z]`) accepted *any* alphanumeric point character, not just a digit — so `.mod` (`mo` + `d`) collided with "Monday point-bundle". Confirmed live: a 46MB TIC zip (`mist0226.zip`, `ANN.FILES.ANSIART`) contained a `MELODIA-*.MOD` module among its art assets; the one matching member got misrouted into the mail importer ("Imported 0 messages"), and because any match makes the whole extraction non-empty, the entire zip was never written to `inbound_dir` at all — genuinely missing from disk despite a clean, fully-acknowledged BinkP transfer on both ends. Real Mystic point numbers are a small decimal count, never a letter, so the point character is now restricted to a plain digit. 4 new tests.
+- **FIX (live-caught): the inbound Poll Log showed "Received: 0" for a session that had clearly received real data.** `messages_received` only ever counted imported echomail/netmail messages, never TIC files/binaries written straight to `inbound_dir` — a session that received nothing *but* a large TIC file (exactly the case above) looked identical in the log to one that received nothing at all. Now folds files written to `inbound_dir` into the same total.
+- **FIX: `update.sh` now warns if `TRUST_PROXY_HEADERS` is missing from an existing install's `.env`.** Live-caught on bbs.a-net.fyi itself: this setting is only ever written by a *fresh* `install.sh` run; an existing install upgrading through `update.sh` never got it backfilled, so every visitor IP silently showed as nginx's own loopback address (127.0.0.1) instead of the real client — useless for IP bans or abuse tracking. Not auto-set, since whether it's safe depends on whether a reverse proxy genuinely fronts a given install (and nginx configs aren't always at the path this script expects) — a wrong auto-set would either open a spoofing hole or leave it silently broken either way. Warns and lets the sysop decide.
+
+## v1.0b2.226 — TIC manifests with a DOS 8.3-truncated filename couldn't find their own binary (July 2026)
+
+Right after v1.0b2.225 let `.tic` manifests reach the scanner for the first time, live testing surfaced a second, different gap: some TIC generators write a classic 8.3-truncated name in the manifest's `File:` field (first 8 characters of the base name + extension) even though the actual attached binary keeps its real, longer filename on the wire — e.g. the manifest says `white_pa.zip` but the file that arrived is `white_paper_3.0.zip`. Confirmed live: 6 files in one batch all matched this pattern exactly, each byte-identical in size to its long-named counterpart already sitting in `inbound/`. This is a different gap than v1.0b2.224's case-insensitive fallback, which only handles a pure case difference, not a length truncation. `process_tic()`'s binary lookup now also falls back to comparing each candidate file's own 8.3-truncated form against the manifest name — safe even in the rare case of a coincidental match, since the size/CRC checks immediately after still reject anything that doesn't actually match.
+
+9 new tests. Full TIC/hatch/areafix/filefix regression sweep clean, no regressions.
 
 ## v1.0b2.225 — TIC manifests never reaching the inbound scanner at all (July 2026)
 
