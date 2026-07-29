@@ -1,7 +1,11 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.232`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.233`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.233 — Same-day fix: MRC verification check (v1.0b2.232) trusted a stale `.env` flag (July 2026)
+
+Caught immediately after shipping v1.0b2.232: the new MRC connectivity check in `update.sh` gated entirely on `.env`'s `MRC_BRIDGE_ENABLED` flag — which, on a real long-lived install, had gone stale at `false` while `anetbbs-mrc-bridge.service` was demonstrably active and serving real traffic. The check silently skipped itself on exactly the install where it mattered most. Now gates on `MRC_BRIDGE_ENABLED == true` **OR** the service actually being active (`systemctl is-active`), whichever says yes.
 
 ## v1.0b2.232 — Removed redundant/broken MRC bridges; nginx MRC-proxy verification on install/update (July 2026)
 

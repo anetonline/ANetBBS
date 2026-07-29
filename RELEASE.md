@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.233 — Same-day fix: MRC verification check trusted a stale `.env` flag (July 2026)
+
+Caught immediately after shipping v1.0b2.232: the new MRC connectivity check in `update.sh` gated entirely on `.env`'s `MRC_BRIDGE_ENABLED` flag, which had gone stale on a real install (the bridge was actively running with the flag stuck at `false`), silently skipping the check exactly where it mattered most. Now also checks whether the service is actually running, not just what `.env` claims.
+
+---
+
 # ANetBBS v1.0b2.232 — Removed redundant/broken MRC bridges; nginx MRC-proxy verification on install/update (July 2026)
 
 Found a stray MRC bridge service crash-looping for 10+ days (297,000+ systemd restarts) pointing at a directory from an old layout. Turned out to be entirely redundant — removed it along with two other MRC bridges that were no longer wanted, standardizing on Bottomless Abyss as the sole MRC network. Simplified the web MRC client's now-single-option server picker to match.

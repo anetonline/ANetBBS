@@ -1653,7 +1653,20 @@ fi
 # and (when we manage nginx) that its /mrcws block points at the right
 # port. Runs on every update, not just fresh installs, so drift gets
 # caught going forward instead of only at initial setup.
-if [[ "${EXISTING_ENV[MRC_BRIDGE_ENABLED]:-}" == "true" ]]; then
+#
+# Gate on whether the service is ACTUALLY running, not just the .env
+# flag -- confirmed live on a real long-lived install: MRC_BRIDGE_ENABLED
+# was stuck at "false" in .env (evidently gone stale at some point after
+# initial install) while anetbbs-mrc-bridge.service was demonstrably
+# active and serving real traffic. Trusting the flag alone silently
+# skipped this entire check on exactly the kind of hand-evolved install
+# where catching drift matters most.
+MRC_ACTUALLY_RUNNING=false
+if [[ "${EXISTING_ENV[MRC_BRIDGE_ENABLED]:-}" == "true" ]] || \
+   systemctl is-active --quiet anetbbs-mrc-bridge 2>/dev/null; then
+    MRC_ACTUALLY_RUNNING=true
+fi
+if [[ "$MRC_ACTUALLY_RUNNING" == "true" ]]; then
     MRC_PORT_CHECK="${EXISTING_ENV[MRC_BRIDGE_PORT]:-8080}"
     MRC_WS_LOCAL="http://127.0.0.1:${MRC_PORT_CHECK}/ws"
     if curl -s -o /dev/null --max-time 3 \
