@@ -1346,14 +1346,16 @@ class BBSMenuUI:
                         tagline_picker=lambda: _maybe_prompt_tagline(self))
                     if body_out and net_id:
                         with _app().app_context():
-                            from anetbbs.models import db as _db2, EchomailMessage as _EM
+                            from anetbbs.models import (
+                                db as _db2, EchomailMessage as _EM,
+                                maybe_tag_ansi_subject as _tag_ansi)
                             em = _EM(
                                 area_id=area_id,
                                 network_id=net_id,
                                 from_name=post_name[:100],
                                 from_address=net_addr,
                                 to_name=compose_to[:100],
-                                subject=compose_subj[:200],
+                                subject=_tag_ansi(compose_subj, body_out)[:200],
                                 body=body_out,
                                 direction='outbound',
                             )
@@ -3822,7 +3824,8 @@ BBSMenuUI.send_pm = _send_pm
 
 async def _compose_echomail(self):
     """Compose an echomail — network-first, then area, then message."""
-    from anetbbs.models import db, EchoArea, EchomailMessage, EchomailNetwork
+    from anetbbs.models import (db, EchoArea, EchomailMessage,
+                                EchomailNetwork, maybe_tag_ansi_subject)
     from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
 
 
@@ -4012,7 +4015,7 @@ async def _compose_echomail(self):
             from_name=post_name[:100],
             from_address=our_addr,
             to_name=to_name[:100],
-            subject=subject[:200],
+            subject=maybe_tag_ansi_subject(subject, body)[:200],
             body=body,
             direction='outbound',
         )

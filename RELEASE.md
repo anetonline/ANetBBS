@@ -1,3 +1,9 @@
+# ANetBBS v1.0b2.239 — Sysop message delete button; `[ANSI]` subject auto-tag (July 2026)
+
+Two requests following the ANSI-art incident above. First, a sysop-only "Delete" button on echomail messages — previously required hand SQL, including cleaning up the outbound BinkP queue by hand. Now a single admin-only action that hard-deletes the message and cleans up every table that references it (queue entries, read status, QWK delivery pointers); can't recall a copy already delivered to a peer, only stop what's still pending and remove the local copy. Second, messages containing real ANSI escape codes now get an automatic `[ANSI] ` subject prefix, so readers on non-ANSI clients know what to expect before opening — wired into all 9 places a subject gets set (3 inbound import paths, 6 local compose surfaces) via one shared helper. 12 new tests total.
+
+---
+
 # ANetBBS v1.0b2.238 — Same-day fix: v237's ANSI art fix wasn't enough (July 2026)
 
 Deploying v237, the art was still scrambled (no longer collapsed to nothing, but rows glued together wrong) — confirmed by comparing side-by-side against the same message on a real Synchronet BBS. v237 fixed real data loss but didn't question whether line breaks should be stripped in the first place: the "flat block art" fast path strips breaks so the VT emulator's own 80-column auto-wrap owns row layout, correct only when a line is actually wider than 80 columns. The condition never checked that — it fired for any flat block art regardless. `groot.ans`'s widest line is 77 columns; stripping glued multiple short source lines onto shared auto-wrapped rows instead of keeping their real one-row-per-line layout. Fixed by checking each line's real visible width against 80 before stripping, in both the web and terminal renderers. Confirmed against the real live message: 69–70 correctly-laid-out rows now, versus 55 wrong ones before. 2 tests rewritten to cover both cases explicitly.

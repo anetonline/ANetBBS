@@ -18,7 +18,8 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, abort)
 from flask_login import login_required, current_user
 
-from ..models import (db, NetmailMessage, EchomailNetwork, UserAka)
+from ..models import (db, NetmailMessage, EchomailNetwork, UserAka,
+                      maybe_tag_ansi_subject)
 from ..echomail.kludges import make_msgid
 from ..echomail.routing import (parse_address, find_network_for_address,
                                 find_aka_for_network)
@@ -302,7 +303,7 @@ def compose(reply_to=None):
             to_address=to_address,
             from_name=from_name,
             to_name=to_name,
-            subject=subject,
+            subject=maybe_tag_ansi_subject(subject, body),
             body=body,
             kludges=__import__('json').dumps(kludges),
             msgid=msgid_value,

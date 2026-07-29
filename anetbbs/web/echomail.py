@@ -10,7 +10,8 @@ from flask_wtf import FlaskForm
 from sqlalchemy.exc import OperationalError
 
 from ..models import (db, EchoArea, EchomailMessage, EchomailReadStatus,
-                       EchomailNetwork, EchomailLastRead)
+                       EchomailNetwork, EchomailLastRead, BinkPHoldQueue,
+                       QWKNodeLastSent, maybe_tag_ansi_subject)
 from ..features.access_control import evaluate_access
 
 echomail_bp = Blueprint('echomail', __name__, url_prefix='/echomail')
@@ -326,6 +327,54 @@ def read(area_id, message_id):
                            next_msg=next_msg)
 
 
+@echomail_bp.route('/<int:area_id>/<int:message_id>/delete', methods=['POST'])
+@login_required
+def delete_message(area_id, message_id):
+    """Admin-only: permanently remove a single echomail message.
+
+    Real gap found live: a sysop composed/received a message that never
+    should have gone out (garbled ANSI art) and had no way to pull it
+    from the local view or the still-pending outbound BinkPHoldQueue
+    short of hand-written SQL against the live database -- exactly the
+    kind of one-off, error-prone, unrepeatable operation a real UI
+    button exists to prevent. Admin-only: echomail is shared FTN network
+    content, not a personal post -- unlike boards.delete_post (author OR
+    admin OR moderator), a regular user has no standing to remove a
+    network message even if they authored it, since once tossed it's
+    already out of local control anyway. This only ever removes the
+    LOCAL copy/any not-yet-sent outbound queue entries -- it cannot
+    recall a copy that's already reached a peer.
+    """
+    if not getattr(current_user, 'is_admin', False):
+        abort(403)
+    echo_area = EchoArea.query.get_or_404(area_id)
+    msg = EchomailMessage.query.filter_by(id=message_id, area_id=area_id).first_or_404()
+
+    # Stop any not-yet-delivered copies from going out before removing
+    # the message itself -- this is the exact step that otherwise
+    # requires hand-written SQL against BinkPHoldQueue, found live.
+    pending_count = BinkPHoldQueue.query.filter_by(message_id=message_id).count()
+    BinkPHoldQueue.query.filter_by(message_id=message_id).delete()
+    EchomailReadStatus.query.filter_by(message_id=message_id).delete()
+    # last_message_id is a nullable high-water-mark pointer, not a hard
+    # reference -- null it out rather than deleting the subscription row
+    # itself (that row also carries the node's QWK conf_number mapping).
+    QWKNodeLastSent.query.filter_by(last_message_id=message_id).update(
+        {'last_message_id': None})
+
+    db.session.delete(msg)
+    db.session.commit()
+
+    if pending_count:
+        flash(f'Message deleted, including {pending_count} not-yet-sent '
+              f'outbound queue entr{"y" if pending_count == 1 else "ies"}. '
+              f'Any copies already delivered to a peer cannot be recalled.',
+              'success')
+    else:
+        flash('Message deleted.', 'success')
+    return redirect(url_for('echomail.area', area_id=echo_area.id))
+
+
 @echomail_bp.route('/<int:area_id>/compose', methods=['GET', 'POST'])
 @echomail_bp.route('/<int:area_id>/reply/<int:reply_to_id>', methods=['GET', 'POST'])
 @login_required
@@ -406,7 +455,7 @@ def compose(area_id, reply_to_id=None):
             network_id=echo_area.network_id,
             from_name=post_name,
             to_name=form.to_name.data,
-            subject=form.subject.data,
+            subject=maybe_tag_ansi_subject(form.subject.data, body),
             body=body,
             tear_line=tear,
             origin_line=origin,
@@ -545,7 +594,7 @@ def netmail_compose():
             from_name=post_name,
             to_name=form.to_name.data.strip(),
             to_address=(form.to_address.data or '').strip() or None,
-            subject=form.subject.data,
+            subject=maybe_tag_ansi_subject(form.subject.data, body),
             body=body,
             tear_line=tear,
             origin_line=origin,

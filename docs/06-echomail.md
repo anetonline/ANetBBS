@@ -137,6 +137,33 @@ compose flow — via a single shared `resolve_post_name()` helper in
 `anetbbs/features/access_control.py` rather than one-off logic per
 surface.
 
+## `[ANSI]` subject auto-tag
+
+A message whose body contains real ANSI escape sequences (not just
+CP437 box-drawing characters alone, which show up in ordinary quoted
+replies/taglines and don't warrant a warning) automatically gets an
+`[ANSI] ` prefix added to its subject, so a reader on a non-ANSI-capable
+client — or just skimming a message list — knows to expect colored/
+box-drawing content before opening it. Idempotent (never double-tags an
+already-tagged subject). Applied via a shared `maybe_tag_ansi_subject()`
+helper in `anetbbs/models.py`, wired into both the 3 inbound import
+paths (BinkP poll, BinkP inbound session, QWK REP upload) and every
+local compose surface — so it fires the same way whether the ANSI
+content came from a peer or was typed locally.
+
+## Deleting a message
+
+Admins get a "Delete" button on the message-read view
+(`POST /echomail/<area_id>/<message_id>/delete`) to permanently remove a
+single echomail message — e.g. one that was composed/received in error
+and shouldn't have gone out. Admin-only: echomail is shared FTN network
+content, not a personal post, so (unlike board-post deletion) authorship
+alone doesn't grant delete rights. Removes the local row and cleans up
+every table that references it (the outbound `BinkPHoldQueue`, per-user
+`EchomailReadStatus`, and `QWKNodeLastSent`'s delivery pointer) — but can
+only stop copies still pending delivery; it cannot recall a copy already
+sent to a peer.
+
 ## AreaFix — subscription requests from peers
 
 AreaFix is the standard FTN robot that lets a downstream peer manage

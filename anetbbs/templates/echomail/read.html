@@ -102,9 +102,20 @@
             {{ msg.direction|capitalize }}
             {% if msg.imported_at %} — received {{ msg.imported_at|eastern('%Y-%m-%d %H:%M') }}{% endif %}
         </span>
-        <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=msg.id) }}" class="btn btn-primary btn-sm">
-            <i class="bi bi-reply"></i> Reply
-        </a>
+        <span>
+            {% if current_user.is_admin %}
+            <form method="POST" action="{{ url_for('echomail.delete_message', area_id=echo_area.id, message_id=msg.id) }}"
+                 class="d-inline" onsubmit="return confirm('Permanently delete this message? This also removes it from any not-yet-sent outbound queue, but cannot recall a copy already delivered to a peer.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm me-1" title="Delete this message (admin only)">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </form>
+            {% endif %}
+            <a href="{{ url_for('echomail.compose', area_id=echo_area.id, reply_to_id=msg.id) }}" class="btn btn-primary btn-sm">
+                <i class="bi bi-reply"></i> Reply
+            </a>
+        </span>
     </div>
 </div>
 {% endblock %}

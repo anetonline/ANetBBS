@@ -1571,7 +1571,8 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     this can't just reuse the message's own from_address field.
     """
     import json
-    from ..models import db, EchomailMessage, EchoArea, NetmailMessage, EchomailNetwork
+    from ..models import (db, EchomailMessage, EchoArea, NetmailMessage,
+                          EchomailNetwork, maybe_tag_ansi_subject)
     from .kludges import find_kludge
     from .routing import resolve_netmail_recipient
     from .poller import _record_bad_area
@@ -1649,7 +1650,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
                 msg_id=msgid or None,
                 from_name=m['from_name'][:100],
                 to_name=m['to_name'][:100],
-                subject=m['subject'][:200],
+                subject=maybe_tag_ansi_subject(m['subject'], m['body'])[:200],
                 body=m['body'],
                 tear_line=(m['tear_line'] or '')[:200] or None,
                 origin_line=(m['origin_line'] or '')[:200] or None,

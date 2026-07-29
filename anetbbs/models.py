@@ -2027,6 +2027,35 @@ def format_tagline_append(tagline_text):
     return f'\n\n-- \n{tagline_text}\n'
 
 
+_ANSI_SUBJECT_TAG = '[ANSI]'
+
+
+def maybe_tag_ansi_subject(subject, body):
+    """Prepend '[ANSI] ' to *subject* when *body* contains real ANSI
+    escape sequences, so a reader on a non-ANSI-capable client (or just
+    skimming a message list) knows to expect colored/box-drawing content
+    before opening it -- rather than being surprised by garbled-looking
+    escape codes or CP437 art that doesn't render on their client.
+
+    A plain substring check for the CSI introducer ('\\x1b[') is the
+    right signal here, not a CP437-block-character check: box-drawing
+    characters alone show up constantly in ordinary quoted replies and
+    taglines and don't need a warning; real ANSI escape sequences are
+    what actually break on a client that can't interpret them.
+
+    Idempotent (never double-tags an already-tagged subject) and
+    case-insensitive on the existing tag so a reply to an already-tagged
+    subject doesn't accumulate '[ANSI] [ANSI] ...'. Returns *subject*
+    unchanged when body has no ANSI content, or is falsy.
+    """
+    if not body or '\x1b[' not in body:
+        return subject
+    subject = subject or ''
+    if subject.upper().startswith(_ANSI_SUBJECT_TAG):
+        return subject
+    return f'{_ANSI_SUBJECT_TAG} {subject}'.rstrip()
+
+
 class CallerLog(db.Model):
     """Per-login record — who connected, from where, on what protocol."""
     __tablename__ = 'caller_log'

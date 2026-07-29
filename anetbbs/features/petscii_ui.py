@@ -686,7 +686,8 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
         return
 
     with _app_ctx():
-        from ..models import db, EchoArea, EchomailNetwork, EchomailMessage
+        from ..models import (db, EchoArea, EchomailNetwork, EchomailMessage,
+                              maybe_tag_ansi_subject)
         area = EchoArea.query.get(area_id)
         network = EchomailNetwork.query.get(area.network_id) if area else None
         msg = EchomailMessage(
@@ -694,7 +695,7 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
             network_id=area.network_id if area else None,
             from_name=post_name[:100],
             to_name=to_name[:100],
-            subject=subject[:200],
+            subject=maybe_tag_ansi_subject(subject, body)[:200],
             body=body,
             direction='outbound',
         )

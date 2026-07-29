@@ -771,7 +771,7 @@ def _import_message(network, msg_data: dict) -> int:
     Import a single parsed message dict into the database.
     Returns 1 if imported, 0 if duplicate, -1 if dropped (loop / unsubscribed).
     """
-    from ..models import db, EchoArea, EchomailMessage
+    from ..models import db, EchoArea, EchomailMessage, maybe_tag_ansi_subject
     import json as _json
 
     area_tag = msg_data.get('area_tag')
@@ -880,7 +880,9 @@ def _import_message(network, msg_data: dict) -> int:
                 from_address=(msg_data.get('from_address') or '')[:60],
                 to_name=(msg_data.get('to_name') or 'All')[:120],
                 to_address=(msg_data.get('to_address') or '')[:60],
-                subject=(msg_data.get('subject') or '(no subject)')[:200],
+                subject=maybe_tag_ansi_subject(
+                    msg_data.get('subject') or '(no subject)',
+                    msg_data.get('body', ''))[:200],
                 body=msg_data.get('body', ''),
                 tear_line=(msg_data.get('tear_line') or '')[:200] or None,
                 origin_line=(msg_data.get('origin_line') or '')[:200] or None,

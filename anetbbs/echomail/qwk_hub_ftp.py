@@ -320,7 +320,8 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
         return 0
 
     with app.app_context():
-        from ..models import db, QWKNode, QWKNodeLastSent, EchoArea, EchomailMessage
+        from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
+                              EchomailMessage, maybe_tag_ansi_subject)
 
         node = QWKNode.query.get(node_id)
         if node is None:
@@ -414,7 +415,9 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                         network_id=area.network_id,
                         from_name=msg_dict.get('from_name', '')[:100],
                         to_name=msg_dict.get('to_name', 'All')[:100],
-                        subject=msg_dict.get('subject', '')[:200],
+                        subject=maybe_tag_ansi_subject(
+                            msg_dict.get('subject', ''),
+                            msg_dict.get('body', ''))[:200],
                         body=msg_dict.get('body', ''),
                         msg_id=msg_dict.get('msg_id', ''),
                         reply_id=msg_dict.get('reply_id', ''),
