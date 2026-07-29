@@ -2056,14 +2056,31 @@ fi
 # further below already cover what to do next.
 if [[ "$ENABLE_MRC" == "y" ]]; then
     MRC_WS_LOCAL="http://127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws"
-    if curl -s -o /dev/null --max-time 3 \
-        -H "Connection: Upgrade" -H "Upgrade: websocket" \
-        -H "Sec-WebSocket-Version: 13" \
-        -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-        "$MRC_WS_LOCAL"; then
-        ok "MRC bridge answering locally on port $MRC_BRIDGE_PORT_DEFAULT"
+    # Confirmed live (twice, see update.sh's copy of this check for the
+    # full story): (1) a probe right after the service starts can race
+    # its own startup, so this retries briefly, matching the /healthz
+    # probe above. (2) A real WS-upgrade attempt is the wrong probe
+    # shape -- once the server answers 101, curl has no reason to close
+    # the now-raw connection on its own, so it blocks until --max-time
+    # kills it, meaning curl's exit code comes back as a timeout on
+    # every SUCCESS too, not just failures. No Upgrade headers needed
+    # (any HTTP response at all, even a 400 rejecting a non-upgrade GET,
+    # proves the bridge's HTTP layer is alive) and read the captured
+    # status code directly instead of trusting curl's exit status.
+    MRC_WS_OK=false
+    for i in 1 2 3 4 5; do
+        MRC_HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+            "$MRC_WS_LOCAL" 2>/dev/null || echo "000")
+        if [[ "$MRC_HTTP_CODE" != "000" ]]; then
+            MRC_WS_OK=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$MRC_WS_OK" == "true" ]]; then
+        ok "MRC bridge answering locally on port $MRC_BRIDGE_PORT_DEFAULT (HTTP $MRC_HTTP_CODE)"
     else
-        warn "MRC bridge is NOT answering on 127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output."
+        warn "MRC bridge is NOT answering on 127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws (after 5 retries over ~15s) — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output."
     fi
 
     if [[ "$ENABLE_NGINX" == "y" ]]; then

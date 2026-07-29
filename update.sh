@@ -1669,14 +1669,37 @@ fi
 if [[ "$MRC_ACTUALLY_RUNNING" == "true" ]]; then
     MRC_PORT_CHECK="${EXISTING_ENV[MRC_BRIDGE_PORT]:-8080}"
     MRC_WS_LOCAL="http://127.0.0.1:${MRC_PORT_CHECK}/ws"
-    if curl -s -o /dev/null --max-time 3 \
-        -H "Connection: Upgrade" -H "Upgrade: websocket" \
-        -H "Sec-WebSocket-Version: 13" \
-        -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-        "$MRC_WS_LOCAL"; then
-        ok "MRC bridge answering locally on port $MRC_PORT_CHECK"
+    # Confirmed live (twice): (1) a probe right after the restart loop
+    # can race the bridge's own startup -- "active" only means the
+    # process started, not that it's finished binding its socket -- so
+    # this retries briefly, same reasoning as the existing /healthz
+    # probe. (2) A real WS-upgrade attempt is the WRONG probe shape: once
+    # the server answers 101, curl has no reason to close the now-raw
+    # duplexed connection on its own, so it just sits until --max-time
+    # kills it -- meaning curl's own exit code comes back as a timeout
+    # (28) on every success, not just failures. Confirmed via the
+    # bridge's own access log: five separate probes, five real 101
+    # responses, and this script reported "not answering" every time
+    # regardless, because it was checking curl's exit code instead of
+    # what curl actually received. Fixed: no Upgrade headers (a genuine
+    # handshake was never actually needed -- any HTTP response at all,
+    # even a 400 rejecting a non-upgrade GET to a WS-only route, proves
+    # the bridge's HTTP layer is alive) and read the captured status
+    # code directly rather than trusting curl's process exit status.
+    MRC_WS_OK=false
+    for i in 1 2 3 4 5; do
+        MRC_HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+            "$MRC_WS_LOCAL" 2>/dev/null || echo "000")
+        if [[ "$MRC_HTTP_CODE" != "000" ]]; then
+            MRC_WS_OK=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$MRC_WS_OK" == "true" ]]; then
+        ok "MRC bridge answering locally on port $MRC_PORT_CHECK (HTTP $MRC_HTTP_CODE)"
     else
-        warn "MRC bridge is NOT answering on 127.0.0.1:$MRC_PORT_CHECK/ws — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output. Both web AND terminal MRC need this running."
+        warn "MRC bridge is NOT answering on 127.0.0.1:$MRC_PORT_CHECK/ws (after 5 retries over ~15s) — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output. Both web AND terminal MRC need this running."
     fi
 
     if [[ -f "$NGINX_AVAIL" ]]; then

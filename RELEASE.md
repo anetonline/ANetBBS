@@ -1,3 +1,15 @@
+# ANetBBS v1.0b2.235 — Same-day fix: MRC verification check was probing with the wrong request shape (July 2026)
+
+The v234 retry fix didn't help: the bridge's access log showed all 5 retries getting real `101` responses while the script still reported failure every time. A WS-upgrade request, once accepted, leaves curl holding an open connection until `--max-time` kills it — so curl's exit code comes back as a timeout on every success, not just failures, and the check was reading that instead of the actual status received. Fixed by dropping the Upgrade headers (never actually needed) and reading the captured status code directly, matching the already-reliable `/healthz` probe's technique. Verified locally against a test server before shipping, given this same check had now been wrong twice.
+
+---
+
+# ANetBBS v1.0b2.234 — Same-day fix: MRC verification check raced the bridge's own startup (July 2026)
+
+Caught immediately on deploying v1.0b2.233 live: the MRC connectivity check warned right after a restart that the bridge wasn't answering, but a manual re-probe seconds later succeeded cleanly. One-shot probe raced the bridge's own startup window (`systemctl is-active` means the process started, not that it's finished binding its socket). Now retries up to 5 times over 10 seconds, matching the existing `/healthz` probe's own retry logic.
+
+---
+
 # ANetBBS v1.0b2.233 — Same-day fix: MRC verification check trusted a stale `.env` flag (July 2026)
 
 Caught immediately after shipping v1.0b2.232: the new MRC connectivity check in `update.sh` gated entirely on `.env`'s `MRC_BRIDGE_ENABLED` flag, which had gone stale on a real install (the bridge was actively running with the flag stuck at `false`), silently skipping the check exactly where it mattered most. Now also checks whether the service is actually running, not just what `.env` claims.

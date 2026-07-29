@@ -1,7 +1,15 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.233`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.235`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.235 — Same-day fix: MRC verification check was probing with the wrong request shape entirely (July 2026)
+
+The v1.0b2.234 retry fix didn't actually fix anything: the bridge's own access log showed all 5 retries getting genuine `101 Switching Protocols` responses, while the script still reported "not answering" every single time. Root cause: a real WebSocket-upgrade request, once accepted, leaves curl holding an open duplexed connection with nothing to close it — curl just sits until `--max-time` kills it, so its *process exit code* comes back as a timeout on every success, not just failures. The check was reading that exit code instead of the status curl actually received. Fixed by dropping the Upgrade headers entirely (a full handshake was never actually needed — any HTTP response at all proves the bridge's HTTP layer is alive) and reading the captured `%{http_code}` directly, the same technique the already-reliable `/healthz` probe uses. Verified locally against a minimal test server before shipping this time, given the same check had now been wrong twice in a row.
+
+## v1.0b2.234 — Same-day fix: MRC verification check raced the bridge's own startup (July 2026)
+
+Caught immediately on deploying v1.0b2.233 live: right after a restart, the new MRC connectivity check warned the bridge wasn't answering — but a manual re-probe seconds later got a clean `101 Switching Protocols`. `systemctl is-active` only means the process started, not that it's finished binding its listen socket yet; a one-shot probe run immediately after the restart loop raced that startup window. Now retries up to 5 times over 10 seconds before warning, matching the existing `/healthz` probe's own reasoning for why it already retries.
 
 ## v1.0b2.233 — Same-day fix: MRC verification check (v1.0b2.232) trusted a stale `.env` flag (July 2026)
 
