@@ -1,7 +1,35 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.235`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.238`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.238 — Same-day fix: v237's ANSI art fix wasn't enough — the strip-line-breaks heuristic itself was wrong (July 2026)
+
+Deploying v237, the art was *still* not displaying correctly — a side-by-side comparison against the same message viewed on a real Synchronet BBS (correct) versus ANetBBS (still scrambled, though no longer collapsed to nothing) made the remaining problem obvious.
+
+v237 fixed real data loss (a leftover `\r` causing rows to overwrite each other), but didn't question *whether* line breaks should be stripped in the first place. The "flat block art" fast path in `render_msg.py` and `anedit.py` strips line breaks so the VT emulator's own 80-column auto-wrap owns row layout — correct only when a source line is actually wider than 80 columns (the one case where an explicit break conflicts with the emulator's own wrap: the line wraps once naturally, then its own trailing break advances the row *again*). The condition that decided *whether* to strip never checked this — it fired for any flat block art with no cursor-positioning, full stop. `groot.ans`'s widest real line is 77 columns, comfortably under 80, so it never needed stripping at all; every line was its own intentional row. Stripping anyway didn't lose characters (that was v237's fix), but glued multiple short source lines onto shared auto-wrapped rows, scrambling the whole picture. Keeping the real `\r\n` breaks lets the VT emulator's own already-correct `\r`/`\n` handling lay out one row per source line, exactly as authored.
+
+Fixed by checking each line's actual visible width (escape sequences excluded) against the 80-column limit before deciding to strip, in both `render_msg.py`'s two render functions and `anedit.py`'s terminal equivalent — replacing `anedit.py`'s old `_avg_line > 70` gate (a body-wide raw average including escape-code bytes, an equally imprecise proxy) with the same precise per-line check. Confirmed against the real live message: correct layout now produces 69–70 rows (one per source line, matching the original ~140-line file after the descriptive header), versus 55 wrong ones from the v237-only fix. 2 tests rewritten to cover both the "line fits, breaks are kept" and "line overflows, breaks are stripped without losing characters" cases explicitly.
+
+## v1.0b2.237 — Flat CP437/ANSI art collapsed to almost nothing in web UI and terminal (July 2026)
+
+Found live: a sysop-composed ~140-line CP437/ANSI art piece (pure SGR color codes, no cursor-positioning) rendered as just a couple of stray colored fragments in the web UI — a ~7500-character message produced only 558 characters of HTML with a single line break. It had already gone out to one downstream BinkP node before this was caught; the other four still-pending queue entries were removed to stop further propagation.
+
+Root cause: both `anetbbs/web/render_msg.py` (web UI) and `anetbbs/features/anedit.py`'s `render_message_body_lines()` (terminal ANView) have a "flat block art" fast path that strips line-break characters entirely, letting the VT emulator's own 80-column auto-wrap own every row advance instead of trusting explicit breaks — but both only ever stripped `\n`, leaving every `\r` from CRLF-terminated art (the overwhelming majority of real-world FTN/DOS ANSI art) behind in the text. The shared VT state machine (`anetbbs/features/ansi_html.py`) treats a bare `\r` as "column := 0" *without* advancing the row, exactly matching real terminal behavior — so each subsequent source line silently overwrote the previous one at the same row instead of moving to a new one. A many-line piece of art collapsed onto a handful of rows, each repeatedly overwritten by whatever line wrote to it last.
+
+Fixed in both places identically: strip `\r` alongside `\n` rather than just `\n` — same original intent, now actually implemented for CRLF content. Confirmed against the real live message before and after the fix (558 → 29,314 rendered HTML characters, 7 → 651 color spans, 1 → 50 line breaks). 3 new tests, each verified to fail without the fix and pass with it.
+
+Also root-caused and confirmed via direct diagnosis that the message's *stored* content was never corrupted — the real downstream Synchronet BBS that already received it rendered the art perfectly, confirming this was purely a rendering-side bug on ANetBBS's own web/terminal display, not a data or transmission issue.
+
+**Also improved the network-join approval email** (`approve_join_request()` in `anetbbs/web/hub_admin.py`), found while manually resolving the above incident's stuck outbound queue entries: it gave a new node's FTN address and BinkP session password, but never the BinkP port, never mentioned that a fresh node starts with zero echo/file area subscriptions until they send an AreaFix/FileFix request (or the exact syntax to do so), and buried the auto-assigned node number inside the zone:net/node address string instead of calling it out plainly. Now includes the port, an explicit "Assigned node number" line, and — when the hub's own address is known — ready-to-use AreaFix/FileFix netmail instructions with the correct network-specific password. 1 new test.
+
+Found while chasing down a handful of small `/tmp` cleanup items during a resource/memory check: leftover `anetbbs_*_synchronet_compat.js` temp files (`write_compat_script()` in `anetbbs/games/synchronet_compat.py`) that were never getting cleaned up.
+
+Root cause: `play_door_game_telnet()`'s polling loop (bridging a Synchronet-JS door's PTY to a telnet/SSH/rlogin session) only ended when the user explicitly aborted (Ctrl+]q) or the door *process* exited on its own. It never checked whether the *user's connection* had dropped while the door was still running. `door_dos` (DOSBox) games are protected by their TCP bridge's own idle-timeout, but Node-based Synchronet-JS doors have no way to learn the user is gone — so a dropped connection just left the door (and its temp compat script) running orphaned until the door happened to exit by itself, which for many doors waiting on stdin, never happens.
+
+Fixed: the loop now also checks `in_task.done()` — the input-reading task already detects a dropped connection immediately (a read returning empty/raising), it just wasn't being watched. 1 new test, verified both that it passes with the fix and that it correctly times out and fails without it (temporarily reverted to confirm before shipping).
+
+Separately noted but not addressed here: the loop's own printed message to the user ("60s of zero activity will auto-abort the door") isn't actually enforced for this game-type family — only `door_dos` has a real idle-timeout. Worth a follow-up if a stuck-but-still-connected door turns out to be a real problem in practice.
 
 ## v1.0b2.235 — Same-day fix: MRC verification check was probing with the wrong request shape entirely (July 2026)
 

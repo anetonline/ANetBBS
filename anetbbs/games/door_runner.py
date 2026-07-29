@@ -1872,8 +1872,23 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
 
     # Wait for either: (a) the door process to exit (session removed from
     # `_sessions` by _cleanup_session via PTY EOF, bridge close, or
-    # waitpid watcher), or (b) the user pressed Ctrl+]q to abort. We poll
-    # every 1s instead of 2s for snappier abort response.
+    # waitpid watcher), (b) the user pressed Ctrl+]q to abort, or (c) the
+    # user's connection itself dropped. We poll every 1s instead of 2s for
+    # snappier abort response.
+    #
+    # Real leak found live: (c) was missing entirely. _input_pump() already
+    # correctly detects a dropped connection (session.reader.read(1) raises
+    # or returns empty, breaking its own loop) -- but nothing here checked
+    # for that. Without door_dos's TCP bridge (which has its own idle-
+    # timeout tied to data flow), a Synchronet-JS door's Node process has
+    # no way to learn the user is gone, so it just keeps running -- PTY EOF
+    # (the only other exit for this loop) never fires, terminate_session()
+    # in the finally block below never runs, and the door's temp compat
+    # script (write_compat_script(), suffix _synchronet_compat.js) is never
+    # unlinked. Confirmed via a batch of exactly this file pattern found
+    # orphaned in /tmp on a real install. in_task.done() is the direct,
+    # immediate signal for this -- no need to wait out an idle timer, the
+    # input pump already knows the instant the connection is gone.
     try:
         while True:
             try:
@@ -1881,6 +1896,8 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 break  # user aborted
             except asyncio.TimeoutError:
                 pass
+            if in_task.done():
+                break  # user's connection dropped
             with _sessions_lock:
                 still_active = sid in _sessions
             if not still_active:

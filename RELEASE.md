@@ -1,3 +1,23 @@
+# ANetBBS v1.0b2.238 — Same-day fix: v237's ANSI art fix wasn't enough (July 2026)
+
+Deploying v237, the art was still scrambled (no longer collapsed to nothing, but rows glued together wrong) — confirmed by comparing side-by-side against the same message on a real Synchronet BBS. v237 fixed real data loss but didn't question whether line breaks should be stripped in the first place: the "flat block art" fast path strips breaks so the VT emulator's own 80-column auto-wrap owns row layout, correct only when a line is actually wider than 80 columns. The condition never checked that — it fired for any flat block art regardless. `groot.ans`'s widest line is 77 columns; stripping glued multiple short source lines onto shared auto-wrapped rows instead of keeping their real one-row-per-line layout. Fixed by checking each line's real visible width against 80 before stripping, in both the web and terminal renderers. Confirmed against the real live message: 69–70 correctly-laid-out rows now, versus 55 wrong ones before. 2 tests rewritten to cover both cases explicitly.
+
+---
+
+# ANetBBS v1.0b2.237 — Flat CP437/ANSI art collapsed to almost nothing in web UI and terminal (July 2026)
+
+Found live: a ~140-line CP437/ANSI art message rendered as just a couple of stray colored fragments instead of the full piece. Both the web UI and terminal ANView renderers strip line-break characters for flat block-art so the VT emulator's own column auto-wrap owns row layout — but both only stripped `\n`, leaving `\r` behind for CRLF-terminated art (the norm for real-world ANSI art). The shared VT emulator treats a bare `\r` as a column reset *without* advancing the row, so each source line silently overwrote the previous one instead of moving down — collapsing a many-line piece onto a handful of repeatedly-overwritten rows. Fixed in both places: strip `\r` alongside `\n`. Confirmed against the real live message (558 → 29,314 rendered HTML characters). 3 new tests, each verified to fail without the fix and pass with it. The message's stored/transmitted content was never corrupted — a downstream Synchronet BBS that already received it rendered it perfectly, confirming this was purely a rendering-side bug.
+
+Also improved the network-join approval email: now includes the BinkP port, an explicit assigned node number, and ready-to-use AreaFix/FileFix subscription instructions (a new node otherwise starts with zero areas and no guidance on how to get any).
+
+---
+
+# ANetBBS v1.0b2.236 — Synchronet-JS door sessions leaked temp files on a dropped connection (July 2026)
+
+Found while cleaning up `/tmp` clutter during a resource check: leftover Synchronet-JS door compat scripts that never got deleted. Root cause: the telnet/SSH door-session loop only ended when the user explicitly quit or the door process itself exited — it never noticed when the user's *connection* dropped while the door was still running, since only `door_dos` (DOSBox) games have their own idle-timeout protection. Fixed: the loop now also watches for the input task detecting a dropped connection, which it already could do — nothing was checking it. 1 new test, verified to both pass with the fix and fail without it before shipping.
+
+---
+
 # ANetBBS v1.0b2.235 — Same-day fix: MRC verification check was probing with the wrong request shape (July 2026)
 
 The v234 retry fix didn't help: the bridge's access log showed all 5 retries getting real `101` responses while the script still reported failure every time. A WS-upgrade request, once accepted, leaves curl holding an open connection until `--max-time` kills it — so curl's exit code comes back as a timeout on every success, not just failures, and the check was reading that instead of the actual status received. Fixed by dropping the Upgrade headers (never actually needed) and reading the captured status code directly, matching the already-reliable `/healthz` probe's technique. Verified locally against a test server before shipping, given this same check had now been wrong twice.

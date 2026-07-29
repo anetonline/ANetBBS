@@ -1485,8 +1485,44 @@ def approve_join_request(req_id):
         lines = [f'Hi {req.name},', '',
                  f'Your application to join as {req.bbs_name} has been approved!', '']
         if binkp_password:
-            lines += [f'BinkP address: {binkp_address}',
-                      f'BinkP session password: {binkp_password}', '']
+            # Real gap found live: this email gave the full FTN address
+            # and session password but never the port (recipients had to
+            # guess/ask), never mentioned AreaFix/FileFix at all (a new
+            # node has zero subscriptions until they send one), and
+            # buried the auto-assigned node number inside the zone:net/
+            # node address string instead of calling it out plainly.
+            from ..echomail.routing import parse_address
+            _parsed = parse_address(binkp_address)
+            node_number = _parsed[2] if _parsed else None
+            port = binkp_network.binkp_port if binkp_network else 24554
+            lines += [f'BinkP address: {binkp_address}']
+            if node_number is not None:
+                lines.append(f'Assigned node number: {node_number}')
+            lines += [f'BinkP port: {port}',
+                     f'BinkP session password: {binkp_password}', '']
+            hub_addr = binkp_network.our_address if binkp_network else None
+            if hub_addr:
+                areafix_pw = ((binkp_network.areafix_password or binkp_password)
+                             if binkp_network else binkp_password)
+                lines += [
+                    'You start with NO echo/file area subscriptions -- send '
+                    'these to get areas flowing:',
+                    '',
+                    f'To subscribe to echomail areas, send a netmail to '
+                    f'"AreaFix" at {hub_addr}',
+                    f'with your AreaFix password ({areafix_pw}) in the '
+                    f'Subject line, and one command',
+                    'per line in the body, e.g.:',
+                    '',
+                    '  +ALL            subscribe to every available echo area',
+                    '  +FIDO.GENERAL   subscribe to one area by tag',
+                    '  %LIST           list your current subscriptions',
+                    '  %HELP           full command list',
+                    '',
+                    f'For file echoes, send the same kind of netmail to '
+                    f'"FileFix" at {hub_addr}',
+                    'instead -- same password, same command syntax.', '',
+                ]
         if qwk_password:
             lines += [f'QWK packet ID: {qwk_pid}',
                       f'QWK password: {qwk_password}', '']

@@ -337,6 +337,36 @@ def _linkify(decoded: str, embed_images: bool) -> str:
     return ''.join(out)
 
 
+def _any_line_exceeds_vt_width(decoded: str, width: int = 80) -> bool:
+    """True when at least one line of *decoded* (escape sequences excluded
+    from the width count) is wider than the VT emulator's column width.
+
+    This is the ONLY scenario where explicit line breaks actually conflict
+    with the emulator's own auto-wrap: a line over `width` visible columns
+    triggers the natural column wrap mid-line, and its own trailing break
+    then advances the row AGAIN, doubling up. For any line at or under
+    `width`, keeping the real break produces the exact intended row -- no
+    conflict, nothing to strip.
+
+    Real bug found live: the callers of this function used to strip line
+    breaks for ANY flat block-art content with no cursor-positioning,
+    regardless of actual line width -- correct for content shaped like the
+    "full-screen logo overflowing col 80" case this logic was built for,
+    but wrong for real-world art (confirmed: a real ~140-line piece, every
+    line comfortably under 80 columns) where each line is its own
+    intentional row. Stripping the breaks doesn't lose characters (that
+    was the separate, now-fixed '\\r'-orphaning bug) but glues multiple
+    short source lines onto one auto-wrapped row apiece, scrambling the
+    layout: keeping breaks produced 69 correctly-laid-out rows for that
+    piece; stripping them produced 55 wrong ones. Only strip when a line
+    genuinely would overflow.
+    """
+    for line in re.split(r'\r\n|\r|\n', _CSI_RE.sub('', decoded)):
+        if len(line) > width:
+            return True
+    return False
+
+
 def render_msg_body(text, chrs: str = '') -> Markup:
     """Jinja filter: render a message body as HTML with CP437 + ANSI support.
     Also translates Synchronet/MRC `|NN` pipe color codes to ANSI before
@@ -353,13 +383,17 @@ def render_msg_body(text, chrs: str = '') -> Markup:
     decoded = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
                      lambda m: m.group(0).replace('\n', ''), decoded)
     decoded = _pipe_to_ansi(decoded)
-    # Strip \n only for pure flat block art (no cursor-pos sequences).
-    # Cursor-pos art keeps \n: stripping collapses flat header sections
-    # (e.g. full-screen logos) that use \n for row breaks, causing them to
-    # overflow past col 80 and disappear.  Cursor-pos sequences use absolute
-    # row/col so artifact \n between them have no visual effect on those rows.
-    if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
-        decoded = decoded.replace('\n', '')
+    # Strip line breaks only for flat block art (no cursor-pos sequences)
+    # that actually has a line wider than the VT emulator's 80-column
+    # width -- see _any_line_exceeds_vt_width's docstring for the full
+    # story on why "has block art, no cursor-pos" alone is NOT enough to
+    # decide this. Cursor-pos art always keeps its breaks: cursor-pos
+    # sequences use absolute row/col, so a break between them has no
+    # visual effect on those rows either way.
+    if ('\x1b' in decoded and _HAS_BLOCK_ART.search(decoded)
+            and not _HAS_CPOS.search(decoded)
+            and _any_line_exceeds_vt_width(decoded)):
+        decoded = decoded.replace('\r\n', '').replace('\n', '').replace('\r', '')
     return Markup(_linkify(decoded, embed_images=False))  # nosec B704 -- _linkify() escape()s all literal text and URLs
 
 
@@ -379,6 +413,13 @@ def render_msg_body_rich(text, chrs: str = '') -> Markup:
     decoded = re.sub(r'\x1b\n?\[[0-9;?\n]*[@-~]',
                      lambda m: m.group(0).replace('\n', ''), decoded)
     decoded = _pipe_to_ansi(decoded)
-    if '\x1b' in decoded and _HAS_BLOCK_ART.search(decoded) and not _HAS_CPOS.search(decoded):
-        decoded = decoded.replace('\n', '')
+    # See render_msg_body's identical check (and _any_line_exceeds_vt_
+    # width's docstring) for the full explanation of both why '\r' and
+    # '\n' must be stripped together, not just '\n', AND why that
+    # stripping must only happen when a line actually overflows 80
+    # columns -- not for any flat block art unconditionally.
+    if ('\x1b' in decoded and _HAS_BLOCK_ART.search(decoded)
+            and not _HAS_CPOS.search(decoded)
+            and _any_line_exceeds_vt_width(decoded)):
+        decoded = decoded.replace('\r\n', '').replace('\n', '').replace('\r', '')
     return Markup(_linkify(decoded, embed_images=True))  # nosec B704 -- _linkify() escape()s all literal text and URLs

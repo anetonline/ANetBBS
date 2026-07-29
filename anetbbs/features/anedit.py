@@ -1940,7 +1940,7 @@ def render_message_body_lines(body: str) -> list:
     the CP437/pipe-code/flat-art-vs-cursor-pos handling here is subtle
     enough that a second, drifted copy would be a real correctness risk.
     """
-    from .ansi_html import to_ansi_lines, _HAS_CURSOR_POS, _HAS_BLOCK_ART
+    from .ansi_html import to_ansi_lines, _HAS_CURSOR_POS, _HAS_BLOCK_ART, _CSI_RE
 
     # CP437 decode — body is stored as latin-1 mojibake from DB for
     # wire-composed messages (BinkP/QWK). Real bug found live (same
@@ -1982,25 +1982,38 @@ def render_message_body_lines(body: str) -> list:
                        if m.group(1) in _PIPE else m.group(0)),
             body_unicode)
 
-    # Strip record-boundary \n ONLY for pure flat block art (no cursor-pos).
-    # Flat art has no absolute positioning — artifact \n from QWK \xe3 scatter
-    # blocks across rows, so stripping fixes the staircase (each art row is
-    # exactly 80 cols; the VT renderer wraps at 80, so the subsequent \n would
-    # double-advance to produce a blank row between every art line).
-    # Cursor-pos art (including mixed flat+cursor-pos) must KEEP \n: stripping
-    # collapses flat header sections (like full-screen logos) by overflowing
-    # past col 80 where the VT renderer clips.  Cursor-pos sequences set
-    # absolute row/col so artifact \n between them have no visual effect.
-    # IMPORTANT: only strip when the body is DENSE flat art (avg line > 70 chars).
-    # Text messages with colored ANSI signatures have block chars too but short
-    # lines — stripping their \n would collapse the entire message onto far fewer
-    # rows, cutting off visible content.
+    # Strip record-boundary line breaks ONLY for flat block art (no
+    # cursor-pos) that actually has a line wider than the VT renderer's
+    # 80-column width -- that's the ONLY case where an explicit break
+    # conflicts with the renderer's own auto-wrap (the line wraps once on
+    # its own at col 80, then its own trailing break advances the row
+    # AGAIN, doubling up into a spurious blank row). Cursor-pos art
+    # (including mixed flat+cursor-pos) always keeps breaks: cursor-pos
+    # sequences set absolute row/col, so a break between them has no
+    # visual effect on those rows either way.
+    #
+    # Real bug found live, twice: (1) stripping only '\n' left every '\r'
+    # from CRLF-terminated art behind, and to_ansi_lines() runs this
+    # through the same VT state machine that treats a bare '\r' as
+    # "column := 0" WITHOUT advancing the row -- so each subsequent
+    # source line overwrote the previous one at the same row. Fixed by
+    # stripping both characters together. (2) The width GATE itself was
+    # wrong too -- `_avg_line > 70` used the RAW (escape-code-inclusive)
+    # average length across the whole body, not each line's actual
+    # visible width, so it fired for real art whose lines were all
+    # comfortably under 80 visible columns (confirmed live: a ~140-line
+    # piece, max real line width 77) -- stripping breaks for content that
+    # never needed it glues multiple short source lines onto one
+    # auto-wrapped row apiece, scrambling the intended layout even though
+    # no characters are lost anymore. Check each line's real visible
+    # width instead of a body-wide average.
     has_cpos  = bool(_HAS_CURSOR_POS.search(body_unicode))
     has_block = bool('\x1b' in body_unicode and _HAS_BLOCK_ART.search(body_unicode))
     if has_block and not has_cpos:
-        _nl = body_unicode.count('\n')
-        _avg_line = len(body_unicode) / max(_nl, 1)
-        body_for_vt = body_unicode.replace('\n', '') if _avg_line > 70 else body_unicode
+        _visible = _CSI_RE.sub('', body_unicode)
+        _overflows = any(len(_ln) > 80 for _ln in re.split(r'\r\n|\r|\n', _visible))
+        body_for_vt = (body_unicode.replace('\r\n', '').replace('\n', '').replace('\r', '')
+                      if _overflows else body_unicode)
     else:
         body_for_vt = body_unicode
 
