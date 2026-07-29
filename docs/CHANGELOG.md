@@ -1,7 +1,17 @@
 # ANetBBS Changelog
 
 Versions are internal build numbers. Public releases are tagged
-separately. Current release: **`v1.0b2.230`** (July 2026). Full release: August 1 2026.
+separately. Current release: **`v1.0b2.231`** (July 2026). Full release: August 1 2026.
+
+## v1.0b2.231 — Real-name posting policy for echomail/netmail; zip-archive gallery caching fix (July 2026)
+
+**Real-name posting policy.** Some FTN networks/areas have a real-world policy requiring the poster's actual name rather than a handle/alias — never previously implemented. New per-user Profile preference (terminal + web) for whether to post echomail/netmail as your handle or your real name by default, plus a new per-area (`EchoArea.require_real_name`) and per-network (`EchomailNetwork.require_real_name_netmail` — netmail has no area concept of its own) admin toggle. When an area/network requires it, a user with no real name set is hard-blocked with a message pointing them to Profile, never silently allowed to post under a handle anyway. Enforced identically across all six local compose surfaces: web echomail compose + QWK-style netmail compose, web netmail.py's true FTN netmail compose, web telegram.py, terminal `bbs_ui.py`'s `_compose_echomail` and its second reply-from-read compose path, and PETSCII's `_echo_compose` — this project's echomail composers have repeatedly needed a fix mirrored across every sibling path, so all six got the identical `resolve_post_name()` check from a single shared helper rather than one-off inline logic.
+
+Caught by the new tests before shipping, not live: `UserManager._user_to_dict()` — the dict that becomes `session.user` for every terminal/PETSCII login — never carried `real_name`/`echomail_name_pref` at all, so a terminal or PETSCII user could never pass a real-name-required gate even immediately after setting one in Profile. Fixed alongside the feature itself. 22 new tests, including direct unit coverage of `resolve_post_name()`'s four resolution branches.
+
+**Zip-archive gallery images were re-downloaded on every view.** Reported live: zip-sourced gallery images (v1.0b2.223) were "VERY slow." Root cause wasn't the zip extraction itself — a single-member read is cheap — it's that the response carried **no caching headers at all**, unlike regular image files (served via `send_from_directory`, which gives browsers ETag/Last-Modified/conditional-GET support for free). Every single page view or pagination click re-extracted and re-transferred every image from scratch, with the browser never able to cache anything.
+
+Fixed: the zip's own `stat()` (mtime + size) now drives an ETag and Last-Modified header, checked via `is_resource_modified()` — the same primitive Flask's own `send_file` uses internally — *before* the archive is even opened. A repeat request for an unchanged image short-circuits straight to a 304 with no body, without ever touching the zip. `Cache-Control: private, max-age=86400` lets the browser skip the round-trip entirely on top of that. Also fixed a smaller inefficiency found along the way: the zip was being opened twice per request (once to find the image inside it, once to read it) — combined into one open. 7 new/updated tests, including one that mocks the read function to confirm a cache-hit genuinely never opens the archive.
 
 ## v1.0b2.230 — Terminal cursor style: steady/spinning options for accessibility (July 2026)
 

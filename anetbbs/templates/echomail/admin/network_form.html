@@ -49,6 +49,14 @@
                 <label class="form-check-label" for="is_active" style="color:#00ff00;">Active</label>
             </div>
 
+            <div class="mb-3 form-check">
+                {{ form.require_real_name_netmail(class="form-check-input") }}
+                <label class="form-check-label" for="require_real_name_netmail" style="color:#ffcc00;">
+                    Require real name for netmail
+                </label>
+                <div class="form-text" style="font-size:.7rem;">{{ form.require_real_name_netmail.description }}</div>
+            </div>
+
             <!-- BinkP fields -->
             <div id="binkp-fields" class="card mb-3" style="border-color:#006600;">
                 <div class="card-header" style="background:#001100; border-color:#006600;">

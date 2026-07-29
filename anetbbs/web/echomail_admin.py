@@ -103,6 +103,13 @@ class NetworkForm(FlaskForm):
                                          validators=[Optional(), NumberRange(1, 10080)],
                                          default=60)
     is_active = BooleanField('Active', default=True)
+    require_real_name_netmail = BooleanField(
+        'Require real name for netmail', default=False,
+        description=(
+            "Some networks have a policy requiring real names on netmail "
+            "(netmail has no per-area concept of its own, so this is a "
+            "network-wide setting). Users with no real name set in their "
+            "Profile are blocked from sending netmail to this network."))
     submit = SubmitField('Save Network')
 
 
@@ -118,6 +125,14 @@ class EchoAreaForm(FlaskForm):
     min_access_level = IntegerField(
         'Min Access Level (0=all users, 10=registered, 50=VIP, 100=sysop)',
         validators=[Optional(), NumberRange(min=0, max=255)], default=10)
+    require_real_name = BooleanField(
+        'Require real name to post', default=False,
+        description=(
+            "Some FTN networks/areas have a policy requiring the poster's "
+            "real name rather than a handle. When on, users with no real "
+            "name set in their Profile are blocked from posting here "
+            "(with a message telling them to set one), not silently "
+            "allowed to post under a handle anyway."))
     submit = SubmitField('Save Area')
 
     def validate_tag(self, field):
@@ -263,6 +278,7 @@ def new_network():
             default_hold=form.default_hold.data,
             default_direct=form.default_direct.data,
             default_recipient=form.default_recipient.data or None,
+            require_real_name_netmail=form.require_real_name_netmail.data,
         )
         db.session.add(network)
         db.session.commit()
@@ -543,6 +559,7 @@ def new_area():
             is_subscribed=form.is_subscribed.data,
             is_sysop_only=form.is_sysop_only.data,
             min_access_level=form.min_access_level.data if form.min_access_level.data is not None else 10,
+            require_real_name=form.require_real_name.data,
         )
         db.session.add(area)
         db.session.commit()

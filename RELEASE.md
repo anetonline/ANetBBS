@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.231 — Real-name posting policy for echomail/netmail; zip-archive gallery caching fix (July 2026)
+
+Some FTN networks/areas require the poster's real name rather than a handle — never previously implemented. New Profile preference (post as handle or real name) plus a per-area and per-network admin toggle that hard-blocks posting without a real name set, when required. Enforced identically across all six local compose surfaces (web echomail + netmail + telegram, terminal, PETSCII) via one shared helper. Also fixed a real gap the new tests caught before shipping: terminal/PETSCII sessions never carried the user's real name at all, so the gate could never be passed from those UIs even with a real name set in Profile. 22 new tests.
+
+Also: zip-sourced gallery images (v1.0b2.223) were reported "VERY slow" live — the response carried no caching headers at all, unlike regular files, so every page view/pagination click re-extracted and re-transferred every image from scratch. Fixed with an ETag/Last-Modified check (via `is_resource_modified()`, the same primitive Flask's `send_file` uses) done *before* the archive is opened — a repeat request for an unchanged image now short-circuits to a 304 without ever touching the zip. Also fixed the zip being opened twice per request. 7 new/updated tests.
+
+---
+
 # ANetBBS v1.0b2.230 — Terminal cursor style: steady/spinning options for accessibility (July 2026)
 
 Feature request from Winzlo: a blinking cursor fights iOS/macOS zoom's "follow keyboard focus," repeatedly recentering the screen — confirmed across four SSH clients. New opt-in `Profile → Cursor style` preference (terminal + web): **Steady** sends a one-time DECSCUSR steady-cursor code at login; **Spinning** shows a Synchronet-style rotating glyph while idle waiting for input, implemented the same way Synchronet's own `K_SPIN` works (a mode flag on the blocking input-read call, not a separate background task) so it works everywhere with no extra state. 15 new tests.

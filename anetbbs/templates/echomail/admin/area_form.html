@@ -70,6 +70,13 @@
                             </label>
                             <div class="form-text" style="font-size:.7rem;">Hidden from and inaccessible to non-admins</div>
                         </div>
+                        <div class="form-check">
+                            {{ form.require_real_name(class="form-check-input") }}
+                            <label class="form-check-label" for="require_real_name" style="color:#ffcc00;">
+                                <i class="bi bi-person-badge"></i> Require Real Name
+                            </label>
+                            <div class="form-text" style="font-size:.7rem;">{{ form.require_real_name.description }}</div>
+                        </div>
                     </div>
                 </div>
                 <div class="col-md-4">

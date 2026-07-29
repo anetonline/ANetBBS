@@ -110,6 +110,33 @@ intact everywhere else. Blank/`NULL` falls back to the old
 name-derived behavior, so existing networks aren't affected until you
 choose to set it.
 
+## Real-name posting policy
+
+Some FTN networks/areas have a real-world policy requiring the
+poster's actual name rather than a handle/alias (e.g. network
+coordination areas). ANetBBS supports this per-area (for echomail) and
+per-network (for netmail, which has no area concept of its own):
+
+- **User side** — Profile has a **Real Name** field (optional unless
+  an area/network you post in requires it) and a **"Post
+  echomail/netmail as"** preference: handle (default) or real name.
+  The preference only controls the *default* — an area/network that
+  requires a real name always uses it regardless of this setting.
+- **Admin side** — the area edit form has a **"Require Real Name"**
+  checkbox; the network edit form has a matching **"Require real name
+  for netmail"** checkbox. When set, a user with no real name in their
+  Profile is hard-blocked from posting there, with a message pointing
+  them to Profile — never silently allowed to post under a handle
+  anyway.
+
+Enforced identically across every local compose surface — web
+echomail compose, web QWK-style netmail compose, web netmail.py's true
+FTN netmail compose, web telegram.py, the terminal compose flow (both
+`_compose_echomail` and the reply-from-read path), and the PETSCII
+compose flow — via a single shared `resolve_post_name()` helper in
+`anetbbs/features/access_control.py` rather than one-off logic per
+surface.
+
 ## AreaFix — subscription requests from peers
 
 AreaFix is the standard FTN robot that lets a downstream peer manage

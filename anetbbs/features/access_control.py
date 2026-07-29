@@ -80,3 +80,37 @@ def _get(obj, key, default):
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+def resolve_post_name(user, require_real_name):
+    """Resolve the From:/author name to use when `user` posts to an
+    echomail area or netmail destination.
+
+    Some FTN networks/areas have a real-world policy requiring the
+    poster's actual name rather than a handle/alias. When
+    require_real_name is True and the user hasn't set one, this is a
+    hard block (not a silent fallback to handle) -- matches the "loud
+    and clear rejection" shape evaluate_access() already uses above,
+    rather than quietly violating the area/network's own policy.
+
+    Returns (name, error): on success, (resolved_name, None). On
+    failure, (None, user_facing_error_message) -- callers must check
+    for a non-None error and reject the post, not just fall through.
+
+    user: an object/dict with `real_name`, `echomail_name_pref`,
+          `display_name`, `username` attributes (or keys) -- same
+          dict-or-ORM-object duck typing as evaluate_access() above,
+          via the same _get() helper.
+    """
+    real_name = (_get(user, 'real_name', '') or '').strip()
+    if require_real_name:
+        if not real_name:
+            return None, ('This area/network requires your real name for '
+                          'posting -- set it in your Profile first.')
+        return real_name, None
+    pref = _get(user, 'echomail_name_pref', 'handle') or 'handle'
+    if pref == 'real_name' and real_name:
+        return real_name, None
+    handle = (_get(user, 'display_name', '') or _get(user, 'username', '')
+             or 'Anonymous')
+    return handle, None

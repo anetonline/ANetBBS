@@ -158,6 +158,55 @@ class GalleryZipRouteTests(unittest.TestCase):
         self.assertEqual(resp.data, _TINY_PNG)
         self.assertEqual(resp.mimetype, 'image/jpeg')
 
+    def test_image_route_sets_caching_headers(self):
+        """Real gap found live: zip-sourced images were reported 'VERY
+        slow' -- root cause was zero caching headers at all (unlike
+        regular files via send_from_directory), so the browser
+        re-downloaded every image on every single page view/pagination
+        click. Confirm ETag/Last-Modified/Cache-Control are now set."""
+        self._make_zip('apod-2026-07-28.zip', {'nebula.jpg': _TINY_PNG})
+        with patch('anetbbs.web.gallery._get_gallery_by_slug',
+                  return_value=self._fake_gallery()):
+            resp = self._client().get(
+                '/gallery/ziptest/img/apod-2026-07-28.zip')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNotNone(resp.headers.get('ETag'))
+        self.assertIsNotNone(resp.headers.get('Last-Modified'))
+        self.assertIn('max-age', resp.headers.get('Cache-Control', ''))
+
+    def test_image_route_returns_304_when_etag_matches(self):
+        """A repeat request with the ETag the browser already has
+        cached must get a 304 with no image body -- the actual fix for
+        the reported slowness (nothing gets re-transferred)."""
+        self._make_zip('apod-2026-07-28.zip', {'nebula.jpg': _TINY_PNG})
+        with patch('anetbbs.web.gallery._get_gallery_by_slug',
+                  return_value=self._fake_gallery()):
+            client = self._client()
+            first = client.get('/gallery/ziptest/img/apod-2026-07-28.zip')
+            etag = first.headers.get('ETag')
+            self.assertIsNotNone(etag)
+            second = client.get('/gallery/ziptest/img/apod-2026-07-28.zip',
+                               headers={'If-None-Match': etag})
+        self.assertEqual(second.status_code, 304)
+        self.assertEqual(second.data, b'')
+
+    def test_image_route_304_never_touches_the_zip(self):
+        """The whole point of checking is_resource_modified() before
+        _read_first_image_from_zip() -- a cache-hit must short-circuit
+        without ever opening the archive at all."""
+        self._make_zip('apod-2026-07-28.zip', {'nebula.jpg': _TINY_PNG})
+        with patch('anetbbs.web.gallery._get_gallery_by_slug',
+                  return_value=self._fake_gallery()):
+            client = self._client()
+            first = client.get('/gallery/ziptest/img/apod-2026-07-28.zip')
+            etag = first.headers.get('ETag')
+            with patch('anetbbs.web.gallery._read_first_image_from_zip') as m:
+                second = client.get(
+                    '/gallery/ziptest/img/apod-2026-07-28.zip',
+                    headers={'If-None-Match': etag})
+        self.assertEqual(second.status_code, 304)
+        m.assert_not_called()
+
     def test_image_route_404s_for_zip_with_no_images(self):
         self._make_zip('empty.zip', {'notes.txt': b'no pictures here'})
         with patch('anetbbs.web.gallery._get_gallery_by_slug',

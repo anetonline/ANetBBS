@@ -1244,6 +1244,7 @@ class BBSMenuUI:
             aobj     = EchoArea.query.get(area_id)
             net_id   = aobj.network_id if aobj else None
             net_addr = (aobj.network.our_address or '1:1/1') if (aobj and aobj.network) else '1:1/1'
+            area_requires_real_name = bool(aobj and aobj.require_real_name)
 
         if not m_list:
             await self.session.write('\x1b[2J\x1b[H')
@@ -1312,6 +1313,15 @@ class BBSMenuUI:
                     date_str=ts,
                 )
                 if view_result in ('reply', 'new'):
+                    from .access_control import resolve_post_name
+                    post_name, name_error = resolve_post_name(
+                        self.session.user, area_requires_real_name)
+                    if name_error:
+                        await self.session.write(
+                            f"\r\n  {FG['red']}{name_error}{RESET}\r\n")
+                        await self.session.read_line(
+                            f"\r\n{FG['cyan']}Press Enter...{RESET}")
+                        continue
                     if view_result == 'reply':
                         compose_to   = frm or 'All'
                         compose_subj = ('Re: ' + subj) if subj else 'Re: (no subject)'
@@ -1340,7 +1350,7 @@ class BBSMenuUI:
                             em = _EM(
                                 area_id=area_id,
                                 network_id=net_id,
-                                from_name=username[:100],
+                                from_name=post_name[:100],
                                 from_address=net_addr,
                                 to_name=compose_to[:100],
                                 subject=compose_subj[:200],
@@ -3958,6 +3968,19 @@ async def _compose_echomail(self):
 
     area_id, area_tag, area_name, network_id, our_addr, _cat = selected_area
 
+    from .access_control import resolve_post_name
+    with _app().app_context():
+        _area_obj = EchoArea.query.get(area_id)
+        post_name, name_error = resolve_post_name(
+            self.session.user, bool(_area_obj and _area_obj.require_real_name))
+    if name_error:
+        _w = ui_width(self.session)
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner(f'Compose — {area_tag}', _w))
+        await self.session.write(f"\r\n  {FG['red']}{name_error}{RESET}\r\n")
+        await self.session.read_line(f"\r\n{FG['cyan']}Press Enter...{RESET}")
+        return
+
     # ── Step 3: compose the message ──────────────────────────────────
     await self.session.write('\x1b[2J\x1b[H')
     await self.session.write(banner(f'Compose — {area_tag}', ui_width(self.session)))
@@ -3986,7 +4009,7 @@ async def _compose_echomail(self):
         em = EchomailMessage(
             area_id=area_id,
             network_id=network_id,
-            from_name=username[:100],
+            from_name=post_name[:100],
             from_address=our_addr,
             to_name=to_name[:100],
             subject=subject[:200],
@@ -4041,6 +4064,7 @@ _PROFILE_TEXT_FIELDS = (
     ('bio', 'Bio (one line)', 500),
     ('signature', 'Signature (one line)', 500),
     ('tagline', 'FTN tagline', 160),
+    ('real_name', 'Real name (some FTN areas require it)', 100),
 )
 _PROFILE_SIXEL_CHOICES = (('Automatic (detect)', 'auto'),
                           ('Always on', 'forced_on'),
@@ -4049,6 +4073,8 @@ _PROFILE_CODEPAGE_CHOICES = (('CP437 (DOS classic)', 'cp437'), ('UTF-8', 'utf8')
 _PROFILE_CURSOR_CHOICES = (('Default (unchanged)', 'default'),
                            ('Steady, no blink (accessibility)', 'steady'),
                            ('Spinning (Synchronet-style)', 'spinning'))
+_PROFILE_ECHOMAIL_NAME_CHOICES = (('My handle (display name)', 'handle'),
+                                  ('My real name', 'real_name'))
 
 
 async def _edit_profile_field(self, kind, attr, label):
@@ -4136,6 +4162,15 @@ async def _edit_profile_field(self, kind, attr, label):
                 f"\r\n{FG['cyan']}Takes effect next time you connect.{RESET}\r\n")
             await self.session.read_line("Press Enter...")
 
+    elif kind == 'echomail_name':
+        picked, value = await self._pick_choice(
+            'Post echomail/netmail as', list(_PROFILE_ECHOMAIL_NAME_CHOICES))
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.echomail_name_pref = value
+                db.session.commit()
+
     elif kind == 'lang':
         # No enforced list of valid language codes exists anywhere in
         # this codebase (MenuTranslation's docstring only gives
@@ -4192,6 +4227,9 @@ async def _edit_profile(self):
             rows.append(('cursor', 'cursor_style', 'Cursor style',
                         dict((v, l) for l, v in _PROFILE_CURSOR_CHOICES).get(
                             u.cursor_style or 'default', u.cursor_style)))
+            rows.append(('echomail_name', 'echomail_name_pref', 'Post echomail/netmail as',
+                        dict((v, l) for l, v in _PROFILE_ECHOMAIL_NAME_CHOICES).get(
+                            u.echomail_name_pref or 'handle', u.echomail_name_pref)))
             rows.append(('lang', 'language', 'Language code', u.language or 'en'))
             return rows
 

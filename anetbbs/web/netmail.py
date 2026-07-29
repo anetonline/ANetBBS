@@ -212,6 +212,18 @@ def compose(reply_to=None):
                                    form=request.form,
                                    taglines=get_active_taglines())
 
+        from ..features.access_control import resolve_post_name
+        post_name, name_error = resolve_post_name(
+            current_user, network.require_real_name_netmail)
+        if name_error:
+            flash(name_error, 'danger')
+            from ..models import get_active_taglines
+            return render_template('netmail/compose.html',
+                                   networks=networks, user_akas=user_akas,
+                                   parent=parent,
+                                   form=request.form,
+                                   taglines=get_active_taglines())
+
         # Pick the FROM address: explicit AKA, network-matched AKA, or
         # network's `our_address`.
         if from_aka:
@@ -238,7 +250,7 @@ def compose(reply_to=None):
                 body = body.rstrip('\n') + format_tagline_append(_t.text)
 
         # Generate kludges
-        from_name = (current_user.display_name or current_user.username)
+        from_name = post_name
         msgid_value = make_msgid(from_address)
         # Kludge formats:
         # - MSGID/CHRS/PID/TZUTC/REPLYADDR/REPLYTO: colon form is the

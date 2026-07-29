@@ -46,6 +46,11 @@ class UpdateProfileForm(FlaskForm):
     signature = TextAreaField('Forum Signature', validators=[Optional(), Length(max=200)])
     tagline = StringField('FTN Tagline', validators=[Optional(), Length(max=160)],
                           description="One-liner appended to outbound netmail/echomail.")
+    real_name = StringField('Real Name', validators=[Optional(), Length(max=100)],
+                            description=(
+        "Some FTN networks/areas require your real name (not a handle) "
+        "for echomail/netmail posting -- set it here so those areas are "
+        "available to you. Optional otherwise."))
     date_of_birth = DateField('Date of Birth', validators=[Optional()])
     show_email = BooleanField('Show Email Publicly')
     avatar_url = StringField('Avatar URL', validators=[Optional(), Length(max=500)])
@@ -70,6 +75,15 @@ class UpdateProfileForm(FlaskForm):
         "that follow keyboard focus (e.g. iOS/macOS zoom). Spinning shows a "
         "rotating |/-\\ character while idle waiting for a keystroke, "
         "matching classic Synchronet BBS behavior."))
+    echomail_name_pref = SelectField('Post echomail/netmail as', validators=[Optional()], choices=[
+        ('handle', 'My handle (display name)'),
+        ('real_name', 'My real name'),
+    ], description=(
+        "Default name used when posting somewhere that doesn't "
+        "specifically require your real name. Areas/networks with a "
+        "real-name requirement always use your real name regardless of "
+        "this setting -- set Real Name above first if you want to post "
+        "in those."))
     submit = SubmitField('Update Profile')
 
     def __init__(self, original_email, *args, **kwargs):
@@ -266,6 +280,7 @@ def edit():
         current_user.website = form.website.data or None
         current_user.signature = form.signature.data or None
         current_user.tagline = form.tagline.data or None
+        current_user.real_name = form.real_name.data or None
         current_user.date_of_birth = form.date_of_birth.data
         current_user.show_email = form.show_email.data
 
@@ -275,6 +290,7 @@ def edit():
 
         current_user.sixel_mode = form.sixel_mode.data or 'auto'
         current_user.cursor_style = form.cursor_style.data or 'default'
+        current_user.echomail_name_pref = form.echomail_name_pref.data or 'handle'
 
         # Handle avatar upload
         if form.avatar_file.data and form.avatar_file.data.filename:
@@ -322,12 +338,14 @@ def edit():
         form.website.data = current_user.website
         form.signature.data = current_user.signature
         form.tagline.data = current_user.tagline
+        form.real_name.data = current_user.real_name
         form.date_of_birth.data = current_user.date_of_birth
         form.show_email.data = current_user.show_email
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
         form.sixel_mode.data = current_user.sixel_mode or 'auto'
         form.cursor_style.data = current_user.cursor_style or 'default'
+        form.echomail_name_pref.data = current_user.echomail_name_pref or 'handle'
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)

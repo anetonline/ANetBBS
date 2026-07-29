@@ -137,6 +137,8 @@ class UserManager:
             "access_level": getattr(user, 'access_level', None) or 10,
             "codepage": getattr(user, 'codepage', None) or 'cp437',
             "cursor_style": getattr(user, 'cursor_style', None) or 'default',
+            "real_name": getattr(user, 'real_name', None) or '',
+            "echomail_name_pref": getattr(user, 'echomail_name_pref', None) or 'handle',
             "language": getattr(user, 'language', None) or 'en',
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login": user.last_login.isoformat() if user.last_login else None,

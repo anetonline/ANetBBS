@@ -657,6 +657,18 @@ async def _echo_message_read(session, msg_id, area_id, area_name):
 
 
 async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_subject=None):
+    from .access_control import resolve_post_name
+    with _app_ctx():
+        from ..models import EchoArea as _EchoArea
+        _area = _EchoArea.query.get(area_id)
+        post_name, name_error = resolve_post_name(
+            session.user, bool(_area and _area.require_real_name))
+    if name_error:
+        await _header(session, f'New message: {area_name}'[:_width(session)])
+        await session.write(name_error + '\r\n')
+        await session.read_line('Press ENTER...')
+        return
+
     await _header(session, f'New message: {area_name}'[:_width(session)])
     default_to = reply_to_name or 'All'
     to_name = (await session.read_line(f'To [{default_to}]: ') or '').strip() or default_to
@@ -680,7 +692,7 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
         msg = EchomailMessage(
             area_id=area_id,
             network_id=area.network_id if area else None,
-            from_name=_username(session)[:100],
+            from_name=post_name[:100],
             to_name=to_name[:100],
             subject=subject[:200],
             body=body,

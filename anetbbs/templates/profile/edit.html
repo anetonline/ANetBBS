@@ -150,6 +150,29 @@
                 </div>
             </div>
         </div>
+
+        <!-- Echomail / Netmail identity -->
+        <div class="col-12">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-fingerprint"></i> Echomail / Netmail Identity</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        {{ form.real_name.label(class="form-label") }}
+                        {{ form.real_name(class="form-control", maxlength="100") }}
+                        {% if form.real_name.description %}
+                        <small class="text-muted">{{ form.real_name.description }}</small>
+                        {% endif %}
+                    </div>
+                    <div class="mb-1">
+                        {{ form.echomail_name_pref.label(class="form-label") }}
+                        {{ form.echomail_name_pref(class="form-select") }}
+                    </div>
+                    {% if form.echomail_name_pref.description %}
+                    <small class="text-muted">{{ form.echomail_name_pref.description }}</small>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
         {% endif %}
 
         <!-- Theme -->

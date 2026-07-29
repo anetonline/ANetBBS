@@ -113,6 +113,17 @@ class User(UserMixin, db.Model):
     # flag on the input-read call itself, not a separate background
     # task, so it's implemented the same way here).
     cursor_style = db.Column(db.String(10), default='default')
+    # Real name for echomail/netmail posting -- some FTN networks/areas
+    # have a policy requiring the poster's real name rather than their
+    # handle. Nullable/blank by default; a user with no real name set
+    # can still post anywhere that doesn't specifically require one.
+    real_name = db.Column(db.String(100), nullable=True)
+    # Default name to use when posting somewhere that does NOT require
+    # a real name: 'handle' (display_name/username, the existing
+    # default behavior) or 'real_name' (use real_name if set, falls
+    # back to handle if not). Areas/networks that DO require a real
+    # name always use it regardless of this preference.
+    echomail_name_pref = db.Column(db.String(10), default='handle')
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)
@@ -574,6 +585,12 @@ class EchomailNetwork(db.Model):
     hub_identity_id = db.Column(db.Integer, db.ForeignKey('hub_identities.id'),
                                 default=_default_hub_identity_id, nullable=True, index=True)
 
+    # Some networks have a real-world policy requiring real names on
+    # netmail (not just specific echo areas -- netmail has no area
+    # concept of its own, so this is a network-wide policy instead).
+    # Same enforcement shape as EchoArea.require_real_name.
+    require_real_name_netmail = db.Column(db.Boolean, default=False)
+
     areas = db.relationship('EchoArea', backref='network', lazy='dynamic', cascade='all, delete-orphan')
     poll_logs = db.relationship('EchomailPollLog', backref='network', lazy='dynamic', cascade='all, delete-orphan')
     hub_identity = db.relationship('HubIdentity', backref=db.backref('networks', lazy='dynamic'))
@@ -600,6 +617,13 @@ class EchoArea(db.Model):
     total_messages = db.Column(db.Integer, default=0)
     last_message_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Some FTN networks/areas have a real-world policy requiring the
+    # poster's actual name rather than a handle/alias (e.g. network
+    # coordination areas). When set, local posts to this area must use
+    # User.real_name -- a user with none set is blocked with a message
+    # directing them to set one in Profile, not silently allowed to
+    # post under a handle anyway.
+    require_real_name = db.Column(db.Boolean, default=False)
 
     messages = db.relationship('EchomailMessage', backref='area', lazy='dynamic', cascade='all, delete-orphan')
 

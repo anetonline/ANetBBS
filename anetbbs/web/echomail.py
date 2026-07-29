@@ -368,6 +368,24 @@ def compose(area_id, reply_to_id=None):
         tear = current_app.config.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0')
         origin = current_app.config.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS')
 
+        # The user may have changed the target area via the dropdown --
+        # resolve the ACTUAL destination area (not just the one the URL
+        # was opened against) so the real-name check below can't be
+        # bypassed by switching to a different area after loading the
+        # form. Falls back to echo_area if the picked id is somehow gone.
+        target_area = EchoArea.query.get(form.area_id.data) or echo_area
+        from ..features.access_control import resolve_post_name
+        post_name, name_error = resolve_post_name(
+            current_user, target_area.require_real_name)
+        if name_error:
+            flash(name_error, 'danger')
+            from ..models import get_active_taglines
+            return render_template('echomail/compose.html',
+                                   form=form,
+                                   echo_area=echo_area,
+                                   original=original,
+                                   taglines=get_active_taglines())
+
         # Append the user's tagline (FTN footer convention) if set.
         body = form.body.data
         if getattr(current_user, 'tagline', None):
@@ -386,7 +404,7 @@ def compose(area_id, reply_to_id=None):
         msg = EchomailMessage(
             area_id=form.area_id.data,
             network_id=echo_area.network_id,
-            from_name=current_user.username,
+            from_name=post_name,
             to_name=form.to_name.data,
             subject=form.subject.data,
             body=body,
@@ -494,6 +512,15 @@ def netmail_compose():
             db.session.add(area)
             db.session.flush()
 
+        from ..features.access_control import resolve_post_name
+        post_name, name_error = resolve_post_name(
+            current_user, network.require_real_name_netmail)
+        if name_error:
+            flash(name_error, 'danger')
+            from ..models import get_active_taglines
+            return render_template('echomail/netmail_compose.html', form=form,
+                                   taglines=get_active_taglines())
+
         tear = current_app.config.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0')
         origin = current_app.config.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS')
 
@@ -515,7 +542,7 @@ def netmail_compose():
         msg = EchomailMessage(
             area_id=area.id,
             network_id=network.id,
-            from_name=current_user.username,
+            from_name=post_name,
             to_name=form.to_name.data.strip(),
             to_address=(form.to_address.data or '').strip() or None,
             subject=form.subject.data,

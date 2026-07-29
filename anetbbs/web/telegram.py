@@ -113,9 +113,18 @@ def send():
                                    networks=networks, user_akas=user_akas,
                                    form=request.form)
 
+        from ..features.access_control import resolve_post_name
+        post_name, name_error = resolve_post_name(
+            current_user, network.require_real_name_netmail)
+        if name_error:
+            flash(name_error, 'danger')
+            return render_template('telegram/send.html',
+                                   networks=networks, user_akas=user_akas,
+                                   form=request.form)
+
         from_aka = find_aka_for_network(current_user, network)
         from_address = from_aka.address if from_aka else network.our_address
-        from_name = current_user.display_name or current_user.username
+        from_name = post_name
         msgid_value = make_msgid(from_address)
 
         # Telegrams should arrive flagged: crash, immediate, private.
