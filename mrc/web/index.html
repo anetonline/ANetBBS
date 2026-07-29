@@ -561,14 +561,6 @@
           <h2>Join MRC Chat</h2>
           <div><input type="text" id="handle-input" placeholder="Your handle" /></div>
           <div><input type="text" id="room-input" placeholder="Room (default: Lobby)" value="Lobby" /></div>
-          <div>
-            <select id="server-select" style="margin:10px 0; width:300px; max-width:90%;">
-              <option value="primary">Bottomless Abyss (Primary)</option>
-              <option value="uk">UK ERB Fallback</option>
-              <option value="ca">CA ERB Fallback</option>
-            </select>
-          </div>
-          <div class="help-hint" id="server-select-hint" style="margin-top:-2px; margin-bottom:10px;">Choose which MRC network to connect to.</div>
           <div><button id="join-btn">Join Chat</button></div>
         </div>
         <div id="chat-panel" style="display:none;">
@@ -846,11 +838,14 @@
     // ========================================================================
     (function () {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // Bottomless Abyss is the only MRC network ANetBBS bridges to --
+      // UK/CA (ERB Fallback) were separate hubs, removed. Left as a
+      // single-item array (rather than special-casing a bare string)
+      // so getServerChoices()/populateServerSelect() below don't need
+      // any behavior change to keep working with exactly one choice.
       if (!window.MRC_SERVER_CHOICES) {
         window.MRC_SERVER_CHOICES = [
-          { id: 'primary', label: 'Bottomless Abyss (Primary)', ws_path: '/mrcws' },
-          { id: 'uk',      label: 'UK ERB Fallback',            ws_path: '/mrcws-uk' },
-          { id: 'ca',      label: 'CA ERB Fallback',            ws_path: '/mrcws-ca' }
+          { id: 'primary', label: 'Bottomless Abyss', ws_path: '/mrcws' }
         ];
       }
       if (!window.MRC_WS_URL) {

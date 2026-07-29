@@ -33,8 +33,16 @@ vendor/games/botwars/botwars_saves/*
 !vendor/games/botwars/botwars_data/.keep
 !vendor/games/botwars/botwars_saves/.keep
 
-# Config files with secrets
-mrc/bridge/config/config.json
+# Config files with secrets -- config/config*.json covers every
+# per-region bridge variant (config.json, config.uk.json, config.ca.json,
+# config.bottomless.json, and any future config.<name>.json), not just
+# the bare default. Found live-server-only config.uk.json/config.ca.json
+# that this glob previously missed (only the bare config.json was
+# covered) -- no leak yet since none of those files exist in this
+# checkout, but the gap meant a future local copy would have shipped in
+# the next release tarball.
+mrc/bridge/config/config*.json
+!mrc/bridge/config/config.example.json
 mrc/bridge/config.json
 mrc_bridge/config.json
 config.json

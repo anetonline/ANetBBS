@@ -1636,6 +1636,52 @@ else
     fi
 fi
 
+# ─── MRC web-proxy verification ────────────────────────────────────────────
+# Real gap found live: a sysop kept getting reports from new admins that
+# web MRC chat didn't work (terminal MRC over SSH/telnet was fine — that's
+# a separate direct connection, not proxied through nginx at all). Root
+# cause class: "behind" mode installs (sysop already runs their own
+# nginx/apache and ANetBBS never touches it — install.sh only prints
+# one-time setup instructions for this, easy to miss in the final wall of
+# text) have zero ongoing verification that /mrcws is actually being
+# proxied correctly, and drift (WEB_PORT changed later, config hand-edited)
+# was previously only ever caught for the auto-managed nginx path above.
+# DOMAIN is never persisted to .env (install.sh only uses it transiently
+# to write server_name) so an externally-managed nginx config, wherever it
+# lives, can't be located or inspected from here — this check verifies
+# everything that IS actually knowable: the bridge's own local listener,
+# and (when we manage nginx) that its /mrcws block points at the right
+# port. Runs on every update, not just fresh installs, so drift gets
+# caught going forward instead of only at initial setup.
+if [[ "${EXISTING_ENV[MRC_BRIDGE_ENABLED]:-}" == "true" ]]; then
+    MRC_PORT_CHECK="${EXISTING_ENV[MRC_BRIDGE_PORT]:-8080}"
+    MRC_WS_LOCAL="http://127.0.0.1:${MRC_PORT_CHECK}/ws"
+    if curl -s -o /dev/null --max-time 3 \
+        -H "Connection: Upgrade" -H "Upgrade: websocket" \
+        -H "Sec-WebSocket-Version: 13" \
+        -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+        "$MRC_WS_LOCAL"; then
+        ok "MRC bridge answering locally on port $MRC_PORT_CHECK"
+    else
+        warn "MRC bridge is NOT answering on 127.0.0.1:$MRC_PORT_CHECK/ws — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output. Both web AND terminal MRC need this running."
+    fi
+
+    if [[ -f "$NGINX_AVAIL" ]]; then
+        if grep -q "location /mrcws" "$NGINX_AVAIL" 2>/dev/null; then
+            NGINX_MRC_PORT=$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | grep -oE '[0-9]+')
+            if [[ "$NGINX_MRC_PORT" == "$MRC_PORT_CHECK" ]]; then
+                ok "nginx /mrcws proxy correctly points at port $MRC_PORT_CHECK"
+            else
+                warn "nginx /mrcws proxy points at port ${NGINX_MRC_PORT:-<none found>}, but the bridge is actually listening on $MRC_PORT_CHECK — web MRC chat will not connect. (The auto-patch above should have fixed this already; if you're seeing this warning, please report it.)"
+            fi
+        else
+            warn "MRC_BRIDGE_ENABLED=true but nginx config ($NGINX_AVAIL) has no /mrcws location block — web MRC chat will not work until you add one. See deploy/anetbbs-nginx.conf.template for the exact block (needs /mrc-auth-check too)."
+        fi
+    else
+        warn "MRC_BRIDGE_ENABLED=true but ANetBBS isn't managing nginx on this box ($NGINX_AVAIL not found) — expected for 'behind' mode installs, but it means we CANNOT verify your own nginx/reverse-proxy correctly proxies /mrcws to 127.0.0.1:$MRC_PORT_CHECK/ws. Test it yourself: open the web MRC page while logged in and check the browser console for WebSocket errors. Terminal MRC (SSH/telnet) doesn't depend on this and is unaffected either way."
+    fi
+fi
+
 if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
     echo ""
     # Detect if the failure is the Python 3.13 eventlet wheel issue.

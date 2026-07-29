@@ -1,3 +1,11 @@
+# ANetBBS v1.0b2.232 — Removed redundant/broken MRC bridges; nginx MRC-proxy verification on install/update (July 2026)
+
+Found a stray MRC bridge service crash-looping for 10+ days (297,000+ systemd restarts) pointing at a directory from an old layout. Turned out to be entirely redundant — removed it along with two other MRC bridges that were no longer wanted, standardizing on Bottomless Abyss as the sole MRC network. Simplified the web MRC client's now-single-option server picker to match.
+
+Separately root-caused a longstanding "web MRC doesn't work for some new sysops" report: "behind" mode installs (sysop runs their own nginx) only got one-time setup instructions for the MRC proxy, with zero ongoing verification it was done right. `install.sh` and `update.sh` now both run a real connectivity check confirming the MRC bridge and its nginx proxy are actually wired up correctly, warning clearly when they can't verify further. Also fixed a `.gitignore` gap that would have let per-region MRC bridge config secrets (credentials) leak into a future release tarball had one ever existed in a local checkout — none has, so no past tarball was affected.
+
+---
+
 # ANetBBS v1.0b2.231 — Real-name posting policy for echomail/netmail; zip-archive gallery caching fix (July 2026)
 
 Some FTN networks/areas require the poster's real name rather than a handle — never previously implemented. New Profile preference (post as handle or real name) plus a per-area and per-network admin toggle that hard-blocks posting without a real name set, when required. Enforced identically across all six local compose surfaces (web echomail + netmail + telegram, terminal, PETSCII) via one shared helper. Also fixed a real gap the new tests caught before shipping: terminal/PETSCII sessions never carried the user's real name at all, so the gate could never be passed from those UIs even with a real name set in Profile. 22 new tests.

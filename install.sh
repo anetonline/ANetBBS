@@ -2045,6 +2045,36 @@ else
     STATUS[web_health]="fail"
 fi
 
+# ─── MRC web-proxy verification ────────────────────────────────────────────
+# Same check update.sh runs on every subsequent update (see its own
+# comment for the full "new sysops report web MRC broken, terminal MRC
+# fine" backstory) — run here too so a fresh install gets this feedback
+# immediately instead of only on the next update.sh run. "behind"/"test"
+# mode sysops are expected to fail the nginx half right after a fresh
+# install (they haven't set up their own proxy yet) — that's fine, this
+# is diagnostic, not a hard failure; the printed mode-specific notes
+# further below already cover what to do next.
+if [[ "$ENABLE_MRC" == "y" ]]; then
+    MRC_WS_LOCAL="http://127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws"
+    if curl -s -o /dev/null --max-time 3 \
+        -H "Connection: Upgrade" -H "Upgrade: websocket" \
+        -H "Sec-WebSocket-Version: 13" \
+        -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+        "$MRC_WS_LOCAL"; then
+        ok "MRC bridge answering locally on port $MRC_BRIDGE_PORT_DEFAULT"
+    else
+        warn "MRC bridge is NOT answering on 127.0.0.1:${MRC_BRIDGE_PORT_DEFAULT}/ws — check 'systemctl status anetbbs-mrc-bridge' and its journalctl output."
+    fi
+
+    if [[ "$ENABLE_NGINX" == "y" ]]; then
+        if [[ -f "/etc/nginx/sites-available/anetbbs" ]] && grep -q "location /mrcws" "/etc/nginx/sites-available/anetbbs" 2>/dev/null; then
+            ok "nginx /mrcws proxy configured"
+        else
+            warn "nginx is enabled but no /mrcws location block was found — web MRC chat will not work. This shouldn't happen from a normal install; check /etc/nginx/sites-available/anetbbs."
+        fi
+    fi
+fi
+
 # ─── nginx CVE check ──────────────────────────────────────────────────────────
 # CVE-2026-42945 ("NGINX Rift") is a confirmed, real, CVSS 9.2 unauthenticated
 # heap-overflow RCE affecting nginx 0.6.27 through 1.30.0, patched upstream in

@@ -4,6 +4,18 @@
 #         sed -i 's/DOMAIN_NAME/yourdomain.com/g' /etc/nginx/sites-available/anetbbs
 #         ln -s /etc/nginx/sites-available/anetbbs /etc/nginx/sites-enabled/
 #         nginx -t && systemctl reload nginx
+#
+# PORT NUMBERS BELOW ARE EXAMPLES (5000 for the app, 5001 for the MRC
+# bridge — install.sh's "production" mode defaults). If you're on
+# "behind" mode (running this alongside your OWN existing nginx/apache,
+# install.sh never touches your config for you) your actual ports are
+# almost certainly different — install.sh's own "behind" mode default is
+# WEB_PORT=8080, MRC bridge=8081. Check YOUR install's .env for the real
+# WEB_PORT and MRC_BRIDGE_PORT before copying these blocks — pasting
+# these exact numbers unmodified is a real, previously-reported cause of
+# "web MRC chat doesn't connect" (terminal MRC over SSH/telnet is a
+# separate connection and unaffected either way, so that symptom alone
+# won't tell you this is the cause).
 
 server {
     listen 80;
@@ -61,10 +73,11 @@ server {
 
     location /mrcws {
         auth_request /mrc-auth-check;
-        # Must match the MRC bridge's own web_listen_port in
-        # mrc/bridge/config.json (install.sh derives it as WEB_PORT+1,
-        # so 5001 here matches this template's WEB_PORT of 5000 above --
-        # update both together if you customize WEB_PORT).
+        # 5001 = MRC_BRIDGE_PORT in YOUR .env (install.sh derives it as
+        # WEB_PORT+1 at install time — it does NOT recompute automatically
+        # if you change WEB_PORT later, so re-check both after any change).
+        # Also confirm it matches web_listen_port in mrc/bridge/config.json
+        # — that's the port the bridge process actually binds to.
         proxy_pass         http://127.0.0.1:5001/ws;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade    $http_upgrade;
