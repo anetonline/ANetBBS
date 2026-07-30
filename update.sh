@@ -1704,7 +1704,7 @@ if [[ "$MRC_ACTUALLY_RUNNING" == "true" ]]; then
 
     if [[ -f "$NGINX_AVAIL" ]]; then
         if grep -q "location /mrcws" "$NGINX_AVAIL" 2>/dev/null; then
-            NGINX_MRC_PORT=$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | grep -oE '[0-9]+')
+            NGINX_MRC_PORT=$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | sed -E 's/.*:([0-9]+)\/ws;.*/\1/')
             if [[ "$NGINX_MRC_PORT" == "$MRC_PORT_CHECK" ]]; then
                 ok "nginx /mrcws proxy correctly points at port $MRC_PORT_CHECK"
             else

@@ -130,7 +130,7 @@ DOC_CATEGORIES = [
         '17-development',
     ]),
     ('Reference', 'bi-book', [
-        'CHANGELOG', 'PORTS', 'SECURITY', 'MSP_LOOPBACK_TEST',
+        'CHANGELOG', 'CHANGELOG-beta', 'PORTS', 'SECURITY', 'MSP_LOOPBACK_TEST',
     ]),
 ]
 
@@ -185,7 +185,7 @@ def view(slug):
         body)
 
     pagination = None
-    if slug == 'CHANGELOG':
+    if slug in ('CHANGELOG', 'CHANGELOG-beta'):
         header, entries = _split_changelog(body)
         page = request.args.get('page', 1, type=int)
         pagination = _ListPagination(page, CHANGELOG_ENTRIES_PER_PAGE, len(entries))

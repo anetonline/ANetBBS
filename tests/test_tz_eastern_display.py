@@ -66,6 +66,26 @@ class FmtEasternTests(unittest.TestCase):
         self.assertEqual(fmt_eastern(None, default='never'), 'never')
         self.assertEqual(fmt_eastern(None), '')
 
+    def test_z_suffix_iso_string_formats_without_crashing(self):
+        """Live crash on the real server (Python 3.10): the Admin ->
+        Upgrades page renders `upstream.published_at|eastern(...)` on
+        a '...Z'-suffixed ISO string from web/upgrades.py's own
+        /api/releases/latest -- datetime.fromisoformat() only accepts
+        a trailing 'Z' as of Python 3.11, so on 3.10 it raised
+        ValueError, to_eastern() failed open and returned the raw
+        string, and fmt_eastern() crashed calling .strftime() on it.
+        AttributeError: 'str' object has no attribute 'strftime'."""
+        self.assertEqual(
+            fmt_eastern('2026-07-24T14:26:00Z', '%Y-%m-%d %H:%M'),
+            '2026-07-24 10:26')
+
+    def test_unparseable_string_returns_default_not_a_crash(self):
+        """to_eastern() fails open and returns a raw (non-datetime)
+        string for genuinely unparseable input -- fmt_eastern() must
+        not blindly call .strftime() on whatever it gets back."""
+        self.assertEqual(
+            fmt_eastern('not a date', default='(unknown)'), '(unknown)')
+
 
 class JinjaFilterTests(unittest.TestCase):
     """Confirm the `eastern` Jinja filter is registered and behaves

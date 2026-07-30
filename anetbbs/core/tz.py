@@ -29,8 +29,15 @@ def to_eastern(dt):
     if dt is None:
         return None
     if isinstance(dt, str):
+        # datetime.fromisoformat() only accepts a trailing 'Z' (the
+        # shape every JSON-facing producer here actually emits, e.g.
+        # upgrades.py's '%Y-%m-%dT%H:%M:%SZ') as of Python 3.11 --
+        # normalize it first so this also works on 3.10, which is
+        # what's actually deployed on the live server despite
+        # install.sh preferring 3.12/3.11 when available.
+        text = dt[:-1] + '+00:00' if dt.endswith('Z') else dt
         try:
-            dt = datetime.fromisoformat(dt)
+            dt = datetime.fromisoformat(text)
         except ValueError:
             return dt
     if dt.tzinfo is None:
@@ -61,6 +68,12 @@ def fmt_eastern(dt, fmt='%Y-%m-%d %H:%M', default=''):
     codebase before this module existed, so call sites that already
     have their own fallback text can pass it straight through."""
     eastern_dt = to_eastern(dt)
-    if eastern_dt is None:
+    # to_eastern() fails open on a string it can't parse as ISO-8601 --
+    # returns the original string as-is rather than raising (see its
+    # own docstring). Honor that contract here too: a non-datetime
+    # can't be strftime()'d, so fall back to `default` instead of
+    # crashing on genuinely malformed input from an external source
+    # (e.g. a hand-rolled upstream registry's release JSON).
+    if not isinstance(eastern_dt, datetime):
         return default
     return eastern_dt.strftime(fmt)

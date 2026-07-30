@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: beta** (`v1.0b2.226`, July 2026) — Full release: **August 1 2026**
+**Status: stable** (`v1.0.0`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0b2.226.tar.gz
-cd ANetBBS-v1.0b2.226
+tar xzf ANetBBS-v1.0.0.tar.gz
+cd ANetBBS-v1.0.0
 sudo bash install.sh
 ```
 
@@ -39,8 +39,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0b2.226.tar.gz
-cd ANetBBS-v1.0b2.226
+tar xzf ANetBBS-v1.0.0.tar.gz
+cd ANetBBS-v1.0.0
 sudo bash update.sh
 ```
 
@@ -236,7 +236,7 @@ See [LICENSE](LICENSE).
 
 ## Status / Caveats
 
-This is a **beta** release. Known rough edges:
+Known rough edges:
 
 - MSP/SYSTAT need privileged ports (11/18) — see
   [`docs/INSTALL.md`](docs/INSTALL.md) for `setcap` / systemd /

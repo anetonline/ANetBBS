@@ -1,19 +1,9 @@
-ANetBBS v1.0b2.239 - Modern BBS System
------------------------------------------
-Web (Flask+SocketIO), telnet, SSH, rlogin,
-FTP, PETSCII (C64/128) front-ends sharing
-one user database. FidoNet BinkP echomail/
-netmail. DOVE-Net QWK. Inter-BBS IM via
-MSP+SYSTAT. MRC chat. LORD pre-installed
-(Synchronet JS). In-browser DOS games:
-DOOM + Duke Nukem 3D (shareware) via
-EmulatorJS/dosbox_pure -- play classics
-right in the browser! Built-in wiki, RSS
-reader, 80x25 web terminal. Synchronet
-.js + Mystic .mps + DOSBox doors + door32.
-Sysop NodeSpy. CP437/ANSI throughout.
-Native Linux doors (RMDoor/DDPlus/FPC)
-work via STDIO mode.
-Linux + Raspberry Pi - ./install.sh
-Full release: August 1 2026
-github.com/anetonline    By StingRay
+ANetBBS v1.0.0 -- Full Release!
+-------------------------------
+Modern multi-node BBS: telnet, SSH,
+rlogin, FTP & PETSCII (C64/128) --
+plus a nice graphical web UI! One user
+base. FidoNet BinkP/QWK echomail, MRC
+chat, LORD + DOOM/Duke3D in-browser.
+CP437/ANSI throughout, wiki, RSS & more.
+github.com/anetonline -- By StingRay

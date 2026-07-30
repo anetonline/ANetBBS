@@ -1,3 +1,9 @@
+# ANetBBS v1.0.0 — Full release (August 2026)
+
+After 239 internal beta builds, ANetBBS reaches v1.0.0. No behavior changes from v1.0b2.239 — this is purely the version cutover from the internal `v1.0b2.NNN` build-number scheme to standard semantic versioning. From here, patch releases follow `v1.0.1`, `v1.0.2`, etc. The full history of every beta build that got the project here is preserved below and in `docs/CHANGELOG.md`.
+
+---
+
 # ANetBBS v1.0b2.239 — Sysop message delete button; `[ANSI]` subject auto-tag (July 2026)
 
 Two requests following the ANSI-art incident above. First, a sysop-only "Delete" button on echomail messages — previously required hand SQL, including cleaning up the outbound BinkP queue by hand. Now a single admin-only action that hard-deletes the message and cleans up every table that references it (queue entries, read status, QWK delivery pointers); can't recall a copy already delivered to a peer, only stop what's still pending and remove the local copy. Second, messages containing real ANSI escape codes now get an automatic `[ANSI] ` subject prefix, so readers on non-ANSI clients know what to expect before opening — wired into all 9 places a subject gets set (3 inbound import paths, 6 local compose surfaces) via one shared helper. 12 new tests total.

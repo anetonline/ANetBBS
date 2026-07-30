@@ -81,6 +81,45 @@ class ArchiveIntegrityPureTests(unittest.TestCase):
         result = test_archive_integrity('/tmp/does-not-exist-anywhere.zip')
         self.assertTrue(result.ok)
 
+    def test_file_id_diz_found_inside_a_wrapper_subdirectory_zip(self):
+        """Jerry asked whether the release tarball's own FILE_ID.DIZ
+        would actually get picked up if a sysop uploaded the release
+        to a file area -- build-release.sh wraps everything inside a
+        top-level ANetBBS-vX.Y.Z/ directory, so FILE_ID.DIZ never sits
+        at the archive root. _find_match() matches by basename at any
+        depth (preferring shallower matches, not requiring root), so
+        this should already work -- confirm it actually does."""
+        from anetbbs.features.archive_meta import extract_archive_description
+        with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+            path = f.name
+        try:
+            with zipfile.ZipFile(path, 'w') as zf:
+                zf.writestr('ANetBBS-v1.0.0/FILE_ID.DIZ',
+                            'ANetBBS v1.0.0 -- Full Release!\n')
+                zf.writestr('ANetBBS-v1.0.0/anetbbs/__init__.py', '# stub')
+            desc = extract_archive_description(path)
+            self.assertIn('ANetBBS v1.0.0 -- Full Release!', desc)
+        finally:
+            os.remove(path)
+
+    def test_file_id_diz_found_inside_a_wrapper_subdirectory_targz(self):
+        """Same as above but for .tar.gz -- the actual format
+        build-release.sh ships (ANetBBS-vX.Y.Z.tar.gz)."""
+        from anetbbs.features.archive_meta import extract_archive_description
+        with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as f:
+            path = f.name
+        try:
+            with tarfile.open(path, 'w:gz') as tf:
+                data = b'ANetBBS v1.0.0 -- Full Release!\n'
+                with tempfile.NamedTemporaryFile() as src:
+                    src.write(data)
+                    src.flush()
+                    tf.add(src.name, arcname='ANetBBS-v1.0.0/FILE_ID.DIZ')
+            desc = extract_archive_description(path)
+            self.assertIn('ANetBBS v1.0.0 -- Full Release!', desc)
+        finally:
+            os.remove(path)
+
     def test_non_archive_file_fails_open(self):
         from anetbbs.features.archive_meta import test_archive_integrity
         with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as f:
