@@ -138,6 +138,64 @@ class UnclaimedNetmailAdminTests(unittest.TestCase):
                                  'assigning unclaimed netmail must notify the '
                                  'recipient the same way automatic resolution does')
 
+    def test_areafix_response_from_bot_addressed_to_sysop_is_excluded(self):
+        """Real gap found live: a peer's AreaFix robot replying FROM
+        'AREAFIX' with an automated 'AREAFIX response' confirmation,
+        generically addressed TO 'Sysop' (not a real local username),
+        used to slip through the old to_name-only bot filter and pile
+        up unbounded (50+ found on a real install). Must be excluded
+        by checking from_name too, the same as the to_name check
+        already does for the reverse direction."""
+        from anetbbs.models import db, NetmailMessage
+        with self.app.app_context():
+            bot_reply = NetmailMessage(
+                network_id=self.net_id, from_address='5:5/2', to_address='5:5/1',
+                from_name='AREAFIX', to_name='Sysop', subject='AREAFIX response',
+                body='+SOMETAG', direction='inbound', status='received',
+                to_user_id=None)
+            db.session.add(bot_reply)
+            db.session.commit()
+
+        client = self._client_as_admin()
+        resp = client.get('/admin/echomail/unclaimed_netmail')
+        self.assertNotIn('AREAFIX response', resp.get_data(as_text=True),
+                         'an AreaFix bot reply must not clutter this queue '
+                         'just because it is addressed to a generic name')
+
+    def test_clear_all_deletes_only_unclaimed_rows(self):
+        from anetbbs.models import NetmailMessage
+        id1 = self._make_unclaimed('Clear me 1')
+        id2 = self._make_unclaimed('Clear me 2')
+        client = self._client_as_admin()
+        resp = client.post('/admin/echomail/unclaimed_netmail/clear_all',
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+        with self.app.app_context():
+            self.assertIsNone(NetmailMessage.query.get(id1))
+            self.assertIsNone(NetmailMessage.query.get(id2))
+            # bot traffic and the already-claimed message from setUpClass
+            # must survive -- clear_all only touches what the queue shows.
+            claimed_still_there = NetmailMessage.query.filter_by(
+                subject='Already claimed').first()
+            self.assertIsNotNone(claimed_still_there)
+
+    def test_clear_all_requires_admin(self):
+        from anetbbs.models import db, User
+        with self.app.app_context():
+            plain = User(username='notanadmin', email='na@example.com',
+                        password_hash='x', access_level=100)
+            db.session.add(plain)
+            db.session.commit()
+            plain_id = plain.id
+
+        client = self.app.test_client()
+        with client.session_transaction() as sess:
+            sess['_user_id'] = str(plain_id)
+            sess['_fresh'] = True
+        resp = client.post('/admin/echomail/unclaimed_netmail/clear_all')
+        self.assertNotEqual(resp.status_code, 200)
+
 
 if __name__ == '__main__':
     unittest.main()

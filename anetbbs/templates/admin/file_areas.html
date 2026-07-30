@@ -110,8 +110,12 @@
             <div class="col-md-auto">
                 <div class="form-check">
                     <input type="checkbox" id="bulkSelectAll" class="form-check-input"
-                           onchange="document.querySelectorAll('input[name=area_ids]').forEach(cb => cb.checked = this.checked);">
-                    <label class="form-check-label" for="bulkSelectAll">Select all</label>
+                           onchange="document.querySelectorAll('input[name=area_ids]').forEach(cb => {
+                               var visible = cb.closest('form').style.display !== 'none';
+                               cb.checked = this.checked && visible;
+                           });"
+                           title="Only selects areas currently shown by the Show filter">
+                    <label class="form-check-label" for="bulkSelectAll">Select all shown</label>
                 </div>
             </div>
             <div class="col-md-auto">
@@ -124,6 +128,16 @@
                     <option value="none">— local (no network) —</option>
                     {% for n in networks %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}
                 </select>
+            </div>
+            <div class="col-md-auto">
+                <label class="form-label small mb-0 me-1" for="areaFilterNetwork">Show:</label>
+                <select id="areaFilterNetwork" class="form-select form-select-sm"
+                        onchange="filterFileAreas(this.value)">
+                    <option value="">All areas</option>
+                    <option value="none">Local only (no network)</option>
+                    {% for n in networks %}<option value="{{ n.id }}">{{ n.name }} only</option>{% endfor %}
+                </select>
+                <span id="areaFilterCount" class="text-muted small ms-1"></span>
             </div>
             <div class="col-md-auto ms-auto d-flex gap-2 flex-wrap">
                 <button form="bulkAreaForm" class="btn btn-outline-success btn-sm" name="bulk_action" value="enable">Enable</button>
@@ -141,10 +155,10 @@
 {% endif %}
 
 <div class="card">
-    <div class="card-body p-0">
+    <div class="card-body p-0" id="fileAreaList">
     {% if areas %}
         {% for fa in areas %}
-        <form method="post" class="border-bottom p-2">
+        <form method="post" class="border-bottom p-2" data-network-id="{{ fa.network_id or 'none' }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="area_id" value="{{ fa.id }}">
             <div class="row g-2 align-items-end">
@@ -220,4 +234,26 @@
     {% endif %}
     </div>
 </div>
+
+<script>
+// Client-side only -- avoids a round-trip on a page that's already fully
+// loaded with every area, and matches the existing bulk-select-network
+// dropdown's own client-side approach (same data-network-id values).
+function filterFileAreas(val) {
+    var forms = document.querySelectorAll('#fileAreaList > form[data-network-id]');
+    var shown = 0;
+    forms.forEach(function (f) {
+        var show = !val || f.dataset.networkId === val;
+        f.style.display = show ? '' : 'none';
+        if (show) shown++;
+    });
+    var countEl = document.getElementById('areaFilterCount');
+    if (countEl) countEl.textContent = val ? '(' + shown + ' of ' + forms.length + ')' : '';
+    // A hidden area's checkbox shouldn't stay silently checked for a bulk
+    // action the sysop can no longer see it's part of.
+    document.querySelectorAll('input[name=area_ids]').forEach(function (cb) {
+        if (cb.closest('form').style.display === 'none') cb.checked = false;
+    });
+}
+</script>
 {% endblock %}

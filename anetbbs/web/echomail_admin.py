@@ -982,6 +982,24 @@ def bad_areas_clear_all():
 # silently vanished from anyone's view with zero visible signal.
 # ---------------------------------------------------------------------------
 
+_UNCLAIMED_NETMAIL_BOT_NAMES = ('areafix', 'area fix', 'areamgr',
+                                'filefix', 'file fix', 'filemgr')
+
+
+def _unclaimed_netmail_query():
+    """Shared base query for the unclaimed-netmail review queue and its
+    bulk-clear action -- kept as one place so the two can't drift out
+    of sync (bulk-clear must delete exactly what the list view shows,
+    nothing more)."""
+    from ..models import NetmailMessage
+    bot = _UNCLAIMED_NETMAIL_BOT_NAMES
+    return NetmailMessage.query.filter(
+        NetmailMessage.direction == 'inbound',
+        NetmailMessage.to_user_id.is_(None),
+        db.func.lower(NetmailMessage.to_name).notin_(bot),
+        db.func.lower(NetmailMessage.from_name).notin_(bot))
+
+
 @echomail_admin_bp.route('/unclaimed_netmail')
 @login_required
 @_admin_required
@@ -989,14 +1007,19 @@ def unclaimed_netmail():
     """Sysop review queue for inbound netmail that never resolved to a
     local user. Excludes AreaFix/FileFix bot traffic -- those are
     intentionally not tied to a real user and are already tracked via
-    AreafixLog, not a gap worth surfacing here."""
+    AreafixLog, not a gap worth surfacing here.
+
+    Checks both to_name and from_name against the bot-name list: the
+    original to_name-only check caught inbound requests addressed TO a
+    peer's AreaFix robot, but missed the reverse case -- a peer's
+    AreaFix robot replying FROM "AREAFIX" with an automated "AREAFIX
+    response" confirmation, generically addressed TO "Sysop" (a common
+    FTN default recipient name, not a real local username). Those
+    piled up here unbounded since nothing ever claims a netmail
+    addressed to a name that isn't a real account. Found live: 50+ old
+    AREAFIX response confirmations from a single network, all noise."""
     from ..models import NetmailMessage
-    _bot_names = ('areafix', 'area fix', 'areamgr',
-                 'filefix', 'file fix', 'filemgr')
-    rows = (NetmailMessage.query
-            .filter(NetmailMessage.direction == 'inbound',
-                    NetmailMessage.to_user_id.is_(None),
-                    db.func.lower(NetmailMessage.to_name).notin_(_bot_names))
+    rows = (_unclaimed_netmail_query()
             .order_by(NetmailMessage.received_at.desc())
             .limit(200).all())
     networks = {n.id: n for n in EchomailNetwork.query.all()}
@@ -1034,6 +1057,27 @@ def unclaimed_netmail_assign(nm_id):
         pass
 
     flash(f'Assigned to {user.username}.', 'success')
+    return redirect(url_for('echomail_admin.unclaimed_netmail'))
+
+
+@echomail_admin_bp.route('/unclaimed_netmail/clear_all', methods=['POST'])
+@login_required
+@_admin_required
+def unclaimed_netmail_clear_all():
+    """Bulk-discard everything in the unclaimed-netmail queue -- old
+    AreaFix-response confirmations and similar noise tend to pile up
+    unbounded with no other way to clear them short of hand SQL. Uses
+    the same filter criteria as the list view (shared
+    _unclaimed_netmail_query()), not a raw wildcard delete, so this
+    can only ever remove rows that would legitimately show up in that
+    queue -- deliberately NOT capped by the list view's 200-row
+    display limit, since "clear all" should clear the real backlog,
+    not just whatever page happens to be rendered.
+    Uses the ORM's synchronize_session=False since every row here gets
+    dropped as one bulk statement, not selectively kept in memory."""
+    count = _unclaimed_netmail_query().delete(synchronize_session=False)
+    db.session.commit()
+    flash(f'Cleared {count} unclaimed netmail message(s).', 'success')
     return redirect(url_for('echomail_admin.unclaimed_netmail'))
 
 

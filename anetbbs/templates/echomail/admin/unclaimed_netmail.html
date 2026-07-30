@@ -24,6 +24,17 @@
             No unclaimed netmail pending review.
         </div>
     {% else %}
+        <form method="post"
+              action="{{ url_for('echomail_admin.unclaimed_netmail_clear_all') }}"
+              class="mb-2 text-end"
+              onsubmit="return confirm('Permanently discard all unclaimed netmail shown here? This cannot be undone.');">
+            {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% endif %}
+            <button class="btn btn-outline-danger btn-sm">
+                <i class="bi bi-trash"></i> Clear All
+            </button>
+        </form>
         <table class="table table-sm table-hover">
             <thead>
                 <tr>

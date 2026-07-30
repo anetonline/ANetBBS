@@ -1,3 +1,11 @@
+# ANetBBS v1.0.1 — Unclaimed-netmail AreaFix-reply noise; File Areas network filter (August 2026)
+
+Two fixes/features found while wrapping up the v1.0.0 rollout. First: Admin → Echomail → Unclaimed Netmail was meant to exclude AreaFix/FileFix bot traffic, but only checked the *recipient* name — it missed the reverse case of a peer's AreaFix robot replying with an automated "AREAFIX response" confirmation addressed generically `To: Sysop`, which isn't a real local username. Found live: 50+ of these had piled up unbounded on one network. Now excluded by checking both directions, plus a new admin-only "Clear All" bulk-discard button (same filter criteria as the list view, not a raw wildcard delete) so an existing backlog can be cleared in one click. 6 new tests.
+
+Second: Admin → File Areas had no way to narrow a long flat list down to just one network or just local areas — a real usability complaint once a sysop has enough areas that hunting through everything gets tedious. New client-side "Show:" filter dropdown (no new route, no round-trip) reusing the same `data-network-id` values the existing bulk-select-network dropdown already relies on; "Select all" now only selects currently-visible areas, so filtering to one network and bulk-deleting can't silently catch areas from a different network that just happen to be scrolled off-screen. 3 new tests.
+
+---
+
 # ANetBBS v1.0.0 — Full release (August 2026)
 
 After 239 internal beta builds, ANetBBS reaches v1.0.0. No behavior changes from v1.0b2.239 — this is purely the version cutover from the internal `v1.0b2.NNN` build-number scheme to standard semantic versioning. From here, patch releases follow `v1.0.1`, `v1.0.2`, etc. The full history of every beta build that got the project here is preserved below and in `docs/CHANGELOG.md`.
