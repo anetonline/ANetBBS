@@ -51,6 +51,26 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # own OLD_VERSION/NEW_VERSION comparison.
 BBS_VERSION="$(cat "$SOURCE_DIR/VERSION" 2>/dev/null || echo unknown)"
 
+# Real bug found live testing a fresh install: that same audit went on
+# to plug BBS_VERSION into the MRC bridge's platform_info field
+# (below), on the assumption that the old "1.3.7" was just a stale,
+# meaningless leftover. It wasn't -- platform_info's version component
+# identifies MRC *client/protocol* compatibility to the upstream hub
+# (mrc.bottomlessabyss.net), a completely separate numbering scheme
+# from ANetBBS's own release version, and the hub actively rejects
+# connections below whatever minimum it currently enforces
+# ("OLDVERSION" packet, handled in mrc/bridge/main.py). ANetBBS is at
+# v1.0.x; the hub's real live minimum observed testing this was 1.2.9
+# -- meaning EVERY fresh install advertising ANetBBS's own version
+# here was guaranteed to be rejected by the hub, regardless of how
+# current the actual ANetBBS release was, since the two numbering
+# schemes have nothing to do with each other. This is independent of
+# BBS_VERSION on purpose -- do not derive it from the VERSION file
+# again. Matches the reference client's own real version
+# (anetmrc_v1.3.9, cross-referenced throughout mrc/bridge/main.py's
+# protocol audit comments), safely above the hub's current floor.
+MRC_CLIENT_COMPAT_VERSION="1.3.9"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # UNINSTALL
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1263,7 +1283,7 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
   "mrc_port": 5001,
   "use_ssl": true,
   "bridge_bbs": "$BBS_NAME",
-  "platform_info": "ANETBBS/Linux.$(uname -m)/$BBS_VERSION",
+  "platform_info": "ANETBBS/Linux.$(uname -m)/$MRC_CLIENT_COMPAT_VERSION",
   "info_web": "$INFO_WEB",
   "info_sysop": "$ADMIN_USER",
   "info_desc": "$BBS_DESC",

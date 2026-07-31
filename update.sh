@@ -1226,13 +1226,22 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     # on any install using a non-default WEB_PORT, the same class of bug
     # already fixed for the nginx proxy_pass patch a bit further down.
     MRC_LISTEN_PORT="${EXISTING_ENV[MRC_BRIDGE_PORT]:-8080}"
+    # platform_info's version component is MRC client/protocol
+    # compatibility as understood by the upstream hub, NOT ANetBBS's
+    # own release version -- this used to be $NEW_VERSION, which meant
+    # every fresh config.json generated this way was guaranteed to be
+    # rejected by the hub's own OLDVERSION check (a real hub minimum
+    # observed live: 1.2.9, in a numbering scheme unrelated to
+    # ANetBBS's v1.0.x series). See install.sh's own longer comment on
+    # MRC_CLIENT_COMPAT_VERSION for the full story -- keep this in
+    # sync with that value if it's ever bumped.
     cat > "$MRC_BRIDGE_CONFIG" << MRCEOF
 {
   "mrc_host": "mrc.bottomlessabyss.net",
   "mrc_port": 5001,
   "use_ssl": true,
   "bridge_bbs": "$BBS_NAME",
-  "platform_info": "ANETBBS/Linux.$(uname -m)/$NEW_VERSION",
+  "platform_info": "ANETBBS/Linux.$(uname -m)/1.3.9",
   "capabilities": ["MCI", "MSGEXT", "CTCP"],
   "web_listen_host": "127.0.0.1",
   "web_listen_port": $MRC_LISTEN_PORT,

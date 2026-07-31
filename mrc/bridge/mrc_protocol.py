@@ -60,6 +60,16 @@ class MRCProtocol:
 
     @classmethod
     def create_handshake(cls, bbs_name: str, platform_info: str = '') -> str:
+        """`platform_info`'s trailing version segment identifies MRC
+        client/protocol compatibility to the upstream hub, in the
+        hub's own numbering scheme -- NOT the host BBS software's own
+        release version. A prior fix mistakenly derived this from
+        ANetBBS's own VERSION file (assuming an old hardcoded value
+        was just meaningless drift); the hub's real OLDVERSION check
+        rejects anything below its own current floor (observed live:
+        1.2.9), a series unrelated to ANetBBS's v1.0.x. See
+        install.sh's MRC_CLIENT_COMPAT_VERSION for the real, deliberately
+        independent value actually shipped."""
         bbs_name = cls.sanitize_field(bbs_name, allow_spaces=True)
         if platform_info:
             platform_info = cls.sanitize_field(platform_info, allow_spaces=False)
