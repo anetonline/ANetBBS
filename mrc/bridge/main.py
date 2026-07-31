@@ -332,17 +332,45 @@ class MRCConnection:
             return False
 
     async def _reconnect_loop(self):
-        delay     = float(self.config.get("mrc_reconnect_initial_delay", 1))
-        max_delay = float(self.config.get("mrc_reconnect_max_delay", 30))
+        delay        = float(self.config.get("mrc_reconnect_initial_delay", 1))
+        max_delay    = float(self.config.get("mrc_reconnect_max_delay", 30))
+        # Real bug found live against a real hub: a connection that
+        # succeeds at the TCP/TLS + handshake level but gets reset
+        # almost immediately afterward (e.g. a hub's own flood
+        # protection reacting to reconnects coming too fast) was being
+        # treated as a full success -- connect() returns True as soon
+        # as the handshake packet is sent, before the concurrent
+        # receive_loop() task (which is what actually notices the
+        # reset) has any say in the matter. The backoff delay was reset
+        # to its floor on every single cycle regardless, so the bridge
+        # kept hammering the hub at a flat ~1-per-second cadence
+        # forever with no growing backoff at all -- plausibly the exact
+        # kind of traffic that gets an IP rate-limited by a hub's own
+        # abuse protection in the first place, turning one bad
+        # connection into a self-perpetuating one. A connection that
+        # drops before staying up for a minimum stable duration now
+        # counts as a failed cycle -- same real sleep+backoff-growth as
+        # an outright failed connect() call -- instead of silently
+        # falling through to the flat per-second heartbeat retry.
+        stable_after = float(self.config.get("mrc_reconnect_stable_seconds", 10))
+        connected_since = None
 
         while not self._closing:
             if not self.connected:
+                if connected_since is not None:
+                    stayed_up = time.monotonic() - connected_since
+                    connected_since = None
+                    if stayed_up < stable_after:
+                        await asyncio.sleep(delay)
+                        delay = min(max_delay, delay * 2)
+                        continue
+                    delay = float(self.config.get("mrc_reconnect_initial_delay", 1))
                 ok = await self.connect()
                 if not ok:
                     await asyncio.sleep(delay)
                     delay = min(max_delay, delay * 2)
                     continue
-                delay = float(self.config.get("mrc_reconnect_initial_delay", 1))
+                connected_since = time.monotonic()
             await asyncio.sleep(1)
 
     async def send_capabilities(self):

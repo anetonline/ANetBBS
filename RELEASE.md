@@ -1,3 +1,11 @@
+# ANetBBS v1.0.7 — MRC bridge reconnect storm against a live hub (August 2026)
+
+Found testing a fresh install: the web MRC client showed "MRC upstream disconnected (reconnecting…)" in an endless loop, with the bridge retrying at a flat ~1-second cadence and no growing backoff. Root cause: the reconnect loop only grew its backoff when the connection failed outright — but here it was succeeding at the TCP/TLS+handshake level and getting reset by the hub moments later, detected by a separate concurrent task that had no say in the backoff decision. Every cycle reset the delay back to its floor, hammering the hub at a constant rate — plausibly why even a one-off manual connection from the same machine got reset too, consistent with the hub's own flood protection reacting to the retry storm. Fixed: a connection now has to stay up for a minimum stable duration before the backoff resets; a fast drop counts as a failed cycle like any other. 2 new tests, confirmed to fail on the old code and pass on the fix.
+
+Also re-bumped the four docs files updated in v1.0.6's install-command sweep from `v1.0.6` to `v1.0.7`.
+
+---
+
 # ANetBBS v1.0.6 — Pre-release docs sweep: stale install-command versions (August 2026)
 
 A final documentation pass ahead of the public release announcement turned up install/update instructions in four files still hardcoded to `v1.0.0` — five patch releases stale. The most serious: the Pi update guide's `wget` command pointed at a GitHub "latest release" URL for an asset literally named `ANetBBS-v1.0.0.tar.gz`, which no longer exists in the latest release and would 404 for anyone following it today. Fixed in `README.md`, `docs/01-installing.md`, `docs/INSTALL-PI.md`, and `docs/preinstall-tutorial.html`. Everything else checked clean in the same pass — the built-in wiki, banner art, web templates, and welcome/goodbye screens all already reference the version dynamically or contain no version string at all; other "as of vX.Y" mentions elsewhere in the docs are legitimate historical notes about when a feature shipped, not stale current-version claims.

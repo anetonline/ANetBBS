@@ -14,8 +14,8 @@
 
 ```bash
 # extract the release tarball
-tar xzf ANetBBS-v1.0.6.tar.gz
-cd ANetBBS-v1.0.6
+tar xzf ANetBBS-v1.0.7.tar.gz
+cd ANetBBS-v1.0.7
 
 # run the installer
 sudo bash install.sh

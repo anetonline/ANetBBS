@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.6`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.7`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.7 — MRC bridge reconnect storm against a live hub (August 2026)
+
+Found testing a fresh install on an otherwise-idle VM: the web MRC client showed "MRC upstream disconnected (reconnecting…)" in an endless loop. The bridge's own log showed why — a real TCP-level connection reset from the upstream hub, immediately after every single connect attempt, at a flat ~1-second retry cadence with no growing delay between attempts. A one-off manual TLS probe from the same machine got reset the exact same way, consistent with the hub's own flood/abuse protection having flagged the source IP in response to the retry storm itself.
+
+Root cause: `MRCConnection._reconnect_loop()` (`mrc/bridge/main.py`) only grew its exponential backoff when the initial `connect()` call failed outright (a TCP/TLS-level error). But the actual failure mode here was different — `connect()` completes the TCP/TLS handshake, sends the handshake packet, and returns success immediately; the hub's reset is only noticed moments later by a separate, concurrently-running receive loop, which has no say in the backoff decision at all. Every such cycle reset the backoff delay straight back to its floor, so a hub that starts rejecting connections shortly after they're established got hammered at a constant rate forever instead of backed away from — turning one bad connection into a self-perpetuating one.
+
+Fixed: a connection now has to stay up for a configurable minimum "stable" duration (`mrc_reconnect_stable_seconds`, default 10s) before the backoff resets. A connection that drops before then is treated as a failed cycle — same real delay-and-grow treatment as an outright failed `connect()` call — instead of silently falling through to the flat per-second retry. 2 new tests, confirmed to fail against the old code (zero backoff growth across five simulated fast-flap cycles) and pass against the fix.
+
+Also updated four docs files' install-command examples from `v1.0.6` to `v1.0.7` (`README.md`, `docs/01-installing.md`, `docs/INSTALL-PI.md`, `docs/preinstall-tutorial.html`) — same drift the previous release's docs sweep addressed, now current again.
 
 ## v1.0.6 — Pre-release docs sweep: stale install-command versions (August 2026)
 
