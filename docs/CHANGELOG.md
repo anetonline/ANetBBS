@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.1`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.2`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.2 — Real bug: a URL inside dense ANSI art corrupted the message layout (August 2026)
+
+Found live: a sysop composed a CP437 ad screen (bordered box, shading bar, a centered `https://` URL inside one row) and posting it in the web UI corrupted the box border and everything at and after that row — the row's intended white padding turned into default-gray blanks with wrong spacing.
+
+Root cause: the URL auto-linkifier (`_linkify()` in `anetbbs/web/render_msg.py`) split the message text into fragments around each matched `https?://` URL and ran the CP437/ANSI grid renderer (`_to_html_vt`/`_run_vt`) independently on each fragment. That renderer always pads a row out to the full 80-column width with default-color blanks when it reaches the end of its input mid-row — it has no way to know the row was artificially cut short by the URL split rather than genuinely ending there. Any row with a URL inside dense box-drawing/shaded art got its layout corrupted this way; plain-colored text or art with no shading characters never triggered the bug (the dispatch to the grid renderer is gated on the presence of solid block/shade glyphs `█▄▀▌▍▎▏░▒▓`, which is why a border-only repro didn't reproduce it during debugging, only the real shading-bar-containing ad screen did).
+
+Fixed by rendering the full message as one continuous pass, then substituting the clickable link into the already-rendered HTML afterward — the grid renderer always sees the complete, uncut text now, so a URL landing mid-row can no longer corrupt that row's layout. 5 new tests, confirmed to fail against the old code and pass against the fix.
 
 ## v1.0.1 — Unclaimed-netmail AreaFix-reply noise; File Areas network filter (August 2026)
 

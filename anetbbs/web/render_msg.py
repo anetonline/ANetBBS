@@ -305,36 +305,51 @@ _URL_TRAIL = '.,;:!?)]}\'"'
 
 
 def _linkify(decoded: str, embed_images: bool) -> str:
-    """Split *decoded* on bare https?:// URLs, running everything else
-    through the normal ANSI/CP437-to-HTML pass and turning URLs into
-    clickable <a> tags (or <img> tags for image URLs, when embed_images
-    is set — board posts only, see render_msg_body_rich).
+    """Run *decoded* through the normal ANSI/CP437-to-HTML pass as ONE
+    continuous render, then turn bare https?:// URLs into clickable <a>
+    tags (or <img> tags for image URLs, when embed_images is set —
+    board posts only, see render_msg_body_rich) by substituting them
+    into the already-rendered HTML.
+
+    Previously this split *decoded* into fragments around each URL
+    match and ran _vt_to_html() independently on each fragment. That
+    broke real dense/bordered ANSI art: _to_html_vt() pads every row
+    out to the full 80-column width with default-gray blanks whenever
+    it reaches the end of its input mid-row (it has no way to know a
+    row was cut short rather than ending there for real) -- exactly
+    what happens when a URL sits in the middle of a centered/bordered
+    row. The intended color and spacing on that row got replaced with
+    default-gray filler the moment a URL landed inside it. Found live:
+    a sysop's own CP437 ad screen had its box border and everything
+    below a centered https:// URL corrupted this way.
+
+    Rendering the whole text once and substituting afterward means the
+    VT grid always sees the complete, uncut text, so this can't happen
+    -- the row layout is exactly what it would have been with no URLs
+    in it at all.
 
     Trailing sentence punctuation ("see https://x.com." or a URL closing
     a parenthetical) is kept out of the link target/text, matching the
     same heuristic used for terminal OSC 8 hyperlinks in bbs_ui.py."""
-    out = []
-    last = 0
+    rendered = _vt_to_html(decoded)
     for m in _URL_RE.finditer(decoded):
-        out.append(_vt_to_html(decoded[last:m.start()]))
         url = m.group(1)
         trail = ''
         while url and url[-1] in _URL_TRAIL:
             trail = url[-1] + trail
             url = url[:-1]
-        last = m.end() - len(trail)
         if not url:
             continue
+        esc = str(escape(url))
         if embed_images and _IMG_EXT_RE.search(url):
-            out.append('<br><img src="' + str(escape(url)) +
-                       '" alt="" style="max-width:100%;max-height:600px;'
-                       'border:1px solid var(--theme-border);"><br>')
+            replacement = ('<br><img src="' + esc +
+                           '" alt="" style="max-width:100%;max-height:600px;'
+                           'border:1px solid var(--theme-border);"><br>')
         else:
-            esc = str(escape(url))
-            out.append(f'<a href="{esc}" target="_blank" '
-                       f'rel="noopener noreferrer">{esc}</a>')
-    out.append(_vt_to_html(decoded[last:]))
-    return ''.join(out)
+            replacement = (f'<a href="{esc}" target="_blank" '
+                           f'rel="noopener noreferrer">{esc}</a>')
+        rendered = rendered.replace(esc, replacement, 1)
+    return rendered
 
 
 def _any_line_exceeds_vt_width(decoded: str, width: int = 80) -> bool:

@@ -1,3 +1,11 @@
+# ANetBBS v1.0.2 — Real bug: a URL inside dense ANSI art corrupted the message layout (August 2026)
+
+Found live: a sysop composed a CP437 ad screen (bordered box, shading bar, a centered `https://` URL inside one row) and posting it corrupted the box border and everything at and after that row — the row's intended color turned into default-gray blanks with wrong spacing.
+
+Root cause: the URL auto-linkifier (`_linkify()` in `anetbbs/web/render_msg.py`) split the message text into fragments around each matched URL and ran the CP437/ANSI grid renderer independently on each fragment. The grid renderer always pads a row out to the full 80-column width with default-color blanks when it reaches the end of its input mid-row — it has no way to know the row was artificially cut short by the URL split rather than genuinely ending there. Any row with a URL inside dense box-drawing/shaded content got corrupted this way; plain text or content without shading characters never triggered it, which is why this had gone unnoticed. Fixed by rendering the full message as one continuous pass, then substituting the clickable link into the already-rendered HTML afterward — the grid renderer always sees the complete, uncut text now. 5 new tests, confirmed to fail on the old code and pass on the fix.
+
+---
+
 # ANetBBS v1.0.1 — Unclaimed-netmail AreaFix-reply noise; File Areas network filter (August 2026)
 
 Two fixes/features found while wrapping up the v1.0.0 rollout. First: Admin → Echomail → Unclaimed Netmail was meant to exclude AreaFix/FileFix bot traffic, but only checked the *recipient* name — it missed the reverse case of a peer's AreaFix robot replying with an automated "AREAFIX response" confirmation addressed generically `To: Sysop`, which isn't a real local username. Found live: 50+ of these had piled up unbounded on one network. Now excluded by checking both directions, plus a new admin-only "Clear All" bulk-discard button (same filter criteria as the list view, not a raw wildcard delete) so an existing backlog can be cleared in one click. 6 new tests.
