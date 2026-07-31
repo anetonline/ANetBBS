@@ -46,6 +46,12 @@ from ..core.protocols import SessionProtocol
 
 
 MAX_OUTGOING_CHARS = 140        # MRC hub hard limit
+# Literal prefix the bridge's _normalize_server_cmd/_handle_server_cmd
+# path sends verbatim as Field7 for a broadcast ("BROADCAST {text}") --
+# fixed, not session-dependent, unlike handle/dm/action overhead which
+# the bridge computes and pushes to the client (see _chat_wire_cap etc.
+# below). Must match mrc/bridge/main.py's own "BROADCAST " literal.
+_BROADCAST_PREFIX = 'BROADCAST '
 SCROLLBACK_LINES   = 500        # local ring buffer
 PING_INTERVAL      = 60         # seconds between WS pings
 AWAY_AFTER         = 600        # seconds idle before IAMHERE AWAY
@@ -202,14 +208,32 @@ def _word_wrap(text: str, width: int, indent: str = '') -> list:
     return lines if lines else [text]
 
 
-def _split_for_wire(text: str, cap: int = MAX_OUTGOING_CHARS) -> list:
-    """Split text into wire-safe chunks (≤ cap chars each)."""
+def _split_for_wire(text: str, cap: int = MAX_OUTGOING_CHARS,
+                    repeat_prefix: str = '') -> list:
+    """Split text into wire-safe chunks (≤ cap chars each, INCLUDING
+    `repeat_prefix` on every chunk).
+
+    `repeat_prefix`, if given, is something that must be present at the
+    start of every chunk on the wire -- e.g. the sender's active color
+    pipe-code for a room-chat message. Real bug this closes: each chunk
+    is sent as its own fully independent MRC message (a separate
+    send_message call, not a client-side word-wrap of one received
+    message -- see _chat_loop), so a color code set once at the start
+    of the ORIGINAL long line only ever survived into the first chunk.
+    Every later chunk arrived with no color of its own and rendered in
+    whatever default/leftover color happened to be active on each
+    recipient's client -- reported live as "loses its color" partway
+    through a long message. Passing the same prefix in here budgets
+    room for it up front and re-applies it to every chunk, not just
+    the first.
+    """
     text = (text or '').rstrip('\r\n')
     if not text:
         return []
-    if len(text) <= cap:
-        return [text]
-    inner = cap - 8          # reserve "(99/99) " tag
+    budget = max(1, cap - len(repeat_prefix))
+    if len(text) <= budget:
+        return [repeat_prefix + text]
+    inner = max(1, budget - 8)          # reserve "(99/99) " tag
     words = text.split(' ')
     chunks, cur = [], ''
     for w in words:
@@ -226,9 +250,9 @@ def _split_for_wire(text: str, cap: int = MAX_OUTGOING_CHARS) -> list:
     if cur:
         chunks.append(cur)
     if len(chunks) <= 1:
-        return chunks
+        return [repeat_prefix + c for c in chunks]
     t = len(chunks)
-    return [f'({i+1}/{t}) {c}' for i, c in enumerate(chunks)]
+    return [f'{repeat_prefix}({i+1}/{t}) {c}' for i, c in enumerate(chunks)]
 
 
 _TZ_OFFSET_RE = re.compile(r'^([+-]?)(\d{1,2})(?::?(\d{2}))?$')
@@ -327,6 +351,14 @@ class MRCChat(BaseChatSystem):
         # client's handleOverheadChars/dmOverheadChars (mrc/index.html).
         self._handle_overhead  = 0
         self._dm_overhead      = 0
+        # Same idea, for /me: the bridge wraps action text in its own
+        # fixed-color "|15* |13{nick} ...|07" (NOT the user's style --
+        # see mrc/bridge/main.py's _session_action_overhead), so this
+        # also has to be reserved from the 140-char budget. Previously
+        # unaccounted for entirely -- /me always budgeted against the
+        # full 140 with zero reservation, so a long action's tail got
+        # silently cut off server-side with no warning.
+        self._action_overhead  = 0
         self._scrollback       = deque(maxlen=SCROLLBACK_LINES)
         self._display_lines    = deque(maxlen=SCROLLBACK_LINES)  # rendered lines for screen
         self._split_screen     = True
@@ -696,9 +728,10 @@ class MRCChat(BaseChatSystem):
             # red-on-red -- reported as invisible "unless you highlight it".
             right_bits.append(f'\x1b[1;37;41m !{self._mention_count} \x1b[0m')
         # Character count: show remaining chars out of the wire limit for
-        # whatever's currently typed (plain chat / DM have different caps
-        # since the bridge prepends a display handle before its hard
-        # 140-char cutoff -- see _chat_wire_cap/_dm_wire_cap).
+        # whatever's currently typed (plain chat / DM / /me each have a
+        # different cap since the bridge prepends a different wrapper
+        # before its hard 140-char cutoff -- see _chat_wire_cap/
+        # _dm_wire_cap/_action_wire_cap).
         typed = len(self._input_buf)
         if typed > 0:
             buf_text = ''.join(self._input_buf)
@@ -713,7 +746,7 @@ class MRCChat(BaseChatSystem):
                 msg_part = parts[2] if len(parts) > 2 else ''
                 remaining = self._dm_wire_cap() - len(msg_part)
             elif lower.startswith('/me '):
-                remaining = MAX_OUTGOING_CHARS - len(low[4:])
+                remaining = self._action_wire_cap() - len(low[4:])
             elif lower.startswith('/'):
                 remaining = MAX_OUTGOING_CHARS - typed
             else:
@@ -1314,14 +1347,24 @@ class MRCChat(BaseChatSystem):
                 return
 
             if head.startswith('USERNICK:'):
+                # Per the actual protocol spec, this carries exactly ONE
+                # nick value (Request: SERVER~~~CLIENT~~~USERNICK:nick~),
+                # not an "old new" pair -- real bug found auditing against
+                # the spec: raw.split(None, 1) on a single-token value
+                # always produced parts=[nick] (no space to split on), so
+                # new_nick was unconditionally '' and never re-added,
+                # while old_nick (actually just the SAME nick) got
+                # unconditionally DISCARDED from the roster every time --
+                # a slow leak that silently shrank tab-completion/mention
+                # coverage with every USERNICK broadcast, never restoring
+                # what it removed. There's no "old" value to reconcile
+                # against on the wire; just record the announced nick as
+                # known (USERLIST's periodic full-roster refresh already
+                # corrects any staleness this leaves behind).
                 raw = body_raw.split(':', 1)[1].strip()
-                parts = raw.split(None, 1)
-                old_nick = re.split(r'[@]', parts[0], 1)[0] if parts else ''
-                new_nick = parts[1].strip() if len(parts) > 1 else ''
-                if old_nick:
-                    self._known_users.discard(old_nick)
-                if new_nick:
-                    self._known_users.add(new_nick)
+                nick = re.split(r'[\s@]', raw, 1)[0] if raw else ''
+                if nick:
+                    self._known_users.add(nick)
                 return
 
             if head.startswith('BANNER:'):
@@ -1359,10 +1402,13 @@ class MRCChat(BaseChatSystem):
             # Just absorb the wire-overhead figures for outgoing length caps.
             ho = data.get('handle_overhead')
             do = data.get('dm_overhead')
+            ao = data.get('action_overhead')
             if isinstance(ho, int):
                 self._handle_overhead = ho
             if isinstance(do, int):
                 self._dm_overhead = do
+            if isinstance(ao, int):
+                self._action_overhead = ao
             # Restore the sysop's saved outgoing text color (persisted
             # server-side via set_style, same field the web client's
             # typing-color dropdown reads/writes -- see _cycle_color()).
@@ -1616,8 +1662,9 @@ class MRCChat(BaseChatSystem):
                 if self._scroll_offset:
                     self._scroll_offset = 0
                     await self._redraw_chat_area()
-                colored = self._current_color_pipe() + line
-                for i, chunk in enumerate(_split_for_wire(colored, cap=self._chat_wire_cap())):
+                for i, chunk in enumerate(_split_for_wire(
+                        line, cap=self._chat_wire_cap(),
+                        repeat_prefix=self._current_color_pipe())):
                     if i:
                         await asyncio.sleep(WIRE_CHUNK_DELAY)
                     await self._send_json({
@@ -1881,6 +1928,11 @@ class MRCChat(BaseChatSystem):
     def _dm_wire_cap(self) -> int:
         """Same as _chat_wire_cap() but for /t DMs (different wrapper prefix)."""
         return max(10, MAX_OUTGOING_CHARS - self._dm_overhead)
+
+    def _action_wire_cap(self) -> int:
+        """Same as _chat_wire_cap() but for /me actions (different, fixed-
+        color wrapper prefix -- see _session_action_overhead in the bridge)."""
+        return max(10, MAX_OUTGOING_CHARS - self._action_overhead)
 
     def _highlight_mentions(self, text: str) -> str:
         if not self._handle or not text:
@@ -2167,7 +2219,13 @@ class MRCChat(BaseChatSystem):
             if not rest:
                 await self._emit('Usage: /me <action>')
                 return True
-            for i, chunk in enumerate(_split_for_wire(rest)):
+            # cap=self._action_wire_cap(), not the bare 140 -- the bridge
+            # replaces this "* " marker with its own fixed-color wrapper
+            # ("|15* |13{nick} ...|07") before this ever hits the wire,
+            # which costs more than 2 chars. Uncapped, any action within
+            # ~12+len(nick) chars of the limit had its tail silently
+            # dropped server-side with no warning.
+            for i, chunk in enumerate(_split_for_wire(rest, cap=self._action_wire_cap())):
                 if i:
                     await asyncio.sleep(WIRE_CHUNK_DELAY)
                 await self._send_json({
@@ -2185,12 +2243,16 @@ class MRCChat(BaseChatSystem):
                 await self._emit(
                     '\x1b[33mBroadcast shield is on -- /shield off to send one.\x1b[0m')
                 return True
-            for i, chunk in enumerate(_split_for_wire(rest)):
+            # cap accounts for the literal "BROADCAST " prefix the bridge
+            # sends verbatim as part of Field7 -- same silent-truncation
+            # risk as /me above if left unaccounted for.
+            for i, chunk in enumerate(_split_for_wire(
+                    rest, cap=MAX_OUTGOING_CHARS - len(_BROADCAST_PREFIX))):
                 if i:
                     await asyncio.sleep(WIRE_CHUNK_DELAY)
                 await self._send_json({
                     'type': 'server_cmd',
-                    'command': f'BROADCAST {chunk}',
+                    'command': f'{_BROADCAST_PREFIX}{chunk}',
                 })
             return True
 

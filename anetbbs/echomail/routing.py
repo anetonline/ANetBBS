@@ -121,9 +121,27 @@ def self_hub_binkp_network(hub_identity_id):
 def find_aka_for_network(user, network):
     """Return the UserAka this user should use to send via `network`.
 
-    Picks the AKA whose zone matches the network's `our_address`. Falls back
-    to the user's primary AKA if no zone match. Returns None if user has no
-    AKAs configured at all (caller should fall back to network.our_address).
+    Picks the AKA whose zone matches the network's `our_address`. Returns
+    None if the user has no AKAs at all, OR none of them match this
+    network's zone -- in both cases the caller is expected to fall back
+    to network.our_address (see the two callers, netmail.py's compose()
+    and telegram.py), which is guaranteed correct for this specific
+    network by definition, unlike any of the user's OTHER AKAs.
+
+    Real live bug this closes: this used to fall back to the user's
+    "primary" AKA (or just akas[0]) whenever none matched the target
+    zone, on the theory that some AKA is better than none. It isn't --
+    a zone-mismatched AKA is confidently WRONG, not just imprecise, and
+    silently pre-empted the caller's own correct network.our_address
+    fallback (which only ever ran when this function returned None,
+    which it never did as long as the user had ANY AKA configured).
+    Confirmed live: a sysop's zone-1 Fidonet reply went out From a
+    completely unrelated zone-1200 AKA (his primary, set for an
+    unrelated network) because it was the only AKA on file, and the
+    real Fidonet network's own our_address was right there and correct
+    but never consulted. The receiving hub's own upstream relay flagged
+    the reply's origin address as unroutable and refused to accept
+    further replies to it.
     """
     if user is None or network is None:
         return None
@@ -139,11 +157,7 @@ def find_aka_for_network(user, network):
             if p and p[0] == target_zone:
                 return a
 
-    # Fall back to primary
-    for a in akas:
-        if a.is_primary:
-            return a
-    return akas[0]
+    return None
 
 
 def resolve_user_by_name_or_address(to_name, to_address):

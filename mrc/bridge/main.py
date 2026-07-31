@@ -713,6 +713,23 @@ class BridgeApp:
         """
         return len(_dm_wrapper_prefix(self._session_display_handle(sess)))
 
+    def _session_action_overhead(self, sess: dict) -> int:
+        """
+        Wire chars consumed by the /me action wrapper -- fixed |15/|13/|07
+        colors, NOT the user's own style (see _handle_send_message's
+        action branch). Field 7 = "|15* |13{nick} {action text}|07".
+        Real gap this closes: neither client ever accounted for this
+        wrapper at all when deciding how much of a /me action was safe
+        to type -- they budgeted against the full 140-char wire limit
+        with zero reservation, so any action text within ~12+len(nick)
+        chars of that limit had its tail silently cut off by
+        _truncate_wire_message() with no warning, the exact silent-
+        truncation _chat_wire_cap()/_dm_wire_cap() already exist to
+        prevent for plain chat and DMs.
+        """
+        nick = self._session_effective_nick(sess)
+        return len(f"|15* |13{nick} ") + len("|07")
+
     def _is_action_body(self, message: str) -> bool:
         m = (message or "").lstrip()
         return m.startswith("|15*") or m.startswith("|15 *") or m.startswith("* ")
@@ -1434,6 +1451,7 @@ class BridgeApp:
             "prefs":           self._session_prefs(sess),
             "handle_overhead": self._session_display_handle_wire_len(sess),
             "dm_overhead":     self._session_dm_overhead(sess),
+            "action_overhead": self._session_action_overhead(sess),
             # The immediate-join message still mentions /identify --
             # purely informational, matching the reference client's own
             # permanent (never-blocking) "Use /identify password for MRC

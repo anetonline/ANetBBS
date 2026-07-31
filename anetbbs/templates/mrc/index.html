@@ -1099,9 +1099,20 @@
     const MRC_MAX_LEN = 140;
     let _handleOverheadChars = 0;
     let _dmOverheadChars     = 0;
+    // Same idea, for /me: the bridge wraps action text in its own fixed
+    // "|15* |13{nick} ...|07" wrapper (not the user's own style -- see
+    // mrc/bridge/main.py's _session_action_overhead), which also eats
+    // into the 140-char budget. Real bug this closes: /me was checked
+    // against the bare MRC_MAX_LEN with zero reservation, so a long
+    // action within ~12+len(nick) chars of the limit passed this
+    // client-side check but still got its tail silently cut off by the
+    // bridge's own hard truncation -- the exact silent-truncation this
+    // whole overhead-reservation scheme exists to prevent for chat/DM.
+    let _actionOverheadChars = 0;
 
-    function _chatTypedLimit() { return Math.max(10, MRC_MAX_LEN - _handleOverheadChars); }
-    function _dmTypedLimit()   { return Math.max(10, MRC_MAX_LEN - _dmOverheadChars); }
+    function _chatTypedLimit()   { return Math.max(10, MRC_MAX_LEN - _handleOverheadChars); }
+    function _dmTypedLimit()     { return Math.max(10, MRC_MAX_LEN - _dmOverheadChars); }
+    function _actionTypedLimit() { return Math.max(10, MRC_MAX_LEN - _actionOverheadChars); }
 
     // DOM refs
     const messagesDiv      = document.getElementById('messages');
@@ -1235,8 +1246,9 @@
 
     function _limitForLine(rawLine) {
       const { kind } = _typedPortionForLimit(rawLine);
-      if (kind === 'chat') return _chatTypedLimit();
-      if (kind === 'dm')   return _dmTypedLimit();
+      if (kind === 'chat')   return _chatTypedLimit();
+      if (kind === 'dm')     return _dmTypedLimit();
+      if (kind === 'action') return _actionTypedLimit();
       return MRC_MAX_LEN;
     }
 
@@ -1840,7 +1852,7 @@
       }
 
       if (parsed.kind === 'action') {
-        if (_isOverLimit('/me ' + parsed.value)) { tooLongError(MRC_MAX_LEN); secureMode = null; return; }
+        if (_isOverLimit('/me ' + parsed.value)) { tooLongError(_actionTypedLimit()); secureMode = null; return; }
         client.sendMessage('* ' + parsed.value);
         messageInput.value = ''; secureMode = null; return;
       }
@@ -2213,6 +2225,7 @@
 
           _handleOverheadChars = (typeof data.handle_overhead === 'number') ? data.handle_overhead : 0;
           _dmOverheadChars     = (typeof data.dm_overhead     === 'number') ? data.dm_overhead     : 0;
+          _actionOverheadChars = (typeof data.action_overhead === 'number') ? data.action_overhead : 0;
 
           document.getElementById('current-room').textContent   = data.room;
           document.getElementById('current-handle').textContent = data.handle;
@@ -2362,6 +2375,7 @@
           currentRoom          = '';
           _handleOverheadChars = 0;
           _dmOverheadChars     = 0;
+          _actionOverheadChars = 0;
           setTopic('-');
           clearStickyDm();
           setUsers([]);
@@ -2382,6 +2396,7 @@
             addMessage('✗ Disconnected from server', 'error');
             _handleOverheadChars = 0;
             _dmOverheadChars     = 0;
+            _actionOverheadChars = 0;
             clearStickyDm();
             setUsers([]);
             _setInRoomUi(false);
