@@ -210,6 +210,51 @@ class ScanInboundTests(unittest.TestCase):
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    def test_unset_storage_path_defaults_under_data_dir_not_var_lib(self):
+        """Real bug found live: an area with no storage_path used to
+        default to /var/lib/anetbbs/file_areas/<TAG> -- a path a
+        non-root service user has no permission to create in any real
+        install. Confirmed live: a legitimate tqwinfo.zip TIC failed
+        with EACCES on every retry until someone manually built that
+        path by hand as root. The default must instead live under the
+        app's own DATA_DIR, same convention as uploads/avatars/echomail,
+        so a freshly auto-created (or admin-created-without-a-path) area
+        can actually file its first delivery unattended."""
+        from anetbbs.models import db, FileArea, TicFile
+        from anetbbs.echomail.tic import scan_inbound
+
+        work_dir = tempfile.mkdtemp(prefix='tic_scan_nopath_')
+        data_dir = tempfile.mkdtemp(prefix='tic_scan_datadir_')
+        try:
+            with self.app.app_context():
+                area = FileArea(tag='NOPATHTEST', name='No Path Test',
+                                storage_path=None,
+                                is_active=True, is_subscribed=True)
+                db.session.add(area)
+                db.session.commit()
+
+            with open(os.path.join(work_dir, 'nopathfile.zip'), 'wb') as f:
+                f.write(b'contents')
+            with open(os.path.join(work_dir, 'nopathfile.tic'), 'w', encoding='cp437') as f:
+                f.write('File nopathfile.zip\nArea NOPATHTEST\nDesc x\n')
+
+            orig_data_dir = self.app.config.get('DATA_DIR')
+            self.app.config['DATA_DIR'] = data_dir
+            try:
+                with self.app.app_context():
+                    processed = scan_inbound(work_dir)
+                    self.assertEqual(processed, 1)
+                    tic = TicFile.query.filter_by(filename='nopathfile.zip').first()
+                    self.assertEqual(tic.status, 'filed')
+                    area = FileArea.query.filter_by(tag='NOPATHTEST').first()
+                    self.assertTrue(area.storage_path.startswith(data_dir))
+                    self.assertNotIn('/var/lib/anetbbs', area.storage_path)
+            finally:
+                self.app.config['DATA_DIR'] = orig_data_dir
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            shutil.rmtree(data_dir, ignore_errors=True)
+
     def test_garbage_tic_file_is_processed_as_an_error_not_a_crash(self):
         """A .tic that peek-parsing can't make sense of must still be
         handed to process_tic() (which records a proper error status),

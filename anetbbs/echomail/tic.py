@@ -322,9 +322,24 @@ def process_tic(tic_path, inbound_dir):
         tic.error_message = (tic.error_message or '') + ' [auto-created area]'
 
     # Resolve a storage destination. If the area has no storage_path, default
-    # to /var/lib/anetbbs/file_areas/<TAG>/ and persist that for next time.
+    # to {DATA_DIR}/file_areas/<TAG>/ and persist that for next time -- same
+    # convention every other on-disk default in this app uses (uploads/,
+    # avatars/, echomail/, etc. all live under DATA_DIR). Real bug found
+    # live: this used to default to /var/lib/anetbbs/file_areas/<TAG>,
+    # which the service (running as an unprivileged user in every real
+    # install, e.g. /home/stingray/anetbbs) has no permission to create --
+    # every auto-created area's first TIC delivery failed with EACCES and
+    # only ever recovered if a sysop manually pre-built that path as root.
+    # Confirmed live: a legitimate tqwinfo.zip TIC retried and failed 4
+    # times (permission denied one directory level deeper each retry, as
+    # a human manually built the path by hand) before finally filing.
     if not area.storage_path:
-        area.storage_path = os.path.join('/var/lib/anetbbs/file_areas',
+        try:
+            from flask import current_app
+            data_dir = current_app.config.get('DATA_DIR') or 'data'
+        except RuntimeError:
+            data_dir = 'data'
+        area.storage_path = os.path.join(data_dir, 'file_areas',
                                          area.tag.replace('/', '_'))
     try:
         os.makedirs(area.storage_path, exist_ok=True)
