@@ -172,6 +172,21 @@ def compose(reply_to=None):
     if parent and not _user_owns(parent):
         abort(403)
 
+    # A reply to netmail that itself arrived with no EchomailNetwork match
+    # (an anonymous/unrecognized-peer BinkP session -- see binkp_server.py's
+    # nodelist crashmail-compliance fix) can't be routed the normal way:
+    # there's no hub_address to send it through, because there's no hub in
+    # this relationship at all -- the sender crash-delivered straight to
+    # us. The correct, symmetric reply is to crash-deliver straight back,
+    # dialing the sender's own real IP (captured at receive time) directly
+    # instead of requiring the sysop to be a formal member of their zone's
+    # network. `origin_ip` is a server-set column, never user input, so
+    # this can't be used to make the server dial an arbitrary attacker-
+    # chosen host -- see NetmailMessage.origin_ip's own model docstring.
+    is_direct_crash_reply = bool(
+        parent and parent.direction == 'inbound'
+        and parent.network_id is None and parent.origin_ip)
+
     networks = EchomailNetwork.query.filter_by(is_active=True).all()
     user_akas = UserAka.query.filter_by(user_id=current_user.id).all()
 
@@ -185,6 +200,16 @@ def compose(reply_to=None):
         is_private = bool(request.form.get('is_private'))
         save_as_draft = bool(request.form.get('save_draft'))
 
+        # For a direct crash-reply, the destination is fixed to who
+        # actually delivered the original message -- never trust the
+        # posted to_address/to_name for this case (the compose template
+        # renders them readonly, but the real boundary is here: only
+        # parent.from_address/from_name, read from the DB, ever reach
+        # the delivery-target fields below).
+        if is_direct_crash_reply:
+            to_address = parent.from_address or ''
+            to_name = parent.from_name or ''
+
         if not parse_address(to_address):
             flash(f'Invalid FTN address: {to_address!r}', 'danger')
             from ..models import get_active_taglines
@@ -192,6 +217,7 @@ def compose(reply_to=None):
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
                                    form=request.form,
+                                   is_direct_crash_reply=is_direct_crash_reply,
                                    taglines=get_active_taglines())
         if not to_name:
             flash('Recipient name is required.', 'danger')
@@ -200,22 +226,56 @@ def compose(reply_to=None):
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
                                    form=request.form,
+                                   is_direct_crash_reply=is_direct_crash_reply,
                                    taglines=get_active_taglines())
 
-        # Pick the network that matches the destination zone
-        network = find_network_for_address(to_address)
-        if network is None:
-            flash(f'No active FTN network covers zone of {to_address}.', 'danger')
-            from ..models import get_active_taglines
-            return render_template('netmail/compose.html',
-                                   networks=networks, user_akas=user_akas,
-                                   parent=parent,
-                                   form=request.form,
-                                   taglines=get_active_taglines())
+        if is_direct_crash_reply:
+            network = None
+        elif parent and parent.network_id:
+            # Reply via the SAME network the original arrived on, not a
+            # fresh zone-based lookup. Real gap found live: a netmail
+            # can legitimately cross zones via ordinary FTN store-and-
+            # forward routing through a hub with a zone gate -- the
+            # network that just delivered it already proved it can
+            # carry traffic for that zone, so find_network_for_address()'s
+            # "our_address zone must match the destination zone" test
+            # (correct for picking a network to compose a FRESH message
+            # through, with no prior routing evidence either way) was
+            # the wrong test for a reply and blocked one that had
+            # already-proven working delivery moments earlier.
+            network = EchomailNetwork.query.filter_by(
+                id=parent.network_id, is_active=True).first()
+            if network is None:
+                flash('The network this netmail arrived on is no longer '
+                     'active.', 'danger')
+                from ..models import get_active_taglines
+                return render_template('netmail/compose.html',
+                                       networks=networks, user_akas=user_akas,
+                                       parent=parent,
+                                       form=request.form,
+                                       is_direct_crash_reply=is_direct_crash_reply,
+                                       taglines=get_active_taglines())
+        else:
+            # Pick the network that matches the destination zone
+            network = find_network_for_address(to_address)
+            if network is None:
+                flash(f'No active FTN network covers zone of {to_address}.', 'danger')
+                from ..models import get_active_taglines
+                return render_template('netmail/compose.html',
+                                       networks=networks, user_akas=user_akas,
+                                       parent=parent,
+                                       form=request.form,
+                                       is_direct_crash_reply=is_direct_crash_reply,
+                                       taglines=get_active_taglines())
 
         from ..features.access_control import resolve_post_name
+        # No EchomailNetwork exists for a direct crash-reply, so there's
+        # no require_real_name_netmail policy to enforce -- matches how
+        # every other network-scoped policy in this codebase defaults to
+        # permissive when unset/not applicable.
         post_name, name_error = resolve_post_name(
-            current_user, network.require_real_name_netmail)
+            current_user,
+            network.require_real_name_netmail if network else False)
         if name_error:
             flash(name_error, 'danger')
             from ..models import get_active_taglines
@@ -223,15 +283,20 @@ def compose(reply_to=None):
                                    networks=networks, user_akas=user_akas,
                                    parent=parent,
                                    form=request.form,
+                                   is_direct_crash_reply=is_direct_crash_reply,
                                    taglines=get_active_taglines())
 
         # Pick the FROM address: explicit AKA, network-matched AKA, or
-        # network's `our_address`.
+        # network's `our_address` -- for a direct crash-reply (no
+        # network), fall back to the AKA the original was addressed to,
+        # so the reply comes from the same identity that received it.
         if from_aka:
             from_address = from_aka
-        else:
+        elif network:
             aka = find_aka_for_network(current_user, network)
             from_address = aka.address if aka else network.our_address
+        else:
+            from_address = parent.to_address or ''
 
         # Append the user's tagline + FTN trailer to the body. Tagline appears
         # as the line right above the tear "---" so downstream readers see it
@@ -297,7 +362,7 @@ def compose(reply_to=None):
                 kludges.append(f'REPLY: {reply_msgid}')
 
         m = NetmailMessage(
-            network_id=network.id,
+            network_id=(network.id if network else None),
             from_user_id=current_user.id,
             from_address=from_address,
             to_address=to_address,
@@ -310,16 +375,44 @@ def compose(reply_to=None):
             reply_msgid=reply_msgid,
             chrs=chrs,
             is_private=is_private,
-            is_crash=is_crash,
+            # A direct crash-reply genuinely IS crash-delivered (no hub
+            # store-and-forward involved at all), regardless of whether
+            # the sysop happened to also tick the checkbox.
+            is_crash=(is_crash or is_direct_crash_reply),
             is_local=True,
             direction='outbound',
             status='draft' if save_as_draft else 'queued',
+            origin_ip=(parent.origin_ip if is_direct_crash_reply else None),
         )
         db.session.add(m)
         db.session.commit()
         if save_as_draft:
             flash('Saved as draft.', 'info')
             return redirect(url_for('netmail.drafts'))
+
+        if is_direct_crash_reply:
+            # Crash mail means immediate delivery attempt, not waiting
+            # for a scheduled poll -- and there IS no scheduled poll for
+            # an ad-hoc unlisted address anyway (no EchomailNetwork row
+            # to attach a schedule to). Same established pattern as the
+            # admin "Poll Now" button (echomail_admin.py's poll_now()):
+            # background thread, request returns immediately.
+            import threading
+            from flask import current_app
+            from ..echomail.poller import send_netmail_direct_now
+            _app = current_app._get_current_object()
+            _msg_id = m.id
+
+            def _run():
+                try:
+                    send_netmail_direct_now(_app, _msg_id)
+                except Exception as exc:
+                    _app.logger.error('Direct crash-send thread error: %s', exc)
+
+            threading.Thread(target=_run, daemon=True).start()
+            flash(f'Crash-dialing {to_address} directly to deliver this reply '
+                 f'— check the message for delivery status shortly.', 'info')
+            return redirect(url_for('netmail.read', msg_id=m.id))
         flash('Netmail queued for next outbound poll.', 'success')
         return redirect(url_for('netmail.read', msg_id=m.id))
 
@@ -363,6 +456,7 @@ def compose(reply_to=None):
     return render_template('netmail/compose.html',
                            networks=networks, user_akas=user_akas,
                            parent=parent, form=initial,
+                           is_direct_crash_reply=is_direct_crash_reply,
                            taglines=get_active_taglines())
 
 

@@ -758,12 +758,28 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         '%s instead of that identity\'s own AKA',
                         peer, remote_addr, identity.name, our_address)
             else:
-                logger.warning('BinkP %s: unknown remote address %s (tried: %s)',
-                               peer, remote_addr, ', '.join(candidates))
-                await _send_cmd(writer, CMD_ERR, f'unknown address {remote_addr}', transcript=transcript)
-                writer.close()
-                _dispose_app_engine()
-                return
+                # Unrecognized peer -- not a configured upstream hub or
+                # downstream node. Standard FTN nodelist policy requires an
+                # unflagged (non-Hold, non-Pvt) listed node to accept
+                # CRASH-delivered netmail from ANY address, not just
+                # pre-registered peers -- real report from a net's nodelist
+                # coordinator (peer address 2:280/464, 2026-07-31):
+                # rejecting every unlisted caller here made this node
+                # non-compliant ("Try result: unknown address ...").
+                # Accept the session as anonymous crashmail: net_id and
+                # downstream_node_id both stay None, so the import step
+                # below only stores NETMAIL (point-to-point, addressed to
+                # a real local user/robot) and silently drops any echomail
+                # content -- echo distribution still requires real network
+                # membership, this is only about netmail deliverability.
+                # No password check: an unlisted/uncoordinated peer has no
+                # shared secret with us to verify in the first place, same
+                # as real binkd/ifcico's handling of unlisted callers.
+                logger.info('BinkP %s: unrecognized address %s (tried: %s) -- '
+                           'accepting as anonymous crashmail session '
+                           '(netmail only, no echomail)',
+                           peer, remote_addr, ', '.join(candidates))
+                net_name = f'unknown ({remote_addr})' if remote_addr else 'unknown'
 
     logger.info('BinkP %s: authenticated as %s (%s)', peer, remote_addr, net_name)
 
@@ -1059,17 +1075,21 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         _debug_manifest(fname, payload)
                         extracted = list(_extract_packets(fname, payload))
                         if extracted:
-                            if net_id is None:
-                                # No EchomailNetwork row to attach these
-                                # messages to (e.g. a hub identity with
-                                # only zone:net configured, no actual
-                                # BinkP network row yet) -- _import_pkt_
-                                # payload() would otherwise hit EchoArea/
-                                # EchomailMessage's NOT-NULL network_id
-                                # constraint and lose the whole packet to
-                                # a silently-swallowed exception with zero
-                                # sysop-visible trace. Loud and skipped is
-                                # strictly better than quiet and lost.
+                            if net_id is None and downstream_node_id is not None:
+                                # A known downstream node, but its hub
+                                # identity has no resolvable EchomailNetwork
+                                # row (e.g. only zone:net configured, no
+                                # actual BinkP network row yet) --
+                                # _import_pkt_payload() would otherwise hit
+                                # EchoArea/EchomailMessage's NOT-NULL
+                                # network_id constraint and lose the whole
+                                # packet to a silently-swallowed exception
+                                # with zero sysop-visible trace. Loud and
+                                # skipped is strictly better than quiet and
+                                # lost. NOT the same as the anonymous-
+                                # crashmail case below (net_id AND
+                                # downstream_node_id both None) -- that one
+                                # is expected and handled, not an error.
                                 logger.error(
                                     'BinkP %s: received %d packet(s) in %s '
                                     'but no EchomailNetwork is resolved for '
@@ -1078,11 +1098,27 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                     'this hub identity.',
                                     peer, len(extracted), fname)
                                 continue
+                            # net_id is None here also covers the anonymous/
+                            # unrecognized-peer crashmail case (see the
+                            # caller-lookup site's own comment) --
+                            # _import_pkt_payload() accepts network_id=None
+                            # and imports netmail only, skipping any
+                            # echomail content in the packet.
+                            # Only worth capturing the real socket IP for
+                            # the genuinely anonymous case (net_id AND
+                            # downstream_node_id both None) -- a known
+                            # upstream hub/downstream node already has a
+                            # real hub_address/ftn_address to route a
+                            # reply through, so there's nothing for a
+                            # direct-dial reply to add there.
+                            _origin_ip = (peer[0] if peer and net_id is None
+                                         and downstream_node_id is None else None)
                             for inner_name, inner_payload in extracted:
                                 _debug_dump_packet(inner_name, inner_payload)
                                 imported_total += _import_pkt_payload(
                                     inner_payload, net_id, inner_name,
-                                    peer_address=remote_addr)
+                                    peer_address=remote_addr,
+                                    origin_ip=_origin_ip)
                         else:
                             # Non-packet files (TIC manifests, hatched binaries, etc.)
                             # get written to inbound for later processing.
@@ -1555,7 +1591,7 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
 
 
 def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
-                        peer_address: str = None) -> int:
+                        peer_address: str = None, origin_ip: str = None) -> int:
     """Parse an FTS-0001 .pkt and import each message as inbound. Returns count.
 
     Routes by AREA: kludge:
@@ -1564,11 +1600,25 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     Triggers the areafix bot if a netmail's to_name matches 'areafix' (any
     case), or the filefix bot for 'filefix' (any case).
 
+    `network_id` may be None -- an anonymous/unrecognized peer, accepted
+    per FTN nodelist crashmail policy (see binkp_server.py's caller-lookup
+    site). Only netmail is imported in that case; any echomail in the same
+    packet is logged and dropped, since echo distribution still requires
+    real network membership (NetmailMessage.network_id is nullable,
+    EchomailMessage/EchoArea's is not).
+
     `peer_address` is the connecting session's own claimed FTN address
     (this function's caller's `remote_addr`) -- passed through to the
     post-import toss_message() calls as an extra loop-prevention
     fallback on top of SEEN-BY. See tosser.py's toss_message() for why
     this can't just reuse the message's own from_address field.
+
+    `origin_ip` is the connecting session's real socket IP (this
+    function's caller's `peer[0]`) -- stored on any netmail imported
+    with network_id=None so a reply can dial the sender back directly
+    (see poller.py's send_direct_netmail_now()). Ignored for echomail
+    and for any session that DOES have a resolvable network_id, since
+    those already have a real hub/node to route a reply through.
     """
     import json
     from ..models import (db, EchomailMessage, EchoArea, NetmailMessage,
@@ -1577,7 +1627,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     from .routing import resolve_netmail_recipient
     from .poller import _record_bad_area
 
-    network = EchomailNetwork.query.get(network_id)
+    network = EchomailNetwork.query.get(network_id) if network_id is not None else None
 
     messages = _parse_ftn_packet(pkt_bytes)
     imported = 0
@@ -1593,6 +1643,16 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
         chrs = find_kludge(kludges, 'CHRS') or 'CP437 2'
 
         if m['area_tag']:
+            if network_id is None:
+                # Anonymous/unrecognized peer -- echomail requires real
+                # network membership (subscription), which an unlisted
+                # crashmail-only caller doesn't have. Only netmail gets
+                # accepted from this session; see this function's docstring.
+                logger.warning(
+                    'BinkP: dropping echomail (area %r) from unrecognized '
+                    'peer %s -- only netmail is accepted from unlisted/'
+                    'anonymous callers', m['area_tag'], peer_address)
+                continue
             # ECHOMAIL — route to area
             area = EchoArea.query.filter_by(
                 network_id=network_id, tag=m['area_tag']).first()
@@ -1772,6 +1832,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
                 status='received',
                 created_at=datetime.utcnow(),
                 received_at=datetime.utcnow(),
+                origin_ip=(origin_ip if network_id is None else None),
             )
             db.session.add(nm)
             db.session.flush()
@@ -1782,8 +1843,8 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
         imported += 1
 
     db.session.commit()
-    logger.info('Imported %d messages from %s into network %d',
-                imported, filename, network_id)
+    logger.info('Imported %d messages from %s into network %s',
+                imported, filename, network_id if network_id is not None else 'none (anonymous crashmail)')
 
     # Hub tosser — fan out each newly imported echomail to downstream nodes.
     # After commit the ORM objects have their .id populated.

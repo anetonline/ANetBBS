@@ -12,22 +12,39 @@
 <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+    {% if is_direct_crash_reply %}
+    <div class="alert alert-info">
+        <i class="bi bi-lightning-charge"></i>
+        This netmail arrived by direct crash delivery from an address not
+        covered by any network you're configured for — there's no hub to
+        route a reply through. Sending this will dial
+        <strong>{{ parent.origin_ip }}</strong> directly to deliver it,
+        the same way it reached you.
+    </div>
+    {% endif %}
+
     <div class="row g-2 mb-3">
         <div class="col-md-6">
             <label class="form-label">To Address (FTN)</label>
             <input type="text" name="to_address" class="form-control"
                    value="{{ form.to_address or '' }}"
                    placeholder="zone:net/node[.point]"
-                   pattern="^\d+:\d+/\d+(\.\d+)?$" required>
+                   pattern="^\d+:\d+/\d+(\.\d+)?$"
+                   {% if is_direct_crash_reply %}readonly{% endif %} required>
             <div class="form-text">
+                {% if is_direct_crash_reply %}
+                Fixed to the sender's own address for a direct crash reply.
+                {% else %}
                 Need to look up an address?
                 <a href="{{ url_for('nodelist.browse') }}" target="_blank">Search the nodelist</a>.
+                {% endif %}
             </div>
         </div>
         <div class="col-md-6">
             <label class="form-label">To Name</label>
             <input type="text" name="to_name" class="form-control"
-                   value="{{ form.to_name or '' }}" required>
+                   value="{{ form.to_name or '' }}"
+                   {% if is_direct_crash_reply %}readonly{% endif %} required>
         </div>
     </div>
 
@@ -50,7 +67,8 @@
         <div class="col-md-6 d-flex align-items-end">
             <div class="form-check me-3">
                 <input class="form-check-input" type="checkbox" name="is_crash" id="cb_crash"
-                    {% if form.is_crash %}checked{% endif %}>
+                    {% if form.is_crash or is_direct_crash_reply %}checked{% endif %}
+                    {% if is_direct_crash_reply %}disabled{% endif %}>
                 <label class="form-check-label" for="cb_crash">
                     Crashmail (direct to recipient)
                 </label>

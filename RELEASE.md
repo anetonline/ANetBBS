@@ -1,3 +1,21 @@
+# ANetBBS v1.0.4 — Reply to crash-delivered netmail with no configured network (August 2026)
+
+Follow-up to v1.0.3's crashmail-compliance fix: a sysop who received netmail from an address covered by no configured EchomailNetwork (exactly what v1.0.3 now accepts) tried to reply and hit "No active FTN network covers zone" — there was no hub to route a reply through, because there's no hub in this relationship at all. The sender crash-delivered straight in; the only correct reply is to crash-deliver straight back.
+
+Fixed with two pieces. First, `NetmailMessage` gained an `origin_ip` column: the inbound BinkP listener now records the real socket IP of any anonymous/unrecognized peer at the moment they deliver netmail (network_id stays `None`, same as before — only netmail gets this treatment, echomail from an unlisted peer is still dropped). Second, replying to that netmail in the web UI detects this exact case and skips the network-matching gate entirely, instead dialing the sender's own real IP directly on the standard BinkP port (24554) via a new `send_netmail_direct_now()` — no shared password (there's none to have with an unlisted peer), immediate delivery attempt in a background thread rather than waiting on a poll schedule that doesn't exist for this address. The destination is always read from the parent message's own DB-stored `origin_ip`, never from posted form fields, so a tampered "To" address in the request can't redirect where the reply actually gets dialed. 13 new tests, plus 5 existing test files fixed after this change's new `_import_pkt_payload()` keyword argument broke their mocked signatures.
+
+A second, related bug turned up testing the first: replying to netmail that arrived through a real, already-configured network — not a crash delivery at all, just an ordinary cross-zone netmail a hub relayed in — hit the exact same "No active FTN network covers zone" error, even though that network had *just* proven it could carry traffic for that zone. The compose route was re-deriving a network purely from the destination's zone, ignoring which network actually delivered the message being replied to. Fixed: replying to any netmail now routes back through the same network it arrived on, when known, instead of a fresh zone lookup — the zone-matching gate now only applies to composing a brand-new message with no prior routing evidence. 3 more new tests.
+
+---
+
+# ANetBBS v1.0.3 — BinkP crashmail compliance: accept netmail from unlisted addresses (August 2026)
+
+Real report, forwarded by a sysop from a net's nodelist coordinator: standard FTN nodelist policy requires a listed node (not flagged `Hold` or `Pvt`) to accept crashmail from *any* address, not just addresses it already has configured as an upstream hub or downstream node. ANetBBS's BinkP listener (`anetbbs/echomail/binkp_server.py`) rejected every session from an unrecognized address with `M_ERR unknown address`, making a correctly-configured, fully-published node non-compliant — exactly the failure the coordinator's own test connection hit.
+
+Fixed by accepting the session instead of rejecting it: an unrecognized caller no longer gets disconnected, and any netmail it delivers is imported and, if addressed to a real local user, linked and notified same as any other netmail. This is scoped narrowly to crashmail policy, not a general opening of the BinkP listener — echomail from an unrecognized peer is still dropped (echo distribution requires real network membership/subscription, which an unlisted caller doesn't have), and AreaFix/FileFix commands from an unrecognized peer still fail closed with "Network not configured" rather than applying any subscription change (that safeguard already existed from an earlier audit and needed no changes). 3 new tests covering the import-level netmail/echomail split and the AreaFix fail-closed behavior, plus 1 existing session-level test updated to assert the new accept-not-reject outcome.
+
+---
+
 # ANetBBS v1.0.2 — Real bug: a URL inside dense ANSI art corrupted the message layout (August 2026)
 
 Found live: a sysop composed a CP437 ad screen (bordered box, shading bar, a centered `https://` URL inside one row) and posting it corrupted the box border and everything at and after that row — the row's intended color turned into default-gray blanks with wrong spacing.

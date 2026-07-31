@@ -1007,6 +1007,19 @@ class NetmailMessage(db.Model):
     is_hold = db.Column(db.Boolean, default=False)
     is_immediate = db.Column(db.Boolean, default=False)
 
+    # Real IP of the peer that crash-delivered this netmail directly to
+    # us over BinkP with no configured EchomailNetwork/BinkPNode match
+    # (network_id is None in that case -- see binkp_server.py's
+    # anonymous-crashmail-accept fix). For an OUTBOUND reply built via
+    # the "direct crash reply" compose path, this instead holds the IP
+    # to dial to deliver it -- copied verbatim from the parent inbound
+    # message's own origin_ip at compose time, never taken from request
+    # form input (that would let a user direct-dial an arbitrary host).
+    # Only meaningful when network_id is None; NULL otherwise. There is
+    # no local nodelist INA/port lookup, so a reply always dials the
+    # standard BinkP port (24554), never a custom one.
+    origin_ip = db.Column(db.String(64))
+
     # Lifecycle
     direction = db.Column(db.String(10), default='outbound')   # 'inbound'/'outbound'
     status = db.Column(db.String(20), default='draft')

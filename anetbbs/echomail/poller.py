@@ -155,6 +155,92 @@ def poll_node_now(app, node_id: int):
             _do_poll_node(app, node)
 
 
+def send_netmail_direct_now(app, netmail_id: int):
+    """Attempt immediate direct-dial delivery of a single queued outbound
+    netmail that has no EchomailNetwork to route through (network_id is
+    None) -- a "crash reply" to netmail that itself arrived via an
+    anonymous/unrecognized-peer BinkP session (see binkp_server.py's
+    nodelist crashmail-compliance fix, and NetmailMessage.origin_ip's own
+    docstring). There is no hub in this relationship -- the sender
+    crash-delivered straight to us, so we crash-deliver straight back,
+    dialing nm.origin_ip on the standard BinkP port (24554; there's no
+    local nodelist INA/IBN entry to learn a custom one from) instead of
+    going through the normal per-network hub_address queue this poller
+    otherwise always uses.
+
+    Runs synchronously in the calling thread -- callers (the netmail
+    compose route) are expected to run this in a background thread, the
+    same established pattern as echomail_admin.py's manual "Poll Now"
+    button (poll_network_now above).
+    """
+    from ..models import db, NetmailMessage
+    from .binkp import BinkPClient
+    with app.app_context():
+        nm = NetmailMessage.query.get(netmail_id)
+        if nm is None:
+            return
+        if not (nm.network_id is None and nm.direction == 'outbound'
+                and nm.status == 'queued' and nm.origin_ip):
+            logger.warning(
+                'send_netmail_direct_now: netmail %s not eligible for '
+                'direct-dial delivery (network_id=%s direction=%s '
+                'status=%s origin_ip=%s)',
+                netmail_id, nm.network_id, nm.direction, nm.status,
+                nm.origin_ip)
+            return
+
+        transcript_lines = []
+        try:
+            client = BinkPClient(
+                host=nm.origin_ip,
+                port=24554,
+                our_address=nm.from_address or '1:1/1',
+                hub_address=nm.to_address or '1:1/0',
+                # No shared secret exists with an unlisted peer we've
+                # never configured -- matches the inbound side's own
+                # no-password-check for an anonymous crashmail session.
+                password='',
+                transcript=transcript_lines,
+                default_crash=True,
+            )
+            data_dir = app.config.get('ECHOMAIL_DATA_DIR', 'data')
+            result = client.poll(outbound_messages=[_NetmailAdapter(nm)],
+                                 data_dir=data_dir)
+            if result.get('sent', 0):
+                nm.status = 'sent'
+                nm.is_sent = True
+                nm.sent_at = datetime.utcnow()
+                logger.info('Direct crash-send: netmail %d delivered to %s',
+                           netmail_id, nm.origin_ip)
+            else:
+                nm.error_message = f'Not acknowledged by {nm.origin_ip}:24554'
+                logger.warning(
+                    'Direct crash-send: netmail %d NOT acknowledged by '
+                    '%s -- left queued, no scheduled retry exists for a '
+                    'direct-dial reply (no network to attach a retry to)',
+                    netmail_id, nm.origin_ip)
+            # Anything the peer pushes back during this same ad-hoc dial
+            # is intentionally NOT imported here (importing needs a real
+            # `network` row for echomail area routing, same constraint
+            # binkp_server.py's own anonymous-peer import path works
+            # around by being the INBOUND listener, not an outbound
+            # dial). If they have mail for us, their own crash-dial IN
+            # will deliver it through the already-fixed inbound path.
+            if result.get('received'):
+                logger.warning(
+                    'Direct crash-send: %s pushed %d message(s) back '
+                    'during this dial -- not imported (no route for an '
+                    'ad-hoc outbound dial to attach them to); they '
+                    'should crash-dial in separately to deliver those',
+                    nm.origin_ip, len(result['received']))
+        except Exception as exc:
+            nm.error_message = f'{type(exc).__name__}: {exc}'
+            logger.exception('Direct crash-send failed for netmail %d: %s',
+                             netmail_id, exc)
+        finally:
+            db.session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------

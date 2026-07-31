@@ -207,7 +207,7 @@ class DownstreamNodeImportNetworkIdTests(unittest.TestCase):
 
         captured = {'import_calls': []}
 
-        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename, peer_address=None):
+        def _tracking_import_pkt_payload(pkt_bytes, network_id, filename, peer_address=None, origin_ip=None):
             captured['import_calls'].append(network_id)
             return 3  # nonzero -- lets the poll-log messages_received assertion be meaningful
 

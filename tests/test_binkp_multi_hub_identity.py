@@ -346,13 +346,23 @@ class DownstreamNodeAuthCharacterizationTests(unittest.TestCase, _BinkpHandlerHa
         self.assertIn(CMD_OK, [c for c, _ in commands])
         self.assertNotIn(CMD_ERR, [c for c, _ in commands])
 
-    def test_unknown_address_gets_err_not_ok(self):
+    def test_unknown_address_now_accepted_as_anonymous_crashmail(self):
+        """v1.0.3: an address matching no configured upstream network or
+        downstream node used to get M_ERR + connection close outright.
+        Real FTN nodelist policy requires a listed node (not flagged Hold
+        or Pvt) to accept crashmail from ANY address, not just
+        pre-registered peers -- a real report from a net's nodelist
+        coordinator (peer address 2:280/464) flagged ANetBBS as
+        non-compliant for rejecting every unlisted caller. Now accepted
+        as an anonymous session: M_OK, no M_ERR -- echomail from this
+        session still gets dropped (see _import_pkt_payload's own
+        network_id=None handling), only netmail is delivered."""
         from anetbbs.echomail.binkp_server import CMD_OK, CMD_ERR
         writer, _ = self._run(networks=[], nodes=[],
                               remote_addr='9:999/999', remote_pwd='whatever')
         commands = _decode_sent_commands(writer.sent)
-        self.assertIn(CMD_ERR, [c for c, _ in commands])
-        self.assertNotIn(CMD_OK, [c for c, _ in commands])
+        self.assertIn(CMD_OK, [c for c, _ in commands])
+        self.assertNotIn(CMD_ERR, [c for c, _ in commands])
 
     def test_known_address_wrong_password_gets_err(self):
         from anetbbs.echomail.binkp_server import CMD_OK, CMD_ERR
