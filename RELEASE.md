@@ -1,3 +1,7 @@
+# ANetBBS v1.0.6 — Pre-release docs sweep: stale install-command versions (August 2026)
+
+A final documentation pass ahead of the public release announcement turned up install/update instructions in four files still hardcoded to `v1.0.0` — five patch releases stale. The most serious: the Pi update guide's `wget` command pointed at a GitHub "latest release" URL for an asset literally named `ANetBBS-v1.0.0.tar.gz`, which no longer exists in the latest release and would 404 for anyone following it today. Fixed in `README.md`, `docs/01-installing.md`, `docs/INSTALL-PI.md`, and `docs/preinstall-tutorial.html`. Everything else checked clean in the same pass — the built-in wiki, banner art, web templates, and welcome/goodbye screens all already reference the version dynamically or contain no version string at all; other "as of vX.Y" mentions elsewhere in the docs are legitimate historical notes about when a feature shipped, not stale current-version claims. Docs-only change, no code touched.
+
 # ANetBBS v1.0.5 — MRC protocol audit: message-length and color bugs (August 2026)
 
 A sysop-requested audit of ANetBBS's MRC chat implementation (terminal client, web client, and the standalone bridge) against the published MRC protocol documentation, prompted by two real reports: room-chat messages losing their color partway through, and not being able to type/send anywhere close to the documented 140-character limit.

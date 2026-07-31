@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.5`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.6`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.6 — Pre-release docs sweep: stale install-command versions (August 2026)
+
+A final documentation pass ahead of the public release announcement, checking for exactly the kind of drift a fast string of patch releases (v1.0.1 through v1.0.5, all in the same week) tends to leave behind: install/update instructions still quoting an old tarball filename.
+
+Found and fixed in four files: `README.md`'s two "Quick install" blocks, `docs/01-installing.md`'s Fresh Install section, `docs/INSTALL-PI.md`'s install and update sections, and `docs/preinstall-tutorial.html`'s walkthrough — all still hardcoded `ANetBBS-v1.0.0.tar.gz`/`cd ANetBBS-v1.0.0`, five patch releases stale. The most consequential of the four: `docs/INSTALL-PI.md`'s "Updating ANetBBS on Pi" section built its `wget` URL from `github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.0.tar.gz` — GitHub's "latest" release alias resolves to whatever the current release actually is, but the literal asset filename in that URL has to match an asset that exists in it. With the latest release now shipping `ANetBBS-v1.0.5.tar.gz`, that link would 404 for any Pi user following the doc verbatim, right as the public announcement was about to send more people to it than usual.
+
+Swept everything else that could plausibly carry a stale version claim in the same pass and found it already clean: the in-BBS wiki (`anetbbs/wiki/seed.py`) has no duplicated install instructions and no "current version" claims of its own; `banner.ans`/`banner.utf8.ans` and the welcome/goodbye ANSI screens contain no version text at all (or already use the existing `@VERSION@` template substitution); the main web templates already read the version dynamically rather than hardcoding it; and the various "as of v1.0b2.NNN" mentions scattered through the rest of the docs are legitimate historical notes about when a specific feature shipped, not claims about the current release — left alone on purpose.
+
+Docs-only change — no application code, tests, or behavior touched, so no new tests and no full-suite rerun for this one.
 
 ## v1.0.5 — MRC protocol audit: message-length and color bugs (August 2026)
 
