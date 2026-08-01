@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.7`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.8`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.8 — Poll log dedup guard could block a network's polls forever (August 2026)
+
+Found live, right after the public release announcement: DOVE-Net (a QWK network) had simply stopped appearing in echomail poll activity, with no error anywhere — just silence for over a day.
+
+Root cause: `_do_poll()`'s concurrent-poll dedup guard (`anetbbs/echomail/poller.py`, added in an earlier audit to stop a sysop's manual "Poll Now" from racing the scheduled poller's own tick for the same network) treats any `EchomailPollLog` row still at `status='running'` as proof a poll is genuinely in progress, and skips starting a new one. That's correct for a poll that's actually still running — but a poll interrupted mid-flight (a service restart landing while a session was still open, which is exactly what happens during any `update.sh` run) leaves its row stuck at `'running'` forever, since no exit path ever gets a chance to run and flip it. Every subsequent poll attempt for that network then silently self-skips, permanently, with nothing logged anywhere a sysop would think to look — confirmed live: DOVE-Net's last poll log row was `status='running'`, `started_at` over a day in the past, and nothing after it at all.
+
+Fixed: a `'running'` row older than 30 minutes (`_STALE_RUNNING_POLL_MINUTES`) is now treated as abandoned rather than as a lock — it's flipped to `'error'` with a note explaining why, and the new poll proceeds normally instead of skipping forever. A genuinely recent `'running'` row still blocks a second concurrent attempt exactly as before. 2 new tests (stale-row recovery, and a sanity check that a fresh row still blocks normally) alongside the 3 existing dedup-guard tests, all passing.
+
+This is the kind of bug an automated update can trigger on any network, not just QWK — any BinkP network poll interrupted by a service restart mid-session would hit the same silent-forever-skip. Sysops on `v1.0.6`/`v1.0.7` whose polling has quietly gone silent for a network should check Admin → Echomail → Poll Log for an old `'running'` row for that network; the fix here is automatic once updated, no manual DB edit needed.
 
 ## v1.0.7 — MRC bridge reconnect storm against a live hub (August 2026)
 

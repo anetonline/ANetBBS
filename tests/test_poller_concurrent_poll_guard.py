@@ -15,6 +15,7 @@ network before starting a second one.
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -141,6 +142,95 @@ class PollerConcurrentPollGuardTests(unittest.TestCase):
                 poller._do_poll(self.app, net)
 
             self.assertEqual(called['n'], 1)
+
+    def test_stale_running_row_is_auto_recovered_not_skipped_forever(self):
+        """Real bug found live: a poll interrupted mid-flight (e.g. a
+        service restart) leaves its row stuck at status='running'
+        forever -- confirmed live, DOVE-Net's poll history just went
+        silent for over a day with a single old 'running' row and
+        nothing after it, since the dedup guard treated that stale row
+        as a genuine in-progress poll and skipped every attempt since.
+        A 'running' row old enough to be implausible must be treated as
+        abandoned, not as a permanent lock."""
+        from anetbbs.models import db, EchomailNetwork, EchomailPollLog
+        from anetbbs.echomail import poller
+
+        with self.app.app_context():
+            net = EchomailNetwork(
+                name='ConcurrentGuardStaleNet', network_type='qwk',
+                qwk_host='example.test', qwk_port=80,
+                is_active=True, poll_interval_minutes=30)
+            db.session.add(net)
+            db.session.commit()
+
+            stale_started = datetime.utcnow() - timedelta(
+                minutes=poller._STALE_RUNNING_POLL_MINUTES + 5)
+            stale_row = EchomailPollLog(
+                network_id=net.id, poll_type='both', status='running',
+                started_at=stale_started)
+            db.session.add(stale_row)
+            db.session.commit()
+            stale_row_id = stale_row.id
+
+            called = {'n': 0}
+
+            def _fake_run_client(*a, **kw):
+                called['n'] += 1
+                return {'received': [], 'sent': 0}
+
+            with patch.object(poller, '_run_client', _fake_run_client):
+                poller._do_poll(self.app, net)
+
+            self.assertEqual(
+                called['n'], 1,
+                'a poll blocked only by a long-stale "running" row must '
+                'still proceed instead of being skipped forever')
+
+            recovered = EchomailPollLog.query.get(stale_row_id)
+            self.assertEqual(
+                recovered.status, 'error',
+                'the abandoned stale row must be flipped out of '
+                '"running" so it stops masquerading as in-progress')
+
+            new_row = (EchomailPollLog.query
+                       .filter_by(network_id=net.id)
+                       .filter(EchomailPollLog.id != stale_row_id)
+                       .first())
+            self.assertIsNotNone(new_row, 'a new poll row must have been created')
+            self.assertEqual(new_row.status, 'success')
+
+    def test_recently_running_row_still_blocks_normally(self):
+        """Sanity check the staleness fix doesn't weaken the original
+        guard -- a row that's genuinely only seconds old must still
+        block a second concurrent attempt."""
+        from anetbbs.models import db, EchomailNetwork, EchomailPollLog
+        from anetbbs.echomail import poller
+
+        with self.app.app_context():
+            net = EchomailNetwork(
+                name='ConcurrentGuardFreshNet', network_type='binkp',
+                binkp_host='127.0.0.1', binkp_port=24554,
+                our_address='1:1/26', hub_address='1:1/27',
+                is_active=True, poll_interval_minutes=30)
+            db.session.add(net)
+            db.session.commit()
+            db.session.add(EchomailPollLog(
+                network_id=net.id, poll_type='both', status='running',
+                started_at=datetime.utcnow() - timedelta(minutes=1)))
+            db.session.commit()
+
+            called = {'n': 0}
+
+            def _fake_run_client(*a, **kw):
+                called['n'] += 1
+                return {'received': [], 'sent': 0}
+
+            with patch.object(poller, '_run_client', _fake_run_client):
+                poller._do_poll(self.app, net)
+
+            self.assertEqual(called['n'], 0)
+            self.assertEqual(
+                EchomailPollLog.query.filter_by(network_id=net.id).count(), 1)
 
 
 if __name__ == '__main__':

@@ -29,6 +29,19 @@ _TRANSCRIPT_MAX_CHARS = 100_000
 # subject/body sent days apart as duplicates.
 _CONTENT_DEDUP_WINDOW_HOURS = 48
 
+# Real bug found live: a poll interrupted mid-flight (e.g. a service
+# restart landing while a QWK/BinkP session was still open) leaves its
+# EchomailPollLog row stuck at status='running' forever -- no exit path
+# ever runs to flip it, since the process itself was killed out from
+# under it. _do_poll()'s own concurrent-poll dedup guard (below) then
+# treats that stale row as "a poll is already in progress" and silently
+# skips every subsequent attempt for that network, permanently, with no
+# further log entries at all -- confirmed live: DOVE-Net's poll history
+# just stopped for over a day with no error, only a single old 'running'
+# row and total silence after it. A 'running' row older than this is
+# treated as abandoned rather than as a genuine in-progress poll.
+_STALE_RUNNING_POLL_MINUTES = 30
+
 
 def _format_transcript(lines):
     """Join transcript lines into one string, truncated to a bounded
@@ -349,11 +362,29 @@ def _do_poll(app, network):
     already_running = EchomailPollLog.query.filter_by(
         network_id=network.id, status='running').first()
     if already_running:
-        logger.info(
-            "Poller: skipping %s -- a poll is already in progress "
-            "(EchomailPollLog #%d, started %s)",
-            network.name, already_running.id, already_running.started_at)
-        return
+        stale_cutoff = datetime.utcnow() - timedelta(
+            minutes=_STALE_RUNNING_POLL_MINUTES)
+        if already_running.started_at and already_running.started_at < stale_cutoff:
+            logger.warning(
+                "Poller: %s's EchomailPollLog #%d has been 'running' "
+                "since %s (>%d min) -- treating as abandoned (likely an "
+                "interrupted process) and proceeding with a new poll "
+                "instead of skipping forever.",
+                network.name, already_running.id, already_running.started_at,
+                _STALE_RUNNING_POLL_MINUTES)
+            already_running.status = 'error'
+            already_running.error_message = (
+                (already_running.error_message or '') +
+                f' [auto-recovered: stuck in "running" for over '
+                f'{_STALE_RUNNING_POLL_MINUTES} minutes, likely an '
+                f'interrupted process]').strip()
+            db.session.commit()
+        else:
+            logger.info(
+                "Poller: skipping %s -- a poll is already in progress "
+                "(EchomailPollLog #%d, started %s)",
+                network.name, already_running.id, already_running.started_at)
+            return
 
     log = EchomailPollLog(
         network_id=network.id,
