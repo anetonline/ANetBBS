@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.9`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.11`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.11 — Minesweeper InterBBS DOVE-Net score sharing (real MsgBase support) (August 2026)
+
+Synchronet's own official Minesweeper door (bundled in v1.0.9) has a real, built-in feature to share game wins across BBSes via Synchronet's `MsgBase` message-base API — previously unimplemented in the Node.js compat shim (any door calling `new MsgBase(...)` would `ReferenceError`). Now real:
+
+- New per-game admin setting, **"InterBBS Score-Sharing Area"** (Admin → Games → edit Minesweeper) — pick any real configured echo area, e.g. DOVE-Net's "Synchronet Data" conference (2013), to enable score sharing. Leave unset and the feature stays off, same as before.
+- A win posts a JSON-encoded report to that area, and other BBSes' win reports read back the same way and merge into the door's own winners list — real `MsgBase` `open`/`save_msg`/`get_index`/`get_msg_header`/`get_msg_body` calls, backed by a new Python bridge (`msgbase_bridge.py`) that reaches ANetBBS's actual echomail data (`EchoArea`/`EchomailMessage`), not a stub.
+- Uses the door's own documented `ctrl/modopts.ini` config path (`[minesweeper]` → `sub = <area-tag>`), auto-written before every launch — no changes needed to the door itself.
+
+## v1.0.10 — File Bulletins: configurable .txt/.ans bulletin viewer (August 2026)
+
+A new logon/logoff-style module for file-based bulletins — distinct from the existing DB-authored Bulletins feature. Drop `.txt`, `.asc`, or `.ans` files into `data/text/bulletins/` and they're auto-registered (inactive until enabled). Sysops manage them from Admin → Bulletins → Files: set a title, sort order, and minimum access level, and toggle visibility per file. Users browse a lightbar list and read through the same CP437/ANSI-aware ANView pipeline used elsewhere in the BBS — real file bytes, not DB text, so CP437/ANSI decoding is correct for genuine art bulletins (the kind door games often drop for scores/news). Wired into the LoginModule system as a new `file_bulletin` module type, attachable to logon/logoff sequences like any other module.
 
 ## v1.0.9 — Synchronet door game support (17 games tested) + MRC ping/latency display (August 2026)
 
