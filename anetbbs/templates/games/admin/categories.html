@@ -28,6 +28,7 @@
             <th>Name</th>
             <th>Slug</th>
             <th>Sort Order</th>
+            <th>Menu</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -37,6 +38,13 @@
             <td>{{ cat.name }}</td>
             <td><code>{{ cat.slug }}</code></td>
             <td>{{ cat.sort_order }}</td>
+            <td>
+                {% if cat.as_submenu %}
+                <span class="badge bg-primary">Submenu section</span>
+                {% else %}
+                <span style="color:#007700;">Inline</span>
+                {% endif %}
+            </td>
             <td>
                 <a href="{{ url_for('games_admin.edit_category', cat_id=cat.id) }}"
                    class="btn btn-sm btn-primary" title="Edit">
@@ -56,7 +64,7 @@
             </td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-center" style="color:#007700;">No categories yet.</td></tr>
+        <tr><td colspan="5" class="text-center" style="color:#007700;">No categories yet.</td></tr>
         {% endfor %}
     </tbody>
 </table>

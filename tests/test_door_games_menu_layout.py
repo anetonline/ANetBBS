@@ -17,6 +17,7 @@ from real SQLAlchemy query results.
 """
 import asyncio
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -170,6 +171,89 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         session = _FakeSession(['Q'])
         asyncio.run(GameManager(session).show_door_menu())
         self.assertIn('Return', session.transcript())
+
+    def test_default_categories_stay_inline_not_submenu(self):
+        """Backward-compat check: _create_default_data()'s seeded
+        categories never set as_submenu, so it must default to False --
+        an upgraded install with no admin action must render exactly
+        like before this feature existed (every game inline, no drill-
+        down)."""
+        from anetbbs.models import GameCategory
+        cats = GameCategory.query.all()
+        self.assertTrue(cats, 'no categories seeded')
+        for c in cats:
+            self.assertFalse(c.as_submenu, msg=f'{c.slug} unexpectedly as_submenu=True')
+
+    def test_as_submenu_category_collapses_to_one_line(self):
+        """Flip Strategy to as_submenu=True (a real seeded GameCategory
+        row with several active bundled doors) -- the top-level menu
+        must show exactly one selectable line for it, and none of its
+        individual game names should appear at the top level anymore
+        (they're one level down now)."""
+        from anetbbs.models import db, GameCategory, Game
+        strategy = GameCategory.query.filter_by(slug='strategy').first()
+        self.assertIsNotNone(strategy, 'expected a seeded "strategy" category')
+        strategy.as_submenu = True
+        db.session.commit()
+        strategy_games = (Game.query.filter_by(category='strategy', is_active=True)
+                          .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
+                          .all())
+        self.assertTrue(strategy_games, 'expected active games in the strategy category')
+
+        from anetbbs.features.games import GameManager
+        session = _FakeSession(['Q'])
+        asyncio.run(GameManager(session).show_door_menu())
+        txt = session.transcript()
+        self.assertIn('Strategy', txt)
+        self.assertIn(f'({len(strategy_games)} door', txt)
+        for g in strategy_games:
+            self.assertNotIn(g.name[:20], txt,
+                             msg=f'{g.name!r} should not appear at the top level once its '
+                                 f'category is as_submenu=True')
+
+    def test_picking_a_submenu_category_lists_only_its_own_games(self):
+        """Choosing the Strategy section line opens a second screen
+        listing only Strategy's games -- other categories' games must
+        NOT leak into that submenu."""
+        from anetbbs.models import db, GameCategory, Game
+        strategy = GameCategory.query.filter_by(slug='strategy').first()
+        strategy.as_submenu = True
+        db.session.commit()
+        strategy_games = (Game.query.filter_by(category='strategy', is_active=True)
+                          .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
+                          .all())
+        other_games = (Game.query.filter_by(is_active=True)
+                       .filter(Game.category != 'strategy')
+                       .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
+                       .all())
+        self.assertTrue(other_games, 'expected at least one non-strategy game seeded')
+
+        # Find the number the Strategy section line got at the top level.
+        from anetbbs.features.games import GameManager
+        probe = _FakeSession(['Q'])
+        asyncio.run(GameManager(probe).show_door_menu())
+        top_txt = probe.transcript()
+        strategy_num = None
+        for line in top_txt.split('\r\n'):
+            if 'Strategy' in line and '→' in line:
+                m = re.search(r'(\d+)', re.sub(r'\x1b\[[0-9;]*m', '', line))
+                strategy_num = int(m.group(1)) if m else None
+        self.assertIsNotNone(strategy_num, f'could not find Strategy section line in:\n{top_txt}')
+
+        # Enter the submenu, back out (redraws the top-level menu again),
+        # then quit -- 2 top-level renders + 1 submenu render total.
+        session = _FakeSession([str(strategy_num), 'B', 'Q'])
+        asyncio.run(GameManager(session).show_door_menu())
+        txt = session.transcript()
+        for g in strategy_games:
+            # Appears 0 times across the 2 top-level renders (collapsed
+            # into the section line) + exactly 1 time in the submenu.
+            self.assertEqual(txt.count(g.name[:20]), 1,
+                             msg=f'{g.name!r} should appear exactly once (in the submenu only)')
+        for g in other_games:
+            # Appears once per top-level render, never in the submenu.
+            self.assertEqual(txt.count(g.name[:20]), 2,
+                             msg=f'{g.name!r} leaked into (or was dropped from) the submenu render')
 
 
 if __name__ == '__main__':

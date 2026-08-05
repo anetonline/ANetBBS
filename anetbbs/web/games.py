@@ -91,6 +91,14 @@ def lobby():
     db_cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
     cat_names = {c.slug: c.name for c in db_cats}
     cat_order = [c.slug for c in db_cats]
+    # Same collapse-to-a-section-card behavior the terminal menu uses
+    # (GameManager.show_door_menu in features/games.py) -- but a category
+    # is only ever collapsed while browsing ALL categories. Once a sysop
+    # or player has already drilled into one via ?category=slug, showing
+    # its games inline there is the whole point of that view, so the
+    # flag is ignored on a filtered request (mirrors the terminal menu's
+    # own one-level-deep design: the flag only affects the top level).
+    cat_as_submenu = {c.slug: bool(c.as_submenu) for c in db_cats} if not category_filter else {}
 
     # Group by category preserving DB order
     cat_buckets = {}
@@ -105,6 +113,7 @@ def lobby():
     return render_template(
         'games/lobby.html',
         categories=categories,
+        cat_as_submenu=cat_as_submenu,
         cat_names=cat_names,
         db_cats=db_cats,
         now_playing=now_playing,

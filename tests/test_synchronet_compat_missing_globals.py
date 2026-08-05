@@ -2165,6 +2165,36 @@ class SynchronetCompatMissingGlobalsTests(unittest.TestCase):
         self.assertNotIn('Error', output, msg=output)
         self.assertIn('RESULT:{"ok":true,"n":7}', output, msg=output)
 
+    def test_modopts_js_get_mod_options_does_not_crash_on_console_charset(self):
+        """Real crash found live running Minesweeper on Jerry's server:
+        the real vendored modopts.js (js.global.console branch) calls
+        `console.charset.toLowerCase()` while resolving a modopts.ini
+        section -- console.charset didn't exist at all in this shim's
+        console object, so ANY door calling get_mod_options() (the
+        documented `var options = load({}, "modopts.js", modname);`
+        convention every modopts.ini-reading door uses) crashed with
+        "Cannot read property 'toLowerCase' of undefined" before ever
+        reaching its own game logic. Exercises the REAL vendored
+        modopts.js, not a synthetic stand-in, since the bug is in how
+        this shim's console object interacts with that real file."""
+        script = (
+            "var options = load({}, 'modopts.js', 'minesweeper');\n"
+            "process.stdout.write('OPTIONS_TYPE:' + typeof options + ';');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertNotIn('toLowerCase', output, msg=output)
+        self.assertIn('OPTIONS_TYPE:', output, msg=output)
+
+    def test_console_charset_is_a_real_string(self):
+        """console.charset must be readable directly too, not just as a
+        side effect of modopts.js -- real Synchronet returns a string
+        like "CP437"/"UTF-8"; ANetBBS is CP437 throughout."""
+        script = "process.stdout.write('CHARSET:' + console.charset + ';');\n"
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('CHARSET:CP437;', output, msg=output)
+
     def test_load_scope_form_still_returns_scope_for_the_graphic_js_convention(self):
         """Regression guard for the already-established, already-
         working Bubble Boggle pattern this fix must NOT break:

@@ -62,10 +62,11 @@ class GameManager:
                 'web_game_module': g.web_game_module or '',
             } for g in games if (g.min_access_level or 0) <= user_access]
 
-            # Build slug->name map from DB categories
+            # Build slug->name/as_submenu maps from DB categories
             cat_rows = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
             cat_names = {c.slug: c.name for c in cat_rows}
             cat_order = [c.slug for c in cat_rows]
+            cat_as_submenu = {c.slug: bool(c.as_submenu) for c in cat_rows}
 
         if not game_list:
             await self.session.write("\r\n\r\nNo door games are configured yet.\r\n"
@@ -80,9 +81,6 @@ class GameManager:
         # Ordered category slugs: DB-ordered first, then any unknown slugs
         ordered_slugs = [s for s in cat_order if s in grouped]
         ordered_slugs += [s for s in grouped if s not in ordered_slugs]
-
-        # Build a flat numbered list (for input parsing) alongside grouped display
-        flat_list = [g for slug in ordered_slugs for g in grouped[slug]]
 
         from .ansi_ui import write_menu_art, ui_width
         # Bold+base (1;3X), not bare aixterm 90-97 -- MagiTerm/NetRunner/
@@ -101,6 +99,13 @@ class GameManager:
             # a player picking a game needs) to make room.
             _cols    = 2
             _col_w   = max(20, (_iw // _cols) - 2)
+            # Numbered entries in on-screen order -- either a game dict
+            # (launch it directly) or a ('submenu', slug, cat_name) tuple
+            # (a category with as_submenu=True: drill into a second-level
+            # menu of just that category's games instead of expanding
+            # inline). Rebuilt every redraw since it's cheap and keeps
+            # numbering in sync with what's actually on screen.
+            numbered = []
             if not await write_menu_art(self.session, 'door_games'):
                 hbar = '═' * _iw
                 title = "Door Games".center(_iw)
@@ -110,28 +115,99 @@ class GameManager:
                 num = 1
                 for slug in ordered_slugs:
                     cat_name = cat_names.get(slug, slug.capitalize())
+                    cat_games = grouped[slug]
+                    if cat_as_submenu.get(slug):
+                        count = len(cat_games)
+                        plural = 'door' if count == 1 else 'doors'
+                        await self.session.write(
+                            f"  {YEL}{num:2d}{DIM}. {GRN}{BOLD}{cat_name}{RESET}"
+                            f"{DIM} → ({count} {plural}){RESET}\r\n")
+                        numbered.append(('submenu', slug, cat_name))
+                        num += 1
+                        continue
                     label = f"  ─── {cat_name} "
                     fill = '─' * max(0, _iw - len(label))
                     await self.session.write(f"{BOLD}{CYAN}{label}{fill}{RESET}\r\n")
                     cells = []
-                    for g in grouped[slug]:
+                    for g in cat_games:
                         name_col = g['name'][:_col_w - 5]
                         cells.append(
                             f"{YEL}{num:2d}{DIM}. {GRN}{name_col:<{_col_w - 5}}{RESET}")
+                        numbered.append(g)
                         num += 1
                     for i in range(0, len(cells), _cols):
                         row = '  '.join(cells[i:i + _cols])
                         await self.session.write(f"  {row}\r\n")
                 await self.session.write(f"  {YEL}Q{DIM}. {GRN}Return{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
+            else:
+                # write_menu_art drew a custom screen -- numbered still
+                # needs to be built (in the same order the loop above
+                # would have numbered things) so input parsing matches
+                # whatever the custom art actually shows.
+                num = 1
+                for slug in ordered_slugs:
+                    if cat_as_submenu.get(slug):
+                        numbered.append(('submenu', slug, cat_names.get(slug, slug.capitalize())))
+                        num += 1
+                        continue
+                    for g in grouped[slug]:
+                        numbered.append(g)
+                        num += 1
 
             choice = await self.session.read_line("Pick a game (number or Q): ")
             if not choice or choice.lower() == 'q':
                 return
             try:
                 idx = int(choice) - 1
-                if 0 <= idx < len(flat_list):
-                    await self._launch(flat_list[idx])
+                if 0 <= idx < len(numbered):
+                    entry = numbered[idx]
+                    if isinstance(entry, tuple) and entry[0] == 'submenu':
+                        _, slug, cat_name = entry
+                        await self._show_category_submenu(cat_name, grouped[slug])
+                    else:
+                        await self._launch(entry)
+                    continue
+            except ValueError:
+                pass
+            await self.session.write("\r\nInvalid choice.\r\n")
+
+    async def _show_category_submenu(self, cat_name, games):
+        """Second-level door menu for a single as_submenu=True category --
+        same flat numbered/2-column rendering as the top-level menu's
+        inline category blocks, just scoped to one category and with
+        'B'/'Q' returning to the parent door menu instead of the main
+        menu. Deliberately one level deep only -- a submenu category's
+        own games are always shown flat here, no further nesting."""
+        from .ansi_ui import ui_width
+        CYAN = '\x1b[1;36m'; WHT = '\x1b[1;37m'; YEL = '\x1b[1;33m'
+        GRN = '\x1b[1;32m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
+        while True:
+            _iw = ui_width(self.session)
+            _cols = 2
+            _col_w = max(20, (_iw // _cols) - 2)
+            hbar = '═' * _iw
+            title = cat_name.center(_iw)
+            await self.session.write(f"\r\n{BOLD}{CYAN}{hbar}{RESET}\r\n")
+            await self.session.write(f"{WHT}{title}{RESET}\r\n")
+            await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n")
+            cells = []
+            for i, g in enumerate(games, start=1):
+                name_col = g['name'][:_col_w - 5]
+                cells.append(f"{YEL}{i:2d}{DIM}. {GRN}{name_col:<{_col_w - 5}}{RESET}")
+            for i in range(0, len(cells), _cols):
+                row = '  '.join(cells[i:i + _cols])
+                await self.session.write(f"  {row}\r\n")
+            await self.session.write(f"  {YEL}B{DIM}. {GRN}Back{RESET}\r\n")
+            await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
+
+            choice = await self.session.read_line("Pick a game (number or B): ")
+            if not choice or choice.lower() in ('b', 'q'):
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(games):
+                    await self._launch(games[idx])
                     continue
             except ValueError:
                 pass

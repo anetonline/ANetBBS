@@ -255,6 +255,14 @@ class GameCategory(db.Model):
     name = db.Column(db.String(80), nullable=False)
     slug = db.Column(db.String(80), unique=True, nullable=False)
     sort_order = db.Column(db.Integer, default=0)
+    # Off by default (existing single-screen flat-list-with-headers
+    # behavior, unchanged). When on, the door menu shows this category
+    # as a single selectable line instead of expanding its games inline
+    # -- picking it opens a second-level menu listing just this
+    # category's games. Lets a sysop with a lot of doors split them into
+    # picked sections (e.g. "Synchronet Doors") without forcing every
+    # install into a deeper menu tree.
+    as_submenu = db.Column(db.Boolean, nullable=False, default=False)
 
     def __repr__(self):
         return f'<GameCategory {self.name}>'

@@ -13,6 +13,8 @@ from wtforms import (StringField, TextAreaField, SelectField, IntegerField,
                      BooleanField, SubmitField)
 from wtforms.validators import DataRequired, Length, Optional, NumberRange
 
+from sqlalchemy.exc import IntegrityError
+
 from ..models import db, Game, GameSession, GameCategory
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,9 @@ class GameCategoryForm(FlaskForm):
     name = StringField('Category Name', validators=[DataRequired(), Length(max=80)])
     slug = StringField('Slug (URL-safe)', validators=[DataRequired(), Length(max=80)])
     sort_order = IntegerField('Sort Order', validators=[Optional()], default=0)
+    as_submenu = BooleanField(
+        'Show as a submenu section (instead of listing games inline)',
+        default=False)
     submit = SubmitField('Save Category')
 
 
@@ -47,7 +52,11 @@ def _category_choices():
 
 def _msgbase_area_choices():
     """Real EchoArea rows for the InterBBS score-sharing dropdown --
-    0 means "off" (Game.msgbase_area_id stays NULL)."""
+    0 means "off" (Game.msgbase_area_id stays NULL). Flat list, used
+    only for form validation (coerce=int against a real id); the
+    template renders the actual <select> itself, grouped by network
+    via _msgbase_area_groups() below -- see that function's own
+    docstring for why a flat list isn't good enough on its own."""
     from ..models import EchoArea
     choices = [(0, '— None —')]
     try:
@@ -56,6 +65,27 @@ def _msgbase_area_choices():
     except Exception:
         pass
     return choices
+
+
+def _msgbase_area_groups():
+    """Real EchoArea rows grouped by network, for a real <optgroup>-
+    per-network <select> in the template. Real gap Jerry hit live: a
+    flat alphabetical-by-area-name list buries DOVE-Net's one
+    "Synchronet Data" area among dozens of unrelated FidoNet areas --
+    grouping by network at least gets a sysop to the right network's
+    areas immediately instead of scanning the whole list."""
+    from ..models import EchoArea, EchomailNetwork
+    groups = []
+    try:
+        networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+        for net in networks:
+            areas = (EchoArea.query.filter_by(network_id=net.id)
+                     .order_by(EchoArea.name).all())
+            if areas:
+                groups.append((net.name, [(a.id, a.name) for a in areas]))
+    except Exception:
+        pass
+    return groups
 
 
 class GameForm(FlaskForm):
@@ -177,10 +207,22 @@ def add_game():
         game = Game()
         _populate_game(game, form)
         db.session.add(game)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Most likely cause: the auto-filled slug collides with an
+            # existing game (e.g. typing "Minesweeper" auto-slugs to
+            # "minesweeper", which the built-in browser minigame already
+            # owns -- the real Synchronet door needs a different slug
+            # like "sbbs-minesweeper"). Roll back and let the sysop pick
+            # a different slug instead of a raw 500.
+            db.session.rollback()
+            flash(f'Could not add game -- the slug "{form.slug.data}" is already in use. '
+                 f'Pick a different slug and try again.', 'danger')
+            return render_template('games/admin/form.html', form=form, game=None, msgbase_area_groups=_msgbase_area_groups())
         flash(f'Game "{game.name}" added successfully.', 'success')
         return redirect(url_for('games_admin.list_games'))
-    return render_template('games/admin/form.html', form=form, game=None)
+    return render_template('games/admin/form.html', form=form, game=None, msgbase_area_groups=_msgbase_area_groups())
 
 
 @games_admin_bp.route('/<int:game_id>/edit', methods=['GET', 'POST'])
@@ -193,10 +235,16 @@ def edit_game(game_id):
     form.msgbase_area_id.choices = _msgbase_area_choices()
     if form.validate_on_submit():
         _populate_game(game, form)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash(f'Could not update game -- the slug "{form.slug.data}" is already in use '
+                 f'by a different game. Pick a different slug and try again.', 'danger')
+            return render_template('games/admin/form.html', form=form, game=game, msgbase_area_groups=_msgbase_area_groups())
         flash(f'Game "{game.name}" updated.', 'success')
         return redirect(url_for('games_admin.list_games'))
-    return render_template('games/admin/form.html', form=form, game=game)
+    return render_template('games/admin/form.html', form=form, game=game, msgbase_area_groups=_msgbase_area_groups())
 
 
 @games_admin_bp.route('/<int:game_id>/delete', methods=['POST'])
@@ -404,6 +452,7 @@ def add_category():
             name=form.name.data,
             slug=form.slug.data,
             sort_order=form.sort_order.data or 0,
+            as_submenu=form.as_submenu.data,
         )
         db.session.add(cat)
         db.session.commit()
@@ -422,6 +471,7 @@ def edit_category(cat_id):
         cat.name = form.name.data
         cat.slug = form.slug.data
         cat.sort_order = form.sort_order.data or 0
+        cat.as_submenu = form.as_submenu.data
         db.session.commit()
         flash(f'Category "{cat.name}" updated.', 'success')
         return redirect(url_for('games_admin.list_categories'))

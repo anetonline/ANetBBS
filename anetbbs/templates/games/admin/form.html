@@ -275,8 +275,17 @@
         <div class="row g-3 mb-2">
             <div class="col-md-6">
                 {{ form.msgbase_area_id.label(class="form-label") }}
-                {{ form.msgbase_area_id(class="form-control") }}
-                <small style="color:#007700;">Only for doors that call real Synchronet MsgBase (e.g. Minesweeper's InterBBS DOVE-Net/FidoNet score sharing) — leave as "None" for every other door</small>
+                <select name="msgbase_area_id" id="msgbase_area_id" class="form-control">
+                    <option value="0" {% if not form.msgbase_area_id.data %}selected{% endif %}>— None —</option>
+                    {% for net_name, areas in msgbase_area_groups %}
+                    <optgroup label="{{ net_name }}">
+                        {% for area_id, area_name in areas %}
+                        <option value="{{ area_id }}" {% if form.msgbase_area_id.data == area_id %}selected{% endif %}>{{ area_name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+                <small style="color:#007700;">Only for doors that call real Synchronet MsgBase (e.g. Minesweeper's InterBBS DOVE-Net/FidoNet score sharing) — leave as "None" for every other door. Grouped by network — DOVE-Net's areas won't be buried among a large FidoNet arealist.</small>
             </div>
         </div>
     </div>

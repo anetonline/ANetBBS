@@ -627,6 +627,16 @@ var console = {
     // bottom line for status" assume 25, not 24.
     screen_columns: 80,
     screen_rows: 25,
+    // Real Synchronet's console.charset (js_console.cpp) -- the active
+    // terminal character set as a string ("CP437", "UTF-8", etc), read
+    // by doors picking a charset-specific modopts.ini section (e.g.
+    // Minesweeper's own modopts.js: `modname + ':charset=' +
+    // console.charset.toLowerCase()`). Missing entirely crashed with
+    // "Cannot read property 'toLowerCase' of undefined" the moment a
+    // door read it -- found live running Minesweeper. ANetBBS is
+    // CP437 throughout, so a static "CP437" is correct here, not a
+    // live per-session value.
+    charset: 'CP437',
     autoterm: 0x1E,        // ANSI + COLOR + RIP + PETSCII bits — claim everything
     // Real Synchronet's console.attributes is a live property: ASSIGNING
     // to it immediately changes the terminal's active color (that's the

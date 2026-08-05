@@ -41,6 +41,11 @@
         {{ form.sort_order(class="form-control") }}
         <small style="color:#007700;">Lower numbers appear first in menus.</small>
     </div>
+    <div class="mb-3 form-check">
+        {{ form.as_submenu(class="form-check-input") }}
+        {{ form.as_submenu.label(class="form-check-label") }}
+        <br><small style="color:#007700;">Off: this category's games are listed inline on the door menu, same as today. On: the door menu shows one line for this whole category, and picking it opens a second menu listing just its games -- useful once a category has a lot of doors.</small>
+    </div>
     <div>
         {{ form.submit(class="btn btn-primary") }}
         <a href="{{ url_for('games_admin.list_categories') }}" class="btn btn-primary ms-2">Cancel</a>

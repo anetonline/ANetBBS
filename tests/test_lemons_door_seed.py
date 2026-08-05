@@ -35,6 +35,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 _DATA_DIR = Path(__file__).resolve().parents[1] / 'data'
+# Real vendored lemons door files -- gitignored (third-party door
+# source, not redistributed via git; a sysop who wants it downloads
+# it separately and drops it at this path, matching BUNDLED_DOORS'
+# own must_exist-gated auto-detection). A fresh git clone (CI, a new
+# contributor) genuinely doesn't have these files -- skip the whole
+# class rather than fail when they're absent.
+_DOOR_ROOT = Path(__file__).resolve().parents[1] / 'anetbbs' / 'games' / 'sbbs_doors' / 'lemons'
 
 
 def _snapshot_data_dir():
@@ -54,6 +61,8 @@ def _fresh_app(db_path):
     return app
 
 
+@unittest.skipUnless(_DOOR_ROOT.is_dir(),
+                    'requires the real vendored lemons door files (gitignored)')
 class LemonsDoorSeedTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

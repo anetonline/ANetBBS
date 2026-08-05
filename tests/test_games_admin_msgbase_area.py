@@ -109,6 +109,44 @@ class GamesAdminMsgBaseAreaTests(unittest.TestCase):
         self.assertIn(b'Synchronet Data', resp.data)
         self.assertIn('None'.encode(), resp.data)
 
+    def test_dropdown_groups_areas_by_network_not_one_flat_alphabetical_list(self):
+        """Real gap Jerry hit live: with FidoNet's own dozens of areas
+        seeded alongside DOVE-Net's single "Synchronet Data" area, a
+        flat alphabetical-by-area-name dropdown buried the one area a
+        sysop actually wants among a wall of unrelated FidoNet areas.
+        Confirms the dropdown is real <optgroup>-per-network markup --
+        each network name appears as its own optgroup label, and DOVE-
+        Net's area is nested under the DOVE-Net optgroup specifically,
+        not just present somewhere in the page."""
+        with self.app.app_context():
+            from anetbbs.models import db, EchomailNetwork, EchoArea
+            fido = EchomailNetwork(name='FidoNet', network_type='binkp',
+                                   our_address='1:1/1')
+            db.session.add(fido)
+            db.session.commit()
+            # A handful of real-shaped FidoNet areas that would otherwise
+            # alphabetically interleave with "Synchronet Data" in a flat
+            # by-area-name sort.
+            for tag, name in [('FIDONET.GEN', 'FidoNet General'),
+                              ('SYNC.SUPPORT', 'Synchronet Support'),
+                              ('SYSOP.CHAT', 'Sysop Chat')]:
+                db.session.add(EchoArea(network_id=fido.id, tag=tag, name=name))
+            db.session.commit()
+
+        resp = self.client.get('/admin/games/add')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.data.decode()
+        self.assertIn('<optgroup label="DOVE-Net">', html)
+        self.assertIn('<optgroup label="FidoNet">', html)
+        # "Synchronet Data" must appear inside the DOVE-Net optgroup
+        # block specifically, not merely somewhere on the page (which
+        # would also be true of the old flat/buried layout).
+        dove_block = html.split('<optgroup label="DOVE-Net">', 1)[1].split('</optgroup>', 1)[0]
+        self.assertIn('Synchronet Data', dove_block)
+        fido_block = html.split('<optgroup label="FidoNet">', 1)[1].split('</optgroup>', 1)[0]
+        self.assertNotIn('Synchronet Data', fido_block)
+        self.assertIn('FidoNet General', fido_block)
+
     def test_saving_a_game_with_an_area_selected_persists_the_fk(self):
         resp = self.client.post('/admin/games/add', data=self._base_form_data(
             msgbase_area_id=str(self.area_id)), follow_redirects=True)
