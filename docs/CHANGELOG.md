@@ -1,11 +1,37 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.8`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.9`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.9 — Synchronet door game support (17 games tested) + MRC ping/latency display (August 2026)
+
+ANetBBS's Node.js compat shim (`synchronet_compat.py`) can now run real, unmodified Synchronet `.js` door games, including ones using Synchronet's real JSON-RPC "JSON DB" protocol (port 10088) for shared, cross-BBS game state and scoreboards. Confirmed working end-to-end against real live JSON-RPC servers (including real cross-BBS data — existing scores, levels, and player history from other real BBSes already using these games):
+
+- **Chicken Delivery** — real-time delivery arcade
+- **Bubble Boggle** — word-search puzzle
+- **Synchronetris** — real-time multiplayer Tetris-style
+- **Jeopardized** — trivia game show, live rankings
+- **Gooble Gooble** — real-time Pac-Man-style chase
+- **Synkroban** — Sokoban warehouse puzzle
+- **Star Trek** — real-time space combat arcade
+- **Fat Fish** — fishing simulation
+- **Dice Warz ][** — territory-conquest strategy (Risk-like)
+- **Maze Race** — real-time multiplayer maze racing
+- **Thirstyville** — café-owner economic simulation
+- **Good Time Trivia** — trivia with multiple categories
+- **Lemons** — "Lemmings"-style puzzle
+- **Star Stocks** — galactic investment strategy
+- **DrugLord** — "Dope Wars"-style economic sim
+- **Uber Blox** — block-clearing puzzle
+- **Minesweeper** — Synchronet's own official Minesweeper (by Digital Man), classic minefield-clearing puzzle with personal-best tracking — the one door in this list that doesn't use JSON-RPC
+
+These games are **not bundled** in the release — they're real, free, open-source software from their own original authors, not ANetBBS's to redistribute. See [`docs/26-synchronet-json-rpc-doors.md`](26-synchronet-json-rpc-doors.md) for download links and setup instructions for each one.
+
+**MRC**: The terminal client's status bar now shows real ping/latency instead of a clock (per-message timestamps already show the time on every line, so the status-bar clock was redundant). Turned out the latency widget already existed in the code but was silently broken — a wire-protocol field-name mismatch meant it never received a valid round-trip time, so only the clock ever showed. Fixed the mismatch and removed the now-redundant clock. The web UI now shows the same live latency figure next to the room topic in its status bar (previously only in the sidebar, which still also shows it).
 
 ## v1.0.8 — Poll log dedup guard could block a network's polls forever (August 2026)
 

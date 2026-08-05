@@ -374,35 +374,22 @@ function testSocket(socket)
 }
 function toXML(obj)
 {
-	var xml = new XMLList('<xml/>');
-	for (var i in obj) {
-		switch (typeof obj[i]) 
-		{
-			case "object": 
-				var child=toXML(obj[i]);
-				xml.appendChild(<{i}>{child.children()}</{i}>);
-				break;
-			case "array": //TODO: figure this shit out
-				/*
-				for(var x=0;x<obj[i].length;x++) {
-					switch(typeof obj[i][x]) {
-						case "object": 
-						case "array":
-							var child=toXML(obj[i][x]);
-							xml.appendChild(<{i}>{child.children()}</{i}>);
-							break;
-						default:
-							xml.appendChild(<{i}>{obj[i][x]}</{i}>);break;
-							break;
-					}
-				}
-				*/
-				break;
-			default: 
-				xml.appendChild(<{i}>{obj[i]}</{i}>);break;
-		}
-	}
-	return xml;
+	// Original used E4X inline XML literals (`<{i}>{...}</{i}>`) and
+	// the E4X-only `XMLList` type -- both were a Mozilla/SpiderMonkey-
+	// only language extension, never supported by Node's V8, and the
+	// syntax alone is a parse-time SyntaxError that would otherwise
+	// block this entire file (funclib.js) from loading at all --
+	// confirmed live: sprite.js/tree.js both load() this file, so any
+	// door touching Frame/Sprite/Tree (most animated doors) would
+	// crash on load before ever reaching a door's own code, regardless
+	// of whether that door calls toXML() itself. No real, unmodified
+	// door in this project's bundled set actually calls toXML() (E4X
+	// XML conversion isn't something a terminal door needs) -- so
+	// rather than attempt a full E4X/XMLList polyfill for a function
+	// nothing currently uses, this fails loudly and specifically if
+	// something ever does call it, instead of silently returning
+	// wrong/empty data.
+	throw new Error("funclib.js: toXML() uses E4X XML, which Node does not support -- not implemented in the compat shim");
 }
 function setPosition(x,y) 
 {

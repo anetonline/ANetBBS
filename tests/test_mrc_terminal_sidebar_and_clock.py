@@ -1,5 +1,6 @@
 """Tests for MRC Phase B (terminal feature-parity rework): the nick-list
-sidebar and clock status-bar widget in anetbbs/features/mrc_chat.py.
+sidebar and latency status-bar widget in anetbbs/features/mrc_chat.py
+(originally a clock widget, replaced -- see LatencyWidgetTests below).
 
 ANetBBS's terminal UI has no existing sidebar-rendering precedent
 anywhere (confirmed by research before implementing this) -- the
@@ -204,26 +205,44 @@ class StatusBarBorderAlignmentTests(unittest.TestCase):
         self.assertNotIn('│', joined)
 
 
-class ClockWidgetTests(unittest.TestCase):
-    def test_status_line_includes_clock_when_enabled(self):
-        chat = _make_chat(window_size=(132, 50))
-        _run(chat._enter_split_screen())
-        chat.session.written.clear()
-        chat._show_clock = True
-        _run(chat._draw_status_line())
-        joined = ''.join(chat.session.written)
-        import re
-        self.assertRegex(joined, r'\d{2}:\d{2}')
+class LatencyWidgetTests(unittest.TestCase):
+    """The status bar's old clock widget (_show_clock) was removed and
+    replaced with a real ping/latency display (Jerry: per-message
+    timestamps already show the time on every line, so a second clock
+    at the top was redundant -- latency was the thing actually
+    missing). See mrc_chat.py's own _draw_status_line comment and
+    _ping_loop's fix for the real msgext/t wire-protocol bug that had
+    silently kept self._latency_ms at None the entire time."""
 
-    def test_status_line_omits_clock_when_disabled(self):
+    def test_status_line_includes_latency_when_known(self):
         chat = _make_chat(window_size=(132, 50))
         _run(chat._enter_split_screen())
-        chat._show_clock = False
+        chat.session.written.clear()
+        chat._latency_ms = 42
+        _run(chat._draw_status_line())
+        joined = ''.join(chat.session.written)
+        self.assertIn('42ms', joined)
+
+    def test_status_line_omits_latency_when_unknown(self):
+        chat = _make_chat(window_size=(132, 50))
+        _run(chat._enter_split_screen())
+        chat._latency_ms = None
         chat.session.written.clear()
         _run(chat._draw_status_line())
         joined = ''.join(chat.session.written)
-        # Room tag itself has no digits, so any HH:MM-shaped substring
-        # here can only have come from the clock widget.
+        self.assertNotIn('ms\x1b[0m', joined)
+
+    def test_status_line_no_longer_renders_a_clock(self):
+        """Direct regression guard for the removed widget itself --
+        confirms no HH:MM-shaped substring appears anywhere in the
+        status bar regardless of latency state (the room tag has no
+        digits, so any HH:MM match could only have come from a clock)."""
+        chat = _make_chat(window_size=(132, 50))
+        _run(chat._enter_split_screen())
+        chat._latency_ms = 7
+        chat.session.written.clear()
+        _run(chat._draw_status_line())
+        joined = ''.join(chat.session.written)
         import re
         self.assertNotRegex(joined, r'\b\d{2}:\d{2}\b')
 

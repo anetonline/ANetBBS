@@ -84,3 +84,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [23 — Webhooks (outbound event notifications)](23-webhooks.md)
 - [24 — Game Center (built-in web games catalog)](24-game-center.md)
 - [25 — PETSCII (Commodore 64/128 terminal support)](25-petscii.md)
+- [26 — Synchronet door games (17 confirmed-working, download/setup guide)](26-synchronet-json-rpc-doors.md)

@@ -537,7 +537,12 @@ Tree.prototype.disable = function() {
 Tree.prototype.trace = function(hash) {
 	hash=hash.split("\t");
 	var text=hash.shift();
-	for each(var i in this.__properties__.items) {
+	// `for each(var x in arr)` is a SpiderMonkey-only construct removed
+	// from JS years ago, not supported by Node's V8 -- same fix
+	// pattern as cnflib.js's getBytes() / frame.js.
+	var __keys = Object.keys(this.__properties__.items);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var i = this.__properties__.items[__keys[__i]];
 		if(i.text == text) {
 			if(i instanceof Tree && hash.length > 0)
 				return i.trace(hash.join("\t"));

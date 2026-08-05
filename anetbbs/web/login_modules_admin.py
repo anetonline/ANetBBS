@@ -26,21 +26,24 @@ from .access_control import require_admin_or_403 as _admin_required
 
 
 MODULE_TYPES = [
-    ('wall',        'Graffiti Wall'),
-    ('lastcallers', 'Last Callers'),
-    ('ansi',        'ANSI Screen (slot)'),
-    ('shell',       'Shell Command'),
-    ('door_native', 'Native Linux Door'),
-    ('door_python', 'Python Door Module'),
+    ('wall',          'Graffiti Wall'),
+    ('lastcallers',   'Last Callers'),
+    ('ansi',          'ANSI Screen (slot)'),
+    ('file_bulletin', 'File Bulletins (ANSI/text browser)'),
+    ('shell',         'Shell Command'),
+    ('door_native',   'Native Linux Door'),
+    ('door_python',   'Python Door Module'),
 ]
 EVENT_TYPES = [('logon', 'Logon'), ('logoff', 'Logoff')]
 
 
 def _params_help(module_type: str) -> str:
     helps = {
-        'wall':        'No params needed — leave as {}',
-        'lastcallers': 'No params needed — leave as {}',
-        'ansi':        '{"slot": "welcome"}  — any BbsAnsiScreen slot name',
+        'wall':          'No params needed — leave as {}',
+        'lastcallers':   'No params needed — leave as {}',
+        'ansi':          '{"slot": "welcome"}  — any BbsAnsiScreen slot name',
+        'file_bulletin': 'No params needed — leave as {}. Manage which files '
+                          'show at Admin -> Bulletins -> Files',
         'shell':       '{"command": "/path/to/script.sh"}',
         'door_native': '{"path": "/path/to/door", "args": "--node $NODE"}',
         'door_python': '{"module": "anetbbs.doors.mything", "func": "run"}',

@@ -301,6 +301,13 @@ class Game(db.Model):
     # Synchronet JS game settings
     synchronet_script_path = db.Column(db.String(500))
     synchronet_exec_dir = db.Column(db.String(500))
+    # Real echomail area this door's InterBBS MsgBase score-sharing (e.g.
+    # Minesweeper's "syncdata" area, networked via DOVE-Net/FidoNet) reads
+    # from and posts to -- optional, only meaningful for door_synchronet
+    # games that actually call new MsgBase(...). NULL means the feature
+    # is off (door_runner.py only writes the door's own modopts.ini
+    # sub= override when this is set). See anetbbs/games/msgbase_bridge.py.
+    msgbase_area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'), nullable=True)
 
     # Web game settings
     web_game_module = db.Column(db.String(100))
@@ -3001,11 +3008,12 @@ class LoginModule(db.Model):
     """An action that runs automatically at logon or logoff for the user.
 
     module_type values:
-      wall        — show/prompt on the graffiti wall (params: none)
-      ansi        — display an ANSI screen slot (params: {"slot": "welcome"})
-      shell       — run a shell command (params: {"command": "/path/to/script"})
-      door_native — run a native Linux door (params: {"path": "...", "args": "..."})
-      door_python — run a Python door module (params: {"module": "...", ...})
+      wall         — show/prompt on the graffiti wall (params: none)
+      ansi         — display an ANSI screen slot (params: {"slot": "welcome"})
+      file_bulletin — browse file bulletins (params: none; see FileBulletin)
+      shell        — run a shell command (params: {"command": "/path/to/script"})
+      door_native  — run a native Linux door (params: {"path": "...", "args": "..."})
+      door_python  — run a Python door module (params: {"module": "...", ...})
 
     event_type:  'logon' | 'logoff'
     """
@@ -3028,6 +3036,36 @@ class LoginModule(db.Model):
 
     def __repr__(self):
         return f'<LoginModule {self.id} {self.event_type}:{self.module_type} {self.name!r}>'
+
+
+class FileBulletin(db.Model):
+    """Admin-managed metadata for a file-based bulletin (.txt/.asc/.ans)
+    living in FILE_BULLETINS_DIR (config.py). The file itself is the
+    source of truth for content; this row is just display metadata
+    (title/order/enabled) plus a hook for min_access_level gating —
+    same split as BbsAnsiScreen's own file-on-disk-plus-DB-row pattern.
+
+    Rows are created automatically the first time the admin bulletin
+    list is viewed (any real, not-yet-known file gets a row, is_active
+    defaults to False so a sysop consciously opts each one in — matches
+    every other "auto-detected, off until confirmed" convention in this
+    project, e.g. BUNDLED_DOORS' _active_default). A row whose file no
+    longer exists on disk is simply skipped when building the terminal
+    list, not auto-deleted (keeps the sysop's title/order intact if the
+    file reappears, e.g. a door regenerating its own score file).
+    """
+    __tablename__ = 'file_bulletins'
+
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False, unique=True)
+    title = db.Column(db.String(120), nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=False, nullable=False)
+    min_access_level = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<FileBulletin {self.filename!r} title={self.title!r}>'
 
 
 class UserField(db.Model):

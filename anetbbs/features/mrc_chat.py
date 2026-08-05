@@ -317,7 +317,6 @@ class MRCChat(BaseChatSystem):
         self._aiohttp_session  = None
         self._recv_task        = None
         self._ping_task        = None
-        self._clock_task       = None
         self._connected        = False
         self._handle           = ''
         self._room             = self.DEFAULT_ROOM
@@ -387,7 +386,6 @@ class MRCChat(BaseChatSystem):
         self._sidebar_enabled = False
         self._sidebar_width   = 20
         self._chat_width      = 80
-        self._show_clock      = True
 
         # Scrolling ticker/banner (see _draw_ticker_line/_ticker_loop) --
         # a second fixed row, above the chat scroll region, rotating
@@ -550,7 +548,6 @@ class MRCChat(BaseChatSystem):
 
             self._recv_task = asyncio.create_task(self._recv_loop())
             self._ping_task = asyncio.create_task(self._ping_loop())
-            self._clock_task = asyncio.create_task(self._clock_loop())
             self._ticker_task = asyncio.create_task(self._ticker_loop())
             await self._chat_loop()
         finally:
@@ -569,8 +566,18 @@ class MRCChat(BaseChatSystem):
                 await asyncio.sleep(PING_INTERVAL)
                 if not self._connected:
                     break
-                # WebSocket-level ping
-                await self._send_json({'type': 'ping', 'msgext': str(time.time())})
+                # WebSocket-level ping. Real bug found live: this sent
+                # 'msgext' as the timestamp field, but the bridge's pong
+                # handler (mrc/bridge/main.py) only ever echoes back
+                # whatever key the web client actually uses -- 't' (see
+                # client.js's own ping: `{type:'ping', t: Date.now()}`).
+                # With the wrong key, the bridge's reply carried `t: null`,
+                # the pong handler below never found a usable timestamp,
+                # and self._latency_ms stayed None for the entire session
+                # -- the status bar's own latency widget (see
+                # _draw_status_line) silently never rendered. 't' matches
+                # the web client's own wire convention exactly.
+                await self._send_json({'type': 'ping', 't': time.time()})
                 # IAMHERE AWAY / ACTIVE tracking
                 idle = time.time() - self._last_input_time
                 if idle >= AWAY_AFTER and not self._is_away:
@@ -586,27 +593,6 @@ class MRCChat(BaseChatSystem):
             pass
         except Exception:
             logger.debug('MRC ping loop error', exc_info=True)
-
-    async def _clock_loop(self):
-        """Redraws the status bar every 30s so the clock widget (see
-        _draw_status_line) doesn't go stale during a quiet room --
-        every OTHER status-bar redraw is reactive (fires on state
-        changes: a message arrives, mentions change, etc.), so without
-        this a genuinely idle session would show the same HH:MM
-        forever."""
-        try:
-            while self._connected:
-                await asyncio.sleep(30)
-                if not self._connected:
-                    break
-                if self._show_clock:
-                    async with self._input_lock:
-                        await self._draw_status_line()
-                        await self.session.write(f'\x1b[{self._input_row};3H')
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.debug('MRC clock loop error', exc_info=True)
 
     async def _ticker_loop(self):
         """Advances and redraws the ticker row every TICKER_TICK_SECONDS.
@@ -758,12 +744,18 @@ class MRCChat(BaseChatSystem):
             else:
                 cc = f'\x1b[1;36m{remaining}\x1b[0m'     # cyan: fine
             right_bits.append(cc)
+        # Replaces the status bar's old clock widget (Jerry: per-message
+        # timestamps already show the time on every line, so a second
+        # clock at the top was redundant -- latency is the thing that
+        # was actually missing). _format_clock() itself, and the
+        # clockformat/tz settings, are unaffected -- still used for the
+        # per-message timestamps. Only _show_clock (which had exactly
+        # one effect, this row) and its now-purposeless /set clock
+        # on|off toggle and _clock_loop() background refresher are gone.
         if self._latency_ms is not None:
             right_bits.append(f'\x1b[2;37m{self._latency_ms}ms\x1b[0m')
         if self._is_away:
             right_bits.append('\x1b[1;33mAWAY\x1b[0m')
-        if self._show_clock:
-            right_bits.append(f'\x1b[2;37m{self._format_clock(self._local_now())}\x1b[0m')
         right = '  '.join(right_bits)
 
         # When the sidebar is up, this bar was previously drawn full
@@ -1259,7 +1251,12 @@ class MRCChat(BaseChatSystem):
         # ── pong: calculate round-trip latency ──
         if evt == 'pong':
             try:
-                t0 = float(data.get('msgext') or data.get('echo') or 0)
+                # 't' matches what _ping_loop() now actually sends (see
+                # that method's own comment on the real msgext/t bug this
+                # fixed) and what the bridge always echoes verbatim.
+                # msgext/echo kept as fallbacks in case an older bridge
+                # build is still running mid-upgrade.
+                t0 = float(data.get('t') or data.get('msgext') or data.get('echo') or 0)
                 if t0 > 0:
                     self._latency_ms = max(0, int((time.time() - t0) * 1000))
                     async with self._input_lock:
@@ -1976,9 +1973,6 @@ class MRCChat(BaseChatSystem):
         if self._ping_task and not self._ping_task.done():
             self._ping_task.cancel()
         self._ping_task = None
-        if self._clock_task and not self._clock_task.done():
-            self._clock_task.cancel()
-        self._clock_task = None
         if self._ticker_task and not self._ticker_task.done():
             self._ticker_task.cancel()
         self._ticker_task = None
@@ -2178,7 +2172,7 @@ class MRCChat(BaseChatSystem):
                 '  /clear              clear chat area (alias /cls)',
                 '  /twit add|del|list|clear [user]   ignore-list management',
                 '  /shield [on|off]    broadcast shield (blocks /broadcast)',
-                '  /set [field value]  nick style, enter/leave/quit msgs, ticker, clock, tz',
+                '  /set [field value]  nick style, enter/leave/quit msgs, ticker, clockformat, tz',
                 '  /set list           show current /set values',
                 '  /dlchatlog          download this session\'s scrollback as text',
                 '  /termsize w,h       report terminal size to server',
@@ -2319,7 +2313,6 @@ class MRCChat(BaseChatSystem):
                     '  leavemsg <text>     shown on chat leave; {handle} placeholder',
                     '  quitmsg <text>      appended to your leave message on /quit',
                     '  ticker <on|off>     scrolling ticker/banner (saved)',
-                    '  clock <on|off>      status-bar clock (local only, not saved)',
                     '  clockformat <12|24> clock/timestamp hour format (saved)',
                     '  tz <zone|offset>    timestamp timezone: EST/CDT/PST/UTC/etc, or -5, +5:30',
                     '  twitfilter <on|off> master twit-list enforcement (saved)',
@@ -2341,7 +2334,6 @@ class MRCChat(BaseChatSystem):
                     f'\x1b[1;36mleavemsg:\x1b[0m {self._leave_msg_tpl or "(default)"}',
                     f'\x1b[1;36mquitmsg:\x1b[0m {self._quit_msg or "(none)"}',
                     f'\x1b[1;36mticker:\x1b[0m {"on" if self._show_ticker else "off"}',
-                    f'\x1b[1;36mclock:\x1b[0m {"on" if self._show_clock else "off"}',
                     f'\x1b[1;36mclockformat:\x1b[0m {self._clock_format}',
                     f'\x1b[1;36mtz:\x1b[0m {self._format_tz_offset()}',
                     f'\x1b[1;36mtwitfilter:\x1b[0m {"on" if self._twit_filter_enabled else "off"}',
@@ -2380,14 +2372,6 @@ class MRCChat(BaseChatSystem):
                     return True
                 await self._send_json({
                     'type': 'set_prefs', 'ticker_enabled': value.lower() == 'on'})
-                return True
-
-            if field == 'clock':
-                if value.lower() not in ('on', 'off'):
-                    await self._emit('Usage: /set clock on|off')
-                    return True
-                self._show_clock = value.lower() == 'on'
-                await self._emit(f'\x1b[1;36mClock:\x1b[0m {value.lower()}')
                 return True
 
             if field == 'clockformat':
@@ -2697,9 +2681,11 @@ class MRCChat(BaseChatSystem):
             for ln in (
                 '',
                 '\x1b[1mRecent MRC client changes\x1b[0m',
+                '  - Status bar: clock replaced with real ping/latency (was silently',
+                '    broken -- now fixed and shown live)',
                 '  - /set defaultroom, /set twitfilter, /set clockformat',
                 '  - /welcome, /changes, /q, /b, /cls command aliases',
-                '  - Nick-list sidebar, status bar (room/topic/mentions/latency/clock)',
+                '  - Nick-list sidebar, status bar (room/topic/mentions/latency)',
                 '  - Scrolling ticker/banner fed by hub BANNER:/STATS: text',
                 '  - /set (prefix/suffix/color/entermsg/leavemsg/quitmsg/ticker/tz/palette)',
                 '  - /twit and /shield ignore/broadcast-shield lists',

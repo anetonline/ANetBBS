@@ -324,6 +324,94 @@ class BBSMenuUI:
         viewer = ANView(self.session, lines, subject=title or '(no subject)')
         await viewer.run()
 
+    # ------------------------------------------------------------------
+    # File Bulletins (.txt/.asc/.ans dropped into FILE_BULLETINS_DIR)
+    # ------------------------------------------------------------------
+
+    async def list_file_bulletins(self):
+        """Lightbar-browsable list of file-based bulletins -- distinct
+        from list_bulletins() above (DB-authored via the web admin
+        textarea): these are real files a sysop drops into
+        FILE_BULLETINS_DIR (or a door game writes its own .ans
+        scoreboard/news into), enabled per-file at Admin -> Bulletins ->
+        Files. Real files are auto-registered (inactive until the sysop
+        confirms) the moment this menu -- or the admin list -- is
+        opened; see file_bulletins.sync_bulletin_rows()."""
+        from . import file_bulletins as _fb
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width as _ui_width
+
+        user = self.session.user or {}
+        user_level = int(user.get('access_level', 0) or 0)
+        is_admin = bool(user.get('is_admin'))
+
+        with _app().app_context():
+            from flask import current_app
+            _fb.sync_bulletin_rows(current_app.config)
+            rows = _fb.get_visible_bulletins(
+                current_app.config, user_level=user_level, is_admin=is_admin)
+            lb_rows = [{'title': r.title, 'filename': r.filename, 'path': p}
+                       for r, p in rows]
+
+        if not lb_rows:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(
+                banner('ANSI/File Bulletins', _ui_width(self.session)))
+            await self.session.write(
+                f"  {FG['gry']}(no file bulletins available){RESET}\r\n")
+            await self.session.read_line(
+                f"\r\n{FG['cyan']}Press Enter to go back...{RESET}")
+            return
+
+        _w = _ui_width(self.session)
+        _title_w = max(30, _w - 20)
+
+        async def render_header():
+            await self.session.write(banner('ANSI/File Bulletins', _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'#':>3}  {'Title':<{_title_w}} {'File':<12}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
+
+        def render_row(idx, row, selected):
+            n_col = FG['wht'] if not selected else ''
+            return (f"  {FG['yel']}{idx + 1:>3}{RESET}  "
+                    f"{n_col}{row['title'][:_title_w]:<{_title_w}}{RESET} "
+                    f"{FG['gry']}{row['filename'][:12]:<12}{RESET}")
+
+        def render_hint(sel, total):
+            return (f"  {FG['cyan']}{sel + 1}/{total}{RESET}  "
+                    f"{FG['cyan']}Up/Dn PgUp/PgDn{RESET}=scroll  "
+                    f"{FG['cyan']}Enter{RESET}=read  "
+                    f"{FG['cyan']}Q{RESET}=back")
+
+        sel = 0
+        while True:
+            result = await self._rss_lightbar(
+                lb_rows, render_header, render_row, render_hint, initial_sel=sel)
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                sel = result[1]
+                row = lb_rows[sel]
+                await self._view_file_bulletin(row['title'], row['path'])
+
+    async def _view_file_bulletin(self, title, full_path):
+        """Read a real file and view it through the same CP437/ANSI-
+        aware pipeline (launch_aneview) used for FidoNet/terminal-
+        composed messages -- unlike _view_bulletin() above, this content
+        genuinely IS raw bytes from a file (classic BBS text or real
+        ANSI art), not web-authored Unicode, so the CP437 decode is
+        correct here rather than something to avoid."""
+        from . import file_bulletins as _fb
+        from .anedit import launch_aneview
+        try:
+            body = _fb.read_bulletin_body(full_path)
+        except OSError:
+            await self.session.write(
+                '\r\n\x1b[31mCould not read that file (it may have been removed).\x1b[0m\r\n')
+            await self.session.read_line('\r\nPress Enter...')
+            return
+        await launch_aneview(self.session, body, subject=title or '(untitled)')
+
     async def _page_text(self, body, title='', subtitle='', page_size=22):
         """Page through `body` one screenful at a time with a [MORE] prompt.
 
@@ -6141,6 +6229,7 @@ async def _show_main_v2(self):
             "║  E. Echomail (read)                      ║\r\n"
             "║  C. Compose Echomail                     ║\r\n"
             "║  F. File Library                         ║\r\n"
+            "║  A. ANSI/File Bulletins                  ║\r\n"
             "║  R. RSS News Reader                      ║\r\n"
             f"{ebooks_line}"
             "║  U. Who's Online                         ║\r\n"
@@ -6170,6 +6259,8 @@ async def _show_main_v2(self):
             await self.compose_echomail()
         elif choice == 'F':
             await self.list_files()
+        elif choice == 'A':
+            await self.list_file_bulletins()
         elif choice == 'R':
             await self.show_rss()
         elif choice == 'K' and ebooks_terminal_on:

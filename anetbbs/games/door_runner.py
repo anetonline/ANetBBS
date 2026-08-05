@@ -202,6 +202,80 @@ def _find_jsexec(game):
     return found if found and os.path.isfile(found) else None
 
 
+def _write_msgbase_ini_override(game, exec_dir):
+    """When a sysop has configured an InterBBS score-sharing area for
+    this door (Game.msgbase_area_id), write/update its own real
+    modopts.ini config file with `sub = <area tag>` before each launch --
+    Minesweeper's own real, documented config path (confirmed against
+    its own sysop docs, pasted directly by Jerry) for the same "syncdata"
+    override its own syncdata.js auto-detect would otherwise try to find
+    by scanning message areas. Using this path instead of building real
+    msg_area.sub enumeration is a deliberate, smaller-scoped choice --
+    see the design plan for why.
+
+    Applies to BOTH the real-jsexec path and the Node compat-shim
+    fallback -- this is the real Synchronet engine's own config
+    convention, not something specific to either runtime.
+
+    Read-modify-write: only ever touches the `sub` key in the
+    `[minesweeper]` section, preserving anything else a sysop may have
+    hand-edited in the same file. Best-effort -- any failure here (DB
+    unavailable, disk error) is logged and swallowed, never blocks the
+    door from launching; msgbase_area_id being unset at all is the
+    common case and returns immediately with no DB/disk touch.
+    """
+    area_id = getattr(game, 'msgbase_area_id', None)
+    if not area_id:
+        return
+    try:
+        import configparser
+        from flask import has_app_context
+
+        def _resolve_tag():
+            from ..models import EchoArea
+            area = EchoArea.query.get(area_id)
+            return area.tag if area else None
+
+        if has_app_context():
+            tag = _resolve_tag()
+        else:
+            # Same throwaway Flask+DB bootstrap used elsewhere in this
+            # file (play_door_game_telnet) -- _build_command can be
+            # called from contexts with no app context already pushed.
+            from flask import Flask
+            from anetbbs.config import get_config
+            _app = Flask(__name__)
+            _app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+            db.init_app(_app)
+            with _app.app_context():
+                tag = _resolve_tag()
+
+        if not tag:
+            logger.warning('msgbase_area_id=%s on game %s has no matching '
+                           'EchoArea (deleted?) -- skipping modopts.ini write',
+                           area_id, getattr(game, 'slug', '?'))
+            return
+
+        ini_path = os.path.join(exec_dir, 'modopts.ini')
+        parser = configparser.ConfigParser()
+        parser.optionxform = str  # preserve key case -- real Synchronet inis are case-sensitive
+        if os.path.isfile(ini_path):
+            try:
+                parser.read(ini_path)
+            except configparser.Error as exc:
+                logger.warning('modopts.ini at %s unparseable, rewriting: %s',
+                               ini_path, exc)
+        if not parser.has_section('minesweeper'):
+            parser.add_section('minesweeper')
+        parser.set('minesweeper', 'sub', tag)
+        os.makedirs(exec_dir, exist_ok=True)
+        with open(ini_path, 'w') as f:
+            parser.write(f)
+    except Exception as exc:
+        logger.warning('msgbase_area_id modopts.ini write failed for game %s: %s',
+                       getattr(game, 'slug', '?'), exc)
+
+
 def _find_mplc():
     """Locate Mystic's .mps Pascal compiler.
 
@@ -404,6 +478,12 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         if not script or not os.path.isfile(script):
             raise FileNotFoundError(f'Synchronet script not found: {script!r}')
 
+        # Applies to BOTH the jsexec and compat-shim paths below -- real
+        # Synchronet's own config convention, not shim-specific. No-op
+        # when Game.msgbase_area_id isn't set (the common case).
+        _write_msgbase_ini_override(
+            game, game.synchronet_exec_dir or os.path.dirname(script))
+
         # Prefer real Synchronet jsexec when it's available on the host —
         # stock Synchronet doors expect the real runtime (msg_area, bbs.exec,
         # File.iniGetValue, etc.). Our Node shim covers a useful subset but
@@ -432,12 +512,13 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         # declarations from the compat (like `var _path = require('path');`)
         # are visible inside functions defined in either half. Two separate
         # eval() calls don't share their top-level scope in node -e mode.
+        import json
         import tempfile
         try:
             with open(compat_path, 'r') as f:
                 compat_src = f.read()
-            with open(script, 'r') as f:
-                user_src = f.read()
+            if not os.path.isfile(script):
+                raise FileNotFoundError(f'Synchronet script not found: {script!r}')
         except OSError as exc:
             raise FileNotFoundError(f'Synchronet script read error: {exc}')
 
@@ -448,7 +529,24 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         marker = '// === Execute the actual game ==='
         if marker in compat_src:
             compat_src = compat_src.split(marker)[0]
-        # Wrap user script in a try/catch that:
+        # The door's own top-level script is run via the compat shim's own
+        # load() (NOT concatenated in as literal trailing statements) —
+        # load() runs code via vm.runInThisContext, so any bare top-level
+        # `var`/`function` the door declares (e.g. Bubble Boggle's
+        # boggle.js: `var root = js.exec_dir; ... load(root +
+        # "game.js");`) becomes a REAL globalThis property, visible to
+        # whatever the door itself subsequently load()s — exactly the
+        # same scoping load()'d files already get from each other. A
+        # single-file door (Chicken Delivery, LORD) behaves identically
+        # either way; a multi-file door where an entry script's own vars
+        # need to be visible to a file IT loads (Bubble Boggle) only
+        # works via this path — literal concatenation put the door's
+        # vars in the combined file's Node module-wrapper scope, which
+        # vm.runInThisContext-executed code (anything reached via
+        # load()) can't see at all. load() also applies
+        # _polyfillE4XForEach to the door's own source here, same as any
+        # other file it loads (needed for Bubble Boggle's game.js).
+        # Wrap in a try/catch that:
         #   1. writes the error to stdout AND stderr (PTY-visible in both)
         #   2. emits start/end markers to stderr so silent-exit failures (game
         #      runs to completion drawing nothing) are diagnosable
@@ -460,19 +558,35 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
             "// === User script: " + script + " ===\n"
             "// Synchronet doors commonly end with:\n"
             "//   if (typeof module === 'undefined' || !module.exports) { main(); }\n"
-            "// In Synchronet's JS runtime `module` is undefined so this fires.\n"
-            "// In Node, `module` exists AND `module.exports` defaults to {} (truthy),\n"
-            "// so the check is false and main() silently skips. Clear it so the\n"
-            "// Synchronet idiom works correctly here.\n"
-            "try { module.exports = null; } catch(e) {}\n"
+            "// Code run via load() (vm.runInThisContext) never sees Node's\n"
+            "// own `module` at all, so `typeof module` is naturally\n"
+            "// 'undefined' there and this idiom fires correctly with no\n"
+            "// special-casing needed.\n"
             "try {\n"
-            + user_src + "\n"
+            "  load(" + json.dumps(script) + ");\n"
             "} catch (e) {\n"
             "  var trace = (e && e.stack) ? e.stack : String(e);\n"
             "  var msg = '\\r\\n\\r\\n--- Door script error ---\\r\\n'\n"
             "          + trace\n"
             "          + '\\r\\n\\r\\nPress any key to return to BBS...';\n"
             "  process.stdout.write(msg);\n"
+            "  // The compat shim's own process.stdout.write is patched to\n"
+            "  // buffer writes and flush on the next event-loop tick (see\n"
+            "  // synchronet_compat.py's _flushStdoutNow doc comment) so\n"
+            "  // bursts of small console writes coalesce into one real\n"
+            "  // write(). The readSync() call below is a blocking syscall\n"
+            "  // that does NOT yield to the event loop at all -- without an\n"
+            "  // explicit flush here, this error message (and its 'Press\n"
+            "  // any key' prompt) never reaches the terminal before the\n"
+            "  // process blocks waiting for a keystroke nobody was ever\n"
+            "  // shown a reason to press, silently hanging instead of\n"
+            "  // showing the crash. Found live: Good Time Trivia's own\n"
+            "  // msg_area.sub gap (a real, separate shim bug) triggered an\n"
+            "  // uncaught exception that produced zero visible output and\n"
+            "  // an indefinitely blocked process -- this flush gap is what\n"
+            "  // hid it, and would have hidden the error message for ANY\n"
+            "  // door crash, not just this one.\n"
+            "  if (typeof _flushStdoutNow === 'function') { try { _flushStdoutNow(); } catch(_) {} }\n"
             "  // Also write the trace to logs/door-errors.log on the server\n"
             "  // so the sysop can diagnose without depending on the user to\n"
             "  // copy-paste. ANETBBS_DOOR_ERROR_LOG is set by door_runner.\n"
@@ -514,6 +628,28 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
             pass
         os.environ['ANETBBS_DOOR_ERROR_LOG'] = door_err_log
         os.environ['ANETBBS_DOOR_SLUG'] = (getattr(game, 'slug', '') or '').strip()
+
+        # anetbbs/games/sbbs_stubs/json-client.js (the drop-in replacement
+        # for Synchronet's real json-client.js -- see that file's own
+        # docstring) shells out to jsonrpc_client.py for the actual wire
+        # protocol, since there's no synchronous TCP primitive available
+        # inside the Node compat shim. It needs to know which Python
+        # interpreter to run (the same venv ANetBBS itself runs under, not
+        # whatever "python3" happens to resolve to on the host) and where
+        # jsonrpc_client.py actually lives -- both resolved once here
+        # rather than guessed from inside the JS environment.
+        import sys as _sys
+        os.environ['ANETBBS_JSONRPC_CLI_PYTHON'] = _sys.executable
+        os.environ['ANETBBS_JSONRPC_CLI_PATH'] = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'jsonrpc_client.py')
+        # Same reasoning, same pattern, for anetbbs/games/sbbs_stubs/http.js
+        # (the drop-in replacement for Synchronet's real http.js) shelling
+        # out to http_client.py -- no synchronous TCP primitive for it to
+        # build a real HTTPRequest/Socket on top of either. Reuses the same
+        # interpreter env var (selecting which python3 to run is not
+        # script-specific) with its own CLI path.
+        os.environ['ANETBBS_HTTP_CLI_PATH'] = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'http_client.py')
 
         # Per-door runtime state: doors that persist state (TW2's json-client,
         # etc.) must NOT write into the source tree — the source dir is owned
@@ -1732,6 +1868,46 @@ def terminate_session(session_id):
     _cleanup_session(session_id)
 
 
+async def _drain_stale_session_input(session, timeout=0.05):
+    """Discard whatever is ALREADY sitting in session.reader's buffer,
+    without waiting for genuinely new bytes.
+
+    Real bug found live bundling Minesweeper: every play_*() bridge below
+    starts forwarding session.reader bytes to a freshly-launched door/
+    remote-socket IMMEDIATELY, with nothing draining whatever was already
+    queued from the user's OWN menu navigation (the Enter keypress that
+    selected this game, a fast double-tap, terminal-echo artifacts,
+    etc). Those stale bytes get relayed into the door before it's even
+    finished starting up, and get consumed as its very first "keypress"
+    the instant it's ready to read. Minesweeper's own real, intentional
+    design (matching real Synchronet) treats a bare Q as an UNCONFIRMED
+    instant quit before the player's first move (confirmation only kicks
+    in once game.start is set), so a single stray byte that happened to
+    land on 'Q' silently ended the session before the player ever saw it
+    happen. Confirmed live: intermittent -- sometimes several real turns
+    were possible, sometimes the door exited within a fraction of a
+    second, exactly the signature of a race against however much was
+    queued at launch time, not a deterministic game-logic bug.
+
+    Not Minesweeper-specific -- any door/remote game with a consequential
+    unconfirmed single-keystroke action at its own startup is equally
+    exposed, so this is called from every bridge that hands session.reader
+    off to something new, not patched into any one door. Drains in a
+    short loop (not a single read) since a real leftover sequence (e.g.
+    an arrow key's multi-byte CSI code) can be more than one byte; stops
+    the moment nothing new arrives within `timeout`, matching the same
+    short-timeout drain pattern BBSSession.init_session already uses for
+    telnet negotiation leftovers."""
+    import asyncio
+    try:
+        while True:
+            pending = await asyncio.wait_for(session.reader.read(4096), timeout=timeout)
+            if not pending:
+                break
+    except (asyncio.TimeoutError, Exception):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Telnet/SSH/rlogin door game runner — bridges PTY <-> BBSSession reader/writer
 # ---------------------------------------------------------------------------
@@ -1816,6 +1992,10 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
         f"\r\nLaunching {game.name}...\r\n"
         f"  - Press Ctrl+] then 'q' to abort\r\n"
         f"  - {_idle_t}s of zero activity will auto-abort the door\r\n\r\n")
+
+    # See _drain_stale_session_input()'s own docstring -- real bug found
+    # live bundling Minesweeper (intermittent instant-quit race).
+    await _drain_stale_session_input(session)
 
     # Pump PTY output -> session writer
     async def _output_pump():
@@ -2199,6 +2379,13 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         await session.read_line("Press Enter...")
         return False
 
+    # See _drain_stale_session_input()'s own docstring -- real bug found
+    # live bundling Minesweeper (intermittent instant-quit race), same
+    # exposure here: whatever's left in session.reader from menu
+    # navigation would otherwise get relayed to the just-connected
+    # remote rlogin server as its first bytes.
+    await _drain_stale_session_input(session)
+
     abort_event = asyncio.Event()
 
     # Pump bytes from the rlogin socket -> the BBS user's terminal
@@ -2428,6 +2615,13 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
         await session.write(f"\r\nConnection failed: {exc}\r\n")
         await session.read_line("Press Enter...")
         return False
+
+    # See _drain_stale_session_input()'s own docstring -- real bug found
+    # live bundling Minesweeper (intermittent instant-quit race), same
+    # exposure here: whatever's left in session.reader from menu
+    # navigation would otherwise get relayed to the just-connected
+    # remote telnet server as its first bytes.
+    await _drain_stale_session_input(session)
 
     iac = TelnetIACFilter()
     abort_event = asyncio.Event()
@@ -2681,6 +2875,13 @@ async def play_dos_game_telnet(game, user, session, bbs_name='ANetBBS',
         return False
 
     sock = bridge._dos_sock
+
+    # See _drain_stale_session_input()'s own docstring -- real bug found
+    # live bundling Minesweeper (intermittent instant-quit race). Lower
+    # exposure here (DOSBox's own boot sequence naturally absorbs stray
+    # keystrokes during its long startup), but cheap and consistent to
+    # apply the same defense at the same point every other bridge does.
+    await _drain_stale_session_input(session)
 
     async def _output_pump():
         # Bridge socket -> session writer

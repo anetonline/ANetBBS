@@ -272,6 +272,13 @@
                 <small style="color:#007700;">Path to Synchronet stdlib (frame.js, etc.)</small>
             </div>
         </div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-6">
+                {{ form.msgbase_area_id.label(class="form-label") }}
+                {{ form.msgbase_area_id(class="form-control") }}
+                <small style="color:#007700;">Only for doors that call real Synchronet MsgBase (e.g. Minesweeper's InterBBS DOVE-Net/FidoNet score sharing) — leave as "None" for every other door</small>
+            </div>
+        </div>
     </div>
 
     <!-- In-Browser DOS Game (js-dos) -->

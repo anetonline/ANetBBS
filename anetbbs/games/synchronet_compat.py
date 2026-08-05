@@ -6,6 +6,7 @@ Generates a Node.js wrapper script that provides Synchronet's JS API objects
 so that Synchronet .js door games can run on ANetBBS via PTY + xterm.js.
 """
 import os
+import sys
 import tempfile
 
 # Template for the compatibility wrapper script injected before the game JS.
@@ -121,9 +122,50 @@ if (typeof Array.prototype.toSource !== 'function') {
 // (each char = one byte 0-255) and emitted as raw bytes. This catches all
 // call sites — console.print, console.write, putmsg, gotoxy, the various
 // ANSI escapes, plus anything in load()'d helpers that writes directly.
+//
+// Also buffers: a single "logical" screen update (e.g. one frame.js
+// Display.cycle() flush) is frequently dozens of separate tiny
+// console.write() calls (one gotoxy+char per changed cell) rather than
+// one combined write. Sending each as its own write()/syscall means a
+// real remote connection with any latency can deliver and paint a
+// screen update only PARTIALLY complete -- confirmed as the leading
+// explanation for Synchronetris's live "bleeding blocks" reports after
+// extensive log analysis ruled out every application-level ordering bug
+// (every write was provably correct and in the right order; the gap is
+// in how many separate pieces it gets split into over the wire, not
+// what gets sent). Buffering everything written during one burst of
+// synchronous JS execution and flushing it as ONE combined write closes
+// that window without changing what's sent, only how it's packaged.
+//
+// CRITICAL: deferring the actual write blindly (e.g. always via
+// process.nextTick) would break the extremely common "print a prompt,
+// then block reading a key" pattern -- readSync() is a real blocking
+// syscall that does NOT yield to the event loop, so a nextTick-deferred
+// prompt would never actually reach the screen before the read blocks,
+// leaving the user staring at nothing. _flushStdoutNow() is called
+// explicitly, synchronously, at every blocking stdin-read call site in
+// this file (see _readKey, _readLine, Queue.prototype.read/poll) to
+// guarantee anything buffered lands before any read can block.
+var _stdoutPending = [];
+var _stdoutFlushScheduled = false;
+function _flushStdoutNow() {
+    _stdoutFlushScheduled = false;
+    if (_stdoutPending.length === 0) return;
+    var chunks = _stdoutPending;
+    _stdoutPending = [];
+    var buf = (chunks.length === 1) ? chunks[0][0] : Buffer.concat(chunks.map(function (c) { return c[0]; }));
+    var origWriteFn = _stdoutPatchedOrigWrite;
+    origWriteFn(buf, function () {
+        for (var i = 0; i < chunks.length; i++) {
+            if (chunks[i][1]) chunks[i][1]();
+        }
+    });
+}
+var _stdoutPatchedOrigWrite = process.stdout.write.bind(process.stdout);
 (function _patchStdoutForCP437() {
-    var _origWrite = process.stdout.write.bind(process.stdout);
     process.stdout.write = function(chunk, encoding, cb) {
+        if (typeof encoding === 'function') { cb = encoding; }
+        var buf;
         if (typeof chunk === 'string') {
             // Translate Synchronet Ctrl-A colour codes here so callers that
             // bypass console.* (dd_lightbar_menu, printfile, raw load()'d
@@ -131,24 +173,26 @@ if (typeof Array.prototype.toSource !== 'function') {
             if (chunk.indexOf('\x01') >= 0 && typeof _translateCtrlA === 'function') {
                 chunk = _translateCtrlA(chunk);
             }
-            // CP437 high bytes → binary buffer (each char = 1 byte 0-255).
-            for (var i = 0; i < chunk.length; i++) {
-                if (chunk.charCodeAt(i) > 127) {
-                    return _origWrite(Buffer.from(chunk, 'binary'),
-                                      typeof encoding === 'function' ? encoding : cb);
-                }
-            }
+            buf = Buffer.from(chunk, 'binary');
         } else if (Buffer.isBuffer(chunk)) {
             // bbs.menu reads files as 'binary' (string) but other helpers
             // may pass Buffer directly. Translate Ctrl-A in raw bytes too.
             if (chunk.indexOf(0x01) >= 0 && typeof _translateCtrlA === 'function') {
                 var s = chunk.toString('binary');
                 s = _translateCtrlA(s);
-                return _origWrite(Buffer.from(s, 'binary'),
-                                  typeof encoding === 'function' ? encoding : cb);
+                buf = Buffer.from(s, 'binary');
+            } else {
+                buf = chunk;
             }
+        } else {
+            buf = Buffer.from(String(chunk), 'binary');
         }
-        return _origWrite(chunk, encoding, cb);
+        _stdoutPending.push([buf, cb]);
+        if (!_stdoutFlushScheduled) {
+            _stdoutFlushScheduled = true;
+            process.nextTick(_flushStdoutNow);
+        }
+        return true;
     };
 })();
 
@@ -164,6 +208,7 @@ function _readKey(timeoutMs) {
     // (rounded up to the nearest 100ms) and return '' on timeout. inkey
     // depends on this — without it, mouse_getkey hangs after ESC waiting
     // for the next byte that may never arrive (bare ESC press).
+    _flushStdoutNow();
     try {
         var buf = Buffer.alloc(1);
         if (timeoutMs && timeoutMs > 0) {
@@ -183,11 +228,65 @@ function _readKey(timeoutMs) {
     } catch(e) { return ''; }
 }
 
-function _readLine(maxlen) {
-    var buf = '';
+// Synchronet maps terminal CSI / SS3 escape sequences (real arrow/
+// Home/End/PgUp/PgDn/Ins/Del keys) to single-byte control codes
+// (Ctrl-^=Up, Ctrl-J=Down, etc. -- see key_defs.js) before a door ever
+// sees them. Doors (and shared libraries like tree.js's lightbar
+// navigation) compare the RESULT of console.inkey()/getkey() against
+// those single-byte KEY_* constants, never against the raw \x1b[A wire
+// bytes. Originally only getkey() did this translation -- inkey() just
+// returned the bare first byte, so a real terminal's arrow-key press
+// (which always starts with a lone \x1b) looked EXACTLY like a plain
+// Escape keypress to any door using inkey() (the more common of the
+// two -- e.g. chickendelivery.js's own main loop, and tree.js's
+// getcmd()). Confirmed live: pressing an arrow key during a real
+// Chicken Delivery session acted exactly like pressing Escape (its
+// quit-confirmation popup fired), and the menu's up/down navigation
+// didn't respond to arrows at all -- both symptoms of the same root
+// cause. Factored out so both getkey() and inkey() share one
+// implementation instead of only one of them being correct.
+function _resolveKey(k) {
+    if (k !== '\x1b') return k;
+    var b = _readKey(50);
+    if (!b) return k;       // bare ESC
+    var prefix = k + b;
+    var c = (b === '[' || b === 'O') ? _readKey(50) : '';
+    if (b === 'O' || b === '[') {
+        if (c === 'A') return '\x1e';   // KEY_UP
+        if (c === 'B') return '\x0a';   // KEY_DOWN
+        if (c === 'C') return '\x06';   // KEY_RIGHT
+        if (c === 'D') return '\x1d';   // KEY_LEFT
+        if (c === 'H') return '\x02';   // KEY_HOME
+        if (c === 'F') return '\x05';   // KEY_END
+        // Tilde sequences for Home/End/PgUp/PgDn/Ins/Del
+        if (c >= '0' && c <= '9') {
+            var seq = c;
+            while (seq.length < 6) {
+                var d = _readKey(50);
+                if (!d) break;
+                seq += d;
+                if (d === '~' || (d >= 'A' && d <= 'Z')) break;
+            }
+            if (seq === '1~' || seq === '7~') return '\x02';  // HOME
+            if (seq === '2~') return '\x16';                  // INSERT
+            if (seq === '3~') return '\x7f';                  // DEL
+            if (seq === '4~' || seq === '8~') return '\x05';  // END
+            if (seq === '5~') return '\x10';                  // PGUP
+            if (seq === '6~') return '\x0e';                  // PGDN
+            return prefix + seq;   // unrecognised — pass through
+        }
+        return prefix + (c || '');
+    }
+    return prefix;
+}
+
+function _readLine(maxlen, initial) {
+    var buf = initial || '';
+    if (buf) process.stdout.write(buf);
     while (buf.length < (maxlen || 80)) {
         try {
             var b = Buffer.alloc(1);
+            _flushStdoutNow();
             _fs.readSync(0, b, 0, 1);
             var ch = b.toString('utf8');
             if (ch === '\r' || ch === '\n') {
@@ -309,54 +408,107 @@ var console = {
     },
     clear:      function(attr) { process.stdout.write('\033[2J\033[H'); },
     cleartoeol: function() { process.stdout.write('\033[K'); },
-    gotoxy:     function(x,y) { process.stdout.write('\033[' + y + ';' + x + 'H'); },
-    home:       function() { process.stdout.write('\033[H'); },
-    getkey:     function(mode, timeout) {
-        var k = _readKey(timeout || 0);
-        if (k !== '\x1b') return k;
-        var b = _readKey(50);
-        if (!b) return k;       // bare ESC
-        // Synchronet maps terminal CSI / SS3 sequences to single-byte
-        // control codes (Ctrl-^=Up, Ctrl-J=Down, etc.) — see key_defs.js.
-        // dd_lightbar compares lastUserInput against those single-byte
-        // KEY_* constants, not the raw \x1b[A wire bytes. Translate here
-        // so KEY_UP / KEY_DOWN / KEY_HOME etc. all match.
-        var prefix = k + b;
-        var c = (b === '[' || b === 'O') ? _readKey(50) : '';
-        if (b === 'O' || b === '[') {
-            if (c === 'A') return '\x1e';   // KEY_UP
-            if (c === 'B') return '\x0a';   // KEY_DOWN
-            if (c === 'C') return '\x06';   // KEY_RIGHT
-            if (c === 'D') return '\x1d';   // KEY_LEFT
-            if (c === 'H') return '\x02';   // KEY_HOME
-            if (c === 'F') return '\x05';   // KEY_END
-            // Tilde sequences for Home/End/PgUp/PgDn/Ins/Del
-            if (c >= '0' && c <= '9') {
-                var seq = c;
-                while (seq.length < 6) {
-                    var d = _readKey(50);
-                    if (!d) break;
-                    seq += d;
-                    if (d === '~' || (d >= 'A' && d <= 'Z')) break;
-                }
-                if (seq === '1~' || seq === '7~') return '\x02';  // HOME
-                if (seq === '2~') return '\x16';                  // INSERT
-                if (seq === '3~') return '\x7f';                  // DEL
-                if (seq === '4~' || seq === '8~') return '\x05';  // END
-                if (seq === '5~') return '\x10';                  // PGUP
-                if (seq === '6~') return '\x0e';                  // PGDN
-                return prefix + seq;   // unrecognised — pass through
-            }
-            return prefix + (c || '');
+    // Real Synchronet console.clearline() (js_console.cpp) -- distinct
+    // from cleartoeol() (cursor-to-end-of-line only): clears the
+    // ENTIRE current line without moving the cursor (ANSI CSI 2K, vs
+    // cleartoeol's bare CSI K which defaults to the 0-parameter
+    // "cursor to end" form). Was completely missing from this shim --
+    // found live auditing Star Stocks: `console.gotoxy(1,24);
+    // console.clearline();` in processSelection(), the core "build an
+    // outpost" gameplay flow, not an edge case.
+    clearline:  function() { process.stdout.write('\033[2K'); },
+    // Real Synchronet's console.gotoxy (confirmed against js_console.cpp's
+    // js_gotoxy) accepts EITHER a single {x,y} object OR two separate
+    // numbers -- inputline.js's own gotoxy() helper calls the object
+    // form (console.gotoxy(position)), which this shim never supported,
+    // producing a garbled "\x1b[undefined;[object Object]H" escape
+    // sequence instead of a real cursor move.
+    gotoxy:     function(x,y) {
+        if (x !== null && typeof x === 'object') {
+            y = x.y;
+            x = x.x;
         }
-        return prefix;
+        process.stdout.write('\033[' + y + ';' + x + 'H');
+    },
+    home:       function() { process.stdout.write('\033[H'); },
+    // Real Synchronet's `mode` argument (confirmed against js_console.cpp,
+    // which threads it straight through to the real terminal-level
+    // inkey()/getkey()) is a bitmask including K_UPPER -- force the
+    // returned key uppercase. This shim silently discarded `mode`
+    // entirely, so any door comparing a K_UPPER'd inkey()/getkey()
+    // result against an uppercase literal (e.g. Synchronetris's real
+    // "Game Over" screen: `while (console.inkey(K_UPPER|...) != "Q");`)
+    // could never match on a real lowercase keypress -- confirmed live:
+    // pressing Q at Game Over did nothing, a total softlock, since the
+    // loop just kept comparing a lowercase "q" against "Q" forever.
+    getkey:     function(mode, timeout) {
+        var k = _resolveKey(_readKey(timeout || 0));
+        if (mode & K_UPPER) k = k.toUpperCase();
+        return k;
     },
     // Synchronet's signature: console.getstr(maxlen, mode) — first arg is the
     // max length (a number), NOT a prompt. Old version wrote arg1 to stdout
     // which crashed when callers passed a number (Bot Wars: console.getstr(2)).
-    getstr:     function(maxlen, mode) {
-        if (typeof maxlen !== 'number') maxlen = 80;
-        return _readLine(maxlen);
+    //
+    // Real Synchronet also has a genuine 3-arg overload,
+    // console.getstr(str, maxlen, mode), where `str` (a STRING, not a
+    // number) is pre-filled/editable initial text -- confirmed real,
+    // not a door bug: Star Trek's setup() calls
+    // `console.getstr("USS ", 30, K_LINE|K_EDIT)` to let the player
+    // type a ship name after a fixed "USS " prefix. Without this, the
+    // first arg would fail the `typeof maxlen !== 'number'` check
+    // above, silently falling back to maxlen=80 with the "USS "
+    // prefix dropped entirely and the real intended maxlen (30, the
+    // door's actual SECOND argument) discarded too -- not a crash,
+    // but a real behavioral gap (no prefix shown, wrong length limit).
+    // Real crash^Wmisbehavior found live on Jerry's Pi3 playing
+    // Thirstyville: typing "160" (meaning $1.60) into the price
+    // prompt (`console.getstr("0.00", 8, K_EDIT|K_LINE)`) produced
+    // "0.00160" -- the OLD behavior below (documented right above this
+    // comment before the fix): the prefix was written once and a
+    // FRESH read started after it with no way to backspace into it,
+    // so typed digits always landed appended at the end, no matter
+    // what. That's the correct behavior for a genuinely fixed,
+    // non-editable prefix (Star Trek's "USS " ship-name prompt, which
+    // stays working identically below since nothing changes for a
+    // caller that never backspaces past their own typed suffix), but
+    // K_EDIT's real, documented meaning (sbbsdefs.js: "Edit string
+    // passed") is that the WHOLE string is a live, backspace-into-able
+    // buffer -- exactly what Thirstyville's price/quantity prompts
+    // need (pre-filled "0.00" or a previous order qty that the player
+    // is meant to actually overwrite). Now routes K_EDIT calls through
+    // _readLine's own initial-buffer support (backspace already
+    // correctly deletes from any buffer contents, regardless of
+    // whether they were pre-filled or freshly typed) instead of bare
+    // string concatenation.
+    getstr:     function(strOrMaxlen, maxlenOrMode, mode) {
+        var initial = '';
+        var maxlen = 80;
+        var editable = false;
+        if (typeof strOrMaxlen === 'string') {
+            initial = strOrMaxlen;
+            maxlen = (typeof maxlenOrMode === 'number') ? maxlenOrMode : 80;
+            editable = !!(mode & K_EDIT);
+        } else {
+            maxlen = (typeof strOrMaxlen === 'number') ? strOrMaxlen : 80;
+        }
+        if (editable) return _readLine(Math.max(maxlen, initial.length), initial);
+        if (initial) process.stdout.write(initial);
+        return initial + _readLine(Math.max(0, maxlen - initial.length));
+    },
+    // Real Synchronet signature (js_console.cpp's js_getnum, confirmed
+    // against the real C source): console.getnum(maxnum, dflt) reads a
+    // number, returning `dflt` (default 0) if the user just presses
+    // Enter with nothing typed. Real Synchronet's underlying
+    // sbbs->getnum() also digit-filters and range-clamps interactively
+    // as the user types -- not replicated here since every current
+    // caller (Bubble Boggle's changeDate()) already does its own
+    // separate range check on the returned value.
+    getnum:     function(maxnum, dflt) {
+        var s = _readLine(10);
+        if (!s) return (typeof dflt === 'number') ? dflt : 0;
+        var n = parseInt(s, 10);
+        return isNaN(n) ? ((typeof dflt === 'number') ? dflt : 0) : n;
     },
     yesno:      function(prompt) {
         process.stdout.write(String(prompt) + ' (Y/N)? ');
@@ -383,12 +535,47 @@ var console = {
     // sequence. We can't ask the wire, so claim a recent SyncTERM (>=1189)
     // — that suppresses DSR's "old terminal" warning for SyncTERM users.
     cterm_version: 1190,
-    inkey:      function(mode, timeout) { return _readKey(timeout || 0); },
-    // strlen — count visible characters (strip ANSI escape sequences)
+    // See getkey()'s own comment just above -- same missing K_UPPER
+    // handling, same real bug class.
+    inkey:      function(mode, timeout) {
+        var k = _resolveKey(_readKey(timeout || 0));
+        if (mode & K_UPPER) k = k.toUpperCase();
+        return k;
+    },
+    // Synchronet console.getkeys(keys, maxnum, mode) is actually
+    // multi-purpose in the real implementation (a numeric-input mode
+    // as well as a restricted-keyset mode -- see js_console.cpp's
+    // js_getkeys) -- only the keyset form is implemented here, since
+    // that's the only one any currently-bundled door calls (e.g.
+    // chickendelivery.js's `console.getkeys("YN")` for its quit-
+    // confirmation popup). Blocks until a key matching `keys`
+    // (case-insensitively) is pressed, returns it uppercased --
+    // matches K_UPPER, the real default mode.
+    getkeys:    function(keys, maxnum, mode) {
+        var allowed = String(keys || '').toUpperCase();
+        if (!allowed) return '';
+        for (;;) {
+            var k = _readKey(0).toUpperCase();
+            if (allowed.indexOf(k) !== -1) return k;
+        }
+    },
+    // strlen — count visible characters (strip ANSI escape sequences AND
+    // Synchronet's own native \x01-prefixed Ctrl-A color codes -- e.g.
+    // \x01y for bright yellow, matching the same \x01(.) pairing
+    // _translateCtrlA already handles for actual output elsewhere in
+    // this file). Missing the Ctrl-A stripping here was a real bug
+    // found live: Synchronetris's own getMsgFrame() centers a message
+    // frame via `Math.floor((frame.width - console.strlen(line)) / 2)`
+    // -- a line with several \x01 codes (e.g.
+    // "\1n\1yPress [\1hQ\1n\1y] to exit") had its computed width
+    // inflated by the invisible code bytes, past the actual frame
+    // width, producing a genuinely negative x coordinate and crashing
+    // `new Frame(x, ...)` on the door's own real "Game Over" screen.
     strlen:     function(str) {
         var s = String(str || '');
         // Strip CSI sequences (\x1b[...m, \x1b[...H, etc) and bare ESC sequences
         s = s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\x1b./g, '');
+        s = s.replace(/\x01./g, '');
         return s.length;
     },
     // printfile — read a file, expand Synchronet @CODE@ tokens, print it.
@@ -441,7 +628,25 @@ var console = {
     screen_columns: 80,
     screen_rows: 25,
     autoterm: 0x1E,        // ANSI + COLOR + RIP + PETSCII bits — claim everything
-    attributes: 7,
+    // Real Synchronet's console.attributes is a live property: ASSIGNING
+    // to it immediately changes the terminal's active color (that's the
+    // documented, real convention doors use to set color -- e.g.
+    // frame.js's Display.__drawChar__ does `console.attributes = attr;`
+    // before writing each character). A plain data property here would
+    // silently accept the assignment and do nothing -- confirmed live:
+    // Chicken Delivery loaded and played correctly but rendered entirely
+    // in monochrome, every character painted with whatever the terminal's
+    // last real SGR state happened to be, since nothing ever told it to
+    // change. Backed by _attributesValue so reads (`var save =
+    // console.attributes`, e.g. chickendelivery.js's own init()/cleanUp())
+    // still return the real current value, not just fire-and-forget the
+    // ANSI code with nothing to read back.
+    _attributesValue: 7,
+    get attributes() { return this._attributesValue; },
+    set attributes(v) {
+        this._attributesValue = (typeof v === 'number') ? v : 7;
+        process.stdout.write(this.ansi(this._attributesValue));
+    },
     line_counter: 0,
     // Synchronet directional aliases (sbbs_console.js calls these names,
     // not cursor_*). Right/left/up/down with optional N — default 1.
@@ -452,6 +657,51 @@ var console = {
     // ctrlkey_passthru — bitmask of Ctrl-keys NOT to intercept. Doors set
     // it to 0x7fffffff (let everything through). We just remember the value.
     ctrlkey_passthru: 0,
+    // console.status — real Synchronet bitfield (CON_* flags from
+    // sbbsdefs.js, e.g. CON_MOUSE_CLK_PASSTHRU/CON_MOUSE_REL_PASSTHRU).
+    // Minesweeper's mouse_enable() does `console.status |= mouse_passthru`
+    // / `&= ~mouse_passthru` and saves/restores it via js.on_exit. This
+    // shim never actually enables real terminal-side xterm mouse
+    // tracking (no escape code anywhere turns it on -- the one door path
+    // that would, cterm/ansiterm's graphics mode, is itself gated behind
+    // a cterm_version this shim reports as too old to reach, so it's
+    // never sent), so a real terminal never emits mouse byte sequences
+    // in the first place and this bitfield has no behavior to back —
+    // just remember whatever value doors read/write, same treatment as
+    // ctrlkey_passthru above.
+    status: 0,
+    // console.mouse_mode — same story as status above: real Synchronet
+    // uses this to toggle terminal mouse-reporting escape codes; this
+    // shim has no real mouse wire protocol to drive, so it's a plain
+    // read/write value doors can save (`orig_mouse = console.mouse_mode`)
+    // and restore on exit without erroring.
+    mouse_mode: 0,
+    // console.creturn() — real Synchronet: writes a bare carriage return
+    // (cursor to column 1, no linefeed), distinct from crlf(). Used by
+    // Minesweeper between redraws of the same status line.
+    creturn: function() { process.stdout.write('\r'); },
+    // console.clear_hotspots() — real Synchronet clears any mouse
+    // click-regions registered via console.add_hotspot(). This shim
+    // never implements hotspot registration (no bundled door calls
+    // add_hotspot; Minesweeper only ever calls clear_hotspots, never
+    // add_hotspot), so there is nothing to clear — safe no-op.
+    clear_hotspots: function() {},
+    // console.getbyte(timeout) — real Synchronet: reads ONE raw,
+    // untranslated byte (0-255) directly from input, or -1 if none
+    // arrives within `timeout` ms. Distinct from getkey/inkey, which
+    // resolve multi-byte ANSI sequences into KEY_* constants — getbyte
+    // is for callers doing their own low-level framing (Minesweeper's
+    // read_apc() reassembles a SyncTERM APC response byte-by-byte). Only
+    // reachable when console.cterm_version >= 1316
+    // (cterm_version_supports_copy_buffers); this shim reports 1190
+    // (see cterm_version below), so that call path is never actually
+    // exercised here — implemented to real semantics regardless, for
+    // correctness and any future caller.
+    getbyte: function(timeout) {
+        var k = _readKey(timeout || 0);
+        if (k === '') return -1;
+        return k.charCodeAt(0) & 0xFF;
+    },
     getlines_remaining: 24,
     question: '',
     pause: function() { this.writeln('\r\n[Press any key to continue]'); this.getkey(); },
@@ -466,8 +716,6 @@ var console = {
     // attr(n) — set current colour attribute. Synchronet doors call this
     // frequently (e.g. console.attr(LIGHTGRAY)). Emit the equivalent ANSI.
     attr: function(n) {
-        var ansi = this.ansi(typeof n === 'number' ? n : 7);
-        process.stdout.write(ansi);
         this.attributes = (typeof n === 'number') ? n : 7;
     },
     // (strlen, mnemonics, printfile defined earlier — DO NOT redeclare here:
@@ -503,7 +751,11 @@ var user = {
     phone:   '',
     address: '',
     zipcode: '',
-    birthdate: '1990-01-01',
+    // Real ANetBBS user data (User.date_of_birth), wired in for
+    // bbs.compare_ars()'s AGE check -- see that function's own
+    // comment. Empty string when unknown/unset, which AGE checks
+    // deliberately treat as failing rather than passing.
+    birthdate: '{USER_BIRTHDATE}',
     sex:     '?',
     rest:    0,
     security: {
@@ -514,6 +766,17 @@ var user = {
         exempt: 0xffffffff,
         restrictions: 0,
     },
+    // Real Synchronet property (js_user.cpp's USER_PROP_IS_SYSOP,
+    // confirmed as `security.level >= 90`, the stock SYSOP ARS
+    // threshold) -- was completely missing from this shim. Found
+    // auditing Good Time Trivia: `doSysopMenu()` starts with
+    // `if (!user.is_sysop) return;` -- with this undefined, `!undefined`
+    // is true, so the real sysop's own admin menu (clear scores,
+    // remove a player/BBS from the shared scoreboard) silently did
+    // nothing no matter who was logged in. Not door-specific -- any
+    // door gating sysop-only features on this real property had the
+    // same silent lockout.
+    is_sysop: {SECURITY_LEVEL} >= 90,
     stats: {
         total_logons: {LOGIN_COUNT},
         total_posts: 0,
@@ -542,7 +805,25 @@ var user = {
     xedit: '',
     tmpext: 'ZIP',
     rows: 24, cols: 80,
+    // Real Synchronet property (confirmed against js_user.cpp's
+    // USER_PROP_IPADDR / "ip_address") -- json-chat.js's JSONChat
+    // constructor reads this off a User instance to build a Nick.
+    ip_address: '{USER_IP}',
 };
+
+// Real Synchronet global constructor -- `new User(number)` looks up
+// ANY user's record by number (js_user.cpp). This compat shim is
+// single-session (one Node process per door session, no live
+// cross-user database access -- the same constraint already
+// documented for user.stats.*/system.username() elsewhere in this
+// file), so this always resolves to the current session's own `user`
+// object regardless of the number requested -- correct for every real
+// call site found so far (json-chat.js's JSONChat.connect() always
+// passes the CURRENT user's own number), and a safe, honest
+// simplification for any future caller (matches the same "returns
+// current-user-shaped data regardless of the argument" precedent
+// system.username(n) already established).
+function User(number) { return user; }
 
 // === server object — Synchronet's host metadata ===
 // dorkit picks sbbs mode iff bbs+server+client+user+console are all
@@ -611,6 +892,67 @@ var bbs = {
     },
     log_str:     function (msg) { process.stderr.write('[BBS LOG] ' + String(msg) + '\n'); },
     log_key:     function () {},
+    // Real Synchronet bbs.compare_ars(arsString) (js_bbs.cpp) -- was
+    // completely missing from this shim. Found live bundling Good Time
+    // Trivia: its qa/dirty_minds.qa category carries a real "AGE 18"
+    // ARS restriction, and getQACategoriesAndFilenames() calls
+    // `bbs.compare_ars(sectionARS)` unconditionally for any category
+    // with an ARS string set -- "TypeError: bbs.compare_ars is not a
+    // function" the first time a real player tried to play at all
+    // (question categories are enumerated before the menu, not lazily
+    // per-category).
+    //
+    // Full Synchronet ARS grammar (LEVEL/AGE/GROUP/FLAG/EXEMPT/REST,
+    // boolean AND/OR/NOT combinations) is out of scope -- this handles
+    // the common real-world single-condition cases this project
+    // actually has real backing data for: SYSOP and LEVEL n against
+    // user.is_sysop/user.security.level (both real, wired from the
+    // actual logged-in ANetBBS user), and AGE n against the real
+    // user's actual date_of_birth (User.date_of_birth, newly wired
+    // in via {USER_BIRTHDATE} below -- previously the `user.birthdate`
+    // field was a hardcoded fake '1990-01-01' that would have silently
+    // passed every AGE check regardless of who was actually logged
+    // in). AGE is deliberately conservative: an unknown/unset
+    // birthdate FAILS the check rather than passing it, since this is
+    // gating actual adult content, not a cosmetic feature -- the
+    // opposite of this shim's usual "permissive by default" stance for
+    // properties with no real backing data, and deliberate here.
+    // Any other/unrecognized token in the ARS string is ignored
+    // (treated as satisfied) rather than aborting the whole check,
+    // matching this shim's general "don't block real users on an ARS
+    // feature we can't fully evaluate" philosophy for anything we
+    // don't have real data for.
+    compare_ars: function (arsString) {
+        var s = String(arsString == null ? '' : arsString).trim();
+        if (!s) return true;
+        var tokens = s.split(/\s+/);
+        var result = true;
+        for (var i = 0; i < tokens.length; i++) {
+            var tok = tokens[i].toUpperCase();
+            if (tok === 'SYSOP') {
+                result = result && !!user.is_sysop;
+            } else if (tok === 'LEVEL' && i + 1 < tokens.length && /^\d+$/.test(tokens[i+1])) {
+                result = result && (user.security.level >= parseInt(tokens[++i], 10));
+            } else if (tok === 'AGE' && i + 1 < tokens.length && /^\d+$/.test(tokens[i+1])) {
+                var minAge = parseInt(tokens[++i], 10);
+                var bday = String(user.birthdate || '');
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(bday)) {
+                    result = false;
+                } else {
+                    var parts = bday.split('-').map(Number);
+                    var birth = new Date(parts[0], parts[1] - 1, parts[2]);
+                    var now = new Date();
+                    var age = now.getFullYear() - birth.getFullYear();
+                    var m = now.getMonth() - birth.getMonth();
+                    if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
+                    result = result && (age >= minAge);
+                }
+            }
+            // Unrecognized tokens (GROUP/FLAG/EXEMPT/REST/etc, and any
+            // argument already consumed above) are silently skipped.
+        }
+        return result;
+    },
     exec:        function (cmdline) {
         var cp = _node_require('child_process');
         try { cp.execSync(String(cmdline), {stdio: 'inherit'}); } catch (e) {}
@@ -625,8 +967,47 @@ var bbs = {
     mods: {},
 };
 
+// Real Synchronet's Socket class is a native object with a handful of
+// static address-family constants directly on the constructor
+// (confirmed by sockdefs.js's own real, unmodified source: `if
+// (Socket.PF_INET !== undefined) var PF_INET = Socket.PF_INET;` and
+// three more just like it). This project deliberately never
+// implements a real Socket -- there's no synchronous TCP primitive in
+// Node, and both json-client.js and http.js's own shim replacements
+// exist specifically to avoid needing one (see those files' own
+// docstrings) -- but sockdefs.js unconditionally reads `Socket.PF_INET`
+// at load time regardless of whether anything ever constructs a real
+// socket, so any door merely loading that file (a very standard
+// pattern for anything network-adjacent, e.g. Jeopardized's own
+// `require('sockdefs.js', 'SOCK_STREAM')`) crashed immediately with
+// "Socket is not defined" before ever reaching its own logic -- no
+// prior bundled door happened to load sockdefs.js, so this never
+// surfaced until now. Just enough of a stub (the 4 static constants
+// sockdefs.js actually reads, standard POSIX values used by every
+// real socket API including Synchronet's own C source) to let that
+// file load without crashing -- not a real, constructible Socket.
+var Socket = { PF_INET: 2, PF_INET6: 10, AF_INET: 2, AF_INET6: 10 };
+
 // === system object ===
 var system = {
+    // Real Synchronet global (js_system.cpp's SYS_PROP_TIMER, backed by
+    // xp_timer() -- confirmed against the real C source, not guessed):
+    // a monotonic, continuously-advancing clock in FRACTIONAL SECONDS
+    // (CLOCK_MONOTONIC under the hood), read fresh on every access, NOT
+    // a value computed once at startup. This is the primitive real
+    // Synchronet doors use for all animation/movement timing --
+    // sprite.js's own movement gating is `system.timer - this.lastMove
+    // > this.ini.speed` throughout. Missing entirely meant
+    // `system.timer` read as `undefined` on every access, so that
+    // comparison was always `NaN > speed` (always false) -- sprites
+    // and enemies never moved at all, confirmed live: menu navigation
+    // and the HUD countdown (driven by a completely separate timer,
+    // event-timer.js's Timer class) both worked fine, but gameplay
+    // itself was a frozen screen. A getter (not a plain number) is
+    // required -- code re-reads system.timer many times per frame
+    // expecting a fresh value each time, the exact same class of bug
+    // as console.attributes needing a real setter.
+    get timer() { return Number(process.hrtime.bigint()) / 1e9; },
     name:       '{BBS_NAME}',
     operator:   'Sysop',
     nodes:      4,
@@ -656,6 +1037,18 @@ var system = {
     matchuser: function (s) { return 0; },
     matchuserdata: function () { return 0; },
     username: function (n) { return '{USERNAME}'; },
+    // Real Synchronet's telegram/node-message system (a short instant
+    // message left for a user on another node, flagged via
+    // node_list[n].misc's NODE_MSGW/NODE_NMSG bits -- confirmed in
+    // nodedefs.js). Since node_list above is a static, never-updated
+    // stub (single-BBS, single-node -- those bits never actually get
+    // set), real doors checking `node_list[...].misc & NODE_MSGW`
+    // before calling these should never actually reach them in
+    // practice -- defensive stubs anyway, matching this project's
+    // "never crash on a technically-reachable path" standard, rather
+    // than assuming that guard is airtight for every caller.
+    get_telegram: function (userNum) { return ''; },
+    get_node_message: function (nodeNum) { return ''; },
     // Synchronet exposes system.exec(cmd) for shell invocations. DSR uses
     // it to convert images to sixel via ImageMagick. Capture stderr (don't
     // inherit) so warnings don't bleed onto the user's terminal mid-image.
@@ -747,6 +1140,11 @@ var js = {
     startup_dir:  '{GAME_DIR}/',
     stubs_dir:    '{STUBS_DIR}/',
     sbbs_exec:    '{EXEC_DIR}/',
+    // Not a real Synchronet js.* property -- internal to this shim only,
+    // same treatment as js.stubs_dir above. MsgBase (see its own class
+    // definition) shells out to this via spawnSync.
+    msgbase_bridge: '{MSGBASE_BRIDGE}',
+    python_bin:     '{PYTHON_BIN}',
     terminated:   false,
     branch_limit: 100000,
     auto_terminate: false,
@@ -757,6 +1155,16 @@ var js = {
     load_path_list: [],
     global: (typeof globalThis !== 'undefined') ? globalThis : (function(){return this;})(),
     gc: function () { /* node has its own GC; no-op */ },
+    // Real Synchronet global (js_global.cpp's js_flatten_string) --
+    // an internal SpiderMonkey perf hint that forces a "rope" string
+    // (built from repeated concatenation) into one flat buffer; has
+    // no JS-observable effect of its own. Gap found live: our own
+    // sbbs_stubs/http.js (copied verbatim from the real vendored
+    // source) calls `js.flatten_string(this.body)` in ReadBody() --
+    // crashed with "js.flatten_string is not a function" the first
+    // time any door actually exercised a real HTTP response body
+    // (Jeopardized's func.js answer-checking call).
+    flatten_string: function (str) { return str; },
     // Register a string of JS code (Synchronet's flavor) OR a function to
     // run at process exit. Doors typically pass a string of code to undo
     // their setup (e.g. `js.on_exit("js.load_path_list.shift()")`).
@@ -807,7 +1215,18 @@ var argc = 0;
 
 // === Stub areas ===
 var file_area = { dir: {} };
-var msg_area  = { grp: {} };
+// Real crash found live bundling Good Time Trivia: `msg_area.sub` was
+// completely absent (only `.grp` existed) -- any door code checking
+// `msg_area.sub.hasOwnProperty(code)` or `msg_area.sub[code]` (a
+// normal, defensive "does this sub-board exist" check, not an exotic
+// call) threw "Cannot read properties of undefined (reading
+// 'hasOwnProperty')" instead of correctly reporting "no sub-boards
+// configured" the way a real empty stub should. This shim
+// deliberately doesn't wire up real message-base sub-board data
+// (documented architecture decision, docs/15-synchronet-compat.md) --
+// but an empty object is the honest way to represent that, not a
+// missing property that crashes the first thing that touches it.
+var msg_area  = { grp: {}, sub: {} };
 
 // === Queue — Synchronet inter-script FIFO ===
 // In real Synchronet, Queues are named IPC channels: two `new Queue("foo")`
@@ -846,6 +1265,7 @@ Queue.prototype.read = function () {
         // that go read()-without-poll don't hang the whole game on EOF.
         try {
             var b = Buffer.alloc(1);
+            _flushStdoutNow();
             var n = _fs.readSync(0, b, 0, 1, null);
             if (n > 0) {
                 return String.fromCharCode(b[0]);
@@ -888,6 +1308,36 @@ function file_size(p) {
 function file_date(p) {
     try { return Math.floor(_fs.statSync(p).mtime.getTime() / 1000); }
     catch (e) { return 0; }
+}
+// Real Synchronet global (js_global.cpp's js_cfgfname, backed by
+// iniFileName() in xpdev/ini_file.c -- confirmed against the real C
+// source, not guessed): resolves a per-machine config override before
+// falling back to the plain path/filename -- tries
+// "path/name.hostname.domain.ext", then "path/name.hostname.ext",
+// then plain "path/name.ext". Bubble Boggle's boggle.js uses this for
+// its own server.ini: `new File(file_cfgname(root, "server.ini"))`.
+// The hostname-override mechanism is a real but rarely-used sysop
+// feature (a per-machine config variant) -- correctness matters more
+// than optimizing for the common case, since silently resolving to
+// the wrong file would be a confusing, hard-to-diagnose bug.
+function file_cfgname(path, fname) {
+    var dir = String(path == null ? '' : path);
+    if (dir && !/[\/\\]$/.test(dir)) dir += '/';
+    var base = String(fname == null ? '' : fname);
+    var ext = '';
+    var dot = base.lastIndexOf('.');
+    if (dot > 0) { ext = base.slice(dot); base = base.slice(0, dot); }
+    try {
+        var hostname = _node_require('os').hostname();
+        var candidate = dir + base + '.' + hostname + ext;
+        if (_fs.existsSync(candidate)) return candidate;
+        var short = hostname.split('.')[0];
+        if (short !== hostname) {
+            candidate = dir + base + '.' + short + ext;
+            if (_fs.existsSync(candidate)) return candidate;
+        }
+    } catch (e) {}
+    return dir + base + ext;
 }
 function file_remove(p) {
     try { _fs.unlinkSync(p); return true; } catch (e) { return false; }
@@ -1018,6 +1468,18 @@ function mswait(ms) {
     var end = Date.now() + n;
     while (Date.now() < end) { /* spin */ }
 }
+// `sleep()` -- real Synchronet global, entirely missing from this shim
+// until found live bundling Minesweeper (`ReferenceError: sleep is not
+// defined`, its own show_image()/play() pacing calls). Real vendored
+// sbbs_stubs/sbbslist_lib.js (`sleep(1000)`) and Minesweeper's own
+// calls (`sleep(options.boom_delay)` etc, defaults 500-1500) both
+// consistently pass millisecond-scale integers, not fractional
+// seconds -- an 1000-SECOND (16+ minute) pause between an explosion
+// and its reveal makes no sense for either door, so real Synchronet's
+// sleep() evidently accepts milliseconds here despite the name reading
+// like a seconds-based API. Implemented as a plain alias to the
+// already-real mswait().
+function sleep(ms) { return mswait(ms); }
 
 // === File object ===
 function File(filename) {
@@ -1042,6 +1504,26 @@ File.prototype.open = function(mode) {
     this._can_write = (raw.indexOf('w') >= 0
                     || raw.indexOf('a') >= 0
                     || raw.indexOf('+') >= 0);
+    // Real bug found live bundling Minesweeper: open() itself never
+    // touches the filesystem for a write-capable mode (the real write
+    // only happens later, in whichever write/close/_writeIni method
+    // actually runs) -- but none of those later writeFileSync calls
+    // create missing parent directories either, so a door's very FIRST
+    // save into a not-yet-existing directory (userprops.js's own
+    // `data/user/<id>.ini`, a per-install path that genuinely doesn't
+    // exist until something writes to it) always failed with ENOENT,
+    // silently, every single time -- Minesweeper's own selector/
+    // highlight/difficulty prefs, for instance, could never actually
+    // persist. Real Synchronet's File API creates missing directories
+    // on open-for-write, matching ordinary fopen()-with-mkdir-p
+    // semantics doors are written to expect. Fixed once here (not at
+    // each individual write call site) so every File-based save benefits,
+    // not just this one door -- same reasoning as file_touch()'s own
+    // mkdirSync a few hundred lines up.
+    if (this._can_write) {
+        try { _fs.mkdirSync(_path.dirname(this.name), {recursive: true}); }
+        catch (e) {}
+    }
     try {
         if (truncate) {
             this._content = '';
@@ -1068,11 +1550,31 @@ File.prototype.open = function(mode) {
         // for one). When a missing/unreadable file makes them later choke
         // on undefined ini keys, the silent fail makes diagnosis impossible.
         // Log to stderr so the wrapper's traceback shows what path failed.
-        try {
-            process.stderr.write('[BBS] File.open(' + JSON.stringify(this.name) +
-                                 ', ' + JSON.stringify(mode) + ') failed: ' +
-                                 (e && e.message ? e.message : e) + '\n');
-        } catch(_) {}
+        //
+        // EXCEPT: a plain read-only open() of a file that simply doesn't
+        // exist yet (ENOENT) is not a diagnosable problem -- it's the
+        // completely normal, expected "no config saved yet" case every
+        // real Synchronet door already handles gracefully by falling
+        // back to defaults (confirmed live: Minesweeper's own modopts.js
+        // lookup and winners.jsonl read both hit this on every fresh
+        // install, forever, since a stock install never seeds sample
+        // config/winner data). Real bug found live bundling Minesweeper:
+        // this logged unconditionally, so a sysop's very first launch of
+        // ANY door with no prior saved state produced a wall of scary-
+        // looking "failed" messages for something that was never actually
+        // wrong. Write-mode failures (this._can_write) still always log
+        // -- after the File.open() mkdirSync fix a few lines up, those
+        // should essentially never legitimately happen anymore, so one
+        // showing up now is exactly the kind of real problem this
+        // logging exists to surface.
+        var _isBenignMissingRead = !this._can_write && e && e.code === 'ENOENT';
+        if (!_isBenignMissingRead) {
+            try {
+                process.stderr.write('[BBS] File.open(' + JSON.stringify(this.name) +
+                                     ', ' + JSON.stringify(mode) + ') failed: ' +
+                                     (e && e.message ? e.message : e) + '\n');
+            } catch(_) {}
+        }
         return false;
     }
 };
@@ -1275,7 +1777,20 @@ File.prototype.write = function(str, len) {
 File.prototype.writeln = function(str) {
     return this.write(String(str == null ? '' : str) + '\n');
 };
-File.prototype.eof = function() { return this._pos >= this._content.length; };
+// Real Synchronet's File.eof is a PROPERTY, not a method -- same class
+// of fix as .position/.length just above. A door checking `while
+// (!dict.eof)` (Bubble Boggle's own dictionary scanner) against a
+// bare function reference would always see it as truthy (a function
+// object, not the boolean it's meant to be), so `!dict.eof` was
+// always false and the loop would spin forever reading past EOF.
+Object.defineProperty(File.prototype, 'eof', {
+    get: function () { return this._pos >= this._content.length; },
+    enumerable: true,
+    configurable: true,
+});
+// rewind() -- seek back to the start of the file. Bubble Boggle's
+// dictionary scanner calls this at the top of every lookup.
+File.prototype.rewind = function() { this._pos = 0; return true; };
 // Synchronet's File API has these — without them, doors that use the standard
 // f.readAll().join("") JSON-load idiom (Bot Wars) silently fail to load saves.
 File.prototype.readAll = function() {
@@ -1448,6 +1963,820 @@ File.prototype.iniSetObject = function(section, obj) {
 // another file that `require()`s it back, or scripts that load themselves).
 var _load_cache = {};
 var _load_depth = 0;
+// Real bug found live bundling Minesweeper: show_image() calls
+// `var Graphic = load({}, "graphic.js");` on EVERY invocation (once
+// per image shown -- welcome/mine/winner/loser/boom), not just once.
+// The FIRST call executes the file fresh and correctly trusts its
+// completion value (a real reference to globalThis.Graphic); every
+// SUBSEQUENT call is a cache hit (no re-execution, so there's no
+// fresh `result` to evaluate at all) and fell back to returning the
+// bare `scope` wrapper object instead -- `new Graphic(...)` on the
+// SECOND image shown threw "Graphic is not a constructor", even
+// though the exact same call worked fine the first time. Remembers,
+// per fullpath, the GLOBAL NAME a trusted completion value referred
+// to (not the value itself, in case it's ever replaced) so a cache
+// hit can re-derive the same real reference instead of only ever
+// getting it right once per file per process.
+var _load_result_name_cache = {};
+
+// Some real Synchronet doors use SpiderMonkey/E4X's `for each (var x
+// in y)` syntax (value iteration) in their OWN source, not just in
+// vendored libraries -- Bubble Boggle's game.js (loaded via load()
+// from boggle.js's own top-level code) has one real occurrence in
+// storeRoundWinner(). A JS parse-time SyntaxError kills the ENTIRE
+// file regardless of whether that branch ever executes. Doors stay
+// byte-for-byte unmodified on disk (this project's own rule) --
+// applied here, to EVERY file load() reads (which now includes a
+// door's own top-level entry script too -- see door_runner.py's
+// _build_command(), which runs it via `load(realScriptPath)` rather
+// than concatenating it in literally, specifically so a door's own
+// top-level vars are real globalThis properties visible to whatever
+// IT load()s, not just module-wrapper-scoped local variables). Also a
+// no-op safety net for the six vendored files already hand-fixed with
+// Object.keys() iteration for readability (running this here too finds
+// nothing left to rewrite in them). Rewrites just the `for (...)`
+// header via a drop-in replacement so the loop body (braced or not) is
+// never touched -- avoids brace-balancing entirely.
+// Finds `function <name>(...) {` (tolerant of whitespace/newlines
+// before the brace) and inserts `insertText` immediately before that
+// SAME function's own closing brace -- located purely structurally,
+// via balanced-brace scanning from the opening brace onward, never by
+// matching any of the function's own body text. A no-op (returns
+// `source` completely unchanged) if the function name isn't found at
+// all or its braces don't balance, so this degrades safely rather
+// than corrupting anything if a door's file changes in the future.
+function _insertBeforeFunctionEnd(source, functionName, insertText) {
+    var sigRe = new RegExp('function\\s+' + functionName + '\\s*\\([^)]*\\)\\s*\\{');
+    var m = sigRe.exec(source);
+    if (!m) return source;
+    var i = m.index + m[0].length; // just past the opening brace
+    var depth = 1;
+    while (i < source.length && depth > 0) {
+        if (source[i] === '{') depth++;
+        else if (source[i] === '}') { depth--; if (depth === 0) break; }
+        i++;
+    }
+    if (depth !== 0) return source;
+    return source.slice(0, i) + insertText + source.slice(i);
+}
+
+// Symmetric twin of _insertBeforeFunctionEnd() above: same name+brace
+// matching, but inserts right after the OPENING brace instead of
+// right before the matching closing one -- i.e. as the very first
+// statement in the function body, before any of the function's own
+// code runs. Needed for guarding a crash that happens partway through
+// a function's own body (appending code at the end can't help there,
+// since it never runs until the function already returned normally --
+// confirmed live: updateStatus()'s own
+// `data.games[gameNumber].players[profile.name]` crashed on a still-
+// corrupted record long before an end-of-function repair would ever
+// have been reached).
+function _insertAfterFunctionStart(source, functionName, insertText) {
+    var sigRe = new RegExp('function\\s+' + functionName + '\\s*\\([^)]*\\)\\s*\\{');
+    var m = sigRe.exec(source);
+    if (!m) return source;
+    var i = m.index + m[0].length; // just past the opening brace
+    return source.slice(0, i) + insertText + source.slice(i);
+}
+
+// Real, confirmed bugs in specific bundled doors' OWN source, fixed
+// here at load() time (applied to the in-memory code only, via
+// _insertBeforeFunctionEnd() above) rather than by editing the door's
+// file on disk -- so a sysop who drops in a fresh copy of the
+// original door package still gets the fix automatically, and the
+// door files themselves stay byte-for-byte unmodified (this project's
+// own long-standing rule for every bundled door). Add future
+// door-specific patches here following the same pattern: match on the
+// loaded file's own path, then insert a call, never touch or store
+// any of the door's own code text.
+function _applyKnownDoorFixes(fullpath, source) {
+    if (/[\/\\]sbbs_stubs[\/\\]dorkit[\/\\]graphic\.js$/.test(fullpath)) {
+        // Real bug found live bundling Minesweeper: the flat
+        // sbbs_stubs/graphic.js copy deliberately ends with a bare
+        // `Graphic;` ("Leave as last line for convenient load() usage")
+        // specifically so `var Graphic = load({}, "graphic.js")`
+        // (Bubble Boggle's and Minesweeper's own real calling
+        // convention) gets the real constructor back as load()'s
+        // completion value. This dorkit/ copy -- which load()'s own
+        // path search prefers over the flat one, same as the
+        // cga_defs.js BG_HIGH/BG_BRIGHT split -- has no such trailer;
+        // its real last statement is an ordinary prototype-method
+        // assignment, so (after the fix that stops trusting an
+        // assignment's incidental value as a real "result", see load()
+        // itself) it fell back to returning `scope` instead --
+        // `new Graphic(...)` then threw "Graphic is not a constructor"
+        // since `scope` is a plain object, not the constructor. Adding
+        // the same trailer this file's own flat sibling already uses
+        // fixes it the same documented way, rather than special-casing
+        // the caller.
+        source += '\nGraphic;\n';
+    }
+    if (/[\/\\]sbbs_stubs[\/\\]frame\.js$/.test(fullpath)) {
+        // Real bug found live bundling FatFish: a gray box appeared
+        // over the top-left quadrant of the lake, exactly the size
+        // and position of the door's own hidden shopFrame (created
+        // and .clear(BG_LIGHTGRAY)'d at startup but never .open()'d
+        // until the player presses the shop key) -- the shop frame's
+        // gray fill was showing THROUGH the lake terrain it should
+        // have been completely covered by. Root-caused with a direct
+        // minimal reproduction (two overlapping sibling frames, the
+        // smaller/later one filled first, then the larger/earlier one
+        // .top()'d -- confirmed the .top() call has ZERO effect on
+        // which one actually renders on top under this shim), not
+        // guessed.
+        //
+        // Real cause: Display.prototype.__getTopCanvas__ (this real,
+        // unmodified vendored file's own compositing logic) picks the
+        // topmost frame by iterating `Object.keys(this.__properties__
+        // .canvas)` and keeping the LAST match -- relying on
+        // .top()/.bottom() reordering that key's position via a
+        // delete-then-reinsert. That works fine for ordinary string
+        // keys, but frame.id (Frame's constructor, confirmed above:
+        // `this.__properties__.id = parent.display.nextID`, a bare
+        // incrementing integer) becomes a canonical array-index-like
+        // object key once used to key the `canvas` object -- and
+        // per the ECMAScript spec, engines MUST enumerate integer-
+        // index keys in ascending numeric order, unconditionally,
+        // regardless of insertion or reinsertion order. Node's V8
+        // follows this spec rule strictly. FatFish's shopFrame is
+        // created (and thus gets its id) AFTER lakeFrame, so its key
+        // is always enumerated last -- meaning it always "wins" the
+        // topmost-canvas check, no matter how many times lakeFrame is
+        // .top()'d. (Whatever engine real Synchronet actually embeds
+        // must not enforce that same integer-key ordering rule, or
+        // this code wouldn't work there either -- confirmed via
+        // Jerry's own real game server screenshot showing correct
+        // rendering with no gray box.)
+        //
+        // This isn't FatFish-specific -- ANY door with overlapping
+        // sibling frames that relies on .top()/.bottom() to control
+        // which one is visible would hit the same bug under this
+        // shim, so the fix patches frame.js itself (matched by its
+        // own fullpath, the same mechanism used for door-specific
+        // fixes elsewhere in this function) rather than working
+        // around it per-door. Display.prototype.open/close/top/
+        // bottom/__getTopCanvas__ are all `X.prototype.Y = function
+        // (){}` property assignments, not plain named function
+        // declarations -- not directly targetable by
+        // _insertBeforeFunctionEnd/_insertAfterFunctionStart (same
+        // limitation noted elsewhere in this function) -- so this
+        // wraps all five from OUTSIDE, appended after the whole file
+        // (already real, unmodified, fully defined by this point)
+        // finishes loading. Maintains an explicit insertion-ordered
+        // array (canvasOrder) as the real source of z-order truth,
+        // completely sidestepping the integer-key enumeration
+        // problem, while leaving the original per-cell inclusion
+        // test (`c.frame.parent == undefined || c.hasData(x,y)`)
+        // untouched -- only the ORDER canvases are visited in changes.
+        source += (
+            '\n(function () {\n' +
+            '\tvar __origOpen = Display.prototype.open;\n' +
+            '\tvar __origClose = Display.prototype.close;\n' +
+            '\tvar __origTop = Display.prototype.top;\n' +
+            '\tvar __origBottom = Display.prototype.bottom;\n' +
+            '\tfunction __remove(order, id) {\n' +
+            '\t\tvar idx = order.indexOf(id);\n' +
+            '\t\tif (idx !== -1) order.splice(idx, 1);\n' +
+            '\t}\n' +
+            '\tDisplay.prototype.open = function (frame) {\n' +
+            '\t\t__origOpen.call(this, frame);\n' +
+            '\t\tif (!this.__properties__.canvasOrder) this.__properties__.canvasOrder = [];\n' +
+            '\t\t__remove(this.__properties__.canvasOrder, frame.id);\n' +
+            '\t\tthis.__properties__.canvasOrder.push(frame.id);\n' +
+            '\t};\n' +
+            '\tDisplay.prototype.close = function (frame) {\n' +
+            '\t\t__origClose.call(this, frame);\n' +
+            '\t\tif (this.__properties__.canvasOrder) __remove(this.__properties__.canvasOrder, frame.id);\n' +
+            '\t};\n' +
+            '\tDisplay.prototype.top = function (frame) {\n' +
+            '\t\t__origTop.call(this, frame);\n' +
+            '\t\tif (!this.__properties__.canvasOrder) this.__properties__.canvasOrder = [];\n' +
+            '\t\t__remove(this.__properties__.canvasOrder, frame.id);\n' +
+            '\t\tthis.__properties__.canvasOrder.push(frame.id);\n' +
+            '\t};\n' +
+            '\tDisplay.prototype.bottom = function (frame) {\n' +
+            '\t\t__origBottom.call(this, frame);\n' +
+            '\t\tif (!this.__properties__.canvasOrder) this.__properties__.canvasOrder = [];\n' +
+            '\t\t__remove(this.__properties__.canvasOrder, frame.id);\n' +
+            '\t\tthis.__properties__.canvasOrder.unshift(frame.id);\n' +
+            '\t};\n' +
+            '\tDisplay.prototype.__getTopCanvas__ = function (x, y) {\n' +
+            '\t\tvar top = undefined;\n' +
+            '\t\tvar order = this.__properties__.canvasOrder || Object.keys(this.__properties__.canvas);\n' +
+            '\t\tfor (var __i = 0; __i < order.length; __i++) {\n' +
+            '\t\t\tvar c = this.__properties__.canvas[order[__i]];\n' +
+            '\t\t\tif (!c) continue;\n' +
+            '\t\t\tif (c.frame.parent == undefined || c.hasData(x, y)) top = c;\n' +
+            '\t\t}\n' +
+            '\t\treturn top;\n' +
+            '\t};\n' +
+            '})();\n'
+        );
+    }
+    if (/[\/\\]sbbs_doors[\/\\]synchronetris[\/\\]game\.js$/.test(fullpath)) {
+        // drawBoard() writes every board cell via Frame.setData(), but
+        // setData() only updates the frame's internal buffer -- an
+        // explicit draw()/cycle() call afterward is what actually
+        // paints the change to the screen (confirmed against this
+        // project's own vendored frame.js: draw()/cycle() are the only
+        // methods that flush). Missing that call meant the board
+        // never visually updated after a completed line was cleared
+        // (getLines() calls drawBoard() expecting it to repaint) --
+        // confirmed live: lines never visually disappeared even though
+        // the underlying board data was correctly cleared.
+        //
+        // draw() was tried first and made things visibly worse: it
+        // calls refresh() (Display.updateFrame(), an unconditional
+        // repaint of every cell in the frame from its own buffer)
+        // before cycle(). The falling piece is rendered by
+        // drawCurrent()/unDrawCurrent() via direct gotoxy()+putmsg(),
+        // bypassing the frame's setData()-backed buffer entirely, so
+        // that full repaint stomps on the falling piece wherever it
+        // overlaps board cells the buffer still thinks are empty --
+        // confirmed live. cycle() alone (Display.cycle(), confirmed
+        // against frame.js) only repaints the specific cells present
+        // in __getUpdateList__() -- i.e. only cells actually touched
+        // by setData() -- so it can't touch the separately-drawn
+        // falling piece at all.
+        source = _insertBeforeFunctionEnd(source, 'drawBoard', '\n\tplayer.stack.cycle();\n');
+        // setPiece() writes a newly-locked piece straight into
+        // player.grid but never calls drawBoard() at all, so a locked
+        // piece never appears on screen until something else (a line
+        // clear, another player's move) happens to trigger a redraw --
+        // confirmed against the real Synchronet server source
+        // (json-db.js) that this can't have been relying on receiving
+        // an echo of the player's own "SET" push notification, since
+        // real Synchronet explicitly never echoes a write back to
+        // whoever sent it. Confirmed live: a locked piece would appear
+        // to vanish, or a later piece would appear to visually merge
+        // with a stack that hadn't actually updated on screen.
+        source = _insertBeforeFunctionEnd(source, 'setPiece', '\n\tdrawBoard(localPlayer);\n');
+        // setPiece() only ever sends a "SET" notification, which
+        // carries no grid data at all (packageData()'s "SET" case is
+        // completely empty -- confirmed reading it). The actual board
+        // state only ever gets sent via a separate "GRID" message,
+        // which getLines() only sends when a line actually clears --
+        // meaning in multiplayer, other players never see your locked
+        // stack update at all unless you happen to clear a line on
+        // that exact piece. A real structural gap in the door's own
+        // network sync, not just a rendering-timing issue. Always
+        // sending GRID alongside SET closes it.
+        source = _insertBeforeFunctionEnd(source, 'setPiece', '\n\tsend("GRID");\n');
+        // setPiece() also never calls unDrawCurrent() before locking
+        // the piece into player.grid -- it writes the grid data,
+        // deletes currentPiece, then (via the fix directly above)
+        // calls drawBoard(), which repaints the WHOLE grid including
+        // the just-landed cells with the same character/color the
+        // falling piece was already rendered with there, so setData()
+        // treats it as no visual change and never re-marks it dirty.
+        // That's fine IF the piece's own falling-render was already
+        // correctly flushed to the real screen by then -- but nothing
+        // guarantees that: a hard drop (fullDrop()) calls move()
+        // rapidly in a tight loop with zero cycle() calls in between,
+        // so the piece's final raw-drawn position can still be
+        // sitting unflushed at the exact moment it locks in. Confirmed
+        // live: hard-dropping left a ghost of the just-dropped piece
+        // rendered overlapping/next to where it actually landed.
+        // Erasing it explicitly via the same raw mechanism it was
+        // drawn with, before the grid write and drawBoard() sweep,
+        // closes this regardless of the flush-timing details above --
+        // unDrawCurrent() needs currentPiece to still be set, so it
+        // has to run at the START of setPiece(), before the existing
+        // end-of-function patch deletes it.
+        source = _insertAfterFunctionStart(source, 'setPiece', '\n\tunDrawCurrent(localPlayer);\n');
+        // loadGarbage() (receiving garbage lines from another player
+        // clearing rows) shift()s the top row off player.grid and
+        // push()es a new garbage row at the bottom -- every existing
+        // row's on-screen meaning changes -- but never calls
+        // drawBoard() itself (it only reaches drawBoard() indirectly,
+        // via setPiece(), on the separate branch where the falling
+        // piece interferes with the shift and has to be locked in
+        // place early). On the normal branch the stack's own visible
+        // pixels are never resynced to the shifted grid data at all,
+        // leaving stale blocks on screen exactly where they used to
+        // be -- confirmed live: a lone block rendered disconnected
+        // from the rest of the stack after other players caused a
+        // garbage shift. Same fix class as drawBoard()/setPiece()
+        // above -- append the missing flush.
+        source = _insertBeforeFunctionEnd(source, 'loadGarbage', '\n\tdrawBoard(localPlayer);\n');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]synchronetris[\/\\]lobby\.js$/.test(fullpath)) {
+        // processUpdate()'s WRITE handler walks a dotted update
+        // location (e.g. "games.5.players.Bob") and auto-vivifies any
+        // missing intermediate object as a bare {} -- but a real Game
+        // object's identity depends on its own .gameNumber property,
+        // which a bare {} never gets. This only bites a client that
+        // receives a nested-path update for a game it never received
+        // the FULL creation write for (its own initial snapshot read,
+        // loadGames(), happens once at door-script load time, before
+        // subscribe() registers -- any game created by another player
+        // in that window is invisible to the snapshot and only ever
+        // arrives here as later nested-path fragments). Confirmed
+        // live: a lobby tile rendered "Game undef" / "[finished]",
+        // and joinGame() -> getOpenGame() returned that same bare
+        // entry's gameNumber (undefined), logging "Error finding game
+        // number" (isNaN(undefined) is true) instead of joining.
+        // Repairing gameNumber from the object's own store key (this
+        // door's own convention throughout -- data.games[gnum] is
+        // always keyed by that same gnum) after every processed
+        // update is a general, cheap self-heal, not a full parse of
+        // update semantics.
+        //
+        // Also backfills .players -- confirmed live this gameNumber-
+        // only repair wasn't enough on its own: fixing the display
+        // (the tile now correctly showed "Game 1 [finished]" instead
+        // of "Game undef") let the door consider it a real, joinable
+        // game again (getOpenGame() doesn't exclude FINISHED, only
+        // PLAYING/SYNCING), and joinGame()'s own
+        // `data.games[gnum].players[profile.name] = player` crashed
+        // with "Cannot set properties of undefined" the moment
+        // someone actually tried to join it, since .players was
+        // still missing. A real Game object always has both
+        // (tetrisobj.js's own Game() constructor: gameNumber AND
+        // players together) -- repairing one without the other just
+        // traded one crash for a different one further down the same
+        // code path.
+        source = _insertBeforeFunctionEnd(source, 'processUpdate',
+            '\n\tfor (var __gk in data.games) {\n' +
+            '\t\tif (data.games[__gk] && data.games[__gk].gameNumber === undefined)\n' +
+            '\t\t\tdata.games[__gk].gameNumber = parseInt(__gk, 10);\n' +
+            '\t\tif (data.games[__gk] && !data.games[__gk].players)\n' +
+            '\t\t\tdata.games[__gk].players = {};\n' +
+            '\t}\n');
+        // Neither self-heal above can reach joinGame()'s OWN fresh
+        // client.read(game_id,"games."+gnum) call -- that fetches
+        // directly from the server every time, bypassing the local
+        // (already-repaired) data.games cache entirely, so a
+        // still-corrupted server-side record comes back corrupted
+        // every time regardless of the fixes above. Confirmed live:
+        // getOpenGame() doesn't exclude FINISHED games (only
+        // PLAYING/SYNCING), so a dead-but-still-FINISHED game (now
+        // correctly showing "Game 1" instead of "Game undef" thanks
+        // to the gameNumber repair) got offered as joinable, and
+        // `data.games[gnum].players[profile.name] = player` crashed
+        // on the still-missing .players the moment someone actually
+        // tried to join it. Since that crash is mid-function (inside
+        // joinGame() itself), it can't be healed after the fact by
+        // appending code elsewhere -- appended code only runs once a
+        // function returns normally. Instead, wrap client.read ONCE
+        // at lobby startup (open() always runs before main()'s loop
+        // can ever reach joinGame()) so any FUTURE read of a
+        // "games.N" record is repaired the instant it comes back,
+        // covering this call site and any other read of the same
+        // corrupted record, not just this one crash.
+        source = _insertBeforeFunctionEnd(source, 'open',
+            '\n\t(function () {\n' +
+            '\t\tvar __origRead = client.read;\n' +
+            '\t\tclient.read = function (scope, location) {\n' +
+            '\t\t\tvar __r = __origRead.apply(client, arguments);\n' +
+            '\t\t\tif (__r && typeof __r === "object" && /^games\\.\\d+$/.test(String(location))) {\n' +
+            '\t\t\t\tvar __gn = parseInt(String(location).split(".")[1], 10);\n' +
+            '\t\t\t\tif (__r.gameNumber === undefined) __r.gameNumber = __gn;\n' +
+            '\t\t\t\tif (!__r.players) __r.players = {};\n' +
+            '\t\t\t}\n' +
+            '\t\t\treturn __r;\n' +
+            '\t\t};\n' +
+            '\t})();\n');
+        // Real Pi3 crash, same corruption class yet again but the
+        // WORST-placed instance of it: updateStatus() is called
+        // SYNCHRONOUSLY from inside processUpdate()'s own WRITE case
+        // -- the SAME processUpdate() call that may have just
+        // auto-vivified data.games[gameNumber] as a bare {} a few
+        // lines earlier in that same switch statement, before ever
+        // reaching processUpdate()'s own appended end-of-function
+        // repair above. Confirmed live:
+        // `data.games[gameNumber].players[profile.name]` crashed
+        // with "Cannot read properties of undefined" -- an append-at-
+        // end patch can't reach this, since appended code only runs
+        // once the whole function returns, and this crash happens
+        // partway through the SAME processUpdate() call that invoked
+        // updateStatus(). Needs a guard at the very START of
+        // updateStatus() itself instead, via
+        // _insertAfterFunctionStart -- ahead of updateStatus()'s own
+        // existing `if(!data.games[gameNumber]) return false;` check,
+        // which already handles the game not existing at all but
+        // never accounted for it existing in a still-corrupted shape.
+        source = _insertAfterFunctionStart(source, 'updateStatus',
+            '\n\tif (data.games[gameNumber] && !data.games[gameNumber].players)\n' +
+            '\t\tdata.games[gameNumber].players = {};\n');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]synchronetris[\/\\]tetrisobj\.js$/.test(fullpath)) {
+        // Same corruption as processUpdate() above (a bare {} missing
+        // .gameNumber), but reached a different way: GameData's own
+        // this.loadGames() does the door's ONE-TIME initial bulk
+        // fetch (client.read(game_id,"games",1)) and assigns straight
+        // to this.games with no repair at all. The processUpdate()
+        // fix above only ever runs in response to a LATER incoming
+        // subscribe() push -- if a dead/abandoned game never gets
+        // touched by another update again (the common case for
+        // something already finished), that self-heal never gets a
+        // chance to fire and the corrupted entry from this initial
+        // fetch persists for the entire session. Confirmed live: the
+        // "Game undef" tile came back after a corrupted entry was
+        // cleared server-side and recurred from ordinary play, and
+        // persisted through a whole session with no further updates
+        // to repair it. this.loadGames() itself is an inline
+        // `this.loadGames=function(){...}` assignment, not a named
+        // function declaration this project's patch mechanism can
+        // target directly -- but it's always called synchronously
+        // from GameData's own constructor (a real named function),
+        // before that constructor returns, so appending the same
+        // repair there catches it right after the fetch completes.
+        source = _insertBeforeFunctionEnd(source, 'GameData',
+            '\n\tfor (var __gk in this.games) {\n' +
+            '\t\tif (this.games[__gk] && this.games[__gk].gameNumber === undefined)\n' +
+            '\t\t\tthis.games[__gk].gameNumber = parseInt(__gk, 10);\n' +
+            '\t}\n');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]jeopardized[\/\\]jeopardized\.js$/.test(fullpath)) {
+        // Real crash found live smoke-testing: any BRAND NEW player
+        // (anyone who's never played Jeopardized before -- confirmed
+        // this includes the sysop's own account, since existing
+        // players visible in the live message feed are the only ones
+        // with actual records) crashes immediately on selecting "Play"
+        // with "Cannot read properties of null (reading 'round')".
+        //
+        // Root cause, confirmed against the real server (a direct read
+        // for a nonexistent key returns {"data": null}, not an omitted
+        // field) and the real vendored client (sbbs_reference/
+        // json-client.js's own wait() returns packet.data completely
+        // raw, no null-to-undefined conversion): database.js's
+        // getUser()/getUserGameState() both check
+        // `typeof x === 'undefined'` to decide whether to create a
+        // fresh record for a new player -- but a missing key reads
+        // back as JS `null` (typeof 'object'), not `undefined`, so
+        // that check never catches it and the raw null gets returned
+        // straight through. This is a real bug in the door's own code
+        // that would happen identically on real Synchronet (the real
+        // client returns the exact same raw null), not a compat-shim
+        // gap -- confirmed by reading the real reference client, not
+        // guessed.
+        //
+        // getUser()/getUserGameState() are `this.NAME = function(){}`
+        // property assignments inside Database's own constructor (also
+        // itself a `var Database = function(settings){}` expression,
+        // not a plain named declaration this project's patch mechanism
+        // can target directly), and every path through both already
+        // ends in an explicit return -- appending repair code at
+        // either end is a no-op (dead code after an existing return).
+        // Neither can the door's own private addUser()/
+        // addUserGameState() helpers be called from outside; they're
+        // closure-scoped inside Database's constructor, never exposed
+        // on the instance. Wrapping both PUBLIC methods from
+        // initDatabase() (a real named function in THIS file, always
+        // called exactly once right after `database = new
+        // Database(...)` completes) and re-running the same create-if-
+        // missing sequence the door's own addUser()/addUserGameState()
+        // already do (write the 'input' event, then retry-read) via a
+        // fresh one-shot JSONClient -- database.getUserID() is a public
+        // method so the id itself doesn't need re-deriving -- is the
+        // only reachable fix point. The write payload shape below is
+        // server-side protocol, not creative door logic: confirmed
+        // directly from the door's own real addUser()/
+        // addUserGameState(), which is the only source for what the
+        // real json-service's 'input' handler actually expects.
+        source = _insertBeforeFunctionEnd(source, 'initDatabase',
+            '\n\t(function () {\n' +
+            '\t\tfunction __ensure(key, extra, path) {\n' +
+            '\t\t\tvar __client = new JSONClient(settings.JSONDB.host, settings.JSONDB.port);\n' +
+            '\t\t\t__client.write(settings.JSONDB.dbName, "input", { key: key, data: extra }, 2);\n' +
+            '\t\t\tvar __v;\n' +
+            '\t\t\tfor (var __n = 0; __n < settings.JSONDB.retries; __n++) {\n' +
+            '\t\t\t\tmswait(settings.JSONDB.retryDelay);\n' +
+            '\t\t\t\t__v = __client.read(settings.JSONDB.dbName, path, 1);\n' +
+            '\t\t\t\tif (__v !== null && typeof __v !== "undefined") break;\n' +
+            '\t\t\t}\n' +
+            '\t\t\treturn __v;\n' +
+            '\t\t}\n' +
+            '\t\tvar __origGetUser = database.getUser;\n' +
+            '\t\tdatabase.getUser = function (usr) {\n' +
+            '\t\t\tvar __r = __origGetUser.call(database, usr);\n' +
+            '\t\t\tif (__r !== null) return __r;\n' +
+            '\t\t\tvar __id = database.getUserID(usr);\n' +
+            '\t\t\treturn __ensure(\n' +
+            '\t\t\t\t"users",\n' +
+            '\t\t\t\t{ id: __id, alias: usr.alias, system: system.name },\n' +
+            '\t\t\t\t"users." + __id\n' +
+            '\t\t\t);\n' +
+            '\t\t};\n' +
+            '\t\tvar __origGetUserGameState = database.getUserGameState;\n' +
+            '\t\tdatabase.getUserGameState = function (usr) {\n' +
+            '\t\t\tvar __r = __origGetUserGameState.call(database, usr);\n' +
+            '\t\t\tif (__r !== null) return __r;\n' +
+            '\t\t\tvar __id = database.getUserID(usr);\n' +
+            '\t\t\treturn __ensure(\n' +
+            '\t\t\t\t"game.users",\n' +
+            '\t\t\t\t{ id: __id },\n' +
+            '\t\t\t\t"game.users." + __id\n' +
+            '\t\t\t);\n' +
+            '\t\t};\n' +
+            '\t})();\n');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]synkroban[\/\\]synkroban\.js$/.test(fullpath)) {
+        // Real portability bug in the door's own source, confirmed by
+        // reading it directly: level-set loading (SkbLevelSet.init())
+        // and the level-set picker (pick_level_set()) both hardcode
+        // the literal path "/sbbs/xtrn/synkroban/" (the author's own
+        // install location) instead of using js.exec_dir like every
+        // other well-behaved door in this project -- skb_config's own
+        // PATH_SYNKROBAN setting (used correctly, elsewhere, for
+        // server.ini) is never consulted for these two call sites at
+        // all. On any install NOT living at that exact absolute path
+        // (guaranteed for ANetBBS, which installs at a variable,
+        // per-deployment location), level files silently fail to load
+        // -- confirmed: this is a plain string substitution, not a
+        // function-boundary insertion, since the bug is a literal
+        // wrong VALUE embedded mid-string in three places, not a
+        // missing/misplaced statement _insertBeforeFunctionEnd or
+        // _insertAfterFunctionStart could target. Breaking out of the
+        // string literal to splice in the real js.exec_dir expression
+        // (already resolved by our own load() pipeline to wherever
+        // this specific install actually put the bundled door) fixes
+        // every occurrence uniformly, whether standalone
+        // ("/sbbs/xtrn/synkroban/" alone) or concatenated with a
+        // further literal suffix (e.g. "/sbbs/xtrn/synkroban/levels/").
+        source = source.split('/sbbs/xtrn/synkroban/').join('" + js.exec_dir + "');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]startrek[\/\\]startrek\.js$/.test(fullpath)) {
+        // Same real bug class already fixed for Jeopardized's
+        // getUser()/getUserGameState() (see that branch above):
+        // scoreBoard() checks `if (scores === undefined)` to decide
+        // whether this is the very first score ever submitted for the
+        // "STARTREK" scope, but the real server returns JSON `null`
+        // for a missing key, not `undefined` -- confirmed against the
+        // real live server and the real vendored json-client.js's own
+        // wait() (`return packet.data;`, no null-to-undefined
+        // conversion). On a brand-new scope (guaranteed here, since
+        // Star Trek has never been played against this server before),
+        // `scores` comes back `null`, the `=== undefined` check misses
+        // it, and the very next line -- `for (var s = 0; s <
+        // scores.length; ...)` -- crashes with "Cannot read
+        // properties of null (reading 'length')" the first time ANY
+        // player finishes a game. Plain string substitution (like the
+        // synkroban fix above), not a function-boundary insertion --
+        // simplest fix for a single wrong comparison operator, and
+        // scoreBoard() is itself a real named function declaration
+        // (unlike Jeopardized's this.getUser=function(){} pattern) so
+        // an _insertAfterFunctionStart-based guard was considered, but
+        // the crash is a genuine WRONG COMPARISON mid-function, not a
+        // missing statement at the boundary -- fixing the comparison
+        // itself is both simpler and more directly correct.
+        source = source.split('scores === undefined')
+            .join('(scores === undefined || scores === null)');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]dicewarz2[\/\\]dicefunc\.js$/.test(fullpath)) {
+        // Real crash found live bundling Dice Warz ][: starting a
+        // single-player game crashed immediately entering the map
+        // screen with "Cannot read properties of undefined (reading
+        // 'owner')" in drawSector(). Root-caused with a direct,
+        // isolated reproduction (not guessed): `map.grid` is a 2D
+        // array where empty cells are left as genuine JS array holes
+        // (`undefined`) by generateMap() -- but this game's own
+        // architecture round-trips the whole map through JSON-RPC
+        // write+read (client.write(...) then a later client.read(...)
+        // in playGame(), a real network hop, not an in-memory reuse
+        // of the object generateMap() just built). JSON.stringify()
+        // converts array holes to literal `null`, not `undefined` --
+        // confirmed directly: `JSON.parse(JSON.stringify([,5,]))` is
+        // `[null,5,null]`. getTile()'s own check,
+        // `grid[coords.x][coords.y]>=0`, silently treats that as a
+        // VALID tile index, because `null >= 0` is `true` in
+        // JavaScript (null coerces to 0 for a numeric comparison) --
+        // while the original, never-serialized `undefined` correctly
+        // failed the same check (`undefined >= 0` is `false`). The
+        // very next line then indexes `map.tiles[null]` (coerced to
+        // the property key `"null"`), which doesn't exist, and every
+        // caller (drawSector() and everything else that asks "is
+        // there a tile here?") crashes on `.owner`. This is a real
+        // bug in the door's own source that would happen identically
+        // on real Synchronet -- the JSON round-trip is this door's
+        // own core persistence mechanism, not something the compat
+        // shim introduces. Fixing getTile() itself (the single shared
+        // helper every caller already goes through) closes this for
+        // every call site at once, rather than patching each `>= 0`
+        // check scattered through the file individually -- the other
+        // two occurrences of this same comparison (landNearby(),
+        // getRandomDirection()) only ever run against a freshly-
+        // generated, never-serialized map, so they're not affected in
+        // practice and are left untouched. Plain string substitution,
+        // like the synkroban/startrek fixes above -- the bug is a
+        // wrong comparison, not a missing statement at a function
+        // boundary.
+        source = source.split(
+            'if(coords && grid[coords.x][coords.y]>=0) \n\t\treturn grid[coords.x][coords.y];'
+        ).join(
+            'if(coords && grid[coords.x][coords.y]!==null && grid[coords.x][coords.y]>=0) \n\t\treturn grid[coords.x][coords.y];'
+        );
+    }
+    if (/[\/\\]sbbs_doors[\/\\]thirsty[\/\\]thirsty\.js$/.test(fullpath)) {
+        // Same bug class as the startrek/dicewarz2 fixes above, found
+        // auditing Thirstyville's source (not yet live-crashed, since
+        // it's confirmed here before first bundling): confirmed
+        // directly against Jerry's real json-rpc server that a READ or
+        // KEYS op against a real but as-yet-empty location returns
+        // JSON `null`, never `undefined` --
+        //   echo '{"op":"read",...,"scope":"DICEWARZ2","location":"DICEWARZ2.NONEXISTENT_KEY",...}'
+        //   => {"ok": true, "data": null}
+        // dataInit()'s very first-ever game start does
+        // `gameSettings = jsonClient.read("THIRSTY","THIRSTY.SETTINGS",1);
+        // if(gameSettings === undefined) { ... }` -- on a brand new
+        // THIRSTY module this returns null, the `=== undefined` guard
+        // never fires, gameSettings stays null, and every later
+        // `gameSettings.week`/`.updated`/etc access crashes. The
+        // adjacent `(playerKeys === undefined) ? 1 :
+        // playerKeys.length` has the identical bug against
+        // THIRSTY.PLAYERS.keys() on the same first-ever run. Both
+        // fixed with the same null-or-undefined widening as the
+        // startrek fix above. getScores()'s `if(keys === undefined)
+        // throw ...` has the same bug but doesn't crash (a bare
+        // `for(var k in keys)` over null is a documented ES5 no-op,
+        // not a throw) -- it only silently swallows the intended "no
+        // players yet" error message, so it's widened too for
+        // correctness while we're here.
+        source = source.split('if(gameSettings === undefined) {')
+            .join('if(gameSettings === undefined || gameSettings === null) {');
+        source = source.split('((playerKeys === undefined) ? 1 : playerKeys.length)')
+            .join('((playerKeys === undefined || playerKeys === null) ? 1 : playerKeys.length)');
+        source = source.split('if(keys === undefined)\n\t\t\tthrow "THIRSTY.PLAYERS has no properties.";')
+            .join('if(keys === undefined || keys === null)\n\t\t\tthrow "THIRSTY.PLAYERS has no properties.";');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]thirsty[\/\\]player\.js$/.test(fullpath)) {
+        // Same null-vs-undefined bug class as thirsty.js above, but
+        // this one is a guaranteed crash rather than a fallback-logic
+        // miss: getPlayer()'s `player = jsonClient.read("THIRSTY",
+        // "THIRSTY.PLAYERS."+playerID, 1); if(player === undefined ||
+        // player.money <= 0)` has no `|| update`-style short-circuit
+        // to save it (unlike demographics.js/products.js/stock-
+        // items.js/weather.js, which all pass their fetch result
+        // through `X === undefined || update`, and `update` is always
+        // true on the very run where X would be null -- see the
+        // thirsty.js comment above). Every brand-new player's first
+        // join reads a THIRSTY.PLAYERS.<id> key that has never been
+        // written, confirmed to come back as real JSON `null` (not
+        // `undefined`) the same way as every other never-written key
+        // on this server. `player === undefined` is then false, so JS
+        // evaluates the second half of the `||` -- `player.money`
+        // -- on a null player, throwing "Cannot read properties of
+        // null (reading 'money')" for literally every new player.
+        source = source.split('if(player === undefined || player.money <= 0) {')
+            .join('if(player === undefined || player === null || player.money <= 0) {');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]thirsty[\/\\]stock-items\.js$/.test(fullpath)) {
+        // Worst instance of the same null-vs-undefined bug class found
+        // in this door: makeStockItems() runs unconditionally as part
+        // of the very first game creation (getStockItems(true), from
+        // dataInit(), BEFORE getPlayer() ever writes the first player
+        // record) -- `jsonClient.keys("THIRSTY","THIRSTY.PLAYERS",1)`
+        // has no guard AT ALL, not even a wrong `=== undefined` check,
+        // so this crashes with "Cannot read properties of null
+        // (reading 'length')" for literally the first player to ever
+        // start a fresh Thirstyville install, unconditionally, every
+        // time -- confirmed against the real live server that KEYS on
+        // a not-yet-written location returns real JSON null.
+        source = source.split(
+            'var players = jsonClient.keys("THIRSTY", "THIRSTY.PLAYERS", 1).length;'
+        ).join(
+            'var players = (jsonClient.keys("THIRSTY", "THIRSTY.PLAYERS", 1) || []).length;'
+        );
+    }
+    if (/[\/\\]sbbs_doors[\/\\]gttrivia[\/\\]gttrivia\.js$/.test(fullpath)) {
+        // Same null-vs-undefined bug class found throughout this
+        // session (a JSON-RPC read of a not-yet-written key returns
+        // real JSON null): gttrivia.js's own guards use
+        // `typeof(data) === "object"` to sanity-check a read result --
+        // but `typeof null === "object"` is a well-known JavaScript
+        // quirk, so these checks don't actually exclude null the way
+        // they look like they do. Every one of these is already
+        // wrapped in a try/catch (this door is unusually well-defended
+        // compared to earlier doors this session), so the real-world
+        // impact is a confusing on-screen JS error message rather than
+        // a hard crash -- confirmed live against the real remote
+        // server (digitaldistortionbbs.com, Jerry's own choice for
+        // this door -- see gttrivia.ini) that the top-level SCORES
+        // scope already has real historical data, so showServerScores()
+        // won't hit this in practice today -- but a per-user/per-BBS
+        // sub-path (e.g. any brand-new player/BBS never seen before)
+        // genuinely can be null, and the sysop-menu removal functions
+        // hit the identical pattern. Widened defensively rather than
+        // waiting for a live report, since it's a one-line fix with
+        // zero behavioral change for the already-working case.
+        source = source.split('if (typeof(data) !== "object")')
+            .join('if (typeof(data) !== "object" || data === null)');
+        source = source.split(
+            'if (typeof(data) === "object" && data.hasOwnProperty("systems"))'
+        ).join(
+            'if (typeof(data) === "object" && data !== null && data.hasOwnProperty("systems"))'
+        );
+        source = source.split('if (typeof(serverUserScoreData) === "object")')
+            .join('if (typeof(serverUserScoreData) === "object" && serverUserScoreData !== null)');
+    }
+    if (/[\/\\]sbbs_doors[\/\\]thirsty[\/\\]weather\.js$/.test(fullpath)) {
+        // Real crash found live smoke-testing Thirstyville:
+        // "TypeError: POP.toFixed is not a function", every time
+        // makeWeather()'s random roll for a day happens to land below
+        // that weather condition's minimumPOP (common -- e.g. weather.
+        // ini's "Cloudy" is minimumPOP=20/maximumPOP=70, roughly a 29%
+        // chance per day, and this runs once per day for 7 days on
+        // every world/reset). Root cause: `weatherConditions[condition]
+        // .minimumPOP` comes straight out of File.iniGetAllObjects(),
+        // which returns raw strings for every value (confirmed against
+        // this shim's own implementation above, and real Synchronet's
+        // iniGetObject/iniGetAllObjects behave the same way absent an
+        // explicit template argument, which this door doesn't pass) --
+        // `POP < ...minimumPOP` numerically coerces fine for the
+        // comparison, but the very next line assigns that STRING
+        // straight into POP with no parseInt/parseFloat, so
+        // `POP.toFixed()` a few lines later throws on a string. A
+        // genuine bug in the door's own source that would crash real
+        // Synchronet identically, not something introduced by this
+        // shim.
+        source = source.split(
+            'POP = weatherConditions[condition].minimumPOP;'
+        ).join(
+            'POP = parseInt(weatherConditions[condition].minimumPOP, 10);'
+        );
+    }
+    return source;
+}
+
+// Real bug found live bundling Minesweeper: `ansiterm_lib.js`,
+// `sauce_lib.js`, and `avatar_lib.js` are three separate, real, correct
+// vendored Synchronet library files that each independently declare
+// their own top-level `const defs = {...}` -- each is meant to be
+// load()'d into its OWN caller-provided scope object (e.g. `load({},
+// "sauce_lib.js")`), so real Synchronet's engine must give each loaded
+// script its own fresh top-level scope for this to work. This shim's
+// load() runs every file via `vm.runInThisContext(code)` against the
+// SAME actual global object every time (needed so loaded files can see
+// console/log/attr/etc.) -- fine for `var` (redeclaring a `var` is
+// always harmless, just overwrites the same globalThis property), but
+// `const`/`let` declared at a script's top level live in a persistent
+// "script realm" lexical environment that Node's vm module shares
+// across EVERY separate runInThisContext call in this process. A
+// SECOND top-level `const defs` from a DIFFERENT file collides with
+// the first one exactly like redeclaring it in the same file would --
+// confirmed live: Minesweeper load()s ansiterm_lib.js (via cterm_lib.js
+// requiring it) and later sauce_lib.js (via show_image()), and the
+// second one threw `SyntaxError: Identifier 'defs' has already been
+// declared`, uncaught by anything except the door's own generic
+// try/catch. Since the existing scope-population regex a few lines
+// below already treats top-level var/const/let as interchangeable for
+// the purpose of copying names onto a caller's scope object, rewriting
+// them to `var` here for EXECUTION purposes is consistent with that
+// existing treatment, not a new distinction -- and it makes
+// redeclaration harmless the same way it already is for `var`,
+// eliminating this whole collision class for every current and future
+// loaded file, not just these three. Only rewrites declarations that
+// start a line (matching the existing scope regex's own `^` anchor
+// convention) -- a `const`/`let` inside a function body's own block
+// scope never hits this shared-realm collision in the first place, so
+// leaving those alone preserves their real block-scoping semantics.
+function _promoteTopLevelConstLet(source) {
+    // No leading \s* on purpose -- matches the existing scope-population
+    // regex's own `^(?:var|const|let)` convention exactly (column 0,
+    // unindented), so only genuine top-level declarations are widened.
+    // An indented const/let (inside a function body's own block scope)
+    // never hits the shared-realm collision this exists to fix, and
+    // widening ITS scope too would be a real, unwanted behavior change.
+    return source.replace(/^(const|let)(\s+)/gm, 'var$2');
+}
+function _polyfillE4XForEach(source) {
+    var re = /for\s+each\s*\(\s*var\s+(\w+)\s+in\s+/g;
+    var out = '';
+    var i = 0;
+    var counter = 0;
+    var m;
+    while ((m = re.exec(source)) !== null) {
+        out += source.slice(i, m.index);
+        var varname = m[1];
+        var exprStart = re.lastIndex;
+        var depth = 1;
+        var j = exprStart;
+        while (j < source.length && depth > 0) {
+            if (source[j] === '(') depth++;
+            else if (source[j] === ')') { depth--; if (depth === 0) break; }
+            j++;
+        }
+        if (depth !== 0) {
+            out += source.slice(m.index, j);
+            i = j;
+            re.lastIndex = j;
+            continue;
+        }
+        var expr = source.slice(exprStart, j).trim();
+        counter++;
+        var key = '__fe_keys_' + counter;
+        var idx = '__fe_i_' + counter;
+        out += 'for (var ' + varname + ', ' + key + '=Object.keys((' + expr
+             + ')||{}), ' + idx + '=0; ' + idx + '<' + key + '.length && ('
+             + varname + '=(' + expr + ')[' + key + '[' + idx + ']],true); '
+             + idx + '++)';
+        i = j + 1;
+        re.lastIndex = i;
+    }
+    out += source.slice(i);
+    return out;
+}
 
 function load() {
     // Synchronet's load() supports several forms:
@@ -1480,6 +2809,16 @@ function load() {
         throw new Error('load(): filename must be a string, got ' +
                         typeof filename);
     }
+    // Real Synchronet's load(scope, filename, arg1, arg2, ...) form
+    // (confirmed against the real vendored modopts.js's own doc
+    // comment: "var options = load({}, 'modopts.js',
+    // 'your_module_name');") passes any trailing args through as the
+    // loaded script's own `argv` -- was completely dropped on the
+    // floor here (the loaded script would see the OUTER door's own
+    // argv, always [], instead). Found live bundling Synchronet
+    // Minesweeper: `load({}, "modopts.js", ini_section)` needs
+    // ini_section to arrive as modopts.js's own `argv[0]`.
+    var scriptArgs = args;
     var attempted = [];
     function _try(p) { attempted.push(p); return _fs.existsSync(p) ? p : null; }
 
@@ -1530,8 +2869,28 @@ function load() {
         }
         throw new Error(msg);
     }
-    if (_load_cache[fullpath] && scope === null) {
-        return; // already loaded (cache only applies to no-scope form)
+    // Real bug found live bundling Minesweeper: cterm_lib.js load()s
+    // ansiterm_lib.js internally (its own line 7), and minesweeper.js
+    // ALSO load()s ansiterm_lib.js directly first -- both via the
+    // 2-arg scope form, which this cache used to never cover at all
+    // ("cache only applies to no-scope form"). Running the SAME file's
+    // top-level const/let declarations a second time throws
+    // `SyntaxError: Identifier 'defs' has already been declared` --
+    // those bindings live in a script-realm lexical environment shared
+    // across EVERY separate vm.runInThisContext call in this process
+    // (unlike `var`, which is just a globalThis property and tolerates
+    // redeclaration fine), so a second real execution of the same
+    // source always collides. Real Synchronet's own load()/require()
+    // never re-executes an already-loaded file regardless of how it's
+    // called either -- that's the entire point of a load cache -- so
+    // the scope-vs-no-scope distinction here was simply an incomplete
+    // implementation, not an intentional difference. The cache now
+    // applies universally; a cache hit still runs the scope-population
+    // logic below (against globalThis state left by whichever call
+    // actually executed the file), just skips re-executing the source.
+    var _alreadyLoaded = !!_load_cache[fullpath];
+    if (_alreadyLoaded && scope === null) {
+        return; // bare form just wants the one-time side effect
     }
     _load_cache[fullpath] = true;
     _load_depth++;
@@ -1542,21 +2901,146 @@ function load() {
     }
     try {
         var code = _fs.readFileSync(fullpath, 'utf8');
-        // vm.runInThisContext runs the code with globalThis as its scope —
-        // `var FOO = ...` and `function FOO()` create properties on
-        // globalThis, which is what we need so require()'s lookup finds
-        // them. Indirect (0,eval)() does NOT do this in Node's CommonJS
-        // module wrapper context (hence past "SMB_SUCCESS is not defined").
-        var result = _vm.runInThisContext(code, { filename: fullpath });
-        // Synchronet's 2-arg form: load(scope, "file") returns whatever
-        // the script's last expression evaluates to. Modules like
-        // sauce_lib.js end with `this;` so the last expression is the
-        // global object — which has the script's exported functions
-        // attached after our runInThisContext run. Caller does
-        // `var sauce = load({}, "sauce_lib.js")` and then `sauce.read(...)`
-        // resolves to globalThis.read, which is exactly what's needed.
+        code = _polyfillE4XForEach(code);
+        code = _applyKnownDoorFixes(fullpath, code);
+        code = _promoteTopLevelConstLet(code);
+        var result;
+        if (!_alreadyLoaded) {
+            // vm.runInThisContext runs the code with globalThis as its scope —
+            // `var FOO = ...` and `function FOO()` create properties on
+            // globalThis, which is what we need so require()'s lookup finds
+            // them. Indirect (0,eval)() does NOT do this in Node's CommonJS
+            // module wrapper context (hence past "SMB_SUCCESS is not defined").
+            //
+            // argv is a real global the loaded script reads as its own
+            // script arguments -- temporarily swap in this call's own
+            // scriptArgs (see the comment above where scriptArgs is
+            // captured) and always restore whatever was there before, so
+            // a nested/recursive load() with different trailing args (or
+            // none) can't leak its argv into an unrelated caller further
+            // up the stack. Must go through globalThis explicitly, not a
+            // bare `argv = ...` assignment: this function's own `argv`
+            // reference resolves to the module-scoped `var argv = []`
+            // declared earlier in this same outer script, which is a
+            // SEPARATE binding from globalThis.argv (only a one-time
+            // copy of it, made once by _registerGlobals() at startup) --
+            // vm.runInThisContext-executed code (the loaded script itself)
+            // reads globalThis.argv, so that's what actually has to change
+            // for it to see the new value at all.
+            var _argvHolder = (typeof global !== 'undefined' ? global : globalThis);
+            var _prevArgv = _argvHolder.argv;
+            _argvHolder.argv = scriptArgs;
+            try {
+                result = _vm.runInThisContext(code, { filename: fullpath });
+            } finally {
+                _argvHolder.argv = _prevArgv;
+            }
+        }
+        // Synchronet's 2-arg form: load(scope, "file") is supposed to
+        // populate `scope` with the loaded file's top-level declarations.
+        // Some callers reassign the return value (`var sauce = load({},
+        // "sauce_lib.js")`); others pre-create the scope object and pass
+        // it in, discarding the return value and expecting `scope` itself
+        // to be mutated in place (e.g. graphic.js does `Graphic.prototype
+        // .defs = {}; load(Graphic.prototype.defs, "cga_defs.js");` with
+        // no assignment at all). Since the code above always runs against
+        // the real globalThis (needed so the loaded file still sees
+        // console/log/attr/etc. from the rest of the shim), copy the
+        // file's own top-level `var`/`const`/`function` names from
+        // globalThis onto `scope` explicitly — this satisfies both
+        // calling conventions regardless of whether the file happens to
+        // end with the "Leave as last line: this;" convention.
         if (scope !== null) {
-            return result;
+            var _declRe = /^(?:var|const|let)\s+([A-Za-z_$][\w$]*)|^function\s+([A-Za-z_$][\w$]*)\s*\(/gm;
+            var _m;
+            while ((_m = _declRe.exec(code)) !== null) {
+                var _name = _m[1] || _m[2];
+                if (_name && typeof globalThis[_name] !== 'undefined') {
+                    scope[_name] = globalThis[_name];
+                }
+            }
+            // Real crash found live bundling Minesweeper: modopts.js's
+            // own doc comment shows `var options = load({}, "modopts.js",
+            // "your_module_name");` -- the CALLER expects load()'s own
+            // return value to be the script's real computed result
+            // (modopts.js's last line is a bare `get_mod_options(...)`
+            // call, no top-level var to copy onto scope at all), not
+            // just the scope object the regex above populated. Real
+            // Synchronet's load() supports BOTH conventions -- graphic.js
+            // deliberately discards the return value and only cares
+            // about `scope` being mutated in place (some of its loaded
+            // files end with a harmless `this;` for exactly that
+            // reason), while modopts.js-style callers reassign the
+            // return value directly. Prefer the script's own real
+            // completion value when it's a genuine result (not
+            // undefined, and not just globalThis from a bare `this;`
+            // trailer) -- falls back to `scope` otherwise, so the
+            // already-working graphic.js/cga_defs.js path is untouched.
+            //
+            // Real regression found live bundling Minesweeper (in THIS
+            // SAME fix, from earlier in this session): dorkit/graphic.js
+            // -- the exact same file Bubble Boggle's own `var Graphic =
+            // load({}, "graphic.js")` already relies on -- has no
+            // deliberate "Leave as last line" trailer at all; its actual
+            // last statement is an ordinary prototype-method assignment
+            // (`Graphic.prototype.scrollup = function(){...};`). A JS
+            // assignment EXPRESSION evaluates to the assigned value, so
+            // `result` here was that unrelated function (V8 infers an
+            // assigned function expression's `.name` from the property
+            // it's assigned to, e.g. "scrollup"), not the real Graphic
+            // constructor -- `result !== undefined && result !== _g` was
+            // true, so it got returned and silently replaced the
+            // correct constructor. `new Graphic(...)` still "worked"
+            // (any function can be `new`'d), but the resulting
+            // instance's prototype had none of graphic.js's real
+            // methods (confirmed live: `graphic.load is not a
+            // function`).
+            //
+            // First attempt at a fix here parsed the source TEXT to
+            // find whether the last statement "looked like" an
+            // assignment -- abandoned after it broke on this SAME
+            // file's own regex literals (`/^\x1b\[([\x30-\x3f]*).../`,
+            // real ANSI-parsing code a few hundred lines up): naive
+            // brace/paren/bracket depth-counting has no notion of
+            // "inside a string/regex literal," so a `[` inside a
+            // character class throws the whole depth count off for the
+            // rest of the file, silently misidentifying a huge, totally
+            // unrelated multi-hundred-line block as "the last
+            // statement." Checking the VALUE instead of the source text
+            // sidesteps that whole class of problem: a deliberate
+            // "export this real thing" completion value (the "Leave as
+            // last line: Graphic;"/`defs;` convention) is always a bare
+            // reference to something ALREADY a real, same-named global
+            // -- `result.name` matches and `globalThis[result.name] ===
+            // result`. An incidental one (assigned-function-expression
+            // fallout) never does, since nothing declared it under that
+            // name at the top level. Non-function results (modopts.js's
+            // own convention: a plain object returned from its last
+            // line's function CALL) are trusted unconditionally, same
+            // as before -- this only tightens the check for functions.
+            //
+            // On a CACHE HIT there's no fresh `result` at all (the
+            // source never re-runs -- see _load_result_name_cache's own
+            // comment for why re-executing is unsafe) -- re-derive a
+            // trusted function result from whatever name a PRIOR call
+            // already proved trustworthy, so a file whose real "export"
+            // is a named global (like Graphic) keeps working correctly
+            // on the 2nd/3rd/... call, not just the 1st.
+            var _g = (typeof globalThis !== 'undefined' ? globalThis : global);
+            if (_alreadyLoaded && result === undefined && _load_result_name_cache[fullpath]) {
+                result = globalThis[_load_result_name_cache[fullpath]];
+            }
+            var _trustResult = (result !== undefined && result !== _g);
+            if (_trustResult && typeof result === 'function') {
+                _trustResult = !!(result.name && globalThis[result.name] === result);
+                if (_trustResult) {
+                    _load_result_name_cache[fullpath] = result.name;
+                }
+            }
+            if (_trustResult) {
+                return result;
+            }
+            return scope;
         }
         if (background) {
             // Caller used the load(true, ...) form expecting a Queue
@@ -1632,6 +3116,16 @@ var HIGH    = 8;
 var BG_BLACK   = 0<<4; var BG_BLUE    = 1<<4; var BG_GREEN   = 2<<4;
 var BG_CYAN    = 3<<4; var BG_RED     = 4<<4; var BG_MAGENTA = 5<<4;
 var BG_BROWN   = 6<<4; var BG_LIGHTGRAY = 7<<4;
+// BLINK/BG_HIGH — real Synchronet globals (cga_defs.js's own values:
+// BLINK=0x80 blink-bit, BG_HIGH=0x400 iCE-color/high-intensity-
+// background bit), missing from this block entirely. Real bug found
+// auditing Minesweeper: its very first executable line is
+// `if(BG_HIGH === undefined) BG_HIGH = 0x400;` -- with BG_HIGH
+// undeclared anywhere in scope (door + compat template share one
+// concatenated file/scope; the door itself never loads cga_defs.js),
+// that bare reference throws `ReferenceError: BG_HIGH is not defined`
+// immediately on launch, before any other door code runs.
+var BLINK = 0x80; var BG_HIGH = 0x400;
 
 // === Global utility functions ===
 function random(n) { return Math.floor(Math.random() * n); }
@@ -1648,6 +3142,159 @@ function ascii(x) {
     return s.length ? s.charCodeAt(0) : 0;
 }
 function ascii_str(s) { return s.charCodeAt(0); }
+
+// Synchronet's md5_calc(str, hex) -- real signature confirmed by
+// usage across bundled doors (Thirstyville's playerID/drinkProperty
+// hashing runs at load time, before main(); LORD's lordsrv.js also
+// calls it): hex=true returns the standard 32-char lowercase hex MD5
+// digest; hex=false/omitted returns the digest base64-encoded,
+// matching Synchronet's own base64_encode() convention used elsewhere
+// in its JS API. Was completely absent from this shim -- Thirstyville
+// would ReferenceError immediately on load, before any door-specific
+// code even ran.
+function md5_calc(str, hex) {
+    var hash = _node_require('crypto').createHash('md5').update(String(str), 'utf8').digest();
+    return hex ? hash.toString('hex') : hash.toString('base64');
+}
+
+// Synchronet's crc16_calc(str) -- needed for MsgBase.get_index()'s own
+// idx.to/idx.subject fields (real Synchronet's message index stores
+// these as CRC16 hashes, not raw text, so doors compare a locally-
+// computed CRC against the index entry as a fast pre-filter before
+// fetching a full header -- Minesweeper's own get_winners() does
+// exactly this: `var to_crc = crc16_calc(title.toLowerCase());`).
+// Standard CRC-16/XMODEM (poly 0x1021, init 0, non-reflected) -- the
+// commonly-documented real Synchronet variant. Getting this exactly
+// byte-for-byte identical to the real C implementation is NOT required
+// for correctness here: MsgBase.get_index() (see below) computes
+// idx.to/idx.subject by calling this SAME function on raw text the
+// bridge returns, rather than trying to reproduce a hash some other
+// process already computed -- so both sides of every comparison always
+// use the identical algorithm and agree with each other regardless of
+// whether it matches upstream Synchronet's own C source exactly. No
+// real cross-system CRC compatibility is needed (nothing here reads a
+// CRC value computed by a different, real Synchronet install).
+function crc16_calc(str) {
+    var s = String(str == null ? '' : str);
+    var crc = 0;
+    for (var i = 0; i < s.length; i++) {
+        crc ^= (s.charCodeAt(i) & 0xFF) << 8;
+        for (var b = 0; b < 8; b++) {
+            crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+            crc &= 0xFFFF;
+        }
+    }
+    return crc;
+}
+
+// Real message-base access -- MsgBase(sub), where `sub` is an echo
+// area's tag. Backed by anetbbs/games/msgbase_bridge.py (a new,
+// synchronous CLI process, spawned once per call via spawnSync -- same
+// established pattern as console.exec's own child_process.spawnSync
+// use a few hundred lines up) since there's no other path from this
+// Node subprocess back into ANetBBS's real Flask/SQLAlchemy echomail
+// data. Built specifically to make Minesweeper's own real InterBBS
+// DOVE-Net score-sharing work (its own MsgBase(options.sub) calls,
+// options.sub resolved via modopts.ini -- see door_runner.py's own
+// comment on that), but not Minesweeper-specific itself -- any door
+// using MsgBase against a real configured echo area works the same way.
+//
+// Only implements the subset of the real MsgBase API doors calling
+// through this shim actually use: open/close/save_msg/get_index/
+// get_msg_header/get_msg_body, plus the .cfg/.last_msg properties
+// Minesweeper reads directly. Real Synchronet's MsgBase has a much
+// larger surface (message groups, config-only mode, etc) -- not
+// implemented, matching this project's "extend reactively" convention
+// for the compat shim generally.
+function MsgBase(sub) {
+    this._sub = String(sub == null ? '' : sub);
+    this._opened = false;
+    this.last_msg = 0;
+    this.cfg = { data_dir: js.exec_dir, code: this._sub };
+}
+MsgBase.prototype._call = function(op) {
+    var extraArgs = Array.prototype.slice.call(arguments, 1);
+    try {
+        var cp = _node_require('child_process');
+        var argv = [js.msgbase_bridge, op, this._sub].concat(
+            extraArgs.map(function(a) { return String(a); }));
+        var r = cp.spawnSync(js.python_bin, argv, {encoding: 'utf8'});
+        if (r.error) {
+            return {ok: false, error: String(r.error)};
+        }
+        if (r.status !== 0) {
+            return {ok: false, error: 'msgbase_bridge exited ' + r.status +
+                    ': ' + (r.stderr || '')};
+        }
+        return JSON.parse(r.stdout || '{}');
+    } catch (e) {
+        return {ok: false, error: String(e && e.message ? e.message : e)};
+    }
+};
+// Real Synchronet: open() returns true/false, and MUST be called before
+// other methods are meaningful -- Minesweeper's own get_winners() does
+// `if(msgbase.get_index !== undefined && msgbase.open())`. this.cfg/
+// this.last_msg are real properties Minesweeper reads directly
+// afterward (cfg.data_dir + cfg.code + ".ini" for its own import_ptr
+// tracking file).
+MsgBase.prototype.open = function() {
+    var result = this._call('open');
+    if (!result.ok) { return false; }
+    this._opened = true;
+    this.last_msg = result.last_msg || 0;
+    this.cfg = { data_dir: js.exec_dir, code: this._sub };
+    return true;
+};
+MsgBase.prototype.close = function() { this._opened = false; };
+MsgBase.prototype.save_msg = function(hdr, body) {
+    var payload = JSON.stringify({
+        to: (hdr && hdr.to) || '',
+        from: (hdr && hdr.from) || '',
+        subject: (hdr && hdr.subject) || '',
+        body: String(body == null ? '' : body),
+    });
+    var result = this._call('save_msg', payload);
+    return !!result.ok;
+};
+// Real Synchronet's index entries carry to/subject as CRC16 hashes, not
+// raw text -- doors compare a locally-computed CRC against these as a
+// fast pre-filter before fetching a full header (see crc16_calc's own
+// comment for why computing the hash HERE, from the bridge's raw text,
+// rather than trying to reproduce a hash computed elsewhere, is what
+// makes this correct without needing to match real Synchronet's exact
+// C implementation). attr is always 0 -- EchomailMessage has no
+// soft-delete column, so nothing a door checks against MSG_DELETE is
+// ever actually set.
+MsgBase.prototype.get_index = function() {
+    var result = this._call('get_index', 0);
+    if (!result.ok || !result.entries) { return []; }
+    return result.entries.map(function(e) {
+        return {
+            number: e.number,
+            offset: e.number,   // no separate on-disk offset concept here
+            to: crc16_calc(String(e.to || '').toLowerCase()),
+            subject: crc16_calc(String(e.subject || '').toLowerCase()),
+            attr: 0,
+        };
+    });
+};
+// byOffset is accepted for real-signature compatibility but ignored --
+// this shim's "offset" and "number" are the same value (see get_index
+// above), so there's nothing to distinguish.
+MsgBase.prototype.get_msg_header = function(byOffset, offsetOrNumber) {
+    var result = this._call('get_header', offsetOrNumber);
+    if (!result.ok) { return undefined; }
+    return result.header;
+};
+// Real signature takes extra formatting flags (strip-quotes etc) --
+// this shim always returns the raw stored body; callers needing their
+// own cleanup (Minesweeper's own get_winners() does its own
+// body.split("\n===",1)[0] trimming) already do it themselves.
+MsgBase.prototype.get_msg_body = function(hdr) {
+    var result = this._call('get_body', hdr && hdr.number);
+    if (!result.ok) { return ''; }
+    return result.body;
+};
 
 // Synchronet's strftime(fmt, unixSeconds) — same conversion specifiers as
 // C's strftime. Doors (LORD's dorkit/local_console.js included) call
@@ -1697,33 +3344,81 @@ function strftime(fmt, unixSeconds) {
 }
 function format() {
     // C-style sprintf supporting flags (-/0/+/space), width (digits or *),
-    // precision (.digits or .*), and types s/d/i/f/x/X/c/%.
+    // precision (.digits or .*), and types s/d/i/u/f/x/X/c/%.
     // DSR uses `printf("%*s", width, str)` — without `*` support that
     // shows up as literal "%*s" in the output and the gallery list is
     // unaligned.
+    //
+    // 'u' (unsigned decimal) was missing from the type class entirely --
+    // real bug found live auditing Minesweeper: its game-clock display
+    // (calc_time(): format("%2u:%02u", ...)) and every scoreboard column
+    // (width/height/mine counts: format("%3u...%2u...%-3u", ...)) use
+    // %u throughout. With 'u' absent from the regex's character class,
+    // those tokens never matched at all and were left as literal text --
+    // the on-screen timer would have shown "%2u:%02u" instead of a real
+    // "05:23", and every scoreboard row similarly broken.
     var args = Array.prototype.slice.call(arguments);
     var fmt = String(args.shift());
-    return fmt.replace(/%(-?)(\*|\d+)?(?:\.(\*|\d+))?([sdifxXc%])/g,
-        function(m, flags, w, p, t) {
+    return fmt.replace(/%(-?)(0?)(\*|\d+)?(?:\.(\*|\d+))?([sdiufxXc%])/g,
+        function(m, flags, zero, w, p, t) {
             if (t === '%') return '%';
             var width = (w === '*') ? Number(args.shift()) : (w ? parseInt(w, 10) : 0);
             var prec  = (p === '*') ? Number(args.shift()) : (p ? parseInt(p, 10) : -1);
             var v = args.shift();
             var out;
-            if (t === 'd' || t === 'i') out = String(parseInt(v, 10));
+            if (t === 'd' || t === 'i' || t === 'u') out = String(parseInt(v, 10));
             else if (t === 'f') out = (prec >= 0) ? parseFloat(v).toFixed(prec) : String(parseFloat(v));
             else if (t === 'x') out = (parseInt(v, 10) >>> 0).toString(16);
             else if (t === 'X') out = (parseInt(v, 10) >>> 0).toString(16).toUpperCase();
             else if (t === 'c') out = String.fromCharCode(parseInt(v, 10));
             else { out = String(v == null ? '' : v); if (prec >= 0) out = out.slice(0, prec); }
             if (width > out.length) {
-                var pad = ' '.repeat(width - out.length);
+                var padChar = (zero === '0' && flags !== '-' && t !== 's') ? '0' : ' ';
+                var pad = padChar.repeat(width - out.length);
                 out = (flags === '-') ? (out + pad) : (pad + out);
             }
             return out;
         });
 }
+// Real Synchronet globals (js_global.cpp's js_b64_encode/js_b64_decode)
+// -- confirmed against the real source, not guessed: standard base64
+// alphabet (not URL-safe), and the C implementation only ever reads
+// argv[0] -- a second argument (some doors pass `true`, e.g.
+// chickendelivery.js's `base64_encode(uid, true)`) is silently
+// ignored by real Synchronet too, so accepting-and-ignoring it here
+// matches real behavior exactly rather than being a shortcut.
+// 'binary' (not 'utf8') matches the C code's raw-byte semantics --
+// same encoding name this file already uses elsewhere for the same
+// reason (see e.g. the PTY output-write path above).
+function base64_encode(str) {
+    if (str === undefined || str === null) return null;
+    return Buffer.from(String(str), 'binary').toString('base64');
+}
+function base64_decode(str) {
+    if (str === undefined || str === null) return null;
+    return Buffer.from(String(str), 'base64').toString('binary');
+}
+// Real Synchronet global (js_global.cpp's js_ctrl) -- confirmed
+// against the real source: accepts a single character (or numeric
+// code), computes `toupper(ch) & ~0x40` (clears bit 6, the standard
+// Ctrl+letter mapping -- 'A' 0x41 -> 0x01, 'C' 0x43 -> 0x03, etc.),
+// and returns it as a ONE-CHARACTER STRING (not a number) -- matches
+// what console.inkey()/getcmd() return, since callers compare against
+// it directly (e.g. `case ctrl('A'):` in frame.js's key handler).
+function ctrl(ch) {
+    var code = (typeof ch === 'string') ? ch.charCodeAt(0) : Number(ch);
+    code = String.fromCharCode(code).toUpperCase().charCodeAt(0) & ~0x40;
+    return String.fromCharCode(code);
+}
 function truncsp(s) { return String(s).replace(/\s+$/, ''); }
+// Real Synchronet global (js_global.cpp's js_skipsp) -- the mirror
+// image of truncsp() above: strips LEADING whitespace instead of
+// trailing. Gap found live: Jeopardized's lib/frame-ext.js (bundled,
+// reused by other doors' own layout code) calls
+// `skipsp(truncsp(word))` when centering wrapped text, and no
+// implementation of this existed anywhere in the shim -- only
+// truncsp() did.
+function skipsp(s) { return String(s).replace(/^\s+/, ''); }
 function strip_ctrl(s) { return String(s).replace(/[\x00-\x1f\x7f]/g, ''); }
 function word_wrap(s, width) {
     var w = width || 79;
@@ -1741,17 +3436,28 @@ function word_wrap(s, width) {
 }
 function lfexpand(s) { return String(s).replace(/\n/g, '\r\n'); }
 function backslash(s) { return String(s).replace(/\\/g, '/') + '/'; }
-function file_exists(path) { return _fs.existsSync(path); }
-function file_getname(path) { return _path.basename(path); }
-function directory(pattern) {
-    var dir = _path.dirname(pattern);
-    var base = _path.basename(pattern).replace(/\*/g, '.*').replace(/\?/g, '.');
-    var re = new RegExp('^' + base + '$');
-    try {
-        return _fs.readdirSync(dir).filter(function(f){ return re.test(f); })
-                  .map(function(f){ return _path.join(dir, f); });
-    } catch(e) { return []; }
-}
+// file_exists/file_getname/directory are NOT redeclared here on purpose.
+// This file used to carry a second, weaker copy of all three right at
+// this spot -- `function` redeclarations at the same scope silently
+// shadow the EARLIER (better) one, exactly the "duplicate keys shadow
+// the originals" trap already documented elsewhere in this file for
+// object literals. Real bug found auditing Minesweeper: its top-level
+// catch-all handler does `file_getname(e.fileName)` -- a real Synchronet
+// (SpiderMonkey) Error has `.fileName`, but a plain V8/Node Error does
+// not, so e.fileName is undefined here. The earlier, real definition
+// (file_getname(p) { return _path.basename(String(p)); }`, up with the
+// other file_* helpers) coerces that safely; this shadowing duplicate
+// (`_path.basename(path)`, no coercion) threw a TypeError instead,
+// turning a graceful in-door `alert(msg)` error report into a raw
+// uncaught crash. The duplicate `directory()` here was also strictly
+// worse than the earlier one (no try/catch around the dirname() call,
+// no literal-dot escaping in the glob-to-regex conversion -- doors
+// matching e.g. "*.bin" would have "." wrongly match any character,
+// not just a literal dot -- and no case-insensitive flag), and the
+// duplicate `file_exists()` dropped the try/catch that keeps a
+// non-string/undefined path from throwing instead of just returning
+// false. All three real, better versions already exist earlier in this
+// file (see the other file_* helpers) — just don't re-declare them.
 // (log/alert defined earlier — handle both log(msg) and log(level, msg))
 
 // Common helpers many doors expect at global scope (Synchronet ships them
@@ -1759,6 +3465,7 @@ function directory(pattern) {
 function clearScreen() { return console.clear(); }
 function home()        { return console.home(); }
 function cleartoeol()  { return console.cleartoeol(); }
+function clearline()   { return console.clearline(); }
 function gotoxy(x, y)  { return console.gotoxy(x, y); }
 function crlf()        { return console.crlf(); }
 function pause()       { return console.pause(); }
@@ -1787,12 +3494,13 @@ function _unused_format_legacy_removed() {
     var names = [
         'load', 'require', 'log', 'alert',
         'file_exists', 'file_isdir', 'file_isfile', 'file_size', 'file_date',
+        'file_cfgname',
         'file_remove', 'file_rename', 'file_copy', 'file_getname', 'file_getext',
         'file_mutex', 'file_touch',
         'mkdir', 'rmdir', 'directory',
         'lfexpand', 'backslash',
         'console', 'bbs', 'user', 'system', 'js', 'server', 'client',
-        'file_area', 'msg_area', 'File',
+        'file_area', 'msg_area', 'File', 'User', 'Socket',
         // Queue — Synchronet inter-script FIFO; needed by dorkit.js
         // line 273 (`new Queue("dorkit_input"...)`) when it's loaded
         // via vm.runInThisContext from inside our load() function.
@@ -1800,13 +3508,47 @@ function _unused_format_legacy_removed() {
         'Queue',
         '_fs', '_path', '_readline', '_node_require',
         // Common helper names many doors expect (alias of console.X):
-        'clearScreen', 'home', 'cleartoeol', 'gotoxy', 'crlf', 'pause',
+        'clearScreen', 'home', 'cleartoeol', 'clearline', 'gotoxy', 'crlf', 'pause',
         'format', 'sprintf', 'printf', 'print', 'write', 'writeln',
         // Top-level Synchronet globals doors and load()'d helpers reach for:
-        'exit', 'mswait', 'random', 'time', 'ascii', 'ascii_str',
-        'truncsp', 'strip_ctrl', 'word_wrap', 'strftime',
+        'exit', 'mswait', 'sleep', 'random', 'time', 'ascii', 'ascii_str',
+        'truncsp', 'skipsp', 'strip_ctrl', 'word_wrap', 'strftime',
+        // base64_encode/decode + ctrl -- real Synchronet globals
+        // (js_global.cpp), needed once frame.js's key-handling code
+        // (`case ctrl('A'):`) and any door computing a base64 id
+        // (e.g. chickendelivery.js's uid) actually run via
+        // vm.runInThisContext -- confirmed live: declaring the
+        // function alone isn't enough, it has to be in THIS list too.
+        'base64_encode', 'base64_decode', 'ctrl',
+        // md5_calc — same "declaring it isn't enough" gotcha as
+        // base64_encode above; Thirstyville's player.js calls it on
+        // its very first line, at load time.
+        'md5_calc',
+        // crc16_calc — same gotcha; Minesweeper's own get_winners()
+        // calls it to compute to_crc/winner_crc for its MsgBase index
+        // pre-filter.
+        'crc16_calc',
+        // MsgBase — real message-base access (see the class definition
+        // and its own comment for the design). Same registration
+        // requirement as every other name in this list.
+        'MsgBase',
         // argv/argc — DSR reads argv[0] for an image path argument
         'argv', 'argc',
+        // BG_HIGH/BLINK — same "declaring it in the outer template's own
+        // scope isn't enough" gotcha as base64_encode/ctrl/md5_calc
+        // above. Real bug found live bundling Minesweeper: its very
+        // first executable line reads BG_HIGH, and the ambient
+        // cga_defs.js preload (a few lines below, `load('cga_defs.js')`)
+        // does NOT reliably supply it -- load()'s own path search
+        // prefers sbbs_stubs/dorkit/cga_defs.js (an older real
+        // Synchronet revision bundled for LORD's dorkit) over the flat
+        // sbbs_stubs/cga_defs.js copy, and that older revision calls the
+        // same 0x400 bit `BG_BRIGHT`, not `BG_HIGH` -- two genuinely
+        // different real upstream revisions, vendored at different
+        // paths. Registering both names here makes them real globalThis
+        // properties unconditionally, independent of which cga_defs.js
+        // variant happens to win the path search.
+        'BG_HIGH', 'BLINK',
         // Also expose all the SYS_* / BBS_OPT_* / LOG_* / KEY_* / colour
         // constants — let the global object inherit them via for-in below.
     ];
@@ -1828,6 +3570,21 @@ function _unused_format_legacy_removed() {
     // commonly-needed ones. Constants from sbbsdefs.js etc are already
     // assigned to global by indirect-eval'd load().
 })();
+
+// Real Synchronet always has the CGA-style color constants (GREEN,
+// LIGHTGREEN, HIGH, BG_RED, etc. -- cga_defs.js) available to every
+// door without it needing to load() that file itself -- they're just
+// part of the ambient environment. Confirmed live: Bubble Boggle's
+// game.js uses GREEN/LIGHTGREEN/CYAN/HIGH/BG_GREEN/etc. directly, but
+// its own load() chain (graphic.js, sbbsdefs.js, funclib.js,
+// calendar.js) never happens to pull in cga_defs.js -- only
+// ansiterm_lib.js/avatar_lib.js do, neither of which this door
+// touches. Rather than special-case this door (or wait for the next
+// one to hit the same gap), load cga_defs.js here once, up front, so
+// every door gets the real ambient behavior automatically -- matches
+// how load() already makes a file's own top-level `var`s real
+// globalThis properties, visible to every script loaded afterward.
+try { load('cga_defs.js'); } catch (e) {}
 
 // === Execute the actual game ===
 var _gameScript = process.argv[process.argv.length - 1];
@@ -1877,6 +3634,20 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
     user_id = _u('id') or 1
     security_level = 255 if _u('is_admin') else 50
     login_count = _u('login_count') or 0
+    user_location = _u('location') or ''
+    # Real User.date_of_birth (a Python date for the SQLAlchemy model
+    # path, possibly a plain string for the dict-based telnet/SSH/
+    # rlogin session path) -- feeds bbs.compare_ars()'s real AGE check
+    # (see that function's own comment in the template). Empty string
+    # when unset/unknown, which AGE checks deliberately treat as
+    # failing rather than passing.
+    _dob = _u('date_of_birth')
+    if _dob is None:
+        user_birthdate = ''
+    elif hasattr(_dob, 'isoformat'):
+        user_birthdate = _dob.isoformat()
+    else:
+        user_birthdate = str(_dob)
 
     # Resolve to absolute paths — the JS wrapper templates these into
     # `js.exec_dir` / `js.startup_dir` which doors then concatenate with
@@ -1901,6 +3672,14 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
     # Stubs dir ships with anetbbs (provides sbbsdefs.js etc) so doors
     # `load("sbbsdefs.js")` works without a full Synchronet install.
     stubs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sbbs_stubs')
+    # MsgBase's real backing -- msgbase_bridge.py, invoked via spawnSync
+    # from the JS MsgBase class. sys.executable (not a bare 'python3' on
+    # PATH) so the bridge runs under the exact same interpreter/venv
+    # ANetBBS itself is running under, guaranteeing its own deps
+    # (Flask/SQLAlchemy) are actually importable.
+    msgbase_bridge = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  'msgbase_bridge.py')
+    python_bin = sys.executable or 'python3'
 
     def _q(s):
         # The local _js_str() escapes special chars but does NOT add surrounding
@@ -1918,6 +3697,9 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
         .replace('{USER_ID}', str(user_id)) \
         .replace('{SECURITY_LEVEL}', str(security_level)) \
         .replace('{LOGIN_COUNT}', str(login_count)) \
+        .replace('{USER_LOCATION}', _q(user_location)) \
+        .replace('{USER_BIRTHDATE}', _q(user_birthdate)) \
+        .replace('{USER_IP}', _q('127.0.0.1')) \
         .replace('{BBS_NAME}', _q(bbs_name)) \
         .replace('{NODE_NUMBER}', str(node_number)) \
         .replace('{EXEC_DIR}', _q(exec_dir)) \
@@ -1925,7 +3707,9 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
         .replace('{STUBS_DIR}', _q(stubs_dir)) \
         .replace('{DATA_DIR}', _q(data_dir)) \
         .replace('{TEXT_DIR}', _q(text_dir)) \
-        .replace('{MODS_DIR}', _q(mods_dir))
+        .replace('{MODS_DIR}', _q(mods_dir)) \
+        .replace('{MSGBASE_BRIDGE}', _q(msgbase_bridge)) \
+        .replace('{PYTHON_BIN}', _q(python_bin))
 
     tmp = tempfile.NamedTemporaryFile(
         mode='w',

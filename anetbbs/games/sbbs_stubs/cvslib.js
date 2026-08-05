@@ -351,7 +351,13 @@ CVS = new (function () {
 					break;
 				case 'Valid-requests':
 					var m=cmd[1].split(' ');
-					for each(var r in m) {
+					// `for each(var x in arr)` is a SpiderMonkey-only
+					// construct removed from JS years ago, not supported
+					// by Node's V8 -- same fix pattern as cnflib.js's
+					// getBytes() / frame.js.
+					var __keys = Object.keys(m);
+					for (var __i = 0; __i < __keys.length; __i++) {
+						var r = m[__keys[__i]];
 						this.validRequests[r] = true;
 					}
 					break;

@@ -4,11 +4,12 @@ Queries active LoginModule rows for the given event_type, checks security
 level, respects fast-logon skip, and dispatches each module in sort_order.
 
 Supported module_type values:
-  wall        — graffiti wall (params: none)
-  ansi        — display an ANSI screen slot (params: {"slot": "welcome"})
-  shell       — run a shell command (params: {"command": "/path/script.sh"})
-  door_native — run a native Linux door binary (params: {"path": "...", "args": "..."})
-  door_python — import and call a Python door (params: {"module": "pkg.mod", "func": "run"})
+  wall         — graffiti wall (params: none)
+  ansi         — display an ANSI screen slot (params: {"slot": "welcome"})
+  file_bulletin — browse file bulletins (params: none; see features/file_bulletins.py)
+  shell        — run a shell command (params: {"command": "/path/script.sh"})
+  door_native  — run a native Linux door binary (params: {"path": "...", "args": "..."})
+  door_python  — import and call a Python door (params: {"module": "pkg.mod", "func": "run"})
 """
 from __future__ import annotations
 
@@ -83,6 +84,10 @@ async def _dispatch(session, module_type: str, params: dict) -> None:
         slot = params.get('slot', '')
         if slot:
             await session._show_ansi_screen(slot)
+
+    elif module_type == 'file_bulletin':
+        from .file_bulletins import show_file_bulletins
+        await show_file_bulletins(session)
 
     elif module_type == 'shell':
         await _run_shell(session, params)

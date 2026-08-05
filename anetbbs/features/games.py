@@ -91,11 +91,16 @@ class GameManager:
         GRN = '\x1b[1;32m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         while True:
             _iw = ui_width(self.session)
-            _name_w  = max(25, _iw - 28)       # game name column
-            _type_w  = 15
-            # Row: (2){num:2}(2).(1) (1){name:_name_w}(1)[{type:_type_w}](1){pad}
-            # = 9 + _name_w + _type_w + _pad → _pad = _iw - 7 - _name_w - _type_w
-            _pad     = max(0, _iw - 7 - _name_w - _type_w)
+            # Two columns per category row -- one game per line ran off the
+            # bottom of a real 24-row terminal once the door count passed
+            # ~10 (Jerry: "once you get so many, you cant see them all...
+            # I had to use the syncterm scroll back to see the top games").
+            # Column width leaves room for a right-hand gutter between the
+            # two columns; the [game_type] tag from the old single-column
+            # layout is dropped here (implementation detail, not something
+            # a player picking a game needs) to make room.
+            _cols    = 2
+            _col_w   = max(20, (_iw // _cols) - 2)
             if not await write_menu_art(self.session, 'door_games'):
                 hbar = '═' * _iw
                 title = "Door Games".center(_iw)
@@ -108,12 +113,15 @@ class GameManager:
                     label = f"  ─── {cat_name} "
                     fill = '─' * max(0, _iw - len(label))
                     await self.session.write(f"{BOLD}{CYAN}{label}{fill}{RESET}\r\n")
+                    cells = []
                     for g in grouped[slug]:
-                        name_col = g['name'][:_name_w]
-                        line = (f"  {YEL}{num:2d}{DIM}. {GRN}{name_col:<{_name_w}}{DIM} "
-                                f"[{g['game_type']:<{_type_w}}]{' ' * _pad}{RESET}\r\n")
-                        await self.session.write(line)
+                        name_col = g['name'][:_col_w - 5]
+                        cells.append(
+                            f"{YEL}{num:2d}{DIM}. {GRN}{name_col:<{_col_w - 5}}{RESET}")
                         num += 1
+                    for i in range(0, len(cells), _cols):
+                        row = '  '.join(cells[i:i + _cols])
+                        await self.session.write(f"  {row}\r\n")
                 await self.session.write(f"  {YEL}Q{DIM}. {GRN}Return{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
 

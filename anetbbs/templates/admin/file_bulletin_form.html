@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Edit File Bulletin - Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-file-earmark-text-fill"></i> Edit File Bulletin</h1>
+</div>
+
+<div class="row justify-content-center">
+<div class="col-lg-7">
+<form method="post" class="card p-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+        <label class="form-label">File</label>
+        <input type="text" class="form-control" value="{{ row.filename }}" disabled>
+        {% if not on_disk %}
+        <small class="text-danger">This file was not found in the bulletins
+            directory — it may have been removed or renamed.</small>
+        {% endif %}
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Title <span class="text-danger">*</span></label>
+        <input type="text" name="title" class="form-control" required
+               value="{{ row.title }}">
+        <small class="text-muted">Shown in the terminal's ANSI/File Bulletins list.</small>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Sort Order</label>
+            <input type="number" name="sort_order" class="form-control"
+                   value="{{ row.sort_order }}">
+            <small class="text-muted">Lower shows first</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Min Access Level</label>
+            <input type="number" name="min_access_level" class="form-control" min="0" max="255"
+                   value="{{ row.min_access_level }}">
+            <small class="text-muted">0=all, 10=users, 100=sysop</small>
+        </div>
+    </div>
+
+    <div class="mb-3 form-check">
+        <input type="checkbox" name="is_active" class="form-check-input" id="is_active"
+               {{ 'checked' if row.is_active }}>
+        <label class="form-check-label" for="is_active">Active (visible to users)</label>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        <a href="{{ url_for('file_bulletins_admin.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+</div>
+</div>
+{% endblock %}

@@ -430,16 +430,28 @@ Frame.prototype.clearData = function(x,y,use_offset) {
 }
 Frame.prototype.bottom = function() {
 	if(this.__properties__.open) {
-		for each(var c in this.__relations__.child)
+		// `for each(var c in arr)` is a SpiderMonkey-only construct
+		// removed from JS years ago and not supported by Node's V8 --
+		// same fix pattern already established in cnflib.js's
+		// getBytes(). Iterate values via Object.keys() so this parses
+		// under both engines regardless of whether the source is an
+		// array or plain object.
+		var __keys = Object.keys(this.__relations__.child);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = this.__relations__.child[__keys[__i]];
 			c.bottom();
+		}
 		this.__properties__.display.bottom(this);
 	}
 }
 Frame.prototype.top = function() {
 	if(this.__properties__.open) {
 		this.__properties__.display.top(this);
-		for each(var c in this.__relations__.child)
+		var __keys = Object.keys(this.__relations__.child);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = this.__relations__.child[__keys[__i]];
 			c.top();
+		}
 	}
 }
 Frame.prototype.open = function() {
@@ -447,20 +459,28 @@ Frame.prototype.open = function() {
 		this.__properties__.display.open(this);
 		this.__properties__.open = true;
 	}
-	for each(var c in this.__relations__.child) {
+	var __keys = Object.keys(this.__relations__.child);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var c = this.__relations__.child[__keys[__i]];
 		c.open();
 	}
 }
 Frame.prototype.refresh = function() {
 	if(this.__properties__.open) {
 		this.__properties__.display.updateFrame(this);
-		for each(var c in this.__relations__.child)
+		var __keys = Object.keys(this.__relations__.child);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = this.__relations__.child[__keys[__i]];
 			c.refresh();
+		}
 	}
 }
 Frame.prototype.close = function() {
-	for each(var c in this.__relations__.child)
+	var __keys = Object.keys(this.__relations__.child);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var c = this.__relations__.child[__keys[__i]];
 		c.close();
+	}
 	if(this.__properties__.open) {
 		this.__properties__.display.close(this);
 		this.__properties__.open = false;
@@ -497,11 +517,16 @@ Frame.prototype.move = function(x,y) {
 	if(ny !== undefined)
 		this.y=ny;
 	this.__properties__.display.updateFrame(this);
-	for each(var c in this.__relations__.child)
+	var __keys = Object.keys(this.__relations__.child);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var c = this.__relations__.child[__keys[__i]];
 		c.move(x,y);
+	}
 }
 Frame.prototype.moveTo = function(x,y) {
-	for each(var c in this.__relations__.child) {
+	var __keys = Object.keys(this.__relations__.child);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var c = this.__relations__.child[__keys[__i]];
 		var cx = (x + (c.x-this.x));
 		var cy = (y + (c.y-this.y));
 		c.moveTo(cx,cy);
@@ -1566,7 +1591,9 @@ Display.prototype.cycle = function() {
 		var lasty = undefined;
 		var lastx = undefined;
 		var lastf = undefined;
-		for each(var u in updates) {
+		var __keys = Object.keys(updates);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var u = updates[__keys[__i]];
 			if(lasty !== u.y || lastx == undefined || (u.x - lastx) !== 1)
 				console.gotoxy(u.px,u.py);
 			if(lastf !== u.id)
@@ -1741,7 +1768,9 @@ Display.prototype.__drawChar__ = function(ch,attr,xpos,ypos) {
 }
 Display.prototype.__getTopCanvas__ = function(x,y) {
 	var top = undefined;
-	for each(var c in this.__properties__.canvas) {
+	var __keys = Object.keys(this.__properties__.canvas);
+	for (var __i = 0; __i < __keys.length; __i++) {
+		var c = this.__properties__.canvas[__keys[__i]];
 		if(c.frame.parent == undefined || c.hasData(x,y))
 			top = c;
 	}

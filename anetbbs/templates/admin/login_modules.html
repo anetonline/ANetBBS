@@ -77,6 +77,8 @@
     <ul class="mb-0 small">
         <li><code>wall</code> — Show the Graffiti Wall</li>
         <li><code>ansi</code> — Display an ANSI screen slot (params: <code>{"slot":"welcome"}</code>)</li>
+        <li><code>file_bulletin</code> — Browse file bulletins (.txt/.asc/.ans) — manage which files show at
+            <a href="{{ url_for('file_bulletins_admin.index') }}">Bulletins &rarr; Files</a></li>
         <li><code>shell</code> — Run a shell command (params: <code>{"command":"/path/script.sh"}</code>)</li>
         <li><code>door_native</code> — Native Linux door binary (params: <code>{"path":"/path/door","args":"--node $NODE"}</code>)</li>
         <li><code>door_python</code> — Python door module (params: <code>{"module":"anetbbs.doors.mything","func":"run"}</code>)</li>

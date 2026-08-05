@@ -226,6 +226,16 @@ class Config:
         'DOWNLOADS_EXTENSIONS',
         'tar.gz,tgz,zip,7z,bz2,xz,rar,iso,img,asc,sig,sha256,md5,txt,nfo,diz')
 
+    # File Bulletins — sysop drops .txt/.asc/.ans files into this directory
+    # and they auto-appear (once enabled per-file at Admin -> Bulletins ->
+    # Files) in the terminal's "File Bulletins" menu and/or as a logon/
+    # logoff module, viewed through the same scrollable ANSI-aware reader
+    # (ANView) used for messages. Also the natural drop point for door
+    # games that write their own .ans scoreboard/news files. Same
+    # auto-detect-a-drop-in-directory convention as DOWNLOADS_DIR above.
+    FILE_BULLETINS_DIR = os.environ.get(
+        'FILE_BULLETINS_DIR', os.path.join(BASE_DIR, 'data', 'text', 'bulletins'))
+
     # Security — country blocking via ip-api.com (free, no registration).
     # Comma-separated ISO 3166-1 alpha-2 codes to block (e.g. CN,RU,KP).
     # Leave blank to disable. Lookup results are cached in-memory for 1 hour.

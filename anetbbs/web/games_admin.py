@@ -45,6 +45,19 @@ def _category_choices():
     return [('other', 'Other')]
 
 
+def _msgbase_area_choices():
+    """Real EchoArea rows for the InterBBS score-sharing dropdown --
+    0 means "off" (Game.msgbase_area_id stays NULL)."""
+    from ..models import EchoArea
+    choices = [(0, '— None —')]
+    try:
+        areas = EchoArea.query.order_by(EchoArea.name).all()
+        choices += [(a.id, f'[{a.network.name}] {a.name}') for a in areas]
+    except Exception:
+        pass
+    return choices
+
+
 class GameForm(FlaskForm):
     """Add/Edit game form."""
     name = StringField('Name', validators=[DataRequired(), Length(max=100)])
@@ -100,6 +113,15 @@ class GameForm(FlaskForm):
     # Synchronet JS
     synchronet_script_path = StringField('Synchronet Script Path (.js)', validators=[Optional(), Length(max=500)])
     synchronet_exec_dir = StringField('Synchronet Exec Dir', validators=[Optional(), Length(max=500)])
+    # InterBBS score-sharing (e.g. Minesweeper's real "syncdata" MsgBase
+    # feature) -- optional, only meaningful for door_synchronet games
+    # that actually call new MsgBase(...). Choices populated at request
+    # time from real EchoArea rows (same pattern as EchoAreaForm.network_id
+    # in echomail_admin.py), not a fixed list -- validate_choice=False
+    # so a game whose configured area was since deleted doesn't hard-fail
+    # form validation, it just shows as unset.
+    msgbase_area_id = SelectField('InterBBS Score-Sharing Area', coerce=int,
+                                  validators=[Optional()], validate_choice=False)
 
     # Web game
     web_game_module = StringField('Web Game Module Name', validators=[Optional(), Length(max=100)])
@@ -150,6 +172,7 @@ def list_games():
 def add_game():
     form = GameForm()
     form.category.choices = _category_choices()
+    form.msgbase_area_id.choices = _msgbase_area_choices()
     if form.validate_on_submit():
         game = Game()
         _populate_game(game, form)
@@ -167,6 +190,7 @@ def edit_game(game_id):
     game = Game.query.get_or_404(game_id)
     form = GameForm(obj=game)
     form.category.choices = _category_choices()
+    form.msgbase_area_id.choices = _msgbase_area_choices()
     if form.validate_on_submit():
         _populate_game(game, form)
         db.session.commit()
@@ -353,6 +377,7 @@ def _populate_game(game, form):
     game.mystic_script_path = form.mystic_script_path.data
     game.synchronet_script_path = form.synchronet_script_path.data
     game.synchronet_exec_dir = form.synchronet_exec_dir.data
+    game.msgbase_area_id = form.msgbase_area_id.data or None
     game.web_game_module = form.web_game_module.data
     game.web_game_url = form.web_game_url.data
 

@@ -129,7 +129,18 @@ Object.defineProperty(Graphic.prototype, "BIN", {
 		for (y=0; y<this.height; y += 1) {
 			for (x=0; x<this.width; x += 1) {
 				if (blen >= pos+2) {
-					this.setCell(bin.charAt(pos), bin.charCodeAt(pos+1));
+					// Real upstream Synchronet (confirmed against
+					// exec/dorkit/graphic.js in the SynchronetBBS/sbbs
+					// repo) omits x/y here -- setCell(ch, attr, x, y)
+					// then reads `this.data[x][y]` with x/y undefined,
+					// throwing immediately on the very first BIN=
+					// assignment (Bubble Boggle's Lobby/GameBoard
+					// constructors both do `this.graphic.load(...)`,
+					// which sets .BIN internally). Passing the loop's
+					// own x/y (which the GET side already iterates in
+					// the same order, confirming these are the
+					// intended coordinates) is the obvious fix.
+					this.setCell(bin.charAt(pos), bin.charCodeAt(pos+1), x, y);
 				}
 				else {
 					return;
@@ -557,6 +568,55 @@ Graphic.prototype.draw = function(xpos,ypos,width,height,xoff,yoff,cons)
 	if(yoff===undefined) {
 		yoff=0;
 	}
+	// Real upstream Synchronet requires the caller to pass `cons`
+	// explicitly, with no fallback -- and would crash here exactly
+	// like this if it were omitted too (confirmed against the real
+	// exec/dorkit/graphic.js source). Bubble Boggle's own game.js
+	// calls `splash.draw();` with zero arguments for its splash-screen
+	// display -- a real bug in the door's own source, not something
+	// this compat layer can fix by editing the door (doors stay
+	// unmodified). Defaulting to the global `console` here is the
+	// obvious, harmless interpretation of what an omitted `cons` was
+	// always going to mean in practice (nothing else makes sense as a
+	// drawing target) -- callers that DO pass a real `cons` are
+	// completely unaffected.
+	if(cons===undefined) {
+		cons=console;
+	}
+	// Real bug found live bundling Minesweeper: this dorkit revision of
+	// graphic.js is missing the 'center' convenience real Synchronet's
+	// draw() supports for xpos/ypos (confirmed present in the flat
+	// sbbs_stubs/graphic.js sibling, an otherwise older/different
+	// revision -- these two vendored copies disagree on more than one
+	// feature, see the BG_HIGH/BG_BRIGHT cga_defs.js split and the
+	// missing "Leave as last line: Graphic;" trailer for the other two
+	// found the same way). Minesweeper's own show_image() calls
+	// `graphic.draw('center', 'center')` for every splash image
+	// (welcome/mine/winner/loser/boom) -- without this, the literal
+	// string 'center' flowed straight into `cons.gotoxy(xpos, ypos+y)`,
+	// where `ypos+y` (string + number) silently string-concatenates
+	// instead of computing a row ("center8" instead of a real row
+	// number), producing garbage escape sequences that leaked "enterN;
+	// centerH"-shaped literal text onto the screen instead of ever
+	// actually drawing the image. Ported from the flat file's own real
+	// centering formula. Uses cons.screen_columns/cons.screen_rows, NOT
+	// cons.cols/cons.rows -- despite the bounds check a few lines below
+	// reading `cons.cols`/`cons.rows`, those are not real console
+	// properties at all (only `user.cols`/`user.rows`, a real but
+	// unrelated Synchronet user terminal-size preference, happen to
+	// share the name) -- confirmed live, `console.cols`/`console.rows`
+	// are both undefined, which is why that existing bounds check below
+	// has always silently no-op'd (any comparison against undefined/NaN
+	// is false, so it never actually blocks an out-of-bounds draw --
+	// fails open, not a crash, presumably why nobody had noticed). Not
+	// fixing that pre-existing check here -- out of scope for this bug
+	// -- but using the REAL property for the new centering math below.
+	if(xpos === 'center') {
+		xpos = Math.floor((cons.screen_columns - width) / 2) + 1;
+	}
+	if(ypos === 'center') {
+		ypos = Math.ceil((cons.screen_rows - height) / 2) + 1;
+	}
 	if(xoff+width > this.width || yoff+height > this.height) {
 		alert("Attempt to draw from outside of graphic: "+xoff+":"+yoff+" "+width+"x"+height+" "+this.width+"x"+this.height);
 		return(false);
@@ -571,7 +631,24 @@ Graphic.prototype.draw = function(xpos,ypos,width,height,xoff,yoff,cons)
 			// Do not draw to the bottom left corner of the screen-would scroll
 			if(xpos+x !== cons.cols
 					|| ypos+y !== cons.rows) {
-				cons.attr = this.data[x+xoff][y+yoff].attr;
+				// Real upstream Synchronet (confirmed against
+				// exec/dorkit/graphic.js) has this exact same bug:
+				// `cons.attr = ...` assigns a plain, unrecognized
+				// property -- real Synchronet's console object only
+				// has `.attributes` (confirmed against js_console.cpp,
+				// there is no "attr" property at all), and even that
+				// would need `.attr.value` here (a raw number), not
+				// the whole Attribute object every other assignment in
+				// this file correctly unwraps (see setCell(), the BIN
+				// getter, etc). The net effect upstream: Graphic.draw()
+				// silently never actually applies per-cell color at
+				// all, even though .bin files like Bubble Boggle's own
+				// boggle.bin genuinely encode real color variation
+				// (confirmed: 10 distinct attribute values in that
+				// file) -- a real, visible, reported bug (splash
+				// screen renders in black and white), not a
+				// stylistic choice worth faithfully reproducing.
+				cons.attributes = this.data[x+xoff][y+yoff].attr.value;
 				ch=this.data[x+xoff][y+yoff].ch;
 				if(ch === "\r" || ch === "\n" || !ch) {
 					ch=this.ch;

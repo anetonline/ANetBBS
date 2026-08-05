@@ -91,6 +91,34 @@ gallery-config.json
 anetbbs/games/sbbs_doors/data/
 vendor/games/anetsims/data/
 
+# Synchronet JSON-RPC interbbs doors used for Pi3 test/validation of the
+# compat shim -- NOT shipped in the release. These are real, free, open-
+# source Synchronet doors that come from their own authors, not from
+# ANetBBS; the point was to prove the compat shim runs them correctly,
+# not to redistribute them. A sysop who wants to run one downloads it
+# themselves and drops it at this exact path -- BUNDLED_DOORS in
+# web_app.py auto-detects and registers it if present (must_exist-gated,
+# silently skipped if absent), matching the existing pattern of every
+# other Games-admin-registered door. See docs/26-synchronet-json-rpc-doors.md
+# for the per-door download links and setup steps.
+anetbbs/games/sbbs_doors/bublbogl/
+anetbbs/games/sbbs_doors/chickendelivery/
+anetbbs/games/sbbs_doors/dicewarz2/
+anetbbs/games/sbbs_doors/druglord/
+anetbbs/games/sbbs_doors/fatfish/
+anetbbs/games/sbbs_doors/gooble/
+anetbbs/games/sbbs_doors/gttrivia/
+anetbbs/games/sbbs_doors/jeopardized/
+anetbbs/games/sbbs_doors/lemons/
+anetbbs/games/sbbs_doors/maze/
+anetbbs/games/sbbs_doors/minesweeper/
+anetbbs/games/sbbs_doors/starstocks/
+anetbbs/games/sbbs_doors/startrek/
+anetbbs/games/sbbs_doors/synchronetris/
+anetbbs/games/sbbs_doors/synkroban/
+anetbbs/games/sbbs_doors/thirsty/
+anetbbs/games/sbbs_doors/uberblox/
+
 # Test / cache dirs
 .pytest_cache/
 .mypy_cache/

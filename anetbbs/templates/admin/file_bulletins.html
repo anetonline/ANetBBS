@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}File Bulletins - Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-file-earmark-text-fill"></i> File Bulletins</h1>
+</div>
+
+<p class="text-muted">
+    Real .txt/.asc/.ans files dropped into <code>{{ bulletins_dir }}</code> —
+    including score/news files a door game writes out itself — are
+    auto-detected here (disabled by default) every time this page loads.
+    Enable the ones you want visible; each shows in the terminal's
+    <strong>ANSI/File Bulletins</strong> menu, viewed through the same
+    scrollable ANSI-aware reader used for messages. This is separate from
+    the sysop-authored text <a href="{{ url_for('admin.bulletins') }}">Bulletins</a> menu.
+</p>
+
+{% if rows %}
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+    <thead>
+        <tr>
+            <th>Sort</th>
+            <th>Title</th>
+            <th>File</th>
+            <th>Min Level</th>
+            <th>Active</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr class="{{ 'table-secondary text-muted' if not row.is_active }}">
+            <td>{{ row.sort_order }}</td>
+            <td><strong>{{ row.title }}</strong></td>
+            <td>
+                <code>{{ row.filename }}</code>
+                {% if row.filename not in on_disk %}
+                <span class="badge bg-danger ms-1" title="File no longer found on disk">missing</span>
+                {% endif %}
+            </td>
+            <td>{{ row.min_access_level }}</td>
+            <td>
+                <form method="post" action="{{ url_for('file_bulletins_admin.toggle', row_id=row.id) }}" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm {{ 'btn-success' if row.is_active else 'btn-outline-secondary' }}">
+                        {{ 'On' if row.is_active else 'Off' }}
+                    </button>
+                </form>
+            </td>
+            <td>
+                <a href="{{ url_for('file_bulletins_admin.edit', row_id=row.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                <form method="post" action="{{ url_for('file_bulletins_admin.delete', row_id=row.id) }}" style="display:inline"
+                      onsubmit="return confirm('Remove {{ row.title }} from the list? The file itself is not deleted.')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger">Del</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="text-muted">No files found yet — drop a .txt/.asc/.ans file into
+    <code>{{ bulletins_dir }}</code> and reload this page.</p>
+{% endif %}
+{% endblock %}

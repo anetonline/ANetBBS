@@ -257,6 +257,7 @@ ADMIN_HUB_SECTIONS = {
         'tools': [
             ('admin.boards', 'Boards', 'bi-collection', 'Message board / conference list'),
             ('admin.bulletins', 'Bulletins', 'bi-megaphone', 'System announcements'),
+            ('file_bulletins_admin.index', 'File Bulletins', 'bi-file-earmark-text', '.txt/.asc/.ans bulletin files'),
             ('admin.motd_admin', 'MOTD Pool', 'bi-card-text', 'Message-of-the-day rotation'),
             ('admin.taglines_admin', 'Taglines', 'bi-chat-quote', 'Shared tagline pool for message composing'),
             ('admin.broadcast', 'Broadcast', 'bi-broadcast', 'Send a message to all online users'),

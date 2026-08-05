@@ -142,6 +142,7 @@
     .status-right { display: flex; align-items: center; gap: 14px; overflow: hidden; min-width: 0; }
     .topic-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 60vw; overflow: hidden; }
     .topic-text { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 55vw; }
+    .latency-wrap { flex-shrink: 0; white-space: nowrap; opacity: 0.65; font-size: 0.9em; }
 
     /* Scrolling ticker/banner -- rotates hub-pushed BANNER:/STATS: text,
        same pool the terminal client's own ticker feeds from (see
@@ -579,6 +580,9 @@
       Status: <span id="status-text">Connecting...</span>
     </div>
     <div class="status-right">
+      <div class="latency-wrap" id="status-latency-wrap" style="display:none;">
+        <span id="status-latency-text">-</span>
+      </div>
       <div class="topic-wrap">
         Topic: <span id="topic-text" class="topic-text">-</span>
       </div>
@@ -1121,6 +1125,8 @@
     const tickerBar        = document.getElementById('ticker-bar');
     const tickerTextEl     = document.getElementById('ticker-text');
     const latencyInfoEl    = document.getElementById('latency-info');
+    const statusLatencyWrap = document.getElementById('status-latency-wrap');
+    const statusLatencyText = document.getElementById('status-latency-text');
     const clockInfoEl      = document.getElementById('clock-info');
     const clockformatSelect = document.getElementById('clockformat-select');
     const tzoffsetInput    = document.getElementById('tzoffset-input');
@@ -2160,6 +2166,11 @@
           if (sentAt > 0) {
             latencyMs = Math.max(0, Date.now() - sentAt);
             if (latencyInfoEl) latencyInfoEl.textContent = latencyMs + 'ms';
+            // Also surface it in the status bar next to the room topic
+            // (Jerry's ask) -- stays hidden until the first real
+            // measurement lands rather than showing a placeholder "-".
+            if (statusLatencyText) statusLatencyText.textContent = latencyMs + 'ms';
+            if (statusLatencyWrap) statusLatencyWrap.style.display = '';
           }
           break;
         }

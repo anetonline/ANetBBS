@@ -463,6 +463,7 @@ def create_app(config_name=None):
     from .web.door_errors import door_errors_bp
     from .web.backups_admin import backups_bp
     from .web.login_modules_admin import login_modules_admin_bp
+    from .web.file_bulletins_admin import file_bulletins_admin_bp
     from .web.wall_admin import wall_admin_bp
     from .web.lastcallers_admin import lastcallers_admin_bp
     from .web.games_interbbs_admin import games_interbbs_admin_bp
@@ -572,6 +573,7 @@ def create_app(config_name=None):
     app.register_blueprint(guru_bp)
     # Logon/logoff modules and graffiti wall admin.
     app.register_blueprint(login_modules_admin_bp)
+    app.register_blueprint(file_bulletins_admin_bp)
     app.register_blueprint(wall_admin_bp)
     app.register_blueprint(lastcallers_admin_bp)
     app.register_blueprint(games_interbbs_admin_bp)
@@ -1639,6 +1641,20 @@ def _create_default_data():
     # of the box without the sysop having to track down + configure them.
     # We only insert the DB row if the binary actually exists on disk —
     # otherwise the door would 500 when launched.
+    #
+    # Exception: the door_synchronet (JSON-RPC interbbs) entries below
+    # are NOT shipped in the release tarball at all (see .gitignore —
+    # anetbbs/games/sbbs_doors/<slug>/ for each one is deliberately
+    # excluded). These are real, free, open-source Synchronet doors
+    # from their own original authors, not ANetBBS's to redistribute —
+    # the point of bundling them locally during development was to
+    # prove the Synchronet compat shim (synchronet_compat.py) runs them
+    # correctly, not to ship copies. A sysop who wants one of these
+    # downloads it themselves and drops it at the documented path (see
+    # docs/26-synchronet-json-rpc-doors.md); the exact same
+    # must_exist-gated logic below then auto-detects and registers it
+    # with zero extra code, identically to how a bundled door's own
+    # binary being present/absent already works.
     from flask import current_app as _ca
     base_dir = _ca.config.get('BASE_DIR') or _ca.root_path
     vendor_dir = os.path.join(base_dir, '..', 'vendor', 'games')
@@ -1761,6 +1777,878 @@ def _create_default_data():
                 _ca.root_path, 'games', 'sbbs_doors', 'lord', 'lord.js'),
             # Active by default — runs under Node via the compat shim.
             '_active_default': True,
+        },
+        {
+            # Chicken Delivery — first door wired up to ANetBBS's new
+            # Synchronet JSON-RPC (port 10088) interbbs client support
+            # (anetbbs/games/jsonrpc_client.py +
+            # anetbbs/games/sbbs_stubs/json-client.js — see that
+            # shim's own docstring for the full compatibility-contract
+            # story). The game ships its own server.ini pointed at
+            # game.a-net-online.lol:10088 — StingRay's real live
+            # Synchronet JSON hub, already serving other sysops'
+            # installs — so this door's score-write/leaderboard-read
+            # calls go straight to real shared cross-BBS data, not a
+            # sandbox. Real Electronic Chicken Software door, source
+            # unmodified from the vendor's own xtrn/ package.
+            'name': 'Chicken Delivery',
+            'slug': 'chickendelivery',
+            'description': 'Platformer by Electronic Chicken Software — '
+                           'guide the chicken through obstacle courses to '
+                           'the door. Cross-BBS high score leaderboard via '
+                           'Synchronet JSON-RPC interbbs.',
+            'category': 'arcade',
+            'icon': 'bi-controller',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'chickendelivery',
+                'chickendelivery.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'chickendelivery'),
+            'sort_order': 15,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'chickendelivery',
+                'chickendelivery.js'),
+            '_active_default': True,
+        },
+        {
+            # Bubble Boggle — second door wired up to the Synchronet
+            # JSON-RPC interbbs client (same compat contract as Chicken
+            # Delivery above). Ships its own server.ini already pointed
+            # at game.a-net-online.lol:10088. Real The BRoKEN BUBBLe
+            # Software (Matt Johnson) door, source unmodified from the
+            # vendor's own xtrn/ package. Entry point is boggle.js (not
+            # game.js — boggle.js reads server.ini, opens the JSON-RPC
+            # client, then load()s game.js itself).
+            'name': 'Bubble Boggle',
+            'slug': 'bublbogl',
+            'description': 'Timed word-search puzzle by The BRoKEN BUBBLe '
+                           'Software — find words on a letter grid before '
+                           'the clock runs out. Cross-BBS monthly '
+                           'leaderboard via Synchronet JSON-RPC interbbs.',
+            'category': 'arcade',
+            'icon': 'bi-grid-3x3-gap',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'bublbogl',
+                'boggle.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'bublbogl'),
+            'sort_order': 16,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'bublbogl',
+                'boggle.js'),
+            '_active_default': True,
+        },
+        {
+            # Synchronetris — third door on the Synchronet JSON-RPC
+            # interbbs client, and the first genuinely real-time
+            # multiplayer one: its lobby shows other players' games
+            # live and in-game syncs a shared piece queue between
+            # players, both built entirely on subscribe()-driven push
+            # updates. This is what motivated building real persistent-
+            # connection support into the JSON-RPC client (see
+            # jsonrpc_client.py's run_listen_session() and
+            # json-client.js's ensureDaemon()) rather than the earlier
+            # one-shot-per-call-only model Chicken Delivery/Bubble
+            # Boggle never needed more than. Entry point is tetris.js
+            # (reads server.ini, opens the JSON-RPC client, then
+            # load()s lobby.js). Real door, source unmodified from the
+            # vendor's own xtrn/ package.
+            'name': 'Synchronetris',
+            'slug': 'synchronetris',
+            'description': 'Real-time multiplayer Tetris over Synchronet '
+                           'JSON-RPC interbbs — live game lobby with chat, '
+                           'synced piece queues between players.',
+            'category': 'arcade',
+            'icon': 'bi-grid-3x3',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synchronetris',
+                'tetris.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synchronetris'),
+            'sort_order': 17,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synchronetris',
+                'tetris.js'),
+            '_active_default': True,
+        },
+        {
+            # Jeopardized — fourth door on the Synchronet JSON-RPC
+            # interbbs client, and the first to also need real outbound
+            # HTTP (its own func.js checks answers against a Web API
+            # via a real HTTPRequest call, not just JSON-RPC game
+            # state). Needed two new pieces of compat-shim
+            # infrastructure beyond what Chicken Delivery/Bubble
+            # Boggle/Synchronetris required: an ANetBBS-authored
+            # http.js replacement (same "keep the real Socket-free
+            # logic, replace only the actual I/O" pattern as
+            # json-client.js) and a minimal Socket stub (sockdefs.js,
+            # a real vendored file loaded by anything network-adjacent,
+            # unconditionally reads Socket.PF_INET etc at load time —
+            # a real gap no earlier bundled door happened to trigger).
+            # Entry point is jeopardized.js. Real door, source
+            # unmodified from the vendor's own xtrn/ package.
+            #
+            # MsgBase is NOT wired up (func.js's notifySysop() sends
+            # real netmail) — confirmed with Jerry that this doesn't
+            # need to work; nothing on the actual play path calls it.
+            # Full audit of all ~15 view files (board/clue/answer/
+            # wager/round/menu/scoreboard/etc) done, and confirmed via
+            # repeated automated PTY smoke tests against Jerry's real
+            # live game.a-net-online.lol JSON-RPC server: a brand new
+            # player can reach the menu, start a round, select a real
+            # clue, submit an answer, get scored, and return to the
+            # board with zero errors. Three real door-side/compat-shim
+            # bugs found and fixed this way (getUser()/
+            # getUserGameState() null-vs-undefined handling for a
+            # first-time player, missing skipsp()/js.flatten_string()
+            # globals). Confirmed working on real Pi3 hardware by
+            # Jerry (v1.0.30) — "it worked great".
+            'name': 'Jeopardized',
+            'slug': 'jeopardized',
+            'description': 'Trivia game show over Synchronet JSON-RPC '
+                           'interbbs, with live rankings and a real '
+                           'answer-checking Web API.',
+            'category': 'trivia',
+            'icon': 'bi-question-diamond',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'jeopardized',
+                'jeopardized.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'jeopardized'),
+            'sort_order': 18,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'jeopardized',
+                'jeopardized.js'),
+            '_active_default': True,
+        },
+        {
+            # Gooble Gooble — 5th door on the Synchronet JSON-RPC
+            # interbbs client, a real-time Pac-Man clone (echicken's
+            # own door, same author as Chicken Delivery/Bubble Boggle/
+            # Synchronetris/Jeopardized). Simpler than the others in
+            # one respect (no HTTP, just JSONClient for a global
+            # scoreboard) but the FIRST real-time-action door in this
+            # family — continuous ghost movement via Sprite.Aerial's
+            # constantmotion, not turn-based like the others. Entry
+            # point is gooble.js. Reuses Frame/Sprite/Tree/JSONClient/
+            # Timer infrastructure already proven by earlier doors in
+            # this family — no new compat-shim gaps found by static
+            # audit before bundling (unlike Jeopardized, which needed
+            # real HTTP support). server.ini points at Jerry's real
+            # live game.a-net-online.lol:10088, matching the other
+            # JSON-RPC doors. commands.js/service.js excluded (real
+            # server-side json-service hooks — score-list aggregation
+            # and write-authorization — never load()'d by gooble.js
+            # itself).
+            #
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("both games worked!!!") alongside Synkroban, v1.0.32.
+            'name': 'Gooble Gooble',
+            'slug': 'gooble',
+            'description': 'A real-time Pac-Man-style maze chase over '
+                           'Synchronet JSON-RPC interbbs, with a live '
+                           'cross-BBS high score list.',
+            'category': 'arcade',
+            'icon': 'bi-joystick',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gooble',
+                'gooble.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gooble'),
+            'sort_order': 19,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gooble',
+                'gooble.js'),
+            '_active_default': True,
+        },
+        {
+            # Synkroban — 6th door on the Synchronet JSON-RPC interbbs
+            # client, a real Sokoban warehouse-puzzle clone (real ART
+            # @ FATCATS BBS door, source unmodified from Jerry's own
+            # curated /home/jerry/Desktop/xtrn/ upload; source header
+            # carries a copyright notice permitting unmodified use plus
+            # configuration-only edits — this project's usual "never
+            # edit the door's own file, patch at load time instead"
+            # policy applies here even more strictly than usual, and
+            # the bundled synkroban.js is byte-identical to source).
+            # 11 real level packs bundled (Sven, Microban, Learning
+            # Sokoban, etc).
+            #
+            # Real portability bug found reading the source before
+            # bundling: level loading hardcodes the author's own
+            # absolute install path ("/sbbs/xtrn/synkroban/") instead
+            # of using js.exec_dir — fixed via a load-time string-
+            # substitution door-patch in _applyKnownDoorFixes
+            # (synchronet_compat.py), NOT a file edit. No other compat-
+            # shim gaps found — reuses only plain Frame + JSONClient,
+            # no Sprite/Tree needed. server.ini already came pre-
+            # pointed at Jerry's real live game.a-net-online.lol:10088
+            # in the source upload.
+            #
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("both games worked!!!") alongside Gooble Gooble, v1.0.32.
+            'name': 'Synkroban',
+            'slug': 'synkroban',
+            'description': 'A Sokoban warehouse puzzle over Synchronet '
+                           'JSON-RPC interbbs, with a live cross-BBS '
+                           'scoreboard and 11 real level packs.',
+            'category': 'puzzle',
+            'icon': 'bi-box-seam',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synkroban',
+                'synkroban.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synkroban'),
+            'sort_order': 21,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'synkroban',
+                'synkroban.js'),
+            '_active_default': True,
+        },
+        {
+            # Star Trek — 7th door on the Synchronet JSON-RPC interbbs
+            # client, a real-time space-combat arcade game (echicken's
+            # own door, same author as Chicken Delivery/Bubble Boggle/
+            # Synchronetris/Jeopardized/Gooble Gooble). Single-file
+            # door (startrek.js) — reuses Frame/Sprite/Layout/Timer/
+            # JSONClient, all already proven infrastructure; this is
+            # the first door to use layout.js (ship-selection tabs),
+            # previously vendored+E4X-fixed proactively but never
+            # actually exercised by a bundled door until now.
+            #
+            # 2 real bugs found reading the source before bundling,
+            # both fixed via load-time door-patches in
+            # _applyKnownDoorFixes (synchronet_compat.py), NOT file
+            # edits:
+            #   1. scoreBoard() checks `scores === undefined` to
+            #      detect a brand-new scoreboard scope, but the real
+            #      server returns JSON null for a missing key -- same
+            #      bug class as Jeopardized's getUser(). Would crash
+            #      on `scores.length` the first time ANYONE finishes a
+            #      game against a fresh "STARTREK" scope.
+            #   2. Real gap in the compat shim itself (not door-
+            #      specific, fixed directly in console.getstr() rather
+            #      than via a door-patch): setup() calls the real
+            #      Synchronet 3-arg overload
+            #      `console.getstr("USS ", 30, K_LINE|K_EDIT)` to
+            #      pre-fill a ship-name prompt with "USS " -- the old
+            #      2-arg-only implementation treated any non-numeric
+            #      first argument as invalid and silently dropped the
+            #      prefix (and the door's real intended maxlen).
+            #      Independently confirmed as real Synchronet behavior
+            #      (not a door bug) via a second real caller,
+            #      sbbs_stubs/form.js.
+            #
+            # server.ini points at Jerry's real live
+            # game.a-net-online.lol:10088, matching the other JSON-RPC
+            # doors.
+            #
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("star trek worked great too").
+            'name': 'Star Trek',
+            'slug': 'startrek',
+            'description': 'Real-time space combat over Synchronet '
+                           'JSON-RPC interbbs, with a live cross-BBS '
+                           'high score list.',
+            'category': 'space',
+            'icon': 'bi-rocket-takeoff',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'startrek',
+                'startrek.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'startrek'),
+            'sort_order': 22,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'startrek',
+                'startrek.js'),
+            '_active_default': True,
+        },
+        {
+            # Fat Fish — 8th door on the Synchronet JSON-RPC interbbs
+            # client, a fishing simulation with real fish AI (fish are
+            # independent objects that swim, feed, and choose depths
+            # on their own — not random luck) and a live cross-BBS
+            # leaderboard. Real "Art @ Fatcats BBS" door (same author
+            # as Synkroban), source unmodified from Jerry's own curated
+            # /home/jerry/Desktop/xtrn/ upload; source header carries a
+            # copyright notice restricting modification, so — same as
+            # Synkroban — no direct file edits, only load-time
+            # door-patches if any bugs are ever found.
+            #
+            # First door to reach mapgenerator.js (real vendored
+            # terrain-generation library, previously present in
+            # sbbs_stubs/ but never exercised by any bundled door —
+            # confirmed clean syntax, no E4X issues, before bundling).
+            # No Sprite usage at all (unlike Gooble/Star Trek) — just
+            # Frame + JSONClient + the map generator, all already
+            # proven infrastructure. Full API audit (every console.*/
+            # system.*/js.*/user.*/Frame.prototype.* call across all 6
+            # of the door's own JS files) found zero compat-shim gaps
+            # before bundling.
+            #
+            # server.ini came pre-configured in Jerry's own upload
+            # already pointed at game.a-net-online.lol:10088.
+            #
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("fatfish worked great") — including the frame.js
+            # z-order fix (v1.0.36, see that BUNDLED_DOORS comment
+            # history/memory) for the gray shop-panel box he first
+            # reported.
+            'name': 'Fat Fish',
+            'slug': 'fatfish',
+            'description': 'A fishing simulation over Synchronet '
+                           'JSON-RPC interbbs — real fish AI, random '
+                           'lake terrain, and a live cross-BBS '
+                           'leaderboard.',
+            'category': 'simulation',
+            'icon': 'bi-water',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'fatfish',
+                'fatfish.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'fatfish'),
+            'sort_order': 23,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'fatfish',
+                'fatfish.js'),
+            '_active_default': True,
+        },
+        {
+            # Dice Warz ][ — 9th door on the Synchronet JSON-RPC
+            # interbbs client, a real "Dice Wars"-style turn-based
+            # territory-conquest strategy game (Risk-like: roll dice
+            # against neighboring tiles to conquer the map), 4-7
+            # players, human vs. AI or human vs. human. Real Matt
+            # Johnson / mcmlxxix door (same author as Bubble Boggle,
+            # already bundled), source unmodified. Entry point is
+            # dice2.js (-> game.js -> dicefunc.js/diceobj.js). First
+            # door to reach inputline.js and json-chat.js (real
+            # InterBBS in-game chat) — both already vendored, neither
+            # previously exercised by a bundled door. No Sprite usage.
+            # Full API audit (console.*/system.*/js.*/user.*/bbs.*/
+            # Frame.prototype.*, including the less-common
+            # console.down()/left()/right() relative-cursor-move
+            # methods) found zero compat-shim gaps before bundling.
+            #
+            # ai.js and service.js are real server-side-only files
+            # (service.js runs the actual game/AI-turn authority;
+            # ai.js is only load()'d BY service.js, never by the
+            # client) — excluded, matching every prior door's own
+            # commands.js/service.js exclusion pattern. server.ini
+            # came pre-configured in Jerry's own upload already
+            # pointed at game.a-net-online.lol:10088.
+            #
+            # Confirmed working on real Pi3 hardware by Jerry after 2
+            # real bugs found from his playtest report and fixed —
+            # see the json-chat.js null-history bug and dicefunc.js
+            # getTile() JSON-array-hole bug, v1.0.38.
+            'name': 'Dice Warz ][',
+            'slug': 'dicewarz2',
+            'description': 'A Risk-like territory-conquest dice game '
+                           'over Synchronet JSON-RPC interbbs — 4-7 '
+                           'players, human or AI, with real InterBBS '
+                           'chat.',
+            'category': 'strategy',
+            'icon': 'bi-dice-6',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'dicewarz2',
+                'dice2.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'dicewarz2'),
+            'sort_order': 24,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'dicewarz2',
+                'dice2.js'),
+            '_active_default': True,
+        },
+        {
+            # Maze Race — 10th door on the Synchronet JSON-RPC
+            # interbbs client, a real-time multiplayer maze-racing
+            # game (a JS remake of Atari's "Maze Craze"). Real Matt
+            # Johnson / mcmlxxix door (same author as Bubble Boggle/
+            # Dice Warz ][, both already bundled and confirmed
+            # working). Entry point is maze.js -> game.js ->
+            # mazeobj.js/mazegen.js/menu.js. Reuses only already-
+            # proven infrastructure (Frame/JSONChat/InputLine/Layout/
+            # funclib, graphic.js for ambient color constants) — no
+            # new vendored files needed. No Sprite usage.
+            #
+            # Full API audit found zero compat-shim gaps. mazegen.js's
+            # own maze generator always explicitly initializes every
+            # grid cell up front (no JS array holes possible), so this
+            # door does NOT hit the JSON.stringify()-turns-holes-into-
+            # null bug class found in Dice Warz ][ (v1.0.38).
+            # mazeobj.js's own GameData already defensively guards
+            # every client.read(...) result with `if(!x) x = {};` --
+            # exactly the null-check pattern several OTHER doors this
+            # session were missing and had to be patched for.
+            #
+            # service.js (real server-side game authority) is never
+            # load()'d by the client -- excluded, matching every prior
+            # door's own exclusion pattern. server.ini came pre-
+            # configured in Jerry's own upload already pointed at
+            # game.a-net-online.lol:10088.
+            #
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("worked great!").
+            'name': 'Maze Race',
+            'slug': 'maze',
+            'description': 'Real-time multiplayer maze racing over '
+                           'Synchronet JSON-RPC interbbs — a JS '
+                           'remake of Atari\'s Maze Craze.',
+            'category': 'arcade',
+            'icon': 'bi-signpost-split',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'maze',
+                'maze.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'maze'),
+            'sort_order': 25,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'maze',
+                'maze.js'),
+            '_active_default': True,
+        },
+        {
+            # Thirstyville — echicken's café-owner economic simulation
+            # (11th JSON-RPC door). Entry point is thirsty.js -> loads
+            # sbbsdefs.js/json-client.js/frame.js/layout.js/tree.js,
+            # then its own demographics.js/products.js/stock-items.js/
+            # weather.js/player.js. game.ini came pre-configured in
+            # Jerry's own upload already pointed at
+            # game.a-net-online.lol:10088.
+            #
+            # Full source audit found 3 real, previously-unnoticed
+            # compat-shim/door gaps, all fixed before this ever ran on
+            # real hardware:
+            #  1. `jsonClient.send({scope:"ADMIN",func:"TIME"});
+            #     jsonClient.wait();` -- the real client's own
+            #     low-level packet primitives -- didn't exist anywhere
+            #     in json-client.js. Added generically (JSONRPCClient.
+            #     raw() + a new RAW op + JS shim send()/wait()), not
+            #     Thirstyville-specific -- any future door that needs a
+            #     packet shape the higher-level methods don't cover can
+            #     use it too. Verified directly against the real live
+            #     server.
+            #  2. Same null-vs-undefined bug class as Jeopardized's
+            #     original crash (a JSON-RPC read/keys of a
+            #     never-written key returns real JSON null, confirmed
+            #     live against the real server for both READ and KEYS):
+            #     three real crash sites, all door-patched --
+            #     thirsty.js's gameSettings/playerKeys on first-ever
+            #     game creation, player.js's getPlayer() (worse: no
+            #     `||update` short-circuit, so EVERY new player's first
+            #     join would crash), and stock-items.js's
+            #     makeStockItems() (worst: no guard at ALL, crashes
+            #     unconditionally for the very first player on a fresh
+            #     install, every time).
+            #  3. `md5_calc(str, hex)` -- a real Synchronet global this
+            #     door calls at load time (player.js's very first line)
+            #     -- was completely absent from the compat shim. No
+            #     prior bundled door ever actually exercised it
+            #     client-side. Implemented via Node's crypto module and
+            #     added to the _registerGlobals() allowlist (the same
+            #     "declaring it isn't enough" gotcha base64_encode/ctrl
+            #     hit before it).
+            'name': 'Thirstyville',
+            'slug': 'thirsty',
+            'description': 'Café-owner economic simulation over '
+                           'Synchronet JSON-RPC interbbs — buy '
+                           'ingredients, brew drinks, and compete on a '
+                           'shared cross-BBS market.',
+            'category': 'strategy',
+            'icon': 'bi-cup-hot',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'thirsty',
+                'thirsty.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'thirsty'),
+            'sort_order': 26,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'thirsty',
+                'thirsty.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("works now!" — after the v1.0.45 getstr K_EDIT fix).
+            '_active_default': True,
+        },
+        {
+            # Good Time Trivia — 12th JSON-RPC door, Eric Oulashin's
+            # (Nightfox) real trivia game. Entry point is gttrivia.js,
+            # a flat text-console door (no Frame/Layout/Tree at all —
+            # much smaller compat-shim surface than most doors this
+            # batch). Ships with its own qa/ trivia question files
+            # (~8MB, real question banks) and its default
+            # gttrivia.ini already pointed at the AUTHOR's own real
+            # public score-sharing hub (digitaldistortionbbs.com:10088,
+            # "Digital Distortion" BBS) rather than StingRay's own
+            # server — confirmed with Jerry to leave it as-is rather
+            # than repoint it, per his explicit "whatever server each
+            # door's ini already has stays as-is" rule for this whole
+            # remaining batch. Live-queried that real remote directly
+            # before shipping: it already has real historical player
+            # data (including the author's own scores).
+            #
+            # 2 real, previously-unknown compat-shim gaps found by
+            # source audit before ever running:
+            #  1. `user.is_sysop` (real Synchronet property,
+            #     js_user.cpp, `security.level >= 90`) was completely
+            #     missing from the shim's `user` object -- with it
+            #     undefined, `doSysopMenu()`'s own `if (!user.is_sysop)
+            #     return;` silently locked the real sysop out of the
+            #     admin menu (clear scores, remove a player/BBS from
+            #     the shared scoreboard) no matter who was logged in.
+            #     Fixed generically, not door-specific.
+            #  2. gttrivia.js's own read-result sanity checks use
+            #     `typeof(data) === "object"`, which doesn't actually
+            #     exclude `null` (a well-known JS quirk) -- the
+            #     established null-vs-undefined bug class from earlier
+            #     doors, but every occurrence here is already wrapped
+            #     in a try/catch (this door is unusually well-defended),
+            #     so the real impact was a confusing on-screen JS error
+            #     message rather than a hard crash. Widened defensively.
+            # `MsgBase` (real Synchronet message-base API) is completely
+            # absent from the shim -- gttrivia.js uses it for an
+            # optional score-sharing-via-message-subboard feature, but
+            # that's gated behind `scoresMsgSubBoardsForPosting`/
+            # `scoresMsgSubBoardsForReading`, both empty by default (its
+            # own shipped .ini) -- not reachable with default config,
+            # left unimplemented rather than building it speculatively.
+            'name': 'Good Time Trivia',
+            'slug': 'gttrivia',
+            'description': 'Trivia game with multiple categories and '
+                           'inter-BBS high scores.',
+            'category': 'trivia',
+            'icon': 'bi-question-circle',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gttrivia',
+                'gttrivia.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gttrivia'),
+            'sort_order': 27,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'gttrivia',
+                'gttrivia.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("they all works :)" — covering all 5 doors this round).
+            '_active_default': True,
+        },
+        {
+            # Lemons — 13th JSON-RPC door, echicken's real "Lemmings"-
+            # style puzzle game (little lemon sprites, not @ signs, per
+            # the door's own readme.txt origin story). Entry point is
+            # lemons.js, loads sbbsdefs.js/frame.js/tree.js/
+            # event-timer.js/json-client.js/sprite.js plus its own
+            # defs.js/game.js/level.js/menu.js/help.js/dbhelper.js.
+            # server.ini already came pre-configured in Jerry's own
+            # upload pointed at game.a-net-online.lol:10088 — left
+            # as-is per his rule for this whole batch. Live-queried
+            # that real remote before shipping: it already has real
+            # level packs (including the author's own original "Lemon
+            # Party" level) and real score history from multiple real
+            # BBSes.
+            #
+            # dbhelper.js (the JSON-RPC layer) is unusually well-
+            # written — every read result is already correctly null-
+            # AND-undefined-safe (`if(!player) return 0;` etc), unlike
+            # several earlier doors this batch — so this door needed
+            # no null-check door-patches at all.
+            #
+            # Zero compat-shim gaps needed fixing for this door. `Menu`/
+            # `Game`/`Level`/`Help`/`PopUp` all turned out to be the
+            # door's own local class definitions (matching their own
+            # filenames, one per file, exactly like every other door
+            # this batch) rather than missing library classes —
+            # `PopUp` specifically also brings its own `Frame.prototype
+            # .drawBorder` polyfill (lemons.js's own top-level code,
+            # not a real Synchronet frame.js method either), so nothing
+            # needed adding to the shared shim at all. (A `PopUp` +
+            # `drawBorder` pair was briefly and mistakenly added to
+            # this shim's frame.js during initial audit, based on a
+            # too-shallow read of lemons.js that stopped at its load()
+            # calls — reverted once the door's own definitions further
+            # down the same file were found.)
+            #
+            # leveledit.js/leveleditor.js (a separate, standalone level-
+            # editing tool -- never load()'d by lemons.js's own client
+            # entry point, not mentioned anywhere in the door's own
+            # installation docs as a separate program) are excluded,
+            # matching the established "only bundle client-reachable
+            # files" rule.
+            'name': 'Lemons',
+            'slug': 'lemons',
+            'description': 'A "Lemmings"-style puzzle game over '
+                           'Synchronet JSON-RPC interbbs — guide '
+                           'lemon sprites to safety, with a shared '
+                           'cross-BBS level library and scoreboard.',
+            'category': 'puzzle',
+            'icon': 'bi-signpost-2',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'lemons',
+                'lemons.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'lemons'),
+            'sort_order': 28,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'lemons',
+                'lemons.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("they all works :)" — covering all 5 doors this round).
+            '_active_default': True,
+        },
+        {
+            # Star Stocks — 14th JSON-RPC door, Matt Johnson's real
+            # galactic-investment strategy game (build outposts on
+            # stars, merge/split companies, trade stock, live cross-BBS
+            # scoreboard). Same author as Fat Fish/Dice Warz ][/Maze
+            # Race/Uber Blox — consistently careful null/undefined
+            # handling in his doors' own JSON-RPC code throughout this
+            # batch, and this one is no exception (`if(!scores) scores
+            # = {};` / `if(!currscore || ...)`, both correctly falsy-
+            # safe already). Entry point is stars.js -> loads
+            # sbbsdefs.js/funclib.js/graphic.js (the same rendering
+            # library Bubble Boggle already proved) plus its own
+            # game.js. server.ini already came pre-configured in
+            # Jerry's own upload pointed at game.a-net-online.lol:10088
+            # — left as-is per his rule for this whole batch (the
+            # door's own install-xtrn.ini default is actually the
+            # author's own bbs.thebrokenbubble.com).
+            #
+            # One real, previously-unknown compat-shim gap found by
+            # source audit before ever running: `console.clearline()`
+            # (a real Synchronet console method, distinct from the
+            # already-supported `cleartoeol()` — clears the WHOLE
+            # current line rather than just cursor-to-end) was
+            # completely missing. Not an edge case: it's called in
+            # `processSelection()`, the core "build an outpost on a
+            # star" gameplay flow. Fixed generically (any door calling
+            # it, not just this one), including the same bare-global
+            # alias convention already established for cleartoeol().
+            'name': 'Star Stocks',
+            'slug': 'starstocks',
+            'description': 'Galactic investment strategy over '
+                           'Synchronet JSON-RPC interbbs — build '
+                           'outposts, merge companies, trade stock, '
+                           'with a shared cross-BBS scoreboard.',
+            'category': 'strategy',
+            'icon': 'bi-graph-up-arrow',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'starstocks',
+                'stars.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'starstocks'),
+            'sort_order': 29,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'starstocks',
+                'stars.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("they all works :)" — covering all 5 doors this round).
+            '_active_default': True,
+        },
+        {
+            # DrugLord — 15th JSON-RPC door, a real "Dope Wars"-style
+            # economic sim by art (Fatcats BBS). Entry point is
+            # druglord.js, loads sbbsdefs.js plus its own ANSI.js/
+            # atm.js/Drug.js/event.js/Location.js/pocket.js. Zero
+            # compat-shim gaps found by source audit — every one of
+            # this door's own null/undefined checks uses loose `==`/
+            # `!=` (which correctly catches both null AND undefined in
+            # one comparison), sidestepping the whole null-vs-undefined
+            # bug class several earlier doors this batch hit via `===`.
+            #
+            # server.ini already came pre-configured pointed at
+            # romulusbbs.com:10088 (matches the door's own hardcoded
+            # druglord_config default exactly) — a real, thriving
+            # third-party multi-BBS community hub, NOT StingRay's own
+            # server. Left as-is per Jerry's explicit rule for this
+            # whole batch. Live-queried that real remote before
+            # shipping: real historical score data from a dozen-plus
+            # real BBSes (FATCATS, RASPBERI, ROMULUS, BITSLAIR, TWIST,
+            # and more).
+            #
+            # Research note for future audits: this door's own .js
+            # files contain extended-ASCII bytes that make plain grep
+            # silently treat them as binary (zero matches, no error) —
+            # `grep -a` is required, or real content gets missed
+            # entirely (hit this live auditing druglord.js itself: an
+            # initial pass wrongly concluded the JSON-RPC scoreboard
+            # feature wasn't actually implemented in this version,
+            # before re-checking with -a).
+            #
+            # logos.ans (present in the source but never referenced by
+            # any console.printfile() call) is excluded — unreachable.
+            'name': 'DrugLord',
+            'slug': 'druglord',
+            'description': 'A "Dope Wars"-style economic sim over '
+                           'Synchronet JSON-RPC interbbs — buy low, '
+                           'sell high, dodge debt, with a shared '
+                           'cross-BBS scoreboard.',
+            'category': 'strategy',
+            'icon': 'bi-capsule',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'druglord',
+                'druglord.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'druglord'),
+            # 30/31 are already used by the pre-existing DOOM/Duke3D
+            # entries below (a different category) -- 32 avoids that
+            # collision while continuing this batch's own sequence.
+            'sort_order': 32,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'druglord',
+                'druglord.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("they all works :)" — covering all 5 doors this round).
+            '_active_default': True,
+        },
+        {
+            # Uber Blox — 16th JSON-RPC door, Matt Johnson's real
+            # block-clearing puzzle game (like GameHouse's "Super
+            # Collapse", NOT a Tetris clone — an earlier, unverified
+            # memory note calling it "redundant with Synchronetris"
+            # was wrong, corrected during this batch's own triage
+            # pass). Same author as Fat Fish/Dice Warz ][/Maze Race/
+            # Star Stocks — same consistently careful null/undefined
+            # handling throughout (`if(!this.players)
+            # this.players={};` etc, already falsy-safe). Entry point
+            # is blox.js -> loads json-client.js, then its own game.js
+            # (which loads graphic.js/sbbsdefs.js/funclib.js, the same
+            # rendering library Star Stocks and Bubble Boggle already
+            # proved). server.ini already came pre-configured in
+            # Jerry's own upload pointed at game.a-net-online.lol:10088
+            # — left as-is per his rule for this whole batch.
+            #
+            # Zero real compat-shim gaps found -- `console.right()`
+            # looked missing on first grep (used in the high-scores
+            # column layout) but was a false alarm: it already exists
+            # in synchronet_compat.py (`right: function(n){...}`,
+            # alongside the already-present left/up/down) — the
+            # earlier grep just searched for the wrong literal text
+            # ("console.right" instead of the object-literal key
+            # "right:"), not a real gap.
+            'name': 'Uber Blox',
+            'slug': 'uberblox',
+            'description': 'Block-clearing puzzle strategy over '
+                           'Synchronet JSON-RPC interbbs, with a '
+                           'shared cross-BBS scoreboard.',
+            'category': 'puzzle',
+            'icon': 'bi-grid-3x3-gap',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'uberblox',
+                'blox.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'uberblox'),
+            'sort_order': 33,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'uberblox',
+                'blox.js'),
+            # Confirmed working on real Pi3 hardware by Jerry
+            # ("they all works :)" — covering all 5 doors this round).
+            '_active_default': True,
+        },
+        {
+            # Synchronet Minesweeper — 17th door, but a DIFFERENT family
+            # from the 16 above: this is Digital Man's (Rob Swindell's)
+            # own real, official Synchronet door, not a JSON-RPC (port
+            # 10088) game. Its only InterBBS feature (posting wins to a
+            # shared "syncdata" DOVE-Net/FidoNet message area via a real
+            # MsgBase) is auto-detected and gracefully self-disables on
+            # a stock ANetBBS install (msg_area.sub is {}, so
+            # syncdata.js's own find() correctly returns false) — the
+            # core single-player game needs nothing beyond what's
+            # already here. Excluded from the release tarball for the
+            # same reason as the 16 JSON-RPC doors (see .gitignore) —
+            # real, free, open-source software from its own original
+            # author, not ANetBBS's to redistribute.
+            #
+            # Full audit found and fixed 4 real, general (not
+            # Minesweeper-specific) compat-shim bugs in
+            # synchronet_compat.py, all with their own regression tests
+            # in tests/test_synchronet_compat_missing_globals.py:
+            #  1. BG_HIGH (referenced on minesweeper.js's very first
+            #     executable line) was undeclared anywhere reachable —
+            #     immediate ReferenceError crash on launch. Root cause:
+            #     two genuinely different real upstream cga_defs.js
+            #     revisions are vendored at different paths (the
+            #     dorkit/ copy calls the same bit BG_BRIGHT, not
+            #     BG_HIGH), and load()'s path search prefers the dorkit
+            #     copy. Fixed by registering BG_HIGH/BLINK directly.
+            #  2. format()'s sprintf-style regex had no 'u' (unsigned
+            #     decimal) conversion at all — every %u token in the
+            #     game clock and every scoreboard column would have
+            #     rendered as literal unexpanded text. Also fixed
+            #     zero-pad width flags ("%02u") being silently treated
+            #     as space-padding.
+            #  3/4. file_getname()/file_exists()/directory() each had a
+            #     SECOND, later, strictly-worse definition further down
+            #     this file that silently shadowed the real one (same
+            #     "duplicate keys shadow the originals" trap already
+            #     known for object literals, just for top-level function
+            #     redeclarations instead). Minesweeper's own top-level
+            #     catch-all exception handler calls
+            #     file_getname(e.fileName) — real under SpiderMonkey,
+            #     undefined under V8/Node — which the shadowing
+            #     duplicate crashed on instead of handling gracefully.
+            #
+            # console.creturn()/clear_hotspots()/getbyte()/status/
+            # mouse_mode were all genuinely missing and added (see
+            # synchronet_compat.py's console object) — status/mouse_mode
+            # are inert bit-buckets (this shim never actually enables
+            # real terminal-side xterm mouse tracking, so there's no
+            # real mouse wire protocol for them to drive either way).
+            # SyncTERM pixel-graphics mode (detect_graphics()'s APC
+            # query/response dance) is gated behind a cterm_version this
+            # shim intentionally reports as too old to reach — the game
+            # gracefully falls back to its plain ANSI/PETSCII rendering,
+            # matching how every other door here handles a capability
+            # this shim doesn't implement.
+            # 'minesweeper' (the obvious slug) is already taken by the
+            # unrelated native browser-JS minigame seeded in
+            # anetbbs/games/web_games.py -- confirmed live: using it
+            # here collided with that existing row, and since the
+            # self-correction loop below only touches game_type/
+            # web_game_module/web_game_url on an EXISTING row (never
+            # synchronet_script_path), the door's own row silently kept
+            # synchronet_script_path=None forever. 'sbbs-minesweeper'
+            # avoids the collision and doubles as a hint to sysops that
+            # this is the real Synchronet door, not the built-in
+            # minigame.
+            'name': 'Minesweeper (Synchronet)',
+            'slug': 'sbbs-minesweeper',
+            'description': 'Synchronet\'s official Minesweeper, by '
+                           'Digital Man — classic minefield-clearing '
+                           'puzzle with personal-best tracking.',
+            'category': 'puzzle',
+            'icon': 'bi-flag',
+            'game_type': 'door_synchronet',
+            'synchronet_script_path': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'minesweeper',
+                'minesweeper.js'),
+            'synchronet_exec_dir': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'minesweeper'),
+            'sort_order': 34,
+            'must_exist': os.path.join(
+                _ca.root_path, 'games', 'sbbs_doors', 'minesweeper',
+                'minesweeper.js'),
+            # Not yet confirmed on real Pi3 hardware — off by default
+            # pending that confirmation, matching every other door's own
+            # rollout convention.
+            '_active_default': False,
         },
         {
             # A-Net Game Server — StingRay's own rlogin door-game server

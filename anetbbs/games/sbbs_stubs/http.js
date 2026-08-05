@@ -1,15 +1,50 @@
-/* $Id: http.js,v 1.47 2020/07/22 04:31:48 echicken Exp $ */
+/* ANetBBS-authored replacement for Synchronet's real http.js.
+
+   WHY THIS EXISTS: the real http.js (preserved verbatim at
+   anetbbs/games/sbbs_reference/http.js for reference) does its actual
+   network I/O via `new Socket(SOCK_STREAM)` (or `ConnectedSocket`),
+   then calls real synchronous methods on it (`.connect()`, `.send()`,
+   `.recvline()`, `.recv()`). Node has no synchronous TCP primitive --
+   the exact same gap already solved for json-client.js -- so a real
+   `Socket` object was never going to be reproducible here either, for
+   the same reasons documented in that file's own docstring (large
+   surface area, open-ended semantics, for a payoff that in practice
+   reduces to "run this one library file").
+
+   Unlike json-client.js, http.js's own structure conveniently
+   separates "build the request" (SetupGet/SetupPost/AddDefaultHeaders/
+   AddExtraHeaders/BasicAuth -- pure string/array logic, zero Socket
+   dependency) from "parse the response" (ReadStatus/ReadHeaders/
+   ReadBody -- pure regex/string logic that only calls
+   `this.sock.recvline()`/`this.sock.recv()`, never touches Socket
+   internals directly) from "do the actual I/O" (SendRequest, the only
+   method that constructs and touches a real Socket). That split means
+   only SendRequest needs replacing: HTTPRequest.prototype's *entire*
+   real body below (constructor, AddDefaultHeaders, AddExtraHeaders,
+   SetupGet, SetupPost, ReadStatus, ReadHeaders, ReadBody, ReadResponse,
+   BasicAuth, Get, Post, Head) is the REAL Synchronet source, copied
+   unmodified from the vendored reference -- only SendRequest is
+   ANetBBS-authored.
+
+   The replacement SendRequest shells out to anetbbs/games/http_client.py
+   (via execFileSync, the same subprocess-per-call pattern already
+   established for jsonrpc_client.py) to perform ONE complete,
+   synchronous request/response round trip, then wraps the raw response
+   bytes in a trivial fake "socket" object exposing just the two methods
+   ReadStatus/ReadHeaders/ReadBody actually call (`recvline`/`recv`),
+   replaying the pre-fetched bytes instead of reading a live connection.
+   Real Synchronet's http.js always sends "Connection: close" and an
+   HTTP/1.0 request line (see AddDefaultHeaders() below, unmodified),
+   so the server is expected to close the connection once the response
+   is fully sent -- http_client.py reads until EOF, which is the
+   correct way to capture a complete response, not a simplification.
+
+   This means every door that only touches the documented HTTPRequest
+   public method surface (Get/Post/Head, the realistic case) keeps
+   working completely unmodified. */
 
 require('sockdefs.js', 'SOCK_STREAM');
 require('url.js', 'URL');
-
-/*
- * TODO Stuff:
- *	Asynchronous requests
- *	Keep-alive support
- *	HTTP/1.1 (chunked, trailers, etc)
- *	Parse response headers
- */
 
 function HTTPRequest(username,password,extra_headers,recv_timeout)
 {
@@ -90,55 +125,82 @@ HTTPRequest.prototype.SetupPost=function(url, referer, base, data, content_type)
 	this.request_headers.push("Content-Length: "+data.length);
 };
 
+function pythonExe() {
+	return process.env.ANETBBS_JSONRPC_CLI_PYTHON || 'python3';
+}
+function httpCliPath() {
+	var p = process.env.ANETBBS_HTTP_CLI_PATH;
+	if (!p)
+		throw new Error("ANETBBS_HTTP_CLI_PATH not set -- http.js shim can't locate http_client.py");
+	return p;
+}
+
+/* Trivial replay "socket" -- ReadStatus/ReadHeaders/ReadBody (real,
+   unmodified below) only ever call recvline()/recv() on this.sock, so
+   this only needs to implement exactly those two methods against a
+   buffer that's already fully in memory (http_client.py already did
+   the real blocking network read). Matches the real Socket methods'
+   signatures (maxlen/timeout args) without needing to honor timeout
+   semantics at all -- there's no live connection left to time out on. */
+function _ReplaySocket(rawResponse) {
+	this._buf = rawResponse;
+	this._pos = 0;
+}
+_ReplaySocket.prototype.recvline = function (maxlen, timeout) {
+	if (this._pos >= this._buf.length) return null;
+	var nl = this._buf.indexOf('\n', this._pos);
+	var end = (nl === -1) ? this._buf.length : nl;
+	var line = this._buf.slice(this._pos, end);
+	if (line.charAt(line.length - 1) === '\r') line = line.slice(0, -1);
+	this._pos = (nl === -1) ? this._buf.length : nl + 1;
+	if (typeof maxlen === 'number' && line.length > maxlen)
+		line = line.slice(0, maxlen);
+	return line;
+};
+_ReplaySocket.prototype.recv = function (len, timeout) {
+	if (this._pos >= this._buf.length) return null;
+	var n = (typeof len === 'number' && len > 0) ? len : this._buf.length - this._pos;
+	var chunk = this._buf.slice(this._pos, this._pos + n);
+	this._pos += chunk.length;
+	return chunk;
+};
+_ReplaySocket.prototype.close = function () {};
+
 HTTPRequest.prototype.SendRequest=function() {
-	var i;
-	var port;
-
-	function do_send(sock, str) {
-		var sent = 0;
-		var ret;
-
-		while (sent < str.length) {
-			sock.poll(60, true);
-			ret = sock.send(str);
-			if (ret === 0 || ret === null || ret === false)
-				return false;
-			if (ret === true)
-				return true;
-			sent += ret;
-		}
-		return true;
-	}
-
 	if (this.sock != undefined)
 		this.sock.close();
-	port = this.url.port?this.url.port:(this.url.scheme=='http'?80:443);
-	if (js.global.ConnectedSocket != undefined) {
-		if ((this.sock = new ConnectedSocket(this.url.host, port)) == null)
-			throw new Error(format("Unable to connect to %s:%u", this.url.host, this.url.port));
-	}
-	else {
-		if((this.sock=new Socket(SOCK_STREAM))==null)
-			throw new Error("Unable to create socket");
-		if(!this.sock.connect(this.url.host, port)) {
-			this.sock.close();
-			throw new Error(format("Unable to connect to %s:%u", this.url.host, this.url.port));
+	var port = this.url.port ? this.url.port : (this.url.scheme=='http' ? 80 : 443);
+	var reqArgs = {
+		host: this.url.host,
+		port: port,
+		scheme: this.url.scheme,
+		request_line: this.request,
+		headers: this.request_headers,
+		body: this.body,
+		timeout: this.recv_timeout
+	};
+	var cp = _node_require('child_process');
+	var out, result;
+	try {
+		out = cp.execFileSync(pythonExe(), [httpCliPath()], {
+			input: JSON.stringify(reqArgs),
+			encoding: 'utf8',
+			timeout: (this.recv_timeout + 5) * 1000
+		});
+	} catch (e) {
+		out = (e && typeof e.stdout === 'string') ? e.stdout : null;
+		if (!out) {
+			throw new Error(format("Unable to connect to %s:%u", this.url.host, port));
 		}
 	}
-	if(this.url.scheme=='https')
-		this.sock.ssl_session=true;
-	if(!do_send(this.sock, this.request+"\r\n"))
-		throw new Error("Unable to send request: " + this.request);
-	for(i in this.request_headers) {
-		if(!do_send(this.sock, this.request_headers[i]+"\r\n"))
-			throw new Error("Unable to send headers");
+	try {
+		result = JSON.parse(out);
+	} catch (e) {
+		throw new Error("http.js shim: subprocess produced invalid JSON: " + out);
 	}
-	if(!do_send(this.sock, "\r\n"))
-		throw new Error("Unable to terminate headers");
-	if(this.body != undefined) {
-		if(!do_send(this.sock, this.body))
-			throw new Error("Unable to send body");
-	}
+	if (!result.ok)
+		throw new Error(result.error || format("Unable to connect to %s:%u", this.url.host, port));
+	this.sock = new _ReplaySocket(result.response);
 };
 
 HTTPRequest.prototype.ReadStatus=function() {

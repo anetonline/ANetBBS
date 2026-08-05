@@ -142,12 +142,16 @@ class SetCommandPrefsTests(unittest.TestCase):
 
 
 class SetCommandLocalOnlyTests(unittest.TestCase):
-    def test_set_clock_toggles_locally_no_wire_traffic(self):
+    def test_set_clock_is_no_longer_a_recognized_field(self):
+        """`/set clock on|off` used to toggle the status-bar clock
+        widget, which was removed (see test_mrc_terminal_sidebar_and_clock.py)
+        in favor of a real ping/latency display -- confirms the field
+        is gone cleanly (falls through to the normal "unknown field"
+        error) rather than silently no-op'ing or crashing."""
         chat = _make_chat()
-        chat._show_clock = True
         _run(chat._handle_slash('/set clock off'))
-        self.assertFalse(chat._show_clock)
         self.assertEqual(chat.sent, [])
+        self.assertTrue(any('Unknown /set field' in line for line in chat.session.written))
 
     def test_set_list_shows_values_no_wire_traffic(self):
         chat = _make_chat()

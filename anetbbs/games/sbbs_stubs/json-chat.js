@@ -96,7 +96,25 @@ function JSONChat(usernum,jsonclient,host,port) {
 		var history = this.client.slice("chat","channels." + target + ".history",index,undefined,1);
 		var msgcount = 0;
 		var lastMsg = 0;
-		for each(var m in history) {
+		// `for each(var x in y)` is a SpiderMonkey-only construct removed
+		// from JS years ago, not supported by Node's V8 -- same fix
+		// pattern as cnflib.js's getBytes() / frame.js.
+		//
+		// Real crash found live bundling Dice Warz ][: `history` is
+		// `null` the first time a channel is ever joined (the real
+		// server returns JSON null for a missing key, same class of
+		// gap found repeatedly this session in real doors -- except
+		// here it's this FILE's own null-unsafe `Object.keys()`
+		// conversion at fault, not the door). Real E4X `for each (var
+		// x in y)` silently does zero iterations over null/undefined
+		// rather than throwing -- confirmed and tested elsewhere in
+		// this project for the equivalent generic polyfill -- but
+		// `Object.keys(null)` throws immediately
+		// ("Cannot convert undefined or null to object"), which this
+		// specific hand-converted spot never guarded against.
+		var __keys = Object.keys(history || {});
+		for (var __hi = 0; __hi < __keys.length; __hi++) {
+			var m = history[__keys[__hi]];
 			if(m == undefined)
 				continue;
 			this.channels[target.toUpperCase()].messages.push(m);
@@ -138,8 +156,11 @@ function JSONChat(usernum,jsonclient,host,port) {
 	
 	this.disconnect = function() {
 		this.client.unsubscribe("chat","channels." + this.nick.name + ".messages");
-		for each(var c in this.channels) 
+		var __ckeys = Object.keys(this.channels);
+		for (var __ci = 0; __ci < __ckeys.length; __ci++) {
+			var c = this.channels[__ckeys[__ci]];
 			this.client.unsubscribe("chat","channels." + c.name + ".messages");
+		}
 		this.channels = {};
 	}
 	
@@ -309,9 +330,16 @@ function JSONChat(usernum,jsonclient,host,port) {
 	
 	/* adapter for updating chat layout view */
 	function syncChatView(view,chat) {
-		for each(var c in chat.channels) {
+		// `for each(var x in y)` is a SpiderMonkey-only construct removed
+		// from JS years ago, not supported by Node's V8 -- same fix
+		// pattern as cnflib.js's getBytes() / frame.js.
+		var __ckeys = Object.keys(chat.channels);
+		for (var __ci = 0; __ci < __ckeys.length; __ci++) {
+			var c = chat.channels[__ckeys[__ci]];
 			var found = false;
-			for each(var t in view.tabs) {
+			var __tkeys = Object.keys(view.tabs);
+			for (var __ti = 0; __ti < __tkeys.length; __ti++) {
+				var t = view.tabs[__tkeys[__ti]];
 				if(t.title == c.name) {
 					found = true;
 					break;
@@ -330,9 +358,13 @@ function JSONChat(usernum,jsonclient,host,port) {
 	
 	/* adapter for updating user list layout view */
 	function syncUserView(view,chat) {
-		for each(var c in chat.channels) {
+		var __ckeys = Object.keys(chat.channels);
+		for (var __ci = 0; __ci < __ckeys.length; __ci++) {
+			var c = chat.channels[__ckeys[__ci]];
 			var found = false;
-			for each(var t in view.tabs) {
+			var __tkeys = Object.keys(view.tabs);
+			for (var __ti = 0; __ti < __tkeys.length; __ti++) {
+				var t = view.tabs[__tkeys[__ti]];
 				if(t.title == c.name) {
 					found = true;
 					break;
@@ -355,8 +387,11 @@ function JSONChat(usernum,jsonclient,host,port) {
 		var tab = view.getTab(chan.name);
 		if(tab && chan.users) {
 			tab.frame.clear();
-			for each(var u in chan.users)
+			var __ukeys = Object.keys(chan.users);
+			for (var __ui = 0; __ui < __ukeys.length; __ui++) {
+				var u = chan.users[__ukeys[__ui]];
 				tab.frame.putmsg(u.nick + "\r\n");
+			}
 		}
 	}
 	

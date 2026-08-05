@@ -178,8 +178,14 @@ function Layout(frame) {
 	this.open=function() {
 		this.current=0;
 		frames.main.open();
-		for each(var v in properties.views)
+		// `for each(var x in arr)` is a SpiderMonkey-only construct
+		// removed from JS years ago, not supported by Node's V8 -- same
+		// fix pattern as cnflib.js's getBytes() / frame.js.
+		var __keys = Object.keys(properties.views);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var v = properties.views[__keys[__i]];
 			v.open();
+		}
 		if(typeof this.onOpen == "function") 
 			this.onOpen();
 	}
@@ -220,15 +226,23 @@ function Layout(frame) {
 		return view;
 	}
 	this.draw=function() {
-		for each(var view in properties.views)
+		var __keys = Object.keys(properties.views);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var view = properties.views[__keys[__i]];
 			view.draw();
+		}
 	}
 	this.cycle=function() {
-		for each(var v in properties.views)
+		var __keys = Object.keys(properties.views);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var v = properties.views[__keys[__i]];
 			v.cycle();
+		}
 	}
 	this.getViewByName=function(title) {
-		for each(var v in properties.views) {
+		var __keys = Object.keys(properties.views);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var v = properties.views[__keys[__i]];
 			if(v.title.toUpperCase() == title.toUpperCase())
 				return v;
 		}
@@ -450,7 +464,9 @@ function LayoutView(title,frame,parent) {
 	
 	/* public methods */
 	this.open=function() {
-		for each(var t in properties.tabs) {
+		var __keys = Object.keys(properties.tabs);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var t = properties.tabs[__keys[__i]];
 			if(typeof t.open == "function")
 				t.open();
 		}
@@ -461,20 +477,25 @@ function LayoutView(title,frame,parent) {
 			this.onOpen();
 	}
 	this.close=function() {
-		for each(var t in properties.tabs) {
+		var __keys = Object.keys(properties.tabs);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var t = properties.tabs[__keys[__i]];
 			if(typeof t.close == "function")
 				t.close();
 		}
-		if(typeof this.onClose == "function") 
+		if(typeof this.onClose == "function")
 			this.onClose();
 	}
 	this.draw=function() {
 		frames.main.draw();
 	}
 	this.cycle=function() {
-		for each(var t in properties.tabs)
+		var __keys = Object.keys(properties.tabs);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var t = properties.tabs[__keys[__i]];
 			if(typeof t.cycle == "function")
 				t.cycle();
+		}
 	}
 	this.addTab=function(title,type,content) {
 		/* use this view's location and dimensions as 
@@ -498,7 +519,9 @@ function LayoutView(title,frame,parent) {
 	}
 	this.getTab=function(title_or_index) {
 		if(isNaN(title_or_index)) {
-			for each(var t in properties.tabs) {
+			var __keys = Object.keys(properties.tabs);
+			for (var __i = 0; __i < __keys.length; __i++) {
+				var t = properties.tabs[__keys[__i]];
 				if(t.title.toUpperCase() == title_or_index.toUpperCase())
 					return t;
 			}

@@ -799,13 +799,18 @@ function JSONdb (fileName, scope) {
 		} 
 		
 		/* terminate any disconnected clients after processing queue */
-		for each(var c in this.disconnected) {
+		// `for each(var x in y)` is a SpiderMonkey-only construct removed
+		// from JS years ago, not supported by Node's V8 -- same fix
+		// pattern as cnflib.js's getBytes() / frame.js.
+		var __keys = Object.keys(this.disconnected);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = this.disconnected[__keys[__i]];
 			/* release any locks the client holds */
 			free_prisoners(c,this.masterShadow);
-			
+
 			/* release any subscriptions the client holds */
 			cancel_subscriptions(c,this.subscriptions);
-			
+
 			/* remove any remaining client queries */
 			fuh_queue(c,this.queue);
 		}
@@ -909,7 +914,9 @@ function JSONdb (fileName, scope) {
 			/* iterate through split object name checking the keys against the database and 
 			checking the lock statuses against the shadow copy */
 			var p=parent.split(/\./);
-			for each(var c in p) {
+			var __pkeys = Object.keys(p);
+			for (var __pi = 0; __pi < __pkeys.length; __pi++) {
+				var c = p[__pkeys[__pi]];
 				/* in the event of a write request, create new data if it does not exist*/
 				/* ensure that the shadow object exists in order to allow for non-read operations */
 				if(shadow[c] === undefined) 
@@ -1005,10 +1012,13 @@ function JSONdb (fileName, scope) {
 		if(shadow == undefined)
 			return info;
 		info = investigate(shadow,info);
-		
-		for each(var i in shadow) 
+
+		var __keys = Object.keys(shadow);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var i = shadow[__keys[__i]];
 			if(i instanceof Shadow)
 				info = search_party(i,info);
+		}
 		return info;
 	}
 
@@ -1046,7 +1056,9 @@ function JSONdb (fileName, scope) {
 	
 	/* send updates of this object to all subscribers */
 	function send_data_updates(client,record) {
-		for each(var c in record.info.subscribers) {
+		var __keys = Object.keys(record.info.subscribers);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = record.info.subscribers[__keys[__i]];
 			/* do not send updates to request originator */
 			if(c.id == client.id)
 				continue;
@@ -1063,7 +1075,9 @@ function JSONdb (fileName, scope) {
 	
 	/* send update of client subscription to all subscribers */
 	function send_subscriber_updates(client,record,oper) {
-		for each(var c in record.info.subscribers) {
+		var __keys = Object.keys(record.info.subscribers);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var c = record.info.subscribers[__keys[__i]];
 			/* do not send updates to request originator */
 			if(c.id == client.id)
 				continue;
@@ -1083,7 +1097,9 @@ function JSONdb (fileName, scope) {
 	/* retrieve a list of subscribers to this record */
 	function get_subscriber_list(record) {
 		var data = [];
-		for each(var s in record.info.subscribers) {
+		var __keys = Object.keys(record.info.subscribers);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var s = record.info.subscribers[__keys[__i]];
 			data.push(get_client_info(s));
 		}
 		return data;
@@ -1099,8 +1115,10 @@ function JSONdb (fileName, scope) {
 	
 	/* check a lock value against valid lock types */
 	function valid_lock(lock) {
-		for each(var l in locks) {
-			if(l == lock) 
+		var __keys = Object.keys(locks);
+		for (var __i = 0; __i < __keys.length; __i++) {
+			var l = locks[__keys[__i]];
+			if(l == lock)
 				return true;
 		}
 		return false;
