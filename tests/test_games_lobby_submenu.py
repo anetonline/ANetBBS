@@ -82,6 +82,41 @@ class GamesLobbySubmenuTests(unittest.TestCase):
         # Puzzle's game must not leak into the arcade-filtered view.
         self.assertNotIn('Synkroban', html)
 
+    def test_sort_order_is_flat_across_categories_not_grouped_by_category_first(self):
+        """Real bug Jerry hit live in the terminal menu (same fix
+        applies here): a game's own sort_order must control its
+        absolute position in the whole lobby, not just its position
+        within its own category -- categories used to always render
+        grouped together in their OWN GameCategory.sort_order first.
+        Seeds two categories whose sort_order would put them in the
+        OPPOSITE order from what their games' sort_order implies."""
+        with self.app.app_context():
+            from anetbbs.models import db, GameCategory, Game
+            zeta_cat = GameCategory(name='Zeta Cat', slug='zetacat', sort_order=1)
+            alpha_cat = GameCategory(name='Alpha Cat', slug='alphacat', sort_order=2)
+            db.session.add_all([zeta_cat, alpha_cat])
+            db.session.commit()
+            db.session.add_all([
+                Game(name='Zeta Web Game', slug='zeta-web-game', category='zetacat',
+                    game_type='door_native', is_active=True, web_enabled=True,
+                    sort_order=100),
+                Game(name='Alpha Web Game', slug='alpha-web-game', category='alphacat',
+                    game_type='door_native', is_active=True, web_enabled=True,
+                    sort_order=1),
+            ])
+            db.session.commit()
+
+        resp = self.client.get('/games/')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.data.decode()
+        self.assertIn('Alpha Web Game', html)
+        self.assertIn('Zeta Web Game', html)
+        self.assertLess(
+            html.index('Alpha Web Game'), html.index('Zeta Web Game'),
+            msg="Alpha Web Game (sort_order=1) must render before Zeta "
+                "Web Game (sort_order=100), regardless of which category "
+                "-- or that category's own sort_order -- each belongs to")
+
 
 if __name__ == '__main__':
     unittest.main()

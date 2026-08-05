@@ -339,6 +339,45 @@ class SynchronetCompatMissingGlobalsTests(unittest.TestCase):
         self.assertIn('PROMPT_MARKER_XYZ', output, msg=output)
         self.assertIn('AFTER_KEY_MARKER', output, msg=output)
 
+    def test_queue_poll_flushes_stdout_like_the_other_blocking_read_sites(self):
+        """Real bug found live: LORD (and any other door built on
+        dorkit.js, the shared vendored library most non-trivial
+        Synchronet doors use) "just sits stale, never loads". dorkit's
+        own real input loop is `dk.console.waitkey()` -> a busy-poll
+        `while (...) { if (queue.poll(timeout)) return true; }` --
+        NOT console.getkey()/_readKey, so the flush fix proven by the
+        test right above this one doesn't cover it. Queue.prototype.poll
+        never called _flushStdoutNow() at all, so a door's own intro
+        screen (drawn via buffered console.write/process.stdout.write
+        calls) sat in the pending buffer indefinitely while dorkit
+        silently spun on poll() waiting for a key -- confirmed live via
+        an instrumented run of the real LORD door: the intro art and
+        "Press a key" prompt never reached the terminal, while polling
+        itself was working correctly in the background the whole time.
+        Indistinguishable from a real hang to the player. Same timing-
+        based proof as the getkey() test above -- final output alone
+        can't tell "flushed immediately" from "flushed only once
+        polling eventually gives up"."""
+        script = (
+            "process.stdout.write('INTRO_SCREEN_MARKER;');\n"
+            "var q = new Queue('test_dorkit_style_poll');\n"
+            "var deadline = Date.now() + 4000;\n"
+            "while (Date.now() < deadline) {\n"
+            "    if (q.poll(50)) { break; }\n"
+            "}\n"
+            "process.stdout.write('AFTER_POLL_LOOP;');\n"
+        )
+        output, _status, first_byte_at = self._run(
+            script, run_seconds=6, return_timing=True)
+        self.assertIsNotNone(first_byte_at, msg='no output arrived at all: ' + output)
+        self.assertLess(first_byte_at, 1.5,
+                         msg=f'intro screen only appeared after {first_byte_at}s -- '
+                             f'should have been flushed on the very first poll() call, '
+                             f'not deferred until the 4s busy-poll loop gave up. '
+                             f'output={output!r}')
+        self.assertIn('INTRO_SCREEN_MARKER;', output, msg=output)
+        self.assertIn('AFTER_POLL_LOOP;', output, msg=output)
+
     def test_many_small_writes_still_produce_correct_combined_output(self):
         """Sanity check for the batching mechanism itself: a burst of
         many separate small console.write() calls (matching frame.js's
@@ -2194,6 +2233,37 @@ class SynchronetCompatMissingGlobalsTests(unittest.TestCase):
         output, _status = self._run(script)
         self.assertNotIn('Error', output, msg=output)
         self.assertIn('CHARSET:CP437;', output, msg=output)
+
+    def test_cursor_right_rounds_a_fractional_argument(self):
+        """Real bug found live: Minesweeper's title bar renders via
+        console_center() (minesweeper.js:737), which computes
+        `console.right((screen_columns - strlen(text)) / 2)` -- a
+        plain division with no rounding of its own, so any odd-parity
+        title text (real example: "Synchronet Minesweeper 3.10", 27
+        chars, against screen_columns=80, gives (80-27)/2 = 26.5)
+        produces a fractional n. console.right() string-concatenated
+        that raw float straight into the ANSI CSI parameter --
+        "\\x1b[26.5C" is not a legal CSI sequence ('.' is an
+        intermediate byte most parsers, including xterm.js, treat as
+        ending parameter collection), so the terminal aborted the
+        sequence and printed the tail literally -- confirmed live on
+        Jerry's server: the title bar rendered a garbled "5C" (the
+        literal tail of "26.5C") before the actual title text. Also
+        covers console.cursor_right/left/up/down and the right/left/
+        up/down aliases, all of which had the exact same bug."""
+        script = (
+            "console.right(26.5);\n"
+            "process.stdout.write('MARK;');\n"
+            "console.cursor_left(3.5);\n"
+            "process.stdout.write('MARK2;');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        # A real, legal CSI sequence -- integer parameter, no stray
+        # intermediate byte -- must appear, not a fractional one.
+        self.assertIn('\x1b[27C', output, msg=repr(output))
+        self.assertIn('\x1b[4D', output, msg=repr(output))
+        self.assertNotIn('.5', output, msg=repr(output))
 
     def test_load_scope_form_still_returns_scope_for_the_graphic_js_convention(self):
         """Regression guard for the already-established, already-

@@ -87,10 +87,10 @@ def lobby():
         query = query.filter(Game.name.ilike(f'%{search}%'))
     games = query.order_by(Game.sort_order, Game.name).all()
 
-    # Load categories from DB for ordering and display names
-    db_cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+    # Load categories from DB for display names / as_submenu flags --
+    # order no longer matters here, see the comment below.
+    db_cats = GameCategory.query.all()
     cat_names = {c.slug: c.name for c in db_cats}
-    cat_order = [c.slug for c in db_cats]
     # Same collapse-to-a-section-card behavior the terminal menu uses
     # (GameManager.show_door_menu in features/games.py) -- but a category
     # is only ever collapsed while browsing ALL categories. Once a sysop
@@ -100,13 +100,38 @@ def lobby():
     # own one-level-deep design: the flag only affects the top level).
     cat_as_submenu = {c.slug: bool(c.as_submenu) for c in db_cats} if not category_filter else {}
 
-    # Group by category preserving DB order
-    cat_buckets = {}
+    # Real gap Jerry hit live (same fix as the terminal menu): games
+    # render in their own flat sort_order/name order (the query above);
+    # category blocks are a side effect of walking that flat list and
+    # noticing where the category changes, not the primary sort key.
+    # This used to always group by category first, rendered in
+    # GameCategory's OWN sort_order -- a new door with a "last"
+    # sort_order landed in the middle of the lobby because its category
+    # happened to sort earlier than categories holding higher-numbered
+    # games. categories is now an ORDERED LIST of (slug, [games]) blocks,
+    # not a dict -- a dict would silently merge two non-contiguous runs
+    # of the same category (an unusual case, but a real one if sort_order
+    # values interleave categories) into a single block, losing the true
+    # flat order.
+    all_by_category = {}
     for game in games:
-        cat_buckets.setdefault(game.category or 'other', []).append(game)
-    ordered_slugs = [s for s in cat_order if s in cat_buckets]
-    ordered_slugs += [s for s in cat_buckets if s not in ordered_slugs]
-    categories = {s: cat_buckets[s] for s in ordered_slugs}
+        all_by_category.setdefault(game.category or 'other', []).append(game)
+    categories = []
+    rendered_submenu_slugs = set()
+    prev_slug = None
+    for game in games:
+        slug = game.category or 'other'
+        if cat_as_submenu.get(slug):
+            if slug in rendered_submenu_slugs:
+                continue
+            categories.append((slug, all_by_category[slug]))
+            rendered_submenu_slugs.add(slug)
+            prev_slug = slug
+            continue
+        if slug != prev_slug:
+            categories.append((slug, []))
+            prev_slug = slug
+        categories[-1][1].append(game)
 
     now_playing = _active_sessions().all()
 

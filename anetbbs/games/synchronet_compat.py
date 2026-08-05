@@ -618,10 +618,22 @@ var console = {
     backspace: function() { process.stdout.write('\b \b'); },
     pushxy: function() { process.stdout.write('\x1b[s'); },
     popxy: function() { process.stdout.write('\x1b[u'); },
-    cursor_up: function(n) { process.stdout.write('\x1b[' + (n||1) + 'A'); },
-    cursor_down: function(n) { process.stdout.write('\x1b[' + (n||1) + 'B'); },
-    cursor_right: function(n) { process.stdout.write('\x1b[' + (n||1) + 'C'); },
-    cursor_left: function(n) { process.stdout.write('\x1b[' + (n||1) + 'D'); },
+    // Math.round(n||1) -- real Synchronet's console.right/left/up/down
+    // (js_console.cpp) take a native int, so a door passing a fractional
+    // value (e.g. Minesweeper's console_center(): `console.right((
+    // screen_columns - strlen(text)) / 2)`, which is a plain non-integer
+    // division with no rounding of its own for odd-width text) silently
+    // truncates there. Here it went straight into the ANSI CSI parameter
+    // as a raw float string -- "\x1b[26.5C" is not a legal CSI sequence
+    // ('.' is an intermediate byte that most parsers, including
+    // xterm.js, treat as ending parameter collection), so the terminal
+    // aborts the sequence and prints the tail literally: real bug found
+    // live, Minesweeper's title bar rendering as a garbled "5C" before
+    // the actual title text.
+    cursor_up: function(n) { process.stdout.write('\x1b[' + Math.round(n||1) + 'A'); },
+    cursor_down: function(n) { process.stdout.write('\x1b[' + Math.round(n||1) + 'B'); },
+    cursor_right: function(n) { process.stdout.write('\x1b[' + Math.round(n||1) + 'C'); },
+    cursor_left: function(n) { process.stdout.write('\x1b[' + Math.round(n||1) + 'D'); },
     // 80x25 — the DOS terminal contract every BBS door is written for.
     // LORD's gotoxy commands target rows 0–24; doors that fit "the
     // bottom line for status" assume 25, not 24.
@@ -660,10 +672,13 @@ var console = {
     line_counter: 0,
     // Synchronet directional aliases (sbbs_console.js calls these names,
     // not cursor_*). Right/left/up/down with optional N — default 1.
-    right: function (n) { process.stdout.write('\x1b[' + (n || 1) + 'C'); },
-    left:  function (n) { process.stdout.write('\x1b[' + (n || 1) + 'D'); },
-    up:    function (n) { process.stdout.write('\x1b[' + (n || 1) + 'A'); },
-    down:  function (n) { process.stdout.write('\x1b[' + (n || 1) + 'B'); },
+    // Math.round -- see cursor_right's own comment above for why a
+    // fractional n (e.g. Minesweeper's console_center() on odd-width
+    // text) must never reach the raw ANSI CSI parameter.
+    right: function (n) { process.stdout.write('\x1b[' + Math.round(n || 1) + 'C'); },
+    left:  function (n) { process.stdout.write('\x1b[' + Math.round(n || 1) + 'D'); },
+    up:    function (n) { process.stdout.write('\x1b[' + Math.round(n || 1) + 'A'); },
+    down:  function (n) { process.stdout.write('\x1b[' + Math.round(n || 1) + 'B'); },
     // ctrlkey_passthru — bitmask of Ctrl-keys NOT to intercept. Doors set
     // it to 0x7fffffff (let everything through). We just remember the value.
     ctrlkey_passthru: 0,
@@ -1296,6 +1311,22 @@ Queue.prototype.poll = function (timeoutMs) {
     // ansi_input.js's `ai.add(byte)` which in turn writes processed
     // keystrokes into THIS queue. Poll just reports whether anything
     // has landed.
+    //
+    // Real bug found live: LORD (and any other door built on dorkit.js)
+    // "just sits stale, never loads" -- its whole screen-then-wait-for-
+    // key flow goes through dk.console.waitkey() -> THIS poll(), never
+    // through read()/_readKey/_readLine (the call sites that already
+    // call _flushStdoutNow(), per this file's own established
+    // convention). Whatever was buffered by process.stdout.write's own
+    // nextTick-deferred batching (the intro screen art, "Press a key"
+    // prompts, everything) never reached the terminal before dorkit's
+    // busy-poll loop started silently spinning on this -- the player
+    // sees a blank/frozen screen with no visual cue anything is
+    // waiting for input, indistinguishable from a real hang. Flushing
+    // here, on every poll (matching the "at every blocking stdin-read
+    // call site" rule), guarantees whatever's pending is visible before
+    // this reports back "nothing yet."
+    _flushStdoutNow();
     return this._items.length > 0;
 };
 Queue.prototype.toString = function () {

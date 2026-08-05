@@ -134,7 +134,21 @@ and ANetBBS will show your ANSI instead of the stock colored menu.
 | `sysop_status` | Sysop → Server Status header                 |
 | `game_center`  | Game Center                                   |
 | `door_games`   | Door Games list                               |
+| `door_games_<category-slug>` | A category's own submenu screen (see below) |
 | `dialout`      | Dial-Out Directory                            |
+
+### Door menu category submenus
+
+A game category flagged **"Show as a submenu section"** (Admin →
+Games → Categories) collapses to one selectable line on the main Door
+Games list; picking it opens a second screen listing just that
+category's own games. That second screen supports the exact same
+file-based art override as any other slot above — drop
+`door_games_<category-slug>.ans` into `data/text/menus/`, where
+`<category-slug>` is the category's own **Slug (URL-safe)** field
+(e.g. a category with slug `synchronet-doors` looks for
+`door_games_synchronet-doors.ans`). Falls back to the stock generated
+layout if no matching file exists, same as every other slot.
 
 Note: the Sysop Tools top-level menu itself (the U/B/E/G/W/... category
 picker) is a scrolling lightbar screen with fixed row positions, so it

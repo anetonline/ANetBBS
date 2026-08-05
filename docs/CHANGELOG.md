@@ -1,11 +1,20 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.12`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.13`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.13 — LORD (and every dorkit.js door) fixed after "sits stale, never loads" (August 2026)
+
+**LORD — Legend of the Red Dragon — stopped loading entirely: the intro screen never appeared and the door looked completely frozen.** Root cause: `Queue.prototype.poll()` in the Node.js compat shim never flushed buffered terminal output before its wait loop, unlike every other blocking-read call site in the shim. LORD's whole "draw a screen, then wait for a keypress" flow runs through `dorkit.js`'s `waitkey()` → `poll()` — not the code path that was already covered — so the intro art and every prompt sat buffered indefinitely while the door correctly polled for input in the background the whole time, with the player staring at a blank screen with no idea a key was expected. This affects every door built on the shared `dorkit.js` library, not just LORD. Confirmed fixed against the real vendored door end-to-end.
+
+Also this round:
+- Door menu `sort_order` is now truly flat/global across the whole menu (terminal and web), not just within each game's own category. Categories used to always render grouped together in their own separate `sort_order`, so a sysop numbering every door 1-N as one flat list (the natural way to think about it) could add a new door with a "should be last" number and see it land in the middle instead, if its category happened to sort earlier. Category headers/sections now fall wherever the category naturally changes while walking that flat order.
+- Minesweeper's title bar rendered a garbled `←5C` before the real title text. `console.right`/`left`/`up`/`down` (and `cursor_right`/`left`/`up`/`down`) were string-concatenating a raw fractional cursor-move count straight into the ANSI escape sequence — Minesweeper's title-bar centering math produces a non-integer for odd-width text, and a fractional CSI parameter isn't legal, so terminals abort the sequence mid-parse and print the tail literally. Now rounds before it hits the wire.
+- The door-menu submenu screen (introduced in v1.0.12) now supports the same file-based ANSI art override as the top-level Door Games list — drop `door_games_<category-slug>.ans` into `data/text/menus/` to replace the generated layout for that category's second-level menu. See the slot-names reference on [`/docs/04-ansi-screens`](/docs/04-ansi-screens) for the full naming convention.
 
 ## v1.0.12 — Door menu sections (drill-down categories) (August 2026)
 

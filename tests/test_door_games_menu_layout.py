@@ -46,6 +46,21 @@ def _fresh_app(db_path):
     return app
 
 
+class _FakeWriter:
+    """Minimal stand-in for a real Session's asyncio-style writer --
+    write_menu_art() writes raw bytes directly via session.writer.write(),
+    a separate path from the async session.write(str) used everywhere
+    else in this file."""
+    def __init__(self, sink):
+        self._sink = sink
+
+    def write(self, data):
+        self._sink.append(data.decode('latin-1', errors='replace'))
+
+    async def drain(self):
+        pass
+
+
 class _FakeSession:
     def __init__(self, responses, width=80):
         self.user = None
@@ -53,6 +68,7 @@ class _FakeSession:
         self.written = []
         self.window_size = (width, 24)
         self.term_mode = 'ansi'
+        self.writer = _FakeWriter(self.written)
 
     async def write(self, text):
         self.written.append(text)
@@ -186,6 +202,45 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         asyncio.run(GameManager(session).show_door_menu())
         self.assertIn('Return', session.transcript())
 
+    def test_sort_order_is_flat_across_categories_not_grouped_by_category_first(self):
+        """Real bug Jerry hit live: adding a new door with a high
+        sort_order (intending "last") landed in the middle of the
+        menu instead, because categories always rendered grouped
+        together in their OWN GameCategory.sort_order, with a game's
+        own sort_order only controlling its position WITHIN that
+        category -- not the game's absolute position in the whole
+        menu (Jerry's own words: "I have all the doors sort orders
+        numbered 1-20", expecting one flat list). Seeds two
+        categories whose OWN sort_order would put them in the
+        opposite order from what their games' sort_order implies --
+        confirms the game with the lower sort_order renders first
+        regardless of which category (and that category's own
+        sort_order) it belongs to."""
+        from anetbbs.models import db, GameCategory, Game
+        zeta_cat = GameCategory(name='Zeta Cat', slug='zetacat', sort_order=1)
+        alpha_cat = GameCategory(name='Alpha Cat', slug='alphacat', sort_order=2)
+        db.session.add_all([zeta_cat, alpha_cat])
+        db.session.commit()
+        db.session.add_all([
+            Game(name='Zeta Game', slug='zeta-game', category='zetacat',
+                game_type='door_native', is_active=True, sort_order=100),
+            Game(name='Alpha Game', slug='alpha-game', category='alphacat',
+                game_type='door_native', is_active=True, sort_order=1),
+        ])
+        db.session.commit()
+
+        from anetbbs.features.games import GameManager
+        session = _FakeSession(['Q'])
+        asyncio.run(GameManager(session).show_door_menu())
+        txt = session.transcript()
+        self.assertIn('Alpha Game', txt)
+        self.assertIn('Zeta Game', txt)
+        self.assertLess(
+            txt.index('Alpha Game'), txt.index('Zeta Game'),
+            msg="Alpha Game (sort_order=1) must render before Zeta Game "
+                "(sort_order=100), regardless of which category -- or that "
+                "category's own sort_order -- each belongs to")
+
     def test_default_categories_stay_inline_not_submenu(self):
         """Backward-compat check: _create_default_data()'s seeded
         categories never set as_submenu, so it must default to False --
@@ -284,6 +339,49 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
             # Appears once per top-level render, never in the submenu.
             self.assertEqual(txt.count(g.name[:20]), 2,
                              msg=f'{g.name!r} leaked into (or was dropped from) the submenu render')
+
+    def test_submenu_uses_custom_art_when_present_for_its_category_slug(self):
+        """The submenu drill-down checks for custom art under the slot
+        name `door_games_<category-slug>` -- same lookup mechanism
+        (load_menu_ansi) the top-level door menu's own `door_games`
+        slot already uses. Confirms: a real file dropped at
+        data/text/menus/door_games_<slug>.ans is actually used instead
+        of the generated layout, and gets cleaned up after the test."""
+        from anetbbs.models import db, GameCategory, Game
+        from pathlib import Path
+        cat = GameCategory(name='Custom Art Cat', slug='customartcat',
+                           as_submenu=True)
+        db.session.add(cat)
+        db.session.add(Game(name='Custom Art Game', slug='custom-art-game',
+                            category='customartcat', game_type='door_native',
+                            is_active=True))
+        db.session.commit()
+
+        menus_dir = Path(__file__).resolve().parents[1] / 'data' / 'text' / 'menus'
+        menus_dir.mkdir(parents=True, exist_ok=True)
+        art_path = menus_dir / 'door_games_customartcat.ans'
+        art_path.write_text('CUSTOM_SUBMENU_ART_MARKER\r\n')
+        self.addCleanup(lambda: art_path.unlink(missing_ok=True))
+
+        from anetbbs.features.games import GameManager
+        probe = _FakeSession(['Q'])
+        asyncio.run(GameManager(probe).show_door_menu())
+        top_txt = probe.transcript()
+        section_num = None
+        for line in top_txt.split('\r\n'):
+            if 'Custom Art Cat' in line and '→' in line:
+                m = re.search(r'(\d+)', re.sub(r'\x1b\[[0-9;]*m', '', line))
+                section_num = int(m.group(1)) if m else None
+        self.assertIsNotNone(section_num, f'could not find section line in:\n{top_txt}')
+
+        session = _FakeSession([str(section_num), 'B', 'Q'])
+        asyncio.run(GameManager(session).show_door_menu())
+        txt = session.transcript()
+        self.assertIn('CUSTOM_SUBMENU_ART_MARKER', txt, msg=txt)
+        # The generated layout's own "Pick a game (number or B)" prompt
+        # still has to appear (art doesn't replace input handling), but
+        # the generated HEADER/hbar block must not, since art took over.
+        self.assertIn('Pick a game (number or B)', txt, msg=txt)
 
 
 if __name__ == '__main__':

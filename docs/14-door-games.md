@@ -20,6 +20,38 @@ through their terminal:
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
 
+## Categories and submenu sections
+
+Every game/door belongs to a category (**Admin → Games → Categories**),
+shown as a header on the Door Games list (terminal) and lobby (web).
+By default a category's games are listed inline under its header —
+fine for a handful of doors, but once a category grows large it can
+run off the bottom of a real terminal screen.
+
+Flip **"Show as a submenu section"** on a category to collapse it
+instead: the top-level door menu shows one selectable line for that
+whole category (e.g. "Synchronet Doors → (17 doors)"), and picking it
+opens a second screen listing just that category's own games, with
+`B`/`Q` (terminal) or the browser back button (web) returning to the
+parent menu. One level deep only — a submenu category's own games are
+always shown flat there, no further nesting. Off by default; existing
+categories/installs render exactly as before until a sysop opts one
+in.
+
+Ordering is flat and global across the *entire* menu — a game's own
+**Sort Order** field controls its absolute position in the whole list
+(lower numbers first), not just its position within its own category.
+Category headers/sections are a side effect of walking that flat
+order and noticing where the category changes, not the primary sort
+key — so a sysop numbering every door 1-N as one list gets exactly
+that ordering, regardless of which categories those doors happen to
+be in.
+
+The submenu screen supports the same file-based ANSI art override as
+the top-level Door Games list — see
+[`04-ansi-screens.md`](04-ansi-screens.md#slot-names-reference) for
+the full slot-naming reference (`door_games_<category-slug>.ans`).
+
 ## ANetCRAFT — bundled Minecraft-inspired terminal game
 
 `anetbbs/features/anetcraft.py` is ANetBBS's own 2D survival game —
