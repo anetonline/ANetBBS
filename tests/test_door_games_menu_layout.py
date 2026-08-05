@@ -116,10 +116,24 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
             os.environ['FLASK_ENV'] = self._orig_flask_env
 
     def test_arcade_category_packs_multiple_games_onto_one_line(self):
-        """Arcade has 4 real bundled doors (Chicken Delivery, Bubble
-        Boggle, Synchronetris, Gooble Gooble) -- the whole point of
-        this fix. Confirms at least one line carries two different
-        game names/numbers together, not one game per line."""
+        """On a real dev/Pi3 checkout, Arcade has 4 real bundled doors
+        (Chicken Delivery, Bubble Boggle, Synchronetris, Gooble
+        Gooble) -- the whole point of this fix. Those are gitignored
+        third-party JSON-RPC door files though (see BUNDLED_DOORS'
+        must_exist gating), absent on a fresh clone/CI -- seed two
+        synthetic games directly instead of relying on them, so this
+        only needs SOME category with >= 2 games, not that specific
+        one, and passes deterministically everywhere. Confirms at
+        least one line carries two different game names/numbers
+        together, not one game per line."""
+        from anetbbs.models import db, Game
+        db.session.add_all([
+            Game(name='Synthetic Arcade One', slug='synthetic-arcade-one',
+                category='arcade', game_type='door_native', is_active=True),
+            Game(name='Synthetic Arcade Two', slug='synthetic-arcade-two',
+                category='arcade', game_type='door_native', is_active=True),
+        ])
+        db.session.commit()
         from anetbbs.features.games import GameManager
         session = _FakeSession(['Q'])
         asyncio.run(GameManager(session).show_door_menu())
@@ -185,15 +199,24 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
             self.assertFalse(c.as_submenu, msg=f'{c.slug} unexpectedly as_submenu=True')
 
     def test_as_submenu_category_collapses_to_one_line(self):
-        """Flip Strategy to as_submenu=True (a real seeded GameCategory
-        row with several active bundled doors) -- the top-level menu
-        must show exactly one selectable line for it, and none of its
-        individual game names should appear at the top level anymore
-        (they're one level down now)."""
+        """Flip Strategy (a real seeded GameCategory row) to
+        as_submenu=True -- the top-level menu must show exactly one
+        selectable line for it, and none of its individual game names
+        should appear at the top level anymore (they're one level
+        down now). Seeds two synthetic games directly into 'strategy'
+        rather than relying on real bundled JSON-RPC strategy doors
+        (Dice Warz, Jeopardized, etc) -- those are gitignored
+        third-party files, absent on a fresh clone/CI."""
         from anetbbs.models import db, GameCategory, Game
         strategy = GameCategory.query.filter_by(slug='strategy').first()
         self.assertIsNotNone(strategy, 'expected a seeded "strategy" category')
         strategy.as_submenu = True
+        db.session.add_all([
+            Game(name='Synthetic Strategy One', slug='synthetic-strategy-one',
+                category='strategy', game_type='door_native', is_active=True),
+            Game(name='Synthetic Strategy Two', slug='synthetic-strategy-two',
+                category='strategy', game_type='door_native', is_active=True),
+        ])
         db.session.commit()
         strategy_games = (Game.query.filter_by(category='strategy', is_active=True)
                           .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
@@ -214,10 +237,17 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
     def test_picking_a_submenu_category_lists_only_its_own_games(self):
         """Choosing the Strategy section line opens a second screen
         listing only Strategy's games -- other categories' games must
-        NOT leak into that submenu."""
+        NOT leak into that submenu. Seeds synthetic strategy games
+        directly -- see the previous test's docstring for why."""
         from anetbbs.models import db, GameCategory, Game
         strategy = GameCategory.query.filter_by(slug='strategy').first()
         strategy.as_submenu = True
+        db.session.add_all([
+            Game(name='Synthetic Strategy One', slug='synthetic-strategy-one',
+                category='strategy', game_type='door_native', is_active=True),
+            Game(name='Synthetic Strategy Two', slug='synthetic-strategy-two',
+                category='strategy', game_type='door_native', is_active=True),
+        ])
         db.session.commit()
         strategy_games = (Game.query.filter_by(category='strategy', is_active=True)
                           .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))

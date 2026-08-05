@@ -1,3 +1,12 @@
+# ANetBBS v1.0.12 — Door menu sections (drill-down categories) (August 2026)
+
+A game category can now be marked as a **submenu section** (Admin → Games → Categories → edit a category → "Show as a submenu section") instead of always listing its games inline — useful once a category has enough doors to run off the bottom of a real terminal screen. A section shows as one selectable line in both the terminal and web door menus; picking it opens a second screen listing just that category's games. Off by default — existing categories/installs render exactly as before until a sysop opts one in. (PETSCII's Games menu intentionally never listed real doors at all, so there's nothing to change there.)
+
+Also fixed along the way:
+- `console.charset` was missing from the Node.js compat shim's `console` object, crashing any door that reads it via the real vendored `modopts.js` (surfaced running Minesweeper) — now returns `"CP437"`, matching ANetBBS's encoding throughout.
+- The InterBBS Score-Sharing Area dropdown (Admin → Games → edit a `door_synchronet` game) is now grouped by network (`<optgroup>` per network) instead of one flat alphabetical list — DOVE-Net's areas no longer get buried in a large FidoNet arealist.
+- Adding a game whose auto-filled slug collided with an existing one (e.g. typing "Minesweeper" when the built-in browser minigame already owns slug `minesweeper`) crashed with a raw 500 instead of a friendly "slug already in use" message.
+
 # ANetBBS v1.0.11 — Minesweeper InterBBS DOVE-Net score sharing (real MsgBase support) (August 2026)
 
 Synchronet's own official Minesweeper door (bundled in v1.0.9) has a real, built-in feature to share game wins across BBSes via Synchronet's `MsgBase` message-base API — previously unimplemented in the Node.js compat shim (any door calling `new MsgBase(...)` would `ReferenceError`). Now real:
