@@ -40,6 +40,7 @@ def _build_wikilink_html(target, label, known_slugs):
 
 _FENCE_RE = re.compile(r'(?ms)^```.*?^```', re.MULTILINE)
 _INLINE_CODE_RE = re.compile(r'`[^`\n]+`')
+_PLACEHOLDER_RE = re.compile(r'\x00WIKI(INLINE|FENCE)(\d+)\x00')
 
 
 def preprocess_wikilinks(body, known_slugs):
@@ -73,11 +74,20 @@ def preprocess_wikilinks(body, known_slugs):
     protected = _WIKILINK_RE.sub(repl, protected)
 
     # 4. Restore.
-    for i, src in enumerate(inlines):
-        protected = protected.replace(f'\x00WIKIINLINE{i}\x00', src)
-    for i, src in enumerate(fences):
-        protected = protected.replace(f'\x00WIKIFENCE{i}\x00', src)
-    return protected
+    #
+    # Real perf bug found live (same shape as web/render_msg.py's fixed
+    # reflow bug): calling .replace() once per placeholder against the
+    # *whole* (already-restored, ever-growing) `protected` string made
+    # this O(n^2) in the combined body length -- confirmed 3+ seconds on
+    # a synthetic ~470KB page with ~12,000 code spans, uncached and
+    # re-run on every single page view. A single regex pass resolving
+    # every placeholder at once (fences and inline spans together,
+    # order-independent since each match already carries its own kind
+    # and index) is one linear scan instead of N whole-string rescans.
+    def _restore(m):
+        kind, idx = m.group(1), int(m.group(2))
+        return inlines[idx] if kind == 'INLINE' else fences[idx]
+    return _PLACEHOLDER_RE.sub(_restore, protected)
 
 
 def render(body, known_slugs=None):

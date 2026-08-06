@@ -23,6 +23,7 @@ Auth model:
   - Admins can lock, delete, rename slugs, and edit locked pages.
 """
 import difflib
+import json
 from datetime import datetime
 
 from flask import (Blueprint, render_template, request, redirect,
@@ -77,6 +78,17 @@ def _topnav_pages():
     ]
 
 
+def _cache_outgoing_links(page, body):
+    """Recompute and store `page.outgoing_links_cache` from `body`.
+
+    Called on every save so wanted()/orphans() can read this instead of
+    re-running extract_outgoing_links() (a regex scan that first strips
+    fenced/inline code) over every page's full body on every single
+    visit to those two pages."""
+    page.outgoing_links_cache = json.dumps(
+        sorted(extract_outgoing_links(body)))
+
+
 def _save_revision(page, body, title, edit_summary, author):
     """Append a new WikiRevision to `page` and update the page's
     canonical fields. Caller must commit."""
@@ -97,6 +109,7 @@ def _save_revision(page, body, title, edit_summary, author):
     page.summary = (edit_summary or '')[:300]
     page.updated_at = datetime.utcnow()
     page.updated_by_id = getattr(author, 'id', None)
+    _cache_outgoing_links(page, page.body)
     return rev
 
 
@@ -168,13 +181,36 @@ def search():
                            nav=_topnav_pages())
 
 
+def _all_pages_outgoing_links():
+    """Yield (page, {outgoing slugs}) for every live page.
+
+    Real perf issue found in a broader web-UI audit: wanted()/orphans()
+    used to call extract_outgoing_links() (a regex scan that first
+    strips fenced/inline code) over every page's full body, from
+    scratch, on every single visit to either page -- uncached, so it
+    got slower as the wiki grew. Reads the cache _save_revision()
+    maintains instead. Rows that predate the cache column (NULL) are
+    self-healed here: computed once and written back, so this degrades
+    to the old per-page cost only once per page, ever, not once per
+    page per visit.
+    """
+    dirty = False
+    for p in WikiPage.query.filter_by(is_deleted=False).all():
+        if p.outgoing_links_cache is None:
+            _cache_outgoing_links(p, p.body)
+            dirty = True
+        yield p, set(json.loads(p.outgoing_links_cache))
+    if dirty:
+        db.session.commit()
+
+
 @wiki_bp.route('/wanted')
 def wanted():
     """Pages that get linked to but don't exist yet."""
     live = _all_slugs()
     wanted_counts = {}
-    for p in WikiPage.query.filter_by(is_deleted=False).all():
-        for slug in extract_outgoing_links(p.body):
+    for p, links in _all_pages_outgoing_links():
+        for slug in links:
             if slug not in live:
                 wanted_counts[slug] = wanted_counts.get(slug, 0) + 1
     items = sorted(wanted_counts.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -186,8 +222,8 @@ def wanted():
 def orphans():
     """Pages no other page links to (other than home)."""
     incoming = set()
-    for p in WikiPage.query.filter_by(is_deleted=False).all():
-        incoming.update(extract_outgoing_links(p.body))
+    for p, links in _all_pages_outgoing_links():
+        incoming.update(links)
     orphans_list = (WikiPage.query
                     .filter_by(is_deleted=False)
                     .filter(WikiPage.slug != 'home')

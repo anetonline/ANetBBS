@@ -443,7 +443,11 @@ class UserSession(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
-    last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Indexed: web_app.py's inject_online_count() context processor runs
+    # a `last_seen >= five_min_ago` range query on EVERY page view, from
+    # every visitor, site-wide -- an unindexed full-table scan on that
+    # hot a path is worth avoiding even though this table is small.
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     ip_address = db.Column(db.String(45))
     user_agent = db.Column(db.String(255))
     page = db.Column(db.String(255))
@@ -2870,6 +2874,15 @@ class WikiPage(db.Model):
     title = db.Column(db.String(200), nullable=False)
     body = db.Column(db.Text, nullable=False, default='')
     summary = db.Column(db.String(300))     # last edit summary, displayed in lists
+    # JSON list of slugs this page's body [[links to]], recomputed and
+    # cached whenever body is saved (see wiki.py's _cache_outgoing_links()).
+    # NULL on rows that predate this column -- wiki.py's wanted()/
+    # orphans() self-heal it lazily on first view instead of requiring a
+    # bulk migration backfill. Avoids re-running the link-extraction
+    # regex over every page's full body on every single visit to those
+    # two pages (real perf issue found live: uncached, degrades linearly
+    # as the wiki grows).
+    outgoing_links_cache = db.Column(db.Text)
     is_locked = db.Column(db.Boolean, default=False, nullable=False)
     is_deleted = db.Column(db.Boolean, default=False, nullable=False, index=True)
     view_count = db.Column(db.Integer, default=0, nullable=False)

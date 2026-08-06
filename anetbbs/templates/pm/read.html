@@ -21,7 +21,7 @@
             {% include '_vote_buttons.html' %}
         </div>
         <pre id="bodyPlain" class="ansi-body" style="white-space:pre-wrap;font-family:inherit;">{{ message.body | msgbody }}</pre>
-        <div id="bodyMd" style="display:none;">{{ message.body | markdown }}</div>
+        <div id="bodyMd" style="display:none;" data-md-url="{{ url_for('pm.read_markdown', message_id=message.id) }}"></div>
         {% if message.sender and message.sender.signature %}
         <div class="mt-3 pt-2 small text-muted" style="border-top:1px dashed var(--theme-border); white-space: pre-wrap;">
             -- <br>{{ message.sender.signature }}
@@ -35,8 +35,17 @@
     const plain = document.getElementById('bodyPlain');
     const md = document.getElementById('bodyMd');
     if (!btn || !plain || !md) return;
+    let loaded = false;
     btn.addEventListener('click', () => {
         const showMd = plain.style.display !== 'none';
+        if (showMd && !loaded) {
+            loaded = true;
+            md.textContent = 'Loading…';
+            fetch(md.dataset.mdUrl)
+                .then(r => r.json())
+                .then(data => { md.innerHTML = data.html; })
+                .catch(() => { md.textContent = 'Failed to load Markdown view.'; loaded = false; });
+        }
         plain.style.display = showMd ? 'none' : '';
         md.style.display = showMd ? '' : 'none';
     });

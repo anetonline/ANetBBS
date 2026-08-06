@@ -15,7 +15,7 @@ Routes:
 """
 import datetime
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, abort)
+                   flash, abort, jsonify)
 from flask_login import login_required, current_user
 
 from ..models import (db, NetmailMessage, EchomailNetwork, UserAka,
@@ -162,6 +162,19 @@ def read(msg_id):
         m.status = 'read'
         db.session.commit()
     return render_template('netmail/read.html', m=m)
+
+
+@netmail_bp.route('/<int:msg_id>/markdown')
+@login_required
+def read_markdown(msg_id):
+    """Lazy JSON endpoint backing read.html's "Toggle Markdown view" --
+    see echomail.py's read_markdown() for why this moved off the
+    always-on render path. Same ownership check as read() above."""
+    m = NetmailMessage.query.get_or_404(msg_id)
+    if not _user_owns(m):
+        abort(403)
+    from .markdown_render import render_markdown
+    return jsonify({'html': str(render_markdown(m.body))})
 
 
 @netmail_bp.route('/compose', methods=['GET', 'POST'])

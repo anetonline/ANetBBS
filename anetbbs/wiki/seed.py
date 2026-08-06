@@ -7,8 +7,10 @@ isn't empty on day 1.
 To re-seed an existing install with brand-new content for any of these
 pages, delete or rename the existing slug first.
 """
+import json
 from datetime import datetime
 from ..models import db, WikiPage, WikiRevision
+from .render import extract_outgoing_links
 
 
 SEED = [
@@ -4032,9 +4034,17 @@ def seed_initial_pages(force=False, sync_unedited=False):
                 do_refresh = True
         if existing and not do_refresh:
             continue
+        # Keep outgoing_links_cache in sync with body here too -- it's
+        # the same cache web/wiki.py's _save_revision() maintains for
+        # web-UI edits (see wanted()/orphans() there for why this exists
+        # -- avoids re-scanning every page body on every visit to those
+        # two pages). Computed inline rather than importing from web/
+        # to keep wiki/ from depending on web/.
+        links_cache = json.dumps(sorted(extract_outgoing_links(body)))
         if existing and do_refresh:
             existing.title = title
             existing.body = body
+            existing.outgoing_links_cache = links_cache
             existing.is_deleted = False
             existing.updated_at = datetime.utcnow()
             db.session.flush()
@@ -4042,7 +4052,8 @@ def seed_initial_pages(force=False, sync_unedited=False):
         else:
             page = WikiPage(slug=slug, title=title, body=body,
                             summary='Initial seed content',
-                            is_deleted=False)
+                            is_deleted=False,
+                            outgoing_links_cache=links_cache)
             db.session.add(page)
             db.session.flush()
         # Add a revision; rev_num = next per page.

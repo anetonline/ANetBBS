@@ -2,7 +2,7 @@
 """
 Private messaging blueprint
 """
-from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Length
@@ -180,6 +180,19 @@ def read(message_id):
     other = User.query.get(other_id)
     return render_template('pm/read.html', message=message,
                            conversation=conversation, other=other)
+
+
+@pm_bp.route('/<int:message_id>/markdown')
+@login_required
+def read_markdown(message_id):
+    """Lazy JSON endpoint backing read.html's "Toggle Markdown view" --
+    see echomail.py's read_markdown() for why this moved off the
+    always-on render path. Same ownership check as read() above."""
+    message = PrivateMessage.query.get_or_404(message_id)
+    if message.recipient_id != current_user.id and message.sender_id != current_user.id:
+        abort(403)
+    from .markdown_render import render_markdown
+    return jsonify({'html': str(render_markdown(message.body))})
 
 
 @pm_bp.route('/<int:message_id>/delete', methods=['POST'])

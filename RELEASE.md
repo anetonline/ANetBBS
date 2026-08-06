@@ -1,3 +1,20 @@
+# ANetBBS v1.0.19 — Web UI performance pass: message rendering, boards, echomail, wiki, file areas (August 2026)
+
+**The trigger: a single echomail message with a large ANSI-art body was taking 30+ seconds to load.** Root cause was an O(n²) bug in `reflow_hard_wrapped_body()` (the code that rejoins hard-wrapped FTN message lines) — for a long run of qualifying lines with no blank-line/art/list breaks, it folded the whole run into one ever-growing string and then re-scanned that *entire* string on every single line join, twice over (once for a trailing-word regex, once for an art-detection regex). Confirmed 32.7s on a synthetic body shaped like the real report; bounding both re-scans to a small fixed window instead of the whole string dropped that to 0.23s — about 140x faster, with all existing tests still passing.
+
+**That led to a broader pass across the web UI** looking for the same class of bug and other real request-path cost:
+
+- The "Toggle Markdown view" button on every message-read page (echomail/netmail/boards/PM) used to render the *entire* body through python-markdown + bleach unconditionally into a hidden div on every page load, even though almost nobody ever opens it — now deferred to a small on-demand endpoint that only renders on first click.
+- Wiki page rendering had the identical O(n²) shape in its own placeholder-restore step (fenced/inline-code protection) — 3.13s → 0.02s on a comparable synthetic page.
+- `_linkify()`'s URL-substitution loop re-scanned the whole rendered output once per matched link — rewritten as a single pass; a 3,200-link body now renders in a fraction of the time.
+- The public message-board index ran 3 separate count queries *per board* (unread/post/reply) — hit by every visitor, including anonymous ones — collapsed to a small, fixed number of grouped queries regardless of board count.
+- The echomail network-chooser page reloaded the user's entire read-status history from scratch once *per network* shown — now one indexed join query for the whole page.
+- Viewing a board thread issued one DB query per reply in the tree — now one query per tree depth, so a thread with hundreds of replies at one depth costs 2 queries instead of hundreds.
+- The file-areas index page ran a full TIC-DB-query + archive-extraction scan per area just to show a count and total size — replaced with a lightweight directory scan that skips all the per-file description work the index page never needed.
+- The wiki's "Wanted pages" / "Orphaned pages" utility pages re-scanned every page's full body on every single visit — now cached (and kept in sync) whenever a page is saved, with pre-existing rows self-healing on first view.
+
+Also fixed a long-standing drift found along the way: `anetbbs/__init__.py`'s `__version__`, `setup.py`'s `version=`, and `FILE_ID.DIZ` had been stuck at `1.0.9` since that release — `VERSION`, `RELEASE.md`, `README.md`, and the changelog were correctly bumped every release since, but those three files were missed for 9 releases running. Back in sync as of this one.
+
 # ANetBBS v1.0.18 — AFK warning + matrix-rain screensaver; MRC wide-terminal sizing fix (August 2026)
 
 **AFK warning + screensaver for the terminal client.** New `AFK_WARNING_SECONDS` setting (`.env`, default `0` = off), mirroring a real Mystic Pascal AFK script Jerry pointed at as a reference. After that many seconds of no keystrokes at any menu prompt, the caller sees a live countdown warning ("You've been idle a while..."); if nobody responds, a generated matrix-rain screensaver takes over the screen. A keystroke at either stage cancels/dismisses it — consumed, not passed through as a real menu selection — and returns to exactly where the caller was (prompt redrawn, plus any already-typed partial line for `read_line`). If the sysop also has `IDLE_TIMEOUT_SECONDS` set and nobody ever comes back, the existing hard idle-disconnect still fires afterward, unchanged.

@@ -2,7 +2,7 @@
 """
 User-facing echomail blueprint for reading and composing echomail messages.
 """
-from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField, SelectField
 from wtforms.validators import DataRequired, Length
@@ -98,21 +98,36 @@ def _accessible_areas_query(network_id):
 
 
 def _unread_counts(area_ids):
-    """Return {area_id: unread_count} for the given area IDs."""
+    """Return {area_id: unread_count} for the given area IDs.
+
+    Real perf bug found live: this used to load the user's ENTIRE
+    read-status history (every message they've ever marked read, across
+    every area/network, unfiltered) into a Python set on every single
+    call -- and index() below called this once PER NETWORK, so the same
+    expensive full scan re-ran N times in one request on the echomail
+    network-chooser page, which nearly every session hits. Rewritten as
+    one LEFT JOIN scoped to just the requested area_ids: SQL finds
+    unread messages directly (no read-status row for this user) instead
+    of Python computing a set difference against an unboundedly-growing
+    table. index() also now calls this once total instead of once per
+    network -- see its own comment.
+    """
     from sqlalchemy import func
     if not area_ids:
         return {}
-    read_msg_ids = {
-        rs.message_id
-        for rs in EchomailReadStatus.query.filter_by(user_id=current_user.id).all()
-    }
     return dict(
         db.session.query(
             EchomailMessage.area_id,
             func.count(EchomailMessage.id)
+        ).outerjoin(
+            EchomailReadStatus,
+            db.and_(
+                EchomailReadStatus.message_id == EchomailMessage.id,
+                EchomailReadStatus.user_id == current_user.id,
+            )
         ).filter(
             EchomailMessage.area_id.in_(area_ids),
-            ~EchomailMessage.id.in_(read_msg_ids) if read_msg_ids else db.true()
+            EchomailReadStatus.id.is_(None)
         ).group_by(EchomailMessage.area_id).all()
     )
 
@@ -127,18 +142,27 @@ def index():
         flash('Echomail is not configured yet.', 'info')
         return render_template('echomail/index.html', network_list=[])
 
-    network_list = []
+    # Gather every accessible area across every network first, then
+    # compute unread counts for ALL of them in one call/query instead of
+    # calling _unread_counts() once per network (see its docstring).
+    net_areas = []
+    all_area_ids = []
     for net in networks:
         areas = _accessible_areas_query(net.id).all()
         if not areas:
             continue
         area_ids = [a.id for a in areas]
-        uc = _unread_counts(area_ids)
-        total_unread = sum(uc.values())
+        net_areas.append((net, area_ids))
+        all_area_ids.extend(area_ids)
+
+    uc_all = _unread_counts(all_area_ids)
+
+    network_list = []
+    for net, area_ids in net_areas:
         network_list.append({
             'network':      net,
-            'area_count':   len(areas),
-            'total_unread': total_unread,
+            'area_count':   len(area_ids),
+            'total_unread': sum(uc_all.get(aid, 0) for aid in area_ids),
         })
 
     return render_template('echomail/index.html', network_list=network_list)
@@ -325,6 +349,27 @@ def read(area_id, message_id):
                            display_origin_line=display_origin_line,
                            prev_msg=prev_msg,
                            next_msg=next_msg)
+
+
+@echomail_bp.route('/<int:area_id>/<int:message_id>/markdown')
+@login_required
+def read_markdown(area_id, message_id):
+    """Lazy JSON endpoint backing read.html's "Toggle Markdown view".
+
+    Real perf issue found live: the read page used to render the message
+    body through python-markdown + bleach unconditionally into a hidden
+    div on every load, even though almost nobody ever opens the Markdown
+    view -- measured ~2s+ of wasted work per page load on a large ANSI-art
+    body. Now that render only happens here, on demand, the first time a
+    user actually clicks the toggle. Same access checks as read() above.
+    """
+    echo_area = EchoArea.query.get_or_404(area_id)
+    _check_area_access(echo_area)
+    msg = EchomailMessage.query.filter_by(id=message_id, area_id=area_id).first_or_404()
+    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(msg, current_user):
+        abort(403)
+    from .markdown_render import render_markdown
+    return jsonify({'html': str(render_markdown(msg.body))})
 
 
 @echomail_bp.route('/<int:area_id>/<int:message_id>/delete', methods=['POST'])

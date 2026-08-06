@@ -33,7 +33,7 @@
             {% include '_vote_buttons.html' %}
         </span>
         <div id="postBodyPlain" class="ansi-body" style="white-space: pre-wrap;">{{ post.content | msgbody_rich }}</div>
-        <div id="postBodyMd" style="display:none;">{{ post.content | markdown }}</div>
+        <div id="postBodyMd" style="display:none;" data-md-url="{{ url_for('boards.view_post_markdown', post_id=post.id) }}"></div>
         {% if post.author and post.author.signature %}
         <div class="mt-3 pt-2 small text-muted" style="border-top:1px dashed var(--theme-border); white-space: pre-wrap;">
             -- <br>{{ post.author.signature }}
@@ -45,8 +45,17 @@
             const plain = document.getElementById('postBodyPlain');
             const md = document.getElementById('postBodyMd');
             if (!btn || !plain || !md) return;
+            let loaded = false;
             btn.addEventListener('click', () => {
                 const showMd = plain.style.display !== 'none';
+                if (showMd && !loaded) {
+                    loaded = true;
+                    md.textContent = 'Loading…';
+                    fetch(md.dataset.mdUrl)
+                        .then(r => r.json())
+                        .then(data => { md.innerHTML = data.html; })
+                        .catch(() => { md.textContent = 'Failed to load Markdown view.'; loaded = false; });
+                }
                 plain.style.display = showMd ? 'none' : '';
                 md.style.display = showMd ? '' : 'none';
             });

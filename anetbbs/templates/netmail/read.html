@@ -48,7 +48,7 @@
     </div>
     <div class="card-body">
         <pre id="bodyPlain" class="ansi-body" style="white-space:pre-wrap;font-family:monospace;margin:0;">{{ m.body | msgbody(m.chrs if m.chrs is defined else '') }}</pre>
-        <div id="bodyMd" style="display:none;">{{ m.body | markdown }}</div>
+        <div id="bodyMd" style="display:none;" data-md-url="{{ url_for('netmail.read_markdown', msg_id=m.id) }}"></div>
     </div>
 </div>
 <script>
@@ -57,8 +57,17 @@
     const plain = document.getElementById('bodyPlain');
     const md = document.getElementById('bodyMd');
     if (!btn || !plain || !md) return;
+    let loaded = false;
     btn.addEventListener('click', () => {
         const showMd = plain.style.display !== 'none';
+        if (showMd && !loaded) {
+            loaded = true;
+            md.textContent = 'Loading…';
+            fetch(md.dataset.mdUrl)
+                .then(r => r.json())
+                .then(data => { md.innerHTML = data.html; })
+                .catch(() => { md.textContent = 'Failed to load Markdown view.'; loaded = false; });
+        }
         plain.style.display = showMd ? 'none' : '';
         md.style.display = showMd ? '' : 'none';
     });

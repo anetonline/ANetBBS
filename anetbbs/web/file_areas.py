@@ -237,6 +237,40 @@ def _scan_area(area):
     return out
 
 
+def _area_file_stats(area):
+    """Cheap (count, total_size) summary scan for the area-index page.
+
+    Real perf bug found live: index() used to call the full
+    _scan_area() per visible area just to get these two numbers for the
+    summary row -- paying for a TicFile DB query, the description-cache
+    JSON load/save, and (for anything not already cached) an archive
+    extraction to pull FILE_ID.DIZ, on every area, on every load of the
+    area list. None of that is needed for a count and a total size, so
+    this does a plain directory scan (still real disk I/O -- can't avoid
+    that for a live count without a DB-side cached counter, a bigger
+    change than this fix -- but skips everything else _scan_area() does).
+    """
+    if not area.storage_path or not os.path.isdir(area.storage_path):
+        return 0, 0
+    count = 0
+    total_size = 0
+    try:
+        with os.scandir(area.storage_path) as it:
+            for entry in it:
+                if entry.name.startswith('.'):
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    total_size += entry.stat().st_size
+                    count += 1
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return count, total_size
+
+
 @file_areas_bp.route('/')
 @login_required
 def index():
@@ -246,11 +280,8 @@ def index():
     # Annotate with file count for the listing page.
     rows = []
     for a in visible:
-        files = _scan_area(a)
-        rows.append({
-            'area': a, 'count': len(files),
-            'total_size': sum(f['size'] for f in files),
-        })
+        count, total_size = _area_file_stats(a)
+        rows.append({'area': a, 'count': count, 'total_size': total_size})
     return render_template('file_areas/index.html', rows=rows)
 
 

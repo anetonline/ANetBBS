@@ -3,11 +3,13 @@
 Message boards blueprint for forum/bulletin board features
 """
 from datetime import datetime
-from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Length
 from flask_wtf import FlaskForm
+
+from sqlalchemy import func, and_, or_
 
 from ..models import db, Board, Post, BoardSubscription, BoardLastRead
 from ..features.access_control import evaluate_access
@@ -61,24 +63,52 @@ def list_boards():
         except Exception:
             db.session.rollback()
 
-    # Get post counts for each board
-    board_stats = {}
-    for board in boards:
-        unread = 0
-        if current_user.is_authenticated:
+    # Get post counts for each board.
+    #
+    # Real perf bug found live: this used to run 3 separate .count()
+    # queries PER BOARD (post_count, reply_count, unread) -- 3N+1 total
+    # DB round trips on the public board index, hit by every visitor
+    # (including anonymous ones, since this route has no @login_required)
+    # on every single page load. Collapsed to a small, fixed number of
+    # grouped-aggregate queries that scale with query count, not board
+    # count.
+    board_ids = [b.id for b in boards]
+    post_counts = {}
+    reply_counts = {}
+    if board_ids:
+        post_counts = dict(
+            db.session.query(Post.board_id, func.count(Post.id))
+            .filter(Post.board_id.in_(board_ids), Post.parent_id.is_(None))
+            .group_by(Post.board_id).all())
+        reply_counts = dict(
+            db.session.query(Post.board_id, func.count(Post.id))
+            .filter(Post.board_id.in_(board_ids), Post.parent_id.isnot(None))
+            .group_by(Post.board_id).all())
+
+    unread_counts = {}
+    if board_ids and current_user.is_authenticated:
+        # Each board has its own "since" threshold (or none), so this is
+        # one query with a per-board OR'd condition instead of one query
+        # per board.
+        conditions = []
+        for board in boards:
             since = last_read.get(board.id)
-            if since:
-                unread = Post.query.filter_by(board_id=board.id).filter(
-                    Post.created_at > since,
-                    Post.author_id != current_user.id).count()
-            else:
-                unread = Post.query.filter_by(board_id=board.id).filter(
-                    Post.author_id != current_user.id).count()
-        board_stats[board.id] = {
-            'post_count': Post.query.filter_by(board_id=board.id, parent_id=None).count(),
-            'reply_count': Post.query.filter_by(board_id=board.id).filter(Post.parent_id.isnot(None)).count(),
-            'unread': unread,
+            base = (Post.board_id == board.id, Post.author_id != current_user.id)
+            conditions.append(and_(*base, Post.created_at > since) if since
+                              else and_(*base))
+        unread_counts = dict(
+            db.session.query(Post.board_id, func.count(Post.id))
+            .filter(or_(*conditions))
+            .group_by(Post.board_id).all())
+
+    board_stats = {
+        board.id: {
+            'post_count': post_counts.get(board.id, 0),
+            'reply_count': reply_counts.get(board.id, 0),
+            'unread': unread_counts.get(board.id, 0),
         }
+        for board in boards
+    }
 
     # Group by category for a sub-conference style listing.
     by_category = {}
@@ -239,23 +269,46 @@ def view_post(post_id):
     post = Post.query.get_or_404(post_id)
     _check_board_access(post.board)
 
-    # Walk all descendants iteratively (depth-first) so the template
-    # can render reply-to-reply threads with indentation. We bound
-    # depth at 20 to keep abusive nests from blowing up the page.
+    # Real perf bug found live: this used to fetch each node's children
+    # with its own query -- N+1 for N nodes in the tree, so a popular
+    # thread with hundreds of replies cost hundreds of DB round trips.
+    # Fetch the whole subtree level-by-level instead: one query per
+    # DEPTH, covering every node at that depth via a single IN(...)
+    # regardless of how many siblings it has (a thread with 300 replies
+    # all at depth 1 now costs 2 queries total, not 301). The final
+    # depth-first, chronological-per-level display order is then
+    # assembled in memory from the already-fetched data -- identical
+    # output to the old per-node-query version, just far fewer queries
+    # for wide/bushy threads.
+    children_by_parent = {}
+    seen = {post.id}
+    level_ids = [post.id]
+    while level_ids:
+        rows = (Post.query.filter(Post.parent_id.in_(level_ids))
+                .order_by(Post.created_at.asc()).all())
+        next_level_ids = []
+        for c in rows:
+            if c.id in seen:
+                continue
+            seen.add(c.id)
+            children_by_parent.setdefault(c.parent_id, []).append(c)
+            next_level_ids.append(c.id)
+        level_ids = next_level_ids
+
+    # Walk the now-fully-fetched tree iteratively (depth-first) so the
+    # template can render reply-to-reply threads with indentation. We
+    # bound the DISPLAYED depth at 20 to keep abusive nests from
+    # blowing up the page layout (matches the original behavior).
     flat = []
     stack = [(post, 0)]
-    seen = {post.id}
     while stack:
         node, depth = stack.pop()
         if node.id != post.id:
             flat.append((node, min(depth, 20)))
-        # children newest-last so we can pop them in chronological order
-        children = (Post.query.filter_by(parent_id=node.id)
-                    .order_by(Post.created_at.desc()).all())
-        for c in children:
-            if c.id in seen:
-                continue
-            seen.add(c.id)
+        # Children were fetched oldest-first; push in reverse (newest
+        # first) so popping the stack yields chronological order, same
+        # as the original "children newest-last" stack discipline.
+        for c in reversed(children_by_parent.get(node.id, [])):
             stack.append((c, depth + 1))
 
     form = ReplyForm()
@@ -265,6 +318,17 @@ def view_post(post_id):
                            replies=flat,
                            form=form,
                            taglines=get_active_taglines())
+
+
+@boards_bp.route('/post/<int:post_id>/markdown')
+def view_post_markdown(post_id):
+    """Lazy JSON endpoint backing view_post.html's "Toggle Markdown view"
+    -- see echomail.py's read_markdown() for why this moved off the
+    always-on render path. Same access check as view_post() above."""
+    post = Post.query.get_or_404(post_id)
+    _check_board_access(post.board)
+    from .markdown_render import render_markdown
+    return jsonify({'html': str(render_markdown(post.content))})
 
 
 @boards_bp.route('/post/<int:post_id>/ansi')

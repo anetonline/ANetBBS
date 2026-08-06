@@ -81,15 +81,25 @@
 {% endif %}{% if display_origin_line %}* Origin: {{ display_origin_line | msgbody(msg.chrs) }}{% endif %}
 </div>
 {% endif %}</div>
-        <div id="bodyMd" class="msg-body" style="display:none;">{{ msg.body | markdown }}</div>
+        <div id="bodyMd" class="msg-body" style="display:none;"
+             data-md-url="{{ url_for('echomail.read_markdown', area_id=echo_area.id, message_id=msg.id) }}"></div>
         <script>
         (function() {
             const btn = document.getElementById('toggleMd');
             const plain = document.getElementById('bodyPlain');
             const md = document.getElementById('bodyMd');
             if (!btn || !plain || !md) return;
+            let loaded = false;
             btn.addEventListener('click', () => {
                 const showMd = plain.style.display !== 'none';
+                if (showMd && !loaded) {
+                    loaded = true;
+                    md.textContent = 'Loading…';
+                    fetch(md.dataset.mdUrl)
+                        .then(r => r.json())
+                        .then(data => { md.innerHTML = data.html; })
+                        .catch(() => { md.textContent = 'Failed to load Markdown view.'; loaded = false; });
+                }
                 plain.style.display = showMd ? 'none' : '';
                 md.style.display = showMd ? '' : 'none';
             });
