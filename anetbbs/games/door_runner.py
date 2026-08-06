@@ -1638,11 +1638,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         # before doing anything, so it's safe even if the PTY watcher
         # already ran the cleanup path.
         try:
-            if reader_app is not None:
-                with reader_app.app_context():
-                    _cleanup_session(gs.id)
-            else:
-                _cleanup_session(gs.id)
+            _cleanup_session_safe(gs.id, reader_app)
         except Exception:  # pylint: disable=broad-except
             logger.exception('waitpid watcher cleanup failed for session %d',
                              gs.id)
@@ -1683,11 +1679,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
                               name=f'force-kill-{gs.id}').start()
             # Run the standard cleanup path.
             try:
-                if reader_app is not None:
-                    with reader_app.app_context():
-                        _cleanup_session(gs.id)
-                else:
-                    _cleanup_session(gs.id)
+                _cleanup_session_safe(gs.id, reader_app)
             except Exception:  # pylint: disable=broad-except
                 logger.exception('bridge close cleanup failed for session %d',
                                  gs.id)
@@ -1815,10 +1807,40 @@ def _pty_reader(session_id, read_fd, emit_fn, app=None,
             break
 
     # Session ended
-    if app is not None:
-        with app.app_context():
+    _cleanup_session_safe(session_id, app)
+
+
+def _cleanup_session_safe(session_id, app=None):
+    """Run _cleanup_session() with a guaranteed valid app context.
+
+    Real bug found live (door_mystic_mps, first real test of that door
+    type): every call site here used the same `if app is not None: with
+    app.app_context(): ... else: _cleanup_session(...)` pattern -- when
+    the earlier `current_app._get_current_object()` capture failed (or
+    simply wasn't reached for this game type's particular launch path)
+    and `app` ended up None, cleanup ran with NO app context at all and
+    _cleanup_session's own DB access (GameSession.query, db.session.commit)
+    raised "Working outside of application context", caught by its broad
+    except and merely logged -- meaning the session was silently never
+    marked completed/released. Building a fresh throwaway app here
+    (same _app()-style pattern used elsewhere in this codebase for
+    terminal-side code with no ambient Flask context) guarantees cleanup
+    always has a real context to work with, regardless of why the
+    caller's own capture came back empty.
+    """
+    if app is None:
+        try:
+            from flask import Flask
+            from anetbbs.config import get_config
+            app = Flask(__name__)
+            app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+            db.init_app(app)
+        except Exception:
+            logger.exception('Could not build a fallback app context for '
+                             'session %d cleanup', session_id)
             _cleanup_session(session_id)
-    else:
+            return
+    with app.app_context():
         _cleanup_session(session_id)
 
 
@@ -1839,8 +1861,8 @@ def _cleanup_session(session_id):
             gs.game.play_count = (gs.game.play_count or 0) + 1
             db.session.commit()
             release_node(gs.game_id, gs.node_number)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.warning('Cleanup error for session %d: %s', session_id, exc)
+    except Exception:
+        logger.exception('Cleanup error for session %d', session_id)
 
 
 def send_input(session_id, data):
@@ -2252,11 +2274,7 @@ def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
 
     def _on_close():
         try:
-            if reader_app is not None:
-                with reader_app.app_context():
-                    _cleanup_session(gs.id)
-            else:
-                _cleanup_session(gs.id)
+            _cleanup_session_safe(gs.id, reader_app)
         except Exception:  # pylint: disable=broad-except
             logger.exception('rlogin close cleanup failed for session %d',
                              gs.id)
@@ -2552,11 +2570,7 @@ def launch_telnet_session(game, user, emit_fn, bbs_name='ANetBBS'):
 
     def _on_close():
         try:
-            if reader_app is not None:
-                with reader_app.app_context():
-                    _cleanup_session(gs.id)
-            else:
-                _cleanup_session(gs.id)
+            _cleanup_session_safe(gs.id, reader_app)
         except Exception:  # pylint: disable=broad-except
             logger.exception('telnet close cleanup failed for session %d',
                              gs.id)

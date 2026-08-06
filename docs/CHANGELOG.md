@@ -1,11 +1,31 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.13`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.15`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.15 — MRC toggle crash fix, mystic backend connection status now visible (August 2026)
+
+Two bugs found live within minutes of deploying v1.0.14 to the Pi and actually testing the new MRC work end-to-end.
+
+**Chat Systems menu crashed instantly.** v1.0.14's `MRC_BRIDGE_ENABLED` fix read the flag via `current_app.config.get(...)` directly in `ChatManager.show_menu()` — passed every existing test, because those tests pushed a real Flask app context around the whole test run, but the real production call site (`menu_engine.py`'s chat menu action) has no ambient Flask context at all. First caller to press the Chat Systems hotkey got an instant `RuntimeError: Working outside of application context` and a "Menu action failed" message instead of a menu. Fixed by routing through a new `_mrc_enabled()` helper that opens its own transient app context, the same established pattern `_chat_flags()` (right above it in the same file) already used. New regression test deliberately does *not* push a context, matching the real call path — confirmed it fails against the old code and passes against the fix.
+
+**Mystic backend connection status was invisible.** The mystic connection backend relayed its subprocess's own stdout (`Attempting connection...`, `Connected...`, `Reconnecting in...`) at debug log level, matching the native backend's raw-wire-packet logging being debug-only for privacy (a chat message could appear there in plaintext). But the mystic subprocess's stdout is never chat content — only connection-status text, chat itself flows entirely through separate files — so hiding it behind debug just meant a sysop had no way to confirm the mystic backend ever actually reached the hub without a redeploy or a log-level override. Now logged at info level, matching the native backend's own connection-log visibility.
+
+## v1.0.14 — MRC: Mystic client backend, real ping/latency, themed palettes (August 2026)
+
+The sysop supplied a real Mystic BBS MRC client release (`pn-mrc137-alpha.zip`, developed by **StackFault** of **The Bottomless Abyss**, Phenom Productions) and asked for an option to run it instead of ANetBBS's own MRC bridge. All credit for the underlying client and the five bundled MRC themes it inspired goes to StackFault — see `docs/27-mrc-chat.md`'s Credit section and `mrc/mystic_client/vendor/PROVENANCE.md`.
+
+**Mystic connection backend.** `mrc_backend: "mystic"` in `mrc/bridge/config.json` (default remains `native`) runs the real, unmodified vendored `mrc_client.py` as a subprocess against a synthetic Mystic BBS directory (`mrc/mystic_client/fake_bbs.py` builds it automatically — no real Mystic install, no `scripts/`/`text/` setup, no `mplc` compiling; that entire side of the original release is Mystic's own in-BBS chat UI, which ANetBBS never uses since it has its own). `mrc/bridge/mystic_connection.py` translates the subprocess's file-based IPC (`.mrc` packet files under `data/mrc/` and `temp/<room>/`) to and from `BridgeApp`'s existing session/room model, so identify-gating, CTCP, DM routing, and userlist behave identically regardless of which backend is active — only the lowest-level transport to the hub differs. `install.sh` now prompts for the backend choice; existing installs default to `native` until `mrc_backend` is added to `config.json` by hand.
+
+**Real MRC latency.** Ported the reference client's own round-trip trick — a registry of outbound packet text keyed to send time, matched against inbound lines the hub echoes back verbatim — into a shared `LatencyTracker` used by both connection backends. This also caught a real bug along the way: the terminal and web MRC clients already had latency displays wired up from an earlier round, but both were driven by a WebSocket ping/pong between the client and the *local* bridge daemon on the same machine — near-zero, meaningless loopback time labeled as if it were real network latency. Decoupled the two: ping/pong stays for its NAT/firewall keepalive purpose, and a new `{"type":"latency","ms":N}` broadcast from the bridge — driven by the actual hub-echo measurement — now feeds the terminal status bar and the web topic bar instead.
+
+**MRC on/off toggle actually works now.** `MRC_BRIDGE_ENABLED` was written to `.env` by `install.sh`'s "Install MRC bridge service?" prompt but never read anywhere in the Flask app — the web Chat dropdown and terminal Chat Systems menu showed "MRC Chat" unconditionally regardless. Now wired through, including the stock chat-menu ANSI art (`anetbbs/screens/menus/chat*.ans`), which hardcodes an MRC line with no way to conditionally render inside static ANSI — skipped entirely in favor of the generated menu whenever MRC is disabled. A sysop-supplied custom `data/text/menus/chat.ans` needs updating by hand if MRC is turned off after the fact.
+
+**Mystic-inspired chrome themes.** Five new options for `/set palette` (terminal) and the web theme dropdown — `original`, `minimal`, `bitchx`, `2leet4u`, `least` — named after and color-inspired by StackFault's bundled MRC themes. Not a pixel port of that package's `.ans` art (a fixed-position-overlay rendering model neither ANetBBS client has an equivalent for) — a matching color identity in the same spirit, applied to ANetBBS's own existing chrome-rendering code.
 
 ## v1.0.13 — LORD (and every dorkit.js door) fixed after "sits stale, never loads" (August 2026)
 

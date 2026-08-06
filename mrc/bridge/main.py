@@ -36,6 +36,7 @@ import aiohttp
 from aiohttp import web
 
 from .db import BridgeDB
+from .latency import LatencyTracker
 from .mrc_protocol import MRCProtocol
 
 # MRC_BRIDGE_LOG_LEVEL=DEBUG enables full raw packet tracing (every
@@ -240,9 +241,10 @@ def _truncate_wire_message(body: str, max_len: int = MRC_MAX_MESSAGE_LEN) -> str
 
 
 class MRCConnection:
-    def __init__(self, config: dict, status_callback=None):
-        self.config          = config
-        self.status_callback = status_callback
+    def __init__(self, config: dict, status_callback=None, latency_callback=None):
+        self.config           = config
+        self.status_callback  = status_callback
+        self.latency_callback = latency_callback
 
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
@@ -257,6 +259,11 @@ class MRCConnection:
         self._io_task:          Optional[asyncio.Task] = None
 
         self.message_callbacks = []
+        self._latency = LatencyTracker(int(self.config.get("mrc_latency_registry_max", 200)))
+
+    @property
+    def latency_ms(self) -> Optional[float]:
+        return self._latency.latency_ms
 
     async def start(self):
         self._closing = False
@@ -464,6 +471,7 @@ class MRCConnection:
         while self._send_queue:
             pkt = self._send_queue.popleft()
             try:
+                self._latency.note_sent(pkt)
                 self.writer.write(pkt.encode())
                 await self.writer.drain()
             except Exception:
@@ -480,6 +488,11 @@ class MRCConnection:
             self._queue_packet(packet)
             return
         try:
+            # Registered right at the point of actual transmission, not
+            # earlier (e.g. not when merely queued above) -- otherwise a
+            # packet stuck waiting for reconnect would inflate the next
+            # real measurement with its queue-wait time.
+            self._latency.note_sent(packet)
             self.writer.write(packet.encode())
             await self.writer.drain()
         except Exception:
@@ -522,6 +535,12 @@ class MRCConnection:
                 break
 
     async def _handle_packet(self, line: str):
+        # Checked against the raw line, independent of parse success --
+        # matches the reference client's own deliver_mrc(), which checks
+        # its registry before doing anything else with the packet.
+        if self._latency.check_received(line) and self.latency_callback:
+            await self.latency_callback(self._latency.latency_ms)
+
         try:
             parsed = MRCProtocol.parse_packet(line)
         except Exception as e:
@@ -659,7 +678,24 @@ class BridgeApp:
 
         self.ctcp_room = MRCProtocol.norm_room(_ctcp_room_from_config(self.config))
 
-        self.mrc = MRCConnection(self.config, status_callback=self._broadcast_bridge_status)
+        # mrc_backend: "native" (default) uses our own hand-rolled socket
+        # client (MRCConnection) below. "mystic" instead supervises the
+        # real vendored Mystic BBS multiplexer (mrc_client.py) as a
+        # subprocess against a synthetic Mystic directory -- see
+        # mystic_connection.py's module docstring. Either way, everything
+        # below this point (session tracking, identify-gating, CTCP, DM
+        # routing, userlist) is completely unchanged; only the transport
+        # differs.
+        backend = (self.config.get('mrc_backend') or 'native').strip().lower()
+        if backend == 'mystic':
+            from .mystic_connection import MysticMultiplexerConnection
+            self.mrc = MysticMultiplexerConnection(
+                self.config, status_callback=self._broadcast_bridge_status,
+                latency_callback=self._broadcast_latency)
+        else:
+            self.mrc = MRCConnection(
+                self.config, status_callback=self._broadcast_bridge_status,
+                latency_callback=self._broadcast_latency)
         self.mrc.add_message_callback(self._on_upstream_packet)
 
         self.tasks = []
@@ -803,6 +839,7 @@ class BridgeApp:
             # a fresh /identify on the very next join even though the
             # bridge's own connection to the hub never dropped).
             self.db.delete_session(str(ws_id))
+            await self._sync_mystic_rooms()
             logger.info(f"Applied delayed disconnect logoff for handle={eff_nick} room={room}")
         except asyncio.CancelledError:
             logger.info(f"Delayed disconnect cancelled for handle={eff_nick}")
@@ -878,7 +915,28 @@ class BridgeApp:
         if status == "upstream_connected":
             await self._rejoin_all_sessions()
 
+    async def _broadcast_latency(self, latency_ms: float):
+        """Real round-trip measurement from either connection backend's
+        LatencyTracker (see latency.py) -- pushed to every connected
+        session so the terminal status bar and web topic bar can show a
+        live number instead of the clock they used to show."""
+        payload = {"type": "latency", "ms": round(latency_ms)}
+        for ws in list(self.websockets.values()):
+            await self._safe_send(ws, payload)
+
     async def _rejoin_all_sessions(self):
+        # Third real gap in the same class as the other two
+        # _sync_mystic_rooms() fixes: this runs on EVERY upstream
+        # reconnect, not just process startup -- a bridge restart (or
+        # just the mystic subprocess itself reconnecting after a
+        # network blip) creates a fresh MysticMultiplexerConnection
+        # with an empty _active_rooms set, while self.db's session
+        # records persist right through it. Without this, a session
+        # that was legitimately in_room=True before the reconnect gets
+        # re-announced to the hub below (IAMHERE/NEWROOM/USERLIST) but
+        # the mystic backend's file-IPC watcher never resumes polling
+        # that room's directory, so every reply is silently dropped.
+        await self._sync_mystic_rooms()
         for _, sess in self.db.list_sessions().items():
             if not sess.get("in_room"):
                 continue
@@ -900,6 +958,18 @@ class BridgeApp:
                 if r:
                     rooms.add(r)
         return rooms
+
+    async def _sync_mystic_rooms(self):
+        """No-op for the native MRCConnection backend (it has no such
+        method). Only the mystic_backend's file-IPC needs to know which
+        rooms currently have a listener -- see MysticMultiplexerConnection.
+        sync_active_rooms's docstring. Called after every room join/leave
+        mutation below rather than threaded through each call site
+        individually, since _rooms_with_active_sessions() is already the
+        single source of truth and cheap to recompute."""
+        sync = getattr(self.mrc, 'sync_active_rooms', None)
+        if sync:
+            await sync(self._rooms_with_active_sessions())
 
     async def _maybe_refresh_userlist_on_server_text(self, text: str):
         if not self.userlist_refresh_on_server_events:
@@ -978,6 +1048,7 @@ class BridgeApp:
         sess["waiting_for_identify"] = False
         sess["in_room"]              = True
         self.db.save_session(ws_id_str, sess)
+        await self._sync_mystic_rooms()
 
     async def _broadcast_info(self, message: str):
         payload = {"type": "info", "message": message}
@@ -1330,6 +1401,7 @@ class BridgeApp:
                     logger.info(f"WebSocket disconnected: {ws_id} (grace {self.ws_disconnect_grace_seconds:.1f}s for handle={eff_nick} room={room})")
                 else:
                     self.db.delete_session(str(ws_id))
+                    await self._sync_mystic_rooms()
                     logger.info(f"WebSocket disconnected: {ws_id}")
             else:
                 logger.info(f"WebSocket disconnected: {ws_id}")
@@ -1764,6 +1836,16 @@ class BridgeApp:
             sess["in_room"]              = True
             sess["room"]                 = new_room
             self.db.save_session(str(ws_id), sess)
+            # Real bug found live: this room-CHANGE path (a caller
+            # already connected doing /join <room>) is entirely separate
+            # from _complete_join_after_identify's initial-join path --
+            # missing this call meant the mystic backend's file-IPC
+            # watcher never started polling temp/<new_room>/ for the new
+            # room, so the hub's own join confirmation/MOTD/userlist
+            # arrived and was silently dropped with nothing listening
+            # for it. Reported live as "/join ... does not appear to be
+            # joining" even though the outbound packets went out fine.
+            await self._sync_mystic_rooms()
 
             # Only the initiator gets room_changed
             await self._send_to_session(str(ws_id), {"type": "room_changed", "room": new_room})
@@ -1820,6 +1902,7 @@ class BridgeApp:
         # lingering until the next reconnect's fresh join, or the hub's
         # own idle timeout, cleans it up.
         self.db.delete_session(str(ws_id))
+        await self._sync_mystic_rooms()
         await self._safe_send(ws, {"type": "left", "message": "Left the room"})
 
     # ------------------------------------------------------------------

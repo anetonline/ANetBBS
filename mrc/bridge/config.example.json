@@ -1,4 +1,5 @@
 {
+  "mrc_backend": "native",
   "mrc_host": "mrc.bottomlessabyss.net",
   "mrc_port": 5001,
   "use_ssl": true,

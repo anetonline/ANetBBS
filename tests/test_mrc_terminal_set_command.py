@@ -338,6 +338,28 @@ class PaletteTests(unittest.TestCase):
         self.assertIn('\x1b[1;33m', lines[0])   # accent_b for amber
         self.assertIn('\x1b[33m', lines[1])     # accent for amber
 
+    def test_mystic_named_palettes_are_all_present_and_selectable(self):
+        """Jerry's ask: a Mystic-inspired look for /set palette, matching
+        the five themes bundled in pn-mrc137-alpha.zip by name (colors
+        are original identities, not a port of that package's .ans art --
+        see docs/27-mrc-chat.md)."""
+        from anetbbs.features.mrc_chat import _TERM_PALETTES
+        for name in ('original', 'minimal', 'bitchx', '2leet4u', 'least'):
+            self.assertIn(name, _TERM_PALETTES)
+            for key in ('accent', 'accent_b', 'dim'):
+                self.assertIn(key, _TERM_PALETTES[name])
+
+        chat = _make_chat()
+        chat._split_screen = False
+        _run(chat._handle_slash('/set palette bitchx'))
+        self.assertEqual(chat._palette_name, 'bitchx')
+
+    def test_set_palette_2leet4u_name_starting_with_a_digit_works(self):
+        chat = _make_chat()
+        chat._split_screen = False
+        _run(chat._handle_slash('/set palette 2leet4u'))
+        self.assertEqual(chat._palette_name, '2leet4u')
+
 
 if __name__ == '__main__':
     unittest.main()

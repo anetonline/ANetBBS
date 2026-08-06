@@ -18,6 +18,27 @@ def _chat_flags(session):
         return None
 
 
+def _mrc_enabled():
+    """Whether the sysop has MRC enabled (MRC_BRIDGE_ENABLED), default
+    True so an existing install with no such key set behaves exactly as
+    before. Needs a pushed Flask app context the same way _chat_flags()
+    above does -- this call site (menu_engine.py's chat menu action)
+    runs with no ambient Flask app/request context, unlike current_app
+    usage elsewhere in this codebase (e.g. mrc_chat.py) whose call
+    sites happen to already be inside one. Confirmed live: calling
+    current_app.config.get() directly here raised "RuntimeError:
+    Working outside of application context" every time a caller opened
+    Chat Systems, a total crash of that menu action, not just a wrong
+    default."""
+    try:
+        from .bbs_ui import _app
+        with _app().app_context():
+            from flask import current_app
+            return current_app.config.get('MRC_BRIDGE_ENABLED', True)
+    except Exception:
+        return True
+
+
 class ChatManager:
     def __init__(self, session: SessionProtocol):
         self.session = session
@@ -30,14 +51,23 @@ class ChatManager:
         from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
             flags = _chat_flags(self.session)
+            mrc_enabled = _mrc_enabled()
             _w = ui_width(self.session)
-            if not await write_menu_art(self.session, 'chat'):
+            # Skip both the stock bundled art (anetbbs/screens/menus/chat*)
+            # and any sysop drop-in override when MRC is disabled -- both
+            # hardcode "MRC Chat" as a menu line with no way to toggle it,
+            # so honoring the flag means falling back to the generated
+            # menu below instead, which is the only rendering path that
+            # actually respects mrc_enabled. A sysop with custom chat.ans
+            # art will need to update it themselves if they disable MRC.
+            if not (mrc_enabled and await write_menu_art(self.session, 'chat')):
                 await self.session.write('\x1b[2J\x1b[H')
                 await self.session.write(banner('Chat Systems', _w))
-                for hk, lbl in (('1', 'Local Chat'),
-                                ('2', 'IRC Chat (A-Net IRC)'),
-                                ('3', 'MRC Chat (Inter-BBS)'),
-                                ('Q', 'Return to Main Menu')):
+                items = [('1', 'Local Chat'), ('2', 'IRC Chat (A-Net IRC)')]
+                if mrc_enabled:
+                    items.append(('3', 'MRC Chat (Inter-BBS)'))
+                items.append(('Q', 'Return to Main Menu'))
+                for hk, lbl in items:
                     await self.session.write(menu_item(hk, lbl, _w) + '\r\n')
                 await self.session.write('\r\n' + footer(_w) + '\r\n')
             choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
@@ -49,7 +79,7 @@ class ChatManager:
                         '\r\n\x1b[1;31mYour IRC access has been suspended.\x1b[0m\r\n')
                 else:
                     await launch_anetirc_telnet(self.session.user, self.session)
-            elif choice == "3":
+            elif choice == "3" and mrc_enabled:
                 if flags and flags.no_mrc:
                     await self.session.write(
                         '\r\n\x1b[1;31mYour MRC access has been suspended.\x1b[0m\r\n')

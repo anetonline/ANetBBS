@@ -312,6 +312,12 @@ class Config:
     LOG_FILE = os.path.join(BASE_DIR, 'bbs.log')
     
     # MRC Bridge Configuration
+    # Written to .env by install.sh from the ENABLE_MRC prompt, but never
+    # actually read anywhere in the Flask app until now -- the web Chat
+    # dropdown and terminal Chat Systems menu showed "MRC Chat" unconditionally
+    # regardless of this flag. Defaults to true so existing installs (whose
+    # .env predates this being consumed) keep showing MRC exactly as before.
+    MRC_BRIDGE_ENABLED = os.environ.get('MRC_BRIDGE_ENABLED', 'true').lower() == 'true'
     MRC_BRIDGE_HOST = os.environ.get('MRC_BRIDGE_HOST', 'localhost')
     MRC_BRIDGE_PORT = int(os.environ.get('MRC_BRIDGE_PORT', '8080'))
     MRC_BRIDGE_USE_SSL = os.environ.get('MRC_BRIDGE_USE_SSL', 'false').lower() == 'true'

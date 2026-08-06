@@ -67,7 +67,53 @@
       --link-bg:#001326; --link-bg-hover:#003a70;
       --btn-bg:#00284d; --btn-bg-hover:#003a70;
     }
-    
+
+    /* Five themes below are named after (and loosely inspired by the
+       color feel of) pn-mrc137-alpha.zip's bundled Mystic BBS MRC
+       themes -- not pixel-accurate ports of that package's .ans art
+       (a fundamentally different fixed-position-overlay rendering
+       model), just a matching set of color identities so a caller
+       picking "BitchX" or "2Leet4U" here gets a look in the same
+       spirit as the same-named Mystic theme. See docs/27-mrc-chat.md. */
+    body.theme-original {
+      --fg:#7fd0ff; --fg-dim:#4a90b8;
+      --panel-bg:#000a1a; --panel-bg2:#001d3d;
+      --border:#3f7fbf; --accent:#ffffff;
+      --link-bg:#000a1a; --link-bg-hover:#002550;
+      --btn-bg:#001d3d; --btn-bg-hover:#002550;
+    }
+    body.theme-minimal {
+      --bg:#000; --fg:#c0c0c0; --fg-dim:#808080;
+      --panel-bg:#0a0a0a; --panel-bg2:#141414;
+      --border:#404040; --accent:#c0c0c0;
+      --link-bg:#0a0a0a; --link-bg-hover:#1e1e1e;
+      --btn-bg:#141414; --btn-bg-hover:#1e1e1e;
+    }
+    body.theme-bitchx {
+      --fg:#33ff33; --fg-dim:#1f9c1f;
+      --panel-bg:#001400; --panel-bg2:#002800;
+      --border:#33ff33; --accent:#ffffff;
+      --link-bg:#001400; --link-bg-hover:#004000;
+      --btn-bg:#002800; --btn-bg-hover:#004000;
+      --mention:#ffff55; --action:#55ffff;
+    }
+    body.theme-2leet4u {
+      --fg:#ff55ff; --fg-dim:#c02cc0;
+      --panel-bg:#150015; --panel-bg2:#2a002a;
+      --border:#ff55ff; --accent:#55ffff;
+      --link-bg:#150015; --link-bg-hover:#450045;
+      --btn-bg:#2a002a; --btn-bg-hover:#450045;
+      --mention:#ffff00; --action:#00ffff;
+    }
+    body.theme-least {
+      --bg:#000; --fg:#e0e0e0; --fg-dim:#909090;
+      --panel-bg:#000000; --panel-bg2:#0a0a0a;
+      --border:#e0e0e0; --accent:#e0e0e0;
+      --link-bg:#000000; --link-bg-hover:#1a1a1a;
+      --btn-bg:#0a0a0a; --btn-bg-hover:#1a1a1a;
+      --mention:#ffffff; --action:#ffffff; --dm:#ffffff; --system:#ffffff;
+    }
+
     html {
       height: 100%;
     }
@@ -368,6 +414,11 @@
     body.crt-on.theme-cyan   { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(85,255,255,0.35); }
     body.crt-on.theme-ibmblue{ text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(127,208,255,0.35); }
     body.crt-on.theme-mono   { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(230,230,230,0.25); }
+    body.crt-on.theme-original { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(127,208,255,0.35); }
+    body.crt-on.theme-minimal  { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(192,192,192,0.2); }
+    body.crt-on.theme-bitchx   { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(51,255,51,0.4); }
+    body.crt-on.theme-2leet4u  { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(255,85,255,0.4); }
+    body.crt-on.theme-least    { text-shadow: 0 0 calc(10px * var(--crt-glow)) rgba(224,224,224,0.2); }
     
     .c00{color:#000000;} .c01{color:#0000AA;} .c02{color:#00AA00;} .c03{color:#00AAAA;}
     .c04{color:#AA0000;} .c05{color:#AA00AA;} .c06{color:#AA5500;} .c07{color:#AAAAAA;}
@@ -700,7 +751,16 @@
               <option value="theme-cyan">Cyan</option>
               <option value="theme-ibmblue">IBM Blue</option>
               <option value="theme-mono">Mono</option>
+              <option value="theme-original">Original (Mystic)</option>
+              <option value="theme-minimal">Minimal (Mystic)</option>
+              <option value="theme-bitchx">BitchX (Mystic)</option>
+              <option value="theme-2leet4u">2Leet4U (Mystic)</option>
+              <option value="theme-least">Least (Mystic)</option>
             </select>
+          </div>
+          <div style="opacity:0.6; font-size:0.85em; margin-top:2px;">
+            Mystic themes inspired by StackFault's MRC client for Mystic BBS
+            (The Bottomless Abyss)
           </div>
           <div class="toggle-row">
             <input type="checkbox" id="crt-toggle" />
@@ -2088,7 +2148,9 @@
     }
 
     function applyThemeClass(themeClass) {
-      document.body.classList.remove('theme-green','theme-amber','theme-cyan','theme-ibmblue','theme-mono');
+      document.body.classList.remove(
+        'theme-green','theme-amber','theme-cyan','theme-ibmblue','theme-mono',
+        'theme-original','theme-minimal','theme-bitchx','theme-2leet4u','theme-least');
       document.body.classList.add(themeClass || 'theme-green');
     }
 
@@ -2162,13 +2224,25 @@
       switch (data.type) {
 
         case 'pong': {
-          const sentAt = Number(data.t);
-          if (sentAt > 0) {
-            latencyMs = Math.max(0, Date.now() - sentAt);
-            if (latencyInfoEl) latencyInfoEl.textContent = latencyMs + 'ms';
-            // Also surface it in the status bar next to the room topic
-            // (Jerry's ask) -- stays hidden until the first real
+          // WS-level keepalive only -- this round trip is local (browser
+          // <-> bridge daemon on the same box, see mrc/bridge/main.py's
+          // handle_websocket echoing 't' straight back), not a
+          // measurement of the real MRC connection. A prior version
+          // displayed this loopback time as "latency", which read as
+          // near-zero and meaningless. See 'latency' below for the real
+          // measurement.
+          break;
+        }
+
+        case 'latency': {
+          const ms = Number(data.ms);
+          if (Number.isFinite(ms)) {
+            latencyMs = Math.max(0, ms);
+            // Real round-trip to the upstream MRC hub (mrc/bridge/
+            // latency.py), pushed whenever the bridge observes the hub
+            // echo a packet back. Stays hidden until the first real
             // measurement lands rather than showing a placeholder "-".
+            if (latencyInfoEl) latencyInfoEl.textContent = latencyMs + 'ms';
             if (statusLatencyText) statusLatencyText.textContent = latencyMs + 'ms';
             if (statusLatencyWrap) statusLatencyWrap.style.display = '';
           }

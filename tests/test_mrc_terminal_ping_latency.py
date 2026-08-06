@@ -1,17 +1,29 @@
-"""Regression tests for the terminal MRC client's real ping/latency
-round trip (anetbbs/features/mrc_chat.py).
+"""Regression tests for the terminal MRC client's ping/latency handling
+(anetbbs/features/mrc_chat.py).
 
-Real bug found live: `_ping_loop()` sent its outgoing timestamp under
-the key `msgext`, but the bridge (mrc/bridge/main.py) only ever echoes
-back whatever key the caller actually sent as `t` (matching the web
-client's own `{type:'ping', t: Date.now()}` convention) -- with the
-wrong key, the bridge's pong reply always carried `t: null`, the
-terminal's own pong handler never found a usable timestamp, and
-self._latency_ms silently stayed None for the entire session. The
-status bar's own latency widget (see test_mrc_terminal_sidebar_and_clock.py)
-therefore never rendered -- this is the actual root cause Jerry's "the
-status bar is missing ping/latency" report traced back to, not a
-missing feature.
+Two rounds of history here:
+
+1. `_ping_loop()` sent its outgoing timestamp under the key `msgext`,
+   but the bridge (mrc/bridge/main.py) only ever echoes back whatever
+   key the caller actually sent as `t` -- with the wrong key, the pong
+   reply always carried `t: null` and self._latency_ms silently stayed
+   None. PingSendTests covers that fix (still valid, unchanged since).
+
+2. Once that was fixed, the value it computed was still wrong in a
+   more fundamental way: 'ping'/'pong' here are a WebSocket-level
+   keepalive between the terminal and the LOCAL bridge daemon on the
+   SAME machine (mrc/bridge/main.py's handle_websocket just echoes `t`
+   straight back) -- not a measurement of the real connection to the
+   upstream MRC hub. It displayed near-zero loopback time labeled as
+   "latency", which is backwards from what a sysop or caller actually
+   wants to see (real MRC-network latency, the thing users in-channel
+   already discuss manually -- see project_mrc_ping_latency_status_
+   swap.md). Fixed by decoupling the two entirely: pong is now a pure
+   no-op (ping is still sent for its own NAT/firewall keepalive
+   purpose), and a new `{"type": "latency", "ms": N}` push from the
+   bridge -- driven by mrc/bridge/latency.py's real round-trip
+   measurement against the actual hub -- is what sets self._latency_ms
+   now. PongIsKeepaliveOnlyTests and LatencyEventTests cover this.
 """
 import asyncio
 import sys
@@ -94,34 +106,49 @@ class PingSendTests(unittest.TestCase):
         self.assertEqual(chat.sent[0]['type'], 'ping')
 
 
-class PongReceiveTests(unittest.TestCase):
-    def test_pong_with_t_field_computes_real_latency(self):
+class PongIsKeepaliveOnlyTests(unittest.TestCase):
+    """pong no longer touches _latency_ms at all -- it's local loopback
+    time, not real MRC-hub latency. See module docstring, round 2."""
+
+    def test_pong_with_t_field_does_not_set_latency(self):
         chat = _make_chat()
         chat._input_lock = asyncio.Lock()
-        sent_at = time.time() - 0.05  # 50ms ago
+        sent_at = time.time() - 0.05
         _run(chat._handle_event({'type': 'pong', 't': sent_at}))
-        self.assertIsNotNone(chat._latency_ms)
-        # Allow generous slack for test-runner scheduling jitter --
-        # this only needs to prove a real, positive, roughly-50ms
-        # round trip was computed, not exact timing.
-        self.assertGreaterEqual(chat._latency_ms, 0)
-        self.assertLess(chat._latency_ms, 5000)
+        self.assertIsNone(chat._latency_ms)
 
-    def test_pong_with_only_the_old_msgext_field_still_works_as_a_fallback(self):
-        """A rolling deploy could briefly have an old bridge build
-        still echoing the pre-fix field name -- confirms the fallback
-        chain (t, then msgext, then echo) doesn't regress that case."""
+    def test_pong_never_raises_regardless_of_payload_shape(self):
         chat = _make_chat()
         chat._input_lock = asyncio.Lock()
-        sent_at = time.time() - 0.01
-        _run(chat._handle_event({'type': 'pong', 'msgext': sent_at}))
-        self.assertIsNotNone(chat._latency_ms)
+        _run(chat._handle_event({'type': 'pong'}))
+        _run(chat._handle_event({'type': 'pong', 't': None}))
+        self.assertIsNone(chat._latency_ms)
 
-    def test_pong_with_no_usable_timestamp_leaves_latency_unset(self):
+
+class LatencyEventTests(unittest.TestCase):
+    """The real source of truth now: a {"type": "latency", "ms": N} push
+    from the bridge, driven by mrc/bridge/latency.py's actual round-trip
+    measurement against the upstream MRC hub."""
+
+    def test_latency_event_sets_latency_ms(self):
+        chat = _make_chat()
+        chat._input_lock = asyncio.Lock()
+        _run(chat._handle_event({'type': 'latency', 'ms': 123}))
+        self.assertEqual(chat._latency_ms, 123)
+
+    def test_latency_event_floors_and_clamps_to_zero(self):
+        chat = _make_chat()
+        chat._input_lock = asyncio.Lock()
+        _run(chat._handle_event({'type': 'latency', 'ms': -5}))
+        self.assertEqual(chat._latency_ms, 0)
+        _run(chat._handle_event({'type': 'latency', 'ms': 12.9}))
+        self.assertEqual(chat._latency_ms, 12)
+
+    def test_latency_event_with_no_ms_leaves_value_unset(self):
         chat = _make_chat()
         chat._input_lock = asyncio.Lock()
         self.assertIsNone(chat._latency_ms)
-        _run(chat._handle_event({'type': 'pong', 't': None}))
+        _run(chat._handle_event({'type': 'latency'}))
         self.assertIsNone(chat._latency_ms)
 
 

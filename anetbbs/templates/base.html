@@ -389,7 +389,9 @@
                             <i class="bi bi-broadcast"></i> Chat
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+                            {% if config.MRC_BRIDGE_ENABLED %}
                             <li><a class="dropdown-item" href="{{ url_for('mrc.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast"></i> MRC Chat</a></li>
+                            {% endif %}
                             <li><a class="dropdown-item" href="{{ url_for('irc.index') }}" style="color:var(--theme-primary);"><i class="bi bi-broadcast-pin"></i> IRC</a></li>
                         </ul>
                     </li>

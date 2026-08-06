@@ -123,6 +123,17 @@ _TERM_PALETTES = {
     'amber':   {'accent': '33', 'accent_b': '1;33', 'dim': '2;33'},
     'cyan':    {'accent': '36', 'accent_b': '1;36', 'dim': '2;36'},
     'mono':    {'accent': '37', 'accent_b': '1;37', 'dim': '2;37'},
+    # Named after (and loosely color-inspired by) pn-mrc137-alpha.zip's
+    # bundled Mystic BBS MRC themes -- not a port of that package's
+    # actual .ans art (a fixed-position-overlay rendering model with no
+    # equivalent here), just a matching set of chrome color identities
+    # so /set palette bitchx etc. lands in the same spirit as the
+    # same-named Mystic theme. See docs/27-mrc-chat.md.
+    'original': {'accent': '34', 'accent_b': '1;34', 'dim': '2;34'},
+    'minimal':  {'accent': '37', 'accent_b': '2;37', 'dim': '2;30'},
+    'bitchx':   {'accent': '32', 'accent_b': '1;32', 'dim': '2;32'},
+    '2leet4u':  {'accent': '35', 'accent_b': '1;35', 'dim': '2;35'},
+    'least':    {'accent': '37', 'accent_b': '37',   'dim': '2;37'},
 }
 
 
@@ -1248,17 +1259,32 @@ class MRCChat(BaseChatSystem):
     async def _handle_event(self, data: dict):
         evt  = data.get('type', '')
 
-        # ── pong: calculate round-trip latency ──
+        # ── pong: WS-level keepalive only, NOT a latency source ──
+        # A prior version of this handler computed self._latency_ms from
+        # this round-trip -- but 'ping'/'pong' here are purely local:
+        # this WebSocket connects the terminal to the bridge daemon on
+        # the SAME machine (mrc/bridge/main.py's handle_websocket just
+        # echoes 't' straight back, see its own docstring), not to the
+        # real upstream MRC hub. That measured near-zero loopback time
+        # and displayed it as if it were real network latency -- exactly
+        # backwards from what a status-bar latency widget is for (see
+        # the 'latency' branch below for the real measurement). Ping
+        # itself is still sent every PING_INTERVAL purely to keep the
+        # WebSocket alive through NAT/firewalls; its reply is just
+        # discarded now.
         if evt == 'pong':
+            return
+
+        # ── latency: real round-trip to the upstream MRC hub ──
+        # Pushed by the bridge (mrc/bridge/main.py's _broadcast_latency)
+        # whenever LatencyTracker observes the hub echo a packet back --
+        # a genuine measurement of the actual MRC connection, unlike the
+        # discarded local pong above.
+        if evt == 'latency':
             try:
-                # 't' matches what _ping_loop() now actually sends (see
-                # that method's own comment on the real msgext/t bug this
-                # fixed) and what the bridge always echoes verbatim.
-                # msgext/echo kept as fallbacks in case an older bridge
-                # build is still running mid-upgrade.
-                t0 = float(data.get('t') or data.get('msgext') or data.get('echo') or 0)
-                if t0 > 0:
-                    self._latency_ms = max(0, int((time.time() - t0) * 1000))
+                ms = data.get('ms')
+                if ms is not None:
+                    self._latency_ms = max(0, int(ms))
                     async with self._input_lock:
                         await self._draw_status_line()
                         await self._draw_input_line()
@@ -2411,6 +2437,10 @@ class MRCChat(BaseChatSystem):
                 if not name:
                     names = ', '.join(sorted(_TERM_PALETTES))
                     await self._emit(f'Usage: /set palette <name>  ({names})')
+                    await self._emit(
+                        '\x1b[2m(original/minimal/bitchx/2leet4u/least are '
+                        "inspired by StackFault's Mystic MRC themes, "
+                        'bottomlessabyss.net)\x1b[0m')
                     return True
                 if name not in _TERM_PALETTES:
                     await self._emit(
@@ -2681,8 +2711,8 @@ class MRCChat(BaseChatSystem):
             for ln in (
                 '',
                 '\x1b[1mRecent MRC client changes\x1b[0m',
-                '  - Status bar: clock replaced with real ping/latency (was silently',
-                '    broken -- now fixed and shown live)',
+                '  - Status bar: clock replaced with real ping/latency to the MRC',
+                '    hub itself (a prior build measured local loopback time instead)',
                 '  - /set defaultroom, /set twitfilter, /set clockformat',
                 '  - /welcome, /changes, /q, /b, /cls command aliases',
                 '  - Nick-list sidebar, status bar (room/topic/mentions/latency)',

@@ -392,6 +392,11 @@ ask_yn ENABLE_TELNET "Enable Telnet server? (y/n)"   "$DEF_ENABLE_TELNET"
 ask_yn ENABLE_SSH    "Enable SSH server? (y/n)"       "$DEF_ENABLE_SSH"
 ask_yn ENABLE_NGINX  "Enable nginx reverse proxy? (y/n)" "$DEF_ENABLE_NGINX"
 ask_yn ENABLE_MRC    "Install MRC bridge service (inter-BBS chat)? (y/n)" "y"
+if [[ "$ENABLE_MRC" == "y" ]]; then
+    ask MRC_BACKEND "MRC connection backend: 'native' (ANetBBS's own bridge) or 'mystic' (runs the real vendored Mystic BBS multiplexer client as a subprocess instead)" "native"
+else
+    MRC_BACKEND="native"
+fi
 ask_yn ENABLE_MSP    "Enable inter-BBS Instant Messaging (MSP/SYSTAT, privileged ports 18/11)? (y/n)" "$DEF_ENABLE_MSP"
 ask_yn ENABLE_FINGER "Enable Finger service (RFC 1288, privileged port 79)? (y/n)" "$DEF_ENABLE_FINGER"
 ask_yn ENABLE_BINKP  "Enable BinkP listener for FidoNet inbound mail (port 24554)? (y/n)" "$DEF_ENABLE_BINKP"
@@ -926,34 +931,90 @@ if [[ "$INSTALL_MYSTIC" == "y" ]]; then
     else
         # Fallback path — vendor/mystic missing (e.g. running from a slim
         # checkout). Pull the installer from mysticbbs.com.
+        #
+        # Real bug found live: this always fetched the x86_64 build
+        # regardless of host architecture. On an ARM install (a Pi, most
+        # obviously) that silently "succeeds" -- the archive downloads and
+        # extracts fine -- but the resulting mystic/mplc binaries are
+        # x86_64 ELFs that fail with "Exec format error" the instant
+        # anything (door_mystic/door_mystic_mps) actually tries to run
+        # them. Mystic BBS does publish real ARM builds (confirmed
+        # against the actual mysticbbs.com downloads page) -- pick the
+        # right one instead of assuming x86_64 unconditionally. armv7l
+        # covers the 32-bit ARMHF build (Pi 1/2, ODROID); aarch64 covers
+        # the 64-bit build (Pi 4+, Orange Pi 5). The ARM archives are
+        # .zip (needs unzip), not .rar like the x86 ones.
         info "Bundled mystic not found — downloading Mystic BBS installer..."
-        MYSTIC_URL_X64="https://mysticbbs.com/downloads/mys112a48_l64.rar"
-        TMP_RAR="/tmp/mystic-linux64.rar"
+        HOST_ARCH="$(uname -m)"
+        case "$HOST_ARCH" in
+            x86_64|amd64)
+                MYSTIC_URL="https://mysticbbs.com/downloads/mys112a48_l64.rar"
+                MYSTIC_ARCHIVE_TYPE="rar"
+                ;;
+            i686|i386)
+                MYSTIC_URL="https://mysticbbs.com/downloads/mys112a48_l32.rar"
+                MYSTIC_ARCHIVE_TYPE="rar"
+                ;;
+            aarch64|arm64)
+                MYSTIC_URL="https://mysticbbs.com/downloads/mys112a48_p64.zip"
+                MYSTIC_ARCHIVE_TYPE="zip"
+                ;;
+            armv7l|armhf|armv6l)
+                MYSTIC_URL="https://mysticbbs.com/downloads/mys112a48_p32.zip"
+                MYSTIC_ARCHIVE_TYPE="zip"
+                ;;
+            *)
+                MYSTIC_URL=""
+                MYSTIC_ARCHIVE_TYPE=""
+                ;;
+        esac
+
+        if [[ -z "$MYSTIC_URL" ]]; then
+            warn "Mystic — no known build for host architecture '$HOST_ARCH'."
+            warn "       You can install manually later: drop mystic + mplc"
+            warn "       binaries in $MYSTIC_DIR/ and re-run with MYSTIC_BBS_PATH set."
+            STATUS[mystic]="fail"
+        else
+        TMP_ARCHIVE="/tmp/mystic-runtime.$MYSTIC_ARCHIVE_TYPE"
         TMP_STAGE="/tmp/mystic-installer-$$"
 
-        if ! command -v unrar &>/dev/null; then
+        if [[ "$MYSTIC_ARCHIVE_TYPE" == "rar" ]] && ! command -v unrar &>/dev/null; then
             info "Installing unrar (needed to extract Mystic archive)..."
             install_one_pkg unrar 2>/dev/null || install_one_pkg unrar-free 2>/dev/null || true
+        elif [[ "$MYSTIC_ARCHIVE_TYPE" == "zip" ]] && ! command -v unzip &>/dev/null; then
+            info "Installing unzip (needed to extract Mystic archive)..."
+            install_one_pkg unzip 2>/dev/null || true
         fi
 
         mkdir -p "$MYSTIC_DIR" "$TMP_STAGE"
         if curl -fsSL --connect-timeout 15 --max-time 180 \
-                -o "$TMP_RAR" "$MYSTIC_URL_X64" 2>/dev/null; then
+                -o "$TMP_ARCHIVE" "$MYSTIC_URL" 2>/dev/null; then
             EXTRACT_OK=""
-            if command -v unrar &>/dev/null; then
-                (cd "$TMP_STAGE" && unrar x -y "$TMP_RAR" >/dev/null 2>&1) && EXTRACT_OK=1
-            elif command -v 7z &>/dev/null; then
-                7z x -y -o"$TMP_STAGE" "$TMP_RAR" >/dev/null 2>&1 && EXTRACT_OK=1
+            if [[ "$MYSTIC_ARCHIVE_TYPE" == "zip" ]]; then
+                if command -v unzip &>/dev/null; then
+                    (cd "$TMP_STAGE" && unzip -q -o "$TMP_ARCHIVE" >/dev/null 2>&1) && EXTRACT_OK=1
+                elif command -v 7z &>/dev/null; then
+                    7z x -y -o"$TMP_STAGE" "$TMP_ARCHIVE" >/dev/null 2>&1 && EXTRACT_OK=1
+                fi
+            else
+                if command -v unrar &>/dev/null; then
+                    (cd "$TMP_STAGE" && unrar x -y "$TMP_ARCHIVE" >/dev/null 2>&1) && EXTRACT_OK=1
+                elif command -v 7z &>/dev/null; then
+                    7z x -y -o"$TMP_STAGE" "$TMP_ARCHIVE" >/dev/null 2>&1 && EXTRACT_OK=1
+                fi
             fi
-            # The rar contains a Mystic *installer* binary (./install), not the
-            # runtime. Run it in unattended auto mode to extract everything.
+            # The archive contains a Mystic *installer* binary (./install),
+            # not the runtime. Run it in unattended auto mode to extract
+            # everything. Confirmed the ARM64 (.zip) archive uses the exact
+            # same ./install auto <dir> overwrite convention as the x86_64
+            # (.rar) one -- same installer, just built for the matching arch.
             if [[ -n "$EXTRACT_OK" && -x "$TMP_STAGE/install" ]]; then
                 if (cd "$TMP_STAGE" && ./install auto "$MYSTIC_DIR" overwrite >/dev/null 2>&1); then
                     chmod +x "$MYSTIC_DIR/mystic" "$MYSTIC_DIR/mplc" 2>/dev/null || true
                     ln -sf "$MYSTIC_DIR/mplc"   /usr/local/bin/mplc   2>/dev/null || true
                     ln -sf "$MYSTIC_DIR/mystic" /usr/local/bin/mystic 2>/dev/null || true
                     if [[ -x "$MYSTIC_DIR/mystic" && -x "$MYSTIC_DIR/mplc" ]]; then
-                        ok "mystic + mplc installed to $MYSTIC_DIR"
+                        ok "mystic + mplc installed to $MYSTIC_DIR ($HOST_ARCH)"
                         STATUS[mystic]="ok"
                         MYSTIC_INSTALLED="y"
                     else
@@ -965,15 +1026,16 @@ if [[ "$INSTALL_MYSTIC" == "y" ]]; then
             elif [[ -n "$EXTRACT_OK" ]]; then
                 skip "Mystic — no ./install binary inside the archive"
             else
-                skip "Mystic — archive extract failed (need unrar or 7z)"
+                skip "Mystic — archive extract failed (need unrar/unzip or 7z)"
             fi
-            rm -f "$TMP_RAR" 2>/dev/null || true
+            rm -f "$TMP_ARCHIVE" 2>/dev/null || true
             rm -rf "$TMP_STAGE" 2>/dev/null || true
         else
-            warn "Mystic — download from $MYSTIC_URL_X64 failed."
+            warn "Mystic — download from $MYSTIC_URL failed."
             warn "       You can install manually later: drop mystic + mplc"
             warn "       binaries in $MYSTIC_DIR/ and re-run with MYSTIC_BBS_PATH set."
             STATUS[mystic]="fail"
+        fi
         fi
     fi
 fi
@@ -1279,6 +1341,7 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
     fi
     cat > "$MRC_CONFIG_FILE" << MRCEOF
 {
+  "mrc_backend": "$MRC_BACKEND",
   "mrc_host": "mrc.bottomlessabyss.net",
   "mrc_port": 5001,
   "use_ssl": true,
