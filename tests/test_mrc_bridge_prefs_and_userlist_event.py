@@ -293,6 +293,44 @@ class DefaultRoomTwitFilterClockFormatPrefsTests(unittest.TestCase):
         prof = self.app.db.get_profile("Alice")
         self.assertEqual(prof["clock_format"], "12")
 
+
+class PalettePrefsTests(unittest.TestCase):
+    """Jerry, live: 'I have had to change the theme each time. I had it
+    set on 2leet4u' -- /set palette was previously local-terminal-only
+    state, never round-tripped through set_prefs/profile like every
+    other /set field, so it silently reset on each reconnect."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_bridge(self._tmp.name)
+        self.ws_id = 777
+        self.ws = _FakeWs()
+        self.app.websockets[self.ws_id] = self.ws
+        self.app.db.save_session(str(self.ws_id), {
+            "handle": "Alice", "nick": "Alice", "room": "lobby", "in_room": True,
+        })
+
+    def test_set_prefs_persists_palette(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"palette": "2leet4u"}))
+        self.assertEqual(self.ws.sent[0]["prefs"]["palette"], "2leet4u")
+        sess = self.app.db.get_session(str(self.ws_id))
+        self.assertEqual(sess["palette"], "2leet4u")
+        prof = self.app.db.get_profile("Alice")
+        self.assertEqual(prof["palette"], "2leet4u")
+
+    def test_palette_loaded_on_next_join(self):
+        _run(self.app._handle_set_prefs(self.ws_id, {"palette": "2leet4u"}))
+        ws_id2 = 778
+        ws2 = _FakeWs()
+        self.app.websockets[ws_id2] = ws2
+        _run(self.app._handle_join_room(ws_id2, {"handle": "Alice", "room": "lobby"}))
+        sess2 = self.app.db.get_session(str(ws_id2))
+        self.assertEqual(sess2["palette"], "2leet4u")
+
+    def test_palette_defaults_empty(self):
+        self.assertEqual(self.app._session_prefs({})["palette"], "")
+
     def test_clock_format_defaults_24(self):
         self.assertEqual(self.app._session_prefs({})["clock_format"], "24")
 

@@ -6,10 +6,13 @@ mrc_client.py expects to live in a Mystic install's root ("bbspath")
 with a `data/users.dat` file (its own sanity check that it's really
 being run from a BBS directory) and does all its file-based IPC
 relative to that root: outbound packets are `.mrc` files dropped into
-`data/mrc/`, inbound packets get written into `temp/<room>/*.mrc` for
-any room with an active `tchat.inuse` marker. None of that has
-anything to do with a real Mystic install once these files/markers
-exist -- it's just a directory shape the script happens to expect.
+`data/mrc/`, inbound packets get written into `temp<room>/*.mrc`
+(the literal string "temp" concatenated with the room name -- NOT a
+`temp/<room>/` subdirectory, see room_dir()'s own docstring for how
+this was confirmed) for any room with an active `tchat.inuse` marker
+in that directory. None of that has anything to do with a real Mystic
+install once these files/markers exist -- it's just a directory shape
+the script happens to expect.
 
 `mrc_config.py` is imported by `from mrc_config import *` BEFORE the
 script's own os.chdir(bbspath) runs, so Python resolves it via
@@ -120,7 +123,21 @@ def ensure_fake_bbs_tree(bbspath: Path, bridge_config: dict) -> Path:
 
 
 def room_dir(bbspath: Path, room: str) -> Path:
-    return Path(bbspath) / 'temp' / room
+    """Real bug found live (first genuine round-trip test, /whoon and
+    /identify replies never arriving despite outbound packets and a
+    real upstream connection both confirmed working): this used to
+    return bbspath/temp/<room>/ -- a subdirectory of temp/. The actual
+    vendored script's own deliver_mrc() builds this path by STRING
+    REPLACEMENT, not path joining -- `f.replace(chatfile, tempdir)`
+    where chatfile ends in ".../data/chat" and tempdir is
+    ".../temp" (no trailing separator) -- so "chatlobby.dat" becomes
+    ".../templobby.dat" and, after stripping ".dat", the directory it
+    actually checks/writes to is ".../temp<room>/" (temp and the room
+    name concatenated with NO separator, a sibling of temp/, not a
+    child of it). Confirmed by literally running the vendored script's
+    own substitution logic. Every inbound reply was being written to a
+    directory nothing was ever watching."""
+    return Path(bbspath) / f'temp{room}'
 
 
 def chat_dat_path(bbspath: Path, room: str) -> Path:

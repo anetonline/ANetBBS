@@ -10,7 +10,7 @@ through their terminal:
 | `door_dosemu`        | DOS .EXE / .COM         | dosemu2, virtual COM1 (no FOSSIL) bridged to the caller's PTY. |
 | `door_native`        | any Linux executable    | Direct fork inside a PTY. |
 | `door_synchronet`    | Synchronet `.js`        | Real `jsexec` if installed, otherwise Node + our compat shim. See [`15-synchronet-compat.md`](15-synchronet-compat.md). |
-| `door_mystic_mps`    | Mystic Pascal `.mps`    | `mplc` auto-compiles to `.mpx`, `mystic -x` runs it. |
+| `door_mystic_mps`    | Mystic Pascal `.mps`    | `mplc` auto-compiles to `.mpx`, `mystic -y` runs it under a real Mystic account. |
 | `door_mystic`        | Mystic Python `.mpy`    | Python with our `mystic_bbs` compat shim. |
 | `door_rlogin`        | remote BBS              | Outbound rlogin TCP bridge to a Synchronet xtrn server / DoorParty / etc. The "door" lives on someone else's BBS. |
 | `door_telnet`        | remote telnet server    | Outbound telnet TCP bridge (e.g. TWGS — Trade Wars Game Server). Same idea as `door_rlogin` but no pre-auth handshake; the remote handles login interactively. |
@@ -336,13 +336,25 @@ Synchronet APIs but is not 100% complete (see
 
 - Game type: `door_mystic_mps`
 - Mystic script path: `/opt/anetbbs/doors/yourdoor/yourdoor.mps`
+- Working directory: `/opt/mystic` (or wherever your Mystic install
+  lives — `mystic` needs to find its own `mystic.dat` here)
+- Username / Password: `USERNAME_OR_@USER@ PASSWORD` — Mystic has no
+  anonymous/no-login mode for scripts, so this is required, not
+  optional. `@USER@` substitutes the real ANetBBS caller's username;
+  a single shared account (a literal username, no `@USER@`) is the
+  realistic default unless every caller already has a matching Mystic
+  account.
 
 When the door launches, the runner:
 
 1. Looks for `mplc` (Mystic Pascal compiler). Comes from the optional
    Mystic install step in `install.sh` (or set `MYSTIC_MPLC_PATH`).
 2. If the `.mps` is newer than its `.mpx` bytecode, recompiles.
-3. Runs `mystic -x yourdoor.mpx`.
+3. Runs `mystic -u<username> -p<password> -y<yourdoor.mpx>` — `-y`
+   (not `-x`, which isn't a real Mystic flag; it silently falls
+   through to a full interactive local-login session instead of
+   running your script) launches a compiled MPL script standalone
+   under the given account.
 
 If `mplc` isn't installed, the runner falls back to running an existing
 `.mpx` next to the source. If neither is present, you get a clear

@@ -44,6 +44,11 @@ from datetime import datetime, timedelta
 from .base_chat import BaseChatSystem
 from ..core.protocols import SessionProtocol
 
+# mrc/ is a sibling top-level package to anetbbs/ (both under the repo
+# root), not a submodule of it -- see mrc/mystic_client/theme_layout.py's
+# own module docstring for the .ini/.ans coordinate format this parses.
+from mrc.mystic_client.theme_layout import load_theme_layout, extract_art_segment, best_fit_mode
+
 
 MAX_OUTGOING_CHARS = 140        # MRC hub hard limit
 # Literal prefix the bridge's _normalize_server_cmd/_handle_server_cmd
@@ -123,18 +128,24 @@ _TERM_PALETTES = {
     'amber':   {'accent': '33', 'accent_b': '1;33', 'dim': '2;33'},
     'cyan':    {'accent': '36', 'accent_b': '1;36', 'dim': '2;36'},
     'mono':    {'accent': '37', 'accent_b': '1;37', 'dim': '2;37'},
-    # Named after (and loosely color-inspired by) pn-mrc137-alpha.zip's
-    # bundled Mystic BBS MRC themes -- not a port of that package's
-    # actual .ans art (a fixed-position-overlay rendering model with no
-    # equivalent here), just a matching set of chrome color identities
-    # so /set palette bitchx etc. lands in the same spirit as the
-    # same-named Mystic theme. See docs/27-mrc-chat.md.
+    # Named after pn-mrc137-alpha.zip's bundled Mystic BBS MRC themes.
+    # These 5 also trigger the full Mystic screen recreation (real
+    # border art + exact element positions from the matching .ini --
+    # see _MYSTIC_PALETTE_NAMES/_sync_mystic_layout below and
+    # theme_layout.py), not just a color swap like the 5 above -- these
+    # accent colors are the InitialFGClr the matching .ini's own
+    # TOPANSI/BOTANSI entries specify, not an independent invention.
     'original': {'accent': '34', 'accent_b': '1;34', 'dim': '2;34'},
     'minimal':  {'accent': '37', 'accent_b': '2;37', 'dim': '2;30'},
     'bitchx':   {'accent': '32', 'accent_b': '1;32', 'dim': '2;32'},
     '2leet4u':  {'accent': '35', 'accent_b': '1;35', 'dim': '2;35'},
     'least':    {'accent': '37', 'accent_b': '37',   'dim': '2;37'},
 }
+
+# Palettes that trigger the full Mystic screen recreation (border art +
+# repositioned elements), not just the chrome-color swap the other 5
+# palettes get.
+_MYSTIC_PALETTE_NAMES = frozenset({'original', 'minimal', 'bitchx', '2leet4u', 'least'})
 
 
 def _pipe_to_ansi(s: str) -> str:
@@ -347,10 +358,22 @@ class MRCChat(BaseChatSystem):
         self._history_pos      = None
         self._history_draft    = ''
 
-        # /set palette -- see _TERM_PALETTES. Local-only (like /set
-        # clock), not persisted via set_prefs: purely a per-session
-        # display preference, nothing another client needs to see.
-        self._palette_name    = 'default'
+        # /set palette -- see _TERM_PALETTES. This is only the
+        # hardcoded pre-join fallback; _apply_prefs() overwrites it with
+        # the caller's own persisted choice (via set_prefs/BridgeDB
+        # profile, same round-trip as prefix/suffix/ticker/etc) once the
+        # 'joined' event arrives. Default is 'original' (Jerry: "make
+        # original the default theme, please") -- was 'default'
+        # (ANetBBS's own plain layout) before that.
+        self._palette_name    = 'original'
+        # Set by _sync_mystic_layout() (called from _enter_split_screen
+        # and the /set palette handler) whenever _palette_name is one of
+        # the 5 Mystic-named palettes -- a real ThemeLayout (see
+        # theme_layout.py) whose coordinates then drive scroll region /
+        # input row / ticker row / status placement instead of this
+        # file's own generated layout. None for the other 5 palettes,
+        # which keep today's existing rendering untouched.
+        self._mystic_layout   = None
         # Wire chars the bridge prepends before the typed message (styled
         # display handle for room chat, DM wrapper prefix for /t) -- sent by
         # the bridge on 'joined' (see mrc/bridge/main.py
@@ -664,33 +687,44 @@ class MRCChat(BaseChatSystem):
         self._term_lines    = max(10, min(120, lines))
         self._status_row    = 1
 
-        # Ticker gets its own fixed row directly below the status bar,
-        # shrinking the chat scroll region by one row -- same technique
-        # as the status bar itself (a plain redrawn row, not a second
-        # DECSTBM region; a terminal only gets one scroll region).
-        if self._show_ticker:
-            self._ticker_row = 2
-            self._scroll_top = 3
-        else:
-            self._ticker_row = None
-            self._scroll_top = 2
-        self._scroll_bottom = self._term_lines - 1
-        self._input_row     = self._term_lines
+        self._sync_mystic_layout()
+        mystic_geometry = self._mystic_geometry() if self._mystic_layout else None
 
-        # Sidebar only on wide-enough terminals -- same >=100-col
-        # threshold this function already treats as "wide" above.
-        # Below that, a fixed-width nick column would eat too much of
-        # an 80-col chat line to be worth it.
-        self._sidebar_enabled = self._term_columns >= 100
-        self._chat_width = (
-            self._term_columns - self._sidebar_width - 1
-            if self._sidebar_enabled else self._term_columns)
+        if mystic_geometry is not None:
+            (self._scroll_top, self._scroll_bottom, self._input_row,
+             self._ticker_row, self._chat_width) = mystic_geometry
+            self._sidebar_enabled = False
+        else:
+            self._mystic_layout = None  # theme file missing expected elements
+            # Ticker gets its own fixed row directly below the status bar,
+            # shrinking the chat scroll region by one row -- same technique
+            # as the status bar itself (a plain redrawn row, not a second
+            # DECSTBM region; a terminal only gets one scroll region).
+            if self._show_ticker:
+                self._ticker_row = 2
+                self._scroll_top = 3
+            else:
+                self._ticker_row = None
+                self._scroll_top = 2
+            self._scroll_bottom = self._term_lines - 1
+            self._input_row     = self._term_lines
+
+            # Sidebar only on wide-enough terminals -- same >=100-col
+            # threshold this function already treats as "wide" above.
+            # Below that, a fixed-width nick column would eat too much of
+            # an 80-col chat line to be worth it.
+            self._sidebar_enabled = self._term_columns >= 100
+            self._chat_width = (
+                self._term_columns - self._sidebar_width - 1
+                if self._sidebar_enabled else self._term_columns)
 
         await self.session.write(
             '\x1b[r'                                              # reset DECSTBM
             '\x1b[2J\x1b[H'                                       # clear screen
             f'\x1b[{self._scroll_top};{self._scroll_bottom}r'    # set scroll region
         )
+        if self._mystic_layout is not None:
+            await self._mystic_draw_frame()
         await self._draw_status_line()
         await self._draw_ticker_line()
         await self._draw_input_line()
@@ -708,8 +742,201 @@ class MRCChat(BaseChatSystem):
         except Exception:
             pass
 
+    def _sync_mystic_layout(self):
+        """(Re)compute self._mystic_layout from the current palette.
+        Cheap (dict/file lookup) -- safe to call from
+        _enter_split_screen or the /set palette handler any time the
+        palette might have changed.
+
+        Picks the widest bundled size variant that fits the caller's
+        actual detected terminal size (self._term_columns/_term_lines,
+        already resolved by the time this runs -- see
+        _enter_split_screen) instead of always loading the 80-col
+        'default' layout. Real gap found live: a 132x37 terminal was
+        stuck on the 80-col layout (no nick-list sidebar) even though
+        a matching 132x36 variant ships in the vendored package --
+        load_theme_layout() always supported a `mode` argument, it was
+        just never passed."""
+        if self._palette_name in _MYSTIC_PALETTE_NAMES:
+            try:
+                mode = best_fit_mode(
+                    self._palette_name, self._term_columns, self._term_lines)
+                self._mystic_layout = load_theme_layout(
+                    self._palette_name, mode=mode)
+            except Exception:
+                self._mystic_layout = None
+        else:
+            self._mystic_layout = None
+
+    def _mystic_geometry(self):
+        """Derive (scroll_top, scroll_bottom, input_row, ticker_row,
+        chat_width) from the active Mystic theme's CHATTL/CHATBL/INPUT/
+        SCROLL element coordinates. Returns None if the theme file is
+        missing any of the required (non-optional) elements, so the
+        caller can fall back to the generic layout rather than draw
+        something broken."""
+        layout = self._mystic_layout
+        if layout is None:
+            return None
+        chattl = layout.element('CHATTL')
+        chatbl = layout.element('CHATBL')
+        input_el = layout.element('INPUT')
+        if not (chattl and chatbl and input_el):
+            return None
+        scroll_el = layout.element('SCROLL')
+        ticker_row = scroll_el[1] if (scroll_el and self._show_ticker) else None
+        return (chattl[1], chatbl[1], input_el[1], ticker_row, chattl[2])
+
+    async def _mystic_draw_frame(self):
+        """Draw the active Mystic theme's static border art (TOPANSI/
+        BOTANSI segments) -- called once on split-screen entry, not on
+        every redraw (it's a static backdrop; ROOM/TOPIC/etc overlay on
+        top of it via their own targeted cursor-position writes in
+        _draw_status_line)."""
+        layout = self._mystic_layout
+        if layout is None:
+            return
+        out = []
+        for key in ('TOPANSI', 'BOTANSI'):
+            art = layout.art.get(key)
+            if not art:
+                continue
+            first_line, num_lines, x, y = art[0], art[1], art[2], art[3]
+            segment = extract_art_segment(layout.ansifile, first_line, num_lines)
+            for i, raw_line in enumerate(segment):
+                out.append(f'\x1b[{y + i};{x}H{raw_line}\x1b[0m')
+        if out:
+            try:
+                await self.session.write(''.join(out))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _mystic_color_sgr(color_num) -> str:
+        """Mystic's .ini color fields use the same 0-15 CGA-derived
+        palette numbering as Synchronet/MRC |NN pipe codes -- reuse
+        _PIPE_COLORS rather than a second color table."""
+        try:
+            key = f'{int(color_num):02d}'
+        except (TypeError, ValueError):
+            key = '07'
+        return _PIPE_COLORS.get(key, '37')
+
+    async def _mystic_draw_status(self):
+        """Overlay ROOM/TOPIC/LATENCY/CLOCK/CHATTERS/BUFFER at the
+        active Mystic theme's own element coordinates, on top of the
+        static border art _mystic_draw_frame already drew. BBSES/ROOMS/
+        ACTIVITY/HEARTBEAT are genuine hub-wide/session stats ANetBBS's
+        bridge doesn't track structurally -- left blank (their static
+        border-art label stays, just nothing dynamic after it) rather
+        than faked. BUFFER is NOT one of those (Jerry, live: "buffer
+        still does not work, that is the character count down if I am
+        not mistaken" -- correct, it's the same wire-length countdown
+        the generic status bar already shows, see
+        _input_remaining_chars, just never wired in here). MENTIONS
+        deliberately isn't placed at all (Jerry: not wanted on this
+        screen)."""
+        layout = self._mystic_layout
+        if layout is None:
+            return
+        out = []
+
+        def _place(name, text):
+            el = layout.element(name)
+            if not el:
+                return
+            x, y, length = el[0], el[1], el[2]
+            fg = self._mystic_color_sgr(el[3])
+            text = text or ''
+            # Always write the full element width, space-padded --
+            # NOT conditional on text being non-empty. Real bug this
+            # fixes: the old MENTIONS placement only wrote when
+            # mention_count > 0, so once a mention count dropped back
+            # to 0 nothing ever overwrote the stale "!1" already on
+            # screen. Writing (and clearing) unconditionally applies to
+            # every element here, not just the one that got reported.
+            if length > 0:
+                if len(text) > length:
+                    text = text[:length]
+                text = text.ljust(length)
+            out.append(f'\x1b[{y};{x}H\x1b[{fg}m{text}\x1b[0m')
+
+        _place('ROOM', f'#{self._room}')
+        _place('TOPIC', self._topic)
+        if self._latency_ms is not None:
+            # The bundled themes' own LATENCY slot is tiny (3 chars in
+            # the "original" theme) -- "42ms" silently truncated to the
+            # confusing "42m" before this fallback. Try the full "NNms"
+            # form first, drop the "ms" suffix if the theme's own
+            # declared width can't fit it.
+            latency_el = layout.element('LATENCY')
+            ms_text = f'{self._latency_ms}ms'
+            if latency_el and len(ms_text) > latency_el[2]:
+                ms_text = f'{self._latency_ms}'
+            _place('LATENCY', ms_text)
+        _place('CLOCK', self._format_clock(self._local_now()))
+        # Real per-room user count -- data ANetBBS already tracks
+        # (self._known_users), unlike the hub-wide stats above.
+        _place('CHATTERS', str(len(self._known_users)))
+        _place('BUFFER', str(self._input_remaining_chars()))
+
+        if out:
+            try:
+                await self.session.write(''.join(out))
+            except Exception:
+                pass
+
+    async def _mystic_draw_nickstrip(self):
+        """NICKTL and NICKBL describe the SAME horizontal region (same
+        x/y/length in every bundled theme) as two different color
+        aspects of one bracketed nick list -- NICKTL is the nick text's
+        own fg/bg, NICKBL is the bracket/separator fg/bg -- not two
+        separate rows. Renders "[Alice] [Bob] [+N more]" truncated to
+        fit, replacing ANetBBS's own vertical sidebar for Mystic mode
+        (disabled via _sidebar_enabled=False in _enter_split_screen)."""
+        layout = self._mystic_layout
+        if layout is None:
+            return
+        el = layout.element('NICKTL')
+        bracket_el = layout.element('NICKBL') or el
+        if not el:
+            return
+        x, y, length = el[0], el[1], el[2]
+        if length <= 0:
+            return
+        nick_fg = self._mystic_color_sgr(el[3])
+        bracket_fg = self._mystic_color_sgr(bracket_el[3])
+
+        users = sorted(self._known_users, key=str.lower)
+        parts = []
+        used = 0
+        shown = 0
+        for u in users:
+            piece_len = len(u) + 2 + (1 if shown else 0)  # "[u]" + leading space
+            if used + piece_len > length:
+                break
+            parts.append((' ' if shown else '') + f'\x1b[{bracket_fg}m[\x1b[{nick_fg}m{u}\x1b[{bracket_fg}m]\x1b[0m')
+            used += piece_len
+            shown += 1
+        remaining = len(users) - shown
+        if remaining > 0:
+            more = f' +{remaining}'
+            if used + len(more) <= length:
+                parts.append(f'\x1b[2m{more}\x1b[0m')
+                used += len(more)
+
+        text = ''.join(parts)
+        pad = max(0, length - used)
+        try:
+            await self.session.write(f'\x1b[{y};{x}H' + text + (' ' * pad))
+        except Exception:
+            pass
+
     async def _draw_status_line(self):
         if not self._split_screen:
+            return
+        if self._mystic_layout is not None:
+            await self._mystic_draw_status()
             return
         room_s = f'\x1b[{self._pal("accent_b")}m[#{self._room}]\x1b[0m'
         topic_s = f' \x1b[1;36m{self._topic}\x1b[0m' if self._topic else ''
@@ -731,23 +958,7 @@ class MRCChat(BaseChatSystem):
         # _dm_wire_cap/_action_wire_cap).
         typed = len(self._input_buf)
         if typed > 0:
-            buf_text = ''.join(self._input_buf)
-            low = buf_text.lstrip()
-            lower = low.lower()
-            if any(lower.startswith(f'/{p} ') for p in
-                   ('msg', 't', 'tell', 'dm', 'pm', 'whisper', 'w')):
-                # Only the message portion (after "/cmd target ") counts
-                # against the DM wire cap -- matches what the bridge
-                # actually receives as the DM payload.
-                parts = low.split(' ', 2)
-                msg_part = parts[2] if len(parts) > 2 else ''
-                remaining = self._dm_wire_cap() - len(msg_part)
-            elif lower.startswith('/me '):
-                remaining = self._action_wire_cap() - len(low[4:])
-            elif lower.startswith('/'):
-                remaining = MAX_OUTGOING_CHARS - typed
-            else:
-                remaining = self._chat_wire_cap() - typed
+            remaining = self._input_remaining_chars()
             if remaining < 0:
                 cc = f'\x1b[1;91m{remaining}\x1b[0m'   # red: over limit
             elif remaining <= 15:
@@ -862,8 +1073,44 @@ class MRCChat(BaseChatSystem):
                 self._ticker_dwell = 0
                 self._ticker_idx = (self._ticker_idx + 1) % len(items)
 
+    async def _mystic_draw_ticker(self):
+        """Overlay the scroller text at the active theme's SCROLL
+        element -- a region inside the top border art, not a dedicated
+        full-width row like the generic ticker, so this must NOT
+        \\x1b[2K-clear the whole line (that would blank out the border
+        art on either side of it). Always pads to the element's own
+        length so a shorter frame fully overwrites a longer previous one."""
+        layout = self._mystic_layout
+        el = layout.element('SCROLL') if layout else None
+        if not el:
+            return
+        x, y, length = el[0], el[1], el[2]
+        if length <= 0:
+            return
+        items = self._ticker_items()
+        if not items:
+            text = ''
+        else:
+            cur = items[self._ticker_idx % len(items)]
+            if len(cur) <= length:
+                text = cur
+            else:
+                padded  = cur + (' ' * 8)
+                doubled = padded * 2
+                pos = self._ticker_scroll_pos % len(padded)
+                text = doubled[pos:pos + length]
+        fg = self._mystic_color_sgr(el[3])
+        text = text[:length].ljust(length)
+        try:
+            await self.session.write(f'\x1b[{y};{x}H\x1b[{fg}m{text}\x1b[0m')
+        except Exception:
+            pass
+
     async def _draw_ticker_line(self):
         if not self._split_screen or not self._ticker_row:
+            return
+        if self._mystic_layout is not None:
+            await self._mystic_draw_ticker()
             return
         items = self._ticker_items()
         # Same border-alignment fix as _draw_status_line: this row was
@@ -926,6 +1173,23 @@ class MRCChat(BaseChatSystem):
         color_a = self._current_color_ansi()
         prompt = '\x1b[1;96m> \x1b[0m'
         prompt_v = 2
+
+        mystic_el = self._mystic_layout.element('INPUT') if self._mystic_layout else None
+        if mystic_el is not None:
+            # Mystic's INPUT region sits at its own x column, not
+            # necessarily col 1 -- \x1b[2K (clear whole line) would blank
+            # out border art to its left, so overwrite exactly the
+            # element's own width instead, padded so a shorter frame
+            # fully replaces a longer previous one.
+            x, y, length = mystic_el[0], mystic_el[1], mystic_el[2]
+            max_text = max(8, length - prompt_v - 1)
+            if len(text) > max_text:
+                text = '<' + text[-(max_text - 1):]
+            body = prompt + color_a + text + '\x1b[0m'
+            pad = max(0, length - _visible_len(body))
+            await self.session.write(f'\x1b[{y};{x}H' + body + (' ' * pad))
+            return
+
         max_text = max(8, self._term_columns - prompt_v - 1)
         if len(text) > max_text:
             text = '<' + text[-(max_text - 1):]
@@ -1082,18 +1346,24 @@ class MRCChat(BaseChatSystem):
                 out.append(sidebar[idx])
             elif line:
                 out.append(line)
+
+        mystic_input_el = self._mystic_layout.element('INPUT') if self._mystic_layout else None
+        input_col = mystic_input_el[0] if mystic_input_el else 1
         # After drawing chat rows, position cursor at input row so the
         # status-bar write (which moves cursor to row 1) is the last
         # cursor move before we hand control back.
-        out.append(f'\x1b[{self._input_row};1H')
+        out.append(f'\x1b[{self._input_row};{input_col}H')
+
+        if self._mystic_layout is not None:
+            await self._mystic_draw_nickstrip()
 
         async with self._input_lock:
             await self.session.write(''.join(out))
             await self._draw_status_line()
-            # Restore cursor to input row col 3 (just after the "> " prompt)
-            # so the terminal's own echo (or our next _draw_input_line call)
+            # Restore cursor to just after the "> " prompt (2 chars) so
+            # the terminal's own echo (or our next _draw_input_line call)
             # continues from the correct position.
-            await self.session.write(f'\x1b[{self._input_row};3H')
+            await self.session.write(f'\x1b[{self._input_row};{input_col + 2}H')
 
     # ── Receive loop ─────────────────────────────────────────────────────────
 
@@ -1246,6 +1516,21 @@ class MRCChat(BaseChatSystem):
             # _enter_split_screen() itself never touches the lock.
             await self._enter_split_screen()
             await self._redraw_chat_area()
+
+        # Persisted palette (see /set palette's set_prefs call) --
+        # same "already ran _enter_split_screen() once with a hardcoded
+        # default before this arrives" problem as ticker_enabled above,
+        # so a saved non-default palette needs the same re-run to take
+        # effect (Mystic-named palettes have real per-theme geometry,
+        # not just colors -- see the /set palette handler's own
+        # geometry_changed comment).
+        palette = prefs.get('palette')
+        if (isinstance(palette, str) and palette in _TERM_PALETTES
+                and palette != self._palette_name):
+            self._palette_name = palette
+            if self._split_screen:
+                await self._enter_split_screen()
+                await self._redraw_chat_area()
 
         if is_initial_join and self._default_room and self._default_room != self._room:
             new_room = self._default_room
@@ -1957,6 +2242,32 @@ class MRCChat(BaseChatSystem):
         color wrapper prefix -- see _session_action_overhead in the bridge)."""
         return max(10, MAX_OUTGOING_CHARS - self._action_overhead)
 
+    def _input_remaining_chars(self) -> int:
+        """Chars still available in the current input line's wire budget
+        -- shared by the generic status bar's char-count widget and the
+        Mystic BUFFER element (Jerry, live: "buffer still does not
+        work, that is the character count down if I am not mistaken" --
+        BUFFER had been left unpopulated as an assumed hub-side stat,
+        but it's this same locally-known countdown). Chat / DM / /me
+        each get wrapped in a different fixed prefix before the wire's
+        hard length cap, so the cap differs by what's currently typed
+        -- see _chat_wire_cap/_dm_wire_cap/_action_wire_cap."""
+        typed = len(self._input_buf)
+        buf_text = ''.join(self._input_buf)
+        low = buf_text.lstrip()
+        lower = low.lower()
+        if any(lower.startswith(f'/{p} ') for p in
+               ('msg', 't', 'tell', 'dm', 'pm', 'whisper', 'w')):
+            parts = low.split(' ', 2)
+            msg_part = parts[2] if len(parts) > 2 else ''
+            return self._dm_wire_cap() - len(msg_part)
+        elif lower.startswith('/me '):
+            return self._action_wire_cap() - len(low[4:])
+        elif lower.startswith('/'):
+            return MAX_OUTGOING_CHARS - typed
+        else:
+            return self._chat_wire_cap() - typed
+
     def _highlight_mentions(self, text: str) -> str:
         if not self._handle or not text:
             return text
@@ -2343,7 +2654,7 @@ class MRCChat(BaseChatSystem):
                     '  tz <zone|offset>    timestamp timezone: EST/CDT/PST/UTC/etc, or -5, +5:30',
                     '  twitfilter <on|off> master twit-list enforcement (saved)',
                     '  defaultroom <room>  room to auto-join on your next connect (saved)',
-                    '  palette <name>      chrome color scheme (local only, not saved): '
+                    '  palette <name>      chrome color scheme (saved): '
                         + ', '.join(sorted(_TERM_PALETTES)),
                     '',
                 ):
@@ -2447,13 +2758,32 @@ class MRCChat(BaseChatSystem):
                         f'\x1b[33mUnknown palette:\x1b[0m {name}. '
                         f'Try: {", ".join(sorted(_TERM_PALETTES))}')
                     return True
+                old_name = self._palette_name
                 self._palette_name = name
-                # _emit() below already cascades into a full
-                # _redraw_chat_area() -> _draw_status_line(), recoloring
-                # the room tag/clock/sidebar -- only the ticker line
-                # needs an explicit redraw here since it's driven by its
-                # own periodic loop, not touched by that cascade.
-                await self._draw_ticker_line()
+                # Persist per-handle server-side (same profile/prefs
+                # round-trip as ticker/clockformat/tz/defaultroom below)
+                # so the palette survives a reconnect instead of
+                # resetting to the hardcoded default every time.
+                await self._send_json({'type': 'set_prefs', 'palette': name})
+                # Switching into, out of, or between Mystic-named
+                # palettes changes the actual screen geometry (each
+                # theme's CHATTL/INPUT/etc coordinates differ, not just
+                # colors) -- a full _enter_split_screen() re-run is
+                # needed to recompute scroll region/input row/border art,
+                # not just a redraw. Plain color-only palette switches
+                # (e.g. green -> cyan) keep the cheaper existing path.
+                geometry_changed = (name in _MYSTIC_PALETTE_NAMES
+                                    or old_name in _MYSTIC_PALETTE_NAMES)
+                if geometry_changed and self._split_screen:
+                    await self._enter_split_screen()
+                else:
+                    # _emit() below already cascades into a full
+                    # _redraw_chat_area() -> _draw_status_line(),
+                    # recoloring the room tag/clock/sidebar -- only the
+                    # ticker line needs an explicit redraw here since
+                    # it's driven by its own periodic loop, not touched
+                    # by that cascade.
+                    await self._draw_ticker_line()
                 await self._emit(f'\x1b[1;36mPalette:\x1b[0m {name}')
                 return True
 

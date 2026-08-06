@@ -38,6 +38,13 @@ class _FakeSession:
 def _make_chat(window_size=None, handle='StingRay'):
     chat = MRCChat(_FakeSession(window_size))
     chat._handle = handle
+    # This file tests the generic (non-Mystic) sidebar/status-bar
+    # negotiation logic specifically -- pin a non-Mystic palette so it
+    # isn't affected by whatever the default happens to be (default is
+    # now 'original', a Mystic palette, which forces the sidebar off
+    # and routes status-bar drawing through the Mystic overlay instead
+    # of this file's generic path entirely).
+    chat._palette_name = 'default'
     return chat
 
 

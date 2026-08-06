@@ -148,10 +148,17 @@ class MysticConnectionFileIpcTests(unittest.TestCase):
 
     def test_sync_active_rooms_sanitizes_room_names_for_filesystem_safety(self):
         _run(self.conn.sync_active_rooms({'../../etc/evil'}))
-        # _safe_room strips everything outside [A-Za-z0-9_-]
-        self.assertFalse((self.bbspath / 'temp' / '../../etc/evil').resolve().exists())
-        matches = list((self.bbspath / 'temp').glob('*'))
-        self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9_-]+', d.name) for d in matches))
+        # _safe_room strips everything outside [A-Za-z0-9_-]. Room dirs
+        # are named "temp<room>" directly under bbspath (see room_dir()'s
+        # own docstring for why -- confirmed against the real vendored
+        # script's own path-building logic), not children of a bare
+        # "temp/" directory, so check bbspath's own listing.
+        self.assertFalse((self.bbspath / '../../etc/evil').resolve().exists())
+        matches = [d for d in self.bbspath.glob('temp*') if d.is_dir()]
+        self.assertTrue(matches)
+        for d in matches:
+            room_part = d.name[len('temp'):]
+            self.assertRegex(room_part, r'^[A-Za-z0-9_-]*$')
 
     def test_inbound_packet_is_parsed_delivered_and_file_deleted(self):
         _run(self.conn.sync_active_rooms({'lobby'}))
@@ -186,7 +193,7 @@ class MysticConnectionFileIpcTests(unittest.TestCase):
         """A packet dropped for a room we never sync_active_rooms()'d into
         must not be picked up -- confirms polling is scoped to _active_rooms,
         not every directory under temp/."""
-        stray_dir = self.bbspath / 'temp' / 'nobodyhome'
+        stray_dir = self.bbspath / 'tempnobodyhome'
         stray_dir.mkdir(parents=True)
         (stray_dir / '00000001.mrc').write_text('X~Y~nobodyhome~~~nobodyhome~ping~')
 

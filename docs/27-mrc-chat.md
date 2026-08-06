@@ -112,32 +112,44 @@ is picking `mystic` at the `install.sh` prompt (or editing
   hub, its pidfile cleanup) -- matches `MRCConnection.stop()`'s own
   best-effort `SHUTDOWN` packet before disconnecting.
 
-## Mystic-inspired chrome themes
+## Mystic-inspired chrome themes (web) and full Mystic screen recreation (terminal)
 
-Both the terminal and web MRC clients have cosmetic theme pickers for
-the chrome (borders, sidebar, status bar) -- unrelated to the
-`mrc_backend` connection choice above, available regardless of which
-backend is active. Five of the options are named after (and
-color-inspired by) the five themes bundled in `pn-mrc137-alpha.zip`
+Both the terminal and web MRC clients have theme pickers offering five
+options named after the themes bundled in `pn-mrc137-alpha.zip`
 (`original`, `minimal`, `bitchx`, `2leet4u`, `least`), alongside
 ANetBBS's own pre-existing five (`default`/`green`, `amber`, `cyan`,
-`mono`/`ibmblue`).
+`mono`/`ibmblue`) -- unrelated to the `mrc_backend` connection choice
+above, available regardless of which backend is active.
 
-These are **not** a port of that package's actual `.ans` art -- Mystic's
-theme system composites a static full-screen background image with
-UI elements placed at fixed X/Y coordinates from an `.ini` file, a
-rendering model with no equivalent in either of ANetBBS's own MRC
-clients (both use a simpler fixed-region layout: status bar, optional
-sidebar, ticker, scroll area). The five Mystic-named options give a
-matching color identity in that same spirit, not a pixel copy.
+**Terminal** (`/set palette <name>`, e.g. `/set palette bitchx`, saved
+per-handle server-side via the same set_prefs/BridgeDB profile
+round-trip as prefix/suffix/ticker/clockformat/etc -- restored
+automatically on your next connect): the five Mystic-named palettes
+trigger a
+full recreation of the real Mystic MRC screen, not just a color swap.
+`mrc/mystic_client/vendor/text/mrc-*.ans` (the actual bundled border
+art) and `mrc/mystic_client/vendor/scripts/mrctheme-*.ini` (the actual
+bundled element coordinates -- room/topic/nick-list/latency/clock/
+input positions) are vendored unmodified and parsed by
+`theme_layout.py`; `mrc_chat.py`'s renderer draws that real border art
+as a static frame and positions every dynamic element (chat text, nick
+strip, room/topic, latency, clock, input line, chatters count, char-
+count-remaining buffer) at the theme's own declared coordinates
+instead of ANetBBS's own generated layout. Elements the theme doesn't
+define (BBSES/ROOMS/ACTIVITY/HEARTBEAT -- genuine hub-wide/session
+stats ANetBBS's bridge doesn't track structurally) are skipped rather
+than faked. Falls back to ANetBBS's own generated
+layout if a theme file is missing or malformed. The other 5 palettes
+(`default`/`green`/`amber`/`cyan`/`mono`) keep the original light
+chrome-color-only behavior -- `_TERM_PALETTES` in
+`anetbbs/features/mrc_chat.py`.
 
-- Terminal: `/set palette <name>` (e.g. `/set palette bitchx`) --
-  local to the session, not saved. `_TERM_PALETTES` in
-  `anetbbs/features/mrc_chat.py`.
-- Web: the theme dropdown in Settings, saved to `localStorage`. CSS
-  custom properties in `anetbbs/templates/mrc/index.html`
-  (`body.theme-original`, `.theme-minimal`, `.theme-bitchx`,
-  `.theme-2leet4u`, `.theme-least`).
+**Web** (theme dropdown in Settings, saved to `localStorage`): still a
+CSS custom-property color swap only (`body.theme-original`,
+`.theme-minimal`, `.theme-bitchx`, `.theme-2leet4u`, `.theme-least` in
+`anetbbs/templates/mrc/index.html`) -- the terminal's full border-art
+recreation has no web equivalent yet, since the web client's HTML/CSS
+layout has no analog to fixed-position ANSI art placement.
 
 ### Choosing a backend at install time
 

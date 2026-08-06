@@ -18,6 +18,27 @@ _ANSI_ESC_RE_B = re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
 _SPIN_CHARS = ('|', '/', '-', '\\')
 _SPIN_TICK_SECONDS = 0.5
 
+# AFK warning + screensaver (AFK_WARNING_SECONDS in .env) -- see
+# _run_afk_sequence(). Module-level so tests can shrink them for fast
+# runs, same convention as _SPIN_TICK_SECONDS above.
+_AFK_WARNING_COUNTDOWN_SECONDS = 20   # mirrors the rcsafk.mps reference script's own TimeOut default
+_AFK_TICK_SECONDS = 1.0
+_AFK_FRAME_INTERVAL_SECONDS = 0.09
+
+
+class _AFKInterrupted(Exception):
+    """Internal-only signal: an AFK warning/screensaver sequence just
+    ended (cancelled during the warning countdown, or dismissed from
+    the screensaver) -- never propagates outside this module. The
+    dismissing keystroke is deliberately consumed, not treated as real
+    input, matching the reference rcsafk.mps script's own behavior
+    (reads the wake key, then Halts -- never passes it through as a
+    menu selection). Caught at each of the three keystroke-read entry
+    points (read_key/read_line/read_key_arrow), which redraw whatever
+    they can (their own prompt, plus any already-typed buffer for
+    read_line) and loop back to read the caller's real next keystroke."""
+
+
 logger = logging.getLogger(__name__)
 from .protocols import SessionProtocol
 # Plain `pyflakes` (unlike flake8) has no `# noqa` suppression, so this
@@ -381,7 +402,7 @@ class BBSSession:
         
         return bytes(box)
 
-    async def _read_byte_maybe_spinning(self, n=1, overall_timeout=None):
+    async def _read_byte_maybe_spinning(self, n=1, overall_timeout=None, allow_afk=False):
         """Read n bytes from the transport, blocking exactly like
         `self.reader.read(n)` -- except when the user has the
         'spinning' cursor preference set, in which case it redraws a
@@ -413,16 +434,38 @@ class BBSSession:
         even while spinning is also enabled (short spin ticks accrue
         toward the same overall deadline, rather than each tick
         resetting it).
+
+        Also the single detection point for the AFK warning/screensaver
+        (self.afk_warning_seconds, see start() and _run_afk_sequence()),
+        gated behind `allow_afk` -- unlike spinning, this is NOT "every
+        input primitive gets it for free": read_raw() is called directly
+        by several features (door games' own poll loops, IRC/telnet
+        bridges, the ANSI editor, dialout) with their own timeout/retry
+        semantics and broad `except Exception` handlers that would
+        silently misinterpret an AFK interruption as "the game/door
+        ended" rather than "resume where you were" -- real risk found
+        auditing every read_raw() call site before wiring this up.
+        Only read_key()/read_key_arrow() (direct callers) and
+        read_line() (via read_raw(..., allow_afk=True)) opt in; every
+        other caller is completely unaffected by this feature.
         """
-        # Only single-byte "waiting for a keystroke" reads ever spin --
-        # a hypothetical future n>1 bulk read (file transfers use their
-        # own raw self.reader.read() calls, never this helper, but
-        # guard anyway) must never have spin-glyph bytes injected into
-        # what could be a binary data stream.
+        # Only single-byte "waiting for a keystroke" reads ever spin or
+        # trigger AFK detection -- a hypothetical future n>1 bulk read
+        # (file transfers use their own raw self.reader.read() calls,
+        # never this helper, but guard anyway) must never have spin-
+        # glyph bytes injected into what could be a binary data stream,
+        # and sub-reads inside an already-started escape sequence (CSI
+        # continuation bytes, password entry, etc.) shouldn't count
+        # toward idle time or interrupt mid-sequence.
         cursor_style = 'default'
-        if n == 1 and isinstance(self.user, dict):
-            cursor_style = self.user.get('cursor_style') or 'default'
-        if cursor_style != 'spinning':
+        afk_seconds = 0.0
+        if n == 1:
+            if isinstance(self.user, dict):
+                cursor_style = self.user.get('cursor_style') or 'default'
+            if allow_afk:
+                afk_seconds = getattr(self, 'afk_warning_seconds', 0) or 0
+        spinning = (cursor_style == 'spinning')
+        if not spinning and afk_seconds <= 0:
             if overall_timeout:
                 return await asyncio.wait_for(self.reader.read(n),
                                               timeout=overall_timeout)
@@ -436,6 +479,18 @@ class BBSSession:
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
                 tick = min(tick, remaining)
+            if afk_seconds > 0:
+                to_afk = afk_seconds - elapsed
+                if to_afk <= 0:
+                    # Always raises: _AFKInterrupted (cancelled/dismissed)
+                    # or asyncio.TimeoutError (the outer idle_timeout ran
+                    # out while nobody ever came back) -- never returns
+                    # normally, so nothing after this call executes.
+                    remaining_after = (
+                        (overall_timeout - elapsed) if overall_timeout is not None
+                        else None)
+                    await self._run_afk_sequence(remaining_after)
+                tick = min(tick, to_afk)
             try:
                 data = await asyncio.wait_for(self.reader.read(n),
                                               timeout=tick)
@@ -443,16 +498,17 @@ class BBSSession:
                 elapsed += tick
                 if overall_timeout is not None and elapsed >= overall_timeout:
                     raise
-                idx = (idx + 1) % len(_SPIN_CHARS)
-                try:
-                    # Draw the glyph, then back the cursor up so the
-                    # next real keystroke's echo lands exactly where
-                    # the user expects it, not one column to the right.
-                    await self.write(_SPIN_CHARS[idx] + '\b')
-                except Exception:
-                    pass
+                if spinning:
+                    idx = (idx + 1) % len(_SPIN_CHARS)
+                    try:
+                        # Draw the glyph, then back the cursor up so the
+                        # next real keystroke's echo lands exactly where
+                        # the user expects it, not one column to the right.
+                        await self.write(_SPIN_CHARS[idx] + '\b')
+                    except Exception:
+                        pass
                 continue
-            if data:
+            if data and spinning:
                 try:
                     # Erase the last-drawn glyph so it doesn't linger
                     # once real input starts arriving.
@@ -460,6 +516,126 @@ class BBSSession:
                 except Exception:
                     pass
             return data
+
+    async def _afk_peek(self, timeout):
+        """Non-blocking-in-practice single-byte read used by
+        _run_afk_sequence's own warning/screensaver loops. Deliberately
+        bypasses read_raw()/_read_byte_maybe_spinning() entirely (a
+        plain self.reader.read(1) instead) -- calling back through
+        those would restart AFK detection recursively with its own
+        fresh elapsed=0, since that state lives in the caller's stack
+        frame, not on self. Returns the byte(s) read, or None on
+        timeout (no key pressed yet)."""
+        try:
+            return await asyncio.wait_for(self.reader.read(1), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+
+    async def _run_afk_sequence(self, remaining_timeout):
+        """Idle-detected: warn with a live countdown, then (if nobody
+        responds) run a matrix-rain screensaver, mirroring the
+        reference rcsafk.mps script's own two-stage flow. Always ends
+        by raising -- either _AFKInterrupted (a keystroke cancelled the
+        warning or dismissed the screensaver -- consumed, not passed
+        through as real input) or asyncio.TimeoutError (remaining_timeout,
+        the outer idle_timeout ceiling, ran out while nobody ever came
+        back -- bubbles up through read_raw()'s existing idle-disconnect
+        handling completely unchanged, no new hangup logic needed).
+
+        remaining_timeout: seconds left of the outer idle_timeout, or
+        None if that's off (screensaver then runs indefinitely with no
+        forced disconnect, matching the reference script's own optional
+        `If CfgTimeOut > 0` hangup guard).
+        """
+        from ..features.ansi_ui import FG, BOLD, RESET
+        from ..features.afk_screensaver import MatrixRain
+
+        loop = asyncio.get_event_loop()
+        deadline = None
+        if remaining_timeout is not None:
+            deadline = loop.time() + max(0.0, remaining_timeout)
+
+        def _time_left():
+            if deadline is None:
+                return None
+            return deadline - loop.time()
+
+        async def _afk_return():
+            try:
+                self._heartbeat_node(action='Returned from AFK')
+            except Exception:
+                pass
+            try:
+                await self.write(
+                    '\x1b[2J\x1b[H'
+                    f"{FG['grn']}{BOLD}Welcome back!{RESET}\r\n\r\n")
+            except Exception:
+                pass
+
+        try:
+            self._heartbeat_node(action='Possibly AFK')
+        except Exception:
+            pass
+
+        # ---- Warning stage ----
+        try:
+            await self.write(
+                '\x1b[r'                                          # reset any leftover scroll region
+                '\x1b[2J\x1b[H'
+                f"{FG['yel']}{BOLD}You've been idle a while...{RESET}\r\n\r\n"
+                f"{FG['wht']}Press any key to stay connected.{RESET}\r\n")
+        except Exception:
+            pass
+
+        remain = _AFK_WARNING_COUNTDOWN_SECONDS
+        while remain > 0:
+            left = _time_left()
+            if left is not None and left <= 0:
+                raise asyncio.TimeoutError()
+            tick = _AFK_TICK_SECONDS if left is None else min(_AFK_TICK_SECONDS, left)
+            try:
+                await self.write(
+                    f'\r{FG["cyan"]}Screensaver in {remain:>2}s...{RESET} ')
+            except Exception:
+                pass
+            data = await self._afk_peek(tick)
+            if data:
+                await _afk_return()
+                raise _AFKInterrupted()
+            remain -= 1
+
+        # ---- Screensaver stage ----
+        try:
+            self._heartbeat_node(action='Away From Keyboard (screensaver)')
+        except Exception:
+            pass
+        ws = getattr(self, 'window_size', None) or (80, 24)
+        cols = max(1, int(ws[0]) - 2)
+        rows = max(1, int(ws[1]) - 2)
+        rain = MatrixRain(cols, rows)
+        try:
+            await self.write('\x1b[2J\x1b[H')
+        except Exception:
+            pass
+
+        while True:
+            left = _time_left()
+            if left is not None and left <= 0:
+                raise asyncio.TimeoutError()
+            frame_start = loop.time()
+            rain.step()
+            try:
+                await self.write(''.join(rain.frame_lines()))
+            except Exception:
+                pass
+            frame_elapsed = loop.time() - frame_start
+            wait = max(0.0, _AFK_FRAME_INTERVAL_SECONDS - frame_elapsed)
+            if left is not None:
+                wait = min(wait, left)
+            data = await self._afk_peek(wait)
+            if data:
+                await _afk_return()
+                raise _AFKInterrupted()
 
     async def _maybe_send_steady_cursor(self):
         """FR from Winzlo (accessibility): a blinking cursor makes
@@ -480,7 +656,7 @@ class BBSSession:
             except Exception:
                 pass
 
-    async def read_key(self, prompt: str = '') -> str:
+    async def read_key(self, prompt: str = '', on_afk_redraw=None) -> str:
         """Read a single keystroke and return it (uppercase ASCII).
 
         Returns '' if the user pressed Enter without a hotkey (so menu
@@ -489,13 +665,43 @@ class BBSSession:
         followed by CRLF — same UX as line input but without the wait
         for Enter.
 
+        on_afk_redraw: optional async no-arg callable, invoked instead
+        of the bare prompt-only redraw when an AFK screensaver just
+        ended (see _AFKInterrupted below). Real gap found live: `prompt`
+        alone is often just a trailing "Choice: " -- the actual menu
+        content (banner/items/etc) was drawn by the CALLER before ever
+        calling read_key(), and the AFK screensaver's own screen-clear
+        wipes it, so a prompt-only redraw left the caller staring at a
+        bare prompt with no menu until they pressed ANOTHER key. Callers
+        that own real screen state (menu_engine.py's run_menu(), the
+        main offender) should pass their own redraw routine here; every
+        other call site is unaffected (falls back to the old prompt-only
+        behavior, unchanged).
+
         Raises CarrierLost if the transport has gone away — callers
         must not confuse this with bare-Enter (both used to look like '')."""
         if prompt:
             await self.write(prompt)
         while True:
             try:
-                ch = await self._read_byte_maybe_spinning(1)
+                ch = await self._read_byte_maybe_spinning(1, allow_afk=True)
+            except _AFKInterrupted:
+                # AFK warning/screensaver just ended -- the dismissing
+                # keystroke is consumed, not treated as this prompt's
+                # real answer. Prefer the caller's own full redraw if it
+                # gave us one; otherwise fall back to just the prompt
+                # (all we have at this level -- the screensaver cleared
+                # the screen). Then go back to waiting for the real next
+                # keystroke.
+                if on_afk_redraw is not None:
+                    try:
+                        await on_afk_redraw()
+                    except Exception:
+                        if prompt:
+                            await self.write(prompt)
+                elif prompt:
+                    await self.write(prompt)
+                continue
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
             if not ch:
@@ -527,19 +733,36 @@ class BBSSession:
             await self.write(key + '\r\n')
             return key
 
-    async def read_key_arrow(self) -> str:
+    async def read_key_arrow(self, on_afk_redraw=None) -> str:
         """Read a single keystroke including arrow/navigation keys. No echo.
 
         Returns one of: 'UP' 'DOWN' 'LEFT' 'RIGHT' 'PGUP' 'PGDN' 'HOME'
         'END' 'ENTER' 'ESC' 'CTRL_C' or an uppercase printable character.
         Raises CarrierLost if the connection drops.
 
+        on_afk_redraw: see read_key()'s own docstring for the full
+        reasoning -- same optional full-screen-redraw hook.
+
         CSI sequences (PgUp = ESC [ 5 ~, PgDn = ESC [ 6 ~, etc.) are read
         byte-by-byte until the VT final byte (0x40–0x7E) so they are never
         fragmented by a partial stream.read() return."""
         while True:
             try:
-                ch = await self._read_byte_maybe_spinning(1)
+                ch = await self._read_byte_maybe_spinning(1, allow_afk=True)
+            except _AFKInterrupted:
+                # No prompt owned at this level -- if the caller gave us
+                # a redraw hook, use it (a lightbar-style menu still
+                # benefits from an immediate redraw instead of waiting
+                # for its next navigation keypress); otherwise this
+                # primitive's callers redraw their own screen on every
+                # navigation cycle anyway, so just consume the
+                # dismissing keystroke and wait for the real next one.
+                if on_afk_redraw is not None:
+                    try:
+                        await on_afk_redraw()
+                    except Exception:
+                        pass
+                continue
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
             if not ch:
@@ -1514,11 +1737,21 @@ class BBSSession:
 
         return bytes(result)
 
-    async def read_raw(self, n=1):
+    async def read_raw(self, n=1, allow_afk=False):
         """Read raw bytes from the connection. Honors `self.idle_timeout`
         if set — disconnects sessions that sit idle waiting for a keystroke.
         IRC/MRC are web features and don't go through this path, so the
         idle timer doesn't affect them.
+
+        allow_afk: opt-in for the AFK warning/screensaver (see
+        _read_byte_maybe_spinning's own docstring for why this defaults
+        to False here -- most callers of read_raw() are door games/
+        bridges with their own poll loops that would misinterpret an
+        AFK interruption; only read_line() passes True). May raise
+        _AFKInterrupted (anetbbs.core.session) when True and the
+        caller's own idle time crossed AFK_WARNING_SECONDS and the
+        screensaver was then dismissed by a keystroke -- callers that
+        pass allow_afk=True must be prepared to catch it.
 
         Raises CarrierLost when the transport disconnects or the idle
         timeout fires, so menu loops break out instead of spinning on
@@ -1526,7 +1759,8 @@ class BBSSession:
         try:
             timeout = getattr(self, 'idle_timeout', 0) or 0
             data = await self._read_byte_maybe_spinning(
-                n, overall_timeout=timeout if timeout > 0 else None)
+                n, overall_timeout=timeout if timeout > 0 else None,
+                allow_afk=allow_afk)
             if not data:
                 raise CarrierLost('client disconnected')
             return await self.handle_telnet_command(data)
@@ -1576,7 +1810,8 @@ class BBSSession:
         except Exception as e:
             logger.debug("write failed: %s", e)
 
-    async def read_line(self, prompt: str = "", max_len: int = 2048) -> str:
+    async def read_line(self, prompt: str = "", max_len: int = 2048,
+                        on_afk_redraw=None) -> str:
         """Read a line of input with echo.
 
         Real gap found in a full auth-security audit: no cap existed on
@@ -1588,6 +1823,11 @@ class BBSSession:
         single lines of composed text); extra input beyond max_len is
         silently dropped (still consumed from the stream, still echoed,
         so the loop keeps making forward progress) rather than raising.
+
+        on_afk_redraw: see read_key()'s own docstring for the full
+        reasoning -- same optional full-screen-redraw hook for callers
+        that own more visible state than just this prompt + the
+        already-typed line (which gets redrawn regardless, see below).
         """
         if prompt:
             await self.write(prompt)
@@ -1595,7 +1835,7 @@ class BBSSession:
         line = bytearray()
         while True:
             try:
-                char = await self.read_raw(1)
+                char = await self.read_raw(1, allow_afk=True)
                 if not char:  # Connection closed (defensive — read_raw raises now)
                     raise CarrierLost('client disconnected')
 
@@ -1649,6 +1889,33 @@ class BBSSession:
                         if self.echo:
                             await self.write(char.decode(self.encoding))
 
+            except _AFKInterrupted:
+                # Same signal/reasoning as read_key's own handling --
+                # the dismissing keystroke is consumed, not added to
+                # the line. Prefer the caller's own full redraw if given
+                # one; otherwise fall back to the prompt + whatever was
+                # already typed (unlike read_key, this call owns a real
+                # partial buffer that the screensaver's screen-clear
+                # wiped visually, even though `line` itself was never
+                # touched) so an AFK interruption mid-line doesn't look
+                # like the user's typing vanished.
+                if on_afk_redraw is not None:
+                    try:
+                        await on_afk_redraw()
+                    except Exception:
+                        pass
+                # Always redraw the prompt + already-typed buffer too --
+                # on_afk_redraw() (if given) only knows about whatever
+                # static screen content the caller owns, never about
+                # THIS call's own in-progress partial line.
+                if prompt:
+                    await self.write(prompt)
+                if line:
+                    try:
+                        await self.write(bytes(line).decode(self.encoding))
+                    except Exception:
+                        pass
+                continue
             except CarrierLost:
                 raise
             except Exception as e:
@@ -1810,6 +2077,24 @@ class BBSSession:
                 self.idle_timeout = 0
         except Exception:
             self.idle_timeout = 0
+        # AFK warning + matrix-rain screensaver before the idle timeout
+        # above actually disconnects (Jerry's ask, mirroring a real
+        # Mystic Pascal AFK script: warn with a countdown, then a
+        # screensaver, then -- only if idle_timeout is also set and
+        # nobody ever comes back -- the existing disconnect happens as
+        # normal). Same off-by-default/opt-in/bullet-proofing pattern
+        # as idle_timeout above; read directly from the environment
+        # rather than adding a config.py Config attribute, matching
+        # what idle_timeout's OWN runtime code path actually does (its
+        # config.py declaration is a separate, unused-by-this-code
+        # duplicate -- not a pattern worth repeating for a new setting).
+        try:
+            raw = os.environ.get('AFK_WARNING_SECONDS', '').strip()
+            self.afk_warning_seconds = int(raw) if raw else 0
+            if self.afk_warning_seconds < 0:
+                self.afk_warning_seconds = 0
+        except Exception:
+            self.afk_warning_seconds = 0
         try:
             await self.init_session()
             await asyncio.sleep(0.1)  # Give time for telnet negotiation

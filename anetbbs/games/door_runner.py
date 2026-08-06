@@ -461,16 +461,60 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
             raise FileNotFoundError(f'Mystic .mps script not found: {script!r}')
 
         # Auto-compile .mps -> .mpx if mplc is available and the source is
-        # newer than the bytecode. Mystic's runtime takes the .mpx (bytecode)
-        # via `-x`, but it's normal for sysops to drop a raw .mps source
-        # they got from a door pack. We compile silently so they don't have
-        # to remember the build step. If mplc isn't on the host, fall back
-        # to the existing path (which assumes the script is already compiled,
-        # i.e., a .mpx file the sysop produced manually).
+        # newer than the bytecode. It's normal for sysops to drop a raw
+        # .mps source they got from a door pack. We compile silently so
+        # they don't have to remember the build step. If mplc isn't on
+        # the host, fall back to the existing path (which assumes the
+        # script is already compiled, i.e., a .mpx file the sysop
+        # produced manually).
         compiled = _ensure_mps_compiled(script, cwd)
         if compiled:
             script = compiled
-        return [mystic, '-x', script], cwd
+
+        # Real bug found live (first-ever end-to-end test of this door
+        # type): `-x` is not a real Mystic BBS command-line flag -- it's
+        # not documented anywhere in Mystic's own install guide or
+        # changelog, and empirically the binary just ignores it and
+        # falls through to a full interactive local-login session
+        # (matching -l's documented behavior), not the door script at
+        # all. The real flag to run a compiled MPL script standalone,
+        # under a specific user's identity, is `-y<script>` (`-Y` is a
+        # case-insensitive alias) combined with `-u<username>
+        # -p<password>` for the account it should run under -- Mystic
+        # has no concept of running a script anonymously.
+        #
+        # command_line_args reused here exactly like door_rlogin already
+        # does for its own remote-login credentials: "USER_TEMPLATE
+        # PASSWORD", where USER_TEMPLATE may contain @USER@ to substitute
+        # the real ANetBBS caller's username. Unlike rlogin (a remote
+        # system that accepts an arbitrary client-supplied identity
+        # string), Mystic requires a REAL, already-existing local user
+        # account matching -u -- @USER@ only works if the sysop has
+        # actually created a matching Mystic account for that ANetBBS
+        # username ahead of time. A single shared account (e.g. a
+        # dedicated "anetbbs" service user, template written as a fixed
+        # name with no @USER@ token) is the simpler, more realistic
+        # setup for most doors that don't need real per-caller Mystic
+        # identity.
+        raw_args = (game.command_line_args or '').strip()
+        parts = raw_args.split(None, 1)
+        if len(parts) < 2:
+            raise ValueError(
+                'door_mystic_mps: command_line_args must be '
+                '"USERNAME_OR_@USER@ PASSWORD" -- Mystic requires a real, '
+                'already-created local user account to run a script under '
+                '(see the Working Directory field\'s help text). '
+                'e.g. "@USER@ mypassword" or "anetbbs mypassword" for a '
+                'single shared account.')
+        user_template, mystic_password = parts[0], parts[1]
+        if isinstance(user, dict):
+            caller_username = (user.get('username') or 'guest').strip()
+        else:
+            caller_username = (getattr(user, 'username', None) or 'guest').strip()
+        mystic_username = user_template.replace('@USER@', caller_username)
+
+        return [mystic, f'-u{mystic_username}', f'-p{mystic_password}',
+                f'-y{script}'], cwd
 
     if game.game_type == 'door_synchronet':
         script_raw = game.synchronet_script_path or ''

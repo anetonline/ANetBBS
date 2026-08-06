@@ -140,6 +140,10 @@ For a `.mps` Pascal source door (or a pre-compiled `.mpx`):
   on launch if the bytecode is missing or older than the source. If
   `mplc` isn't installed, it falls back to assuming the script is
   already compiled.
+- `command_line_args`: `USERNAME_OR_@USER@ PASSWORD` — required.
+  Mystic has no anonymous/no-login mode for scripts; this becomes the
+  real `-u`/`-p` account the door runs under (`@USER@` substitutes the
+  calling ANetBBS user's own username).
 
 For a Mystic-API Python door:
 - `game_type`: `door_mystic`

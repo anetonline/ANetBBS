@@ -19,8 +19,11 @@ every ~10ms, forwards the raw packet text to the real hub verbatim,
 and deletes the file.
 
 Inbound: the subprocess's own deliver_mrc() writes one packet per file
-into temp/<room>/*.mrc for any room with a temp/<room>/tchat.inuse
-marker present. A background task here polls those directories (only
+into temp<room>/*.mrc (temp + room name concatenated with no
+separator -- NOT a temp/<room>/ subdirectory, see fake_bbs.py's
+room_dir() docstring for how this was confirmed) for any room with a
+temp<room>/tchat.inuse marker present. A background task here polls
+those directories (only
 for rooms BridgeApp has told us are actually active, via
 sync_active_rooms), parses each file with the same wire-format parser
 the native backend uses, deletes it, and invokes message_callbacks --
@@ -219,7 +222,7 @@ class MysticMultiplexerConnection:
     async def sync_active_rooms(self, rooms: Set[str]):
         """Called by BridgeApp whenever room membership changes (mirrors
         its own _rooms_with_active_sessions()). The subprocess only
-        delivers inbound packets for a room into temp/<room>/ while that
+        delivers inbound packets for a room into temp<room>/ while that
         room's tchat.inuse marker exists -- this keeps that marker (and
         the room's own chat<room>.dat registration) in sync with who's
         actually listening, so we're not endlessly polling directories

@@ -573,105 +573,120 @@ async def run_menu(session, start='main'):
             'blk': '\x1b[40m',
         }
 
-        # Clear screen.  ASCII terminals get newlines; ANSI/wide get ESC[2J.
-        if _mode == 'ascii':
-            await session.write('\r\n' * 4)
-        else:
-            await session.write('\x1b[2J\x1b[H')
-
-        if screen.strip():
-            # Custom screen passthrough (ANSI art or plain .asc file).
-            # Substitute Synchronet @CODE@ / Mystic |XX placeholders first.
-            try:
-                from .display_codes import apply as _apply_codes
-                from .bbs_ui import _app as _bbs_app
-                import anetbbs as _anetbbs_pkg
-                _cfg = _bbs_app().config
-                rendered = _apply_codes(
-                    screen,
-                    user=session.user,
-                    bbs_name=_cfg.get('BBS_NAME', ''),
-                    sysop=_cfg.get('SYSOP_NAME', ''),
-                    node=(getattr(session, '_node_entry', None).slot
-                          if getattr(session, '_node_entry', None) else 1),
-                    version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
-                )
-            except Exception:
-                rendered = screen
-            if is_plain_text:
-                await session.write(rendered)
+        # Factored into a closure (not just inline code) so it can also
+        # serve as read_key()'s on_afk_redraw hook -- real gap found
+        # live: the AFK screensaver's own screen-clear wiped this whole
+        # menu, and read_key()'s own fallback redraw only had `prompt`
+        # ("Choice: ") to work with, so a caller coming back from AFK
+        # saw a bare prompt with no menu until they pressed ANOTHER key.
+        # Closing over this iteration's own already-computed title/
+        # item_list/screen/etc means a redraw mid-wait shows exactly
+        # what was on screen before AFK triggered, not a stale value
+        # from a different menu.
+        async def _draw_menu():
+            # Clear screen.  ASCII terminals get newlines; ANSI/wide get ESC[2J.
+            if _mode == 'ascii':
+                await session.write('\r\n' * 4)
             else:
-                # Write as raw bytes to preserve CP437 high-byte characters.
-                # session.write() re-encodes strings as CP437, which corrupts
-                # content decoded from latin-1: e.g. U+00DC (from byte 0xDC ▄)
-                # re-encodes to CP437 byte 0x9A (Ü) — wrong glyph on terminal.
+                await session.write('\x1b[2J\x1b[H')
+
+            if screen.strip():
+                # Custom screen passthrough (ANSI art or plain .asc file).
+                # Substitute Synchronet @CODE@ / Mystic |XX placeholders first.
                 try:
-                    session.writer.write(rendered.encode('latin-1'))
-                    await session.writer.drain()
-                except (UnicodeEncodeError, AttributeError):
+                    from .display_codes import apply as _apply_codes
+                    from .bbs_ui import _app as _bbs_app
+                    import anetbbs as _anetbbs_pkg
+                    _cfg = _bbs_app().config
+                    rendered = _apply_codes(
+                        screen,
+                        user=session.user,
+                        bbs_name=_cfg.get('BBS_NAME', ''),
+                        sysop=_cfg.get('SYSOP_NAME', ''),
+                        node=(getattr(session, '_node_entry', None).slot
+                              if getattr(session, '_node_entry', None) else 1),
+                        version=getattr(_anetbbs_pkg, '__version__', 'v1.0a'),
+                    )
+                except Exception:
+                    rendered = screen
+                if is_plain_text:
                     await session.write(rendered)
-            await session.write("\r\n")
-        elif _mode == 'ascii':
-            # ASCII auto-render: plain text, no escape codes, ASCII box chars.
-            inner_w = 64
-            bar = '+' + '-' * (inner_w - 2) + '+'
-            cell = f'| {title.upper()}'.ljust(inner_w - 1) + '|'
-            await session.write(f"{bar}\r\n{cell}\r\n{bar}\r\n")
+                else:
+                    # Write as raw bytes to preserve CP437 high-byte characters.
+                    # session.write() re-encodes strings as CP437, which corrupts
+                    # content decoded from latin-1: e.g. U+00DC (from byte 0xDC ▄)
+                    # re-encodes to CP437 byte 0x9A (Ü) — wrong glyph on terminal.
+                    try:
+                        session.writer.write(rendered.encode('latin-1'))
+                        await session.writer.drain()
+                    except (UnicodeEncodeError, AttributeError):
+                        await session.write(rendered)
+                await session.write("\r\n")
+            elif _mode == 'ascii':
+                # ASCII auto-render: plain text, no escape codes, ASCII box chars.
+                inner_w = 64
+                bar = '+' + '-' * (inner_w - 2) + '+'
+                cell = f'| {title.upper()}'.ljust(inner_w - 1) + '|'
+                await session.write(f"{bar}\r\n{cell}\r\n{bar}\r\n")
 
-            # Single-column item list for ASCII readability
-            for hk, lbl, _, _ in item_list:
-                line = f"  [{hk}] {lbl}"
-                await session.write(line + '\r\n')
+                # Single-column item list for ASCII readability
+                for hk, lbl, _, _ in item_list:
+                    line = f"  [{hk}] {lbl}"
+                    await session.write(line + '\r\n')
 
-            await session.write('-' * inner_w + '\r\n')
-        else:
-            # ANSI/wide auto-render.
-            inner_w = 128 if _mode == 'wide' else 64
-            top_bar = '▄' * inner_w
-            bot_bar = '▀' * inner_w
-            await session.write(f"{FG['cyan']}{BG['blk']}{top_bar}{RESET}\r\n")
-            cell = f"╣ {title.upper()} ╠".center(inner_w)
-            await session.write(
-                f"{BG['cya']}{FG['wht']}{BOLD}{cell}{RESET}\r\n")
-            await session.write(f"{FG['cyan']}{BG['blk']}{bot_bar}{RESET}\r\n")
+                await session.write('-' * inner_w + '\r\n')
+            else:
+                # ANSI/wide auto-render.
+                inner_w = 128 if _mode == 'wide' else 64
+                top_bar = '▄' * inner_w
+                bot_bar = '▀' * inner_w
+                await session.write(f"{FG['cyan']}{BG['blk']}{top_bar}{RESET}\r\n")
+                cell = f"╣ {title.upper()} ╠".center(inner_w)
+                await session.write(
+                    f"{BG['cya']}{FG['wht']}{BOLD}{cell}{RESET}\r\n")
+                await session.write(f"{FG['cyan']}{BG['blk']}{bot_bar}{RESET}\r\n")
 
-            # Two-column item list — fits more options on one screen
-            cols = 2
-            col_w = (inner_w // cols) - 2
-            items_padded = list(item_list)
-            if len(items_padded) % cols:
-                items_padded += [None] * (cols - len(items_padded) % cols)
-            for i in range(0, len(items_padded), cols):
-                pieces = []
-                for j in range(cols):
-                    it = items_padded[i + j]
-                    if it is None:
-                        pieces.append(' ' * col_w)
-                        continue
-                    hk, lbl, _, _ = it
-                    text = f"  [{hk}] {lbl}"
-                    if len(text) > col_w:
-                        text = text[:col_w - 1] + '>'
-                    text = text.ljust(col_w)
-                    text = text.replace(
-                        f"[{hk}]",
-                        f"{FG['yel']}{BOLD}[{hk}]{RESET}{FG['grn']}", 1)
-                    pieces.append(f"{FG['grn']}{text}{RESET}")
-                await session.write(''.join(pieces) + '\r\n')
+                # Two-column item list — fits more options on one screen
+                cols = 2
+                col_w = (inner_w // cols) - 2
+                items_padded = list(item_list)
+                if len(items_padded) % cols:
+                    items_padded += [None] * (cols - len(items_padded) % cols)
+                for i in range(0, len(items_padded), cols):
+                    pieces = []
+                    for j in range(cols):
+                        it = items_padded[i + j]
+                        if it is None:
+                            pieces.append(' ' * col_w)
+                            continue
+                        hk, lbl, _, _ = it
+                        text = f"  [{hk}] {lbl}"
+                        if len(text) > col_w:
+                            text = text[:col_w - 1] + '>'
+                        text = text.ljust(col_w)
+                        text = text.replace(
+                            f"[{hk}]",
+                            f"{FG['yel']}{BOLD}[{hk}]{RESET}{FG['grn']}", 1)
+                        pieces.append(f"{FG['grn']}{text}{RESET}")
+                    await session.write(''.join(pieces) + '\r\n')
 
-            await session.write(f"{FG['gry']}{'─' * inner_w}{RESET}\r\n")
+                await session.write(f"{FG['gry']}{'─' * inner_w}{RESET}\r\n")
 
-        # NodeSpy heartbeat — log current menu so sysop's web panel can see.
-        try:
-            if hasattr(session, '_heartbeat_node'):
-                session._heartbeat_node(page=current,
-                                        action=f'menu: {title}')
-        except Exception:
-            pass
+            # NodeSpy heartbeat — log current menu so sysop's web panel can see.
+            try:
+                if hasattr(session, '_heartbeat_node'):
+                    session._heartbeat_node(page=current,
+                                            action=f'menu: {title}')
+            except Exception:
+                pass
+
+            await session.write(f"\r\n{prompt}")
+
+        await _draw_menu()
 
         # Single-key hotkey input — no Enter required. Bare Enter
         # falls through to a redraw.
-        choice = await session.read_key(f"\r\n{prompt}")
+        choice = await session.read_key('', on_afk_redraw=_draw_menu)
         if not choice:
             continue
 

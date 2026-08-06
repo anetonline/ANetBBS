@@ -30,6 +30,33 @@ _ELEMENT_KEYS = (
 # Display Y, InitialFGClr".
 _ART_KEYS = ('TOPANSI', 'BOTANSI')
 
+_MODE_RE = re.compile(r'^mrctheme-[^.]+\.(\d+)x(\d+)\.ini$')
+
+
+def best_fit_mode(theme_name: str, cols: int, lines: int) -> str:
+    """Pick the largest bundled size variant ('132x36', '160x44', etc)
+    that fits within the caller's actual (cols, lines) without
+    overflowing, or 'default' (the 80-col layout) if nothing fits or
+    the theme has no wide variants at all -- 'least'/'2leet4u' only
+    ever ship a 'default' .ini, matching load_theme_layout's own
+    fallback. "Fits" means both dimensions are <= the caller's actual
+    terminal size; "largest" is by area, so a 132x59 terminal doesn't
+    settle for 132x36 when 132x59 itself is available."""
+    best = None
+    best_area = -1
+    for path in _SCRIPTS_DIR.glob(f'mrctheme-{theme_name}.*.ini'):
+        m = _MODE_RE.match(path.name)
+        if not m:
+            continue
+        w, h = int(m.group(1)), int(m.group(2))
+        if w > cols or h > lines:
+            continue
+        area = w * h
+        if area > best_area:
+            best_area = area
+            best = f'{w}x{h}'
+    return best or 'default'
+
 
 class ThemeLayout:
     def __init__(self, ansifile: str, art: Dict[str, tuple], elements: Dict[str, tuple]):
@@ -54,9 +81,10 @@ def _parse_ini_text(text: str) -> dict:
 
 def load_theme_layout(theme_name: str, mode: str = 'default') -> Optional[ThemeLayout]:
     """theme_name: original/minimal/bitchx/2leet4u/least. mode: 'default'
-    (80-col) is the only width ANetBBS currently renders against, but the
-    vendored package also ships 132x*/160x* variants for wide terminals
-    if that's ever wired up."""
+    (80-col) unless the caller resolved a wider variant via
+    best_fit_mode() -- see mrc_chat.py's _sync_mystic_layout(), which
+    picks the largest 132x*/160x* variant that fits the caller's
+    actual detected terminal size."""
     ini_path = _SCRIPTS_DIR / f'mrctheme-{theme_name}.{mode}.ini'
     if not ini_path.is_file():
         return None

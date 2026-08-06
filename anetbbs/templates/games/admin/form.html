@@ -250,10 +250,30 @@
         <div class="section-header"><i class="bi bi-file-earmark-binary"></i> Mystic BBS Pascal Script (.mps) Settings</div>
         <div class="row g-3 mb-2">
             <div class="col-md-8">
-                {{ form.mystic_script_path.label(class="form-label") }}
+                {{ form.mystic_script_path.label(text="Mystic Script Path (.mps/.mpx)", class="form-label") }}
                 {{ form.mystic_script_path(class="form-control", placeholder="/games/dopewars.mps") }}
                 <small style="color:#007700;">Requires the Mystic BBS runtime (<code>mystic</code>) installed on the server.
                 Set <code>MYSTIC_BBS_PATH</code> env var if it is not at <code>/usr/local/bin/mystic</code>.</small>
+            </div>
+            <div class="col-md-4">
+                {{ form.working_directory.label(class="form-label") }}
+                {{ form.working_directory(class="form-control", placeholder="/opt/mystic") }}
+                <small class="text-muted">Defaults to the script's own directory. Set this to your real
+                Mystic BBS install directory so the script can find <code>mystic.dat</code> there
+                (confirmed live: fails with "Unable to read mystic.dat" when run from outside the
+                actual install directory).</small>
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
+            <div class="col-md-8">
+                {{ form.command_line_args.label(text="Mystic Username / Password", class="form-label") }}
+                {{ form.command_line_args(class="form-control", placeholder="@USER@ mypassword") }}
+                <small class="text-muted">Format: <code>USERNAME PASSWORD</code>. Mystic requires a real,
+                already-created local user account to run a script under — there's no anonymous mode.
+                <code>@USER@</code> in the username substitutes the real ANetBBS caller's own username,
+                but only works if you've actually created a matching Mystic account for every caller
+                ahead of time. For most doors, a single shared account (e.g. a dedicated
+                <code>anetbbs</code> service user — fixed name, no <code>@USER@</code>) is simpler.</small>
             </div>
         </div>
     </div>

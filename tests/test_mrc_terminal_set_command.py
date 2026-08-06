@@ -301,12 +301,15 @@ class SetCommandTzTests(unittest.TestCase):
 
 class PaletteTests(unittest.TestCase):
     def test_default_palette_matches_original_hardcoded_colors(self):
+        # Default is 'original' (Jerry: "make original the default
+        # theme, please") -- was 'default' (ANetBBS's own plain layout)
+        # before that, briefly 'bitchx' in between.
         from anetbbs.features.mrc_chat import _TERM_PALETTES
         chat = _make_chat()
-        self.assertEqual(chat._palette_name, 'default')
-        self.assertEqual(chat._pal('accent_b'), '1;96')
-        self.assertEqual(chat._pal('accent'), '36')
-        self.assertEqual(chat._pal('dim'), '2;36')
+        self.assertEqual(chat._palette_name, 'original')
+        self.assertEqual(chat._pal('accent_b'), '1;34')
+        self.assertEqual(chat._pal('accent'), '34')
+        self.assertEqual(chat._pal('dim'), '2;34')
         self.assertIn('green', _TERM_PALETTES)
         self.assertIn('amber', _TERM_PALETTES)
 
@@ -321,14 +324,14 @@ class PaletteTests(unittest.TestCase):
     def test_set_palette_unknown_name_rejected_no_state_change(self):
         chat = _make_chat()
         _run(chat._handle_slash('/set palette nonexistent'))
-        self.assertEqual(chat._palette_name, 'default')
+        self.assertEqual(chat._palette_name, 'original')
 
     def test_set_palette_no_args_lists_options(self):
         chat = _make_chat()
         _run(chat._handle_slash('/set palette'))
         joined = '\n'.join(chat.session.written)
         self.assertIn('amber', joined)
-        self.assertEqual(chat._palette_name, 'default')
+        self.assertEqual(chat._palette_name, 'original')
 
     def test_sidebar_colors_follow_active_palette(self):
         chat = _make_chat()

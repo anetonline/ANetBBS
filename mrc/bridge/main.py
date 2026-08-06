@@ -756,6 +756,13 @@ class BridgeApp:
             # the bridge never interprets it, only stores/echoes it, same
             # as the message templates above.
             "tz_offset":          _clamp_tz_offset(sess.get("tz_offset", 0)),
+            # Terminal chrome/theme name (e.g. 'bitchx', '2leet4u') --
+            # purely a client rendering hint, same as clock_format/
+            # tz_offset above. The bridge doesn't know or care about the
+            # set of valid names (that's the terminal client's
+            # _TERM_PALETTES); it only stores/echoes whatever string the
+            # client sends.
+            "palette":            (sess.get("palette") or "").strip(),
         }
 
     def _session_display_handle(self, sess: dict) -> str:
@@ -1043,12 +1050,32 @@ class BridgeApp:
         await self.mrc.send_packet(MRCProtocol.create_newroom(eff_nick, self.config["bridge_bbs"], "", room))
         await self._sleep_delay()
 
-        await self._send_join_payloads(eff_nick, room, sess.get("remote_ip", ""))
-
+        # Real bug found live: "the topic does not show up unless I
+        # change it" -- and a follow-on join-time TOPIC query (below)
+        # didn't fix it either, because the actual root cause is here.
+        # in_room used to only flip True AFTER _send_join_payloads()
+        # finished (banners/MOTD/topic/userlist/chatters, each a real
+        # round trip to the hub with a _sleep_delay() between them --
+        # ~500ms+ minimum, more with real network latency). But the hub
+        # can (and, per live testing, does) reply to NEWROOM with an
+        # unprompted ROOMTOPIC: right away -- and every SERVER->CLIENT
+        # room broadcast (ROOMTOPIC included) is only delivered to
+        # sessions where in_room is already True (_on_upstream_packet's
+        # "special == CLIENT" branch, via _sessions_in_room()). Any such
+        # reply arriving during that whole payload-sending window was
+        # therefore silently dropped for this session -- explaining
+        # both "doesn't show right away" and "the join-time TOPIC query
+        # didn't help" (its own reply would arrive during the same
+        # window). Flipping in_room True here, right after the room is
+        # actually joined from the hub's own perspective, instead of
+        # after this entire followup sequence completes, means none of
+        # these early replies get lost.
         sess["waiting_for_identify"] = False
         sess["in_room"]              = True
         self.db.save_session(ws_id_str, sess)
         await self._sync_mystic_rooms()
+
+        await self._send_join_payloads(eff_nick, room, sess.get("remote_ip", ""))
 
     async def _broadcast_info(self, message: str):
         payload = {"type": "info", "message": message}
@@ -1527,6 +1554,7 @@ class BridgeApp:
             "default_room":         MRCProtocol.norm_room(_sanitize_no_tilde(prof.get("default_room") or "", 20)),
             "clock_format":         "12" if str(prof.get("clock_format", "24")).strip() == "12" else "24",
             "tz_offset":            _clamp_tz_offset(prof.get("tz_offset", 0)),
+            "palette":              _sanitize_no_tilde(prof.get("palette") or "", 20),
         }
         self.db.save_session(str(ws_id), sess)
 
@@ -1680,6 +1708,9 @@ class BridgeApp:
 
         if "tz_offset" in data:
             updates["tz_offset"] = _clamp_tz_offset(data.get("tz_offset"))
+
+        if "palette" in data:
+            updates["palette"] = _sanitize_no_tilde(data.get("palette") or "", 20)
 
         if not updates:
             await self._safe_send(ws, {"type": "error", "message": "No recognized preference fields in request."})
