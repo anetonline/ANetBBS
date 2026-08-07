@@ -42,9 +42,9 @@ def delete_backup(name):
         shutil.rmtree(p)
         return True, f"Deleted {name}."
     except PermissionError:
-        return False, (f"Delete failed: permission denied. This backup was created by an "
-                        f"older update.sh (root-owned) -- delete it via the web admin "
-                        f"(Admin -> Backups), which has the privileged-helper fallback.")
+        return False, ("Delete failed: permission denied. This backup was created by an "
+                        "older update.sh (root-owned) -- delete it via the web admin "
+                        "(Admin -> Backups), which has the privileged-helper fallback.")
 
 
 def _delete(stdscr, b):
