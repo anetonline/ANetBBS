@@ -1791,15 +1791,18 @@ class BBSSession:
                     # Not the CP437/ANSI encode path at all -- PETSCII is a
                     # different control-code system, not just a different
                     # code page. See anetbbs/features/petscii_codec.py.
+                    # ansi_to_petscii() translates ANSI color codes into
+                    # real C64 color bytes rather than discarding them;
+                    # non-color CSI (cursor moves etc.) is still dropped.
                     from ..features import petscii_codec
-                    text = petscii_codec.encode(_ANSI_ESC_RE.sub('', text))
+                    text = petscii_codec.encode(petscii_codec.ansi_to_petscii(text))
                 else:
                     if self.term_mode == 'ascii':
                         text = _ANSI_ESC_RE.sub('', text)
                     text = text.encode(self.encoding, errors='replace')
             elif self.term_mode == 'petscii':
                 from ..features import petscii_codec
-                text = petscii_codec.encode(_ANSI_ESC_RE_B.sub(b'', text).decode('latin-1'))
+                text = petscii_codec.encode(petscii_codec.ansi_to_petscii(text.decode('latin-1')))
             elif self.term_mode == 'ascii':
                 text = _ANSI_ESC_RE_B.sub(b'', text)
             self.writer.write(text)

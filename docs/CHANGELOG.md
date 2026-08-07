@@ -1,11 +1,66 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.20`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.21`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.21 — Critical fix: unbounded memory/CPU leak in the terminal service; PETSCII ANSI color translation (August 2026)
+
+**Critical live fix: `anetbbs.service` (telnet/SSH/rlogin/PETSCII/FTP)
+leaked memory and CPU without bound** — observed growing to 19.8GB RAM
+and 99.7% CPU after ~7 hours uptime with only a couple of concurrent
+sessions, causing severe lag and dropped MRC chat connections. Root
+cause: `anetbbs/features/bbs_ui.py`'s `_app()` helper built a brand-new
+Flask app and registered a brand-new SQLAlchemy engine/connection pool
+on *every single call*, never disposed — and `anetbbs/core/session.py`'s
+sysop-kick watchdog calls it every 5 seconds for the entire lifetime of
+every logged-in session (one of ~150 call sites across that module).
+Over hours, with multiple concurrent sessions, that's tens of thousands
+of leaked engines. Same root shape as a BinkP per-connection database
+leak fixed earlier in this project's history — that fix was never
+generalized to this helper. Fixed by caching the Flask app instead of
+rebuilding it per call: reusing one shared app across many
+`app_context()` pushes is the normal, correct Flask usage pattern (it's
+exactly what the web/gunicorn process already does for every concurrent
+web request) — building a fresh one on every call was the actual
+anomaly. Found via a live user report ("I keep getting disconnected
+from MRC" plus general terminal lag) traced in real time through
+`systemctl status`/`journalctl` output showing RAM climbing while the
+report was being investigated; hotfixed directly to the live server
+ahead of this packaged release given the severity.
+
+**PETSCII (Commodore 64/128) sessions now get real translated colors
+instead of having ANSI color codes stripped outright.**
+`anetbbs/features/petscii_codec.py` gained `ansi_to_petscii()`,
+translating ANSI SGR color codes into real C64 color control bytes —
+verified against Synchronet's own open-source PETSCII terminal
+implementation (`src/sbbs3/petscii_term.cpp`) rather than invented from
+scratch; every color byte matches theirs exactly. Replicates the same
+reverse-video trick Synchronet uses for combined foreground+background
+colors, since C64 text mode has no independent per-character background
+color (only one foreground color per cell plus a whole-cell reverse
+flag). Non-color ANSI sequences (cursor moves, erase, etc.) are still
+dropped, same as before this change — PETSCII still can't honor
+arbitrary cursor addressing from ANSI content.
+
+**Audited the rest of the codebase for the same leak shape and fixed
+three more call sites that copy-pasted it**, in
+`anetbbs/games/door_runner.py` (`_write_msgbase_ini_override()`,
+`_cleanup_session_safe()`, `play_door_game_telnet()` — the latter two
+hit on every door game launch and exit) and
+`anetbbs/features/games.py` (`show_door_menu()` and its game-launch
+path). Unlike `bbs_ui.py`, these callers' own tests rely on getting a
+genuinely fresh Flask app per call (to point `SQLALCHEMY_DATABASE_URI`
+at a different temp DB per test case), so a shared-cached-app fix
+wasn't an option here — instead added
+`anetbbs/features/db_scope.py::transient_app_context()`, a small
+context manager that disposes the fresh app's SQLAlchemy engine on
+exit, modeled on `anetbbs/echomail/binkp_server.py`'s existing
+`_new_app()`/`_dispose_app_engine()` pattern (which already handled
+this correctly and was left untouched).
 
 ## v1.0.20 — anetbbs-cfg: standalone terminal admin tool (August 2026)
 

@@ -1,8 +1,12 @@
 """Unit tests for the PETSCII terminal-mode session plumbing added to
 anetbbs.core.session.BBSSession (see the "PETSCII Terminal Support
 (Phase 1)" plan): forced_term_mode/forced_width overrides, the
-term_mode/petscii_width properties, and write()'s new PETSCII branch
-(strip ANSI, encode via petscii_codec instead of cp437).
+term_mode/petscii_width properties, and write()'s PETSCII branch
+(translate ANSI color codes to real PETSCII color bytes via
+petscii_codec.ansi_to_petscii(), then encode via petscii_codec instead
+of cp437 -- see tests/test_petscii_codec.py's AnsiToPetsciiTests for
+thorough coverage of the translation itself; this file just confirms
+session.write() actually calls it).
 
 login_screen()'s and the post-login dispatch's PETSCII branches are
 exercised in tests/test_petscii_ui.py against the lighter-weight
@@ -73,9 +77,20 @@ class WritePetsciiBranchTests(unittest.TestCase):
         asyncio.run(session.write('Hello, World!'))
         self.assertEqual(bytes(writer.written), b'hELLO, wORLD!')
 
-    def test_ansi_escape_sequences_are_stripped_not_passed_through(self):
+    def test_ansi_sgr_color_codes_are_translated_not_stripped(self):
+        # SGR 1;33 = bold + ANSI brown(33) = index 11 = PETSCII yellow
+        # (0x9E); SGR 0 resets to the default index 7 = light-gray
+        # (0x9B). See test_petscii_codec.py's AnsiToPetsciiTests for the
+        # full color-mapping table this is exercising end-to-end.
         session, writer = _make_session(forced_term_mode='petscii')
         asyncio.run(session.write('\x1b[1;33mHello\x1b[0m'))
+        self.assertEqual(bytes(writer.written), bytes([0x9E]) + b'hELLO' + bytes([0x9B]))
+
+    def test_non_sgr_ansi_escape_sequences_are_still_stripped(self):
+        # Cursor moves/erase/etc. have no PETSCII equivalent and are
+        # still dropped entirely, same as before this feature existed.
+        session, writer = _make_session(forced_term_mode='petscii')
+        asyncio.run(session.write('\x1b[2JHello'))
         self.assertEqual(bytes(writer.written), b'hELLO')
 
     def test_control_code_characters_reach_the_wire_as_real_petscii_bytes(self):
@@ -83,6 +98,14 @@ class WritePetsciiBranchTests(unittest.TestCase):
         session, writer = _make_session(forced_term_mode='petscii')
         asyncio.run(session.write(f'{pc.CLR_HOME}Hi'))
         self.assertEqual(bytes(writer.written), bytes([0x93]) + b'hI')
+
+    def test_bytes_input_also_translates_ansi_color(self):
+        # write() has a separate bytes-input branch (used when raw
+        # already-encoded bytes are written directly) that must apply
+        # the same ansi_to_petscii() translation, not just the str path.
+        session, writer = _make_session(forced_term_mode='petscii')
+        asyncio.run(session.write(b'\x1b[31mHi\x1b[0m'))
+        self.assertEqual(bytes(writer.written), bytes([0x1C]) + b'hI' + bytes([0x9B]))
 
     def test_non_petscii_session_still_uses_cp437_encode(self):
         session, writer = _make_session()  # default term_mode == 'ansi'

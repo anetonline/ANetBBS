@@ -8,6 +8,10 @@ parsing on a real C64), so this is deliberately separate from the
 CP437/ANSI encode path anetbbs/core/session.py's write() already uses
 for telnet/SSH/rlogin sessions.
 
+ansi_to_petscii() (near the bottom) translates ANSI SGR color codes
+into real C64 color bytes rather than discarding them -- see that
+function's own docstring for the reverse-video trick this requires.
+
 Design: control codes are represented here as ordinary Python
 single-character strings whose codepoint IS the real PETSCII control
 byte (e.g. CLR_HOME = chr(0x93)) -- callers (anetbbs/features/petscii_ui.py)
@@ -34,6 +38,7 @@ the display charset are the same ROM-selected mapping) -- without it,
 every letter of a typed username/password would arrive with the wrong
 case, and login always failed even against a correct account.
 """
+import re
 
 # ---- Screen/cursor control ------------------------------------------------
 CLR_HOME = chr(0x93)      # clear screen + cursor home
@@ -145,3 +150,122 @@ def decode_char(byte_value: int) -> str:
     where the control-byte/backspace/Enter cases are already handled
     by the caller before this is ever called."""
     return _swap_letter_case(chr(byte_value))
+
+
+# ---- ANSI SGR (color) -> real PETSCII color bytes --------------------------
+#
+# Verified against Synchronet's own open-source implementation
+# (src/sbbs3/petscii_term.cpp, PETSCII_Terminal::attrstr()/xlat_atr()) --
+# the only other BBS codebase that does this translation for real.
+# Every byte value below is cross-checked against that source; none are
+# guessed. C64 text mode has no independent per-character background
+# color -- only one foreground color per cell, plus a whole-cell REVERSE
+# flag that swaps foreground/background pixels. Synchronet's approach
+# (replicated here): when ANSI specifies both a non-default foreground
+# AND a non-black background, switch to reverse video (REVERSE_ON) and
+# show the BACKGROUND color as the visible color -- the original
+# foreground is discarded, since real hardware can't keep both. When
+# the background returns to black/default, REVERSE_OFF and resume
+# normal foreground-color tracking.
+
+_CSI_RE = re.compile(r'\x1b\[([0-9;?]*)([@-~])')
+
+# Combined (bold, base-color 0-7) index -> real C64 color byte. Index =
+# base ANSI color (30-37 minus 30) + 8 if bold/bright -- the real ANSI
+# SGR order (0=black 1=red 2=green 3=brown/olive 4=blue 5=magenta
+# 6=cyan 7=lightgray; bright is +8), matching the _FG dict already used
+# by anetbbs/web/render_msg.py, NOT WWIV/Renegade's own differently-
+# ordered ctrl-color-code letters (K/B/G/C/R/M/Y/W) -- those are a
+# separate, unrelated convention and mapping them here directly would
+# scramble every color.
+_SGR_INDEX_TO_COLOR = {
+    0: COLOR_BLACK, 1: COLOR_RED, 2: COLOR_GREEN, 3: COLOR_BROWN,
+    4: COLOR_BLUE, 5: COLOR_ORANGE, 6: COLOR_GREY, 7: COLOR_LIGHT_GREY,
+    8: COLOR_DARK_GREY, 9: COLOR_LIGHT_RED, 10: COLOR_LIGHT_GREEN,
+    11: COLOR_YELLOW, 12: COLOR_LIGHT_BLUE, 13: COLOR_PURPLE,
+    14: COLOR_CYAN, 15: COLOR_WHITE,
+}
+
+
+def _color_index(code, bold):
+    """code: an ANSI SGR color number (30-37/90-97 fg, or 40-47/100-107
+    bg with 40 subtracted first by the caller) or None for default.
+    Returns a 0-15 index into _SGR_INDEX_TO_COLOR."""
+    if code is None:
+        return 7  # default light-gray-ish, matches ANSI's own default
+    if 30 <= code <= 37:
+        base = code - 30
+        return base + (8 if bold else 0)
+    if 90 <= code <= 97:
+        return (code - 90) + 8  # already an explicit bright color
+    return 7
+
+
+def ansi_to_petscii(text: str) -> str:
+    """Translate ANSI SGR color codes in *text* into real PETSCII color
+    control bytes (see module comment above for the reverse-video
+    approach used for combined fg+bg). Non-SGR CSI sequences (cursor
+    moves, erase, etc.) are dropped, same as before this function
+    existed -- PETSCII still can't honor arbitrary cursor addressing
+    from ANSI content. Returned string is plain text plus embedded
+    control-code characters, ready for encode() exactly like any other
+    petscii_codec constant embedded in an f-string.
+    """
+    out = []
+    fg = None    # raw ANSI fg code (30-37/90-97) or None
+    bg = None    # raw ANSI bg code (40-47/100-107) or None
+    bold = False
+    last_emitted = None  # (reversed: bool, color_byte) of the last thing we actually wrote
+
+    def emit_for_state():
+        nonlocal last_emitted
+        # bg is stored in ANSI bg-code numbering (40-47/100-107); shift
+        # by 10 to reuse _color_index's fg-numbering (30-37/90-97) --
+        # valid because ANSI defines bg codes as fg_code+10 for the same
+        # hue, by spec, not just convention.
+        bg_idx = _color_index(bg - 10, False) if bg is not None else 0
+        reversed_ = bg_idx != 0
+        color = _SGR_INDEX_TO_COLOR[bg_idx if reversed_ else _color_index(fg, bold)]
+        state = (reversed_, color)
+        if state == last_emitted:
+            return
+        if reversed_ != (last_emitted[0] if last_emitted else False):
+            out.append(REVERSE_ON if reversed_ else REVERSE_OFF)
+        out.append(color)
+        last_emitted = state
+
+    pos = 0
+    for m in _CSI_RE.finditer(text):
+        if m.start() > pos:
+            out.append(text[pos:m.start()])
+        params, final = m.group(1), m.group(2)
+        if final == 'm':
+            if not params:
+                params = '0'
+            for p in params.split(';'):
+                try:
+                    n = int(p)
+                except ValueError:
+                    continue
+                if n == 0:
+                    fg, bg, bold = None, None, False
+                elif n == 1:
+                    bold = True
+                elif n == 22:
+                    bold = False
+                elif n == 7:
+                    fg, bg = (bg - 10) if bg is not None else 30, (fg + 10) if fg is not None else 40
+                elif 30 <= n <= 37 or 90 <= n <= 97:
+                    fg = n
+                elif 40 <= n <= 47 or 100 <= n <= 107:
+                    bg = n
+                elif n == 39:
+                    fg = None
+                elif n == 49:
+                    bg = None
+            emit_for_state()
+        # Drop non-SGR CSI sequences (cursor positioning, erase, etc.)
+        pos = m.end()
+    if pos < len(text):
+        out.append(text[pos:])
+    return ''.join(out)

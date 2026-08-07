@@ -10,8 +10,9 @@ Currently provides view-mode for:
   - File library (list files)
   - User profile (view own info)
 
-All operations push a transient Flask app context so they can use the
-SQLAlchemy-mapped models without needing to be inside a Flask request.
+All operations push a Flask app context (via _app(), below) so they can
+use the SQLAlchemy-mapped models without needing to be inside a Flask
+request.
 """
 import asyncio
 import os
@@ -22,16 +23,76 @@ from ..core.tz import fmt_eastern
 
 logger = logging.getLogger(__name__)
 
+_cached_app = None
+_cached_app_key = None
+
 
 def _app():
-    """Make a transient Flask app + db context. Call inside `with`."""
-    from flask import Flask
+    """Return a shared Flask app for pushing `with _app().app_context():`.
+
+    Real incident, live 2026-08-07: this used to build a brand-new
+    Flask app AND call db.init_app(app) -- registering a brand-new
+    SQLAlchemy engine/connection pool -- on every single call, never
+    disposed. anetbbs/core/session.py's kick-watchdog polls this every
+    5 seconds for the ENTIRE LIFETIME of every logged-in session,
+    across ~150 call sites total in this module; over hours, with
+    multiple concurrent sessions, that's tens of thousands of leaked
+    engines -- confirmed live via `systemctl status anetbbs` showing
+    RAM climbing 14.5GB -> 19.8GB in ~12 minutes with only 2-3 sessions
+    connected. Same root shape as the BinkP per-call-connection leak
+    fixed previously (see docs/CHANGELOG-beta.md) -- that fix was never
+    generalized here. Reusing one Flask app across many app_context()
+    pushes is the normal, intended usage pattern (it's exactly what the
+    real web/gunicorn process already does for every concurrent
+    request) -- building a fresh one per call was the actual anomaly.
+    Cached lazily rather than at import time so anything that imports
+    this module before config/env is ready still works unchanged.
+
+    Keyed on (FLASK_ENV, resolved SQLALCHEMY_DATABASE_URI) rather than
+    cached unconditionally -- a blanket cache broke
+    tests/test_ebook_terminal_menu.py and friends, which call into this
+    module's own methods (not mocking `_app` the way bbs_ui's dedicated
+    test file does) and rely on getting a fresh app bound to a new
+    per-test temp DB every time they repoint
+    TestingConfig.SQLALCHEMY_DATABASE_URI. In production FLASK_ENV and
+    the DB URI never change during the process lifetime, so this is a
+    cache hit (and thus a single long-lived engine) after the first
+    call -- identical fix for the leak -- while tests that swap the URI
+    between calls correctly get a fresh app (with the previous one's
+    engine disposed, so cache-invalidation itself can't leak either).
+
+    Re-syncs the cached app's config from the config class on every
+    call, even on a cache *hit* -- found via
+    tests/test_chat_mrc_toggle.py, which patches
+    TestingConfig.MRC_BRIDGE_ENABLED (not the DB URI) between test
+    methods and expects chat.py's `current_app.config.get(...)` read
+    (through this same `_app()`) to see the new value immediately. A
+    plain dict re-sync is cheap and doesn't touch the engine, unlike a
+    DB-URI change, which genuinely needs a new engine pointed at the
+    new database.
+    """
+    global _cached_app, _cached_app_key
     from anetbbs.config import get_config
     from anetbbs.models import db
-    app = Flask(__name__)
-    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
-    db.init_app(app)
-    return app
+    env = os.environ.get('FLASK_ENV', 'production')
+    cfg = get_config(env)
+    key = (env, getattr(cfg, 'SQLALCHEMY_DATABASE_URI', None))
+    if _cached_app is None or key != _cached_app_key:
+        if _cached_app is not None:
+            with _cached_app.app_context():
+                try:
+                    db.engine.dispose()
+                except Exception:
+                    pass
+        from flask import Flask
+        app = Flask(__name__)
+        app.config.from_object(cfg)
+        db.init_app(app)
+        _cached_app = app
+        _cached_app_key = key
+    else:
+        _cached_app.config.from_object(cfg)
+    return _cached_app
 
 
 def _parse_file_selection(text, lo, hi):

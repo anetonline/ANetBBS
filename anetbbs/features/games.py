@@ -41,6 +41,7 @@ class GameManager:
         from flask import Flask
         from anetbbs.config import get_config
         from anetbbs.models import db, Game, GameCategory
+        from .db_scope import transient_app_context
 
         app = Flask(__name__)
         app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
@@ -48,7 +49,7 @@ class GameManager:
 
         user_access = (self.session.user or {}).get('access_level') or 10
 
-        with app.app_context():
+        with transient_app_context(app):
             games = (Game.query
                      .filter_by(is_active=True)
                      .filter(~Game.game_type.in_(['builtin_web', 'door_dos_browser']))
@@ -292,12 +293,13 @@ class GameManager:
         from anetbbs.models import db, Game
         from ..games.door_runner import (play_door_game_telnet, play_rlogin_telnet,
                                          play_telnet_terminal)
+        from .db_scope import transient_app_context
 
         app = Flask(__name__)
         app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
         db.init_app(app)
 
-        with app.app_context():
+        with transient_app_context(app):
             g = Game.query.get(game_dict['id'])
             if g is None:
                 await self.session.write("\r\nGame disappeared from the catalog.\r\n")

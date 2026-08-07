@@ -115,5 +115,94 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(pc.decode(bytes([0xFF])), '?')
 
 
+class AnsiToPetsciiTests(unittest.TestCase):
+    """Covers pc.ansi_to_petscii() -- translates ANSI SGR color codes to
+    real C64 color bytes. Every expected byte in this class is verified
+    against Synchronet's own open-source PETSCII terminal implementation
+    (src/sbbs3/petscii_term.cpp), not invented -- see that function's
+    docstring in petscii_codec.py for the reverse-video mechanism this
+    exercises for combined foreground+background cases."""
+
+    # (SGR code, expected PETSCII color constant) for all 16 combined
+    # dark/bright colors, using the real ANSI SGR numeric order (not
+    # WWIV/Renegade's differently-ordered ctrl-color letters).
+    DARK_CASES = [
+        (30, pc.COLOR_BLACK), (31, pc.COLOR_RED), (32, pc.COLOR_GREEN),
+        (33, pc.COLOR_BROWN), (34, pc.COLOR_BLUE), (35, pc.COLOR_ORANGE),
+        (36, pc.COLOR_GREY), (37, pc.COLOR_LIGHT_GREY),
+    ]
+    BRIGHT_CASES = [
+        (90, pc.COLOR_DARK_GREY), (91, pc.COLOR_LIGHT_RED),
+        (92, pc.COLOR_LIGHT_GREEN), (93, pc.COLOR_YELLOW),
+        (94, pc.COLOR_LIGHT_BLUE), (95, pc.COLOR_PURPLE),
+        (96, pc.COLOR_CYAN), (97, pc.COLOR_WHITE),
+    ]
+
+    def test_dark_colors_by_explicit_bright_sgr_code(self):
+        for code, expected in self.DARK_CASES:
+            with self.subTest(code=code):
+                result = pc.ansi_to_petscii(f'\x1b[{code}mX')
+                self.assertEqual(result[0], expected, f'SGR {code}')
+                self.assertEqual(result[1], 'X')
+
+    def test_bright_colors_by_explicit_9x_sgr_code(self):
+        for code, expected in self.BRIGHT_CASES:
+            with self.subTest(code=code):
+                result = pc.ansi_to_petscii(f'\x1b[{code}mX')
+                self.assertEqual(result[0], expected, f'SGR {code}')
+
+    def test_bold_plus_dark_color_equals_bright_variant(self):
+        # SGR 1 (bold) + a 30-37 dark color == the same hue's 90-97
+        # bright variant -- the standard ANSI-BBS convention.
+        for (dark_code, _), (_, bright_expected) in zip(self.DARK_CASES, self.BRIGHT_CASES):
+            with self.subTest(code=dark_code):
+                result = pc.ansi_to_petscii(f'\x1b[1;{dark_code}mX')
+                self.assertEqual(result[0], bright_expected)
+
+    def test_no_color_codes_passes_text_through_unchanged(self):
+        self.assertEqual(pc.ansi_to_petscii('plain text, no codes'), 'plain text, no codes')
+
+    def test_reset_code_returns_to_default_light_grey(self):
+        result = pc.ansi_to_petscii('\x1b[31mRed\x1b[0mNormal')
+        self.assertTrue(result.startswith(pc.COLOR_RED))
+        self.assertIn(pc.COLOR_LIGHT_GREY, result)
+
+    def test_redundant_same_color_emits_byte_only_once(self):
+        result = pc.ansi_to_petscii('\x1b[31m\x1b[31mRedRed')
+        self.assertEqual(result, pc.COLOR_RED + 'RedRed')
+
+    def test_combined_fg_and_bg_uses_reverse_video_with_bg_as_visible_color(self):
+        # Real hardware constraint (see module docstring): C64 text mode
+        # can't show a colored foreground AND colored background at
+        # once. Synchronet's approach (replicated here): reverse video,
+        # showing the BACKGROUND color as the visible color.
+        result = pc.ansi_to_petscii('\x1b[31;44mText\x1b[0m')
+        self.assertEqual(
+            result,
+            pc.REVERSE_ON + pc.COLOR_BLUE + 'Text' + pc.REVERSE_OFF + pc.COLOR_LIGHT_GREY,
+        )
+
+    def test_clearing_only_background_restores_original_foreground(self):
+        # SGR 49 clears just the background -- the original foreground
+        # (set earlier and never reset) must resume, not get lost.
+        result = pc.ansi_to_petscii('\x1b[31;44mA\x1b[49mB')
+        self.assertEqual(
+            result,
+            pc.REVERSE_ON + pc.COLOR_BLUE + 'A' + pc.REVERSE_OFF + pc.COLOR_RED + 'B',
+        )
+
+    def test_non_sgr_csi_sequences_are_dropped(self):
+        result = pc.ansi_to_petscii('\x1b[2J\x1b[31mHello')
+        self.assertEqual(result, pc.COLOR_RED + 'Hello')
+
+    def test_result_is_ready_for_encode_without_further_processing(self):
+        # The whole point: the translated string embeds real control-code
+        # characters (like REVERSE_ON/COLOR_* already do elsewhere in
+        # this codebase), so it flows straight into encode() unchanged.
+        translated = pc.ansi_to_petscii('\x1b[31mHi\x1b[0m')
+        encoded = pc.encode(translated)
+        self.assertEqual(encoded, bytes([0x1C]) + b'hI' + bytes([0x9B]))
+
+
 if __name__ == '__main__':
     unittest.main()

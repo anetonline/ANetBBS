@@ -244,10 +244,11 @@ def _write_msgbase_ini_override(game, exec_dir):
             # called from contexts with no app context already pushed.
             from flask import Flask
             from anetbbs.config import get_config
+            from ..features.db_scope import transient_app_context
             _app = Flask(__name__)
             _app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
             db.init_app(_app)
-            with _app.app_context():
+            with transient_app_context(_app):
                 tag = _resolve_tag()
 
         if not tag:
@@ -1872,7 +1873,8 @@ def _cleanup_session_safe(session_id, app=None):
     always has a real context to work with, regardless of why the
     caller's own capture came back empty.
     """
-    if app is None:
+    built_fresh_app = app is None
+    if built_fresh_app:
         try:
             from flask import Flask
             from anetbbs.config import get_config
@@ -1884,8 +1886,13 @@ def _cleanup_session_safe(session_id, app=None):
                              'session %d cleanup', session_id)
             _cleanup_session(session_id)
             return
-    with app.app_context():
-        _cleanup_session(session_id)
+    if built_fresh_app:
+        from ..features.db_scope import transient_app_context
+        with transient_app_context(app):
+            _cleanup_session(session_id)
+    else:
+        with app.app_context():
+            _cleanup_session(session_id)
 
 
 def _cleanup_session(session_id):
@@ -2003,11 +2010,12 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
     # We're outside Flask, so push one ourselves.
     from flask import Flask
     from anetbbs.config import get_config
+    from ..features.db_scope import transient_app_context
     app = Flask(__name__)
     app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
     db.init_app(app)
 
-    with app.app_context():
+    with transient_app_context(app):
         # Re-fetch the user/game in this app context (the caller's instances
         # may be from a different SQLAlchemy session and won't be attached here)
         from ..models import User as DbUser, Game as DbGame
