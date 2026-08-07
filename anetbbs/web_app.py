@@ -84,6 +84,22 @@ def create_app(config_name=None):
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    # ANETBBS_SCHEMA_MIGRATE_ONLY=1 marks this process as a one-shot CLI
+    # command (a schema migration, or a standalone tool like anetbbs-cfg)
+    # rather than the long-running web/BBS server -- used below both to
+    # bypass the SECRET_KEY production check (a one-shot command doesn't
+    # serve traffic) AND to skip starting every background service
+    # (echomail/RSS pollers, MSP/SYSTAT listeners, registry heartbeat,
+    # events scheduler, ...). Real bug found running anetbbs-cfg on a live
+    # install: without this, `create_app()` started a SECOND full copy of
+    # every one of those background services/threads alongside the
+    # already-running anetbbs-web process -- double-polling echomail,
+    # double-firing scheduled events, a second registry heartbeat racing
+    # the real one -- just to open a local config screen. Set by
+    # anetbbs/cfg/app.py for exactly this reason; also already set by
+    # update.sh's schema-migration step and the upgrade wizard.
+    _one_shot_cli = bool(os.environ.get('ANETBBS_SCHEMA_MIGRATE_ONLY'))
+
     # Refuse to boot in production with the dev SECRET_KEY fallback.
     # In dev, just log a loud warning so the sysop sees it.
     # Bypass with ANETBBS_SCHEMA_MIGRATE_ONLY=1 — the upgrade wizard's
@@ -614,13 +630,13 @@ def create_app(config_name=None):
     _configure_logging(app)
     
     # Start background echomail poller
-    if app.config.get('ECHOMAIL_ENABLED', True) and not app.config.get('TESTING', False):
+    if app.config.get('ECHOMAIL_ENABLED', True) and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .echomail.poller import start_poller
         start_poller(app)
 
     # Start background RSS poller (refreshes feeds on RSS_POLL_INTERVAL,
     # default 30 min). No-op in TESTING mode.
-    if not app.config.get('TESTING', False):
+    if not (app.config.get('TESTING', False) or _one_shot_cli):
         try:
             from .rss.poller import start_poller as start_rss_poller
             start_rss_poller(app)
@@ -628,17 +644,17 @@ def create_app(config_name=None):
             app.logger.exception('RSS poller failed to start')
 
     # Start the inter-BBS instant message (MSP / RFC 1312) listener
-    if app.config.get('MSP_ENABLED', True) and not app.config.get('TESTING', False):
+    if app.config.get('MSP_ENABLED', True) and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.server import start_msp_server
         start_msp_server(app)
 
     # SYSTAT / ActiveUser UDP service (Synchronet IMSG companion to MSP)
-    if app.config.get('SYSTAT_ENABLED', True) and not app.config.get('TESTING', False):
+    if app.config.get('SYSTAT_ENABLED', True) and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.systat import start_systat_server
         start_systat_server(app)
 
     # Daily refresh of the inter-BBS directory (sbbsimsg.lst)
-    if app.config.get('SBBSIMSG_AUTO_REFRESH', True) and not app.config.get('TESTING', False):
+    if app.config.get('SBBSIMSG_AUTO_REFRESH', True) and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.directory import start_refresher
         start_refresher(app)
 
@@ -646,14 +662,14 @@ def create_app(config_name=None):
     # Independent of the registry-hub role: any install with a
     # REGISTRY_URL set will pull the upstream list so its users can see
     # peer ANetBBS systems in /imsg/directory/.
-    if not app.config.get('TESTING', False):
+    if not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.anetbbs_directory import start_anetbbs_directory_refresher
         start_anetbbs_directory_refresher(app)
 
     # Federation hub — SYSTAT prober that keeps anetbbs.lst pruned of
     # dead peers. Only runs when this install is the central hub
     # (REGISTRY_MODE_ENABLED). No-op on peer installs.
-    if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
+    if app.config.get('REGISTRY_MODE_ENABLED') and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.probe import start_probe_thread
         start_probe_thread(app)
 
@@ -662,7 +678,7 @@ def create_app(config_name=None):
     # own /imsg/directory shows no self-entry until a sysop creates
     # the row by hand. Pre-verified + pre-approved (the hub trusts
     # itself). No-op on peer installs.
-    if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
+    if app.config.get('REGISTRY_MODE_ENABLED') and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.hub_self_register import start_hub_self_register_thread
         start_hub_self_register_thread(app)
 
@@ -670,7 +686,7 @@ def create_app(config_name=None):
     # surfaces (anetbbs.lst, /api/releases/latest, /healthz) over the
     # configured REGISTRY_URL. Catches reverse-proxy regressions
     # before peers start complaining.
-    if app.config.get('REGISTRY_MODE_ENABLED') and not app.config.get('TESTING', False):
+    if app.config.get('REGISTRY_MODE_ENABLED') and not (app.config.get('TESTING', False) or _one_shot_cli):
         try:
             from .msp.hub_selftest import start_hub_selftest_thread
             start_hub_selftest_thread(app)
@@ -681,7 +697,7 @@ def create_app(config_name=None):
     # feeds the live graphs at /admin/control/. Reads MainPID via
     # `systemctl show` and /proc via psutil; no privileges required.
     # Soft-no-ops if psutil isn't installed.
-    if not app.config.get('TESTING', False):
+    if not (app.config.get('TESTING', False) or _one_shot_cli):
         try:
             from .web.metrics import start_sampler as _start_metrics_sampler
             _start_metrics_sampler()
@@ -693,7 +709,7 @@ def create_app(config_name=None):
     # default rows (TW2 maint, weekly VACUUM, log rotation) so a fresh
     # install gets reasonable cadence out of the box. Idempotent —
     # existing rows are never overwritten.
-    if not app.config.get('TESTING', False):
+    if not (app.config.get('TESTING', False) or _one_shot_cli):
         try:
             from .events.runner import (start_event_scheduler,
                                         ensure_default_events)
@@ -706,7 +722,7 @@ def create_app(config_name=None):
     # peer sysops opt in by setting REGISTRY_SELF_REGISTER=true and
     # filling in SYSOP_EMAIL / BBS_DOMAIN so the hub can email them
     # the verify token.
-    if app.config.get('REGISTRY_SELF_REGISTER') and not app.config.get('TESTING', False):
+    if app.config.get('REGISTRY_SELF_REGISTER') and not (app.config.get('TESTING', False) or _one_shot_cli):
         from .msp.registry_client import start_self_register_thread
         start_self_register_thread(app)
 

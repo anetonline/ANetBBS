@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.19`, August 2026)
+**Status: stable** (`v1.0.20`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.19.tar.gz
-cd ANetBBS-v1.0.19
+tar xzf ANetBBS-v1.0.20.tar.gz
+cd ANetBBS-v1.0.20
 sudo bash install.sh
 ```
 
@@ -39,8 +39,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.19.tar.gz
-cd ANetBBS-v1.0.19
+tar xzf ANetBBS-v1.0.20.tar.gz
+cd ANetBBS-v1.0.20
 sudo bash update.sh
 ```
 
@@ -215,6 +215,17 @@ buildx` once there's a registry to publish to.
 - File-area admin
 - Manual `+TAG`/`-TAG` AreaFix-to-hub form
 - BBS directory browser with live `who's online` queries
+- `anetbbs-cfg` — standalone full-screen terminal admin tool (SCFG /
+  `mystic -cfg` style), run directly on the server console, near-full
+  parity with the web admin: boards & message areas, echomail networks/
+  areas/hub (AreaFix log, poll log, QWK node requests), file areas &
+  bulletins, users & security (access levels, password reset, IP bans,
+  word filters, login auto-ban, registration log), games (door games,
+  categories, active sessions), image galleries, BBS/PETSCII menu
+  editors, scheduled events, graffiti wall moderation, login modules,
+  last-callers log, backup browsing, and `.env` system settings — no
+  browser required. `python -m anetbbs.cfg` from a checkout, or
+  `anetbbs-cfg` once installed.
 
 ## Documentation
 

@@ -590,6 +590,21 @@ else
         warn "pip install failed — dependencies may be out of date"
     fi
 
+    # ── Refresh /usr/local/bin/ console-script shortcuts ────────────────────
+    # pip install -e above regenerates venv/bin/anetbbs-* for any console
+    # script currently in setup.py, including brand-new ones (e.g.
+    # anetbbs-cfg, added in v1.0.20) that didn't exist at original install
+    # time -- but a new script has no /usr/local/bin/ shortcut until
+    # ensure_symlinks() runs again. Self-heals every update instead of only
+    # on a fresh install or an explicit `anetbbs-upgrade` run, so a sysop
+    # never hits "command not found" for a script that pip clearly just
+    # installed. Idempotent + silent on installs with nothing new to add.
+    if [[ -x "$VENV_DIR/bin/anetbbs-symlinks" ]]; then
+        "$VENV_DIR/bin/anetbbs-symlinks" "$INSTALL_DIR" >/dev/null 2>&1 && \
+            ok "Refreshed /usr/local/bin/ command shortcuts" || \
+            warn "Could not refresh /usr/local/bin/ shortcuts (non-fatal — use \$VENV_DIR/bin/<command> directly)"
+    fi
+
     # ── Python 3.13 eventlet safety fix ──────────────────────────────────────
     # eventlet < 0.38.0 crashes on Python 3.13 with:
     #   AttributeError: module 'eventlet.green.thread' has no attribute

@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0.19",
+    version="1.0.20",
     packages=find_packages(),
     install_requires=[
         # Core
@@ -78,6 +78,7 @@ setup(
         'console_scripts': [
             'anetbbs=anetbbs.main:main',
             'anetbbs-web=anetbbs.web_app:main',
+            'anetbbs-cfg=anetbbs.cfg.app:main',
             'anetbbs-install=anetbbs.installer.wizard:main',
             'anetbbs-upgrade=anetbbs.installer.upgrade:main',
             'anetbbs-symlinks=anetbbs.installer.symlinks:main',

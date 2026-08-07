@@ -1,3 +1,32 @@
+# ANetBBS v1.0.20 — anetbbs-cfg: standalone terminal admin tool (August 2026)
+
+**New: `anetbbs-cfg`, a full-screen curses terminal admin tool** in the spirit of Synchronet's `SCFG` / Mystic's `mystic -cfg` — a standalone console command, independent of the web admin and of whether the network services are even running. Run it with `python -m anetbbs.cfg` from a checkout, or `anetbbs-cfg` once installed; it uses the same `create_app()`/database as the web and BBS processes, so changes show up immediately everywhere.
+
+First version shipped 5 sections; **expanded to 16 total sections for near-full web-admin parity**, per Jerry's priority order:
+- **Boards & Message Areas** — add/edit/delete/reorder, access levels
+- **Echomail Networks & Areas** — pick a network, drill into its echo areas; BinkP host/port/passwords, AreaFix password, poll interval
+- **Echomail Hub** — AreaFix log, poll log, QWK node request approve/deny (mirrors the web admin's exact packet-id validation + random-password credential generation)
+- **File Areas** — tag, storage path, upload permission, access levels
+- **File Bulletins** — metadata for files dropped into FILE_BULLETINS_DIR, auto-synced from disk on view
+- **Users & Security** — search/edit users, one-time password reset, IP bans, word filters, login auto-ban thresholds, registration attempt log
+- **Games** — door games (full field set across all game types), categories, active session monitor with disconnect/clear-stale
+- **Image Galleries** — add/edit/remove gallery collections (JSON-config backed, same store the web admin uses)
+- **BBS Menus** / **PETSCII Menus** — two-level menu/item editors for both terminal menu trees
+- **Scheduled Events** — cron-style task config, JSON schedule/params validated on save, Run Now
+- **Graffiti Wall** — post moderation (delete/restore/clear-all)
+- **Login Modules** — logon/logoff action config
+- **Last Callers** — read-only login log
+- **Backups** — browse/delete update.sh's pre-update snapshots
+- **System / Network Settings** — a grouped `.env` editor (server ports, application settings, logging, BinkP, files/FTP, games, echomail, NUV), preserving comments and untouched keys on save
+
+Advanced/rarely-touched fields and a few genuinely risky operations stay web-admin-only, flagged in the tool itself: ANSI board/menu banner screens, BinkP TLS/CRAM-MD5/packet password, file-area network reassignment, IP whitelist, backup **restore** (privileged sudoers-gated helper, can overwrite a live `.env`/database — browsing/deleting old backups is still available here), and InterBBS Wall/Last-Callers sharing settings (combined `.env` write + echomail-area provisioning in one web route).
+
+**Fixed during Pi3 testing: launching `anetbbs-cfg` on a live install started a second full copy of the entire BBS background service stack** (echomail poller, RSS poller, MSP/SYSTAT listeners, the ANetBBS directory refresher, the metrics sampler, the scheduled-events runner) alongside the already-running `anetbbs-web` process — double-polling echomail, double-firing scheduled events, extra CPU/network contention on top of the real service — just to open a local config screen. `create_app()` only ever gated these behind `TESTING`; extended the existing `ANETBBS_SCHEMA_MIGRATE_ONLY` one-shot-CLI flag (already used by `update.sh`'s schema-migration step) to also skip all of them.
+
+**Then found the real cause of `anetbbs-cfg` still taking ~10 seconds to start on a Pi3, plus the eventlet deprecation warning and an exit-time `RuntimeError: greenlet is being finalized` crash report**: profiling showed `create_app()` — built for the full web server — pulls in eventlet (+ monkey-patches stdlib socket/threading/ssl), flask-socketio, and flask-migrate, then registers **76 web blueprints** and compiles their werkzeug URL-routing tables, none of which a local config screen needs. `anetbbs-cfg` now uses a new, much smaller `anetbbs.cfg.db_bootstrap.create_minimal_app()` instead — a bare Flask app with just `db` bound to it, skipping web_app.py (and eventlet) entirely. Cuts measured startup from ~3.6s to ~1.1s on a dev machine; proportionally larger on a Pi3. Since eventlet is never imported at all now, both the deprecation warning and the eventlet/greenlet shutdown crash are structurally gone, not suppressed.
+
+Built on a small reusable curses widget layer (`anetbbs/cfg/ui.py`) with zero new dependencies (stdlib `curses` only) — a scrollable list editor, a field-driven form (turns a set of model columns into a screen with no per-section layout code), and confirm/message modals. The `.env` parser round-trips a file byte-for-byte on a no-op edit and only ever rewrites the keys actually changed.
+
 # ANetBBS v1.0.19 — Web UI performance pass: message rendering, boards, echomail, wiki, file areas (August 2026)
 
 **The trigger: a single echomail message with a large ANSI-art body was taking 30+ seconds to load.** Root cause was an O(n²) bug in `reflow_hard_wrapped_body()` (the code that rejoins hard-wrapped FTN message lines) — for a long run of qualifying lines with no blank-line/art/list breaks, it folded the whole run into one ever-growing string and then re-scanned that *entire* string on every single line join, twice over (once for a trailing-word regex, once for an art-detection regex). Confirmed 32.7s on a synthetic body shaped like the real report; bounding both re-scans to a small fixed window instead of the whole string dropped that to 0.23s — about 140x faster, with all existing tests still passing.
