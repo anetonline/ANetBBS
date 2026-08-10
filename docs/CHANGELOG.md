@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.27`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.28`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.28 — PETSCII new-user registration fixes (August 2026)
+
+**The `newuser` welcome banner displayed as literal garbage on PETSCII — real bug found live on the Pi.** `_show_ansi_screen()` writes raw CP437/ANSI bytes directly to the socket, bypassing `write()`'s petscii translation branch entirely — the exact same limitation already guarded against for the `'welcome'` and `'goodbye'` screen slots, just missed for `'newuser'`. A real PETSCII session saw the sysop's `newuser.ans` banner as literal `ESC[...m` escape codes with case-inverted text instead of a rendered screen. Fixed with the same `if self.term_mode != 'petscii'` guard already used for the other two slots — "Registration successful!" (which already goes through `write()` correctly) still confirms the account was created; petscii users just don't get the customizable ANSI banner, the same tradeoff already accepted for `'welcome'`/`'goodbye'`.
+
+**Security-question and newuser-questionnaire prompts broke mid-word on a 40-column PETSCII screen — another real bug from the same screenshots.** These prompts were written as long unwrapped lines via `session.write()` and left to the terminal's own hardware auto-wrap, with no word-boundary awareness. New `_prompt_width()`/`_wrap_text_lines()` helpers in `session.py` (petscii_width-aware, falling back to window_size/80 for every other term_mode) now word-wrap the security-question list, the "Question N of 3" selection prompt, and the sysop-defined newuser questionnaire prompts.
 
 ## v1.0.27 — ASCII MRC chat client; word-wrap fix for embedded newlines (August 2026)
 

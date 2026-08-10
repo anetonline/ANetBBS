@@ -1,3 +1,9 @@
+# ANetBBS v1.0.28 — PETSCII new-user registration fixes (August 2026)
+
+**The newuser welcome banner showed as literal garbage on PETSCII.** `_show_ansi_screen()` writes raw ANSI bytes straight to the socket, bypassing petscii translation — same limitation already guarded for the 'welcome'/'goodbye' screens, just missed for 'newuser'. Fixed with the same guard; "Registration successful!" still confirms account creation correctly.
+
+**Security-question and newuser-questionnaire prompts broke mid-word at 40 columns.** These were written as long unwrapped lines with no word-boundary awareness. Fixed with new petscii_width-aware wrap helpers in session.py.
+
 # ANetBBS v1.0.27 — ASCII MRC chat client; word-wrap fix for embedded newlines (August 2026)
 
 **New: MRC chat for plain ASCII sessions.** `ascii` has always been a selectable terminal mode, but MRC never had a client for it — sessions got the full ANSI split-screen `MRCChat`, and `session.write()` strips every ANSI escape sequence for ascii mode, so that client's cursor-addressed layout was silently dropped entirely. New `AsciiMRCChat` (same plain-scroll-mode pattern as `PetsciiMRCChat`, simpler since there's no PETSCII case-inversion or color translation to worry about) is now wired into `chat.py`'s `ChatManager` for `term_mode == 'ascii'` sessions.

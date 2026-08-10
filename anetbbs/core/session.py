@@ -3,12 +3,42 @@ import asyncio
 import logging
 import os
 import re
+import textwrap
 from datetime import datetime
 from .tz import fmt_eastern
 from typing import Dict, Optional, Any
 
 _ANSI_ESC_RE   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 _ANSI_ESC_RE_B = re.compile(rb'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def _prompt_width(session) -> int:
+    """Terminal width for wrapping long registration/questionnaire
+    prompts -- petscii_width takes priority (a real C64 screen's width
+    is fixed; window_size is normally 80x24 there regardless of the
+    actual 40/80-col session, see petscii_ui.py's own _width() helper),
+    falling back to window_size[0], then 80."""
+    w = getattr(session, 'petscii_width', None)
+    if w:
+        return w
+    ws = getattr(session, 'window_size', None)
+    try:
+        return int(ws[0]) if ws else 80
+    except (TypeError, ValueError, IndexError):
+        return 80
+
+
+def _wrap_text_lines(text: str, width: int) -> list:
+    """Word-wrap *text* to *width* columns, one physical line per list
+    entry. Real bug found live on the Pi (PETSCII, 40 columns): long
+    security-question / newuser-questionnaire prompts were written as a
+    single unwrapped line each and left to the terminal's own hardware
+    auto-wrap, which breaks mid-word with no word-boundary awareness."""
+    width = max(10, width)
+    lines = []
+    for para in (text or '').split('\n'):
+        lines.extend(textwrap.wrap(para, width) or [''])
+    return lines
 
 # Synchronet-style spinning cursor (User.cursor_style == 'spinning') --
 # rotates while genuinely idle waiting for the next keystroke, then
@@ -1032,19 +1062,32 @@ class BBSSession:
             return
         from ..models import SECURITY_QUESTIONS
 
-        await self.write(
-            "\r\n\x1b[1;36m=== Password Recovery Security Questions ===\x1b[0m\r\n"
-            "These are used if you ever need to reset your password.\r\n\r\n"
-        )
+        wrap_width = max(20, _prompt_width(self))
+        header = '\r\n'.join(_wrap_text_lines(
+            '=== Password Recovery Security Questions ===', wrap_width))
+        intro = '\r\n'.join(_wrap_text_lines(
+            'These are used if you ever need to reset your password.', wrap_width))
+        await self.write(f"\r\n\x1b[1;36m{header}\x1b[0m\r\n{intro}\r\n\r\n")
+        indent = ' ' * 6  # matches the visible width of "  NN. " below
+        wrap_width = max(20, wrap_width - len(indent))
         for i, q in enumerate(SECURITY_QUESTIONS, 1):
-            await self.write(f"  \x1b[33m{i:2}.\x1b[0m {q}\r\n")
+            wrapped = _wrap_text_lines(q, wrap_width)
+            await self.write(f"  \x1b[33m{i:2}.\x1b[0m {wrapped[0]}\r\n")
+            for cont in wrapped[1:]:
+                await self.write(f"{indent}{cont}\r\n")
 
         qa_pairs = []
         used = set()
         for slot in range(1, 4):
             while True:
-                await self.write(f"\r\n\x1b[1mQuestion {slot} of 3\x1b[0m"
-                                 f" — enter a number (1-{len(SECURITY_QUESTIONS)}): ")
+                q_prefix = f"Question {slot} of 3"
+                q_suffix = f" — enter a number (1-{len(SECURITY_QUESTIONS)}): "
+                q_wrapped = _wrap_text_lines(q_prefix + q_suffix, _prompt_width(self))
+                # Bold only the "Question N of 3" portion -- always the
+                # start of the first wrapped line, since word-wrap never
+                # reorders characters, only breaks between them.
+                q_wrapped[0] = f"\x1b[1m{q_prefix}\x1b[0m" + q_wrapped[0][len(q_prefix):]
+                await self.write("\r\n" + "\r\n".join(q_wrapped))
                 raw = await self.read_line("")
                 raw = raw.strip()
                 if not raw.isdigit():
@@ -1058,7 +1101,9 @@ class BBSSession:
                     await self.write("\r\nYou already used that question — choose a different one.\r\n")
                     continue
                 question = SECURITY_QUESTIONS[idx]
-                answer = await self.read_line(f"{question}\r\nYour answer: ")
+                wrapped_question = '\r\n'.join(
+                    _wrap_text_lines(question, _prompt_width(self)))
+                answer = await self.read_line(f"{wrapped_question}\r\nYour answer: ")
                 answer = answer.strip()
                 if len(answer) < 2:
                     await self.write("\r\nAnswer too short (minimum 2 characters).\r\n")
@@ -1093,8 +1138,10 @@ class BBSSession:
                          "=== New User Questionnaire ===\x1b[0m\r\n")
         for qid, prompt, required in questions:
             tag = ' (required)' if required else ' (Enter to skip)'
+            wrapped_prompt = '\r\n'.join(
+                _wrap_text_lines(f'{prompt}{tag}: ', _prompt_width(self)))
             while True:
-                ans = await self.read_line(f'{prompt}{tag}: ')
+                ans = await self.read_line(wrapped_prompt)
                 if ans is None:
                     break
                 ans = ans.strip()
@@ -1620,7 +1667,18 @@ class BBSSession:
         result = self.user_manager.create_user(username, password, email)
         if result in ('ok', 'ok_pending'):
             await self.write("\r\nRegistration successful!\r\n")
-            await self._show_ansi_screen('newuser')
+            # _show_ansi_screen has no PETSCII-aware rendering -- it writes
+            # raw CP437/ANSI bytes directly to the socket, bypassing
+            # write()'s petscii branch -- same limitation already guarded
+            # against for the 'welcome' and 'goodbye' slots (see
+            # login_screen() and the disconnect path below); this call
+            # was simply missed. "Registration successful!" above already
+            # went through write() correctly, so petscii users still get
+            # a real confirmation, just not the sysop's customizable
+            # newuser.ans banner (same tradeoff already accepted for
+            # 'welcome'/'goodbye').
+            if self.term_mode != 'petscii':
+                await self._show_ansi_screen('newuser')
             # 'ok_pending' (NUV_ENABLED) means this account needs sysop
             # approval before it can log in -- use the ungated internal
             # lookup (safe: it's the account this same request just
