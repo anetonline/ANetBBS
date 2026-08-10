@@ -15,8 +15,9 @@ context required), via a module-level SQLAlchemy engine.
 """
 import os
 import logging
+import uuid
 from datetime import datetime
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, delete, update
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,10 @@ class SessionPresence:
         self.peer = (peer or '')[:45]
         self.protocol = protocol
         self._row_id = None
+        # Per-CONNECTION identity (see UserSession.session_key's own
+        # docstring) -- every SessionPresence instance is exactly one
+        # connection, so this is fresh every time, never looked up.
+        self._session_key = uuid.uuid4().hex
         # Mark as online immediately
         self.heartbeat()
 
@@ -65,27 +70,26 @@ class SessionPresence:
         try:
             with _Session() as s:
                 if self._row_id is None:
-                    # Find or create one row per user
-                    row = s.execute(
-                        select(UserSession).where(UserSession.user_id == self.user_id)
-                    ).scalar_one_or_none()
-                    if row is None:
-                        row = UserSession(
-                            user_id=self.user_id,
-                            ip_address=self.peer,
-                            user_agent=f'BBS/{self.protocol}',
-                            page=self.page,
-                            last_seen=datetime.utcnow(),
-                        )
-                        s.add(row)
-                        s.flush()
-                        self._row_id = row.id
-                    else:
-                        row.last_seen = datetime.utcnow()
-                        row.ip_address = self.peer
-                        row.user_agent = f'BBS/{self.protocol}'
-                        row.page = self.page
-                        self._row_id = row.id
+                    # Every SessionPresence instance represents exactly ONE
+                    # connection -- always insert a fresh row rather than
+                    # adopting whatever row already exists for this
+                    # user_id. Real bug found live: user_id used to be
+                    # UNIQUE, so a second simultaneous connection (e.g.
+                    # SSH while already logged in on the web) found and
+                    # overwrote the FIRST connection's row instead of
+                    # getting its own -- "who's online" only ever showed
+                    # one of the two.
+                    row = UserSession(
+                        user_id=self.user_id,
+                        session_key=self._session_key,
+                        ip_address=self.peer,
+                        user_agent=f'BBS/{self.protocol}',
+                        page=self.page,
+                        last_seen=datetime.utcnow(),
+                    )
+                    s.add(row)
+                    s.flush()
+                    self._row_id = row.id
                 else:
                     s.execute(
                         update(UserSession)
@@ -102,17 +106,25 @@ class SessionPresence:
         self.heartbeat()
 
     def disconnect(self):
-        """Mark the row as stale immediately (set last_seen to a long-ago time)
-        so the web's 5-minute online window drops them right away."""
+        """Remove this connection's row entirely.
+
+        Used to just mark the row stale (last_seen far in the past) so
+        the web's 5-minute online window would drop it -- fine when
+        user_id was unique and the row got reused/overwritten by this
+        user's next connection anyway. Now that UserSession supports
+        multiple rows per user (session_key), leaving a stale row
+        around forever would make the table grow unbounded over a
+        long-running install's lifetime instead of self-capping at one
+        row per user. The row's whole purpose ends when this connection
+        ends, so delete it outright. (Connections that never get a
+        clean disconnect -- dropped carrier, killed process -- are
+        caught by the events.handlers.cleanup_stale_sessions backstop
+        instead.)"""
         try:
             from anetbbs.models import UserSession
             with _Session() as s:
                 if self._row_id is not None:
-                    s.execute(
-                        update(UserSession)
-                        .where(UserSession.id == self._row_id)
-                        .values(last_seen=datetime(1970, 1, 1))
-                    )
+                    s.execute(delete(UserSession).where(UserSession.id == self._row_id))
                     s.commit()
         except Exception as exc:
             logger.debug('presence disconnect failed: %s', exc)

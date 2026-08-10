@@ -251,6 +251,35 @@ def security_check(app, params):
     return True, summary
 
 
+def cleanup_stale_sessions(app, params):
+    """Delete long-stale UserSession rows.
+
+    UserSession.user_id used to be unique=True (one row per user,
+    self-overwriting on every new connection), so this table could
+    never grow past the user count. That constraint was removed so
+    simultaneous connections for the same account (e.g. web + SSH at
+    once) each get their own row for "who's online" -- real bug found
+    live, reported by Jerry -- and a clean disconnect now DELETES its
+    own row (core/presence.py::SessionPresence.disconnect(),
+    web/auth.py's logout route) rather than just marking it stale.
+    Without a bound, a connection that never gets a clean disconnect
+    (browser closed, dropped carrier, killed process) would leave a
+    permanent row behind forever on a long-running install. This is
+    the backstop: anything untouched for `stale_days` (default 1) is
+    long past the 5-minute online window and safe to remove outright.
+    """
+    try:
+        from ..models import db, UserSession
+        from datetime import datetime, timedelta
+        stale_days = int((params or {}).get('stale_days', 1))
+        cutoff = datetime.utcnow() - timedelta(days=stale_days)
+        deleted = UserSession.query.filter(UserSession.last_seen < cutoff).delete()
+        db.session.commit()
+        return True, f'Deleted {deleted} stale session row(s) older than {stale_days}d'
+    except Exception as exc:  # noqa: BLE001
+        return False, f'cleanup_stale_sessions failed: {exc!r}'
+
+
 def hub_generate_nodelist(app, params):
     """Generate the ANotherNetwork nodelist and publish it into the
     ANN.FILES.NODELIST file area, replacing the prior copy, so peers can
@@ -331,6 +360,7 @@ REGISTRY: Dict[str, HandlerFn] = {
     'db_vacuum':            db_vacuum,
     'log_rotate':           log_rotate,
     'security_check':       security_check,
+    'cleanup_stale_sessions': cleanup_stale_sessions,
     'hub_generate_nodelist': hub_generate_nodelist,
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
@@ -345,6 +375,7 @@ HANDLER_META = {
     'db_vacuum':      ('SQLite VACUUM',          'Reclaim free pages + refresh planner stats. Off-peak.'),
     'log_rotate':     ('Rotate large logs',      'Roll any logs/*.log over the threshold to .1. Params: max_mb (default 50).'),
     'security_check': ('Security update check',  'apt + pip outdated scan, tags Ubuntu-security rows. Report at /admin/security/.'),
+    'cleanup_stale_sessions': ('Clean up stale online-presence rows', "Delete UserSession rows untouched for stale_days (default 1) -- catches connections that never got a clean disconnect (dropped carrier, killed process). Params: stale_days."),
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
@@ -384,5 +415,19 @@ DEFAULT_EVENTS = [
         # log rotation. Sysop can see the morning's apt + pip status
         # on the admin dashboard on first login of the day.
         'schedule_json': '{"kind": "daily", "time": "04:00"}',
+    },
+    {
+        'name': 'Clean up stale online-presence rows',
+        'handler_key': 'cleanup_stale_sessions',
+        'params_json': '{"stale_days": 1}',
+        # 05:00 UTC — after the other daily 03:30/04:00/04:45 jobs.
+        # Auto-seeded on every install (not just fresh ones, since
+        # ensure_default_events() only inserts rows whose handler_key
+        # isn't already present) because UserSession.user_id losing its
+        # unique=True constraint (see models.UserSession's docstring)
+        # means this table is no longer implicitly bounded to one row
+        # per user -- every install needs this backstop, not just new
+        # ones.
+        'schedule_json': '{"kind": "daily", "time": "05:00"}',
     },
 ]

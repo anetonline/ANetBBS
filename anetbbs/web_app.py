@@ -170,14 +170,32 @@ def create_app(config_name=None):
             # real route that merely starts with /static.
             if request.endpoint == 'static':
                 return
-            session = UserSession.query.filter_by(user_id=current_user.id).first()
-            if session is None:
-                session = UserSession(user_id=current_user.id)
-                db.session.add(session)
-            session.last_seen = datetime.utcnow()
-            session.ip_address = request.remote_addr
-            session.user_agent = request.user_agent.string[:255] if request.user_agent.string else None
-            session.page = request.path
+            # Real bug found live: this used to look up "the" UserSession
+            # row for this user_id (unique=True at the time) -- a second
+            # simultaneous connection for the same account (e.g. an SSH
+            # session while already logged in on the web) collided on
+            # that same row instead of getting its own, so "who's
+            # online" only ever showed whichever one wrote most
+            # recently. session_key -- a random token stashed once per
+            # browser session in the signed Flask session cookie, same
+            # stash-a-correlation-id idiom auth.py's login route already
+            # uses for caller_log_id -- gives each BROWSER SESSION (not
+            # just each protocol) its own row.
+            import uuid as _uuid
+            from flask import session as _flask_session
+            key = _flask_session.get('presence_session_key')
+            if not key:
+                key = _uuid.uuid4().hex
+                _flask_session['presence_session_key'] = key
+            user_session = UserSession.query.filter_by(session_key=key).first()
+            if user_session is None:
+                user_session = UserSession(user_id=current_user.id, session_key=key)
+                db.session.add(user_session)
+            user_session.user_id = current_user.id
+            user_session.last_seen = datetime.utcnow()
+            user_session.ip_address = request.remote_addr
+            user_session.user_agent = request.user_agent.string[:255] if request.user_agent.string else None
+            user_session.page = request.path
             try:
                 db.session.commit()
             except Exception:
@@ -222,7 +240,14 @@ def create_app(config_name=None):
         from datetime import timedelta
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
         try:
-            count = UserSession.query.filter(UserSession.last_seen >= five_min_ago).count()
+            # Distinct users, not raw UserSession rows -- one person
+            # connected via both web and SSH at once (now that
+            # UserSession supports more than one row per user, see
+            # models.UserSession's docstring) must still count as 1
+            # here, not 2.
+            count = (db.session.query(UserSession.user_id)
+                    .filter(UserSession.last_seen >= five_min_ago)
+                    .distinct().count())
         except Exception:
             count = 0
         return {'online_count': count}
@@ -972,6 +997,48 @@ def _lightweight_migrate(app):
                   'caller_log_id')
     _ensure_index('echomail_poll_logs', 'ix_echomail_poll_logs_node_id',
                   'node_id')
+
+    # Real bug found live: UserSession.user_id used to be unique=True --
+    # a hard one-row-per-user constraint, so a second simultaneous
+    # connection (e.g. SSH while already logged in on the web) found and
+    # overwrote the FIRST connection's row instead of getting its own;
+    # "who's online" only ever showed one of them. session_key (the
+    # auto-sweep above already added the bare column) is the new
+    # per-connection identity; drop the stale UNIQUE index on an
+    # upgrading install -- confirmed via schema inspection this is a
+    # separate `CREATE UNIQUE INDEX`, not an inline column constraint,
+    # so a plain DROP INDEX is safe and needs no table rebuild -- then
+    # let _ensure_index recreate a plain (non-unique) one under the
+    # SAME name so fresh-install and upgraded-install schemas converge.
+    # A fresh install never had the unique index (the model no longer
+    # declares unique=True), so this is a no-op there.
+    try:
+        existing_idx = {i['name']: i for i in insp.get_indexes('user_sessions')}
+        idx = existing_idx.get('ix_user_sessions_user_id')
+        if idx and idx.get('unique'):
+            # Drop + recreate in one connection/transaction rather than
+            # dropping here and relying on _ensure_index's own
+            # existence check below to notice and recreate it -- the
+            # `insp` object shared across this whole function caches
+            # reflection results from before the drop, so a later
+            # get_indexes() call through it can still report the
+            # just-dropped index as present, causing _ensure_index to
+            # wrongly skip recreating it (confirmed live while testing
+            # this migration).
+            with engine.begin() as conn:
+                conn.execute(_sa.text('DROP INDEX ix_user_sessions_user_id'))
+                conn.execute(_sa.text(
+                    'CREATE INDEX ix_user_sessions_user_id ON user_sessions (user_id)'))
+            app.logger.info(
+                'Replaced UNIQUE index on user_sessions.user_id with a plain '
+                'one -- multiple simultaneous connections per user are now supported')
+    except Exception as exc:
+        app.logger.warning('Could not migrate ix_user_sessions_user_id: %s', exc)
+    # No-op on an upgrading install (just handled above) or a fresh
+    # install (create_all() already created the plain index since the
+    # model no longer declares unique=True).
+    _ensure_index('user_sessions', 'ix_user_sessions_user_id', 'user_id')
+    _ensure_index('user_sessions', 'ix_user_sessions_session_key', 'session_key')
 
     # Ask Anet guru door: FTS5 search index over wiki_pages (SQLite only —
     # see anetbbs/guru/fts.py). Created empty here; fresh installs populate

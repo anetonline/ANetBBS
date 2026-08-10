@@ -11,7 +11,7 @@ from wtforms.validators import DataRequired, EqualTo, Length, Optional, Validati
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField as WTFFileField, FileAllowed
 from werkzeug.utils import secure_filename
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .validators import PermissiveEmail as Email
 from ..models import db, User, Post, Theme, UserSession, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue, get_builtin_field_config
@@ -29,11 +29,20 @@ def get_avatar_url(user):
 
 
 def is_user_online(user):
-    """Check if user is currently online (last seen within 5 minutes)"""
-    session = UserSession.query.filter_by(user_id=user.id).first()
-    if session and session.last_seen:
-        return (datetime.utcnow() - session.last_seen).total_seconds() < 300
-    return False
+    """Check if user is currently online (last seen within 5 minutes).
+
+    Real bug found live: this used to fetch ANY one UserSession row for
+    this user_id (no ordering) and check ITS last_seen -- fine back
+    when user_id was unique=True and there was only ever one row, but
+    with multiple rows now possible (see models.UserSession's
+    docstring), an arbitrary/stale row could get picked over a
+    genuinely-active one, reporting an online user as offline.
+    Rewritten as an existence check scoped to the window itself, so it
+    doesn't matter which (if any) row is fresh."""
+    cutoff = datetime.utcnow() - timedelta(minutes=5)
+    return UserSession.query.filter(
+        UserSession.user_id == user.id,
+        UserSession.last_seen >= cutoff).first() is not None
 
 
 class UpdateProfileForm(FlaskForm):

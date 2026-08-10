@@ -438,11 +438,31 @@ class WebGameWallet(db.Model):
 
 
 class UserSession(db.Model):
-    """Active user session tracking for online presence"""
+    """Active user session tracking for online presence.
+
+    One row per CONNECTION, not per user -- a user logged in via the
+    web AND SSH at once (or two browsers/tabs) gets one row each,
+    identified by session_key. user_id used to be unique=True (one row
+    per user, self-overwriting on every new connection); a real bug
+    found live (Jerry logged in via web + SSH simultaneously, "who's
+    online" only ever showed the web connection) traced to that
+    constraint -- the second connection's presence write found and
+    overwrote the first's row instead of getting its own. See
+    core/presence.py::SessionPresence and web_app.py::track_user_session()
+    for the two writers, and events/handlers.py::cleanup_stale_sessions
+    for the backstop that now bounds this table's growth (removing the
+    unique constraint means rows are no longer implicitly capped at one
+    per user)."""
     __tablename__ = 'user_sessions'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    # Per-connection identity (a random token, not tied to user_id) --
+    # lets each writer find/update ITS OWN row across repeated calls
+    # instead of "the" row for this user. Terminal: a fresh uuid4 per
+    # SessionPresence instance. Web: stashed in the signed Flask session
+    # cookie so it survives across requests within one browser session.
+    session_key = db.Column(db.String(64), nullable=True, index=True)
     # Indexed: web_app.py's inject_online_count() context processor runs
     # a `last_seen >= five_min_ago` range query on EVERY page view, from
     # every visitor, site-wide -- an unindexed full-table scan on that
@@ -452,18 +472,22 @@ class UserSession(db.Model):
     user_agent = db.Column(db.String(255))
     page = db.Column(db.String(255))
 
-    # Cascade-delete the session row when the user is deleted. Without
-    # this, SQLAlchemy defaults to "set FK to NULL" on user delete —
-    # but user_id is NOT NULL, so the parent delete blows up with
-    # `IntegrityError: NOT NULL constraint failed: user_sessions.user_id`.
+    # Cascade-delete this user's session row(s) when the user is
+    # deleted. Without this, SQLAlchemy defaults to "set FK to NULL" on
+    # user delete -- but user_id is NOT NULL, so the parent delete
+    # blows up with `IntegrityError: NOT NULL constraint failed:
+    # user_sessions.user_id`. Plural/list relationship (not
+    # uselist=False) since a user can now have more than one row; never
+    # read anywhere in the codebase (grepped clean) so renaming from
+    # the old singular `session` backref is a safe, zero-call-site change.
     user = db.relationship(
         'User',
-        backref=db.backref('session', uselist=False,
-                           cascade='all, delete-orphan'),
+        backref=db.backref('sessions', cascade='all, delete-orphan',
+                           lazy='dynamic'),
         lazy=True)
 
     def __repr__(self):
-        return f'<UserSession user_id={self.user_id}>'
+        return f'<UserSession user_id={self.user_id} session_key={self.session_key}>'
 
 
 class PrivateMessage(db.Model):

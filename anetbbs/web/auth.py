@@ -599,9 +599,23 @@ def logout():
                 db.session.commit()
     except Exception:
         db.session.rollback()
+    # Delete this browser session's presence row -- now that UserSession
+    # supports multiple rows per user (session_key, see model docstring),
+    # leaving it around after logout would just be a permanently stale
+    # row instead of self-overwriting on the next login the way the old
+    # unique=True design implicitly did.
+    try:
+        _sk = flask_session.get('presence_session_key')
+        if _sk:
+            from ..models import UserSession
+            UserSession.query.filter_by(session_key=_sk).delete()
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
     logout_user()
     _log_activity(uid, 'logout')
     flask_session.pop('caller_log_id', None)
+    flask_session.pop('presence_session_key', None)
     flash('You have been logged out.', 'info')
     return redirect(url_for('main.index'))
 

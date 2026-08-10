@@ -120,7 +120,13 @@ def dashboard():
         'total_posts': Post.query.count(),
         'total_boards': Board.query.count(),
         'total_messages': Message.query.count(),
-        'online_users': UserSession.query.filter(UserSession.last_seen >= five_min_ago).count(),
+        # Distinct users, not raw UserSession rows -- one person connected
+        # via both web and SSH at once must still count as 1 here, not 2
+        # (see models.UserSession's docstring for why multiple rows per
+        # user are now possible).
+        'online_users': (db.session.query(UserSession.user_id)
+                         .filter(UserSession.last_seen >= five_min_ago)
+                         .distinct().count()),
         'new_users_24h': User.query.filter(User.created_at >= one_day_ago).count(),
         'new_posts_24h': Post.query.filter(Post.created_at >= one_day_ago).count(),
         'pending_files': pending_files,

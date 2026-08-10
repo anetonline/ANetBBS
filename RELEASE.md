@@ -1,3 +1,9 @@
+# ANetBBS v1.0.23 — "Who's online" now shows every simultaneous connection per user (August 2026)
+
+**Fixed a real bug: a user logged in via both web and SSH at once only ever showed up once in "who's online."** `UserSession.user_id` was `unique=True` — a hard one-row-per-user constraint — so a second simultaneous connection overwrote the first's row instead of getting its own. Each connection now gets its own row (`session_key`, not `user_id`), and a clean disconnect deletes its own row instead of just marking it stale. Added a `cleanup_stale_sessions` scheduled-maintenance handler (auto-seeded on every install) as a backstop for connections that never disconnect cleanly.
+
+**Also fixed**: three "N users online" counters (navbar badge, admin dashboard, sysop stats screen) were counting raw connection rows instead of distinct users — would have double-counted anyone with two connections; and `profile.py`'s `is_user_online()` could report a genuinely-active user as offline by checking an arbitrary, possibly-stale session row.
+
 # ANetBBS v1.0.22 — Terminal echomail-reply network bug, live presence detail, activity log drill-down, echomail admin logging, calendar/board polish (August 2026)
 
 **Fixed a real bug: replying to an echomail message from the terminal never actually reached the network.** A fourth local-compose write path (`read_echo_area()`'s inline reply composer) never got the `toss_message()` fix the other three composers already had — a terminal reply looked fine locally but never queued for any downstream node. Also fixed: none of the three terminal/PETSCII composers set the FTN origin/tear line, unlike the web composer.

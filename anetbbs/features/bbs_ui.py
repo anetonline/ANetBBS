@@ -6178,7 +6178,7 @@ BBSMenuUI.sysop_callers = _sysop_callers
 
 async def _sysop_status(self):
     """Quick server-status snapshot for sysops (counts + recent activity)."""
-    from anetbbs.models import (User, UserSession, Post, Message as Bulletin,
+    from anetbbs.models import (db, User, UserSession, Post, Message as Bulletin,
                                 PrivateMessage, EchomailMessage, EchomailNetwork)
     from .ansi_ui import write_menu_art, banner, footer, FG, RESET, BOLD, prompt as _p, ui_width
     with _app().app_context():
@@ -6198,7 +6198,12 @@ async def _sysop_status(self):
         stats = {
             'Users total':      User.query.count(),
             'Active (30d)':     User.query.filter(User.last_login >= datetime.utcnow() - timedelta(days=30)).count(),
-            'Online now':       UserSession.query.filter(UserSession.last_seen >= five).count(),
+            # Distinct users, not raw UserSession rows -- someone
+            # connected via both web and terminal at once must still
+            # count as 1 (see models.UserSession's docstring).
+            'Online now':       (db.session.query(UserSession.user_id)
+                                 .filter(UserSession.last_seen >= five)
+                                 .distinct().count()),
             'Posts':            Post.query.count(),
             'Private msgs':     PrivateMessage.query.count(),
             'Bulletins':        Bulletin.query.count(),

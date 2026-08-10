@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.22`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.23`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.23 — "Who's online" now shows every simultaneous connection per user (August 2026)
+
+**Fixed a real bug: a user logged in via both web and SSH at once only ever showed up once in "who's online."** Root cause: `UserSession.user_id` was `unique=True` — a hard one-row-per-user constraint — so a second simultaneous connection's presence write found and overwrote the first connection's row instead of getting its own. Removed the constraint and gave each *connection* its own identity (`session_key`, not `user_id`): a fresh UUID per terminal session (`anetbbs/core/presence.py::SessionPresence`), and one stashed in the signed session cookie per browser session (`anetbbs/web_app.py::track_user_session()`). `/who/`, the terminal Who's Online screen, the admin control panel, and the sysop `whoison` console command all now correctly show one row per connection instead of one row per user.
+
+**Bounded the table's growth now that it's no longer implicitly capped at one row per user.** A clean disconnect (terminal `SessionPresence.disconnect()`, web logout) now deletes its own row outright instead of just marking it stale. For connections that never get a clean disconnect (dropped carrier, killed process, browser closed), a new scheduled-maintenance handler, `cleanup_stale_sessions`, deletes anything untouched for more than a day — auto-seeded on every install, not just fresh ones.
+
+**Fixed two related bugs found in the same audit**: three "N users online" counters (the site-wide navbar badge, the admin dashboard, and the terminal sysop stats screen) were counting raw connection rows rather than distinct users, which would have double-counted anyone with two connections open; and `profile.py`'s `is_user_online()` picked an arbitrary session row with no ordering, which could report a genuinely-active user as offline if an older, stale row for the same account happened to be checked instead.
 
 ## v1.0.22 — Terminal echomail-reply network bug, live presence detail, activity log drill-down, echomail admin logging, calendar/board polish (August 2026)
 
