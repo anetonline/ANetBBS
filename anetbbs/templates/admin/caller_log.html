@@ -2,6 +2,12 @@
 {% block title %}Caller Log{% endblock %}
 {% block content %}
 <div class="bbs-header"><h1><i class="bi bi-clock-history"></i> Caller Log</h1></div>
+<div class="mb-3">
+    <a href="{{ url_for('admin.activity') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-list-ul"></i> Full Activity Feed</a>
+    <a href="{{ url_for('lastcallers_admin.index') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-globe"></i> InterBBS Last Callers</a>
+</div>
 
 <form method="get" class="card p-3 mb-3">
     <div class="row g-2">
@@ -38,7 +44,7 @@
 </form>
 
 <table class="table table-sm">
-    <thead><tr><th>When</th><th>User</th><th>Service</th><th>IP</th><th>Country</th><th>Duration</th></tr></thead>
+    <thead><tr><th>When</th><th>User</th><th>Service</th><th>IP</th><th>Country</th><th>Duration</th><th></th></tr></thead>
     <tbody>
     {% for c in pagination.items %}
     <tr>
@@ -48,9 +54,11 @@
         <td><code>{{ c.ip_address or '' }}</code></td>
         <td><small>{{ c.country or '' }}</small></td>
         <td><small>{{ c.duration_seconds or 0 }}s</small></td>
+        <td><a href="{{ url_for('admin.caller_log_detail', caller_log_id=c.id) }}"
+               class="btn btn-sm btn-outline-primary">View Activity</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="text-muted">No matches.</td></tr>
+    <tr><td colspan="7" class="text-muted">No matches.</td></tr>
     {% endfor %}
     </tbody>
 </table>

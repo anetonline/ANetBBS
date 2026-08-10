@@ -1,3 +1,15 @@
+# ANetBBS v1.0.22 — Terminal echomail-reply network bug, live presence detail, activity log drill-down, echomail admin logging, calendar/board polish (August 2026)
+
+**Fixed a real bug: replying to an echomail message from the terminal never actually reached the network.** A fourth local-compose write path (`read_echo_area()`'s inline reply composer) never got the `toss_message()` fix the other three composers already had — a terminal reply looked fine locally but never queued for any downstream node. Also fixed: none of the three terminal/PETSCII composers set the FTN origin/tear line, unlike the web composer.
+
+**"Who's on" now shows real detail** (which door, which chat room, which menu section) instead of being frozen at "main" for the whole session — `SessionPresence.set_page()` was only ever called once, at login.
+
+**New per-session activity log with a drill-down** — click a caller-log entry to see a full timeline (login → menu actions → doors played/exited → chat sessions with duration → logout), built on the existing `UserActivity` table. Also fixed `CallerLog.duration_seconds`, which was never actually written before this.
+
+**Echomail admin logging**: poll logs filterable by downstream node, AreaFix log gained a from-address filter, and node detail pages gained a full File Area Subscriptions card (view/add/remove — didn't exist for file areas before).
+
+**Calendar**: sysop can now delete past events, not just upcoming ones. **Boards**: new "Recent Activity" sort option (web + terminal) alongside the existing manual order.
+
 # ANetBBS v1.0.21 — Critical fix: unbounded memory/CPU leak in the terminal service; PETSCII ANSI color translation (August 2026)
 
 **Critical live fix: `anetbbs.service` (telnet/SSH/rlogin/PETSCII/FTP) leaked memory and CPU without bound, growing to 19.8GB RAM and 99.7% CPU after ~7 hours with only a couple of concurrent sessions.** Root cause: `anetbbs/features/bbs_ui.py`'s `_app()` helper built a brand-new Flask app AND registered a brand-new SQLAlchemy engine/connection pool on every single call, never disposed. `anetbbs/core/session.py`'s sysop-kick watchdog polls this every 5 seconds for the entire lifetime of every logged-in session — over hours, with multiple concurrent sessions, that's tens of thousands of leaked engines. Same root shape as a BinkP connection leak fixed previously in this project, just never generalized to this helper. Fixed by caching the Flask app instead of rebuilding it per call — reusing one shared app across many `app_context()` pushes is the normal, correct Flask pattern (it's exactly what the web/gunicorn process already does); building a fresh one every call was the actual anomaly. Confirmed live: found via a user's real-time bug report ("I keep getting disconnected from MRC" + terminal lag), diagnosed from `systemctl status` output showing RAM climbing in real time, hotfixed directly to the live server before this packaged release.

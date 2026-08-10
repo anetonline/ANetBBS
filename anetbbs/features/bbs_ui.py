@@ -245,7 +245,9 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_boards(self):
-        from anetbbs.models import Board
+        from anetbbs.models import Board, Post, db
+        from sqlalchemy import func
+        from datetime import datetime as _dt
         from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
         with _app().app_context():
             _user_level = int((self.session.user or {}).get('access_level', 10))
@@ -254,21 +256,44 @@ class BBSMenuUI:
             if not _is_admin:
                 _bq = _bq.filter(Board.min_access_level <= _user_level)
             boards = _bq.order_by(Board.order, Board.name).all()
-            board_list = [(b.id, b.name, b.description or '', b.posts.count()) for b in boards]
+            board_ids = [b.id for b in boards]
+            # Terminal counterpart to boards.py's web ?sort=activity fix --
+            # Jerry: "recent posts are kind of hard to find... maybe a
+            # filter for order by date." 'A' toggles between the
+            # sysop-configured manual order and most-recent-post-first.
+            last_activity = {}
+            if board_ids:
+                last_activity = dict(
+                    db.session.query(Post.board_id, func.max(Post.created_at))
+                    .filter(Post.board_id.in_(board_ids))
+                    .group_by(Post.board_id).all())
+            board_list_default = [
+                (b.id, b.name, b.description or '', b.posts.count(),
+                 last_activity.get(b.id))
+                for b in boards]
 
-        if not board_list:
+        if not board_list_default:
             await self.session.write("\r\nNo boards configured yet.\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
+        sort_by_activity = False
+
+        def _current_list():
+            if sort_by_activity:
+                return sorted(board_list_default, key=lambda t: t[4] or _dt.min,
+                             reverse=True)
+            return board_list_default
+
         while True:
+            board_list = _current_list()
             _w = ui_width(self.session)
             # indent(2)+num(3)+sp(1) = 6 prefix; threads col = 16; spacing = 4
             _name_w = max(28, _w - 6 - 16 - 4)
             _desc_w = max(62, _w - 8)
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner('Message Boards', _w))
-            for i, (_, name, desc, count) in enumerate(board_list, 1):
+            for i, (_, name, desc, count, _last) in enumerate(board_list, 1):
                 await self.session.write(
                     f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET} "
                     f"{FG['grn']}{name:<{_name_w}}{RESET} "
@@ -277,13 +302,18 @@ class BBSMenuUI:
                     await self.session.write(
                         f"      {FG['dim']}{desc[:_desc_w]}{RESET}\r\n")
             await self.session.write(
-                f"\r\n  {FG['yel']}{BOLD}Q{RESET}{FG['gry']}.{RESET} "
+                f"\r\n  {FG['yel']}{BOLD}A{RESET}{FG['gry']}.{RESET} "
+                f"{FG['grn']}Sort: {'Recent Activity' if sort_by_activity else 'Category'}{RESET}"
+                f"  {FG['yel']}{BOLD}Q{RESET}{FG['gry']}.{RESET} "
                 f"{FG['red']}Return{RESET}\r\n")
             await self.session.write(footer(_w) + '\r\n')
             choice = (await self.session.read_line(
-                _prompt('Pick board (number / Q): ')) or '').strip()
+                _prompt('Pick board (number / A / Q): ')) or '').strip()
             if choice.upper() == 'Q' or not choice:
                 return
+            if choice.upper() == 'A':
+                sort_by_activity = not sort_by_activity
+                continue
             try:
                 idx = int(choice) - 1
                 if 0 <= idx < len(board_list):
@@ -1495,9 +1525,15 @@ class BBSMenuUI:
                         tagline_picker=lambda: _maybe_prompt_tagline(self))
                     if body_out and net_id:
                         with _app().app_context():
+                            from flask import current_app
                             from anetbbs.models import (
                                 db as _db2, EchomailMessage as _EM,
+                                EchoArea as _EA, EchomailNetwork as _ENet,
                                 maybe_tag_ansi_subject as _tag_ansi)
+                            _tear = current_app.config.get(
+                                'ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0')
+                            _origin = current_app.config.get(
+                                'ECHOMAIL_ORIGIN_LINE', 'ANetBBS')
                             em = _EM(
                                 area_id=area_id,
                                 network_id=net_id,
@@ -1506,10 +1542,29 @@ class BBSMenuUI:
                                 to_name=compose_to[:100],
                                 subject=_tag_ansi(compose_subj, body_out)[:200],
                                 body=body_out,
+                                tear_line=_tear,
+                                origin_line=_origin,
                                 direction='outbound',
                             )
                             _db2.session.add(em)
                             _db2.session.commit()
+                            saved_id = em.id
+
+                            # Same "local write path never queued anything"
+                            # gap _compose_echomail() was fixed for
+                            # (comment there has the full incident writeup)
+                            # -- a reply typed here went through a
+                            # completely separate code path that never got
+                            # the same fix, so it never left the hub at
+                            # all despite claiming to be "queued".
+                            from ..echomail.tosser import toss_message
+                            toss_message(saved_id)
+
+                            from ..echomail.notify_reply import maybe_notify_recipient
+                            _area_obj = _EA.query.get(area_id)
+                            _network_obj = _ENet.query.get(net_id)
+                            if _area_obj is not None and _network_obj is not None:
+                                maybe_notify_recipient(em, _area_obj, _network_obj)
                         await self.session.write(
                             f"\r\n  {FG['grn']}{BOLD}[OK] Message queued for next poll.{RESET}\r\n")
                         await self.session.read_line(
@@ -4158,6 +4213,9 @@ async def _compose_echomail(self):
         return
 
     with _app().app_context():
+        from flask import current_app
+        _tear = current_app.config.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0')
+        _origin = current_app.config.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS')
         em = EchomailMessage(
             area_id=area_id,
             network_id=network_id,
@@ -4166,6 +4224,8 @@ async def _compose_echomail(self):
             to_name=to_name[:100],
             subject=maybe_tag_ansi_subject(subject, body)[:200],
             body=body,
+            tear_line=_tear,
+            origin_line=_origin,
             direction='outbound',
         )
         db.session.add(em)

@@ -686,6 +686,7 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
         return
 
     with _app_ctx():
+        from flask import current_app
         from ..models import (db, EchoArea, EchomailNetwork, EchomailMessage,
                               maybe_tag_ansi_subject)
         area = EchoArea.query.get(area_id)
@@ -697,6 +698,8 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
             to_name=to_name[:100],
             subject=maybe_tag_ansi_subject(subject, body)[:200],
             body=body,
+            tear_line=current_app.config.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0'),
+            origin_line=current_app.config.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS'),
             direction='outbound',
         )
         db.session.add(msg)

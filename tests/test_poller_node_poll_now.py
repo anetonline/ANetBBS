@@ -139,6 +139,10 @@ class NodePollNowTests(unittest.TestCase):
                              'actual resolved network')
             self.assertEqual(log.status, 'success')
             self.assertEqual(log.messages_sent, 1)
+            self.assertEqual(log.node_id, node_id,
+                             'poll log must also record which node this '
+                             'hub-initiated poll was with, so the admin '
+                             'poll-log page can filter by node')
 
     def test_no_ack_leaves_hold_queue_message_pending(self):
         """result['sent'] == 0 (node didn't ack, e.g. SKIP/ERR/dropped

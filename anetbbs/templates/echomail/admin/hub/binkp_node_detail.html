@@ -158,6 +158,78 @@
     </div>
 </div>
 
+<!-- File area subscriptions -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-folder2-open"></i> File Area Subscriptions</span>
+        <span class="badge bg-primary">{{ file_subscribed_ids|length }} subscribed</span>
+    </div>
+    <div class="card-body p-0" style="max-height:360px; overflow-y:auto;">
+        {% if file_subscribed_ids %}
+        <table class="table table-striped table-sm mb-0">
+            <thead><tr><th>Tag</th><th>Name</th><th>Actions</th></tr></thead>
+            <tbody>
+                {% for area in all_file_areas %}
+                {% if area.id in file_subscribed_ids %}
+                <tr>
+                    <td><code>{{ area.tag }}</code></td>
+                    <td>{{ area.name or '' }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('hub_admin.binkp_file_subscribe', node_id=node.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="area_id" value="{{ area.id }}">
+                            <input type="hidden" name="action" value="unsubscribe">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">−</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center p-3 text-muted">No file-area subscriptions yet — add one below.</div>
+        {% endif %}
+    </div>
+    <div class="card-footer">
+        <a href="{{ url_for('admin.file_echo_subs', peer_address=node.ftn_address) }}" class="small">
+            View/manage all subscriptions for this node in File-Echo Subscriptions →</a>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Add File Area Subscription</span>
+        <form method="POST" action="{{ url_for('hub_admin.binkp_file_subscribe_all', node_id=node.id) }}"
+              onsubmit="return confirm('Subscribe {{ node.ftn_address }} to every active file area?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-check2-all"></i> Subscribe to All
+            </button>
+        </form>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('hub_admin.binkp_file_subscribe', node_id=node.id) }}" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="subscribe">
+            <div class="col-md-8">
+                <label class="form-label">File Area</label>
+                <select name="area_id" class="form-select">
+                    <option value="">— choose area —</option>
+                    {% for area in all_file_areas %}
+                    {% if area.id not in file_subscribed_ids %}
+                    <option value="{{ area.id }}">{{ area.tag }}{% if area.name %} ({{ area.name }}){% endif %}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Subscribe</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Hold queue controls -->
 {% if pending_count %}
 <div class="card mb-4 border-warning">

@@ -307,6 +307,10 @@ class DownstreamNodeImportNetworkIdTests(unittest.TestCase):
         self.assertEqual(log.network_id, 42)
         self.assertEqual(log.status, 'success')
         self.assertEqual(log.messages_received, 3)
+        self.assertEqual(log.node_id, 2,
+                         'EchomailPollLog.node_id must be populated for a '
+                         'downstream-node session, so the admin poll-log page '
+                         'can filter by node, not just by network')
 
     def test_downstream_node_on_default_identity_still_gets_none_handled_gracefully(self):
         # A node whose hub_identity is None (or has no matching

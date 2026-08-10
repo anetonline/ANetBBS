@@ -68,6 +68,7 @@
             <th>Service</th>
             <th>Source</th>
             <th>When</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -78,6 +79,8 @@
             <td>{{ c.service or '?' }}</td>
             <td>{% if c.origin_bbs %}<span class="badge bg-info text-dark" title="Imported via InterBBS Last Callers">{{ c.origin_bbs }}</span>{% else %}<span class="text-muted small">local</span>{% endif %}</td>
             <td><small>{{ c.started_at|eastern('%Y-%m-%d %H:%M', '?') }}</small></td>
+            <td>{% if not c.origin_bbs %}<a href="{{ url_for('admin.caller_log_detail', caller_log_id=c.id) }}"
+                   class="btn btn-sm btn-outline-primary">View Activity</a>{% endif %}</td>
         </tr>
         {% endfor %}
     </tbody>

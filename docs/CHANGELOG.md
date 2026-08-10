@@ -1,11 +1,25 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.21`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.22`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.22 — Terminal echomail-reply network bug, live presence detail, activity log drill-down, echomail admin logging, calendar/board polish (August 2026)
+
+**Fixed a real bug: replying to an echomail message from the terminal never actually reached the network.** `read_echo_area()`'s inline reply composer (`anetbbs/features/bbs_ui.py`) was a fourth local-compose write path into `EchomailMessage` that never got the `toss_message()` fix the other three composers (the dedicated Compose Echomail menu item, the web composer, and PETSCII's composer) already had — a terminal reply sat in the local DB, visible on read-back, but was never queued into any downstream node's hold queue at all. This is the exact bug Jerry hit replying to a test message on a real network. Also fixed: none of the three terminal/PETSCII composers set `tear_line`/`origin_line` (the FTN `* Origin:` footer), even though the web composer always has — all three now read `ECHOMAIL_TEAR_LINE`/`ECHOMAIL_ORIGIN_LINE` from config like the web route does.
+
+**"Who's on" now shows real detail instead of being frozen at "main" all session.** Root cause: `SessionPresence.set_page()` — the exact method built for this — was hardcoded to fire exactly once, at login, and never stored on the session for anything else to call again. Now updated from `menu_engine.py`'s central action dispatch (every top-level menu action: games, chat, boards, files, echo, pm, ...) plus finer detail from `games.py` (which door) and `mrc_chat.py` (which room) — both the terminal Who's Online command and the web `/who/` page benefit, along with the sysop's NodeSpy panel.
+
+**New per-session activity log with a real drill-down.** The caller log now has a "View Activity" link per session, showing a full chronological timeline — login, menu actions, doors played/exited, MRC chat sessions with duration, logout — built on the existing (but nearly unused) `UserActivity` audit table rather than a new system. Also fixed a bug found along the way: `CallerLog.duration_seconds` was declared on the model and shown in two admin templates but never actually written anywhere — every row showed 0s; both web and terminal sessions now record real duration on logout.
+
+**Echomail admin logging got substantially more detail**, all things Jerry specifically asked for after going through the hub over the weekend: poll logs are now filterable by downstream node, not just network; the AreaFix log gained a from-address (node) filter; and node detail pages gained a full File Area Subscriptions card — view what file areas a node is subscribed to and add/remove them, mirroring the existing message-area subscription UI, which didn't exist for file areas at all before this.
+
+**Calendar**: a sysop can now delete past events from the main calendar view, not just upcoming ones — the delete button simply never rendered for the "Recent past events" list.
+
+**Message boards**: added a "Recent Activity" sort option (web `?sort=activity`, terminal `A` hotkey) alongside the existing sysop-configured manual order, so recently-active boards are easy to find instead of requiring a scan of every category.
 
 ## v1.0.21 — Critical fix: unbounded memory/CPU leak in the terminal service; PETSCII ANSI color translation (August 2026)
 

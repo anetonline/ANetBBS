@@ -6,6 +6,10 @@
 <div class="bbs-header">
     <h1><i class="bi bi-clock-history"></i> User Activity Log</h1>
 </div>
+<div class="mb-3">
+    <a href="{{ url_for('admin.caller_log') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-clock-history"></i> Caller Log (per-session view)</a>
+</div>
 
 <form method="get" class="row g-2 mb-3">
     <div class="col-md-4">

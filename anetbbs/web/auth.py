@@ -17,7 +17,7 @@ from flask_wtf import FlaskForm
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
-                      UserActivity, UserSecurityAnswer, SECURITY_QUESTIONS,
+                      UserSecurityAnswer, SECURITY_QUESTIONS,
                       EmailVerifyToken, AutoBanConfig)
 from ..features.rate_limit import rate_limit
 
@@ -167,20 +167,26 @@ def _login_rate_exceeded():
     _auto_ban_ip(_client_ip())
 
 
-def _log_activity(user_id, activity_type, details=None):
-    """Record a UserActivity row. Best-effort — never raise on failure."""
-    try:
-        db.session.add(UserActivity(
-            user_id=user_id,
-            activity_type=activity_type,
-            details=details,
-            ip_address=_client_ip(),
-            user_agent=(request.headers.get('User-Agent') or '')[:255],
-            service='web',
-        ))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+def _log_activity(user_id, activity_type, details=None, caller_log_id=None):
+    """Record a UserActivity row. Best-effort — never raise on failure.
+
+    Thin, request-aware wrapper around the shared
+    anetbbs.core.activity_log.log_activity() (which has no `request`
+    dependency, so it can also be called from the asyncio terminal
+    session code — see Session._log_activity()). `caller_log_id`
+    defaults to whatever login session is active in flask_session
+    (stashed by the login route below), so every other existing call
+    site here (register, password reset, etc.) gets correlated to the
+    active session automatically without passing it explicitly.
+    """
+    from ..core.activity_log import log_activity
+    log_activity(
+        user_id, activity_type, details,
+        ip_address=_client_ip(),
+        user_agent=request.headers.get('User-Agent') or '',
+        service='web',
+        caller_log_id=caller_log_id if caller_log_id is not None
+                     else flask_session.get('caller_log_id'))
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -319,8 +325,12 @@ def login():
         user.update_login()
 
         login_user(user, remember=True)
-        _log_activity(user.id, 'login')
-        # Caller log row — best effort, never block the login.
+        # Caller log row — best effort, never block the login. Created
+        # BEFORE _log_activity('login') and its id stashed in
+        # flask_session so every UserActivity event logged for the rest
+        # of this login (here and at every other _log_activity() call
+        # site: register, password reset, etc.) correlates back to this
+        # session for the admin drill-down view.
         try:
             from ..models import CallerLog
             _cl = CallerLog(
@@ -328,6 +338,7 @@ def login():
                 service='web', ip_address=_client_ip())
             db.session.add(_cl)
             db.session.commit()
+            flask_session['caller_log_id'] = _cl.id
             try:
                 from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
                 post_lastcaller_to_interbbs(_cl)
@@ -335,6 +346,7 @@ def login():
                 pass
         except Exception:
             db.session.rollback()
+        _log_activity(user.id, 'login')
         try:
             from ..features.webhooks import fire
             fire('login', {'user': user.username, 'service': 'web'})
@@ -571,8 +583,25 @@ def register():
 def logout():
     """Logout the current user"""
     uid = current_user.id
+    # Fix for a real bug found live: CallerLog.duration_seconds was
+    # declared on the model and shown in two admin templates but never
+    # written anywhere -- every row showed 0s. Written here, before
+    # popping the correlation id, using the same flask_session-stashed
+    # CallerLog.id the login route above set.
+    try:
+        _cl_id = flask_session.get('caller_log_id')
+        if _cl_id:
+            from ..models import CallerLog
+            _cl = CallerLog.query.get(_cl_id)
+            if _cl is not None:
+                _cl.duration_seconds = int(
+                    (datetime.utcnow() - _cl.started_at).total_seconds())
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
     logout_user()
     _log_activity(uid, 'logout')
+    flask_session.pop('caller_log_id', None)
     flash('You have been logged out.', 'info')
     return redirect(url_for('main.index'))
 

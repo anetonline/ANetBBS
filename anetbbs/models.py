@@ -707,6 +707,16 @@ class EchomailPollLog(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     network_id = db.Column(db.Integer, db.ForeignKey('echomail_networks.id'), nullable=False, index=True)
+    # Which downstream BinkPNode this session was with -- NULL for a
+    # session against the network's own upstream hub (poller.py's
+    # poll_network_now), set for a session with a specific peer polling
+    # US as hub (binkp_server.py inbound) or us dialing OUT to a
+    # specific downstream node (poller.py's poll_node_now). Lets the
+    # admin poll-log page filter by node, not just by network -- a hub
+    # with several downstream nodes previously had no way to tell whose
+    # session a given log row was.
+    node_id = db.Column(db.Integer, db.ForeignKey('binkp_nodes.id'),
+                        nullable=True, index=True)
     poll_type = db.Column(db.String(10), default='both')  # 'send', 'receive', 'both'
     started_at = db.Column(db.DateTime, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime)
@@ -719,6 +729,8 @@ class EchomailPollLog(db.Model):
     # sysop see exactly what happened on the wire for a failed poll
     # without needing server log access. QWK polls leave this blank.
     transcript = db.Column(db.Text)
+
+    node = db.relationship('BinkPNode')
 
     def __repr__(self):
         return f'<EchomailPollLog network={self.network_id} status={self.status}>'
@@ -1268,8 +1280,10 @@ class UserActivity(db.Model):
 
     activity_type is a short slug. Common values:
       login, logout, register, post, post_reply, msg_sent, msg_read,
-      file_upload, file_download, door_played, chat_msg, profile_edit,
-      password_changed, theme_changed
+      file_upload, file_download, door_played, door_exited, chat_msg,
+      chat_entered, chat_exited, profile_edit, password_changed,
+      theme_changed, menu:<action_type> (one per top-level terminal
+      menu action -- games, chat, boards, files, echo, pm, etc.)
     """
     __tablename__ = 'user_activities'
 
@@ -1281,6 +1295,13 @@ class UserActivity(db.Model):
     ip_address = db.Column(db.String(45))
     user_agent = db.Column(db.String(255))
     service = db.Column(db.String(20))               # web/telnet/ssh/rlogin
+    # Correlates every event in one login session back to its CallerLog
+    # row, so the admin "caller log" list can drill into "everything this
+    # user did this session" instead of just showing a flat global feed.
+    # Nullable -- rows written before this column existed, and any event
+    # logged with no active login session (rare), have no correlation.
+    caller_log_id = db.Column(db.Integer, db.ForeignKey('caller_log.id'),
+                              nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow,
                            nullable=False, index=True)
 

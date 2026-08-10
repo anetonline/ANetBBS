@@ -574,6 +574,7 @@ def _do_poll_node(app, node):
 
     log = EchomailPollLog(
         network_id=network.id,
+        node_id=node.id,
         poll_type='both',
         started_at=datetime.utcnow(),
         status='running',

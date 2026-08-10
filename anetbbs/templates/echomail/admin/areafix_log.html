@@ -41,6 +41,11 @@
                     <option value="filefix" {% if bot_filter == 'filefix' %}selected{% endif %}>FileFix</option>
                 </select>
             </div>
+            <div class="col-md-3">
+                <label class="form-label form-label-sm">Filter by node (From address):</label>
+                <input type="text" name="from_address" value="{{ from_filter }}"
+                       class="form-control form-control-sm" placeholder="e.g. 1200:1/2">
+            </div>
             <div class="col-md-2">
                 <button class="btn btn-primary btn-sm">Filter</button>
             </div>
@@ -101,7 +106,7 @@
                 {% if pagination.has_prev %}
                 <li class="page-item">
                     <a class="page-link"
-                       href="?page={{ pagination.prev_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}">Prev</a>
+                       href="?page={{ pagination.prev_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}{% if from_filter %}&from_address={{ from_filter }}{% endif %}">Prev</a>
                 </li>
                 {% endif %}
                 <li class="page-item active">
@@ -112,7 +117,7 @@
                 {% if pagination.has_next %}
                 <li class="page-item">
                     <a class="page-link"
-                       href="?page={{ pagination.next_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}">Next</a>
+                       href="?page={{ pagination.next_num }}{% if network_filter %}&network_id={{ network_filter }}{% endif %}{% if bot_filter %}&bot={{ bot_filter }}{% endif %}{% if from_filter %}&from_address={{ from_filter }}{% endif %}">Next</a>
                 </li>
                 {% endif %}
             </ul>

@@ -536,6 +536,10 @@ class MRCChat(BaseChatSystem):
             f'\r\n\x1b[36mConnecting to MRC bridge at {bridge_url} ...\x1b[0m\r\n')
 
         self._aiohttp_session = aiohttp.ClientSession()
+        # Set before the try below so the finally: block can always check
+        # it -- a failed connect returns from inside the try without ever
+        # reaching the "chat_entered" line further down.
+        _chat_started = None
         try:
             try:
                 self._ws = await asyncio.wait_for(
@@ -580,6 +584,28 @@ class MRCChat(BaseChatSystem):
             await self._emit(
                 '\x1b[33mTip:\x1b[0m /identify <pass> if your handle is registered (MRC Trust).')
 
+            # "Who's on" detail: chat is a long-running activity
+            # menu_engine.py's dispatch point can't describe beyond "in
+            # chat" -- this is the one place that knows the room.
+            presence = getattr(self.session, 'presence', None)
+            if presence is not None:
+                try:
+                    presence.set_page(f'chat:mrc #{self._room}')
+                except Exception:
+                    pass
+            if hasattr(self.session, '_heartbeat_node'):
+                try:
+                    self.session._heartbeat_node(action=f'MRC chat: #{self._room}')
+                except Exception:
+                    pass
+            import time as _time
+            _chat_started = _time.monotonic()
+            if hasattr(self.session, '_log_activity'):
+                try:
+                    self.session._log_activity('chat_entered', f'mrc #{self._room}')
+                except Exception:
+                    pass
+
             self._recv_task = asyncio.create_task(self._recv_loop())
             self._ping_task = asyncio.create_task(self._ping_loop())
             self._ticker_task = asyncio.create_task(self._ticker_loop())
@@ -587,6 +613,20 @@ class MRCChat(BaseChatSystem):
         finally:
             await self._exit_split_screen()
             await self._disconnect()
+            presence = getattr(self.session, 'presence', None)
+            if presence is not None:
+                try:
+                    presence.set_page('chat')
+                except Exception:
+                    pass
+            if _chat_started is not None and hasattr(self.session, '_log_activity'):
+                try:
+                    _elapsed = int(_time.monotonic() - _chat_started)
+                    _mins = _elapsed // 60
+                    self.session._log_activity(
+                        'chat_exited', f'mrc #{self._room} ({_mins}m)')
+                except Exception:
+                    pass
 
     # ── Keepalive ping loop ──────────────────────────────────────────────────
 

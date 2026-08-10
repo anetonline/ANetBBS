@@ -964,6 +964,15 @@ def _lightweight_migrate(app):
             app.logger.warning('Could not create %s.%s unique index: %s',
                                _idx_table, _idx_col, exc)
 
+    # Activity-log drill-down (models.UserActivity.caller_log_id) and
+    # per-node echomail poll-log filtering (models.EchomailPollLog.node_id)
+    # -- both FK columns the auto-sweep above adds automatically, but
+    # index=True is never retroactive (see _ensure_index's own docstring).
+    _ensure_index('user_activities', 'ix_user_activities_caller_log_id',
+                  'caller_log_id')
+    _ensure_index('echomail_poll_logs', 'ix_echomail_poll_logs_node_id',
+                  'node_id')
+
     # Ask Anet guru door: FTS5 search index over wiki_pages (SQLite only —
     # see anetbbs/guru/fts.py). Created empty here; fresh installs populate
     # it naturally when seed_initial_pages() inserts wiki rows later in

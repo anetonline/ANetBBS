@@ -17,6 +17,12 @@
             <option value="{{ net.id }}" {% if network_filter == net.id %}selected{% endif %}>{{ net.name }}</option>
             {% endfor %}
         </select>
+        <select name="node_id" class="form-control form-control-sm" style="width:200px;">
+            <option value="">All Nodes</option>
+            {% for n in all_nodes %}
+            <option value="{{ n.id }}" {% if node_filter == n.id %}selected{% endif %}>{{ n.name }}</option>
+            {% endfor %}
+        </select>
         <button type="submit" class="btn btn-primary btn-sm">Filter</button>
     </form>
 </div>
@@ -27,7 +33,7 @@
         <table class="table table-striped mb-0">
             <thead>
                 <tr>
-                    <th>Network</th><th>Started</th><th>Completed</th>
+                    <th>Network</th><th>Node</th><th>Started</th><th>Completed</th>
                     <th>Type</th><th>Status</th><th>Sent</th><th>Received</th><th>Error</th><th></th>
                 </tr>
             </thead>
@@ -35,6 +41,7 @@
                 {% for log in logs %}
                 <tr data-status="{{ log.status }}" {% if log.status == 'running' %}class="table-warning"{% endif %}>
                     <td>{{ log.network.name }}</td>
+                    <td>{{ log.node.name if log.node else '—' }}</td>
                     <td style="font-size:0.8rem; white-space:nowrap;">{{ log.started_at|eastern('%Y-%m-%d %H:%M:%S') }}</td>
                     <td style="font-size:0.8rem; white-space:nowrap;">
                         {{ log.completed_at|eastern('%H:%M:%S', '—') }}
@@ -81,13 +88,13 @@
     <ul class="pagination justify-content-center">
         {% if pagination.has_prev %}
         <li class="page-item">
-            <a class="page-link" href="{{ url_for('echomail_admin.logs', page=pagination.prev_num, network_id=network_filter or '') }}">‹ Prev</a>
+            <a class="page-link" href="{{ url_for('echomail_admin.logs', page=pagination.prev_num, network_id=network_filter or '', node_id=node_filter or '') }}">‹ Prev</a>
         </li>
         {% endif %}
         {% for p in pagination.iter_pages() %}
             {% if p %}
             <li class="page-item {{ 'active' if p == pagination.page else '' }}">
-                <a class="page-link" href="{{ url_for('echomail_admin.logs', page=p, network_id=network_filter or '') }}">{{ p }}</a>
+                <a class="page-link" href="{{ url_for('echomail_admin.logs', page=p, network_id=network_filter or '', node_id=node_filter or '') }}">{{ p }}</a>
             </li>
             {% else %}
             <li class="page-item disabled"><span class="page-link">…</span></li>
@@ -95,7 +102,7 @@
         {% endfor %}
         {% if pagination.has_next %}
         <li class="page-item">
-            <a class="page-link" href="{{ url_for('echomail_admin.logs', page=pagination.next_num, network_id=network_filter or '') }}">Next ›</a>
+            <a class="page-link" href="{{ url_for('echomail_admin.logs', page=pagination.next_num, network_id=network_filter or '', node_id=node_filter or '') }}">Next ›</a>
         </li>
         {% endif %}
     </ul>

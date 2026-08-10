@@ -50,6 +50,13 @@ class ReplyForm(FlaskForm):
 @boards_bp.route('/')
 def list_boards():
     """List all message boards"""
+    # Real gap found live: boards always sorted by the admin-configured
+    # manual Board.order field, with no way to see which boards actually
+    # have recent activity without scanning every category by eye --
+    # Jerry: "recent posts are kind of hard to find... maybe a filter
+    # for order by date." ?sort=activity reorders boards (within their
+    # existing category groups) by most-recent-post-first instead.
+    sort_mode = (request.args.get('sort') or 'category').strip()
     boards = [b for b in
              Board.query.filter_by(is_active=True).order_by(Board.order).all()
              if evaluate_access(current_user, b.min_access_level)]
@@ -85,6 +92,16 @@ def list_boards():
             .filter(Post.board_id.in_(board_ids), Post.parent_id.isnot(None))
             .group_by(Post.board_id).all())
 
+    last_activity = {}
+    if board_ids:
+        last_activity = dict(
+            db.session.query(Post.board_id, func.max(Post.created_at))
+            .filter(Post.board_id.in_(board_ids))
+            .group_by(Post.board_id).all())
+    if sort_mode == 'activity':
+        boards = sorted(boards, key=lambda b: last_activity.get(b.id) or datetime.min,
+                        reverse=True)
+
     unread_counts = {}
     if board_ids and current_user.is_authenticated:
         # Each board has its own "since" threshold (or none), so this is
@@ -106,6 +123,7 @@ def list_boards():
             'post_count': post_counts.get(board.id, 0),
             'reply_count': reply_counts.get(board.id, 0),
             'unread': unread_counts.get(board.id, 0),
+            'last_activity': last_activity.get(board.id),
         }
         for board in boards
     }
@@ -120,7 +138,8 @@ def list_boards():
                   key=lambda k: (0 if k == 'General' else 1, k.lower()))
     grouped = [(c, by_category[c]) for c in cats]
     return render_template('boards/list.html', boards=boards,
-                           board_stats=board_stats, grouped=grouped)
+                           board_stats=board_stats, grouped=grouped,
+                           sort_mode=sort_mode)
 
 
 @boards_bp.route('/<int:board_id>')

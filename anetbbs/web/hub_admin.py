@@ -29,7 +29,8 @@ from flask_wtf import FlaskForm
 from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNode, QWKNodeLastSent, EchoArea, EchomailNetwork,
                        QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest,
-                       HubIdentity, _default_hub_identity_id)
+                       HubIdentity, _default_hub_identity_id,
+                       FileEchoSubscription, FileArea)
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -497,6 +498,15 @@ def binkp_node_detail(node_id):
     binkp_networks = (EchomailNetwork.query
                       .filter_by(is_active=True, network_type='binkp')
                       .order_by(EchomailNetwork.name).all())
+    # File-area subscriptions for this node -- keyed by peer_address
+    # (a raw FTN-address string, not a BinkPNode FK) rather than a
+    # dedicated FileAreaNode table; safe because BinkPNode.ftn_address
+    # is unique=True and both this and FileFix's own node-matching
+    # (filefix.py) already treat the address as the shared identity.
+    file_subscribed_ids = {
+        s.file_area_id for s in
+        FileEchoSubscription.query.filter_by(peer_address=node.ftn_address).all()}
+    all_file_areas = FileArea.query.filter_by(is_active=True).order_by(FileArea.tag).all()
     return render_template(
         'echomail/admin/hub/binkp_node_detail.html',
         node=node,
@@ -505,6 +515,8 @@ def binkp_node_detail(node_id):
         hold_entries=hold_entries,
         pending_count=pending_count,
         binkp_networks=binkp_networks,
+        file_subscribed_ids=file_subscribed_ids,
+        all_file_areas=all_file_areas,
     )
 
 
@@ -645,6 +657,70 @@ def binkp_subscribe_all(node_id):
         flash(f'Subscribed {node.ftn_address} to {added} area(s).', 'success')
     else:
         flash(f'{node.ftn_address} is already subscribed to every area on the selected network(s).', 'info')
+    return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
+
+
+@hub_admin_bp.route('/binkp/<int:node_id>/file-subscribe', methods=['POST'])
+@login_required
+@_admin_required
+def binkp_file_subscribe(node_id):
+    """Add or remove FILE area subscriptions for a BinkP node -- the
+    file-area counterpart to binkp_subscribe() above. Real gap found:
+    a sysop could see message-area subscriptions per node and
+    add/remove them, but had no equivalent for file areas at all --
+    only a disconnected, node-agnostic flat list at admin.file_echo_subs.
+    Keyed by peer_address (see binkp_node_detail()'s own comment on
+    why no FileAreaNode FK table was needed)."""
+    node = BinkPNode.query.get_or_404(node_id)
+    area_id = request.form.get('area_id', type=int)
+    action = request.form.get('action', 'subscribe')
+    if not area_id:
+        abort(400)
+    area = FileArea.query.get_or_404(area_id)
+
+    if action == 'subscribe':
+        existing = FileEchoSubscription.query.filter_by(
+            file_area_id=area_id, peer_address=node.ftn_address).first()
+        if not existing:
+            db.session.add(FileEchoSubscription(
+                file_area_id=area_id, peer_address=node.ftn_address))
+            db.session.commit()
+            flash(f'Subscribed {node.ftn_address} to file area {area.tag}.', 'success')
+    elif action == 'unsubscribe':
+        row = FileEchoSubscription.query.filter_by(
+            file_area_id=area_id, peer_address=node.ftn_address).first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+            flash(f'Unsubscribed {node.ftn_address} from file area {area.tag}.', 'success')
+
+    return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
+
+
+@hub_admin_bp.route('/binkp/<int:node_id>/file-subscribe-all', methods=['POST'])
+@login_required
+@_admin_required
+def binkp_file_subscribe_all(node_id):
+    """Subscribe a node to every active file area in one click --
+    file-area counterpart to binkp_subscribe_all(). No network scoping
+    needed (unlike the echo-area version): FileArea isn't necessarily
+    tied to a single echomail network the way EchoArea is."""
+    node = BinkPNode.query.get_or_404(node_id)
+    already = {s.file_area_id for s in
+              FileEchoSubscription.query.filter_by(peer_address=node.ftn_address).all()}
+    areas = FileArea.query.filter_by(is_active=True).all()
+    added = 0
+    for area in areas:
+        if area.id in already:
+            continue
+        db.session.add(FileEchoSubscription(
+            file_area_id=area.id, peer_address=node.ftn_address))
+        added += 1
+    if added:
+        db.session.commit()
+        flash(f'Subscribed {node.ftn_address} to {added} file area(s).', 'success')
+    else:
+        flash(f'{node.ftn_address} is already subscribed to every active file area.', 'info')
     return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
 
 

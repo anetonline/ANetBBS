@@ -14,7 +14,7 @@ from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
 
 from ..models import (db, EchomailNetwork, EchoArea, EchomailMessage,
-                       EchomailPollLog, BadAreaLog, UserAka)
+                       EchomailPollLog, BadAreaLog, UserAka, BinkPNode)
 
 echomail_admin_bp = Blueprint('echomail_admin', __name__, url_prefix='/admin/echomail')
 
@@ -852,20 +852,26 @@ def bulk_import():
 def logs():
     page = request.args.get('page', 1, type=int)
     network_filter = request.args.get('network_id', type=int)
+    node_filter = request.args.get('node_id', type=int)
 
     query = EchomailPollLog.query
     if network_filter:
         query = query.filter_by(network_id=network_filter)
+    if node_filter:
+        query = query.filter_by(node_id=node_filter)
 
     pagination = query.order_by(EchomailPollLog.started_at.desc())\
         .paginate(page=page, per_page=50, error_out=False)
 
     all_networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
+    all_nodes = BinkPNode.query.order_by(BinkPNode.name).all()
     return render_template('echomail/admin/logs.html',
                            logs=pagination.items,
                            pagination=pagination,
                            all_networks=all_networks,
-                           network_filter=network_filter)
+                           all_nodes=all_nodes,
+                           network_filter=network_filter,
+                           node_filter=node_filter)
 
 
 @echomail_admin_bp.route('/logs/<int:log_id>/transcript')
@@ -1204,12 +1210,15 @@ def areafix_log():
     page = request.args.get('page', 1, type=int)
     network_filter = request.args.get('network_id', type=int)
     bot_filter = (request.args.get('bot') or '').strip()
+    from_filter = (request.args.get('from_address') or '').strip()
 
     q = AreafixLog.query
     if network_filter:
         q = q.filter_by(network_id=network_filter)
     if bot_filter in ('areafix', 'filefix'):
         q = q.filter_by(bot=bot_filter)
+    if from_filter:
+        q = q.filter(AreafixLog.from_address.ilike(f'%{from_filter}%'))
     pagination = (q.order_by(AreafixLog.created_at.desc())
                   .paginate(page=page, per_page=50, error_out=False))
     networks = {n.id: n for n in EchomailNetwork.query.all()}
@@ -1219,7 +1228,8 @@ def areafix_log():
                            networks=networks,
                            all_networks=list(networks.values()),
                            network_filter=network_filter,
-                           bot_filter=bot_filter)
+                           bot_filter=bot_filter,
+                           from_filter=from_filter)
 
 
 @echomail_admin_bp.route('/akas', methods=['GET', 'POST'])

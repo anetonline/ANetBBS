@@ -46,6 +46,12 @@
         {% for e in past %}
             <li class="list-group-item text-muted">
                 {{ e.title }} — {{ e.starts_at|eastern('%Y-%m-%d') }}
+                {% if current_user.is_authenticated and (current_user.is_admin or e.created_by_id == current_user.id) %}
+                <form method="post" action="{{ url_for('calendar.delete', event_id=e.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                </form>
+                {% endif %}
             </li>
         {% endfor %}
         </ul>

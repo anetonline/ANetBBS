@@ -267,6 +267,31 @@ class GameManager:
         builtin_python games are called directly (no subprocess).
         Other game types use the PTY path."""
 
+        # "Who's on" detail: menu_engine.py's dispatch only knows the user
+        # picked the generic "games" action -- this is the one place that
+        # knows WHICH game, so it's the natural spot to set the finer-
+        # grained presence page Jerry asked for ("playing Lord" instead of
+        # just "in games").
+        presence = getattr(self.session, 'presence', None)
+        if presence is not None:
+            try:
+                presence.set_page(f'games:{game_dict.get("name", "?")}')
+            except Exception:
+                pass
+        if hasattr(self.session, '_heartbeat_node'):
+            try:
+                self.session._heartbeat_node(action=f'door: {game_dict.get("name", "?")}')
+            except Exception:
+                pass
+
+        import time as _time
+        _launch_started = _time.monotonic()
+        if hasattr(self.session, '_log_activity'):
+            try:
+                self.session._log_activity('door_played', game_dict.get('name', '?'))
+            except Exception:
+                pass
+
         # builtin_python — pure Python game, no subprocess or door runner needed.
         if game_dict.get('game_type') == 'builtin_python':
             module_path = game_dict.get('web_game_module', '')
@@ -286,6 +311,20 @@ class GameManager:
                 logger.exception('builtin_python game error: %s', exc)
                 await self.session.write(f"\r\nError launching game: {exc}\r\n")
                 await self.session.read_line("\r\nPress Enter...")
+            finally:
+                if presence is not None:
+                    try:
+                        presence.set_page('games')
+                    except Exception:
+                        pass
+                if hasattr(self.session, '_log_activity'):
+                    try:
+                        _elapsed = int(_time.monotonic() - _launch_started)
+                        self.session._log_activity(
+                            'door_exited',
+                            f'{game_dict.get("name", "?")} ({_elapsed}s)')
+                    except Exception:
+                        pass
             return
 
         from flask import Flask
@@ -326,6 +365,20 @@ class GameManager:
             logger.exception('Door game error: %s', exc)
             await self.session.write(f"\r\nError launching game: {exc}\r\n")
             await self.session.read_line("\r\nPress Enter...")
+        finally:
+            if presence is not None:
+                try:
+                    presence.set_page('games')
+                except Exception:
+                    pass
+            if hasattr(self.session, '_log_activity'):
+                try:
+                    _elapsed = int(_time.monotonic() - _launch_started)
+                    self.session._log_activity(
+                        'door_exited',
+                        f'{game_dict.get("name", "?")} ({_elapsed}s)')
+                except Exception:
+                    pass
 
     async def play_number_guess(self):
         """Built-in number guessing — no door, pure session I/O."""

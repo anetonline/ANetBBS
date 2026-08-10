@@ -1166,6 +1166,34 @@ class BBSSession:
         except Exception:
             pass
 
+    def _log_activity(self, activity_type, details=None):
+        """Write a UserActivity row for this session, correlated to its
+        CallerLog row (self._caller_log_id, set at login above) so the
+        admin caller-log drill-down can show a full per-session timeline
+        -- the terminal-side counterpart to web/auth.py's _log_activity().
+        Best-effort, same as _heartbeat_node()/_close_node_activity()
+        above."""
+        if not getattr(self, 'user', None):
+            return
+        try:
+            from ..features.bbs_ui import _app
+            from .activity_log import log_activity
+            peer_ip = ''
+            try:
+                addr = self.writer.get_extra_info('peername')
+                if addr:
+                    peer_ip = addr[0] if isinstance(addr, tuple) else str(addr)
+            except Exception:
+                pass
+            with _app().app_context():
+                log_activity(
+                    self.user['id'], activity_type, details,
+                    ip_address=peer_ip,
+                    service=getattr(self, '_proto', None),
+                    caller_log_id=getattr(self, '_caller_log_id', None))
+        except Exception:
+            pass
+
     def _close_node_activity(self):
         """Delete the NodeActivity row for this session."""
         if not getattr(self, '_node_activity_id', None):
@@ -2161,6 +2189,10 @@ class BBSSession:
             wname = type(self.writer).__name__.lower()
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
+            # Stored on self so menu_engine.py/games.py/mrc_chat.py can
+            # update it after the initial set_page('main') below -- see
+            # menu_engine.py's dispatch point for why this was needed.
+            self.presence = presence
 
             # Caller log row — best effort, never block login. Mirrors
             # web/auth.py's login route, which already does this for web
@@ -2182,6 +2214,12 @@ class BBSSession:
                         ip_address=_ip)
                     _db.session.add(_cl)
                     _db.session.commit()
+                    # Stashed for the activity-log drill-down (correlates
+                    # every UserActivity event this session logs back to
+                    # this CallerLog row) and for writing duration_seconds
+                    # on the way out, in the finally: block below.
+                    self._caller_log_id = _cl.id
+                    self._proto = proto
                     try:
                         from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
                         post_lastcaller_to_interbbs(_cl)
@@ -2319,6 +2357,27 @@ class BBSSession:
                     pass
             if presence is not None:
                 presence.disconnect()
+            # Fix for a real bug found live: CallerLog.duration_seconds
+            # was declared on the model and shown in two admin templates
+            # but never written anywhere for ANY protocol -- every row
+            # showed 0s. Covers every exit path uniformly since this is
+            # the same finally: block presence.disconnect() already runs
+            # from (explicit logoff, idle timeout, dropped carrier,
+            # unhandled exception).
+            if getattr(self, '_caller_log_id', None):
+                try:
+                    from ..models import CallerLog, db as _db
+                    from ..features.bbs_ui import _app
+                    with _app().app_context():
+                        _cl = CallerLog.query.get(self._caller_log_id)
+                        if _cl is not None:
+                            _cl.duration_seconds = int(
+                                (datetime.utcnow() - self._session_started_at)
+                                .total_seconds())
+                            _db.session.commit()
+                except Exception:
+                    pass
+                self._log_activity('logout')
             # Release the multinode slot + announce departure.
             try:
                 from ..features.multinode import release_slot, broadcast

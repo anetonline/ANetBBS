@@ -647,6 +647,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 from ..models import EchomailPollLog as _EPL
                 _new_log = _EPL(
                     network_id=net_id,
+                    node_id=downstream_node_id,  # always None on this branch (3a, upstream hub calling us) -- set for symmetry with the 3b/downstream-node creation sites below
                     poll_type='both',  # not yet known; set for real at completion
                     started_at=session_started_at,
                     status='running',
@@ -1188,7 +1189,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         log = (EchomailPollLog.query.get(poll_log_id)
                                if poll_log_id is not None else None)
                         if log is None:
-                            log = EchomailPollLog(network_id=net_id, started_at=session_started_at)
+                            log = EchomailPollLog(network_id=net_id, node_id=downstream_node_id,
+                                                  started_at=session_started_at)
                             db.session.add(log)
                         total_received = imported_total + files_received
                         log.poll_type = _inbound_poll_type(total_received, sent_count)
@@ -1221,7 +1223,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     log = (EchomailPollLog.query.get(poll_log_id)
                            if poll_log_id is not None else None)
                     if log is None:
-                        log = EchomailPollLog(network_id=net_id, poll_type='both',
+                        log = EchomailPollLog(network_id=net_id, node_id=downstream_node_id,
+                                              poll_type='both',
                                               started_at=session_started_at)
                         _db.session.add(log)
                     log.completed_at = datetime.utcnow()

@@ -708,6 +708,28 @@ async def run_menu(session, start='main'):
                         action=f'{action_type}({action_args or ""})')
             except Exception:
                 pass
+            try:
+                # "Who's on" fix: SessionPresence.set_page() used to be
+                # called exactly once, at login -- so UserSession.page
+                # (read by both the terminal Who's Online command and the
+                # web /who/ page) was frozen at "main" for the rest of
+                # every session, regardless of what the user actually did
+                # next. This is the same dispatch point _heartbeat_node()
+                # already fires from, so every top-level menu action
+                # (games, chat, boards, files, echo, pm, ...) now updates
+                # both presence tables.
+                if getattr(session, 'presence', None) is not None:
+                    session.presence.set_page(f'{action_type} {action_args or ""}'.strip())
+            except Exception:
+                pass
+            try:
+                # Activity-log detail: one row per top-level menu action.
+                # 'goto' is pure menu-tree plumbing (submenu navigation),
+                # not a user action worth logging.
+                if action_type != 'goto' and hasattr(session, '_log_activity'):
+                    session._log_activity(f'menu:{action_type}', action_args or None)
+            except Exception:
+                pass
             result = await action(ui, action_args)
         except Exception as exc:
             # Carrier dropped inside an action — propagate so the session

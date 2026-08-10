@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Session Activity — {{ cl.username or '?' }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-clock-history"></i> Session Activity — {{ cl.username or '?' }}</h1>
+</div>
+<div class="mb-3">
+    <a href="{{ url_for('admin.caller_log') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Caller Log</a>
+    <a href="{{ url_for('admin.activity') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-list-ul"></i> Full Activity Feed</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-3"><strong>User:</strong> {{ cl.username or '?' }}</div>
+            <div class="col-md-3"><strong>Service:</strong> <span class="badge bg-secondary">{{ cl.service or '?' }}</span></div>
+            <div class="col-md-3"><strong>IP:</strong> <code>{{ cl.ip_address or '' }}</code></div>
+            <div class="col-md-3"><strong>Duration:</strong> {{ cl.duration_seconds or 0 }}s</div>
+        </div>
+        <div class="mt-2 text-muted small">Started {{ cl.started_at|eastern('%Y-%m-%d %H:%M:%S') }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>When</th><th>Event</th><th>Details</th></tr></thead>
+            <tbody>
+            {% for e in events %}
+                <tr>
+                    <td><code>{{ e.created_at|eastern('%Y-%m-%d %H:%M:%S') }}</code></td>
+                    <td><span class="badge bg-secondary">{{ e.activity_type }}</span></td>
+                    <td>{{ e.details or '' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="3" class="text-muted text-center p-3">No activity recorded for this session.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

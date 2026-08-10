@@ -12,6 +12,15 @@
     </form>
 </div>
 
+<div class="mb-3 small">
+    Sort:
+    <a href="{{ url_for('boards.list_boards') }}"
+       class="{{ 'fw-bold' if sort_mode != 'activity' else '' }}">Category</a>
+    &middot;
+    <a href="{{ url_for('boards.list_boards', sort='activity') }}"
+       class="{{ 'fw-bold' if sort_mode == 'activity' else '' }}">Recent Activity</a>
+</div>
+
 {% if boards %}
     {% for cat, blist in grouped %}
     <div class="card mb-3">
@@ -27,6 +36,7 @@
                         <th>Description</th>
                         <th class="text-center">Topics</th>
                         <th class="text-center">Replies</th>
+                        <th class="text-center">Last Activity</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41,6 +51,9 @@
                         <td>{{ board.description }}</td>
                         <td class="text-center">{{ board_stats[board.id].post_count }}</td>
                         <td class="text-center">{{ board_stats[board.id].reply_count }}</td>
+                        <td class="text-center small text-muted">
+                            {{ board_stats[board.id].last_activity|eastern('%Y-%m-%d %H:%M', '—') }}
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>

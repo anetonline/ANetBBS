@@ -2432,6 +2432,24 @@ def caller_log():
                            date_from=date_from, date_to=date_to)
 
 
+@admin_bp.route('/caller-log/<int:caller_log_id>')
+@login_required
+@admin_required
+def caller_log_detail(caller_log_id):
+    """Per-session activity drill-down: everything a user did during
+    one login, in order -- login, menu actions, doors played, chat
+    sessions, logout. Requested directly by Jerry: 'you should be able
+    to click on that name (for that session) and see exactly what they
+    did.' UserActivity.caller_log_id (added alongside this route)
+    correlates every event back to the CallerLog row clicked from."""
+    from ..models import CallerLog, UserActivity
+    cl = CallerLog.query.get_or_404(caller_log_id)
+    events = (UserActivity.query
+             .filter_by(caller_log_id=caller_log_id)
+             .order_by(UserActivity.created_at.asc()).all())
+    return render_template('admin/caller_log_detail.html', cl=cl, events=events)
+
+
 @admin_bp.route('/broadcast', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -2558,12 +2576,15 @@ def file_echo_subs():
             flash('Subscription deleted.', 'success')
         return redirect(url_for('admin.file_echo_subs'))
 
-    subs = (FileEchoSubscription.query
-            .join(FileArea, FileArea.id == FileEchoSubscription.file_area_id)
-            .order_by(FileArea.tag, FileEchoSubscription.peer_address)
-            .all())
+    peer_filter = (request.args.get('peer_address') or '').strip()
+    q = (FileEchoSubscription.query
+        .join(FileArea, FileArea.id == FileEchoSubscription.file_area_id))
+    if peer_filter:
+        q = q.filter(FileEchoSubscription.peer_address == peer_filter)
+    subs = q.order_by(FileArea.tag, FileEchoSubscription.peer_address).all()
     areas = FileArea.query.filter_by(is_active=True).order_by(FileArea.tag).all()
-    return render_template('admin/file_echo_subs.html', subs=subs, areas=areas)
+    return render_template('admin/file_echo_subs.html', subs=subs, areas=areas,
+                           peer_filter=peer_filter)
 
 
 @admin_bp.route('/users/<int:user_id>/notes', methods=['GET', 'POST'])
