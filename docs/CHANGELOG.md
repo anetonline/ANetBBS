@@ -1,11 +1,37 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.23`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.27`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.27 — ASCII MRC chat client; word-wrap fix for embedded newlines (August 2026)
+
+**New `AsciiMRCChat` client for `term_mode == 'ascii'` sessions.** `ascii` has always been a real, selectable terminal mode, but it never had its own MRC client the way PETSCII now does — `chat.py`'s `ChatManager` handed every session the full ANSI split-screen `MRCChat` regardless of mode. `session.write()` strips every ANSI escape sequence outright for ascii sessions, so that split-screen mode's DECSTBM scroll-region setup, CPR terminal-size probe, and cursor-addressed status/input/ticker draws were all silently dropped — a real, structural bug (ascii+MRC had no usable layout at all), not just a missing feature. `AsciiMRCChat` (`anetbbs/features/mrc_chat_ascii.py`) is the same plain-scroll-mode override pattern already proven by `PetsciiMRCChat`, simplified since ASCII has no case-inversion, no color-byte translation, and no special DEL key — just standard `\x7f`/`\x08` backspace. `ChatManager.__init__` now picks `AsciiMRCChat` for `term_mode == 'ascii'` and `MRCChat` for everything else.
+
+**`_word_wrap()` fix for embedded newlines — real bug found live on the Pi.** A multi-line MOTD/banner from the MRC bridge arrives as one string with its own intentional `\n` line breaks. The word-wrap tokenizer (shared by both `MRCChat`'s ANSI split-screen `_emit()` and `PetsciiMRCChat`/`AsciiMRCChat`'s plain-scroll `_emit()`) only charged an embedded `\n` 1 column against its width budget, but the terminal itself resets to column 0 there — so the algorithm's internal column count and the real cursor position diverged, leaving whatever word came right after the newline in the source text stranded alone at the left margin (seen live at 40 columns: "at", "!list", "or", and a URL each appearing as isolated fragments). Fixed by treating `\n`/`\r\n` in the input as hard breaks, word-wrapped independently, before the normal width-based reflow runs.
+
+## v1.0.26 — PETSCII MRC chat: real word-wrap instead of raw terminal auto-wrap (August 2026)
+
+**Another real bug found live-testing on the Pi, worse at 40 columns than 80.** `PetsciiMRCChat._emit()` was just writing each message's raw text and letting the terminal's own hardware auto-wrap break it wherever the physical column happened to land — no word-boundary awareness, so long messages could split mid-word and continuation text had no relationship to the original line. Fixed by reusing `MRCChat`'s own `_word_wrap()` helper (the same one the ANSI split-screen client already uses) so messages wrap cleanly at word boundaries regardless of screen width, written as a single atomic write (still serialized against incoming/outgoing keystrokes via the shared lock from the previous release).
+
+## v1.0.25 — PETSCII MRC chat: password masking, AFK interruption, message-splicing fixes (August 2026)
+
+**Three real bugs found live-testing v1.0.24's new PETSCII MRC client on the Pi, all traced to the same root cause.** `PetsciiMRCChat._read_chat_line()` originally delegated to the generic `session.read_line()` for simplicity — that turned out to be wrong three ways:
+
+1. **`/identify <password>` echoed the password in the clear, unmasked.** `read_line()` has no masking; the real per-keystroke masking logic lives in the ANSI client's raw input loop, which the PETSCII override bypassed entirely.
+2. **The AFK warning/screensaver could interrupt an active chat session.** `read_line()` always opts into AFK tracking internally — MRC is specifically designed to never go through that path at all.
+3. **An incoming message arriving mid-keystroke spliced into the line being typed**, corrupting the display (the message actually sent was still correct — this was a rendering race, not data corruption). ANSI split-screen mode avoids this because incoming messages and the input line are drawn to separate cursor-addressed regions; plain-scroll mode has no such separation, so both now share the same lock the ANSI client already uses for this.
+
+Fixed by replacing the delegated `read_line()` call with a proper PETSCII-safe character-by-character input loop — reading raw off the connection (matching the ANSI client's own approach, which also sidesteps AFK), reimplementing password masking at the single-character level, and serializing with incoming-message writes via the shared input lock. Also fixed `_term_columns` never being set for PETSCII sessions (stuck at its 80-column default), which affected a couple of width calculations.
+
+## v1.0.24 — PETSCII MRC chat client; colored PETSCII menus (August 2026)
+
+**New: MRC chat is now available on PETSCII (C64/128) sessions.** Previously MRC was never offered to PETSCII users at all — not gated, just never built. `anetbbs/features/mrc_chat.py`'s `MRCChat` class turned out to already have a complete, working plain-scroll fallback rendering mode built in and self-guarded throughout (`_emit()`, `_draw_status_line()`, etc. all already check `if not self._split_screen:`), just never reachable by a real terminal because the ANSI split-screen setup (CPR terminal-size probing, DECSTBM scroll regions, cursor-addressed draws) always ran first and silently failed on a real C64. New `anetbbs/features/mrc_chat_petscii.py::PetsciiMRCChat` subclasses `MRCChat` and overrides exactly three methods to force that plain-scroll mode instead — everything else (the bridge websocket connection, JSON protocol, ping/pong keepalive, slash commands) is inherited unchanged. Available from both the built-in PETSCII menu and sysop-built custom `PetsciiMenu` trees.
+
+**PETSCII menus can show real color now.** The ANSI-to-PETSCII color translation added previously was already fully wired through `session.write()` — menu screens just never embedded any color codes to translate. New `anetbbs/features/petscii_theme.py` (the PETSCII counterpart to the ANSI side's `ansi_ui.py`) adds a colored reverse-video header bar and colored menu hotkeys to both the built-in menu and sysop-built custom menus, which also gain a per-menu color picker in the admin UI.
 
 ## v1.0.23 — "Who's online" now shows every simultaneous connection per user (August 2026)
 

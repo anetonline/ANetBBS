@@ -58,7 +58,15 @@ class _FakeSession:
 
 
 def _visible_width(line):
-    return len(line.replace('[CLR]', '').replace('\x12', '').replace('\x92', ''))
+    # Strip PETSCII color bytes too, not just [CLR]/REVERSE_ON/REVERSE_OFF --
+    # petscii_ui.py's _header()/menu_line() (see petscii_theme.py) now embed
+    # real color control bytes, which (like reverse-video) are invisible on
+    # a real C64 screen and must not count toward the row's visible width.
+    from anetbbs.features.petscii_theme import COLOR_NAMES
+    out = line.replace('[CLR]', '').replace('\x12', '').replace('\x92', '')
+    for color_byte in COLOR_NAMES.values():
+        out = out.replace(color_byte, '')
+    return len(out)
 
 
 class TruncateWordsUnitTests(unittest.TestCase):

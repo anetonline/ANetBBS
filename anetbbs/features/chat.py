@@ -1,5 +1,6 @@
 # anetbbs/features/chat.py
 from .mrc_chat import MRCChat
+from .mrc_chat_ascii import AsciiMRCChat
 from .anetirc2 import launch_anetirc_telnet
 from ..core.protocols import SessionProtocol
 
@@ -42,8 +43,15 @@ def _mrc_enabled():
 class ChatManager:
     def __init__(self, session: SessionProtocol):
         self.session = session
+        # ascii sessions never got their own MRC client (unlike petscii,
+        # which has an entirely separate menu system -- see
+        # mrc_chat_ascii.py's docstring): the full ANSI MRCChat's split-
+        # screen mode depends on cursor-addressing escape sequences that
+        # session.write() strips outright for term_mode == 'ascii',
+        # leaving no layout at all.
+        mrc_cls = AsciiMRCChat if getattr(session, 'term_mode', 'ansi') == 'ascii' else MRCChat
         self.chat_systems = {
-            'mrc': MRCChat(session),
+            'mrc': mrc_cls(session),
         }
 
     async def show_menu(self):

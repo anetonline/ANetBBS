@@ -48,6 +48,21 @@ class DbBootstrapFunctionalTests(unittest.TestCase):
         import os
         self._old_db_url = os.environ.get("DATABASE_URL")
         os.environ["DATABASE_URL"] = f"sqlite:///{self.tmp_db}"
+        # DevelopmentConfig.SQLALCHEMY_DATABASE_URI (anetbbs/config.py) is
+        # a class attribute resolved from DATABASE_URL once, at whenever
+        # anetbbs.config is FIRST imported anywhere in the process -- not
+        # re-read per test. In a full pytest run, dozens of earlier test
+        # files import it before the os.environ mutation above ever gets
+        # a chance to matter, so create_minimal_app("development") would
+        # silently bind to a stale/shared database and see leftover Board
+        # rows from other tests ("UNIQUE constraint failed: boards.name").
+        # Passed every time in isolation only because nothing else had
+        # imported anetbbs.config first. Patching the class attribute
+        # directly (same idiom test_chat_mrc_toggle.py already uses for
+        # MRC_BRIDGE_ENABLED) sidesteps the import-order dependency.
+        import anetbbs.config as cfg_mod
+        self._old_dev_db_uri = cfg_mod.DevelopmentConfig.SQLALCHEMY_DATABASE_URI
+        cfg_mod.DevelopmentConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{self.tmp_db}"
 
     def tearDown(self):
         import os
@@ -55,6 +70,8 @@ class DbBootstrapFunctionalTests(unittest.TestCase):
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = self._old_db_url
+        import anetbbs.config as cfg_mod
+        cfg_mod.DevelopmentConfig.SQLALCHEMY_DATABASE_URI = self._old_dev_db_uri
         if self.tmp_db.exists():
             self.tmp_db.unlink()
 

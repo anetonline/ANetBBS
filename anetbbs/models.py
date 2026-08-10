@@ -849,6 +849,11 @@ class PetsciiMenu(db.Model):
     is_default = db.Column(db.Boolean, default=False)
     min_access = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # A petscii_theme.COLOR_NAMES key (e.g. 'LIGHT_BLUE'), or NULL for
+    # petscii_theme.DEFAULT_HEADER_COLOR -- per-menu, not per-item, by
+    # design: one color per menu is a much smaller admin surface (one
+    # dropdown, not one per item row) than fine-grained per-line theming.
+    theme_color = db.Column(db.String(20), nullable=True)
 
     items = db.relationship('PetsciiMenuItem', backref='menu',
                             order_by='PetsciiMenuItem.sort_order',

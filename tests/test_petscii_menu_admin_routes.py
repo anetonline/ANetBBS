@@ -77,6 +77,31 @@ class PetsciiMenuAdminRouteTests(unittest.TestCase):
         self.assertEqual(r2.status_code, 200)
         self.assertIn(b'Boards', r2.data)
 
+    def test_theme_color_saved_on_create_and_edit(self):
+        client = self._admin_client()
+        client.post('/admin/petscii-menus/new', data={
+            'name': 'colored', 'title': 'Colored Menu', 'prompt': 'Choice: ',
+            'theme_color': 'red',  # lowercase on the wire -- must be normalized
+        }, follow_redirects=True)
+
+        with self.app.app_context():
+            from anetbbs.models import PetsciiMenu
+            menu = PetsciiMenu.query.filter_by(name='colored').first()
+            self.assertEqual(menu.theme_color, 'RED')
+            menu_id = menu.id
+
+        client.post(f'/admin/petscii-menus/{menu_id}/edit', data={
+            'title': 'Colored Menu', 'prompt': 'Choice: ',
+            'theme_color': 'not_a_real_color',
+        }, follow_redirects=True)
+        with self.app.app_context():
+            from anetbbs.models import PetsciiMenu, db
+            menu = db.session.get(PetsciiMenu, menu_id)
+            self.assertIsNone(menu.theme_color,
+                             'an invalid color name must be stored as NULL '
+                             '(falls back to the module default at render '
+                             'time), not saved verbatim')
+
     def test_duplicate_name_rejected(self):
         client = self._admin_client()
         client.post('/admin/petscii-menus/new', data={

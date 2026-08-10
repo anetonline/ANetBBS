@@ -14,10 +14,12 @@ Phase 1 scope: message boards, echomail, private messages, file-area
 browsing (no transfer), who's-online, profile, logoff, plus ONE
 built-in game (Number Guessing -- plain session I/O, no ANSI codes at
 all, so features.games.GameManager.play_number_guess() is reused
-directly rather than reimplemented). Door games/ANetCRAFT/DarkForces/
-MRC chat/IRC are still intentionally never offered here -- not shown,
-not marked "unavailable," just absent, matching how the session-level
-logon/logoff modules (Wall, ANSI art) are already skipped entirely for
+directly rather than reimplemented), plus MRC chat (features.mrc_chat_petscii.PetsciiMRCChat
+-- a plain-scroll-mode subclass of the real MRCChat, see that module's
+own docstring). Door games/ANetCRAFT/DarkForces/IRC are still
+intentionally never offered here -- not shown, not marked
+"unavailable," just absent, matching how the session-level logon/logoff
+modules (Wall, ANSI art) are already skipped entirely for
 term_mode == 'petscii'. Only games that are pure plain-text (no cursor
 addressing) are candidates for this exception; each one needs the same
 "reuses session I/O only" check Number Guessing passed before adding it.
@@ -32,7 +34,7 @@ import textwrap
 from datetime import datetime, timedelta
 from ..core.tz import fmt_eastern
 
-from .petscii_codec import REVERSE_ON, REVERSE_OFF
+from . import petscii_theme
 
 # Leaves room for a 2-line header + a prompt line on a real 25-row C64
 # screen, regardless of whether the session is 40 or 80 columns wide
@@ -64,11 +66,11 @@ def _user_id(session):
     return u.get('id') if isinstance(u, dict) else None
 
 
-async def _header(session, title):
+async def _header(session, title, color=None):
     await session.clear_screen()
     w = _width(session)
-    inner = max(1, w - 2)
-    await session.write(f'{REVERSE_ON} {title[:inner].ljust(inner)}{REVERSE_OFF}\r\n\r\n')
+    bar_color = color or petscii_theme.DEFAULT_HEADER_COLOR
+    await session.write(petscii_theme.header_bar(title, w, bar_color) + '\r\n\r\n')
 
 
 async def _paginate(session, lines, header_title=None):
@@ -283,20 +285,23 @@ async def run_petscii_menu(session):
     await _run_default_petscii_menu(session)
 
 
+async def _mrc_chat(session):
+    from .mrc_chat_petscii import PetsciiMRCChat
+    await PetsciiMRCChat(session).show_menu()
+
+
 async def _run_default_petscii_menu(session):
     """The hardcoded Phase 1 menu -- also the fallback for sysops who
     haven't built a custom PetsciiMenu tree."""
+    _items = [
+        ('1', 'Message Boards'), ('2', 'Echomail'), ('3', 'Private Messages'),
+        ('4', 'File Areas'), ('5', "Who's Online"), ('6', 'Your Profile'),
+        ('7', 'Games'), ('8', 'MRC Chat'), ('Q', 'Logoff'),
+    ]
     while True:
         await _header(session, 'ANetBBS Main Menu')
-        await session.write(
-            "  1. Message Boards\r\n"
-            "  2. Echomail\r\n"
-            "  3. Private Messages\r\n"
-            "  4. File Areas\r\n"
-            "  5. Who's Online\r\n"
-            "  6. Your Profile\r\n"
-            "  7. Games\r\n"
-            "  Q. Logoff\r\n")
+        for hotkey, label in _items:
+            await session.write(petscii_theme.menu_line(hotkey, label) + '\r\n')
         choice = (await session.read_line('\r\nChoice: ') or '').strip().upper()
         if choice == '1':
             await _boards_menu(session)
@@ -312,6 +317,8 @@ async def _run_default_petscii_menu(session):
             await _profile(session)
         elif choice == '7':
             await _games_menu(session)
+        elif choice == '8':
+            await _mrc_chat(session)
         elif choice == 'Q':
             await session.write('\r\nGoodbye!\r\n')
             return
@@ -337,6 +344,7 @@ def _register_custom_menu_actions():
         'who': _whos_online,
         'profile': _profile,
         'games': _games_menu,
+        'mrc': _mrc_chat,
     })
 
 
@@ -360,6 +368,7 @@ async def _run_custom_petscii_menu(session, start_name):
                        if it.is_visible and level >= (it.min_access or 0)]
                 title = menu.title
                 prompt = menu.prompt or 'Choice: '
+                header_color = petscii_theme.resolve_color(menu.theme_color)
         if menu is None:
             # Broken 'goto' target, or the default menu got deleted
             # mid-session -- fail safe into the always-working hardcoded
@@ -367,9 +376,9 @@ async def _run_custom_petscii_menu(session, start_name):
             await _run_default_petscii_menu(session)
             return
 
-        await _header(session, title)
+        await _header(session, title, header_color)
         for hotkey, label, _at, _aa in rows:
-            await session.write(f'  {hotkey}. {label}\r\n')
+            await session.write(petscii_theme.menu_line(hotkey, label) + '\r\n')
         choice = (await session.read_line(f'\r\n{prompt}') or '').strip().upper()
 
         match = next((r for r in rows if r[0].upper() == choice), None)

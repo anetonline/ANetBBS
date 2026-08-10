@@ -34,6 +34,16 @@
       <input name="min_access" type="number" class="form-control" value="{{ menu.min_access if menu else 0 }}">
       <small class="text-muted">0 = anyone, 100 = sysop</small>
     </div>
+    <div class="col-md-4 mb-3">
+      <label class="form-label">Header color</label>
+      <select name="theme_color" class="form-select">
+        <option value="">— default (light blue) —</option>
+        {% for c in theme_color_choices %}
+          <option value="{{ c }}" {% if menu and menu.theme_color == c %}selected{% endif %}>{{ c.title().replace('_', ' ') }}</option>
+        {% endfor %}
+      </select>
+      <small class="text-muted">Title bar + hotkey color for this menu's screens.</small>
+    </div>
     <div class="col-md-4 mb-3 form-check pt-4">
       <input class="form-check-input" name="is_default" type="checkbox" id="isdef"
              {% if menu and menu.is_default %}checked{% endif %}>

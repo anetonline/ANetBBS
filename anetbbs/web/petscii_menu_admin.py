@@ -14,9 +14,13 @@ from flask_login import login_required
 
 from ..models import db, PetsciiMenu, PetsciiMenuItem
 from .access_control import require_admin as _admin_required
+from ..features.petscii_theme import COLOR_NAMES
 
 petscii_menu_admin_bp = Blueprint('petscii_menu_admin', __name__,
                                   url_prefix='/admin/petscii-menus')
+
+# Sorted for a stable, alphabetical <select> order in the admin form.
+THEME_COLOR_CHOICES = sorted(COLOR_NAMES.keys())
 
 
 # Action types known to petscii_ui.py's custom-menu interpreter -- keep
@@ -31,6 +35,7 @@ ACTION_TYPES = [
     ('who', "Who's online"),
     ('profile', 'View own profile'),
     ('games', 'Games (Number Guessing)'),
+    ('mrc', 'MRC chat (global BBS chat)'),
     ('logoff', 'End session'),
 ]
 
@@ -56,16 +61,19 @@ def new_menu():
         if PetsciiMenu.query.filter_by(name=name).first():
             flash(f"PETSCII menu '{name}' already exists.", 'danger')
             return redirect(url_for('petscii_menu_admin.new_menu'))
+        theme_color = (request.form.get('theme_color') or '').strip().upper()
         m = PetsciiMenu(
             name=name[:50], title=title[:100],
             prompt=request.form.get('prompt') or 'Choice: ',
             is_default=bool(request.form.get('is_default')),
             min_access=int(request.form.get('min_access') or 0),
+            theme_color=theme_color if theme_color in COLOR_NAMES else None,
         )
         db.session.add(m); db.session.commit()
         return redirect(url_for('petscii_menu_admin.edit_menu', menu_id=m.id))
     return render_template('petscii_menu_admin/edit.html', menu=None, items=[],
-                           action_types=ACTION_TYPES)
+                           action_types=ACTION_TYPES,
+                           theme_color_choices=THEME_COLOR_CHOICES)
 
 
 @petscii_menu_admin_bp.route('/<int:menu_id>/edit', methods=['GET', 'POST'])
@@ -78,12 +86,15 @@ def edit_menu(menu_id):
         m.prompt = (request.form.get('prompt') or 'Choice: ')[:100]
         m.is_default = bool(request.form.get('is_default'))
         m.min_access = int(request.form.get('min_access') or 0)
+        theme_color = (request.form.get('theme_color') or '').strip().upper()
+        m.theme_color = theme_color if theme_color in COLOR_NAMES else None
         db.session.commit()
         flash('PETSCII menu saved.', 'success')
         return redirect(url_for('petscii_menu_admin.edit_menu', menu_id=m.id))
     items = m.items.order_by(PetsciiMenuItem.sort_order, PetsciiMenuItem.id).all()
     return render_template('petscii_menu_admin/edit.html', menu=m, items=items,
-                           action_types=ACTION_TYPES)
+                           action_types=ACTION_TYPES,
+                           theme_color_choices=THEME_COLOR_CHOICES)
 
 
 @petscii_menu_admin_bp.route('/<int:menu_id>/delete', methods=['POST'])

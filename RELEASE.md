@@ -1,3 +1,23 @@
+# ANetBBS v1.0.27 — ASCII MRC chat client; word-wrap fix for embedded newlines (August 2026)
+
+**New: MRC chat for plain ASCII sessions.** `ascii` has always been a selectable terminal mode, but MRC never had a client for it — sessions got the full ANSI split-screen `MRCChat`, and `session.write()` strips every ANSI escape sequence for ascii mode, so that client's cursor-addressed layout was silently dropped entirely. New `AsciiMRCChat` (same plain-scroll-mode pattern as `PetsciiMRCChat`, simpler since there's no PETSCII case-inversion or color translation to worry about) is now wired into `chat.py`'s `ChatManager` for `term_mode == 'ascii'` sessions.
+
+**Word-wrap fix for embedded newlines — another real bug found live on the Pi.** A multi-line MOTD banner sent as one string with its own `\n` line breaks was getting mis-wrapped: the shared `_word_wrap()` helper treated an embedded newline as ordinary reflowable whitespace instead of a hard break, so the terminal's own cursor reset at that newline didn't match the algorithm's internal tracking — leaving stray words ("at", "!list", "or", a URL) stranded alone at the left margin. Fixed by splitting on real newlines first.
+
+# ANetBBS v1.0.26 — PETSCII MRC chat: real word-wrap instead of raw terminal auto-wrap (August 2026)
+
+**Another bug found live-testing on the Pi, worse at 40 columns than 80.** Long MRC messages were just being written raw and left to the terminal's own hardware auto-wrap, which has no word-boundary awareness. Fixed by reusing the ANSI client's own word-wrap helper, so messages wrap cleanly regardless of screen width.
+
+# ANetBBS v1.0.25 — PETSCII MRC chat: password masking, AFK interruption, message-splicing fixes (August 2026)
+
+**Three real bugs found live-testing v1.0.24's PETSCII MRC client, all from the same root cause.** `/identify <password>` echoed unmasked, the AFK screensaver could interrupt an active chat, and an incoming message arriving mid-keystroke could splice into the line being typed. All traced to `_read_chat_line()` delegating to the generic `session.read_line()` instead of reading raw off the connection like the ANSI client does. Rebuilt as a proper PETSCII-safe character-by-character input loop with real masking and shared-lock serialization against incoming messages.
+
+# ANetBBS v1.0.24 — PETSCII MRC chat client; colored PETSCII menus (August 2026)
+
+**New: MRC chat on PETSCII (C64/128).** Never offered to PETSCII sessions before — turned out `MRCChat` already had a working plain-scroll fallback mode built in, just unreachable because the ANSI split-screen setup always ran first and silently failed on real C64 hardware. New `PetsciiMRCChat` subclass forces that mode; everything else (bridge connection, protocol, slash commands) is inherited unchanged from the real MRC client.
+
+**PETSCII menus can show real color now** — both the built-in menu and sysop-built custom menus, which also gain a per-menu color picker in the admin UI. The color-translation pipeline (`ansi_to_petscii()`) was already fully wired up; menus just never used it.
+
 # ANetBBS v1.0.23 — "Who's online" now shows every simultaneous connection per user (August 2026)
 
 **Fixed a real bug: a user logged in via both web and SSH at once only ever showed up once in "who's online."** `UserSession.user_id` was `unique=True` — a hard one-row-per-user constraint — so a second simultaneous connection overwrote the first's row instead of getting its own. Each connection now gets its own row (`session_key`, not `user_id`), and a clean disconnect deletes its own row instead of just marking it stale. Added a `cleanup_stale_sessions` scheduled-maintenance handler (auto-seeded on every install) as a backstop for connections that never disconnect cleanly.

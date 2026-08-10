@@ -192,6 +192,23 @@ def _word_wrap(text: str, width: int, indent: str = '') -> list:
     Continuation lines are prefixed with *indent* (already counted in width)."""
     if width <= 0:
         return [text]
+
+    # A literal '\n'/'\r\n' in *text* (e.g. a multi-line MOTD/banner from
+    # the MRC bridge, sent as one string with its own intentional line
+    # breaks) is a hard break, not reflowable whitespace -- found live on
+    # the Pi at 40 columns: the tokenizer below only charges a whitespace
+    # token 1 column against the width budget, but the terminal itself
+    # resets to column 0 at the embedded '\n', so its internal column
+    # count and the real cursor position diverge and the next word lands
+    # stranded alone at the left margin. Splitting into hard-break
+    # segments first and word-wrapping each independently keeps the
+    # source's own line structure (including blank lines) intact.
+    if '\n' in text or '\r' in text:
+        lines = []
+        for segment in re.split(r'\r\n|\r|\n', text):
+            lines.extend(_word_wrap(segment, width, indent=indent) if segment else [''])
+        return lines
+
     if _visible_len(text) <= width:
         return [text]
 
