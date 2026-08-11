@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.29`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.31`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.31 — Fixed the actual root cause behind Minesweeper's missing DOVE-Net scores (August 2026)
+
+**`iniGetObject()` silently discarded a sysop's whole `modopts.ini` override when called with real Synchronet's overloaded boolean-first-argument form.** After v1.0.30's `readAll()` fix, "view winners" still showed nothing — traced live with a real sysop, step by step, against real production data: file permissions checked out, and a pre-existing debug log line in Minesweeper itself revealed `options.sub` was resolving to `false` despite a correctly-placed, correctly-permissioned `modopts.ini` containing `sub=2013`. Root cause: real, unmodified Synchronet library code (`modopts.js`'s own `iniGetObject(/* lowercase */false, /* blanks */true)`, also used identically by `install-3rdp-xtrn.js`) routinely omits the `section` argument entirely and passes the boolean flags positionally instead — a boolean can never legitimately be a section name. The compat shim's `File.prototype.iniGetObject()` didn't account for this, so `section === false` fell through to looking up a section literally named `"false"`, found nothing, and returned `null` — discarding the entire root section (every plain `key=value` line before any `[header]`) with no error anywhere. Fixed by detecting a boolean first argument and treating it as the `lowercase` flag, defaulting `section` to root. This was the actual final blocker in the whole DOVE-Net score-sharing chain — Minesweeper's `get_winners()`, the `MsgBase` caching (v1.0.29), and the `readAll()` fix (v1.0.30) were all correct the entire time.
+
+## v1.0.30 — Fixed a data-loss bug in the JSONL file-reading compat shim (August 2026)
+
+**Minesweeper's "view winners" showed a totally empty list even after the v1.0.29 lockup fix — real report, traced all the way to a live data dump.** After ruling out every filtering/checksum step in `get_winners()` against real production data (confirmed live: the message's `To:`/`Subject:`/`direction` all matched correctly, and the MD5 checksum verified byte-for-byte), the actual culprit turned out to be `File.prototype.readAll()` in the JS compat shim (`anetbbs/games/synchronet_compat.py`): every line written via `writeln()` — the standard JSONL-append pattern `json_lines.js`'s `add()` uses — ends with a trailing `\n`, so a naive `content.split('\n')` produces one spurious empty-string "line" after the real content. `json_lines.js`'s own `get()` then calls `JSON.parse('')` on that phantom line, which throws — and since `get()` has no recovery flag by default, that ONE synthetic empty line made it return an error string instead of the parsed array, silently discarding every real entry. Confirmed live: Minesweeper's `netwins.jsonl` had 85+ correctly-imported real win entries from DOVE-Net the whole time — `get_winners()` was throwing all of them away every single call. Fixed by stripping exactly one trailing newline before splitting (a genuine blank line elsewhere in a file is still preserved). This affects any door using the standard JSONL-append idiom, not just Minesweeper.
+
+**Added the missing `file_getcase()` global — real bug found live via LORD2.** `l2lib.js`'s `getfname()` calls it to resolve asset filenames case-insensitively, a legacy pattern from DOS/Windows-era door development that only ever mattered once running on a real case-sensitive filesystem (every Linux install, including ANetBBS). The global didn't exist in the compat shim at all, so any door calling it hit a `ReferenceError` immediately. Implemented to match real Synchronet's documented behavior (case-insensitive directory scan, returns the actual on-disk filename or `undefined`).
 
 ## v1.0.29 — Fixed a real lockup in InterBBS door score-sharing (August 2026)
 

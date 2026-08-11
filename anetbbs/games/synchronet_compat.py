@@ -1422,6 +1422,34 @@ function file_copy(from, to) {
 function file_getname(p) {
     return _path.basename(String(p));
 }
+// Real Synchronet global (js_file.cpp's js_file_getcase, backed by
+// getfname()/fexistcase() in xpdev/dirwrap.c -- confirmed against the
+// real C source, not guessed): resolves *p* case-INsensitively against
+// the real on-disk filename and returns the actual (correctly-cased)
+// path if a match exists anywhere in that directory, or undefined if
+// nothing matches even case-insensitively. Real use case: legacy door
+// games written/tested on case-insensitive filesystems (DOS/Windows)
+// reference asset files with inconsistent case, which only breaks on a
+// real case-sensitive filesystem (every Linux install, including
+// ANetBBS) -- LORD2's own l2lib.js getfname() calls this specifically
+// to work around that. An exact-case match short-circuits the
+// directory scan (the common case -- most files ARE already correctly
+// cased).
+function file_getcase(p) {
+    try {
+        if (_fs.existsSync(p)) return String(p);
+        var dir = _path.dirname(String(p));
+        var base = _path.basename(String(p));
+        var wantLower = base.toLowerCase();
+        var entries = _fs.readdirSync(dir);
+        for (var i = 0; i < entries.length; i++) {
+            if (entries[i].toLowerCase() === wantLower) {
+                return _path.join(dir, entries[i]);
+            }
+        }
+        return undefined;
+    } catch (e) { return undefined; }
+}
 function file_touch(p, atime, mtime) {
     // Synchronet's file_touch updates the mtime (and creates the file
     // if missing). tw2's LoadPlayer touches data/user/NNNN.tw2 to mark
@@ -1834,9 +1862,30 @@ Object.defineProperty(File.prototype, 'eof', {
 File.prototype.rewind = function() { this._pos = 0; return true; };
 // Synchronet's File API has these — without them, doors that use the standard
 // f.readAll().join("") JSON-load idiom (Bot Wars) silently fail to load saves.
+//
+// Real bug found live: every line written via writeln() (json_lines.js's
+// add(), the standard JSONL-append idiom) ends with a trailing '\n', so
+// a naive `content.split('\n')` produces a SPURIOUS trailing empty-
+// string "line" after the real content. json_lines.js's own get()
+// then calls JSON.parse('') on it, which throws -- and since get() has
+// no recover flag by default, that ONE synthetic empty line makes it
+// return an error STRING instead of the parsed array, silently
+// discarding every real entry that parsed fine (Minesweeper's own
+// get_winners() then sees `typeof net_list != 'object'` and quietly
+// resets it to [], even with real, valid, correctly-imported win data
+// on disk -- confirmed live: netwins.jsonl had 85+ valid entries, none
+// ever displayed). Real Synchronet's own readAll() does not produce
+// this spurious trailing line -- strip exactly one trailing '\n'
+// before splitting (not all trailing whitespace, so a genuine blank
+// line elsewhere in the file is still preserved), and return []
+// outright for a truly empty file (0 lines, not one empty line).
 File.prototype.readAll = function() {
     var rest = this._content.slice(this._pos);
     this._pos = this._content.length;
+    if (rest === '') return [];
+    if (rest.charAt(rest.length - 1) === '\n') {
+        rest = rest.slice(0, -1);
+    }
     return rest.split('\n').map(function(l) { return l.replace(/\r$/, ''); });
 };
 File.prototype.writeAll = function(arr) {
@@ -1902,7 +1951,26 @@ File.prototype.iniGetValue = function(section, key, defaultValue) {
     if (sec && key in sec) return sec[key];
     return (defaultValue === undefined) ? null : defaultValue;
 };
-File.prototype.iniGetObject = function(section) {
+File.prototype.iniGetObject = function(section, lowercase, blanks) {
+    // Real Synchronet's iniGetObject(section, lowercase, blanks) is
+    // routinely called with `section` OMITTED and just the two boolean
+    // flags given positionally instead -- confirmed genuine, unmodified
+    // Synchronet library code does exactly this: modopts.js's
+    // `iniGetObject(/* lowercase */false, /* blanks: */true)` and
+    // install-3rdp-xtrn.js's `iniGetObject(/* lowercase: */true)`. A
+    // boolean first argument can never legitimately BE a section name,
+    // so treat it as `lowercase` and shift `blanks` in from the second
+    // position -- matching real Synchronet's own argument-count
+    // disambiguation. Real bug found live: without this, modopts.js's
+    // own `sub=` override (Minesweeper's DOVE-Net score-sharing config)
+    // silently returned null instead of the root section, discarding a
+    // sysop's whole modopts.ini every time -- no error, no crash, just
+    // every option value reverting to its script default.
+    if (typeof section === 'boolean') {
+        blanks = lowercase;
+        lowercase = section;
+        section = undefined;
+    }
     var s = this._parseIni();
     // Synchronet's iniGetObject returns the keys of one section as a flat
     // object. Default (no arg) is the root section (keys before any
@@ -3576,7 +3644,7 @@ function _unused_format_legacy_removed() {
     var names = [
         'load', 'require', 'log', 'alert',
         'file_exists', 'file_isdir', 'file_isfile', 'file_size', 'file_date',
-        'file_cfgname',
+        'file_cfgname', 'file_getcase',
         'file_remove', 'file_rename', 'file_copy', 'file_getname', 'file_getext',
         'file_mutex', 'file_touch',
         'mkdir', 'rmdir', 'directory',

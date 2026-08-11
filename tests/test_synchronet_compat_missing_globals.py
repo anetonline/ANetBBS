@@ -836,6 +836,151 @@ class SynchronetCompatMissingGlobalsTests(unittest.TestCase):
         self.assertNotIn('Error', output, msg=output)
         self.assertIn('PATH:/tmp/anetbbs_cfgname_test/server.ini', output)
 
+    def test_file_getcase_resolves_wrong_case_and_returns_undefined_when_missing(self):
+        """Regression for a real report: LORD2's l2lib.js (getfname())
+        calls file_getcase() to resolve asset filenames case-
+        insensitively (a legacy-door pattern from DOS/Windows, where
+        filename case never mattered -- breaks the instant it runs on a
+        real case-sensitive Linux filesystem, which is exactly ANetBBS).
+        The global was entirely missing -- any door calling it hit
+        ReferenceError before this fix."""
+        tmp_dir = os.path.join(self._tmpdir.name, 'getcase_test')
+        os.makedirs(tmp_dir, exist_ok=True)
+        with open(os.path.join(tmp_dir, 'README.TXT'), 'w') as f:
+            f.write('hi')
+        script = (
+            f"var exact = file_getcase('{tmp_dir}/README.TXT');\n"
+            f"var wrong = file_getcase('{tmp_dir}/readme.txt');\n"
+            f"var missing = file_getcase('{tmp_dir}/nope.txt');\n"
+            "process.stdout.write('EXACT:' + exact + ';');\n"
+            "process.stdout.write('WRONG:' + wrong + ';');\n"
+            "process.stdout.write('MISSING:' + (missing === undefined) + ';');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn(f'EXACT:{tmp_dir}/README.TXT;', output, msg=output)
+        self.assertIn(f'WRONG:{tmp_dir}/README.TXT;', output, msg=output)
+        self.assertIn('MISSING:true;', output, msg=output)
+
+    def test_inigetobject_boolean_first_arg_means_root_section_not_a_section_named_false(self):
+        """Real bug found live via a multi-message diagnostic session:
+        Minesweeper's DOVE-Net score-sharing config (`sub=2013` in a
+        modopts.ini override) was silently ignored every single time,
+        with no error anywhere -- traced all the way down to this one
+        call shape. Real, unmodified Synchronet library code
+        (modopts.js's own `iniGetObject(/* lowercase */false, /* blanks */true)`,
+        and install-3rdp-xtrn.js's `iniGetObject(/* lowercase */true)`)
+        routinely omits the `section` argument and passes the boolean
+        flags positionally instead -- a boolean can never legitimately
+        BE a section name. Before this fix, `section === false` fell
+        through to `s[false]` (coerced to the string key "false"),
+        which obviously never matches a real section, returning null
+        and silently discarding the entire root section (every plain
+        `key=value` line before any `[header]`) -- exactly what
+        modopts.ini's `sub=2013` override is."""
+        tmp_path = os.path.join(self._tmpdir.name, 'modopts_test.ini')
+        with open(tmp_path, 'w') as f:
+            f.write('sub=2013\ntimelimit=60\n')
+        script = (
+            f"var f = new File('{tmp_path}');\n"
+            "f.open('r');\n"
+            "var obj = f.iniGetObject(false, true);\n"
+            "f.close();\n"
+            "process.stdout.write('SUB:' + (obj ? obj.sub : 'NULL') + ';');\n"
+            "process.stdout.write('TIMELIMIT:' + (obj ? obj.timelimit : 'NULL') + ';');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('SUB:2013;', output,
+                      'iniGetObject(false, true) must return the root section, '
+                      'not null / a section literally named "false"')
+        self.assertIn('TIMELIMIT:60;', output, msg=output)
+
+    def test_inigetobject_still_works_with_a_real_section_name(self):
+        """Regression guard: the boolean-first-arg special case must not
+        break the far more common `iniGetObject('sectionname')` call
+        shape used throughout the rest of this codebase (avatar_lib.js,
+        cfglib.js, fidocfg.js, etc)."""
+        tmp_path = os.path.join(self._tmpdir.name, 'sectioned_test.ini')
+        with open(tmp_path, 'w') as f:
+            f.write('root_key=root_value\n[minesweeper]\nsub=2013\n')
+        script = (
+            f"var f = new File('{tmp_path}');\n"
+            "f.open('r');\n"
+            "var root = f.iniGetObject();\n"
+            "var named = f.iniGetObject('minesweeper');\n"
+            "f.close();\n"
+            "process.stdout.write('ROOT:' + root.root_key + ';');\n"
+            "process.stdout.write('NAMED:' + named.sub + ';');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('ROOT:root_value;', output, msg=output)
+        self.assertIn('NAMED:2013;', output, msg=output)
+
+    def test_readall_does_not_produce_a_spurious_trailing_empty_line(self):
+        """Direct regression for File.prototype.readAll() -- every line
+        written via writeln() (the standard JSONL-append idiom used by
+        json_lines.js's add()) ends with a trailing '\\n', so a naive
+        `content.split('\\n')` produces one extra empty-string "line"
+        after the real content. Confirms readAll() itself no longer
+        does that (see the next test for the full json_lines.js
+        end-to-end failure this caused live)."""
+        tmp_path = os.path.join(self._tmpdir.name, 'readall_test.txt')
+        with open(tmp_path, 'w') as f:
+            f.write('line one\nline two\n')
+        script = (
+            f"var f = new File('{tmp_path}');\n"
+            "f.open('r');\n"
+            "var lines = f.readAll();\n"
+            "f.close();\n"
+            "process.stdout.write('COUNT:' + lines.length + ';');\n"
+            "process.stdout.write('LAST:' + JSON.stringify(lines[lines.length - 1]) + ';');\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('COUNT:2;', output,
+                      'must return exactly 2 lines, not 3 with a spurious trailing "" entry')
+        self.assertIn('LAST:"line two";', output)
+
+    def test_json_lines_get_survives_a_trailing_newline_end_to_end(self):
+        """Real report: Minesweeper's DOVE-Net score-sharing correctly
+        imported 85+ real win entries into netwins.jsonl (via
+        json_lines.js's add(), which always writeln()s -- trailing
+        newline guaranteed), but "view winners" showed a completely
+        empty list. Root cause: json_lines.js's get() calls
+        JSON.parse('') on readAll()'s spurious trailing empty line,
+        which throws -- and since get() has no recover flag by default,
+        that ONE synthetic empty line made it return an error STRING
+        instead of the parsed array. Minesweeper's own get_winners()
+        then saw `typeof net_list != 'object'` and silently reset it to
+        [], discarding every real, correctly-imported entry. This is
+        the exact end-to-end path (real json_lines.js, real File,
+        real trailing-newline-terminated content) -- not just readAll()
+        in isolation."""
+        tmp_path = os.path.join(self._tmpdir.name, 'netwins_test.jsonl')
+        with open(tmp_path, 'w') as f:
+            f.write('{"name":"Deuce","end":1691911303}\n'
+                    '{"name":"Keyop","end":1689976174}\n')
+        script = (
+            "var jl = load({}, 'json_lines.js');\n"
+            f"var result = jl.get('{tmp_path}');\n"
+            "process.stdout.write('TYPE:' + (typeof result) + ';');\n"
+            "process.stdout.write('LEN:' + (Array.isArray(result) ? result.length : 'n/a') + ';');\n"
+            "if (Array.isArray(result)) {\n"
+            "    process.stdout.write('NAME0:' + result[0].name + ';');\n"
+            "    process.stdout.write('NAME1:' + result[1].name + ';');\n"
+            "}\n"
+        )
+        output, _status = self._run(script)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('TYPE:object;', output,
+                      'get() must return the parsed array, not an error string, '
+                      'for a normal trailing-newline-terminated JSONL file')
+        self.assertIn('LEN:2;', output, msg=output)
+        self.assertIn('NAME0:Deuce;', output, msg=output)
+        self.assertIn('NAME1:Keyop;', output, msg=output)
+
     def test_load_scope_form_populates_a_pre_created_scope_object(self):
         """Direct reproduction of graphic.js's real usage pattern
         (`Graphic.prototype.defs = {}; load(Graphic.prototype.defs,
