@@ -81,7 +81,26 @@ def op_get_index(area_tag, args):
                     EchomailMessage.id > after_id)
             .order_by(EchomailMessage.id)
             .all())
-    entries = [{'number': r.id, 'to': r.to_name or '', 'subject': r.subject or ''}
+    # Header + body fields embedded inline (one query already has them
+    # loaded) so the JS-side MsgBase shim can cache a whole area's worth
+    # of messages from THIS one subprocess call, instead of spawning a
+    # fresh Python process + Flask app per message via separate
+    # get_header/get_body calls. Real report: DOVE-Net score-sharing in
+    # Minesweeper's own get_winners() calls get_msg_header()+get_msg_body()
+    # once per matching index entry in a tight loop -- with a synced
+    # area holding a normal amount of InterBBS history that was hundreds
+    # of extra subprocess spawns (each with its own Flask+SQLAlchemy
+    # startup cost), easily minutes of wall time with no progress
+    # indicator -- indistinguishable from a hang. See MsgBase.get_index's
+    # own comment in synchronet_compat.py for the caching side of this
+    # fix. Same field shapes as op_get_header/op_get_body's own responses
+    # (from_net_type mirrors real Synchronet semantics: only a message
+    # that genuinely arrived via the network counts as a real InterBBS
+    # win).
+    entries = [{'number': r.id, 'to': r.to_name or '', 'subject': r.subject or '',
+                'from': r.from_name or '', 'body': r.body or '',
+                'from_net_type': (r.direction == 'inbound'),
+                'from_net_addr': r.from_address or ''}
                for r in rows]
     return {'ok': True, 'entries': entries}
 

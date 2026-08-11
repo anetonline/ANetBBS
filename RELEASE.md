@@ -1,3 +1,7 @@
+# ANetBBS v1.0.29 — Fixed a real lockup in InterBBS door score-sharing (August 2026)
+
+**Minesweeper's "view winners" screen looked like a total lockup after setting up DOVE-Net/syncdata score sharing.** Not an infinite loop — the JS `MsgBase` compat shim spawned a brand-new Python subprocess (fresh Flask app + DB init) for EVERY message it checked, and a synced echo area with real InterBBS history meant potentially hundreds of spawns before anything displayed. `get_index` now embeds header/body data inline in one query, and `MsgBase` caches it per message, so the whole scan is one subprocess call instead of hundreds. Also added a 30s subprocess timeout as a safety net. Fixes score-sharing for any door using the real `MsgBase` API, not just Minesweeper.
+
 # ANetBBS v1.0.28 — PETSCII new-user registration fixes (August 2026)
 
 **The newuser welcome banner showed as literal garbage on PETSCII.** `_show_ansi_screen()` writes raw ANSI bytes straight to the socket, bypassing petscii translation — same limitation already guarded for the 'welcome'/'goodbye' screens, just missed for 'newuser'. Fixed with the same guard; "Registration successful!" still confirms account creation correctly.

@@ -144,6 +144,33 @@ class MsgBaseBridgeTests(unittest.TestCase):
         self.assertEqual(entry['subject'], 'Winner')
         self.assertIn('number', entry)
 
+    def test_get_index_embeds_header_and_body_fields_inline(self):
+        """Regression for a real report: DOVE-Net score-sharing in
+        Minesweeper's own get_winners() looked like a total lockup on
+        "view winners" -- not an infinite loop, but hundreds of
+        sequential get_header/get_body subprocess spawns (one PER
+        matching message) in a tight loop, each paying fresh Python +
+        Flask + SQLAlchemy startup cost. get_index's one query already
+        has every field a header/body fetch would need loaded, so it's
+        returned inline here -- letting the JS-side MsgBase shim
+        (synchronet_compat.py) cache it and serve get_msg_header()/
+        get_msg_body() from memory instead of shelling out again per
+        message. See test_synchronet_compat_missing_globals.py's
+        test_get_msg_header_and_body_serve_from_cache_after_get_index
+        for the JS-side half of this fix."""
+        payload = json.dumps({'to': 'Synchronet Minesweeper', 'from': 'StingRay',
+                              'subject': 'Winner', 'body': '{"score":42}'})
+        self._run_bridge('save_msg', 'SYNCDATA', payload)
+
+        result = self._run_bridge('get_index', 'SYNCDATA', '0')
+        entry = result['entries'][0]
+        self.assertEqual(entry['from'], 'StingRay')
+        self.assertEqual(entry['body'], '{"score":42}')
+        self.assertFalse(entry['from_net_type'],
+                         'a freshly outbound-posted message must not look '
+                         'like a real network win to itself')
+        self.assertIn('from_net_addr', entry)
+
     def test_get_index_after_id_filters_out_already_seen(self):
         for i in range(3):
             self._run_bridge('save_msg', 'SYNCDATA', json.dumps(

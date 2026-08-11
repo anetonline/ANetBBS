@@ -2727,6 +2727,53 @@ class SynchronetCompatMissingGlobalsTests(unittest.TestCase):
         self.assertIn('NETTYPE:true;', output, msg=output)
         self.assertIn('FROM:OtherSysop;', output, msg=output)
 
+    def test_get_msg_header_and_body_serve_from_cache_after_get_index(self):
+        """Regression for a real report: DOVE-Net score-sharing in
+        Minesweeper's own get_winners() looked like a total lockup on
+        "view winners". Not an infinite loop -- get_index() itself was
+        fine, but the JS shim's get_msg_header()/get_msg_body() each
+        spawned a brand-new Python subprocess (fresh Flask app +
+        SQLAlchemy startup) PER MATCHING MESSAGE in get_winners()'s own
+        loop. With a normally-sized amount of synced InterBBS history
+        that's potentially hundreds of sequential subprocess spawns with
+        no progress indicator -- easily minutes of wall time,
+        indistinguishable from a hang.
+
+        Fixed by having msgbase_bridge.py's op_get_index embed each
+        entry's header+body fields inline (one query already has them
+        loaded) and having the JS MsgBase class cache them per message
+        number, so get_msg_header()/get_msg_body() serve straight from
+        memory for any message get_index() already saw.
+
+        Proven here by deliberately breaking js.msgbase_bridge (pointing
+        it at a nonexistent path) AFTER get_index() has run, for TWO
+        separate messages -- if get_msg_header()/get_msg_body() still
+        needed to shell out, every one of the four calls below would
+        fail (spawnSync against a missing path -> {ok:false} ->
+        undefined header / empty body), not just return correct,
+        message-specific data for both messages."""
+        self._seed_msgbase_db()
+        script = (
+            "var mb = new MsgBase('SYNCDATA');\n"
+            "mb.open();\n"
+            "mb.save_msg({from:'Alice', to:'All', subject:'Win1'}, 'alice body');\n"
+            "mb.save_msg({from:'Bob', to:'All', subject:'Win2'}, 'bob body');\n"
+            "var idx = mb.get_index();\n"
+            "process.stdout.write('IDXLEN:' + idx.length + ';');\n"
+            "js.msgbase_bridge = '/nonexistent/anetbbs_msgbase_bridge_broken.py';\n"
+            "var hdr0 = mb.get_msg_header(false, idx[0].number);\n"
+            "var body0 = mb.get_msg_body(hdr0);\n"
+            "var hdr1 = mb.get_msg_header(false, idx[1].number);\n"
+            "var body1 = mb.get_msg_body(hdr1);\n"
+            "process.stdout.write('H0FROM:' + hdr0.from + ';B0:' + body0 + ';');\n"
+            "process.stdout.write('H1FROM:' + hdr1.from + ';B1:' + body1 + ';');\n"
+        )
+        output, _status = self._run(script, run_seconds=15)
+        self.assertNotIn('Error', output, msg=output)
+        self.assertIn('IDXLEN:2;', output, msg=output)
+        self.assertIn('H0FROM:Alice;B0:alice body;', output, msg=output)
+        self.assertIn('H1FROM:Bob;B1:bob body;', output, msg=output)
+
 
 if __name__ == '__main__':
     unittest.main()

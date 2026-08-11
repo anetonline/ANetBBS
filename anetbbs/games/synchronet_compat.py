@@ -3252,6 +3252,13 @@ function MsgBase(sub) {
     this._opened = false;
     this.last_msg = 0;
     this.cfg = { data_dir: js.exec_dir, code: this._sub };
+    // Populated by get_index() -- see that method's own comment. Checked
+    // first by get_msg_header()/get_msg_body() so a door's normal
+    // "scan the index, then fetch header+body for whatever matched"
+    // pattern (Minesweeper's own get_winners(), and presumably any
+    // other door written against the real MsgBase API the same way)
+    // doesn't spawn a fresh subprocess per message.
+    this._cache = {};
 }
 MsgBase.prototype._call = function(op) {
     var extraArgs = Array.prototype.slice.call(arguments, 1);
@@ -3259,7 +3266,13 @@ MsgBase.prototype._call = function(op) {
         var cp = _node_require('child_process');
         var argv = [js.msgbase_bridge, op, this._sub].concat(
             extraArgs.map(function(a) { return String(a); }));
-        var r = cp.spawnSync(js.python_bin, argv, {encoding: 'utf8'});
+        // 30s timeout -- defense in depth so ONE stuck subprocess (e.g.
+        // real DB lock contention with a concurrent writer) fails
+        // cleanly (ok:false, ETIMEDOUT in r.error below) instead of
+        // hanging the whole door forever with no way out. Matches this
+        // shim's own "always return quickly, ok:false on failure"
+        // design already documented in msgbase_bridge.py's docstring.
+        var r = cp.spawnSync(js.python_bin, argv, {encoding: 'utf8', timeout: 30000});
         if (r.error) {
             return {ok: false, error: String(r.error)};
         }
@@ -3306,10 +3319,24 @@ MsgBase.prototype.save_msg = function(hdr, body) {
 // C implementation). attr is always 0 -- EchomailMessage has no
 // soft-delete column, so nothing a door checks against MSG_DELETE is
 // ever actually set.
+// Also caches each entry's header+body fields (msgbase_bridge.py's
+// op_get_index now embeds them inline -- one query already has them
+// loaded) so get_msg_header()/get_msg_body() below can serve a door's
+// normal per-index-entry follow-up calls straight from memory instead
+// of spawning a fresh subprocess per message. Real report: DOVE-Net
+// score-sharing in Minesweeper's own get_winners() looked like a total
+// lockup on "view winners" -- it wasn't an infinite loop, just hundreds
+// of sequential Python-process-plus-Flask-app spawns (one per matching
+// synced message) with no progress indicator, easily minutes of wall
+// time. The PUBLIC return shape here is unchanged (still just
+// number/offset/to/subject/attr, hashed) -- only this instance's
+// private _cache gains the extra fields.
 MsgBase.prototype.get_index = function() {
     var result = this._call('get_index', 0);
     if (!result.ok || !result.entries) { return []; }
+    var self = this;
     return result.entries.map(function(e) {
+        self._cache[e.number] = e;
         return {
             number: e.number,
             offset: e.number,   // no separate on-disk offset concept here
@@ -3323,6 +3350,15 @@ MsgBase.prototype.get_index = function() {
 // this shim's "offset" and "number" are the same value (see get_index
 // above), so there's nothing to distinguish.
 MsgBase.prototype.get_msg_header = function(byOffset, offsetOrNumber) {
+    var cached = this._cache[offsetOrNumber];
+    if (cached !== undefined) {
+        return {
+            from: cached.from || '', to: cached.to || '',
+            subject: cached.subject || '', number: cached.number,
+            from_net_type: !!cached.from_net_type,
+            from_net_addr: cached.from_net_addr || '',
+        };
+    }
     var result = this._call('get_header', offsetOrNumber);
     if (!result.ok) { return undefined; }
     return result.header;
@@ -3332,7 +3368,12 @@ MsgBase.prototype.get_msg_header = function(byOffset, offsetOrNumber) {
 // own cleanup (Minesweeper's own get_winners() does its own
 // body.split("\n===",1)[0] trimming) already do it themselves.
 MsgBase.prototype.get_msg_body = function(hdr) {
-    var result = this._call('get_body', hdr && hdr.number);
+    var num = hdr && hdr.number;
+    var cached = this._cache[num];
+    if (cached !== undefined && cached.body !== undefined) {
+        return cached.body;
+    }
+    var result = this._call('get_body', num);
     if (!result.ok) { return ''; }
     return result.body;
 };

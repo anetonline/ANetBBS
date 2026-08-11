@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.28`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.29`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.29 — Fixed a real lockup in InterBBS door score-sharing (August 2026)
+
+**Minesweeper's "view winners" screen looked like a total lockup — real report after setting up DOVE-Net/syncdata score sharing.** Not an infinite loop: `get_winners()` scans a synced echo area and calls `get_msg_header()`/`get_msg_body()` once per matching message, and the JS `MsgBase` compat shim backed each of those with a *separate* subprocess spawn — a fresh Python process, fresh Flask app, fresh SQLAlchemy init, every single call. Against a DOVE-Net area with real accumulated InterBBS history, "view winners" meant potentially hundreds of sequential spawns before anything displayed — easily minutes with no progress indicator. `msgbase_bridge.py`'s `get_index` op now embeds each entry's header/body fields inline (the one query already has them loaded), and `MsgBase` caches them per message number in `anetbbs/games/synchronet_compat.py`, so `get_msg_header()`/`get_msg_body()` serve from memory instead of shelling out again — the whole scan is now one subprocess call instead of hundreds. Also added a 30s timeout to the subprocess spawn itself as a safety net, so a single genuinely-stuck call (e.g. real DB lock contention) fails cleanly instead of hanging forever. This fixes score-sharing for any door using the real `MsgBase` API against a configured echo area, not just Minesweeper.
 
 ## v1.0.28 — PETSCII new-user registration fixes (August 2026)
 

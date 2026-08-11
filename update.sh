@@ -1313,27 +1313,48 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/text" 2>/dev/null ||
 SUDOERS_SRC="$SOURCE_DIR/deploy/sudoers.anetbbs"
 SUDOERS_DST="/etc/sudoers.d/anetbbs"
 if [[ -f "$SUDOERS_SRC" ]]; then
-    info "Refreshing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
-    # Substitute placeholders so the sudoers grants:
-    #   - run as the actual SERVICE_USER (not the template's '__SERVICE_USER__')
-    #   - reference the real upgrade wrapper path ($INSTALL_DIR/deploy/run_upgrade.sh,
-    #     not the template's /opt/anetbbs/ placeholder)
-    UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
-    RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
-    # Substitute both deploy paths plus the user placeholder. Without
-    # the -g flag each sed only hits its first match; we need every
-    # /opt/anetbbs/deploy/* line to land on the real install path.
-    sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
-        -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
-        -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
-        "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
-    if visudo -cf "$SUDOERS_DST.tmp" >/dev/null 2>&1; then
-        mv "$SUDOERS_DST.tmp" "$SUDOERS_DST"
-        chmod 0440 "$SUDOERS_DST"
-        ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
+    if [[ -z "$SERVICE_USER" ]]; then
+        # Real report: on a fresh install where anetbbs-web.service hasn't
+        # been created yet AND stat on INSTALL_DIR somehow comes back
+        # empty, the sed below would substitute __SERVICE_USER__ with
+        # nothing, producing a line that starts with a bare space
+        # (" ALL=(root) NOPASSWD: ...") -- invalid sudoers syntax, and
+        # previously just an opaque "syntax check failed" with no clue
+        # why. Skip outright with a clear reason instead of attempting a
+        # write we already know will fail.
+        warn "SERVICE_USER resolved empty — skipping sudoers refresh " \
+             "(would produce invalid syntax). Re-run update.sh once " \
+             "anetbbs-web.service exists, or check INSTALL_DIR ownership."
     else
-        rm -f "$SUDOERS_DST.tmp"
-        warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+        info "Refreshing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
+        # Substitute placeholders so the sudoers grants:
+        #   - run as the actual SERVICE_USER (not the template's '__SERVICE_USER__')
+        #   - reference the real upgrade wrapper path ($INSTALL_DIR/deploy/run_upgrade.sh,
+        #     not the template's /opt/anetbbs/ placeholder)
+        UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
+        RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
+        # Substitute both deploy paths plus the user placeholder. Without
+        # the -g flag each sed only hits its first match; we need every
+        # /opt/anetbbs/deploy/* line to land on the real install path.
+        sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
+            -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
+            -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
+            "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
+        # Capture visudo's actual error instead of discarding it -- the
+        # previous ">/dev/null 2>&1" left this a total black box: a real
+        # user hit "syntax check failed" and neither they nor we could
+        # tell why. `2>&1 >/dev/null` (order matters) sends only stderr
+        # into the captured variable, discarding visudo's own stdout.
+        VISUDO_ERR=$(visudo -cf "$SUDOERS_DST.tmp" 2>&1 >/dev/null)
+        if [[ $? -eq 0 ]]; then
+            mv "$SUDOERS_DST.tmp" "$SUDOERS_DST"
+            chmod 0440 "$SUDOERS_DST"
+            ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
+        else
+            rm -f "$SUDOERS_DST.tmp"
+            warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+            warn "  visudo says: ${VISUDO_ERR:-<no output>}"
+        fi
     fi
 fi
 
