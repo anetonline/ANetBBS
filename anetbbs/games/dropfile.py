@@ -169,7 +169,7 @@ def generate_dorinfo(user, node_number, minutes_remaining=60, bbs_name='ANetBBS'
     """
     parts = (_u(user, 'username') or 'User').split(None, 1)
     first_name = parts[0]
-    last_name = parts[1] if len(parts) > 1 else 'User'
+    last_name = parts[1] if len(parts) > 1 else ''
 
     sysop_parts = 'Sysop User'.split()
     security_level = 200 if _u(user, 'is_admin') else 50
@@ -226,8 +226,8 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
     """
     parts = (_u(user, 'username') or 'User').split(None, 1)
     first_name = parts[0]
-    last_name = parts[1] if len(parts) > 1 else 'User'
-    full_name = f'{first_name} {last_name}'
+    last_name = parts[1] if len(parts) > 1 else ''
+    full_name = f'{first_name} {last_name}'.strip()
 
     security_level = 200 if _u(user, 'is_admin') else 50
 
@@ -256,6 +256,163 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
         str(minutes_remaining), # Minutes remaining this session
         '1',               # ANSI emulation (1=yes)
         str(node_number),  # Node number
+    ]
+
+    content = '\r\n'.join(lines) + '\r\n'
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as f:
+            f.write(content)
+
+    return content
+
+
+def generate_chain_txt(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
+                       output_path=None):
+    """
+    Generate a CHAIN.TXT drop file (WWIV-style, 30-line format).
+
+    Field layout confirmed directly against OpenDoors' own parser
+    (third_party/OpenDoors/ODInEx1.c, the `FOUND_CHAIN_TXT` branch of
+    its dropfile auto-detector) rather than guessed from a spec —
+    the same verify-against-the-real-consumer discipline used
+    throughout this project for dropfile formats. Lines OpenDoors
+    reads but doesn't interpret into any od_control field are left
+    blank; every line OpenDoors DOES populate a real field from is
+    filled with a real, working value. Note line 16 (time remaining)
+    is read in SECONDS here, unlike DOOR.SYS/DOOR32.SYS's minutes —
+    OpenDoors divides it by 60 immediately after reading.
+
+    Args:
+        user: User model instance
+        node_number: Integer node number
+        minutes_remaining: Session time remaining in minutes
+        bbs_name: Name of the BBS (unused by this format directly,
+            kept for signature consistency with the other generators)
+        output_path: Full path to write the file (optional)
+
+    Returns:
+        String content of the drop file
+    """
+    del bbs_name  # not part of CHAIN.TXT's own field set
+    parts = (_u(user, 'username') or 'User').split(None, 1)
+    first_name = parts[0]
+    last_name = parts[1] if len(parts) > 1 else ''
+
+    security_level = 200 if _u(user, 'is_admin') else 50
+    seconds_remaining = minutes_remaining * 60
+
+    lines = [
+        str(_u(user, 'id') or 0),      # 1: User number
+        _u(user, 'username') or '',    # 2: User handle
+        f'{first_name} {last_name}'.strip(),  # 3: User name
+        '',                            # 4: Callsign (ham radio field, N/A)
+        '',                            # 5: unused
+        'U',                           # 6: Sex (unknown)
+        '',                            # 7: unused
+        '01/01/00',                    # 8: Last date on
+        '80',                          # 9: Screen width
+        '24',                          # 10: Screen length
+        str(security_level),           # 11: Security level
+        '1' if _u(user, 'is_admin') else '0',  # 12: Is sysop
+        '0',                           # 13: Is co-sysop
+        '1',                           # 14: ANSI (1=yes)
+        '1',                           # 15: Non-zero if remote (always true here)
+        str(seconds_remaining),        # 16: Time remaining, in SECONDS
+        '',                            # 17: unused
+        '',                            # 18: unused
+        '',                            # 19: unused
+        '38400',                       # 20: Baud rate
+        str(node_number),              # 21: Port number
+        '',                            # 22: unused
+        '',                            # 23: Password (left blank -- never echo a real one here)
+        '',                            # 24: unused
+        '',                            # 25: unused
+        '',                            # 26: unused
+        '',                            # 27: unused
+        '',                            # 28: unused
+        '',                            # 29: unused
+        '',                            # 30: unused
+    ]
+
+    content = '\r\n'.join(lines) + '\r\n'
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as f:
+            f.write(content)
+
+    return content
+
+
+def generate_sfdoors_dat(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
+                         output_path=None):
+    """
+    Generate an SFDOORS.DAT drop file (Spitfire-style format).
+
+    Field layout confirmed directly against OpenDoors' own parser
+    (third_party/OpenDoors/ODInEx1.c's `ODInitReadSFDoorsDAT()`), which
+    documents every line with its own inline comment -- the clearest
+    of the four formats this module supports to verify, since there
+    was no need to infer meaning from surrounding logic the way
+    CHAIN.TXT required. Only lines 1-33 are actually required by the
+    parser (it returns failure if any of those are missing); lines
+    34+ are read best-effort, so this generator stops at 35 rather
+    than also emitting the DOS-serial-hardware-specific IRQ/port-
+    address lines that follow, which have no meaning for a modern
+    telnet/SSH/PTY-based install.
+
+    Args:
+        user: User model instance
+        node_number: Integer node number
+        minutes_remaining: Session time remaining in minutes
+        bbs_name: Name of the BBS (unused by this format directly,
+            kept for signature consistency with the other generators)
+        output_path: Full path to write the file (optional)
+
+    Returns:
+        String content of the drop file
+    """
+    del bbs_name  # not part of SFDOORS.DAT's own field set
+    security_level = 200 if _u(user, 'is_admin') else 50
+
+    lines = [
+        str(_u(user, 'id') or 0),      # 1: User number
+        _u(user, 'username') or 'User',  # 2: User name
+        '',                            # 3: Password (left blank)
+        '',                            # 4: unused
+        '38400',                       # 5: Baud rate
+        str(node_number),              # 6: Serial port number
+        str(minutes_remaining),        # 7: Time remaining, in MINUTES
+        '',                            # 8: unused
+        '',                            # 9: unused
+        'T',                           # 10: ANSI mode (T=true)
+        str(security_level),           # 11: Security level
+        '0',                           # 12: Upload count
+        '0',                           # 13: Download count
+        '',                            # 14: unused
+        '0',                           # 15: Login time (minutes since midnight)
+        '',                            # 16: unused
+        'T' if _u(user, 'is_admin') else 'F',  # 17: Sysop-next flag
+        '',                            # 18: unused
+        '',                            # 19: unused
+        '',                            # 20: unused
+        'T',                           # 21: Error-free connection (telnet/SSH always is)
+        '0',                           # 22: Current message area
+        '0',                           # 23: Current file area
+        str(node_number),              # 24: Current node number
+        '',                            # 25: unused
+        '',                            # 26: unused
+        '',                            # 27: unused
+        '0',                           # 28: Kilobytes downloaded today
+        '0',                           # 29: Kilobytes uploaded, total
+        '0',                           # 30: Kilobytes downloaded, total
+        '000-000-0000',                # 31: Home phone
+        'Unknown',                     # 32: Home location
+        '',                            # 33: unused (last REQUIRED line)
+        'F',                           # 34: RIP mode (optional)
+        'F',                           # 35: Wants chat (optional)
     ]
 
     content = '\r\n'.join(lines) + '\r\n'
@@ -325,6 +482,8 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
             'door.sys': 'DOOR.SYS',
             'dorinfo': 'DORINFO1.DEF',
             'door32.sys': 'DOOR32.SYS',
+            'chain.txt': 'CHAIN.TXT',
+            'sfdoors.dat': 'SFDOORS.DAT',
         }.get(drop_type, 'DOOR.SYS')
         output_path = os.path.join(output_path.rstrip('/'), filename_for_type)
 
@@ -347,5 +506,9 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
         ch = -1 if game_type == 'door_native' else None
         generate_door32(user, node_number, minutes_remaining, bbs_name, output_path,
                         comm_handle=ch)
+    elif drop_type == 'chain.txt':
+        generate_chain_txt(user, node_number, minutes_remaining, bbs_name, output_path)
+    elif drop_type == 'sfdoors.dat':
+        generate_sfdoors_dat(user, node_number, minutes_remaining, bbs_name, output_path)
 
     return output_path

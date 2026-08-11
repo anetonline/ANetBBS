@@ -132,6 +132,8 @@ class GameForm(FlaskForm):
         ('door.sys', 'DOOR.SYS'),
         ('dorinfo', 'DORINFO1.DEF'),
         ('door32.sys', 'DOOR32.SYS'),
+        ('chain.txt', 'CHAIN.TXT'),
+        ('sfdoors.dat', 'SFDOORS.DAT'),
     ], default='none', validators=[Optional()], validate_choice=False)
     drop_file_path = StringField('Drop File Path', validators=[Optional(), Length(max=500)])
     use_dosbox = BooleanField('Use DOSBox/dosemu2', default=False)
@@ -398,6 +400,22 @@ def tw2_reset_universe():
 # Helper
 # ---------------------------------------------------------------------------
 
+def _strip_or_none(value):
+    """Strip leading/trailing whitespace from a path/command-ish form
+    field, real bug found live: a trailing space or two (easy to pick
+    up copy-pasting a path from elsewhere) survives the form save
+    silently -- no validation error, nothing visibly wrong in the form
+    -- and then blows up door_runner.py's os.chdir()/os.path.isfile()
+    checks with a raw FileNotFoundError referencing a path that LOOKS
+    right in every error message except for invisible trailing
+    whitespace. Only applied to path/command fields, not free-text
+    ones like description, where leading/trailing whitespace is the
+    user's own business."""
+    if value is None:
+        return value
+    return value.strip()
+
+
 def _populate_game(game, form):
     """Copy form data onto a Game model instance."""
     game.name = form.name.data
@@ -414,17 +432,17 @@ def _populate_game(game, form):
     game.web_enabled = form.web_enabled.data
     game.terminal_enabled = form.terminal_enabled.data
     game.share_scores_interbbs = form.share_scores_interbbs.data
-    game.executable_path = form.executable_path.data
-    game.working_directory = form.working_directory.data
-    game.command_line_args = form.command_line_args.data
-    game.rlogin_bbs_tag = form.rlogin_bbs_tag.data
+    game.executable_path = _strip_or_none(form.executable_path.data)
+    game.working_directory = _strip_or_none(form.working_directory.data)
+    game.command_line_args = _strip_or_none(form.command_line_args.data)
+    game.rlogin_bbs_tag = _strip_or_none(form.rlogin_bbs_tag.data)
     game.drop_file_type = form.drop_file_type.data
-    game.drop_file_path = form.drop_file_path.data
+    game.drop_file_path = _strip_or_none(form.drop_file_path.data)
     game.use_dosbox = form.use_dosbox.data
     game.needs_fossil_driver = form.needs_fossil_driver.data
-    game.mystic_script_path = form.mystic_script_path.data
-    game.synchronet_script_path = form.synchronet_script_path.data
-    game.synchronet_exec_dir = form.synchronet_exec_dir.data
+    game.mystic_script_path = _strip_or_none(form.mystic_script_path.data)
+    game.synchronet_script_path = _strip_or_none(form.synchronet_script_path.data)
+    game.synchronet_exec_dir = _strip_or_none(form.synchronet_exec_dir.data)
     game.msgbase_area_id = form.msgbase_area_id.data or None
     game.web_game_module = form.web_game_module.data
     game.web_game_url = form.web_game_url.data

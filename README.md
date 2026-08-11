@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.31`, August 2026)
+**Status: stable** (`v1.0.32`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -18,8 +18,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.31.tar.gz
-cd ANetBBS-v1.0.31
+tar xzf ANetBBS-v1.0.32.tar.gz
+cd ANetBBS-v1.0.32
 sudo bash install.sh
 ```
 
@@ -39,8 +39,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.31.tar.gz
-cd ANetBBS-v1.0.31
+tar xzf ANetBBS-v1.0.32.tar.gz
+cd ANetBBS-v1.0.32
 sudo bash update.sh
 ```
 
@@ -125,7 +125,8 @@ buildx` once there's a registry to publish to.
   Node.js + compatibility shim that the alpha 2 work expanded enough to
   fully run **LORD** (Legend of the Red Dragon — Synchronet's JS port,
   pre-installed, no Synchronet required)
-- Native binary doors with DOOR.SYS / DOOR32.SYS / DORINFO drop files
+- Native binary doors with DOOR.SYS / DOOR32.SYS / DORINFO / CHAIN.TXT
+  / SFDOORS.DAT drop files
 - **rlogin door bridge** (`door_rlogin`) — connects out to a remote
   BBS's own door server (Synchronet xtrn, DoorParty, etc.) instead of
   running a local subprocess. **A-Net Online's game server ships

@@ -1,3 +1,11 @@
+# ANetBBS v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
+
+**Every single-word username showed up inside doors with a phantom "User" suffix — "Stingray" became "Stingray User".** `generate_dorinfo()` and `generate_door32()` both used the literal string `'User'` as a placeholder last name whenever splitting the username produced no second word, instead of an empty string — `generate_door_sys()` already got this right, the other two just never matched it. Fixed to match; all three now produce a plain username when there's no real last name.
+
+**A trailing space or two on a door's Working Directory (or any other path/command field) silently broke it.** Easy to pick up copy-pasting a path from elsewhere — nothing in the admin form flagged it — and `door_runner.py` then crashed with a raw `FileNotFoundError` referencing a path that LOOKED right except for invisible trailing whitespace. Every path/command field is now stripped before saving, for every game type.
+
+**Added CHAIN.TXT and SFDOORS.DAT drop-file generation** for OpenDoors-based doors (including ANetCHESS), verified field-by-field against OpenDoors' own real parser source. PCBOARD.SYS was investigated too but turned out to be dead code inside OpenDoors itself — not added, since it wouldn't actually work with any OpenDoors-based door.
+
 # ANetBBS v1.0.31 — Fixed the actual root cause behind Minesweeper's missing DOVE-Net scores (August 2026)
 
 **"View winners" still showed nothing after v1.0.30 — this was the real, final blocker.** Traced live with a real sysop through production data: permissions were fine, and Minesweeper's own debug log revealed `options.sub` resolving to `false` despite a correct `modopts.ini`. Root cause: real Synchronet's `modopts.js` calls `iniGetObject(/* lowercase */false, /* blanks */true)` — omitting the section name entirely and passing boolean flags positionally instead. Our compat shim treated that `false` as a literal section name, found nothing, and silently discarded the sysop's whole config with zero error. Fixed by detecting a boolean first argument and defaulting to the root section. `MsgBase` caching (v1.0.29) and `readAll()` (v1.0.30) were both correct the whole time — this was the missing piece.

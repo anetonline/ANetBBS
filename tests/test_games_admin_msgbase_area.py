@@ -167,6 +167,36 @@ class GamesAdminMsgBaseAreaTests(unittest.TestCase):
             self.assertIsNotNone(game)
             self.assertIsNone(game.msgbase_area_id)
 
+    def test_saving_strips_whitespace_from_path_and_command_fields(self):
+        """Real bug found live: a sysop configuring a door_native game
+        copy-pasted a path with trailing spaces into Working Directory
+        (`/home/stingray/achess/build  `). Nothing in the form flagged
+        it -- the value looked completely normal -- and door_runner.py
+        crashed with a raw FileNotFoundError on os.chdir() referencing
+        a path that LOOKED right in the error message. Confirms
+        _populate_game() now strips these fields before they're ever
+        saved, for every game_type's path/command fields (native,
+        Synchronet, and Mystic), not just the one that broke first."""
+        resp = self.client.post('/admin/games/add', data=self._base_form_data(
+            slug='achess-native',
+            game_type='door_native',
+            executable_path='  /home/stingray/achess/build/anetchess \t',
+            working_directory='/home/stingray/achess/build  ',
+            command_line_args=' -D %f ',
+            synchronet_script_path=' /opt/anetbbs/.../minesweeper.js ',
+            synchronet_exec_dir=' /opt/anetbbs/.../minesweeper ',
+        ), follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        with self.app.app_context():
+            from anetbbs.models import Game
+            game = Game.query.filter_by(slug='achess-native').first()
+            self.assertIsNotNone(game)
+            self.assertEqual(game.executable_path, '/home/stingray/achess/build/anetchess')
+            self.assertEqual(game.working_directory, '/home/stingray/achess/build')
+            self.assertEqual(game.command_line_args, '-D %f')
+            self.assertEqual(game.synchronet_script_path, '/opt/anetbbs/.../minesweeper.js')
+            self.assertEqual(game.synchronet_exec_dir, '/opt/anetbbs/.../minesweeper')
+
     def test_editing_back_to_none_clears_a_previously_set_area(self):
         with self.app.app_context():
             from anetbbs.models import db, Game

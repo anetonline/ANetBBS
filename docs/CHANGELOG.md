@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.31`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.32`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
+
+**Every single-word username showed up inside doors with a phantom "User" suffix — "Stingray" became "Stingray User".** `generate_dorinfo()` and `generate_door32()` both used the literal string `'User'` as a placeholder last name whenever splitting the username produced no second word, instead of an empty string — `generate_door_sys()` already got this right, the other two just never matched it. Fixed to match; all three now produce a plain username when there's no real last name.
+
+**A trailing space or two on a door's Working Directory (or any other path/command field) silently broke it.** Easy to pick up copy-pasting a path from elsewhere — nothing in the admin form flagged it, the value looked completely normal in the form — and `door_runner.py` then crashed with a raw `FileNotFoundError` on `os.chdir()` referencing a path that LOOKED right in every error message except for invisible trailing whitespace. `_populate_game()` now strips every path/command field (executable path, working directory, command-line args, drop-file path, Mystic/Synchronet script paths, BBS tag) before saving, for every game type.
+
+**Added CHAIN.TXT and SFDOORS.DAT drop-file generation**, for launching doors that expect those formats — OpenDoors-based doors (including ANetCHESS) support both natively. Field layout for each verified directly against OpenDoors' own real parser source (`ODInEx1.c`'s `FOUND_CHAIN_TXT` branch and `ODInitReadSFDoorsDAT()`), not guessed from a spec, matching this project's established discipline for drop-file formats — same approach that caught real bugs in the DOOR.SYS/DOOR32.SYS generators previously. PCBOARD.SYS was also investigated for the same purpose, but turned out to be dead code inside OpenDoors itself (a struct and a pointer declared, never actually wired into its dropfile auto-detection) — not added, since it wouldn't do anything for any OpenDoors-based door.
 
 ## v1.0.31 — Fixed the actual root cause behind Minesweeper's missing DOVE-Net scores (August 2026)
 
