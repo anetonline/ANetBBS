@@ -1305,6 +1305,28 @@ fi
 
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/text" 2>/dev/null || true
 
+# Ensure data/mods/ (and its text/, text/menus/, and core/
+# subdirectories) exist -- the sysop's own file-override tree,
+# matching Synchronet's real /sbbs/mods/ convention (mods/<script>.js
+# overrides exec/, mods/text/ overrides text/, mods/text/menu/
+# overrides text/menu/ -- see wiki.synchro.net/dir:mods). Covers three
+# categories: Synchronet-compat door scripts/stubs
+# (synchronet_compat.py's js.mods_dir, door_runner.py's
+# _apply_mods_override()), ANSI/menu screens (session.py's
+# _show_ansi_screen(), ansi_ui.py's load_menu_ansi()), and ANetBBS's
+# own native core Python screens (core/mods_override.py's
+# call_core_override() -- e.g. data/mods/core/login_menu.py overrides
+# the built-in ANSI login menu, the same idea as customizing
+# Synchronet's own login.js/logon.js in its mods/). Deliberately NOT
+# seeded with any stock content the way data/text/ is above -- mods/
+# starts empty and stays empty until a sysop deliberately drops in a
+# same-named replacement for something they want to override; copying
+# stock content into it here would make every file "overridden" by
+# default, which is the opposite of the intent.
+mkdir -p "$INSTALL_DIR/data/mods/text/menus"
+mkdir -p "$INSTALL_DIR/data/mods/core"
+chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/mods" 2>/dev/null || true
+
 # Refresh /etc/sudoers.d/anetbbs so the Service Control Center can run
 # systemctl + journalctl against the current unit names. We rewrite it
 # every update because past releases shipped a stale list (anetbbs-telnet,

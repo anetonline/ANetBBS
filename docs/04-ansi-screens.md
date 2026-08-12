@@ -29,13 +29,29 @@ Each screen has:
 ## File-based override (welcome / goodbye / newuser / custom slots)
 
 Before checking the database, `welcome`/`goodbye`/`newuser` and any
-custom `ansi` slot also look for a plain file drop-in at
-`data/text/<slot>.ans` (and `<slot>132.ans` for widescreen terminals,
-`<slot>.asc` for plain-ASCII terminals) — this takes priority over the
-database screen, so it's the quickest way to swap in art without
-touching Admin. No restart required.
+custom `ansi` slot also look for a plain file drop-in — checked in
+this order, first match wins:
+
+1. `data/mods/text/<slot>.ans` — the **preferred** location (v1.0.36+),
+   matching real Synchronet's own `mods/text/` convention
+   (wiki.synchro.net/dir:mods): a sysop customization that's guaranteed
+   to survive an ANetBBS update untouched, the same guarantee
+   `data/mods/` already gives door scripts (see
+   [doc 14 — Door games](14-door-games.md)).
+2. `data/text/<slot>.ans` — the older location, still fully supported
+   for anyone already using it; nothing here needs to move.
+
+Both accept `<slot>132.ans` for widescreen terminals and `<slot>.asc`
+for plain-ASCII terminals, same as each other. Either location takes
+priority over the database screen, so dropping a file in is the
+quickest way to swap in art without touching Admin. No restart
+required.
 
 ### Multiple screens shown together (classic multi-logon-screen style)
+
+Everything below works identically whichever of the two directories
+above you use — the examples show `data/text/` for brevity, but
+`data/mods/text/` behaves exactly the same way.
 
 Drop in more than one numbered file and ANetBBS shows **all of them**,
 in order, every single login — the same idea as Synchronet's
@@ -105,17 +121,24 @@ You can paste:
 
 Beyond the database-driven ANSI screens above, built-in terminal menus
 (IRC chat, sysop tools, etc.) support **file-based** ANSI overrides.
-Place a `.ans` file in `data/text/menus/` with the correct slot name
-and ANetBBS will show your ANSI instead of the stock colored menu.
+Place a `.ans` file with the correct slot name in either of these
+(checked in order, first match wins — same precedence as the
+lifecycle screens above):
+
+1. `data/mods/text/menus/` — the **preferred** location (v1.0.36+),
+   matching real Synchronet's own `mods/text/menu/` convention.
+2. `data/text/menus/` — the older location, still fully supported.
 
 ### How it works
 
-1. Drop `<slot>.ans` into `data/text/menus/` (create the directory if needed).
+1. Drop `<slot>.ans` into `data/mods/text/menus/` (or `data/text/menus/`
+   — create the directory if needed).
 2. No restart required — the file is read on every menu visit.
 3. The screen is cleared, your ANSI is displayed, then the normal
    prompt appears below it (the sysop is still responsible for the art;
    ANetBBS always appends the live prompt so the user can make a choice).
-4. If the file is absent or unreadable, the stock colored menu is shown.
+4. If the file is absent or unreadable in both locations, the stock
+   colored menu is shown.
 
 ### File naming requirements
 

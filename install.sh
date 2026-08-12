@@ -1083,7 +1083,7 @@ else
 fi
 
 # Create all data directories
-for d in data data/uploads data/avatars data/games data/dos-games data/echomail data/mrc data/text data/text/menus logs anetbbs/logs; do
+for d in data data/uploads data/avatars data/games data/dos-games data/echomail data/mrc data/text data/text/menus data/mods data/mods/text data/mods/text/menus data/mods/core logs anetbbs/logs; do
     mkdir -p "$INSTALL_DIR/$d"
 done
 ok "Data directories created"

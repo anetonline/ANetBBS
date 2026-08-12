@@ -99,14 +99,20 @@ def load_menu_ansi(slot: str, mode: str = 'ansi'):
     """Return raw bytes for a menu art file, or None if nothing is found.
 
     Lookup order (mode-aware):
-      wide : data/text/menus/{slot}132.ans → {slot}.ans
-      ansi : data/text/menus/{slot}.ans
-      ascii: data/text/menus/{slot}.asc   → {slot}.ans
-    Each candidate is also tried under anetbbs/screens/menus/ as a bundled
-    stock fallback before giving up.
+      wide : data/mods/text/menus/{slot}132.ans → {slot}.ans
+      ansi : data/mods/text/menus/{slot}.ans
+      ascii: data/mods/text/menus/{slot}.asc    → {slot}.ans
+    Each candidate is also tried under data/text/menus/ (the older,
+    still-supported location predating the mods/ tree), THEN
+    anetbbs/screens/menus/ as the bundled stock fallback, before
+    giving up. mods/text/menus/ matches real Synchronet's own
+    mods/text/menu/ convention (wiki.synchro.net/dir:mods) -- checked
+    first so a sysop override always wins, same precedence as
+    session.py's own _show_ansi_screen().
     """
     from pathlib import Path
     data_dir   = Path(__file__).resolve().parent.parent.parent / 'data'
+    mods_dir   = data_dir / 'mods' / 'text' / 'menus'
     menus_dir  = data_dir / 'text' / 'menus'
     stock_dir  = Path(__file__).resolve().parent.parent / 'screens' / 'menus'
 
@@ -118,7 +124,7 @@ def load_menu_ansi(slot: str, mode: str = 'ansi'):
         candidates = [f'{slot}.ans']
 
     for fname in candidates:
-        for directory in (menus_dir, stock_dir):
+        for directory in (mods_dir, menus_dir, stock_dir):
             f = directory / fname
             try:
                 if f.is_file():

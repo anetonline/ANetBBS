@@ -109,10 +109,9 @@ class LoginScreenPetsciiBranchTests(unittest.TestCase):
         # Regression guard: the petscii skip must not affect the normal path.
         session, writer = _make_session()  # default term_mode == 'ansi'
         session._show_ansi_screen = AsyncMock()
-
-        async def _fake_read_line(prompt=''):
-            return '3'
-        session.read_line = _fake_read_line
+        # ANSI mode's login choice comes from the interactive lightbar
+        # menu (see tests/test_login_lightbar_menu.py), not read_line().
+        session._login_lightbar_menu = AsyncMock(return_value='3')
 
         asyncio.run(session.login_screen())
         session._show_ansi_screen.assert_called_once_with('welcome')

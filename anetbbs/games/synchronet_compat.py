@@ -1165,6 +1165,12 @@ var js = {
     startup_dir:  '{GAME_DIR}/',
     stubs_dir:    '{STUBS_DIR}/',
     sbbs_exec:    '{EXEC_DIR}/',
+    // Not a real Synchronet js.* property (bbs.mods_dir/system.mods_dir
+    // above ARE real -- doors sometimes read those directly) -- this
+    // one is internal to this shim's own load() resolver below, same
+    // treatment as js.stubs_dir. Checked FIRST, before anything else,
+    // so a sysop's own override always wins.
+    mods_dir:     '{MODS_DIR}/',
     // Not a real Synchronet js.* property -- internal to this shim only,
     // same treatment as js.stubs_dir above. MsgBase (see its own class
     // definition) shells out to this via spawnSync.
@@ -2935,10 +2941,22 @@ function load() {
     if (_path.isAbsolute(filename)) {
         fullpath = _try(filename);
     } else {
-        // Honor js.load_path_list FIRST — doors prepend paths there
+        // Sysop's own /data/mods/ override -- checked FIRST, before
+        // even js.load_path_list, matching real Synchronet's own
+        // mods/ precedence: a same-named file dropped there always
+        // wins over the stock/xtrn copy, so a sysop's local patch to
+        // a door script (or a stub/library file it loads) survives a
+        // package update untouched. Joined against the exact filename
+        // string the caller passed to load() -- e.g. a door calling
+        // load("dorkit/screen.js") is overridden by dropping a file at
+        // data/mods/dorkit/screen.js, preserving whatever subdirectory
+        // structure the call site itself used rather than flattening
+        // everything into one bare-basename namespace.
+        fullpath = _try(_path.join(js.mods_dir || '.', filename));
+        // Honor js.load_path_list next — doors prepend paths there
         // (e.g. LORD does `js.load_path_list.unshift(js.exec_dir+"dorkit/")`
         // so its dorkit helper libs resolve).
-        if (Array.isArray(js.load_path_list)) {
+        if (!fullpath && Array.isArray(js.load_path_list)) {
             for (var _lp = 0; _lp < js.load_path_list.length && !fullpath; _lp++) {
                 fullpath = _try(_path.join(js.load_path_list[_lp], filename));
             }
@@ -3818,7 +3836,22 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
         game.synchronet_script_path or '/tmp') or '/tmp')  # nosec B108
     data_dir = os.path.join(os.path.dirname(exec_dir), 'data')
     text_dir = os.path.join(os.path.dirname(exec_dir), 'text')
-    mods_dir = os.path.join(os.path.dirname(exec_dir), 'mods')
+    # Real gap found live (Jerry: "we really need to finish wiring in
+    # the /data/mods/ directory... just like Synchronet has a
+    # /sbbs/mods/ directory"): this used to be a per-door SIBLING
+    # directory of exec_dir (game-tree-relative, e.g.
+    # ".../xtrn/mods"), never ANetBBS's own single central override
+    # tree -- and js.mods_dir (below, used by load()'s own resolution
+    # order) never existed at all, so nothing ever actually consulted
+    # this value regardless of where it pointed. Fixed to be ONE
+    # central data/mods/ directory (a sibling of data/text/, which
+    # already has this same override behavior for ANSI screens -- see
+    # session.py's _show_ansi_screen) so a sysop has exactly one place
+    # to look, matching Synchronet's own single /sbbs/mods/ tree. Sits
+    # inside the existing data/ tree that update.sh's rsync already
+    # excludes wholesale, so a dropped-in override survives a package
+    # update with zero extra deploy-script changes needed.
+    mods_dir = os.path.join(_bbs_root, 'data', 'mods')
     # Stubs dir ships with anetbbs (provides sbbsdefs.js etc) so doors
     # `load("sbbsdefs.js")` works without a full Synchronet install.
     stubs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sbbs_stubs')

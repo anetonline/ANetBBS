@@ -1297,9 +1297,16 @@ class BBSSession:
         silently no-ops if the slot doesn't exist or the DB is unavailable.
 
         Resolution order:
-          1. {DATA_DIR}/text/{slot}.ans  — file drop-in (highest priority)
-          2. BbsAnsiScreen DB row        — set via /admin/menus/screens
-          3. nothing                     — silently skip
+          1. {DATA_DIR}/mods/text/{slot}.ans — file override (highest
+             priority), matching real Synchronet's own mods/text/
+             convention (wiki.synchro.net/dir:mods: "if a file exists
+             in both the [text] directory and the mods/text directory,
+             the version in the mods/text directory will be displayed
+             rather than the version in the text directory").
+          2. {DATA_DIR}/text/{slot}.ans  — file drop-in (older,
+             still-supported location predating the mods/ tree)
+          3. BbsAnsiScreen DB row        — set via /admin/menus/screens
+          4. nothing                     — silently skip
 
         Multiple display variants: dropping in {slot}132_2.ans,
         {slot}132_3.ans, ... alongside {slot}132.ans (which counts as
@@ -1309,8 +1316,8 @@ class BBSSession:
         pause is wanted before the next one loads). Name them
         {slot}132_ran.ans / {slot}132_2_ran.ans / ... instead to pick just
         ONE at random each login rather than showing the whole sequence.
-        See _resolve_display_screens. Works for both the file-based
-        override (step 1) and the bundled stock screen (step 3); a
+        See _resolve_display_screens. Works for the file-based
+        overrides (steps 1-2) and the bundled stock screen (step 4); a
         single file (the common case) behaves exactly as before.
 
         @PAUSE@ codes embedded in the ANSI body split the content into pages;
@@ -1331,7 +1338,9 @@ class BBSSession:
             mode = self.term_mode
             is_plain_text = False
 
-            # 1. File-based override (mode-aware priority)
+            # 1-2. File-based overrides (mode-aware priority), mods/text/
+            #      checked before the older text/ location for each
+            #      candidate filename in turn:
             #    wide : {slot}132.ans → {slot}.ans
             #    ansi : {slot}.ans
             #    ascii: {slot}.asc
@@ -1340,6 +1349,7 @@ class BBSSession:
             _text_dir = None
             try:
                 _data_dir = _app().config.get('DATA_DIR', '')
+                _mods_text_dir = _pl.Path(_data_dir) / 'mods' / 'text'
                 _text_dir = _pl.Path(_data_dir) / 'text'
                 if mode == 'wide':
                     _candidates = [f'{slot}132.ans', f'{slot}.ans']
@@ -1348,7 +1358,8 @@ class BBSSession:
                 else:
                     _candidates = [f'{slot}.ans']
                 for _fname in _candidates:
-                    _picked = _resolve_display_screens(_text_dir, _fname)
+                    _picked = (_resolve_display_screens(_mods_text_dir, _fname)
+                              or _resolve_display_screens(_text_dir, _fname))
                     if _picked is not None:
                         body = _load_display_screens(_picked)
                         is_plain_text = _fname.endswith('.asc')
@@ -1356,7 +1367,7 @@ class BBSSession:
             except Exception:
                 pass
 
-            # 2. DB lookup (ANSI content — skip for ascii mode)
+            # 3. DB lookup (ANSI content — skip for ascii mode)
             if not body and mode != 'ascii':
                 from ..models import BbsAnsiScreen
                 with _app().app_context():
@@ -1375,7 +1386,7 @@ class BBSSession:
                         db_pause = bool(row.pause_after)
                         body = row.body
 
-            # 3. Bundled stock screen (anetbbs/screens/) — all modes
+            # 4. Bundled stock screen (anetbbs/screens/) — all modes
             if not body:
                 body, _plain = _stock_screen(slot, mode)
                 if body is not None:
@@ -1457,6 +1468,117 @@ class BBSSession:
         except Exception:
             pass
 
+    async def _login_lightbar_menu(self, bbs_name: str) -> str:
+        """Interactive ANSI lightbar replacement for the old static
+        numbered login box -- Up/Down (or Left/Right) moves the
+        highlight, Enter selects. Direct 1/2/3 and L/N/E hotkeys still
+        jump straight to a choice too, so muscle memory from the old
+        box (and any client with broken arrow-key support) still works.
+
+        Returns '1' (Login), '2' (New User Registration), or '3' (Exit)
+        -- the same contract login_screen()'s dispatch already expects
+        from the ascii/petscii branches' read_line()-based menus, so
+        the caller doesn't need to know which branch produced it.
+        """
+        items = (('1', 'L', 'Login'),
+                 ('2', 'N', 'New User Registration'),
+                 ('3', 'E', 'Exit'))
+        sel = 0
+        IW = 40  # inner content width -- matches the box border below
+        B = '\x1b[1m'; R = '\x1b[0m'
+        CY = '\x1b[36m'; YE = '\x1b[33m'; GR = '\x1b[32m'; WH = '\x1b[37m'
+        SEL = '\x1b[7m\x1b[1m'   # reverse + bold -- same highlight convention as the BBS's other lightbar menus (bbs_ui.py's _rss_lightbar)
+        EOL = '\x1b[K'
+        # NOT the raw CP437 control-picture bytes (0x10/0x18/0x19) --
+        # those only render as arrow/triangle glyphs on a real legacy
+        # DOS-style terminal emulator that does control-range glyph
+        # substitution (SyncTerm, etc.); a modern/web ANSI client can
+        # just as reasonably treat 0x00-0x1F as literal control codes
+        # and print a Unicode "control picture" placeholder instead --
+        # confirmed live (Pi test): showed up as ␐/␘/␙, not arrows.
+        # 0xAF ('»') is in cp437's high half (a real printable
+        # character, not a control-code substitution trick) and
+        # renders identically everywhere; the hint text just spells
+        # out "Up/Down" instead of risking another control-byte glyph.
+        CURSOR = '»'
+        ITEM_ROW = {0: 6, 1: 7, 2: 8}   # absolute row numbers, set by _draw_full()'s own layout below
+
+        def _at(row):
+            return f'\x1b[{row};1H'
+
+        def _item_row(idx):
+            _, _, label = items[idx]
+            marker = CURSOR if idx == sel else ' '
+            text = f'  {marker} {label}'.ljust(IW)
+            if idx == sel:
+                return f'{B}{CY}║{SEL}{text}{R}{B}{CY}║{R}{EOL}'
+            return f'{B}{CY}║{R}{GR}{text}{B}{CY}║{R}{EOL}'
+
+        async def _draw_full():
+            title = f'Welcome to {bbs_name}'[:IW - 2].center(IW - 2)
+            # Must be <= IW - 1 visible chars (the row template below adds
+            # one leading literal space before it) -- found live: the
+            # earlier "Up/Down" wording was exactly IW chars, one over
+            # budget, which overflowed the box border by a column.
+            hint_plain = 'Up/Dn Move   Enter Select   1-3 Direct'
+            hint = f'{YE}Up/Dn{R} Move   {YE}Enter{R} Select   {YE}1-3{R} Direct'
+            hint += ' ' * max(0, IW - 1 - len(hint_plain))
+            lines = [
+                '',
+                f'{B}{CY}╔{"═" * IW}╗{R}',
+                f'{B}{CY}║{R} {WH}{title}{R} {B}{CY}║{R}',
+                f'{B}{CY}╠{"═" * IW}╣{R}',
+                f'{B}{CY}║{R}{" " * IW}{B}{CY}║{R}',
+                _item_row(0),
+                _item_row(1),
+                _item_row(2),
+                f'{B}{CY}║{R}{" " * IW}{B}{CY}║{R}',
+                f'{B}{CY}╠{"═" * IW}╣{R}',
+                f'{B}{CY}║{R} {hint}{B}{CY}║{R}',
+                f'{B}{CY}╚{"═" * IW}╝{R}',
+                '',
+            ]
+            await self.write('\r\n'.join(lines) + '\r\n')
+
+        async def _redraw_item(idx):
+            await self.write(f'{_at(ITEM_ROW[idx])}{_item_row(idx)}')
+
+        await _draw_full()
+
+        result = None
+        while result is None:
+            key = await self.read_key_arrow()
+            if key in ('UP', 'LEFT'):
+                old, sel = sel, (sel - 1) % len(items)
+                await _redraw_item(old)
+                await _redraw_item(sel)
+            elif key in ('DOWN', 'RIGHT'):
+                old, sel = sel, (sel + 1) % len(items)
+                await _redraw_item(old)
+                await _redraw_item(sel)
+            elif key == 'ENTER':
+                result = items[sel][0]
+            elif key in ('1', '2', '3'):
+                result = key
+            elif key == 'L':
+                result = '1'
+            elif key == 'N':
+                result = '2'
+            elif key in ('E', 'ESC', 'CTRL_C'):
+                result = '3'
+
+        # The caller (handle_login()/handle_registration()) writes its
+        # own header from wherever the cursor happens to be -- the old
+        # static read_line()-based menu naturally left it at a fresh
+        # line below the box, but this menu's absolute cursor addressing
+        # leaves it wherever the last redraw put it (mid-box). Without
+        # this, the next screen's text overlaps the still-visible box
+        # instead of appearing on a clean screen (confirmed live: "===
+        # User Login ===" bled into the "New User Registration"/"Exit"
+        # rows on a real Pi test).
+        await self.write('\x1b[2J\x1b[H')
+        return result
+
     async def login_screen(self) -> bool:
         """Display login screen and handle user authentication"""
         # Auto-login path: SSH/rlogin pre-filled the username. Skip the welcome
@@ -1529,6 +1651,7 @@ class BBSSession:
                     "\r\n"
                     "Choice: "
                 )
+                choice = await self.read_line(menu)
             elif self.term_mode == 'petscii':
                 w = self.petscii_width
                 inner = w - 4
@@ -1550,29 +1673,23 @@ class BBSSession:
                     "\r\n"
                     "Choice: "
                 )
+                choice = await self.read_line(menu)
             else:
-                B = '\x1b[1m'; R = '\x1b[0m'
-                # Bold (B, above) is already combined with each of these
-                # everywhere they're used below -- base 30-37 codes here,
-                # not bare aixterm 90-97 (MagiTerm/NetRunner/PuTTY don't
-                # recognize 90-97 and silently drop the color; SyncTerm
-                # happens to, which is why this only showed up elsewhere).
-                CY = '\x1b[36m'; YE = '\x1b[33m'; GR = '\x1b[32m'; WH = '\x1b[37m'; DI = '\x1b[37m'
-                menu = (
-                    "\r\n"
-                    f"{B}{CY}╔════════════════════════════════════════╗{R}\r\n"
-                    f"{B}{CY}║ {WH}{_title}{CY} ║{R}\r\n"
-                    f"{B}{CY}╠════════════════════════════════════════╣{R}\r\n"
-                    f"{B}{CY}║  {YE}1{DI}. {GR}Login{' ' * 30}{CY}║{R}\r\n"
-                    f"{B}{CY}║  {YE}2{DI}. {GR}New User Registration{' ' * 14}{CY}║{R}\r\n"
-                    f"{B}{CY}║  {YE}3{DI}. {GR}Exit{' ' * 31}{CY}║{R}\r\n"
-                    f"{B}{CY}╚════════════════════════════════════════╝{R}\r\n"
-                    "\r\n"
-                    f"{B}{YE}Choice:{R} "
-                )
+                # Interactive Up/Down + Enter lightbar, replacing the old
+                # static numbered box -- direct 1/2/3 (and L/N/E) hotkeys
+                # still work too, so the muscle-memory path never breaks.
+                # A sysop can drop a full replacement at
+                # data/mods/core/login_menu.py (defining an async
+                # render_login_menu(session, bbs_name) -> str) to
+                # override this without touching core code at all --
+                # same idea as Synchronet's own login.js/logon.js in
+                # mods/. See core/mods_override.py.
+                from .mods_override import call_core_override
+                choice = await call_core_override(
+                    'login_menu', 'render_login_menu',
+                    lambda: self._login_lightbar_menu(_bbs_name),
+                    self, _bbs_name)
 
-            choice = await self.read_line(menu)
-            
             if choice == '1':
                 if await self.handle_login():
                     return True

@@ -171,6 +171,39 @@ def _resolve_path(p, base=None):
     return os.path.normpath(os.path.join(base, p))
 
 
+def _mods_dir():
+    """The sysop's own /data/mods/ override directory -- a file dropped
+    here takes priority over the stock, package-shipped copy, matching
+    Synchronet's own real /sbbs/mods/ convention (Jerry: "just like
+    Synchronet has a /sbbs/mods/ directory"). Lives inside the existing
+    data/ tree, which update.sh's rsync already excludes wholesale, so
+    an override survives a package update with no extra deploy-script
+    changes. Same directory synchronet_compat.py's own js.mods_dir
+    (used by the compat shim's internal load() resolver) points at --
+    one central place for a sysop to look, not one per door."""
+    base = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, 'data', 'mods')
+
+
+def _apply_mods_override(path):
+    """If a same-named file exists in the sysop's mods/ override
+    directory (matched by basename only -- the entry-point script path
+    stored on Game.synchronet_script_path is normally already absolute,
+    so there's no relative subdirectory structure worth preserving the
+    way there is for synchronet_compat.py's own load()-driven files),
+    return that override's path instead. Returns `path` unchanged if
+    no override exists, including when `path` is falsy."""
+    if not path:
+        return path
+    candidate = os.path.join(_mods_dir(), os.path.basename(path))
+    if os.path.isfile(candidate):
+        logger.info('door_runner: using mods/ override for %s -> %s',
+                    os.path.basename(path), candidate)
+        return candidate
+    return path
+
+
 def _find_jsexec(game):
     """Locate a Synchronet jsexec binary on the host. Returns the absolute
     path or None. Honors a few common install layouts in priority order:
@@ -519,7 +552,13 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
     if game.game_type == 'door_synchronet':
         script_raw = game.synchronet_script_path or ''
-        script = _resolve_path(script_raw)
+        # mods/ override applies here, upstream of the jsexec-vs-Node-
+        # shim fork below -- `script` feeds both, so a sysop's replaced
+        # copy of a door's own top-level .js file is honored regardless
+        # of which runtime ends up executing it. This is the entry-
+        # point file itself; anything IT subsequently load()s is
+        # covered separately by js.mods_dir in synchronet_compat.py.
+        script = _apply_mods_override(_resolve_path(script_raw))
         if not script or not os.path.isfile(script):
             raise FileNotFoundError(f'Synchronet script not found: {script!r}')
 

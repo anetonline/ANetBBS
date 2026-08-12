@@ -386,6 +386,94 @@ When in doubt: if the door pack is a self-contained JS file with its
 own data directory, it'll likely work. If it's something Synchronet
 ships *with* Synchronet (like the message reader), it won't.
 
+### `data/mods/` — the sysop override tree (v1.0.36+)
+
+`data/mods/` is ANetBBS's answer to real Synchronet's own `/sbbs/mods/`
+directory (wiki.synchro.net/dir:mods) — **one central place** for a
+sysop to drop a customized replacement for anything the BBS ships,
+guaranteed to survive an `update.sh` run untouched (only the `data/`
+tree is excluded from the update's file sync, and `data/mods/` lives
+inside it). This doc covers the Synchronet-compat-door half; ANSI/menu
+screen overrides under `data/mods/text/` work the same way and are
+covered in [doc 4 — ANSI screens](04-ansi-screens.md); ANetBBS's own
+native core Python screens (not Synchronet-compat, not static ANSI
+art) are covered further below in this same section.
+
+Bundled Synchronet-compat door scripts (`anetbbs/games/sbbs_doors/`)
+and the compat shim's own stub/library files (`anetbbs/games/sbbs_stubs/`,
+things like `sbbsdefs.js`) ship as part of the package itself — a
+sysop hand-patch to one of these (fixing a door-specific quirk,
+tweaking behavior) would normally get silently overwritten on the next
+update. Drop a same-named replacement in `data/mods/` and it's used
+**instead of** the bundled copy, checked first before anything else.
+Two things this covers:
+
+- **A door's own top-level entry-point script** (`Game.synchronet_script_path`,
+  e.g. `lord.js`) — matched by filename only, e.g. drop
+  `data/mods/lord.js` to override
+  `anetbbs/games/sbbs_doors/lord/lord.js` regardless of that file's
+  actual package-tree location.
+- **Anything loaded at runtime via `load("somefile.js")`** — a door's
+  own sibling files, or a compat-shim stub/library file — matched
+  against the exact filename/relative-path string the door itself
+  passed to `load()`, so overriding `load("dorkit/screen.js")` means
+  dropping a file at `data/mods/dorkit/screen.js`, not just
+  `data/mods/screen.js`.
+
+No admin-UI step needed — `update.sh`/`install.sh` both ensure
+`data/mods/` (and its `text/`/`text/menus/`/`core/` subdirectories)
+exist (empty by default; nothing is seeded into it the way `data/text/`
+seeds stock ANSI screens — mods/ only ever contains what a sysop
+deliberately puts there), and every override is checked automatically,
+no restart required.
+
+#### `data/mods/core/` — overriding ANetBBS's own native code
+
+Synchronet's `login.js`/`logon.js` aren't doors — they're core system
+scripts Synchronet's own engine loads by filename, and a sysop's
+customized copy in `mods/` is preferred automatically, no special-case
+distinction from a door script. ANetBBS's core isn't script-driven the
+same way (`login_screen()` etc. are compiled-in Python methods, not
+files loaded by name at runtime), so getting the same capability for
+ANetBBS's own code needs an explicit override point per screen rather
+than falling out for free — `anetbbs/core/mods_override.py`'s
+`call_core_override()` is that mechanism, and the ANSI telnet login
+menu (the interactive Up/Down lightbar shown before login) is the
+first screen wired up to it.
+
+Drop a complete replacement file at `data/mods/core/login_menu.py`
+defining an async `render_login_menu(session, bbs_name) -> str`
+(returning `'1'` Login / `'2'` New User Registration / `'3'` Exit) and
+it's used **instead of** the built-in menu, checked fresh from disk on
+every login attempt — no restart needed to pick up an edit, and
+deleting the file falls straight back to the built-in version.
+`session` is the live session object: `session.write(text)` sends raw
+ANSI/text, `session.read_key_arrow()` reads one keystroke and returns
+`'UP'`/`'DOWN'`/`'LEFT'`/`'RIGHT'`/`'ENTER'`/`'ESC'`/`'CTRL_C'`/
+`'PGUP'`/`'PGDN'`/`'HOME'`/`'END'` or an uppercase printable character.
+A syntax error, a missing function, or an exception raised while the
+override runs all degrade gracefully to the built-in menu instead of
+breaking login — check the BBS log if an edit doesn't seem to be
+taking effect.
+
+Two real lessons from building this against a real terminal, worth
+keeping if you're editing the layout: raw CP437 control-picture bytes
+(0x10/0x18/0x19, the classic DOS convention for arrow/triangle glyphs)
+only render correctly on a legacy terminal emulator that does
+control-range glyph substitution — a modern or web-based ANSI client
+can just as reasonably show a Unicode "control picture" placeholder
+instead, so stick to real printable cp437 characters (e.g. `»`, 0xAF)
+for cursor markers. And because this menu uses absolute cursor
+positioning (`\x1b[row;1H`) rather than the old scroll-with-the-page
+`read_line()` style, it must clear the screen itself before returning
+a choice — otherwise the next screen's text bleeds into the
+still-visible box instead of a clean redraw.
+
+Other core screens can opt into the same mechanism later by calling
+`call_core_override('<name>', '<func>', stock_fn, *args)` from their
+own call site — see `login_screen()` in `core/session.py` for the
+reference wiring.
+
 ## In-browser DOS games (`door_dos_browser`)
 
 `door_dos_browser` runs classic DOS games directly in the user's web

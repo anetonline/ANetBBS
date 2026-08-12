@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.35`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.36`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.36 — New `data/mods/` sysop-override tree, matching Synchronet's own `mods/` convention (August 2026)
+
+Added a central `data/mods/` directory where a sysop can drop a customized replacement for anything ANetBBS ships, guaranteed to survive a package update untouched — the same guarantee real Synchronet's own `/sbbs/mods/` tree gives (wiki.synchro.net/dir:mods), and built to the same unified layout: one root directory whose subdirectories mirror what's being overridden, not a scattered set of one-off override points.
+
+Three things are covered:
+
+- **Synchronet-compat door/game scripts.** `synchronet_compat.py`'s shim already computed a `mods_dir` value and threaded it through as `bbs.mods_dir`/`system.mods_dir` (real Synchronet API properties some doors read directly), but the internal `js.mods_dir` its own `load()` resolver needed to actually *use* that value never existed — so nothing ever consulted it. Fixed: `js.mods_dir` now exists and is checked first in `load()`'s search order, and `door_runner.py` applies the same override to a door's own top-level entry-point script (the one file that never goes through `load()` at all, since it's handed directly to jsexec/Node as the process entry point).
+- **ANSI/menu screen overrides.** `data/mods/text/` and `data/mods/text/menus/` are now checked *ahead of* the existing `data/text/` and `data/text/menus/` override locations for welcome/goodbye/newuser/custom ANSI screens and built-in terminal menu art — matching real Synchronet's own `mods/text/`/`mods/text/menu/` convention. The older `data/text/` locations keep working unchanged for anyone already using them; `data/mods/text/` is simply preferred when both exist. See [doc 4 — ANSI screens](../docs/04-ansi-screens.md) and [doc 14 — door games](../docs/14-door-games.md).
+- **ANetBBS's own native core Python screens.** Real Synchronet's `login.js`/`logon.js` are core system scripts (not doors) a sysop can customize in `mods/` the same way as anything else, because Synchronet's whole engine loads everything by filename. ANetBBS's own core isn't script-driven the same way, so a matching capability needed a new, explicit mechanism: `core/mods_override.py`'s `call_core_override()` checks `data/mods/core/<name>.py` for a full replacement Python file and falls back to the built-in version if it's missing, broken, or throws — never breaking the screen it's overriding. See [doc 14 — door games](../docs/14-door-games.md).
+
+`data/mods/` (and its `text/`/`text/menus/`/`core/` subdirectories) sits inside the part of the install `update.sh` already excludes wholesale, so a sysop's dropped-in override survives a package update with zero extra deploy-script changes.
 
 ## v1.0.35 — Network-join credentials email now tracked, with a resend button (August 2026)
 
