@@ -140,6 +140,7 @@
       <th>Reviewed</th>
       <th>Reviewed by</th>
       <th>Reason / Credentials</th>
+      <th>Email</th>
     </tr>
   </thead>
   <tbody>
@@ -171,6 +172,34 @@
           {% endif %}
         {% else %}
           {{ r.deny_reason or '—' }}
+        {% endif %}
+      </td>
+      <td class="small text-nowrap">
+        {% if r.status == 'approved' %}
+          {% if r.email_error %}
+            {# email_error holds the MOST RECENT failure, even if an
+               earlier attempt (email_sent_at) succeeded -- a later
+               failed resend must not read as "Sent". #}
+            <span class="badge bg-danger" title="{{ r.email_error }}">
+              <i class="bi bi-envelope-exclamation"></i> Failed
+            </span>
+          {% elif r.email_sent_at %}
+            <span class="badge bg-success" title="Last sent {{ r.email_sent_at|eastern('%Y-%m-%d %H:%M') }}">
+              <i class="bi bi-envelope-check"></i> Sent
+            </span>
+          {% else %}
+            <span class="badge bg-secondary">Not sent</span>
+          {% endif %}
+          <form method="POST"
+                action="{{ url_for('hub_admin.resend_join_request_email', req_id=r.id) }}"
+                class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary ms-1" title="Resend credentials email">
+              <i class="bi bi-arrow-repeat"></i>
+            </button>
+          </form>
+        {% else %}
+          —
         {% endif %}
       </td>
     </tr>

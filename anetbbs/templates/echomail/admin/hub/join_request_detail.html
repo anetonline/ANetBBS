@@ -94,6 +94,29 @@
           {% if req.status == 'denied' %}
           <tr><th>Deny Reason</th><td>{{ req.deny_reason or '—' }}</td></tr>
           {% endif %}
+          {% if req.status == 'approved' %}
+          <tr><th>Credentials Email</th><td>
+            {% if req.email_error %}
+              {# email_error holds the MOST RECENT failure, even if an
+                 earlier attempt succeeded -- must not read as "Sent". #}
+              <span class="badge bg-danger"><i class="bi bi-envelope-exclamation"></i> Failed</span>
+              <span class="small text-muted d-block">{{ req.email_error }}</span>
+            {% elif req.email_sent_at %}
+              <span class="badge bg-success"><i class="bi bi-envelope-check"></i> Sent</span>
+              <span class="small text-muted">{{ req.email_sent_at|eastern('%Y-%m-%d %H:%M %Z') }}</span>
+            {% else %}
+              <span class="badge bg-secondary">Not sent</span>
+            {% endif %}
+            <form method="POST"
+                  action="{{ url_for('hub_admin.resend_join_request_email', req_id=req.id) }}"
+                  class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary ms-2">
+                <i class="bi bi-arrow-repeat"></i> Resend
+              </button>
+            </form>
+          </td></tr>
+          {% endif %}
           {% endif %}
         </table>
       </div>

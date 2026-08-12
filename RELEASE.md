@@ -1,3 +1,7 @@
+# ANetBBS v1.0.35 — Network-join credentials email now tracked, with a resend button (August 2026)
+
+**The join-approval credentials email had no delivery tracking at all** — a one-shot, best-effort send with only a transient flash message and a log line, so a silent SMTP-side failure for one specific applicant (relay bounce, greylisting, quota) was invisible and unrecoverable short of grepping logs. Added per-request tracking (last attempt, last success, last error) shown directly on the Join Requests list and each request's detail page, plus a **Resend** button that re-sends the exact same already-generated credentials — never regenerates a new password, which would invalidate whatever the applicant may have already received.
+
 # ANetBBS v1.0.34 — New BinkP outbound spool directory; fixed a redelivered-TIC sysop confusion (August 2026)
 
 **Added a real BinkP outbound spool directory.** ANetBBS's own echomail has always been entirely DB-queue-driven — there was no way for an external program (e.g. a door writing its own FTS-0001 netmail packets straight to disk) to hand ANetBBS a file to transmit. Any file dropped in a peer's spool directory now gets sent as-is on the next BinkP session with that peer (both dial-out and dial-in directions covered) and archived to a `sent/` subfolder on success. Spool directories are per-peer — `<DATA_DIR>/binkp/outbound/<peer address>`, overridable via `BINKP_OUTBOUND_DIR` — and the resolved path for each configured peer is now shown on the Echomail Networks list and a BinkP node's own detail page.

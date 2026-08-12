@@ -1431,6 +1431,117 @@ def archive_join_request(req_id):
     return redirect(url_for('hub_admin.join_request_detail', req_id=req.id))
 
 
+def _send_join_approval_email(req):
+    """Compose and send the join-approval credentials email for an
+    ALREADY-approved request, reading its persisted node links and
+    generated passwords rather than any locals from the approval
+    request itself -- shared by approve_join_request() (the first,
+    automatic send) and resend_join_request_email() (a manual retry),
+    so the two can never drift apart on wording/instructions, and so a
+    resend is possible arbitrarily long after the original approval
+    request has ended.
+
+    Deliberately re-sends the SAME already-generated credentials —
+    never regenerates a new password. Regenerating would silently
+    invalidate whatever the applicant may have already received (a
+    "failed" send isn't proof nothing arrived; SMTP failure modes
+    include partial/delayed delivery) or already configured their own
+    mailer with.
+
+    Persists the outcome on `req` (email_sent_at/email_last_attempt_at/
+    email_error — see the model's own comment for the exact semantics)
+    and commits, so this is the one place that bookkeeping happens.
+
+    Returns (ok, message) -- message is a short, flash-ready string
+    either way (success confirmation, or the reason it failed/was
+    skipped).
+    """
+    import datetime
+    from ..mailer import smtp_enabled, send_email
+    from ..echomail.routing import parse_address
+
+    if not smtp_enabled():
+        return False, ('SMTP relay is not configured, so you\'ll need to '
+                       'relay the generated credentials to the applicant '
+                       'yourself.')
+
+    binkp_node = BinkPNode.query.get(req.binkp_node_id) if req.binkp_node_id else None
+    qwk_node = QWKNode.query.get(req.qwk_node_id) if req.qwk_node_id else None
+    binkp_password = req.generated_binkp_password
+    qwk_password = req.generated_qwk_password
+    binkp_network = binkp_node.network if binkp_node else None
+
+    lines = [f'Hi {req.name},', '',
+             f'Your application to join as {req.bbs_name} has been approved!', '']
+    if binkp_node and binkp_password:
+        _parsed = parse_address(binkp_node.ftn_address)
+        node_number = _parsed[2] if _parsed else None
+        port = binkp_network.binkp_port if binkp_network else 24554
+        lines += [f'BinkP address: {binkp_node.ftn_address}']
+        if node_number is not None:
+            lines.append(f'Assigned node number: {node_number}')
+        lines += [f'BinkP port: {port}',
+                 f'BinkP session password: {binkp_password}', '']
+        hub_addr = binkp_network.our_address if binkp_network else None
+        if hub_addr:
+            areafix_pw = ((binkp_network.areafix_password or binkp_password)
+                         if binkp_network else binkp_password)
+            lines += [
+                'You start with NO echo/file area subscriptions -- send '
+                'these to get areas flowing:',
+                '',
+                f'To subscribe to echomail areas, send a netmail to '
+                f'"AreaFix" at {hub_addr}',
+                f'with your AreaFix password ({areafix_pw}) in the '
+                f'Subject line, and one command',
+                'per line in the body, e.g.:',
+                '',
+                '  +ALL            subscribe to every available echo area',
+                '  +FIDO.GENERAL   subscribe to one area by tag',
+                '  %LIST           list your current subscriptions',
+                '  %HELP           full command list',
+                '',
+                f'For file echoes, send the same kind of netmail to '
+                f'"FileFix" at {hub_addr}',
+                'instead -- same password, same command syntax.', '',
+            ]
+    if qwk_node and qwk_password:
+        lines += [f'QWK packet ID: {qwk_node.packet_id}',
+                  f'QWK password: {qwk_password}', '']
+
+    ok, err = send_email(req.email, 'Your network join application was approved',
+                         '\n'.join(lines))
+    now = datetime.datetime.utcnow()
+    req.email_last_attempt_at = now
+    if ok:
+        req.email_sent_at = now
+        req.email_error = None
+    else:
+        req.email_error = err or 'unknown error'
+    db.session.commit()
+
+    if ok:
+        return True, f'Credentials emailed to {req.email}.'
+    return False, (f'Credentials email failed to send ({err}) -- relay '
+                   f'them to {req.email} manually.')
+
+
+@hub_admin_bp.route('/join/requests/<int:req_id>/resend-email', methods=['POST'])
+@login_required
+@_admin_required
+def resend_join_request_email(req_id):
+    """Manually re-send the credentials email for an already-approved
+    request. See _send_join_approval_email()'s own docstring for why
+    this re-sends rather than regenerates."""
+    req = NetworkJoinRequest.query.get_or_404(req_id)
+    if req.status != 'approved':
+        flash('Can only resend credentials for an approved request.', 'warning')
+        return redirect(url_for('hub_admin.join_requests'))
+    ok, msg = _send_join_approval_email(req)
+    flash(msg, 'success' if ok else 'warning')
+    return redirect(url_for('hub_admin.join_requests'))
+
+
 @hub_admin_bp.route('/join/requests/<int:req_id>/approve', methods=['POST'])
 @login_required
 @_admin_required
@@ -1559,63 +1670,12 @@ def approve_join_request(req_id):
     db.session.commit()
 
     # Best-effort credentials email -- never blocks the approval itself
-    # if SMTP isn't configured or the send fails.
-    from ..mailer import smtp_enabled, send_email
-    if smtp_enabled():
-        lines = [f'Hi {req.name},', '',
-                 f'Your application to join as {req.bbs_name} has been approved!', '']
-        if binkp_password:
-            # Real gap found live: this email gave the full FTN address
-            # and session password but never the port (recipients had to
-            # guess/ask), never mentioned AreaFix/FileFix at all (a new
-            # node has zero subscriptions until they send one), and
-            # buried the auto-assigned node number inside the zone:net/
-            # node address string instead of calling it out plainly.
-            from ..echomail.routing import parse_address
-            _parsed = parse_address(binkp_address)
-            node_number = _parsed[2] if _parsed else None
-            port = binkp_network.binkp_port if binkp_network else 24554
-            lines += [f'BinkP address: {binkp_address}']
-            if node_number is not None:
-                lines.append(f'Assigned node number: {node_number}')
-            lines += [f'BinkP port: {port}',
-                     f'BinkP session password: {binkp_password}', '']
-            hub_addr = binkp_network.our_address if binkp_network else None
-            if hub_addr:
-                areafix_pw = ((binkp_network.areafix_password or binkp_password)
-                             if binkp_network else binkp_password)
-                lines += [
-                    'You start with NO echo/file area subscriptions -- send '
-                    'these to get areas flowing:',
-                    '',
-                    f'To subscribe to echomail areas, send a netmail to '
-                    f'"AreaFix" at {hub_addr}',
-                    f'with your AreaFix password ({areafix_pw}) in the '
-                    f'Subject line, and one command',
-                    'per line in the body, e.g.:',
-                    '',
-                    '  +ALL            subscribe to every available echo area',
-                    '  +FIDO.GENERAL   subscribe to one area by tag',
-                    '  %LIST           list your current subscriptions',
-                    '  %HELP           full command list',
-                    '',
-                    f'For file echoes, send the same kind of netmail to '
-                    f'"FileFix" at {hub_addr}',
-                    'instead -- same password, same command syntax.', '',
-                ]
-        if qwk_password:
-            lines += [f'QWK packet ID: {qwk_pid}',
-                      f'QWK password: {qwk_password}', '']
-        ok, err = send_email(req.email, 'Your network join application was approved',
-                             '\n'.join(lines))
-        if ok:
-            flash(f'Approved! Credentials emailed to {req.email}.', 'success')
-        else:
-            flash(f'Approved, but the credentials email failed to send '
-                  f'({err}) -- relay them to {req.email} manually.', 'warning')
-    else:
-        flash('Approved! SMTP relay is not configured, so you\'ll need to '
-              'relay the generated credentials to the applicant yourself.', 'warning')
+    # if SMTP isn't configured or the send fails (see
+    # _send_join_approval_email's own docstring for why this is shared
+    # with the manual resend action, and what it persists on `req`).
+    ok, msg = _send_join_approval_email(req)
+    flash(f'Approved! {msg}' if ok else f'Approved, but {msg}',
+         'success' if ok else 'warning')
     return redirect(url_for('hub_admin.join_requests'))
 
 

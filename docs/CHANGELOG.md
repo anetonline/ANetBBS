@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.34`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.35`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.35 — Network-join credentials email now tracked, with a resend button (August 2026)
+
+**"The last two people said they have not received [the join-approval credentials email]... should have a resend feature."** Real gap: the auto-send at approval time was always a one-shot, best-effort attempt with NOTHING persisted about whether it actually succeeded — just a flash message that's gone on the next page load, and a log line. If the sysop approved several requests in a row (or just didn't catch the banner), a silent SMTP-side failure (relay bounce, greylisting, quota) for one specific applicant was completely invisible and unrecoverable short of grepping the app log.
+
+Added three tracking columns to `NetworkJoinRequest` (`email_sent_at`, `email_last_attempt_at`, `email_error`) and a shared `_send_join_approval_email()` helper used by both the automatic send-on-approval and a new **Resend** button (on both the Join Requests list and each request's detail page) — so the two paths can never drift apart on wording, and delivery status is now visible at a glance instead of relying on catching a transient banner. Resend deliberately re-sends the *same* already-generated credentials rather than regenerating a new password, since regenerating would silently invalidate whatever the applicant may have already received or configured their own mailer with from an earlier, partially-successful attempt.
 
 ## v1.0.34 — New BinkP outbound spool directory; fixed a redelivered-TIC sysop confusion (August 2026)
 

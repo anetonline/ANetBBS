@@ -27,6 +27,41 @@ Hub Management admin panel. This doc covers all of them.
   an asymmetry worth knowing about if you're comparing outbound
   bandwidth against a peer that does compress.
 
+### Outbound spool directory — for external programs (v1.0.34+)
+
+Everything above is DB-queue-driven: outbound netmail/echomail lives
+as `EchomailMessage`/`NetmailMessage` rows, outbound file distribution
+as `HatchQueue` rows (see [doc 7 — File Areas](07-file-areas.md)).
+Neither gives an *external* program — a door that writes its own real
+FTS-0001 `.pkt` netmail packets straight to disk, the way a
+traditional FTN mailer's flat-file outbound spool works — anywhere to
+hand ANetBBS a file to transmit.
+
+`resolve_outbound_dir()` in `anetbbs/echomail/binkp.py` fixes that:
+any file dropped in a peer's spool directory is sent to that peer
+exactly as found (no packet-building, no manifest) on the next BinkP
+session, in either direction — us dialing out (`poller.py`) or a peer
+dialing in to us (`binkp_server.py`). Successfully-sent files move
+into a `sent/` subfolder rather than being deleted.
+
+The spool is **per peer**, not one shared directory the way inbound
+is — a loose file has no address of its own to route by, and more
+than one network/node can be configured at once:
+
+```
+<DATA_DIR>/binkp/outbound/<sanitized peer FTN address>/
+```
+
+Override the root with the `BINKP_OUTBOUND_DIR` env var (mirrors
+`BINKP_INBOUND_DIR`). You don't need to compute the sanitized path by
+hand — the resolved directory for each configured peer is shown
+directly on **Admin → Echomail Networks** (an "Outbound Spool" column)
+and on each BinkP node's own detail page under **Hub Management**.
+
+This is what ANetCHESS's own `-ibbs out` (or any similar external
+netmail-writing program) should be pointed at as its per-node
+outbound directory.
+
 ## ANotherNetwork — bundled by default
 
 Every fresh ANetBBS install seeds a real, working echomail/QWK network
@@ -490,6 +525,16 @@ configured (see [doc 2 — Sysop daily ops](02-sysop-daily-ops.md)), the
 applicant is emailed their new credentials automatically; otherwise the
 sysop is told to relay them manually. Denials can include a reason,
 also emailed if SMTP is working.
+
+**Credentials email delivery is tracked per request** (v1.0.35+) — the
+Join Requests list and each request's detail page show whether the
+last send attempt actually succeeded (an SMTP-relay-side bounce,
+greylist, or quota issue on the recipient's end can silently fail a
+send with no other trace). A **Resend** button next to that status
+re-sends the exact same already-generated credentials — it never
+regenerates a new password, since that would invalidate whatever the
+applicant may have already received or configured their own mailer
+with from an earlier, partially-successful attempt.
 
 This feature isn't hardcoded to ANotherNetwork — it's meant to be
 usable by any sysop running their own ANetBBS hub for their own

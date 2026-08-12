@@ -3624,6 +3624,20 @@ class NetworkJoinRequest(db.Model):
     qwk_node_id = db.Column(db.Integer, db.ForeignKey('qwk_nodes.id'), nullable=True)
     generated_binkp_password = db.Column(db.String(50))
     generated_qwk_password = db.Column(db.String(50))
+    # Credentials-email delivery tracking. Real gap found live: the
+    # send has always been a one-shot, best-effort attempt at approval
+    # time with NOTHING persisted about whether it actually succeeded
+    # -- only a flash message (gone on next page load) and a log line.
+    # A sysop approving several requests in a row had no way to look
+    # back and tell which ones' emails silently failed (SMTP relay
+    # bounce/greylist on the recipient's end, etc.) short of grepping
+    # the app log. email_sent_at is set only on a SUCCESSFUL send (and
+    # is never cleared by a later failed retry); email_last_attempt_at
+    # updates on every attempt, success or not; email_error holds the
+    # most recent failure reason, cleared on a subsequent success.
+    email_sent_at = db.Column(db.DateTime)
+    email_last_attempt_at = db.Column(db.DateTime)
+    email_error = db.Column(db.Text)
 
     hub_identity = db.relationship('HubIdentity', backref=db.backref('join_requests', lazy='dynamic'))
 
