@@ -210,6 +210,78 @@ class ScanInboundTests(unittest.TestCase):
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    def test_redelivered_already_filed_tic_is_swept_not_left_stuck(self):
+        """Real bug found live: a sysop saw a real .tic sitting in
+        inbound_dir, but "Rescan" reported none found and it just
+        stayed there on every subsequent rescan (some file echoes
+        redeliver an unchanged binary on a schedule; confirmed live --
+        the exact same binary refiled weeks after its first successful
+        filing). Different from test_already_filed_tic_is_not_
+        reprocessed_on_second_scan above: THAT test's second .tic
+        never actually exists on disk anymore by the second scan (the
+        first scan already moved it into processed/) -- it doesn't
+        exercise the dedup-skip branch's cleanup at all. This one
+        drops a genuinely NEW copy of an already-filed TIC back into
+        inbound_dir (a real redelivery) and confirms scan_inbound()
+        both declines to re-file it AND sweeps it into processed/,
+        rather than leaving it sitting in inbound_dir forever."""
+        from anetbbs.models import db, FileArea, TicFile
+        from anetbbs.echomail.tic import scan_inbound
+
+        work_dir = tempfile.mkdtemp(prefix='tic_scan_redeliver_')
+        try:
+            storage_dir = os.path.join(work_dir, 'storage')
+            os.makedirs(storage_dir, exist_ok=True)
+            with self.app.app_context():
+                area = FileArea(tag='REDELIVER', name='Redeliver Test',
+                                storage_path=storage_dir,
+                                is_active=True, is_subscribed=True)
+                db.session.add(area)
+                db.session.commit()
+
+            tic_body = 'File redeliver.zip\nArea REDELIVER\nDesc x\n'
+            with open(os.path.join(work_dir, 'redeliver.zip'), 'wb') as f:
+                f.write(b'contents')
+            with open(os.path.join(work_dir, 'redeliver.tic'), 'w', encoding='cp437') as f:
+                f.write(tic_body)
+
+            with self.app.app_context():
+                first = scan_inbound(work_dir)
+                self.assertEqual(first, 1)
+
+            # First filing's own cleanup already swept the originals --
+            # confirm inbound_dir is genuinely empty of them before
+            # simulating the redelivery, so the next scan_inbound()
+            # call is unambiguously exercising a FRESH copy.
+            self.assertFalse(os.path.exists(os.path.join(work_dir, 'redeliver.tic')))
+            self.assertFalse(os.path.exists(os.path.join(work_dir, 'redeliver.zip')))
+
+            # Simulate a real redelivery: the exact same manifest (and,
+            # as some mailers do, the binary alongside it) lands in
+            # inbound_dir again.
+            with open(os.path.join(work_dir, 'redeliver.zip'), 'wb') as f:
+                f.write(b'contents')
+            with open(os.path.join(work_dir, 'redeliver.tic'), 'w', encoding='cp437') as f:
+                f.write(tic_body)
+
+            with self.app.app_context():
+                second = scan_inbound(work_dir)
+                # Not re-filed as a second real FileUpload/TicFile row...
+                self.assertEqual(
+                    TicFile.query.filter_by(filename='redeliver.zip').count(), 1)
+                # ...but the sysop still sees it was handled, not silence.
+                self.assertEqual(second, 1)
+
+            processed_dir = os.path.join(work_dir, 'processed')
+            self.assertTrue(os.path.isfile(os.path.join(processed_dir, 'redeliver.tic')))
+            self.assertTrue(os.path.isfile(os.path.join(processed_dir, 'redeliver.zip')))
+            self.assertFalse(os.path.exists(os.path.join(work_dir, 'redeliver.tic')),
+                             'redelivered .tic must not be left stuck in inbound_dir')
+            self.assertFalse(os.path.exists(os.path.join(work_dir, 'redeliver.zip')),
+                             'redelivered binary must not be left stuck in inbound_dir')
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     def test_unset_storage_path_defaults_under_data_dir_not_var_lib(self):
         """Real bug found live: an area with no storage_path used to
         default to /var/lib/anetbbs/file_areas/<TAG> -- a path a

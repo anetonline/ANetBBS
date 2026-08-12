@@ -1,6 +1,14 @@
+# ANetBBS v1.0.34 — New BinkP outbound spool directory; fixed a redelivered-TIC sysop confusion (August 2026)
+
+**Added a real BinkP outbound spool directory.** ANetBBS's own echomail has always been entirely DB-queue-driven — there was no way for an external program (e.g. a door writing its own FTS-0001 netmail packets straight to disk) to hand ANetBBS a file to transmit. Any file dropped in a peer's spool directory now gets sent as-is on the next BinkP session with that peer (both dial-out and dial-in directions covered) and archived to a `sent/` subfolder on success. Spool directories are per-peer — `<DATA_DIR>/binkp/outbound/<peer address>`, overridable via `BINKP_OUTBOUND_DIR` — and the resolved path for each configured peer is now shown on the Echomail Networks list and a BinkP node's own detail page.
+
+**Fixed a real live bug where a redelivered TIC file looked stuck but the rescan button reported nothing wrong.** Some file echoes periodically redistribute already-delivered files unchanged; the dedup-skip path that correctly refused to re-file an already-filed binary never reached the step that moves a processed file out of the inbound directory, so a genuine redelivery piled up there forever. Fixed to sweep it into `processed/` like any other successfully-handled file.
+
 # ANetBBS v1.0.33 — anetbbs-cfg now reachable from the terminal Sysop Menu, SSH only (August 2026)
 
 **The standalone `anetbbs-cfg` full-screen config tool can now be launched directly from a live terminal session** — a new "Config Tool" entry in the Sysop Menu, instead of needing separate shell access. SSH sessions only, by explicit design: the tool edits user security levels, echomail/hub credentials, and other sensitive config, and telnet is plaintext. Gated twice (the menu entry itself is only added for SSH sessions, and the launch function independently re-checks), so there's no path that bypasses it. Implemented as a hidden `Game` row reusing `door_runner.py`'s already-hardened PTY-bridging code, rather than reimplementing terminal I/O handling from scratch.
+
+**Fixed a real crash found live testing the above**: `_curses.error: curs_set() returned ERR` on launch, because doors launched this way inherit `TERM=ansi` (fine for every other, non-curses door, but missing the cursor-visibility capability curses needs). New `safe_curs_set()` wraps every call site so this degrades gracefully instead of crashing.
 
 # ANetBBS v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
 

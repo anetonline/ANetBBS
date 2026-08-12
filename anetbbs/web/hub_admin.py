@@ -507,6 +507,9 @@ def binkp_node_detail(node_id):
         s.file_area_id for s in
         FileEchoSubscription.query.filter_by(peer_address=node.ftn_address).all()}
     all_file_areas = FileArea.query.filter_by(is_active=True).order_by(FileArea.tag).all()
+    from ..echomail.binkp import resolve_outbound_dir
+    outbound_dir = resolve_outbound_dir(
+        current_app.config.get('DATA_DIR') or 'data', node.ftn_address)
     return render_template(
         'echomail/admin/hub/binkp_node_detail.html',
         node=node,
@@ -517,6 +520,7 @@ def binkp_node_detail(node_id):
         binkp_networks=binkp_networks,
         file_subscribed_ids=file_subscribed_ids,
         all_file_areas=all_file_areas,
+        outbound_dir=outbound_dir,
     )
 
 

@@ -207,6 +207,85 @@ def _sanitize_inbound_filename(raw: str) -> str:
     return name
 
 
+def _sanitize_peer_dirname(address: str) -> str:
+    """Reduce an FTN address (e.g. '111:111/1' or '1200:1/1.5') to a safe,
+    portable directory name for that peer's outbound spool. FTN addresses
+    always contain '/' -- a literal path separator -- so the raw address
+    can never be used bare as a directory component."""
+    import re as _re
+    name = _re.sub(r'[^A-Za-z0-9._-]+', '_', (address or '').strip())
+    name = name.strip('._')
+    return name or 'unknown'
+
+
+def resolve_outbound_dir(data_dir: str, peer_address: str) -> str:
+    """Resolve the per-peer outbound spool directory.
+
+    Real gap found live: ANetBBS's own echomail is entirely DB-queue-
+    driven (EchomailMessage rows for netmail/echomail, HatchQueue rows
+    for file distribution) -- there was no way for an external program
+    (e.g. ANetCHESS's own `-ibbs out`, which writes real FTS-0001 .pkt
+    netmail packets straight to disk, the same way any traditional FTN
+    mailer's flat-file outbound spool works) to hand ANetBBS a file to
+    transmit. This is that spool: anything dropped here is sent as-is
+    on the next BinkP session with that peer and archived to a `sent/`
+    subfolder, never deleted outright (same convention as tic.py's
+    inbound `processed/`).
+
+    Keyed PER PEER, not one shared directory like BINKP_INBOUND_DIR --
+    a loose file has no address of its own to route by, and more than
+    one EchomailNetwork/BinkPNode peer can be configured at once, so a
+    single shared outbound directory would be ambiguous about which
+    session should pick a given file up. Matches the same
+    peer_address-keyed convention HatchQueue already uses.
+
+    Root directory honors BINKP_OUTBOUND_DIR (mirrors
+    BINKP_INBOUND_DIR's env-override + data_dir-default pattern);
+    defaults to <data_dir>/binkp/outbound/<sanitized peer address>.
+    """
+    import os as _os
+    root = _os.environ.get('BINKP_OUTBOUND_DIR') or _os.path.join(
+        (data_dir or 'data'), 'binkp', 'outbound')
+    return _os.path.join(root, _sanitize_peer_dirname(peer_address))
+
+
+def list_outbound_dir_files(outbound_dir: str):
+    """Return a sorted list of (name, full_path) for regular files sitting
+    directly inside outbound_dir -- its own 'sent' archive subfolder is
+    never itself included."""
+    import os as _os
+    if not outbound_dir or not _os.path.isdir(outbound_dir):
+        return []
+    out = []
+    for name in sorted(_os.listdir(outbound_dir)):
+        if name == 'sent':
+            continue
+        path = _os.path.join(outbound_dir, name)
+        if _os.path.isfile(path):
+            out.append((name, path))
+    return out
+
+
+def archive_sent_outbound_file(outbound_dir: str, name: str, path: str):
+    """Move a successfully-sent outbound file into outbound_dir/sent/,
+    never deleting outright -- same "keep it recoverable" convention as
+    tic.py's inbound processed/ folder. If a same-named file somehow
+    already made it there, the source is just removed instead of
+    failing the move (matches tic.py's _move_to_processed)."""
+    import os as _os
+    import shutil as _shutil
+    try:
+        sent_dir = _os.path.join(outbound_dir, 'sent')
+        _os.makedirs(sent_dir, exist_ok=True)
+        dst = _os.path.join(sent_dir, name)
+        if _os.path.exists(dst):
+            _os.remove(path)
+        else:
+            _shutil.move(path, dst)
+    except OSError:
+        logger.exception('Outbound dir: sent %s but could not archive it', name)
+
+
 def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
                       packet_password: str = '',
                       default_crash: bool = False,
@@ -882,13 +961,20 @@ class BinkPClient:
                       hatch items that were attempted but not acked).
         """
         import os as _os
-        result = {'received': [], 'sent': 0, 'hatched_ids': [], 'hatch_failures': []}
+        result = {'received': [], 'sent': 0, 'hatched_ids': [], 'hatch_failures': [],
+                  'outbound_dir_sent': 0, 'outbound_dir_failures': []}
         # Persistent inbound path — the prior /tmp default was tmpfs on
         # most distros so anything stashed vanished on restart. Computed
         # once here since _wait_got()/_send_messages() may now also need
         # to stash an interleaved file, not just _receive_messages().
         self._inbound_dir = _os.environ.get('BINKP_INBOUND_DIR') or _os.path.join(
             (data_dir or 'data'), 'binkp', 'inbound')
+        # self.hub_address is the peer we're actually dialing -- an
+        # upstream hub (poller.py's _run_client) or a downstream node
+        # (poller.py's _run_node_client both construct this class the
+        # same way, just with different addresses) -- so this resolves
+        # correctly for either direction with no extra wiring.
+        self._outbound_dir = resolve_outbound_dir(data_dir, self.hub_address)
         self._interleaved_received = []
         self._interleaved_eob_count = 0
         self._connect()
@@ -899,6 +985,8 @@ class BinkPClient:
             if hatch_items:
                 result['hatched_ids'], result['hatch_failures'] = \
                     self._send_hatch(hatch_items)
+            result['outbound_dir_sent'], result['outbound_dir_failures'] = \
+                self._send_outbound_dir_files()
             result['received'] = self._receive_messages(data_dir)
             if self._interleaved_received:
                 result['received'].extend(self._interleaved_received)
@@ -953,6 +1041,38 @@ class BinkPClient:
             logger.info("Hatch: shipped %s + %s to %s",
                         item.filename, tic_name, item.peer_address)
         return sent_ids, failures
+
+    def _send_outbound_dir_files(self):
+        """Ship any loose files sitting in self._outbound_dir (see
+        resolve_outbound_dir) to this peer, exactly as found -- no
+        packet-building, no HatchQueue/.tic manifest, unlike
+        _send_hatch. The file's producer (e.g. ANetCHESS's own
+        `-ibbs out`) is responsible for writing whatever the receiving
+        side expects, typically a real FTS-0001 .pkt netmail packet.
+
+        Returns (sent_count, failures) -- failures is a list of
+        (filename, message) tuples, same shape as _send_hatch's."""
+        sent = 0
+        failures = []
+        for name, path in list_outbound_dir_files(self._outbound_dir):
+            try:
+                with open(path, 'rb') as f:
+                    data = f.read()
+            except OSError as exc:
+                logger.error("Outbound dir: cannot read %s: %s", path, exc)
+                failures.append((name, f'cannot read: {exc}'))
+                continue
+            mtime = int(datetime.utcnow().timestamp())
+            self._send_cmd(CMD_FILE, f'{name} {len(data)} {mtime} 0')
+            self._send_data(data)
+            if not self._wait_got():
+                logger.warning("Outbound dir: peer didn't ack %s", name)
+                failures.append((name, "peer didn't ack file"))
+                continue
+            archive_sent_outbound_file(self._outbound_dir, name, path)
+            sent += 1
+            logger.info("Outbound dir: shipped %s to %s", name, self.hub_address)
+        return sent, failures
 
     def _wait_got(self, timeout_sec: float = None) -> bool:
         """Read frames until we see M_GOT (success) or M_SKIP/M_ERR (fail).

@@ -5,7 +5,8 @@ All routes require login + admin access.
 """
 import threading
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
+from flask import (Blueprint, render_template, redirect, url_for, flash,
+                   request, abort, current_app)
 from flask_login import login_required, current_user
 from wtforms import (StringField, TextAreaField, SubmitField, SelectField,
                      IntegerField, BooleanField, PasswordField)
@@ -241,7 +242,23 @@ def dashboard():
 @_admin_required
 def networks():
     all_networks = EchomailNetwork.query.order_by(EchomailNetwork.name).all()
-    return render_template('echomail/admin/networks.html', networks=all_networks)
+    # Resolved per-network outbound spool path (see binkp.py's
+    # resolve_outbound_dir docstring) -- shown so a sysop can tell an
+    # external program (e.g. a door writing its own FTS-0001 netmail
+    # packets) exactly where to drop a file for pickup on this
+    # network's next BinkP session, without needing to read source.
+    # Keyed by network.hub_address, the peer address _run_client()
+    # actually dials -- QWK networks have no such spool, so they're
+    # simply left out of the dict.
+    from ..echomail.binkp import resolve_outbound_dir
+    data_dir = current_app.config.get('DATA_DIR') or 'data'
+    outbound_dirs = {
+        net.id: resolve_outbound_dir(data_dir, net.hub_address)
+        for net in all_networks
+        if net.network_type == 'binkp' and net.hub_address
+    }
+    return render_template('echomail/admin/networks.html', networks=all_networks,
+                           outbound_dirs=outbound_dirs)
 
 
 @echomail_admin_bp.route('/networks/new', methods=['GET', 'POST'])

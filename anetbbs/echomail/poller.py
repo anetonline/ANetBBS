@@ -496,8 +496,14 @@ def _do_poll(app, network):
                 "%d message(s) left queued for retry next poll",
                 network.name, len(outbound))
 
-        logger.info("Poller: %s — sent=%d received=%d",
-                    network.name, log.messages_sent, log.messages_received)
+        logger.info("Poller: %s — sent=%d received=%d outbound_dir_sent=%d",
+                    network.name, log.messages_sent, log.messages_received,
+                    result.get('outbound_dir_sent', 0))
+        if result.get('outbound_dir_failures'):
+            logger.warning(
+                "Poller: %s — %d outbound-dir file(s) not delivered: %s",
+                network.name, len(result['outbound_dir_failures']),
+                ', '.join(name for name, _msg in result['outbound_dir_failures']))
 
         # Hub tosser — fan out newly imported messages to downstream nodes.
         if imported:
@@ -653,9 +659,14 @@ def _do_poll_node(app, node):
 
         node.last_seen_at = datetime.utcnow()
 
-        logger.info("Poller: node %s (%s) -- sent=%d received=%d",
+        logger.info("Poller: node %s (%s) -- sent=%d received=%d outbound_dir_sent=%d",
                     node.name, node.ftn_address, log.messages_sent,
-                    log.messages_received)
+                    log.messages_received, result.get('outbound_dir_sent', 0))
+        if result.get('outbound_dir_failures'):
+            logger.warning(
+                "Poller: node %s (%s) -- %d outbound-dir file(s) not delivered: %s",
+                node.name, node.ftn_address, len(result['outbound_dir_failures']),
+                ', '.join(name for name, _msg in result['outbound_dir_failures']))
 
         if imported:
             try:

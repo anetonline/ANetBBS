@@ -21,7 +21,7 @@
         <table class="table table-striped mb-0">
             <thead>
                 <tr>
-                    <th>Name</th><th>Type</th><th>Host</th><th>Status</th>
+                    <th>Name</th><th>Type</th><th>Host</th><th>Outbound Spool</th><th>Status</th>
                     <th>Last Poll</th><th>Interval</th><th>Actions</th>
                 </tr>
             </thead>
@@ -33,6 +33,11 @@
                     <td style="font-size:0.85rem;">
                         {% if net.network_type == 'binkp' %}{{ net.binkp_host or '—' }}:{{ net.binkp_port or 24554 }}
                         {% else %}{{ net.qwk_host or '—' }}:{{ net.qwk_port or 80 }}{% endif %}
+                    </td>
+                    <td style="font-size:0.8rem;">
+                        {% if net.id in outbound_dirs %}
+                        <code title="Drop a file here (e.g. from a door that writes its own netmail packets) and it's sent as-is on this network's next BinkP session, then archived to a sent/ subfolder.">{{ outbound_dirs[net.id] }}</code>
+                        {% else %}—{% endif %}
                     </td>
                     <td>
                         {% if net.is_active %}

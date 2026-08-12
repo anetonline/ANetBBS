@@ -37,6 +37,7 @@ from .binkp import (
     _build_cmd, _build_data,
     _build_ftn_packet, _parse_ftn_packet,
     _sanitize_inbound_filename,
+    resolve_outbound_dir, list_outbound_dir_files, archive_sent_outbound_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -861,6 +862,21 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         logger.warning('Hold-queue .pkt not accepted by %s — '
                                        'leaving pending for retry', remote_addr)
 
+                # Loose outbound-spool files (see binkp.py's
+                # resolve_outbound_dir docstring) keyed the same way as
+                # the HatchQueue lookup just below -- node.ftn_address,
+                # not remote_addr, for the same reason.
+                node_outbound_dir = resolve_outbound_dir(
+                    app.config.get('DATA_DIR') or 'data', node.ftn_address or '')
+                if os.path.isdir(node_outbound_dir):
+                    dir_sent, dir_failures = await _send_outbound_dir_items(
+                        reader, writer, node_outbound_dir, peer,
+                        recv_state, inbound_files, transcript=transcript)
+                    sent_count += dir_sent
+                    if dir_failures:
+                        logger.warning('Outbound dir: %d file(s) not delivered to %s',
+                                       len(dir_failures), remote_addr)
+
                 from ..models import HatchQueue
                 # Keyed on node.ftn_address (the resolved DB row's own
                 # address, matching what filefix.py's hub side stored
@@ -928,6 +944,21 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     else:
                         logger.warning('Outbound .pkt was not accepted by %s — '
                                        'leaving in queue for retry', remote_addr)
+
+                # Loose outbound-spool files (see binkp.py's
+                # resolve_outbound_dir docstring), keyed the same way as
+                # the HatchQueue lookup just below -- net_hub_address,
+                # our upstream hub calling us instead of us dialing out.
+                net_outbound_dir = resolve_outbound_dir(
+                    app.config.get('DATA_DIR') or 'data', net_hub_address or '')
+                if net_hub_address and os.path.isdir(net_outbound_dir):
+                    dir_sent, dir_failures = await _send_outbound_dir_items(
+                        reader, writer, net_outbound_dir, peer,
+                        recv_state, inbound_files, transcript=transcript)
+                    sent_count += dir_sent
+                    if dir_failures:
+                        logger.warning('Outbound dir: %d file(s) not delivered to %s',
+                                       len(dir_failures), remote_addr)
 
                 from ..models import HatchQueue
                 # Same gap as the downstream_node_id branch above (see
@@ -1591,6 +1622,43 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
         logger.info('Hatch (inbound listener): shipped %s + %s to %s',
                     item.filename, tic_name, peer)
     return sent_ids, failures
+
+
+async def _send_outbound_dir_items(reader, writer, outbound_dir, peer,
+                                   state, files, transcript=None):
+    """Ship any loose files sitting in outbound_dir (see binkp.py's
+    resolve_outbound_dir) to a connected peer that dialed IN to us,
+    using the same M_FILE/M_GOT exchange as _send_pkt_file/
+    _send_hatch_items. Async counterpart of binkp.py's BinkPClient.
+    _send_outbound_dir_files() (the outbound-poll/dial-out direction)
+    -- this is the inbound-listener direction (a peer dials INTO us
+    and we flush whatever's waiting for them too, same as hatch/echo).
+
+    No packet-building, no HatchQueue/.tic manifest -- files are sent
+    exactly as found. Returns (sent_count, failures), failures a list
+    of (filename, message) tuples."""
+    sent = 0
+    failures = []
+    for name, path in list_outbound_dir_files(outbound_dir):
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+        except OSError as exc:
+            logger.error('Outbound dir (inbound listener): cannot read %s: %s',
+                        path, exc)
+            failures.append((name, f'cannot read: {exc}'))
+            continue
+        accepted = await _send_pkt_file(reader, writer, name, data,
+                                        peer, state, files, transcript=transcript)
+        if not accepted:
+            logger.warning('Outbound dir (inbound listener): peer did not ack %s',
+                           name)
+            failures.append((name, "peer didn't ack file"))
+            continue
+        archive_sent_outbound_file(outbound_dir, name, path)
+        sent += 1
+        logger.info('Outbound dir (inbound listener): shipped %s to %s', name, peer)
+    return sent, failures
 
 
 def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,

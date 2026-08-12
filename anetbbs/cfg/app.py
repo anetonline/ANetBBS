@@ -47,7 +47,7 @@ SECTIONS = [
 
 
 def _main_menu(stdscr):
-    curses.curs_set(0)
+    ui.safe_curs_set(0)
     try:
         ui.init_colors()
     except curses.error:

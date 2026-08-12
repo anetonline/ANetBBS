@@ -55,6 +55,9 @@
                     <tr><th>Location</th><td>{{ node.location or '—' }}</td></tr>
                     <tr><th>Email</th><td>{{ node.email or '—' }}</td></tr>
                     <tr><th>Password</th><td><code>{{ node.password }}</code></td></tr>
+                    <tr><th>Outbound Spool</th><td style="font-size:0.8rem;">
+                        <code title="Drop a file here (e.g. from a door that writes its own netmail packets) and it's sent as-is to this node on the next BinkP session, then archived to a sent/ subfolder.">{{ outbound_dir }}</code>
+                    </td></tr>
                     <tr><th>Status</th><td>
                         {% if node.is_active %}<span class="badge bg-success">active</span>
                         {% else %}<span class="badge bg-secondary">inactive</span>{% endif %}

@@ -159,6 +159,40 @@ def _dos83_truncate(name):
     return f'{base[:8]}.{ext}' if ext else base[:8]
 
 
+def _move_to_processed(inbound_dir, *paths):
+    """Move each of `paths` (any that are real files in inbound_dir) into
+    inbound_dir/processed/, never deleting outright -- matches this
+    project's usual "keep it recoverable" posture elsewhere. If a
+    same-named file is already sitting in processed/ (a genuine repeat
+    delivery of a binary that already filed successfully), the source
+    is just removed rather than overwriting the original.
+
+    Shared by process_tic()'s own success path AND scan_inbound()'s
+    duplicate-skip path (see the real bug this second use fixes: a
+    binary that's re-delivered -- some file echoes redistribute
+    unchanged files on a schedule -- has status='filed' in TicFile
+    already, so scan_inbound() correctly skips re-filing it, but
+    without this, that skip left the redundant .tic/binary pair
+    sitting in inbound_dir forever, silently, since only process_tic()
+    itself used to do this cleanup and skipped TICs never reach it).
+    Best-effort: a cleanup failure here must never affect a TIC's own
+    already-recorded status.
+    """
+    try:
+        processed_dir = os.path.join(inbound_dir, 'processed')
+        os.makedirs(processed_dir, exist_ok=True)
+        for src in paths:
+            if src and os.path.isfile(src):
+                dst = os.path.join(processed_dir, os.path.basename(src))
+                if os.path.exists(dst):
+                    os.remove(src)
+                else:
+                    shutil.move(src, dst)
+    except OSError:
+        logger.exception('Could not clean up inbound after filing: %s',
+                         ', '.join(str(p) for p in paths if p))
+
+
 def process_tic(tic_path, inbound_dir):
     """Process a single .tic file. Returns the TicFile DB row.
 
@@ -372,21 +406,9 @@ def process_tic(tic_path, inbound_dir):
     # processed/ subdir (never delete outright -- matches this
     # project's usual "keep it recoverable" posture elsewhere) so
     # inbound_dir only ever holds things still awaiting or failing
-    # processing. Best-effort: a cleanup failure here must never
-    # downgrade a TIC that already successfully filed.
-    try:
-        processed_dir = os.path.join(inbound_dir, 'processed')
-        os.makedirs(processed_dir, exist_ok=True)
-        for src in (bin_path, tic_path):
-            if src and os.path.isfile(src):
-                dst = os.path.join(processed_dir, os.path.basename(src))
-                if os.path.exists(dst):
-                    os.remove(src)
-                else:
-                    shutil.move(src, dst)
-    except OSError:
-        logger.exception('TIC %s: could not clean up inbound after filing',
-                         tic.filename)
+    # processing. See _move_to_processed()'s own docstring for the
+    # second, later-found gap this same helper also fixes.
+    _move_to_processed(inbound_dir, bin_path, tic_path)
 
     # Auto-import nodelist if this file area is a nodelist distribution echo
     # (e.g. Z1DAILY for FidoNet, tqwinfo for TQWnet). The nodelist text might
@@ -554,6 +576,29 @@ def scan_inbound(inbound_dir):
             existing = TicFile.query.filter_by(
                 filename=bin_name, status='filed').first()
             if existing:
+                # Real bug found live: a sysop saw a real .tic sitting
+                # in inbound_dir, but "Rescan" reported none found and
+                # the file just stayed there on every subsequent
+                # rescan. Some file echoes redeliver an unchanged
+                # binary on a schedule (confirmed live: the exact same
+                # binary refiled weeks after its first successful
+                # filing) -- declining to re-file it here is correct,
+                # but the early `continue` below meant this redundant
+                # .tic (and its freshly-redelivered binary, if one
+                # landed alongside it) never reached process_tic()'s
+                # own cleanup-into-processed/ step, so it piled up in
+                # inbound_dir forever with no visible explanation.
+                from .binkp import _sanitize_inbound_filename
+                bin_path = os.path.join(
+                    inbound_dir, _sanitize_inbound_filename(bin_name))
+                _move_to_processed(inbound_dir, bin_path, tic_path)
+                # Counts toward `processed` even though nothing was
+                # re-filed -- a sysop staring at "no unprocessed .tic
+                # files found" while a .tic sits right there in the
+                # directory listing needs to see THAT happened, not
+                # silence indistinguishable from "there was genuinely
+                # nothing here."
+                processed += 1
                 continue
         process_tic(tic_path, inbound_dir)
         processed += 1

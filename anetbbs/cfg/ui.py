@@ -18,6 +18,24 @@ from curses.textpad import Textbox
 APP_TITLE = "ANetBBS Terminal Configuration"
 
 
+def safe_curs_set(visibility):
+    """curs_set() raises curses.error ("curs_set() returned ERR")
+    whenever the terminfo entry for the current $TERM has no cursor-
+    visibility capability (civis/cnorm) -- real bug found live: doors
+    launched via door_runner.py inherit TERM=ansi (a minimal terminfo
+    entry meant for doors that emit raw ANSI escapes directly, which is
+    every OTHER door this launch path has ever run -- anetbbs-cfg is
+    the first curses-based program to go through it, and 'ansi' simply
+    doesn't define civis/cnorm). Cursor visibility is cosmetic, not
+    functional, so failing here should never crash the whole tool --
+    same reasoning as _safe_addstr below for the equivalent addstr
+    edge case."""
+    try:
+        curses.curs_set(visibility)
+    except curses.error:
+        pass
+
+
 def _safe_addstr(win, y, x, text, attr=0):
     """addstr silently raises curses.error at the bottom-right corner cell
     (writing there advances the cursor past the window's last legal
@@ -107,7 +125,7 @@ def run_menu(stdscr, title, items, footer="[Up/Down] Move  [Enter] Select  [Esc]
     None if the user backed out."""
     idx = 0
     stdscr.keypad(True)
-    curses.curs_set(0)
+    safe_curs_set(0)
     while True:
         stdscr.erase()
         draw_header(stdscr, title)
@@ -135,7 +153,7 @@ def _edit_line(stdscr, y, x, width, initial=""):
     win.erase()
     win.addstr(0, 0, initial[: width - 1])
     win.move(0, min(len(initial), width - 1))
-    curses.curs_set(1)
+    safe_curs_set(1)
     box = Textbox(win, insert_mode=True)
     cancelled = []
 
@@ -150,7 +168,7 @@ def _edit_line(stdscr, y, x, width, initial=""):
         return ch
 
     box.edit(validator)
-    curses.curs_set(0)
+    safe_curs_set(0)
     if cancelled:
         return None
     return box.gather().strip()
@@ -171,7 +189,7 @@ def run_form(stdscr, title, fields, values, help_lines=None,
     """
     data = dict(values)
     idx = 0
-    curses.curs_set(0)
+    safe_curs_set(0)
     label_w = max(len(f["label"]) for f in fields) + 2
     while True:
         stdscr.erase()
@@ -261,7 +279,7 @@ def run_list(stdscr, title, columns, fetch_rows, on_add=None, on_edit=None,
     """
     idx = 0
     top = 0
-    curses.curs_set(0)
+    safe_curs_set(0)
     hint_parts = []
     if on_add:
         hint_parts.append("[A]dd")

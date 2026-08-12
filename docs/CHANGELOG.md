@@ -1,15 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.33`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.34`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
 
+## v1.0.34 — New BinkP outbound spool directory; fixed a redelivered-TIC sysop confusion (August 2026)
+
+**Added a real BinkP outbound spool directory.** Real gap found live: ANetBBS's own echomail has always been entirely DB-queue-driven — outbound netmail/echomail as `EchomailMessage` rows, outbound file distribution as `HatchQueue` rows — with no way at all for an *external* program (e.g. a door that writes its own FTS-0001 netmail packets straight to disk, the same way any traditional FTN mailer's flat-file outbound spool works) to hand ANetBBS a file to transmit. Any file dropped in a peer's spool directory is now sent as-is on the next BinkP session with that peer (dial-out via `poller.py`, dial-in via `binkp_server.py` — both directions covered) and archived to a `sent/` subfolder on success, never deleted outright. Spool directories are keyed **per peer** (not one shared folder like the inbound directory), since a loose file has no address of its own to route by and more than one network/node can be configured at once — `<DATA_DIR>/binkp/outbound/<peer address>`, overridable via `BINKP_OUTBOUND_DIR`. The resolved path for each configured peer is now shown directly on the Echomail Networks list and a BinkP node's own detail page, so a sysop doesn't have to read source to find it.
+
+**Fixed a real live bug: a redelivered TIC file that was already successfully filed weeks earlier looked stuck, but "Rescan Inbound Now" reported nothing was wrong.** Root cause, traced from a real report of a `.tic`/binary pair sitting in the inbound directory that the rescan button claimed didn't exist: some file echoes periodically redistribute already-delivered files unchanged, and `scan_inbound()`'s dedup-skip branch (correctly refusing to re-file something already marked `filed` in the DB) did a bare `continue` without ever reaching the cleanup step that moves a processed file out of the inbound directory — so a genuine redelivery piled up in inbound forever, invisible to the rescan button's "no unprocessed .tic files found" message. Fixed by extracting the existing cleanup logic into a shared `_move_to_processed()` helper and calling it from the dedup-skip path too, with the rescan count now reflecting files it swept.
+
 ## v1.0.33 — anetbbs-cfg now reachable from the terminal Sysop Menu, SSH only (August 2026)
 
 **The standalone `anetbbs-cfg` full-screen config tool can now be launched directly from a live terminal session**, instead of needing separate shell access — a new "Config Tool" entry in the Sysop Menu. Restricted to SSH sessions only, by explicit design: the tool can edit user security levels, echomail/hub credentials, and other sensitive config, and telnet sends everything in plaintext. Gated twice — the menu entry itself only appears at all on an SSH session (not just hidden/greyed out on telnet), and the launch function independently re-checks the same thing, so there's no path that bypasses it even if the menu-gating logic changes later. Implemented by registering `anetbbs-cfg` as a hidden `Game` row (`is_active=False`, so it never appears in the normal games list to anyone) and reusing `door_runner.py`'s already-hardened PTY-bridging code — the same machinery every native door already uses, rather than reimplementing terminal I/O handling from scratch.
+
+**Fixed a real crash found live testing the above**: launching anetbbs-cfg through the Sysop Menu immediately crashed with `_curses.error: curs_set() returned ERR`. Root cause: doors launched via `door_runner.py` inherit `TERM=ansi`, a minimal terminfo entry meant for the raw-ANSI-escape doors that are every OTHER door this launch path has ever run — it has no cursor-visibility (civis/cnorm) capability, and anetbbs-cfg is the first curses-based program to go through this path. New `anetbbs.cfg.ui.safe_curs_set()` wraps every `curs_set()` call site (5 in `ui.py`, 1 in `app.py`) so a missing capability degrades to "cursor stays visible" instead of crashing the tool.
 
 ## v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
 
