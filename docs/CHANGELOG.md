@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.32`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.33`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.33 — anetbbs-cfg now reachable from the terminal Sysop Menu, SSH only (August 2026)
+
+**The standalone `anetbbs-cfg` full-screen config tool can now be launched directly from a live terminal session**, instead of needing separate shell access — a new "Config Tool" entry in the Sysop Menu. Restricted to SSH sessions only, by explicit design: the tool can edit user security levels, echomail/hub credentials, and other sensitive config, and telnet sends everything in plaintext. Gated twice — the menu entry itself only appears at all on an SSH session (not just hidden/greyed out on telnet), and the launch function independently re-checks the same thing, so there's no path that bypasses it even if the menu-gating logic changes later. Implemented by registering `anetbbs-cfg` as a hidden `Game` row (`is_active=False`, so it never appears in the normal games list to anyone) and reusing `door_runner.py`'s already-hardened PTY-bridging code — the same machinery every native door already uses, rather than reimplementing terminal I/O handling from scratch.
 
 ## v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
 

@@ -1,3 +1,7 @@
+# ANetBBS v1.0.33 — anetbbs-cfg now reachable from the terminal Sysop Menu, SSH only (August 2026)
+
+**The standalone `anetbbs-cfg` full-screen config tool can now be launched directly from a live terminal session** — a new "Config Tool" entry in the Sysop Menu, instead of needing separate shell access. SSH sessions only, by explicit design: the tool edits user security levels, echomail/hub credentials, and other sensitive config, and telnet is plaintext. Gated twice (the menu entry itself is only added for SSH sessions, and the launch function independently re-checks), so there's no path that bypasses it. Implemented as a hidden `Game` row reusing `door_runner.py`'s already-hardened PTY-bridging code, rather than reimplementing terminal I/O handling from scratch.
+
 # ANetBBS v1.0.32 — Fixed a dropfile username bug, door-config path trimming, and added CHAIN.TXT/SFDOORS.DAT support (August 2026)
 
 **Every single-word username showed up inside doors with a phantom "User" suffix — "Stingray" became "Stingray User".** `generate_dorinfo()` and `generate_door32()` both used the literal string `'User'` as a placeholder last name whenever splitting the username produced no second word, instead of an empty string — `generate_door_sys()` already got this right, the other two just never matched it. Fixed to match; all three now produce a plain username when there's no real last name.

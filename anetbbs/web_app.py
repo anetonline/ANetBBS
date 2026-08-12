@@ -13,6 +13,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
+import sys
 import secrets
 import logging
 import json
@@ -1737,6 +1738,42 @@ def _create_default_data():
                 os.path.join(vendor_dir, 'anetsims', 'door32.sys'),
             'sort_order': 60,
             'must_exist': os.path.join(vendor_dir, 'anetsims', 'anetsims'),
+        },
+        {
+            # anetbbs-cfg, the standalone curses full-screen sysop config
+            # tool (setup.py console_scripts entry), made reachable from
+            # a live terminal session's Sysop Menu (SSH only — see
+            # bbs_ui.py's _sysop_menu()) instead of needing separate
+            # real shell access. Registered as an ordinary door_native
+            # Game row purely so it can reuse door_runner.py's
+            # already-hardened PTY-bridging (launch_door_game /
+            # play_door_game_telnet) rather than reimplementing PTY
+            # fork/exec + I/O pumping + abort-key handling from scratch.
+            # `is_active: False` (via `_active_default` below) keeps it
+            # out of the normal player-facing games list on both web and
+            # terminal — launch_door_game/play_door_game_telnet don't
+            # check is_active themselves, so the Sysop Menu's own direct
+            # call still works. No drop file — anetbbs-cfg reads the DB
+            # directly (anetbbs.cfg.db_bootstrap), not a dropfile.
+            'name': 'ANetBBS Config Tool',
+            'slug': 'anetbbs-cfg',
+            'description': 'Sysop-only full-screen config tool (boards, '
+                           'echomail, users, games, system settings). '
+                           'Launched from the terminal Sysop Menu over '
+                           'SSH only.',
+            'category': 'system',
+            'icon': 'bi-gear',
+            'game_type': 'door_native',
+            'executable_path':
+                os.path.join(os.path.dirname(sys.executable), 'anetbbs-cfg'),
+            'working_directory': base_dir,
+            'min_access_level': 255,
+            'max_nodes': 1,
+            'web_enabled': False,
+            'sort_order': 900,
+            '_active_default': False,
+            'must_exist':
+                os.path.join(os.path.dirname(sys.executable), 'anetbbs-cfg'),
         },
         {
             # Trade Wars 2002 — Synchronet's JS port by Deuce, bundled

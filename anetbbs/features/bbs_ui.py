@@ -4614,6 +4614,23 @@ BBSMenuUI.read_thread_v2 = _read_thread_v2
 # Phase 4: Sysop tools (admin users only)
 # ---------------------------------------------------------------------------
 
+def _session_is_ssh(session):
+    """True if `session` is a real SSH connection (not telnet/rlogin/web).
+
+    Pulled out as its own pure function -- rather than inlined at each
+    call site -- specifically so it's independently unit-testable
+    against a bare fake object, no full session/lightbar-UI mock
+    needed. Used to gate anything sysop-sensitive that shouldn't be
+    reachable over telnet's plaintext (currently just the anetbbs-cfg
+    launcher; see _sysop_menu's categories list and
+    _sysop_cfg_tool()). Mirrors core/session.py's own
+    `type(self.writer).__name__`-based protocol detection -- `presence`
+    is set from that exact logic at login and kept on the session for
+    the rest of its lifetime.
+    """
+    return getattr(getattr(session, 'presence', None), 'protocol', None) == 'ssh'
+
+
 async def _sysop_menu(self):
     """Top-level sysop menu — only shown to is_admin users.
 
@@ -4647,6 +4664,14 @@ async def _sysop_menu(self):
         ('M', 'Node Monitor',     self.sysop_node_monitor),
         ('S', 'Server Status',    self.sysop_status),
     ]
+    # Full-screen anetbbs-cfg tool: SSH only, per Jerry's explicit
+    # security call (it edits user security levels, echomail/hub
+    # credentials, etc. -- telnet is plaintext). Only ADDED to the menu
+    # for an SSH session, not just hidden/greyed out, so there's no key
+    # that could ever dispatch to it from telnet -- see
+    # _sysop_cfg_tool()'s own docstring for the second, defensive check.
+    if _session_is_ssh(self.session):
+        categories.append(('X', 'Config Tool (SSH)', self.sysop_cfg_tool))
 
     async def render_header():
         await self.session.write(banner('Sysop Tools', ui_width(self.session)))
@@ -4673,6 +4698,61 @@ async def _sysop_menu(self):
             if match:
                 await match[2]()
 BBSMenuUI.sysop_menu = _sysop_menu
+
+
+async def _sysop_cfg_tool(self):
+    """Launches the standalone `anetbbs-cfg` curses config tool inside
+    this session, bridged via the same PTY machinery every native door
+    uses (door_runner.play_door_game_telnet) -- see the 'anetbbs-cfg'
+    BUNDLED_DOORS entry in web_app.py's _create_default_data() for why
+    it's registered as an ordinary (but is_active=False, hidden from
+    every normal games list) Game row rather than something bespoke.
+
+    SSH only, by explicit sysop security requirement -- this tool can
+    edit user security levels, echomail/hub credentials, and other
+    sensitive config, and telnet carries all of that in plaintext.
+    Gated twice: _sysop_menu() above only ADDS the menu entry that
+    reaches this function when the session is already SSH, and this
+    function independently re-checks the same thing, so a direct call
+    (a future refactor, a bug in the menu gating) still can't bypass it.
+    """
+    if not _session_is_ssh(self.session):
+        await self.session.write(
+            "\r\nThe config tool is only available over SSH (not telnet), "
+            "for security.\r\n")
+        await self.session.read_line("Press Enter...")
+        return
+
+    from flask import Flask
+    from anetbbs.config import get_config
+    from anetbbs.models import db, Game
+    from ..games.door_runner import play_door_game_telnet
+    from .db_scope import transient_app_context
+
+    app = Flask(__name__)
+    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+    db.init_app(app)
+
+    with transient_app_context(app):
+        g = Game.query.filter_by(slug='anetbbs-cfg').first()
+        if g is None:
+            await self.session.write(
+                "\r\nConfig tool isn't available on this install "
+                "(anetbbs-cfg not found -- check the venv is up to date).\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+
+    try:
+        await play_door_game_telnet(
+            game=g,
+            user=self.session.user,
+            session=self.session,
+        )
+    except Exception as exc:
+        logger.exception('anetbbs-cfg launch error: %s', exc)
+        await self.session.write(f"\r\nError launching config tool: {exc}\r\n")
+        await self.session.read_line("\r\nPress Enter...")
+BBSMenuUI.sysop_cfg_tool = _sysop_cfg_tool
 
 
 async def _sysop_users(self):

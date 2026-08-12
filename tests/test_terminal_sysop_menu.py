@@ -16,6 +16,7 @@ import os
 import sys
 import shutil
 import tempfile
+import types
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -67,6 +68,15 @@ class SysopMenuWiringTests(unittest.TestCase):
     def test_sysop_menu_itself_still_resolves(self):
         from anetbbs.features.bbs_ui import BBSMenuUI
         self.assertTrue(callable(getattr(BBSMenuUI, 'sysop_menu', None)))
+
+    def test_sysop_cfg_tool_method_exists(self):
+        # Not in EXPECTED_CATEGORY_METHODS above -- unlike every other
+        # entry there, this one is only CONDITIONALLY added to
+        # _sysop_menu's categories list (SSH sessions only), so its
+        # wiring gets its own dedicated tests below rather than being
+        # lumped in with the always-present categories.
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        self.assertTrue(callable(getattr(BBSMenuUI, 'sysop_cfg_tool', None)))
 
     def test_sub_screen_helpers_exist(self):
         # Screens reachable only from inside a category (not directly off
@@ -224,6 +234,66 @@ class CategoryActionDbTests(unittest.TestCase):
         msgs = sysop_paging.pop_messages(7)
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]['text'], 'page reply text')
+
+
+class SessionIsSshHelperTests(unittest.TestCase):
+    """_session_is_ssh() -- pure function, gates the anetbbs-cfg
+    launcher to SSH-only sessions (Jerry's explicit security
+    requirement: the tool edits security levels/echomail credentials,
+    and telnet carries all of that in plaintext)."""
+
+    def _fake_session(self, protocol):
+        presence = types.SimpleNamespace(protocol=protocol) if protocol else None
+        return types.SimpleNamespace(presence=presence)
+
+    def test_ssh_session_is_true(self):
+        from anetbbs.features.bbs_ui import _session_is_ssh
+        self.assertTrue(_session_is_ssh(self._fake_session('ssh')))
+
+    def test_telnet_session_is_false(self):
+        from anetbbs.features.bbs_ui import _session_is_ssh
+        self.assertFalse(_session_is_ssh(self._fake_session('telnet')))
+
+    def test_rlogin_session_is_false(self):
+        from anetbbs.features.bbs_ui import _session_is_ssh
+        self.assertFalse(_session_is_ssh(self._fake_session('rlogin')))
+
+    def test_no_presence_at_all_is_false(self):
+        # Defensive: a session that never went through the normal
+        # login/presence-assignment path (shouldn't happen in
+        # practice) must fail CLOSED, not open.
+        from anetbbs.features.bbs_ui import _session_is_ssh
+        self.assertFalse(_session_is_ssh(self._fake_session(None)))
+
+
+class SysopCfgToolGatingTests(unittest.TestCase):
+    """_sysop_cfg_tool's OWN defensive re-check -- confirms it refuses
+    to even attempt a launch on a non-SSH session, independent of
+    _sysop_menu's category-list gating (covered separately above via
+    SessionIsSshHelperTests). Two layers, tested independently,
+    matching the function's own docstring reasoning: the menu simply
+    never offers a key that reaches this function from telnet, and
+    this function doesn't trust that alone."""
+
+    class _FakeSession:
+        def __init__(self, protocol):
+            self.presence = types.SimpleNamespace(protocol=protocol) if protocol else None
+            self.written = []
+
+        async def write(self, data):
+            self.written.append(data)
+
+        async def read_line(self, prompt=''):
+            return ''
+
+    def test_telnet_session_is_refused_before_any_launch_attempt(self):
+        import asyncio
+        from anetbbs.features.bbs_ui import BBSMenuUI
+
+        fake_self = types.SimpleNamespace(session=self._FakeSession('telnet'))
+        asyncio.run(BBSMenuUI.sysop_cfg_tool(fake_self))
+        joined = ''.join(fake_self.session.written)
+        self.assertIn('SSH', joined)
 
 
 if __name__ == '__main__':
