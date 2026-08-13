@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="anetbbs",
-    version="1.0.36",
+    version="1.0.37",
     packages=find_packages(),
     install_requires=[
         # Core

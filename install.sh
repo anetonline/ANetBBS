@@ -72,6 +72,23 @@ BBS_VERSION="$(cat "$SOURCE_DIR/VERSION" 2>/dev/null || echo unknown)"
 MRC_CLIENT_COMPAT_VERSION="1.3.9"
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ROOT CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+# Must run before UNINSTALL below, not after it -- real gap found in an
+# audit: every uninstall command (systemctl stop/disable, rm -rf the
+# install dir, userdel) was reachable and would run to completion (with
+# permission errors either suppressed via `|| true` or left as unchecked
+# stderr) even when invoked without root, and the script still printed
+# "ANetBBS has been uninstalled." and exited 0 regardless -- a sysop
+# could run --uninstall, see a clean success message, and the BBS would
+# still be fully installed and running.
+if [[ "$EUID" -ne 0 ]]; then
+    fail "This installer must be run as root."
+    echo "  Run: sudo bash install.sh"
+    exit 1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # UNINSTALL
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -113,13 +130,20 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ROOT CHECK
+# CLI FLAGS
 # ═══════════════════════════════════════════════════════════════════════════════
-if [[ "$EUID" -ne 0 ]]; then
-    fail "This installer must be run as root."
-    echo "  Run: sudo bash install.sh"
-    exit 1
-fi
+# Parsed here, BEFORE OS/package-manager detection below -- real gap
+# found in an audit: the "Could not detect your package manager"
+# prompt (further down) used to run unconditionally, before this was
+# ever parsed, so the documented non-interactive `--defaults` path
+# blocked on an interactive `read` (and then auto-aborted on a closed/
+# redirected stdin, e.g. a Docker build) on any OS not in the
+# hardcoded case list below -- exactly the situation a non-interactive
+# install is most likely to hit.
+USE_DEFAULTS=false
+FORCE_OVERWRITE=false
+[[ "${1:-}" == "--defaults" ]] && USE_DEFAULTS=true
+[[ "${1:-}" == "--force" || "${2:-}" == "--force" ]] && FORCE_OVERWRITE=true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEMD CHECK
@@ -128,9 +152,18 @@ fi
 # Without systemctl, every service-install/enable/start call would just fail
 # with "command not found", scattered across 9 steps with no clear signal
 # of the real cause. Fail fast with one clear message instead.
-if ! command -v systemctl >/dev/null 2>&1; then
-    fail "systemctl not found — ANetBBS's install/update scripts require systemd."
-    echo "  This system (or container) doesn't appear to run systemd."
+#
+# Checking `command -v systemctl` alone isn't enough -- real gap found
+# in an audit: some Docker images have the systemd PACKAGE (and its
+# systemctl binary) layered in without systemd actually running as
+# PID 1, so that check false-passes and the script only fails ~10
+# minutes later, opaquely, at the Step 8 service-install/start calls.
+# `/run/systemd/system` only exists when systemd is genuinely active
+# as the running init system -- the standard, widely-used test for
+# this exact distinction.
+if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
+    fail "systemd is not running — ANetBBS's install/update scripts require it."
+    echo "  This system (or container) doesn't appear to have systemd as its init."
     echo "  See docker/ for a container-based deployment that doesn't need it."
     exit 1
 fi
@@ -141,6 +174,7 @@ fi
 step "Detecting operating system"
 
 OS_ID="unknown"
+OS_ID_LIKE=""
 OS_VERSION=""
 OS_PRETTY=""
 PKG_MANAGER="unknown"
@@ -148,12 +182,13 @@ PKG_MANAGER="unknown"
 if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     OS_ID="${ID,,}"
+    OS_ID_LIKE="${ID_LIKE,,}"
     OS_VERSION="${VERSION_ID:-}"
     OS_PRETTY="${PRETTY_NAME:-$OS_ID $OS_VERSION}"
 fi
 
 case "$OS_ID" in
-    ubuntu|debian|linuxmint|pop|elementary|zorin|kali)
+    ubuntu|debian|linuxmint|pop|elementary|zorin|kali|raspbian)
         PKG_MANAGER="apt"
         ;;
     rhel|centos|rocky|almalinux|ol)
@@ -166,6 +201,9 @@ case "$OS_ID" in
     fedora)
         PKG_MANAGER="dnf"
         ;;
+    alpine)
+        PKG_MANAGER="apk"
+        ;;
     arch|manjaro|endeavouros)
         PKG_MANAGER="pacman"
         ;;
@@ -173,7 +211,31 @@ case "$OS_ID" in
         PKG_MANAGER="zypper"
         ;;
     *)
-        PKG_MANAGER="unknown"
+        # Not in the explicit list above -- fall back to ID_LIKE
+        # (also present in /etc/os-release) for distro derivatives that
+        # don't rebrand their own ID, e.g. many Debian/Ubuntu/Raspberry
+        # Pi OS respins, RHEL clones, and Arch-based distros not
+        # individually named above. Checks the most specific package
+        # manager it can still confirm is actually present rather than
+        # assuming from the ID_LIKE string alone.
+        case "$OS_ID_LIKE" in
+            *debian*|*ubuntu*)
+                command -v apt-get &>/dev/null && PKG_MANAGER="apt"
+                ;;
+            *rhel*|*fedora*)
+                if command -v dnf &>/dev/null; then
+                    PKG_MANAGER="dnf"
+                elif command -v yum &>/dev/null; then
+                    PKG_MANAGER="yum"
+                fi
+                ;;
+            *arch*)
+                command -v pacman &>/dev/null && PKG_MANAGER="pacman"
+                ;;
+            *suse*)
+                command -v zypper &>/dev/null && PKG_MANAGER="zypper"
+                ;;
+        esac
         ;;
 esac
 
@@ -183,8 +245,12 @@ info "Package manager: ${BOLD}$PKG_MANAGER${NC}"
 if [[ "$PKG_MANAGER" == "unknown" ]]; then
     warn "Could not detect your package manager."
     warn "You may need to install dependencies manually."
-    read -rp "Continue anyway? [y/N]: " CONT
-    [[ "${CONT,,}" != "y" ]] && { echo "Aborted."; exit 1; }
+    if $USE_DEFAULTS; then
+        warn "--defaults given -- continuing without prompting."
+    else
+        read -rp "Continue anyway? [y/N]: " CONT
+        [[ "${CONT,,}" != "y" ]] && { echo "Aborted."; exit 1; }
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -212,10 +278,9 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # INTERACTIVE WIZARD
 # ═══════════════════════════════════════════════════════════════════════════════
-USE_DEFAULTS=false
-FORCE_OVERWRITE=false
-[[ "${1:-}" == "--defaults" ]] && USE_DEFAULTS=true
-[[ "${1:-}" == "--force" || "${2:-}" == "--force" ]] && FORCE_OVERWRITE=true
+# USE_DEFAULTS/FORCE_OVERWRITE are parsed earlier now (see "CLI FLAGS"
+# above the systemd check) so the unknown-package-manager prompt above
+# can respect --defaults too.
 
 echo ""
 echo -e "${BOLD}${CYAN}"
@@ -363,6 +428,16 @@ ask_secret ADMIN_PASS "Sysop password"
 # Auto-generate password if blank
 if [[ -z "$ADMIN_PASS" ]]; then
     ADMIN_PASS=$(openssl rand -base64 16 2>/dev/null || python3 -c "import secrets; print(secrets.token_urlsafe(16))" 2>/dev/null || head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 16)
+    # If openssl/python3/base64 are ALL missing (e.g. a truly minimal
+    # image before Step 1/2 has installed anything yet), the whole
+    # fallback chain above can silently evaluate to an empty string --
+    # found in an audit. Fail loudly rather than shipping an admin
+    # account with a blank password.
+    if [[ -z "$ADMIN_PASS" ]]; then
+        fail "Could not generate an admin password (openssl, python3, and base64 all unavailable)."
+        echo "  Re-run with one of those installed, or enter a password manually when prompted."
+        exit 1
+    fi
     ADMIN_PASS_GENERATED=true
     info "  Auto-generated admin password."
 else
@@ -435,6 +510,15 @@ fi
 
 # ─── Generate SECRET_KEY ───────────────────────────────────────────────────────
 SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
+# Same silent-empty-string risk as ADMIN_PASS above (openssl/python3/
+# xxd all missing) -- a blank Flask SECRET_KEY is a silent security
+# problem (session/CSRF tokens become forgeable), not a loud one, so
+# this must fail instead of writing an empty value into .env.
+if [[ -z "$SECRET_KEY" ]]; then
+    fail "Could not generate SECRET_KEY (openssl, python3, and xxd all unavailable)."
+    echo "  Re-run with one of those installed."
+    exit 1
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIRMATION
@@ -498,6 +582,9 @@ install_one_pkg() {
             ;;
         zypper)
             zypper install -y -n "$pkg" 2>/dev/null
+            ;;
+        apk)
+            apk add --no-cache "$pkg" 2>/dev/null
             ;;
         *)
             return 1
@@ -601,6 +688,33 @@ pkg_name() {
                 *)               echo "$generic" ;;
             esac
             ;;
+        apk)
+            # Alpine. Also best-effort, matching the zypper block's own
+            # caveat above -- these follow Alpine's well-documented
+            # naming conventions (py3-* split packages, build-base as
+            # the gcc/make/libc-dev meta-package) but aren't verified
+            # against a real Alpine box in this environment.
+            case "$generic" in
+                python3)         echo "python3" ;;
+                python3-venv)    echo "py3-venv" ;;
+                python3-pip)     echo "py3-pip" ;;
+                python3-dev)     echo "python3-dev" ;;
+                build-essential) echo "build-base" ;;
+                rsync)           echo "rsync" ;;
+                git)             echo "git" ;;
+                curl)            echo "curl" ;;
+                nodejs)          echo "nodejs" ;;
+                npm)             echo "npm" ;;
+                nginx)           echo "nginx" ;;
+                certbot)         echo "certbot" ;;
+                certbot-nginx)   echo "certbot-nginx" ;;
+                dosbox)          echo "dosbox" ;;
+                openssh-client)  echo "openssh-client" ;;
+                libffi-dev)      echo "libffi-dev" ;;
+                libsixel-bin)    echo "libsixel" ;;
+                *)               echo "$generic" ;;
+            esac
+            ;;
         *)
             echo "$generic"
             ;;
@@ -667,6 +781,11 @@ case "$PKG_MANAGER" in
         zypper --non-interactive refresh 2>/dev/null || true
         ok "Zypper ready"
         ;;
+    apk)
+        info "Refreshing apk package index..."
+        apk update -q 2>/dev/null || true
+        ok "APK ready"
+        ;;
     *)
         warn "Unrecognized package manager ($PKG_MANAGER) — skipping cache refresh."
         ;;
@@ -678,6 +797,17 @@ esac
 step "Step 2/9: Installing required system packages"
 
 REQUIRED_PKGS=(python3 python3-venv python3-pip python3-dev build-essential libffi-dev rsync git curl openssh-client lrzsz)
+# Alpine's base image ships BusyBox's adduser/addgroup applets, not the
+# GNU-compatible useradd/groupadd/usermod this script uses everywhere
+# below (STEP 4 and the ssl-cert group handling near the end) --
+# BusyBox's flag syntax isn't compatible with those calls as written.
+# Rather than forking every user/group-management call site into a
+# BusyBox-vs-GNU branch (real risk of introducing bugs into a script
+# that already works correctly everywhere else), install Alpine's
+# `shadow` package, which provides genuine GNU-compatible useradd/
+# groupadd/usermod/userdel -- a common, well-established pattern for
+# Alpine images that need conventional Linux user management.
+[[ "$PKG_MANAGER" == "apk" ]] && REQUIRED_PKGS+=(shadow)
 REQUIRED_FAILED=()
 
 for generic in "${REQUIRED_PKGS[@]}"; do
@@ -1265,8 +1395,12 @@ LOG_LEVEL=INFO
 GAMES_ENABLED=true
 GAMES_MAX_NODES=10
 GAMES_SESSION_TIMEOUT=3600
-DOSBOX_PATH=/usr/bin/dosbox
-DOSEMU_PATH=/usr/bin/dosemu
+# command -v with a fallback, matching NODEJS_PATH below -- these were
+# previously hardcoded to /usr/bin/, which breaks on any distro that
+# installs them elsewhere (e.g. dosbox-staging packaging quirks, non-
+# merged-/usr layouts).
+DOSBOX_PATH=$(command -v dosbox 2>/dev/null || echo "/usr/bin/dosbox")
+DOSEMU_PATH=$(command -v dosemu 2>/dev/null || echo "/usr/bin/dosemu")
 NODEJS_PATH=$(command -v node 2>/dev/null || echo "/usr/bin/node")
 MYSTIC_PYTHON_PATH=
 MYSTIC_BBS_PATH=$([[ "${MYSTIC_INSTALLED:-n}" == "y" ]] && echo "/opt/mystic/mystic" || echo "/usr/local/bin/mystic")
@@ -1834,8 +1968,27 @@ if [[ -f "$SUDOERS_SRC" ]]; then
         chmod 0440 "$SUDOERS_DST"
         ok "sudoers installed (SCC restart + Check-for-Updates auto-install will work)"
     else
-        rm -f "$SUDOERS_DST.tmp"
-        warn "sudoers syntax check failed — Service Control Center buttons and web auto-update will not work until this is fixed manually."
+        # Real report: some sudo builds (minimal/stripped packages on
+        # certain distros) are compiled without I/O-logging support at
+        # all, so the `!log_input, !log_output` Defaults lines (added
+        # to dodge a DIFFERENT problem -- an audit/pty-open plugin
+        # failure on some VPS/container hosts, see the comment above
+        # those lines in deploy/sudoers.anetbbs) are themselves
+        # rejected as "unknown setting" on those hosts. Retry once
+        # with just those 3 lines stripped before giving up entirely.
+        sed '/^Defaults!ANETBBS_[A-Z]*  *!log_input, !log_output$/d' \
+            "$SUDOERS_DST.tmp" > "$SUDOERS_DST.tmp2"
+        if visudo -cf "$SUDOERS_DST.tmp2" >/dev/null 2>&1; then
+            mv "$SUDOERS_DST.tmp2" "$SUDOERS_DST"
+            rm -f "$SUDOERS_DST.tmp"
+            chmod 0440 "$SUDOERS_DST"
+            warn "sudoers installed WITHOUT the I/O-logging-suppression lines" \
+                 "-- this sudo build doesn't support log_input/log_output"
+            ok "sudoers installed (SCC restart + Check-for-Updates auto-install will work)"
+        else
+            rm -f "$SUDOERS_DST.tmp" "$SUDOERS_DST.tmp2"
+            warn "sudoers syntax check failed — Service Control Center buttons and web auto-update will not work until this is fixed manually."
+        fi
     fi
 else
     warn "deploy/sudoers.anetbbs not found — skipping sudoers install."

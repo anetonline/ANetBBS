@@ -1,11 +1,27 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.36`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.37`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.37 — install.sh/update.sh portability audit: real fixes for Alpine, Pi, and minimal/Docker hosts (August 2026)
+
+A sysop report that `visudo` rejected `deploy/sudoers.anetbbs` on a host whose `sudo` build has no I/O-logging support (an "unknown setting: log_input" error) prompted a full portability audit of both `install.sh` and `update.sh` against the stated goal of working on any distro, including Raspberry Pi and Docker. Several real, independently-confirmed bugs were found and fixed:
+
+- **Sudoers refresh no longer fails outright on sudo builds without I/O-logging support.** Both scripts now retry once with the offending `!log_input, !log_output` Defaults lines stripped if the full file fails `visudo -cf`, rather than leaving a stale sudoers file in place (which had been silently missing whatever commands changed since the sysop's last successful refresh).
+- **`install.sh --uninstall` ran without checking it was root**, letting every destructive command fail silently while still reporting a clean "uninstalled" success.
+- **`install.sh --defaults` (the documented non-interactive install path) could still block on an interactive prompt** and auto-abort on any OS not in the package-manager detection list — exactly the situation a non-interactive install (Docker build, CI) is most likely to hit.
+- **Both scripts checked only that the `systemctl` binary exists, not that systemd is actually running as PID 1.** Some Docker images have the binary layered in without real systemd, causing both scripts to fail opaquely partway through instead of failing fast with a clear message — more dangerous in `update.sh`, which actively stops the live BBS mid-upgrade with no other restart path.
+- **`update.sh`'s main file-sync step had no error checking at all**, printing "Files synced" unconditionally even if `rsync` failed — meaning a failure there could leave the database migrated against stale, un-synced application code. It now aborts cleanly and restarts whatever it had stopped.
+- **`update.sh`'s database-migration fallback (used when `sudo` itself is missing) silently skipped all column-migration logic**, reporting "Database schema updated" while actually adding no new columns. It now runs the same real migration as the primary path.
+- Fixed several GNU-coreutils-only constructs (`grep -oP`, `head -n -N`) that silently break on BusyBox/Alpine, and a missing `file` command dependency that silently defeated the ARM/x86 binary-architecture safety check for bundled doors.
+- Raspberry Pi's older `ID=raspbian` releases, and other unlisted distro derivatives (via `/etc/os-release`'s `ID_LIKE`), are now correctly detected instead of falling through to "unknown package manager."
+- **Added full Alpine (`apk`) package-manager support** to `install.sh` — detection, package installation, and per-package name mapping, plus installing Alpine's `shadow` package so the existing user/group-management commands work unchanged. Note: Alpine natively uses OpenRC rather than systemd, and both scripts still require systemd, so this support currently only applies to an Alpine host that also runs systemd.
+
+`docker/` (Dockerfile, entrypoint scripts, compose file, single-container supervisord config) was also audited separately and found to already be in good shape, with no changes needed.
 
 ## v1.0.36 — New `data/mods/` sysop-override tree, matching Synchronet's own `mods/` convention (August 2026)
 

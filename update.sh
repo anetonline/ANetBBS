@@ -30,9 +30,21 @@ fi
 # This script restarts/patches ANetBBS's systemd units throughout. Without
 # systemctl, those calls would fail piecemeal with "command not found"
 # scattered across 8 steps rather than one clear signal up front.
-if ! command -v systemctl >/dev/null 2>&1; then
-    fail "systemctl not found — ANetBBS's install/update scripts require systemd."
-    echo "  This system (or container) doesn't appear to run systemd."
+#
+# Checking `command -v systemctl` alone isn't enough -- real gap found
+# in an audit: some Docker images have the systemd PACKAGE (and its
+# systemctl binary) layered in without systemd actually running as
+# PID 1, so that check false-passes. That's strictly more dangerous
+# here than in install.sh: this script actively STOPS the live BBS
+# (Step 3) and every restart, including the failure-rollback path,
+# goes exclusively through systemctl with no other fallback -- a
+# false pass here risks the script stopping the service, silently
+# failing every subsequent systemctl call, and leaving the BBS down
+# with no way to bring it back up. `/run/systemd/system` only exists
+# when systemd is genuinely active as the running init system.
+if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
+    fail "systemd is not running — ANetBBS's install/update scripts require it."
+    echo "  This system (or container) doesn't appear to have systemd as its init."
     echo "  See docker/ for a container-based deployment that doesn't need it."
     exit 1
 fi
@@ -59,7 +71,11 @@ step "Step 1/8: Detecting existing installation"
 if [[ -z "$INSTALL_DIR" ]]; then
     # Try to find from service file
     if [[ -f /etc/systemd/system/anetbbs-web.service ]]; then
-        INSTALL_DIR=$(grep -oP 'WorkingDirectory=\K.*' /etc/systemd/system/anetbbs-web.service | head -1)
+        # sed instead of `grep -oP` -- -P (PCRE) isn't supported by
+        # BusyBox grep (Alpine's default), which silently breaks this
+        # auto-detection and falls through to the unhelpful empty-path
+        # failure below. Plain sed capture-group works everywhere.
+        INSTALL_DIR=$(sed -n 's/^WorkingDirectory=//p' /etc/systemd/system/anetbbs-web.service | head -1)
         info "Detected install dir from service: $INSTALL_DIR"
     else
         INSTALL_DIR="/opt/anetbbs"
@@ -308,7 +324,17 @@ ok "Backup stored at $BACKUP_DIR (was $OLD_VERSION → $NEW_VERSION)"
 # bounded retention -- 3 covers "I need to roll back one or two
 # versions" without growing forever. Sorted by name, which sorts
 # chronologically since the timestamp format is YYYYMMDDHHMMSS.
-mapfile -t _old_backups < <(ls -1d "$INSTALL_DIR/data/backups/anetbbs-backup-"* 2>/dev/null | sort | head -n -3)
+mapfile -t _all_backups < <(ls -1d "$INSTALL_DIR/data/backups/anetbbs-backup-"* 2>/dev/null | sort)
+# `head -n -3` ("all but the last 3 lines") is a GNU coreutils
+# extension -- BusyBox head (Alpine's default) doesn't accept a
+# negative count and errors, which silently emptied _old_backups on
+# those hosts and defeated this whole retention safety feature.
+# Bash array slicing does the same "drop the last N" job without
+# depending on any external tool's specific flag support.
+_old_backups=()
+if (( ${#_all_backups[@]} > 3 )); then
+    _old_backups=("${_all_backups[@]:0:${#_all_backups[@]}-3}")
+fi
 for _old in "${_old_backups[@]:-}"; do
     [[ -n "$_old" && -d "$_old" ]] || continue
     rm -rf "$_old" && info "Pruned old backup: $_old"
@@ -321,12 +347,23 @@ step "Step 3/8: Stopping services"
 # anetbbs-telnet / anetbbs-ssh services were merged into anetbbs.service
 # during v1.0a2.10; iterating over them on a current install just prints
 # "was not running" lines that look like errors in screenshots.
+# Tracked so an early, critical failure below (Step 4's file sync) can
+# restart exactly what this step actually stopped, without needing the
+# full end-of-script rollback machinery (nothing's been written yet at
+# that point, so there's nothing to restore -- just services to bring
+# back up against the untouched old code).
+STOPPED_SERVICES=()
 for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
     if [[ ! -f "/etc/systemd/system/${svc}.service" ]]; then
         continue
     fi
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
-        systemctl stop "$svc" 2>/dev/null && ok "Stopped $svc" || warn "Could not stop $svc"
+        if systemctl stop "$svc" 2>/dev/null; then
+            ok "Stopped $svc"
+            STOPPED_SERVICES+=("$svc")
+        else
+            warn "Could not stop $svc"
+        fi
     else
         skip "$svc was not running"
     fi
@@ -471,7 +508,19 @@ else
     #   mrc/bridge/logs/                    — bridge runtime logs
     #   mrc/bridge/*.db / *.db-shm / *.db-wal — bridge sqlite state
     info "Syncing files from $SOURCE_DIR to $INSTALL_DIR ..."
-    rsync -a \
+    # Real gap found in an audit: unlike every OTHER rsync in this
+    # script (the pre-update code snapshot above, and the failure-
+    # rollback restore near the end), this one -- the single most
+    # important step in the whole upgrade -- had no error checking at
+    # all and printed "Files synced" unconditionally regardless of
+    # whether rsync actually ran (missing binary, disk full, etc.). A
+    # failure here previously meant the script would silently continue
+    # updating the DB schema for the NEW version's models against the
+    # OLD, un-synced application code. Since nothing depends on this
+    # sync having partially succeeded, a failure here restarts exactly
+    # what Step 3 stopped (against the still-intact old code -- nothing
+    # has been overwritten yet) and aborts, rather than pressing on.
+    if rsync -a \
         --exclude='.git' \
         --exclude='venv' \
         --exclude='__pycache__' \
@@ -489,8 +538,19 @@ else
         --exclude='/mrc/bridge/*.db' \
         --exclude='/mrc/bridge/*.db-shm' \
         --exclude='/mrc/bridge/*.db-wal' \
-        "$SOURCE_DIR/" "$INSTALL_DIR/"
-    ok "Files synced (user data + configs preserved)"
+        "$SOURCE_DIR/" "$INSTALL_DIR/"; then
+        ok "Files synced (user data + configs preserved)"
+    else
+        fail "File sync failed — aborting before touching the database or config."
+        if [[ ${#STOPPED_SERVICES[@]} -gt 0 ]]; then
+            info "Restarting services Step 3 stopped (old code is untouched)..."
+            for svc in "${STOPPED_SERVICES[@]}"; do
+                systemctl start "$svc" 2>/dev/null && ok "Restarted $svc" || warn "Could not restart $svc"
+            done
+        fi
+        fail "Update aborted. Check disk space and that rsync is installed, then re-run."
+        exit 1
+    fi
 
     # Sync bundled door subdirectories from the release tarball.
     # /doors/ is excluded from the main rsync above to protect sysop-customized
@@ -502,6 +562,25 @@ else
     # Binary arch-mismatch (Pi running ARM, tarball ships x86-64): the binary
     # is skipped and a recompile message is printed; build.sh is still updated.
     if [[ -d "$SOURCE_DIR/doors" ]]; then
+        # Real gap found in an audit: the arch-mismatch safety check
+        # right below entirely depends on the `file` command, which
+        # isn't installed by default on many minimal images (slim
+        # Python images, minimal Alpine). If it's silently missing,
+        # `file "$src_file" 2>/dev/null` fails, the ELF/Mach-O/PE32
+        # grep test on empty input is false, and the code fell into
+        # the "always update, it's not binary" branch -- installing a
+        # potentially incompatible binary with NONE of the arch-
+        # mismatch warning this whole block exists to provide. Falls
+        # back to a filename heuristic (every door binary in this
+        # project ships without a file extension; scripts/configs
+        # always have one) when `file` isn't available, and treats an
+        # unverifiable binary conservatively (never silently
+        # overwritten) rather than assuming it's safe.
+        HAVE_FILE_CMD=1
+        command -v file >/dev/null 2>&1 || HAVE_FILE_CMD=0
+        if [[ "$HAVE_FILE_CMD" -eq 0 ]]; then
+            warn "'file' command not found — door binary updates will use a filename heuristic (install 'file' for accurate arch detection)"
+        fi
         mkdir -p "$INSTALL_DIR/doors"
         for src_door in "$SOURCE_DIR/doors"/*/; do
             [[ -d "$src_door" ]] || continue
@@ -512,8 +591,15 @@ else
                 # Brand-new door — install everything.
                 cp -a "$src_door" "$dst_door"
                 ok "Installed new door: doors/$door_name"
+                # cp -a already preserves the source tarball's own
+                # executable bits, so this is a defensive top-up, not
+                # the primary mechanism -- low risk either way.
                 find "$dst_door" -maxdepth 1 -type f | while IFS= read -r f; do
-                    file "$f" 2>/dev/null | grep -qiE 'ELF|executable' && chmod 755 "$f" 2>/dev/null || true
+                    if [[ "$HAVE_FILE_CMD" -eq 1 ]]; then
+                        file "$f" 2>/dev/null | grep -qiE 'ELF|executable' && chmod 755 "$f" 2>/dev/null || true
+                    else
+                        [[ "$(basename "$f")" != *.* ]] && chmod 755 "$f" 2>/dev/null || true
+                    fi
                 done
                 find "$dst_door" -maxdepth 2 -name "*.sh" -exec chmod 755 {} \; 2>/dev/null || true
             else
@@ -528,13 +614,28 @@ else
                     # Skip files that are identical to what's installed.
                     [[ -f "$dst_file" ]] && cmp -s "$src_file" "$dst_file" && continue
 
-                    if file "$src_file" 2>/dev/null | grep -qiE 'ELF|Mach-O|PE32'; then
+                    if { [[ "$HAVE_FILE_CMD" -eq 1 ]] && file "$src_file" 2>/dev/null | grep -qiE 'ELF|Mach-O|PE32'; } || \
+                       { [[ "$HAVE_FILE_CMD" -eq 0 ]] && [[ "$fname" != *.* ]]; }; then
                         # Binary file — only overwrite if arch matches.
-                        src_arch=$(file "$src_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
-                        if [[ -f "$dst_file" ]]; then
-                            dst_arch=$(file "$dst_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
+                        if [[ "$HAVE_FILE_CMD" -eq 1 ]]; then
+                            src_arch=$(file "$src_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
+                            if [[ -f "$dst_file" ]]; then
+                                dst_arch=$(file "$dst_file" 2>/dev/null | grep -oE 'x86-64|aarch64|ARM|i386' | head -1)
+                            else
+                                dst_arch="$src_arch"
+                            fi
+                        elif [[ -f "$dst_file" ]]; then
+                            # Can't determine arch without `file` --
+                            # be conservative and never silently
+                            # overwrite an EXISTING extensionless
+                            # binary rather than assume it's safe.
+                            src_arch="unknown"
+                            dst_arch="unverifiable"
                         else
-                            dst_arch="$src_arch"
+                            # No existing file at risk of being
+                            # clobbered -- safe to copy either way.
+                            src_arch="unknown"
+                            dst_arch="unknown"
                         fi
                         if [[ -z "$src_arch" || "$src_arch" == "$dst_arch" ]]; then
                             cp "$src_file" "$dst_file"
@@ -837,22 +938,82 @@ with app.app_context():
 DBEOF
         DB_UPDATED=true
     elif "$VENV_DIR/bin/python" << DBEOF2 2>/dev/null; then
-import os, sys
+import os, sys, sqlite3
 sys.path.insert(0, '$INSTALL_DIR')
 os.chdir('$INSTALL_DIR')
 os.environ['FLASK_ENV'] = 'production'
 os.environ['DATABASE_URL'] = '$DB_URL'
 os.environ['SECRET_KEY'] = '$DB_SECRET_KEY'
-os.environ['ANETBBS_SCHEMA_MIGRATE_ONLY'] = '1'
 
 from dotenv import load_dotenv
 load_dotenv('$ENV_FILE')
 
-from anetbbs.web_app import create_app
-from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage, EchomailReadStatus, EchomailPollLog
+# Same real ALTER TABLE migration as the sudo path above -- real gap
+# found in an audit: this fallback (only reached when `sudo` itself
+# is missing, e.g. a minimal Docker image running as root with no
+# sudo binary installed at all) previously used create_app() +
+# db.create_all() only, which NEVER alters existing tables, so any
+# column added to an existing table in the new version's models was
+# silently never added to the live database here -- while the script
+# still printed "Database schema updated". Build a minimal app
+# context directly (skipping create_app()'s own _create_default_data()
+# call, which the sudo path's own comment already notes would crash
+# against tables still missing the new columns this script is about
+# to add) rather than reduce functionality just because sudo is gone.
+from flask import Flask
+from anetbbs.models import db
+from anetbbs.config import get_config
 
-app = create_app('production')
+app = Flask(__name__)
+app.config.from_object(get_config('production'))
+db.init_app(app)
+
+def sqlite_type(col):
+    from sqlalchemy.types import Integer, String, Text, Boolean, DateTime, Date, Float, LargeBinary
+    t = col.type
+    if isinstance(t, Integer): return "INTEGER"
+    if isinstance(t, Boolean): return "BOOLEAN"
+    if isinstance(t, (DateTime, Date)): return "DATETIME"
+    if isinstance(t, Float): return "FLOAT"
+    if isinstance(t, LargeBinary): return "BLOB"
+    return "TEXT"
+
 with app.app_context():
+    db_url = app.config['SQLALCHEMY_DATABASE_URI']
+    db_path = db_url.replace('sqlite:///', '').replace('sqlite:////', '/')
+    if not db_path.startswith('/'):
+        db_path = '/' + db_path
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        existing_tables = {row[0] for row in cur.fetchall()}
+        for table_name, table in db.metadata.tables.items():
+            if table_name not in existing_tables:
+                continue
+            cur.execute(f"PRAGMA table_info({table_name})")
+            existing_cols = {row[1] for row in cur.fetchall()}
+            for col in table.columns:
+                if col.name in existing_cols:
+                    continue
+                sql_type = sqlite_type(col)
+                null_clause = "" if col.nullable else " NOT NULL"
+                default_clause = ""
+                if col.default is not None and getattr(col.default, 'arg', None) is not None:
+                    d = col.default.arg
+                    if isinstance(d, bool):
+                        default_clause = f" DEFAULT {1 if d else 0}"
+                    elif isinstance(d, (int, float)):
+                        default_clause = f" DEFAULT {d}"
+                    elif isinstance(d, str):
+                        default_clause = f" DEFAULT '{d}'"
+                try:
+                    cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type}{null_clause}{default_clause}")
+                    print(f"  + {table_name}.{col.name}")
+                except sqlite3.OperationalError:
+                    pass
+        conn.commit()
+        conn.close()
     db.create_all()
     print('SCHEMA_OK')
 DBEOF2
@@ -1373,9 +1534,33 @@ if [[ -f "$SUDOERS_SRC" ]]; then
             chmod 0440 "$SUDOERS_DST"
             ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
         else
-            rm -f "$SUDOERS_DST.tmp"
-            warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
-            warn "  visudo says: ${VISUDO_ERR:-<no output>}"
+            # Real report: some sudo builds (minimal/stripped packages on
+            # certain distros) are compiled without I/O-logging support
+            # at all, so the `!log_input, !log_output` Defaults lines
+            # (added to dodge a DIFFERENT problem -- an audit/pty-open
+            # plugin failure on some VPS/container hosts, see the
+            # comment above those lines in deploy/sudoers.anetbbs) are
+            # themselves rejected as "unknown setting" on those hosts.
+            # Retry once with just those 3 lines stripped before giving
+            # up entirely -- a working sudoers file missing that one
+            # narrow protection beats leaving a stale pre-upgrade file
+            # in place (which silently fails to authorize any commands
+            # added since the sysop's last successful refresh).
+            sed '/^Defaults!ANETBBS_[A-Z]*  *!log_input, !log_output$/d' \
+                "$SUDOERS_DST.tmp" > "$SUDOERS_DST.tmp2"
+            if visudo -cf "$SUDOERS_DST.tmp2" >/dev/null 2>&1; then
+                mv "$SUDOERS_DST.tmp2" "$SUDOERS_DST"
+                rm -f "$SUDOERS_DST.tmp"
+                chmod 0440 "$SUDOERS_DST"
+                warn "sudoers refreshed WITHOUT the I/O-logging-suppression lines" \
+                     "-- this sudo build doesn't support log_input/log_output" \
+                     "(visudo said: ${VISUDO_ERR:-<no output>})"
+                ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
+            else
+                rm -f "$SUDOERS_DST.tmp" "$SUDOERS_DST.tmp2"
+                warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+                warn "  visudo says: ${VISUDO_ERR:-<no output>}"
+            fi
         fi
     fi
 fi
