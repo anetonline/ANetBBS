@@ -876,16 +876,36 @@ else
     fi
     DB_URL="${EXISTING_ENV[DATABASE_URL]:-sqlite:///${INSTALL_DIR}/data/anetbbs.db}"
     DB_UPDATED=false
-    if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" << DBEOF 2>/dev/null; then
+    # Real gap found in a security/performance audit: INSTALL_DIR/DB_URL/
+    # DB_SECRET_KEY/ENV_FILE used to be spliced unescaped into single-
+    # quoted Python string literals below (same bug class as install.sh's
+    # own admin-account heredoc -- see its comment for the full
+    # reasoning). Lower risk here specifically since DB_URL/DB_SECRET_KEY
+    # come from .env rather than a fresh interactive prompt, but a
+    # sysop-hand-edited DATABASE_URL (e.g. a Postgres connection string
+    # with a special character) could still trip it -- fixed the same
+    # way, via real environment variables read back through os.environ,
+    # with the heredoc delimiter quoted so bash does no expansion inside
+    # it at all.
+    if sudo -u "$SERVICE_USER" \
+        INSTALL_DIR="$INSTALL_DIR" \
+        DB_URL="$DB_URL" \
+        DB_SECRET_KEY="$DB_SECRET_KEY" \
+        ENV_FILE="$ENV_FILE" \
+        "$VENV_DIR/bin/python" << 'DBEOF' 2>/dev/null; then
 import os, sys, sqlite3
-sys.path.insert(0, '$INSTALL_DIR')
-os.chdir('$INSTALL_DIR')
+install_dir = os.environ['INSTALL_DIR']
+sys.path.insert(0, install_dir)
+os.chdir(install_dir)
 os.environ['FLASK_ENV'] = 'production'
-os.environ['DATABASE_URL'] = '$DB_URL'
-os.environ['SECRET_KEY'] = '$DB_SECRET_KEY'
+# DATABASE_URL/SECRET_KEY are already real env vars at this point
+# (passed in by the sudo command line above) -- os.environ already has
+# them under the same names DB_URL/DB_SECRET_KEY were exported as.
+os.environ['DATABASE_URL'] = os.environ['DB_URL']
+os.environ['SECRET_KEY'] = os.environ['DB_SECRET_KEY']
 
 from dotenv import load_dotenv
-load_dotenv('$ENV_FILE')
+load_dotenv(os.environ['ENV_FILE'])
 
 # Build minimal app context — avoid create_app() which calls _create_default_data()
 # and would crash if old tables are missing new columns.
@@ -947,16 +967,21 @@ with app.app_context():
     print('SCHEMA_OK')
 DBEOF
         DB_UPDATED=true
-    elif "$VENV_DIR/bin/python" << DBEOF2 2>/dev/null; then
+    elif INSTALL_DIR="$INSTALL_DIR" \
+        DB_URL="$DB_URL" \
+        DB_SECRET_KEY="$DB_SECRET_KEY" \
+        ENV_FILE="$ENV_FILE" \
+        "$VENV_DIR/bin/python" << 'DBEOF2' 2>/dev/null; then
 import os, sys, sqlite3
-sys.path.insert(0, '$INSTALL_DIR')
-os.chdir('$INSTALL_DIR')
+install_dir = os.environ['INSTALL_DIR']
+sys.path.insert(0, install_dir)
+os.chdir(install_dir)
 os.environ['FLASK_ENV'] = 'production'
-os.environ['DATABASE_URL'] = '$DB_URL'
-os.environ['SECRET_KEY'] = '$DB_SECRET_KEY'
+os.environ['DATABASE_URL'] = os.environ['DB_URL']
+os.environ['SECRET_KEY'] = os.environ['DB_SECRET_KEY']
 
 from dotenv import load_dotenv
-load_dotenv('$ENV_FILE')
+load_dotenv(os.environ['ENV_FILE'])
 
 # Same real ALTER TABLE migration as the sudo path above -- real gap
 # found in an audit: this fallback (only reached when `sudo` itself
@@ -1120,6 +1145,23 @@ EnvironmentFile=$INSTALL_DIR/.env
 # NOTE: We intentionally do NOT set CapabilityBoundingSet here so that
 # sudo (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Real gap found in a security/performance audit: no systemd
+# sandboxing directives at all -- see install.sh's matching unit for
+# the longer version of this comment. NoNewPrivileges=yes is
+# deliberately OMITTED here (unlike the other units this script
+# generates) -- it would block the sudo escalation the NOTE above
+# already documents as required for the Service Control Center.
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5
@@ -1161,6 +1203,21 @@ EnvironmentFile=$INSTALL_DIR/.env
 # /admin/control/ flags it as a listener problem.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Real gap found in a security/performance audit: no systemd
+# sandboxing directives at all. This unit never calls sudo, so
+# NoNewPrivileges=yes is safe here (unlike anetbbs-web.service).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/anetbbs
 Restart=always
 RestartSec=5
@@ -1325,6 +1382,18 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=MRC_BRIDGE_CONFIG=$MRC_BRIDGE_CONFIG
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m mrc.bridge.main
 Restart=always
 RestartSec=10
@@ -1362,6 +1431,18 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$ENV_FILE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m anetbbs.echomail.binkp_server
 Restart=always
 RestartSec=5
@@ -1391,6 +1472,18 @@ Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$ENV_FILE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m anetbbs.core.finger_server
 Restart=always
 RestartSec=10
@@ -1421,22 +1514,43 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     # ANetBBS's v1.0.x series). See install.sh's own longer comment on
     # MRC_CLIENT_COMPAT_VERSION for the full story -- keep this in
     # sync with that value if it's ever bumped.
-    cat > "$MRC_BRIDGE_CONFIG" << MRCEOF
-{
-  "mrc_host": "mrc.bottomlessabyss.net",
-  "mrc_port": 5001,
-  "use_ssl": true,
-  "bridge_bbs": "$BBS_NAME",
-  "platform_info": "ANETBBS/Linux.$(uname -m)/1.3.9",
-  "capabilities": ["MCI", "MSGEXT", "CTCP"],
-  "web_listen_host": "127.0.0.1",
-  "web_listen_port": $MRC_LISTEN_PORT,
-  "message_rate_seconds": 0.5,
-  "iamhere_interval_seconds": 60,
-  "log_level": "INFO",
-  "data_dir": "$INSTALL_DIR/data/mrc"
+    # Real gap found in a security/performance audit: BBS_NAME is a
+    # sysop-typed value (originally from install.sh's wizard, possibly
+    # since hand-edited in .env), interpolated directly into a JSON
+    # string literal with no escaping -- a name containing a double-
+    # quote or backslash produced syntactically invalid JSON, which
+    # the MRC bridge would then crash on at every startup. Building it
+    # via Python's own json module instead guarantees correct escaping
+    # regardless of content -- same fix applied to install.sh's own
+    # matching heredoc, same env-var-passing pattern used throughout
+    # this script's other heredocs for the identical class of bug.
+    BBS_NAME="$BBS_NAME" \
+        PLATFORM_INFO="ANETBBS/Linux.$(uname -m)/1.3.9" \
+        MRC_LISTEN_PORT="$MRC_LISTEN_PORT" \
+        MRC_DATA_DIR="$INSTALL_DIR/data/mrc" \
+        MRC_BRIDGE_CONFIG="$MRC_BRIDGE_CONFIG" \
+        python3 << 'MRCPYEOF'
+import json
+import os
+
+config = {
+    "mrc_host": "mrc.bottomlessabyss.net",
+    "mrc_port": 5001,
+    "use_ssl": True,
+    "bridge_bbs": os.environ['BBS_NAME'],
+    "platform_info": os.environ['PLATFORM_INFO'],
+    "capabilities": ["MCI", "MSGEXT", "CTCP"],
+    "web_listen_host": "127.0.0.1",
+    "web_listen_port": int(os.environ['MRC_LISTEN_PORT']),
+    "message_rate_seconds": 0.5,
+    "iamhere_interval_seconds": 60,
+    "log_level": "INFO",
+    "data_dir": os.environ['MRC_DATA_DIR'],
 }
-MRCEOF
+with open(os.environ['MRC_BRIDGE_CONFIG'], 'w') as f:
+    json.dump(config, f, indent=2)
+    f.write('\n')
+MRCPYEOF
     chown "$SERVICE_USER":"$SERVICE_USER" "$MRC_BRIDGE_CONFIG"
     chmod 640 "$MRC_BRIDGE_CONFIG"
     ok "MRC bridge config.json generated"

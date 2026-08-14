@@ -111,6 +111,17 @@ services:
   mrc-bridge:
     image: *anetbbs-image
     command: ["/usr/local/bin/entrypoint.sh", "python", "-m", "mrc.bridge.main"]
+    # Real gap found in a security/performance audit: every OTHER
+    # service here sets env_file + the shared DB env anchor, but this
+    # one didn't -- and entrypoint.sh (which this service also runs)
+    # unconditionally hard-fails with "FATAL: ANETBBS_DB_URL is not
+    # set" if it's missing, so this container could never actually
+    # start via `docker compose up -d` at all; it would crash-loop
+    # immediately every time. mrc.bridge.main itself doesn't read the
+    # DB vars, but the shared entrypoint it runs through requires them
+    # regardless, exactly like finger/binkp below.
+    env_file: [.env]
+    environment: *anetbbs-db-env
     ports:
       - "8080:8080"
     volumes:

@@ -99,7 +99,7 @@ class ChatActivityLogTests(unittest.TestCase):
         chat = MRCChat(session)
 
         class _FailingClientSession:
-            def ws_connect(self, url):
+            def ws_connect(self, url, **kwargs):
                 raise OSError('connection refused')
 
             async def close(self):

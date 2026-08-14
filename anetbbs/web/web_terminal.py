@@ -16,7 +16,6 @@ Architecture:
 Each browser tab gets its own outbound TCP socket; bytes flow both ways
 through the socketio namespace `/term`.
 """
-import ipaddress
 import logging
 import os
 import socket
@@ -26,6 +25,8 @@ import threading
 from flask import Blueprint, render_template, request
 from flask_login import login_required, current_user
 from flask_socketio import emit
+
+from ..core.net_safety import resolve_safe_destination as _resolve_safe_destination_impl
 
 
 logger = logging.getLogger(__name__)
@@ -67,35 +68,16 @@ def _resolve_safe_destination(host, port):
     destinations, with a narrow exception for loopback on one of this
     BBS's own service ports.
 
-    Resolves the hostname ONCE here and returns the resolved
-    (family, sockaddr) pair for the caller to connect() with directly,
-    rather than letting the caller re-resolve the hostname string at
-    connect time -- re-resolving would leave a DNS-rebinding gap where
-    a hostname that resolves safely at check-time could resolve to an
-    internal address by connect-time.
+    Thin wrapper around the shared core.net_safety implementation
+    (extracted this audit round so RSS's feed-URL and sixel-image
+    fetches can share the exact same validation instead of each
+    maintaining their own copy) -- this module keeps its own loopback-
+    exception behavior via own_ports=_own_service_ports.
 
     Returns (family, sockaddr, None) on success, or
     (None, None, error_message) on rejection.
     """
-    try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except (socket.gaierror, UnicodeError):
-        return None, None, f'Could not resolve host: {host}'
-    if not infos:
-        return None, None, f'Could not resolve host: {host}'
-
-    family, _socktype, _proto, _canonname, sockaddr = infos[0]
-    try:
-        ip = ipaddress.ip_address(sockaddr[0])
-    except ValueError:
-        return None, None, 'Invalid resolved address'
-
-    if ip.is_loopback and port in _own_service_ports():
-        return family, sockaddr, None
-    if (ip.is_private or ip.is_link_local or ip.is_loopback
-            or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-        return None, None, 'Connections to private/internal addresses are not allowed'
-    return family, sockaddr, None
+    return _resolve_safe_destination_impl(host, port, own_ports=_own_service_ports)
 
 
 class _TermSession:

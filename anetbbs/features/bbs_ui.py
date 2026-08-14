@@ -2723,16 +2723,33 @@ class BBSMenuUI:
         feed source itself -- a subscribed feed's publisher (or anyone
         who compromises it) controls each item's content, including this
         URL. Scheme-restricted to http(s) so a malicious item can't use
-        file:// to read local files off the server via urlopen (the
-        underlying private/internal-IP SSRF surface is a separate, lower-
-        severity residual risk noted but not fully closed here — same
-        trust model as any other server-side image-embed feature).
+        file:// to read local files off the server via urlopen.
+
+        Follow-up found in a later security/performance audit: the
+        underlying private/internal-IP SSRF surface that comment
+        flagged as a "residual risk noted but not fully closed" is now
+        closed too, via the same shared core.net_safety guard used by
+        web_terminal.py (round 1's Critical SSRF fix) and the RSS
+        feed-URL fetch (round 2, anetbbs/rss/poller.py). This one is
+        reachable by ANY regular user, not just admins -- the feed
+        itself may be sysop-subscribed, but its ITEMS (and therefore
+        this image URL) are entirely publisher-controlled content any
+        subscriber ends up rendering.
         """
         import shutil, subprocess, tempfile, os, urllib.request as _ur
         from urllib.parse import urlparse as _urlparse
+        from ..core.net_safety import resolve_safe_destination as _resolve_safe_dest
         if not shutil.which('img2sixel'):
             return False
-        if _urlparse(image_url).scheme not in ('http', 'https'):
+        parsed_img_url = _urlparse(image_url)
+        if parsed_img_url.scheme not in ('http', 'https'):
+            return False
+        img_host = parsed_img_url.hostname
+        if not img_host:
+            return False
+        img_port = parsed_img_url.port or (443 if parsed_img_url.scheme == 'https' else 80)
+        _fam, _sockaddr, _ssrf_err = _resolve_safe_dest(img_host, img_port)
+        if _ssrf_err:
             return False
         tmp = None
         try:

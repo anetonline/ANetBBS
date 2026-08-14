@@ -12,8 +12,9 @@ in the admin UI), call :func:`fetch_one_now`.
 """
 import os
 import logging
+import socket
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import unescape
 import re
 
@@ -22,6 +23,18 @@ logger = logging.getLogger(__name__)
 _stop_event = threading.Event()
 _thread = None
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+# Real gap found in a security/performance audit: feedparser.parse()
+# has no timeout= parameter at all (confirmed against its real
+# signature) and no connect/read deadline was ever applied around it
+# -- a slow, unresponsive, or deliberately stalling feed server could
+# hang this call indefinitely. Since _poll_loop below fetches feeds
+# ONE AT A TIME on a single dedicated background thread, one hung feed
+# blocked every OTHER active feed's refresh for as long as the hang
+# lasted, with no upper bound at all. Bounding this caps the worst
+# case for a full poll cycle at num_feeds * _FEED_FETCH_TIMEOUT
+# instead of potentially forever.
+_FEED_FETCH_TIMEOUT = 20
 
 
 def _strip_html(text):
@@ -52,6 +65,8 @@ def _import_one_feed(app, feed_id):
     """Fetch one feed and persist any new items. Returns count of inserted
     items. Updates feed.last_fetched_at and feed.last_error."""
     import feedparser
+    from urllib.parse import urlparse
+    from ..core.net_safety import resolve_safe_destination
     from ..models import db, RssFeed, RssItem
 
     with app.app_context():
@@ -59,10 +74,57 @@ def _import_one_feed(app, feed_id):
         if not feed or not feed.is_active:
             return 0
         url = feed.url
+
+        # Real gap found in a security/performance audit: feedparser.parse()
+        # used to be called directly on the raw feed.url with no scheme/
+        # host validation at all -- feedparser treats a bare path or a
+        # file:// URI as a LOCAL FILE to read, not a network fetch
+        # (confirmed empirically both forms are read straight off disk),
+        # and had no restriction against an http(s) URL targeting an
+        # internal-only address either. Reachable via the feed-URL admin
+        # config field (including an already-compromised admin session).
+        # Same reasoning as web_terminal.py's own SSRF guard (round 1's
+        # Critical fix) -- reused here via the shared core.net_safety
+        # helper extracted this round rather than a second copy.
+        parsed_url = urlparse(url or '')
+        if parsed_url.scheme not in ('http', 'https'):
+            feed.last_error = 'feed URL must be a plain http(s):// URL'
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            logger.warning('RSS fetch refused for %s: non-http(s) URL', feed.name)
+            return 0
+        host = parsed_url.hostname
+        if not host:
+            feed.last_error = 'feed URL has no host'
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            return 0
+        port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+        _family, _sockaddr, ssrf_err = resolve_safe_destination(host, port)
+        if ssrf_err:
+            feed.last_error = f'refused: {ssrf_err}'
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            logger.warning('RSS fetch refused for %s: %s', feed.name, ssrf_err)
+            return 0
+
         try:
-            parsed = feedparser.parse(url, request_headers={
-                'User-Agent': 'ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)'
-            })
+            # feedparser.parse() has no timeout= parameter of its own
+            # (checked its real signature) -- socket.setdefaulttimeout()
+            # is the standard, widely-used workaround for exactly this
+            # gap. It's a PROCESS-GLOBAL setting, not thread-local, so
+            # this saves/restores whatever was there before rather than
+            # assuming it was unset, and restores it immediately after
+            # this one call in a finally -- the window where it's
+            # active is bounded to this fetch alone.
+            _prev_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(_FEED_FETCH_TIMEOUT)
+            try:
+                parsed = feedparser.parse(url, request_headers={
+                    'User-Agent': 'ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)'
+                })
+            finally:
+                socket.setdefaulttimeout(_prev_timeout)
         except Exception as exc:  # pylint: disable=broad-except
             feed.last_error = f'fetch failed: {exc}'
             feed.last_fetched_at = datetime.utcnow()
@@ -169,6 +231,65 @@ def _extract_image_url(entry, content_html):
     return None
 
 
+def _prune_old_items(app):
+    """Delete RssItem rows older than the retention window.
+
+    Real gap found in a security/performance audit: nothing ever
+    pruned RssItem -- every poll cycle (default every 30 minutes) can
+    add up to 200 new items per active feed, deduped by (feed_id,
+    guid) so no duplicate re-inserts, but old items just accumulate
+    forever. Over a long-running install with several active feeds,
+    this table grows unboundedly, slowing its own queries/indexes down
+    over time along with routine backups. RSS_ITEM_RETENTION_DAYS
+    (env var, default 90) bounds it -- same env-var-override
+    convention as RSS_POLL_INTERVAL above.
+
+    RssReadStatus.item_id has ondelete='CASCADE' declared in the model,
+    but that's only enforced by the DB engine itself if SQLite foreign-
+    key enforcement is turned on (PRAGMA foreign_keys=ON) -- this
+    project never sets that -- AND a bulk .delete() query bypasses
+    SQLAlchemy's own ORM-level relationship cascade regardless (that
+    only fires for objects deleted via db.session.delete(obj), not a
+    bulk query). Deletes matching RssReadStatus rows explicitly first
+    so pruning an item can't leave orphaned read-marker rows behind.
+    """
+    from ..models import db, RssItem, RssReadStatus
+    try:
+        days = int(os.environ.get('RSS_ITEM_RETENTION_DAYS', '90'))
+    except ValueError:
+        days = 90
+    if days <= 0:
+        return
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    with app.app_context():
+        try:
+            stale_ids = [
+                row[0] for row in
+                db.session.query(RssItem.id).filter(
+                    db.or_(
+                        db.and_(RssItem.published_at.isnot(None),
+                               RssItem.published_at < cutoff),
+                        db.and_(RssItem.published_at.is_(None),
+                               RssItem.fetched_at < cutoff),
+                    )
+                ).all()
+            ]
+            if not stale_ids:
+                return
+            (RssReadStatus.query
+             .filter(RssReadStatus.item_id.in_(stale_ids))
+             .delete(synchronize_session=False))
+            (RssItem.query
+             .filter(RssItem.id.in_(stale_ids))
+             .delete(synchronize_session=False))
+            db.session.commit()
+            logger.info('RSS: pruned %d item(s) older than %d days',
+                       len(stale_ids), days)
+        except Exception as exc:  # pylint: disable=broad-except
+            db.session.rollback()
+            logger.warning('RSS item pruning failed: %s', exc)
+
+
 def fetch_one_now(feed_id):
     """Trigger an immediate fetch for one feed. Used by admin ‘refresh’
     button and the add-feed flow so users see items right away.
@@ -199,6 +320,8 @@ def _poll_loop(app, interval):
                 except Exception as exc:  # pylint: disable=broad-except
                     logger.exception('RSS poller: feed %d crashed: %s',
                                      fid, exc)
+            if not _stop_event.is_set():
+                _prune_old_items(app)
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('RSS poller loop error: %s', exc)
         # Wait until next tick. Wakes early if app is shutting down.

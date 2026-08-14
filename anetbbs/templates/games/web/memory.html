@@ -96,7 +96,7 @@ function startMemory(size) {
         var score = Math.max(0, 1000 - moves * 10 - time * 2);
         document.getElementById('mem-msg').textContent = '🎉 Completed! Moves: ' + moves + ', Time: ' + time + 's';
         fetch(window.location.pathname.replace('/play','/') + 'score', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRFToken':document.querySelector('meta[name="csrf-token"]')?.content||''},
             body: JSON.stringify({score:score, details:{moves:moves, time:time}})
         }).catch(function(){});
     }

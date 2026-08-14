@@ -133,8 +133,15 @@
     }
 
     function getCsrf() {
-        var m = document.cookie.match(/csrf_token=([^;]+)/);
-        return m ? m[1] : '';
+        // Real gap found in a security/performance audit: this read a
+        // "csrf_token" cookie that nothing in this app ever sets --
+        // Flask-WTF's token lives in the page (the meta tag below),
+        // never a cookie, so this always returned '' and every score
+        // submission was silently rejected by CSRF protection. Matches
+        // the same meta-tag pattern already working elsewhere in this
+        // codebase (base.html's own <meta name="csrf-token">).
+        var m = document.querySelector('meta[name="csrf-token"]');
+        return m ? m.getAttribute('content') : '';
     }
 
     document.getElementById('hm-new-game').addEventListener('click', startGame);

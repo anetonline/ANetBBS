@@ -31,6 +31,8 @@ import secrets
 import zipfile
 from datetime import datetime, timedelta
 
+from .zip_safety import iter_safe_members, ZipBombError
+
 from .binkp import (
     CMD_NUL, CMD_ADR, CMD_PWD, CMD_FILE, CMD_OK, CMD_EOB,
     CMD_GOT, CMD_ERR, CMD_SKIP, CMD_NAMES,
@@ -185,21 +187,19 @@ def _extract_packets(name, payload):
     if _is_zip(payload):
         try:
             with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-                for info in zf.infolist():
-                    if info.is_dir():
-                        continue
-                    try:
-                        inner = zf.read(info.filename)
-                    except Exception as exc:
-                        logger.warning('Failed to read %s from %s: %s',
-                                       info.filename, name, exc)
-                        continue
-                    if _is_fts_packet(inner) or _looks_like_mail_bundle_ext(
-                            info.filename):
-                        yield (info.filename, inner)
-                    else:
-                        logger.info('Skipping non-packet %s inside %s',
-                                    info.filename, name)
+                try:
+                    for info, inner in iter_safe_members(zf):
+                        if _is_fts_packet(inner) or _looks_like_mail_bundle_ext(
+                                info.filename):
+                            yield (info.filename, inner)
+                        else:
+                            logger.info('Skipping non-packet %s inside %s',
+                                        info.filename, name)
+                except ZipBombError as exc:
+                    logger.warning('Refusing to extract %s: %s', name, exc)
+                except Exception as exc:
+                    logger.warning('Failed to read a member of %s: %s',
+                                   name, exc)
         except zipfile.BadZipFile as exc:
             logger.warning('Bad ZIP %s: %s', name, exc)
     elif _is_fts_packet(payload) or _looks_like_mail_bundle_ext(name):
@@ -556,12 +556,33 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     await _send_cmd(writer, CMD_ADR, aka_line, transcript=transcript)
 
     # 2. Read client commands until we get their address + password
+    #
+    # Real gap found in a security/performance audit: the 30s timeout
+    # below only ever bounds the gap BETWEEN frames, not the total
+    # time spent in this loop. A peer (malicious or just slow-loris
+    # style) that sends one harmless M_NUL frame every ~29 seconds
+    # forever keeps resetting that per-frame timer indefinitely,
+    # holding this coroutine, its open socket, and (once one is
+    # opened below) a DB engine connection alive without ever
+    # completing the handshake -- unauthenticated, since M_ADR/M_PWD
+    # never has to arrive. A modest number of connections doing this
+    # concurrently exhausts the listener's connection/FD budget. Fixed
+    # with an overall wall-clock deadline across the whole loop,
+    # matching the same deadline-based pattern _send_pkt_file() below
+    # already uses for its own M_GOT wait.
+    handshake_deadline = asyncio.get_event_loop().time() + 120
     remote_addr = None
     remote_akas = []
     remote_pwd = None
     while remote_addr is None or remote_pwd is None:
+        remaining = handshake_deadline - asyncio.get_event_loop().time()
+        if remaining <= 0:
+            logger.warning('BinkP %s: handshake timed out (overall deadline)', peer)
+            return
         try:
-            is_cmd, payload = await asyncio.wait_for(_recv_frame(reader, transcript=transcript), timeout=30)
+            is_cmd, payload = await asyncio.wait_for(
+                _recv_frame(reader, transcript=transcript),
+                timeout=min(30, remaining))
         except asyncio.TimeoutError:
             logger.warning('BinkP %s: handshake timed out', peer)
             return

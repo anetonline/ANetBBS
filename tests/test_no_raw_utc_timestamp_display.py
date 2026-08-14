@@ -69,7 +69,7 @@ ALLOWLIST = {
     # correct, just a different shape than the rest of the codebase --
     # see each file's own comment at the to_eastern() call site.
     'anetbbs/features/display_codes.py': {65, 66, 67, 86, 87},
-    'anetbbs/features/anetirc2.py': {621},
+    'anetbbs/features/anetirc2.py': {634},
 }
 
 

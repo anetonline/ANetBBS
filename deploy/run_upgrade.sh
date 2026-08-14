@@ -73,6 +73,45 @@ fi
 [ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
 log "install dir: $INSTALL_DIR"
 
+# ── Verify URL origin against the configured registry ─────────────────────
+# Real gap found in a security/performance audit: URL was only ever
+# validated by SHAPE (https + .tar.gz + no shell metacharacters), never
+# by ORIGIN -- since the caller supplies both the URL and the sha256
+# checked against it below, an attacker able to invoke this script
+# directly (the sudoers grant is to the service user, not gated behind
+# the admin web UI -- see deploy/sudoers.anetbbs) could host their own
+# tarball anywhere and compute a self-consistent hash, defeating the
+# sha256 check entirely. Bounded here by requiring the download host to
+# match REGISTRY_URL's own host -- read independently from .env (the
+# same config source the web app itself uses via anetbbs/config.py),
+# not trusted from argv, so a caller can't just also pass a self-
+# consistent value for this check. REGISTRY_URL is deliberately sysop-
+# configurable (a private network of peers can run their own release
+# feed -- see anetbbs/web/upgrades.py's own docstring), so this can't
+# be a fixed hardcoded host; it has to track whatever THIS install
+# actually trusts. Falls back to the same default anetbbs/config.py
+# itself uses when REGISTRY_URL isn't set in .env at all.
+REGISTRY_HOST=""
+ENV_FILE="$INSTALL_DIR/.env"
+if [ -r "$ENV_FILE" ]; then
+    REGISTRY_LINE=$(grep -m1 '^REGISTRY_URL=' "$ENV_FILE" 2>/dev/null || true)
+    REGISTRY_VALUE="${REGISTRY_LINE#REGISTRY_URL=}"
+    # Strip optional surrounding quotes some .env writers/editors add.
+    REGISTRY_VALUE="${REGISTRY_VALUE%\"}"; REGISTRY_VALUE="${REGISTRY_VALUE#\"}"
+    REGISTRY_VALUE="${REGISTRY_VALUE%\'}"; REGISTRY_VALUE="${REGISTRY_VALUE#\'}"
+    _reg_no_scheme="${REGISTRY_VALUE#http://}"
+    _reg_no_scheme="${_reg_no_scheme#https://}"
+    REGISTRY_HOST="${_reg_no_scheme%%/*}"
+fi
+[ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
+
+_url_no_scheme="${URL#http://}"
+_url_no_scheme="${_url_no_scheme#https://}"
+URL_HOST="${_url_no_scheme%%/*}"
+[ "$URL_HOST" = "$REGISTRY_HOST" ] \
+    || fail "url host '$URL_HOST' does not match this install's configured REGISTRY_URL host '$REGISTRY_HOST' -- refusing to download from an unexpected origin"
+log "url origin verified against registry host: $REGISTRY_HOST"
+
 # ── Download tarball to a unique tempdir we own ───────────────────────────
 TMP=$(mktemp -d -t anetbbs-upgrade-XXXXXX)
 trap 'rm -rf "$TMP"' EXIT

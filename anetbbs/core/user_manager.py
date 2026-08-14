@@ -40,6 +40,17 @@ _DB_URI = _resolve_db_uri()
 _engine = create_engine(_DB_URI, future=True)
 _Session = sessionmaker(bind=_engine, future=True, expire_on_commit=False)
 
+# Real gap found in a security/performance audit: authenticate() below
+# used to `return None` for a nonexistent username BEFORE ever calling
+# check_password_hash() -- the same short-circuit-timing gap fixed in
+# web/auth.py's login() (see that module's own longer comment on
+# _DUMMY_PASSWORD_HASH for the full reasoning). A telnet/SSH/rlogin
+# login for a real username with a wrong password took as long as the
+# real hash verification, while a nonexistent username returned almost
+# instantly -- a distinguishable timing side channel independent of
+# whatever error message either path shows.
+_DUMMY_PASSWORD_HASH = generate_password_hash('not-a-real-password-timing-normalization')
+
 
 class UserManager:
     """SQLAlchemy-backed user manager. Same User table as the web app."""
@@ -285,10 +296,23 @@ class UserManager:
                 select(User).where(func.lower(User.username) == username.lower())
             ).scalar_one_or_none()
             if user is None:
+                # Always run a real hash verification -- see
+                # _DUMMY_PASSWORD_HASH's own comment above -- so this
+                # path takes statistically the same time as a real
+                # username with a wrong password.
+                check_password_hash(_DUMMY_PASSWORD_HASH, password)
+                return None
+            # Password verified BEFORE the is_active check (unlike a
+            # naive "check state, then hash" ordering) -- same timing-
+            # normalization reasoning as the user-is-None case above:
+            # an existing-but-deactivated account would otherwise
+            # short-circuit past the hash check and return faster than
+            # an active account with a wrong password, leaking which
+            # existing usernames are currently deactivated purely by
+            # response timing.
+            if not check_password_hash(user.password_hash, password):
                 return None
             if not user.is_active:
-                return None
-            if not check_password_hash(user.password_hash, password):
                 return None
             # Real access-control gap found in a full audit: neither of
             # these was ever checked here, unlike web/auth.py's login()

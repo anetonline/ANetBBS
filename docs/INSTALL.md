@@ -321,6 +321,13 @@ restart anetbbs`.
   sudo chmod -R g+rX,o+rX /opt/anetbbs/anetbbs/games/sbbs_stubs
   sudo chmod -R g+rwX /opt/anetbbs/doors
   ```
+  (Safe to run as shown: `install.sh` already `chown -R`s the whole
+  install directory to `$SERVICE_USER:$SERVICE_USER` before this point,
+  so the "g" being widened here is that service account's own dedicated
+  group, not some broader host-wide one — only add other Linux users to
+  it if you deliberately want them to share write access to doors'
+  save/state files. `sbbs_stubs` only gets read+traverse for "o", never
+  write.)
 - **`bbs.log` PermissionError** → service user needs write access to the
   install dir. `install.sh` `chown`s on every run; if you re-pointed the
   unit file at a different install dir, mirror the perms there.

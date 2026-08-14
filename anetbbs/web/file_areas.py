@@ -13,6 +13,8 @@ Routes:
     /file-areas/<id>/<filename>     stream-download a file
     /file-areas/<id>/upload         POST file (where permission allows)
 """
+import fcntl
+import hmac
 import io
 import json
 import os
@@ -25,6 +27,7 @@ from flask_login import login_required, current_user
 from ..models import db, FileArea, TicFile, SharedFileLink
 from ..features.archive_meta import extract_archive_description
 from ..features.access_control import evaluate_access
+from ..features.rate_limit import rate_limit, _user_or_ip
 from .list_pagination import ListPagination
 
 
@@ -36,6 +39,22 @@ def _is_image(name):
     return os.path.splitext(name.lower())[1] in _IMAGE_EXTS
 
 file_areas_bp = Blueprint('file_areas', __name__, url_prefix='/file-areas')
+
+
+def _oversized_upload(upload):
+    """True if `upload` (a Werkzeug FileStorage) declares more bytes
+    than UPLOAD_MAX_SIZE. Real gap found in a security/performance
+    audit: unlike web/files.py's own gallery upload() (which already
+    does this exact check), none of this module's three upload routes
+    checked file size at all -- combined with no app-wide
+    MAX_CONTENT_LENGTH existing either (also fixed this audit, see
+    config.py), any authenticated user could fill the disk via any of
+    these endpoints. Same seek-to-end technique as files.py's check."""
+    upload.stream.seek(0, 2)
+    size = upload.stream.tell()
+    upload.stream.seek(0)
+    max_size = current_app.config.get('UPLOAD_MAX_SIZE', 100 * 1024 * 1024)
+    return size > max_size, max_size
 
 
 def _visible_to(user, area):
@@ -72,17 +91,11 @@ def _hatch_if_network_area(area, dest_path, filename, description=None):
             'hatch_local_file failed for %s in area %s', filename, area.tag)
 
 
-_DESC_CACHE_FILENAME = '.descriptions.json'
-
-
-def _desc_cache_path(area):
-    if not area.storage_path:
-        return None
-    return os.path.join(area.storage_path, _DESC_CACHE_FILENAME)
-
-
-def _load_desc_cache(area):
-    path = _desc_cache_path(area)
+def _read_json_sidecar(path):
+    """Plain, unlocked read of a JSON sidecar cache -- used where a
+    momentarily-stale read is harmless (a cache-hit check that just
+    falls back to re-computing on a miss), unlike the read-modify-write
+    sites below which use the locked _update_json_sidecar instead."""
     if not path or not os.path.isfile(path):
         return {}
     try:
@@ -93,15 +106,95 @@ def _load_desc_cache(area):
         return {}
 
 
-def _save_desc_cache(area, cache):
-    path = _desc_cache_path(area)
+def _update_json_sidecar(path, mutate):
+    """Read-modify-write a JSON sidecar cache file under an exclusive
+    OS file lock (fcntl.flock).
+
+    Real gap found in a security/performance audit: every *_cache
+    helper below used to be a bare load-then-save pair, called with
+    the read and write as two separate, unlocked steps -- two
+    concurrent requests touching the SAME area (two uploads, an upload
+    racing a manage/desc edit, two admins editing descriptions at
+    once; this app runs multi-threaded/multi-worker) could both load
+    the same starting snapshot, each apply their own change to their
+    own in-memory copy, then each overwrite the file with THEIR view
+    in turn -- whichever wrote last silently discarded the other
+    request's change. Wrapping the read AND write in one flock-held
+    critical section, with `mutate` re-applied against whatever is
+    CURRENTLY on disk (not a possibly-stale copy read earlier,
+    unlocked), closes that: concurrent updates now serialize instead
+    of racing, and no caller's change is silently lost, whether it's
+    an add/update OR a delete (mutate can pop a key just as easily as
+    set one -- unlike a naive "merge my old snapshot back in", which
+    can't distinguish "never loaded this key" from "deliberately
+    removed it").
+
+    mutate(dict) -> dict is called with the current on-disk content
+    (freshly read under the lock; {} if missing/corrupt) and must
+    return the new content to persist. Returns the new content, or {}
+    on any I/O failure (best-effort, matches every *_cache helper's
+    existing silent-failure behavior -- a sidecar-cache problem must
+    never block an upload/delete/description edit).
+
+    Locks a SEPARATE ".lock" file, not the JSON data file itself, and
+    does a plain read ('r') + truncating write ('w') rather than
+    locking one 'a+' fd and seek(0)/truncate()/write()-ing on it in
+    place. An earlier version of this function did exactly that and
+    LOOKED correct (the read-modify-write is still fully inside the
+    flock-held section) but was empirically still racy under real
+    concurrency -- confirmed via a 30-thread stress test that
+    consistently dropped a handful of entries roughly 1 run in 5.
+    Root cause: a file opened with 'a'/'a+' has O_APPEND set at the OS
+    level, which forces the kernel to reposition to end-of-file on
+    every write() *at write time*, regardless of any prior seek()/
+    truncate() -- an interaction with Python's buffered TextIOWrapper
+    that doesn't reliably behave like "seek(0) really means position
+    0" for the write. Locking a separate, always-freshly-opened lock
+    file and doing the actual data read/write as two ordinary,
+    non-append opens sidesteps that interaction entirely. Verified via
+    the same 30-thread stress test run 10+ times back to back with
+    zero dropped entries after this change (see
+    tests/test_file_areas_sidecar_cache_race.py).
+    """
     if not path:
-        return
+        return {}
+    lock_path = path + '.lock'
     try:
-        with open(path, 'w', encoding='utf-8') as fh:
-            json.dump(cache, fh)
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     except OSError:
-        pass
+        return {}
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            data = {}
+            if os.path.isfile(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        raw = fh.read()
+                    data = json.loads(raw) if raw.strip() else {}
+                    if not isinstance(data, dict):
+                        data = {}
+                except (OSError, ValueError):
+                    data = {}
+            new_data = mutate(data)
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(new_data, fh)
+            return new_data
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    except OSError:
+        return {}
+    finally:
+        os.close(lock_fd)
+
+
+_DESC_CACHE_FILENAME = '.descriptions.json'
+
+
+def _desc_cache_path(area):
+    if not area.storage_path:
+        return None
+    return os.path.join(area.storage_path, _DESC_CACHE_FILENAME)
 
 
 def _clear_desc_cache(area):
@@ -127,29 +220,6 @@ def _hash_cache_path(area):
     return os.path.join(area.storage_path, _HASH_CACHE_FILENAME)
 
 
-def _load_hash_cache(area):
-    path = _hash_cache_path(area)
-    if not path or not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_hash_cache(area, cache):
-    path = _hash_cache_path(area)
-    if not path:
-        return
-    try:
-        with open(path, 'w', encoding='utf-8') as fh:
-            json.dump(cache, fh)
-    except OSError:
-        pass
-
-
 def _check_and_record_dupe(area, dest, filename):
     """Hash *dest* (already saved), check the area's hash cache for a
     match, record the new hash either way. Returns the filename of an
@@ -158,10 +228,20 @@ def _check_and_record_dupe(area, dest, filename):
     try:
         from ..features.file_dedup import hash_file
         h = hash_file(dest)
-        cache = _load_hash_cache(area)
-        existing = cache.get(h)
-        cache[h] = filename
-        _save_hash_cache(area, cache)
+        # The read (cache.get(h)) and write (cache[h] = filename) must
+        # happen atomically under the SAME lock -- see
+        # _update_json_sidecar's own docstring -- otherwise two
+        # uploads racing each other could both read "no match yet"
+        # before either recorded its own hash.
+        found = {}
+
+        def _mutate(cache):
+            found['existing'] = cache.get(h)
+            cache[h] = filename
+            return cache
+
+        _update_json_sidecar(_hash_cache_path(area), _mutate)
+        existing = found.get('existing')
         return existing if existing != filename else None
     except Exception:
         current_app.logger.exception('dedup hash failed for %s in area %s',
@@ -187,8 +267,13 @@ def _scan_area(area):
               .all()):
         tic_descs[t.filename] = t.description or ''
 
-    cache = _load_desc_cache(area)
-    cache_dirty = False
+    cache = _read_json_sidecar(_desc_cache_path(area))
+    # Newly-extracted entries only, tracked separately from `cache` --
+    # merged into whatever's CURRENTLY on disk under lock at the end
+    # (see _update_json_sidecar's own docstring), rather than blindly
+    # overwriting with this possibly-stale, unlocked-read snapshot.
+    # Safe as an add-only merge: this loop never removes cache entries.
+    updates = {}
 
     out = []
     try:
@@ -215,12 +300,11 @@ def _scan_area(area):
                         description = extract_archive_description(full) or ''
                     except Exception:
                         description = ''
-                    cache[name] = {
+                    updates[name] = {
                         'mtime': int(st.st_mtime),
                         'size': st.st_size,
                         'description': description,
                     }
-                    cache_dirty = True
 
             out.append({
                 'name': name,
@@ -232,8 +316,11 @@ def _scan_area(area):
     except OSError:
         pass
 
-    if cache_dirty:
-        _save_desc_cache(area, cache)
+    if updates:
+        def _mutate(cache):
+            cache.update(updates)
+            return cache
+        _update_json_sidecar(_desc_cache_path(area), _mutate)
     return out
 
 
@@ -462,6 +549,7 @@ def thumbnail(area_id, filename):
 
 @file_areas_bp.route('/<int:area_id>/upload', methods=['POST'])
 @login_required
+@rate_limit('file_area_upload', limit=20, window=300, key_fn=_user_or_ip)
 def upload(area_id):
     area = FileArea.query.get_or_404(area_id)
     if not _visible_to(current_user, area):
@@ -478,9 +566,19 @@ def upload(area_id):
         flash('No file selected.', 'danger')
         return redirect(url_for('file_areas.view_area', area_id=area.id))
 
-    # Optional area password
+    too_big, max_size = _oversized_upload(upload)
+    if too_big:
+        flash(f'File too large. Maximum size is {max_size // 1024 // 1024}MB.', 'danger')
+        return redirect(url_for('file_areas.view_area', area_id=area.id))
+
+    # Optional area password. Real gap found in a security/performance
+    # audit: plain != is a timing side-channel on an attacker-supplied
+    # value -- same bug class already fixed for BinkP/AreaFix/FileFix/
+    # TIC elsewhere this audit.
     if area.password:
-        if (request.form.get('password') or '') != area.password:
+        if not hmac.compare_digest(
+                (request.form.get('password') or '').encode('utf-8', errors='replace'),
+                area.password.encode('utf-8', errors='replace')):
             flash('Incorrect area password.', 'danger')
             return redirect(url_for('file_areas.view_area', area_id=area.id))
 
@@ -755,10 +853,11 @@ def manage_delete(area_id):
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
     try:
         os.remove(full)
-        cache = _load_desc_cache(area)
-        if filename in cache:
-            del cache[filename]
-            _save_desc_cache(area, cache)
+
+        def _mutate(cache):
+            cache.pop(filename, None)
+            return cache
+        _update_json_sidecar(_desc_cache_path(area), _mutate)
         flash(f'Deleted {filename}.', 'success')
     except OSError as exc:
         flash(f'Delete failed: {exc}', 'danger')
@@ -796,13 +895,16 @@ def manage_desc(area_id):
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
     try:
         st = os.stat(full)
-        cache = _load_desc_cache(area)
-        cache[filename] = {
+        entry = {
             'mtime': int(st.st_mtime),
             'size': st.st_size,
             'description': description,
         }
-        _save_desc_cache(area, cache)
+
+        def _mutate(cache, entry=entry):
+            cache[filename] = entry
+            return cache
+        _update_json_sidecar(_desc_cache_path(area), _mutate)
         flash(f'Description updated for {filename}.', 'success')
     except OSError as exc:
         flash(f'Failed: {exc}', 'danger')
@@ -811,6 +913,7 @@ def manage_desc(area_id):
 
 @file_areas_bp.route('/<int:area_id>/manage/upload', methods=['POST'])
 @login_required
+@rate_limit('file_area_upload', limit=20, window=300, key_fn=_user_or_ip)
 def manage_upload(area_id):
     if not getattr(current_user, 'is_admin', False):
         abort(403)
@@ -821,6 +924,10 @@ def manage_upload(area_id):
     f = request.files.get('file')
     if not f or not f.filename:
         flash('No file selected.', 'danger')
+        return redirect(url_for('file_areas.manage_files', area_id=area.id))
+    too_big, max_size = _oversized_upload(f)
+    if too_big:
+        flash(f'File too large. Maximum size is {max_size // 1024 // 1024}MB.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
     safe_name = os.path.basename(f.filename)
     if not safe_name or safe_name.startswith('.'):
@@ -864,13 +971,16 @@ def manage_upload(area_id):
 
         if description:
             st = os.stat(dest)
-            cache = _load_desc_cache(area)
-            cache[safe_name] = {
+            entry = {
                 'mtime': int(st.st_mtime),
                 'size': st.st_size,
                 'description': description,
             }
-            _save_desc_cache(area, cache)
+
+            def _mutate(cache, entry=entry):
+                cache[safe_name] = entry
+                return cache
+            _update_json_sidecar(_desc_cache_path(area), _mutate)
         _hatch_if_network_area(area, dest, safe_name, description)
         if dupe_of:
             flash(f'Uploaded {safe_name} (note: identical to existing "{dupe_of}").',
@@ -888,6 +998,7 @@ def manage_upload(area_id):
 
 @file_areas_bp.route('/smart-upload', methods=['GET', 'POST'])
 @login_required
+@rate_limit('file_area_upload', limit=20, window=300, key_fn=_user_or_ip)
 def smart_upload():
     """Upload a file and route to a chosen area, or auto-detect by tag prefix.
 
@@ -902,6 +1013,10 @@ def smart_upload():
         upload = request.files.get('file')
         if not upload or not upload.filename:
             flash('No file selected.', 'danger')
+            return redirect(url_for('file_areas.smart_upload'))
+        too_big, max_size = _oversized_upload(upload)
+        if too_big:
+            flash(f'File too large. Maximum size is {max_size // 1024 // 1024}MB.', 'danger')
             return redirect(url_for('file_areas.smart_upload'))
         manual_area_id = request.form.get('area_id', type=int)
 

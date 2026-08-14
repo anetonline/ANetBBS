@@ -248,6 +248,19 @@ class _IRC:
             if not data:
                 break
             self._rbuf += data.decode('utf-8', errors='replace')
+            # Real gap found in a security/performance audit: nothing
+            # capped how large _rbuf could grow while waiting for a
+            # '\n' -- a malicious or broken IRC server (users point
+            # this client at whatever server they choose, so this is
+            # genuinely attacker-reachable) sending an endless stream
+            # with no line terminator would buffer unboundedly. Real
+            # lines are bounded to 512 bytes by RFC 2812/1459; 8192
+            # is generous headroom while making the failure mode
+            # "disconnect", not "grow without bound".
+            if len(self._rbuf) > 8192 and '\n' not in self._rbuf:
+                self.client._sys(
+                    "[server error: line exceeded max length, disconnecting]")
+                break
             while '\n' in self._rbuf:
                 line, self._rbuf = self._rbuf.split('\n', 1)
                 line = line.rstrip('\r')

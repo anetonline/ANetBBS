@@ -219,6 +219,17 @@ class _IrcSession:
 
     def run(self):
         """Blocking read loop, pumps incoming IRC lines to socketio."""
+        # Real gap found in a security/performance audit: nothing ever
+        # capped how large `buf` could grow while waiting for a '\r\n'.
+        # A malicious or just broken IRC server (or a MITM on the
+        # connection) sending an endless stream of bytes with no line
+        # terminator at all would make this process buffer literally
+        # everything in RAM forever, per active web-IRC session --
+        # real lines are bounded to 512 bytes by RFC 2812/1459; a much
+        # more generous 8 KiB cap still comfortably fits every
+        # legitimate line while making the failure mode "disconnect",
+        # not "grow without bound".
+        _MAX_LINE_BUF = 8192
         buf = b''
         reason = 'connection closed'
         started = time.time()
@@ -234,6 +245,11 @@ class _IrcSession:
                     reason = 'remote closed (EOF)'
                     break
                 buf += chunk
+                if len(buf) > _MAX_LINE_BUF and b'\r\n' not in buf:
+                    reason = 'line exceeded max length with no terminator'
+                    logger.warning(
+                        'IRC sid=%s: %s, disconnecting', self.sid, reason)
+                    break
                 while b'\r\n' in buf:
                     line, buf = buf.split(b'\r\n', 1)
                     line_count += 1

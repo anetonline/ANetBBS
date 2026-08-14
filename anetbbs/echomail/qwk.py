@@ -19,6 +19,8 @@ from datetime import datetime
 import hashlib
 import time
 
+from .zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
+
 logger = logging.getLogger(__name__)
 
 # QWK constants
@@ -691,6 +693,20 @@ class QWKClient:
                     logger.warning("QWK: missing CONTROL.DAT or MESSAGES.DAT in packet")
                     return []
 
+                # Real gap found in a security/performance audit: reading
+                # a ZIP member's decompressed bytes with no check on its
+                # declared uncompressed size lets a small, highly-
+                # compressed archive ("zip bomb") expand to gigabytes in
+                # memory. Checked BEFORE zf.read() -- ZipInfo.file_size
+                # is free to read (from the local file header).
+                for _name in (control_name, messages_name):
+                    _size = zf.getinfo(_name).file_size
+                    if _size > MAX_MEMBER_UNCOMPRESSED:
+                        raise ZipBombError(
+                            f'{_name!r} declares {_size} bytes uncompressed '
+                            f'(cap {MAX_MEMBER_UNCOMPRESSED}) -- refusing '
+                            'to extract')
+
                 control_data = zf.read(control_name).decode('latin-1', errors='replace')
                 messages_data = zf.read(messages_name)
 
@@ -702,4 +718,7 @@ class QWKClient:
             return messages
         except zipfile.BadZipFile as exc:
             logger.error("QWK: bad zip file: %s", exc)
+            return []
+        except ZipBombError as exc:
+            logger.warning("QWK: refusing to extract packet: %s", exc)
             return []

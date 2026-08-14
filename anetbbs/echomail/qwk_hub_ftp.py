@@ -345,6 +345,21 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                     logger.warning('QWK FTP REP: no .MSG file in %s', rep_path)
                     return 0
 
+                # Real gap found in a security/performance audit: reading
+                # a ZIP member's decompressed bytes with no check on its
+                # declared uncompressed size lets a small, highly-
+                # compressed archive ("zip bomb") expand to gigabytes in
+                # memory. Checked BEFORE zf.read() -- ZipInfo.file_size
+                # is free to read (from the local file header).
+                from .zip_safety import MAX_MEMBER_UNCOMPRESSED
+                for _name in filter(None, (msg_file, ctrl_file)):
+                    if zf.getinfo(_name).file_size > MAX_MEMBER_UNCOMPRESSED:
+                        logger.warning(
+                            'QWK FTP REP: %s in %s declares an oversized '
+                            'uncompressed size -- refusing to extract',
+                            _name, rep_path)
+                        return 0
+
                 msg_data = zf.read(msg_file)
                 ctrl_data = zf.read(ctrl_file).decode('cp437', errors='replace') \
                     if ctrl_file else ''

@@ -47,8 +47,21 @@ downstream BinkPNode:
 Reference: FTS-0024 (areafix-style commands).
 """
 import re
+import hmac
 import datetime
 from ..models import db, EchoArea, EchomailNetwork, NetmailMessage, AreafixLog, BinkPNode, EchoAreaNode
+
+
+def _passwords_match(expected, provided):
+    """Constant-time password comparison. Real gap found in a
+    security/performance audit: this module compared attacker-
+    supplied netmail Subject-line passwords with plain ==, a timing
+    side-channel -- the same bug class already fixed for BinkP's own
+    M_PWD/CRAM-MD5 check (see binkp_server.py), just never swept into
+    the netmail-based robot-auth paths here."""
+    return hmac.compare_digest(
+        (expected or '').encode('utf-8', errors='replace'),
+        (provided or '').encode('utf-8', errors='replace'))
 
 
 _CMD_RE = re.compile(
@@ -191,7 +204,7 @@ def process_request(network, from_address, subject, body):
     # resubscribe every echo area. Same bug class already fixed once in
     # _process_node_request() below -- the fix was never mirrored back
     # here. Matches this function's own docstring's claimed intent.
-    if not expected_pw or expected_pw != provided_pw:
+    if not expected_pw or not _passwords_match(expected_pw, provided_pw):
         return ("Areafix: password incorrect or missing — no changes made.\n", {
             'network_id': network.id,
             'from_address': from_address, 'request_type': 'badpw',
@@ -280,7 +293,7 @@ def _process_node_request(node, from_address, subject, body):
     # empty today (defense-in-depth, not currently exploitable), but
     # require a real, matching password unconditionally rather than
     # relying on that.
-    if not expected_pw or expected_pw != provided_pw:
+    if not expected_pw or not _passwords_match(expected_pw, provided_pw):
         return ("Areafix: password incorrect or missing — no changes made.\n", {
             'network_id': node.network_id,
             'from_address': from_address, 'request_type': 'badpw',

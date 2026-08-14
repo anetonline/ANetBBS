@@ -14,6 +14,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, SelectField
 from wtforms.validators import DataRequired, EqualTo, Length, Regexp, ValidationError
 from flask_wtf import FlaskForm
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
@@ -219,6 +220,22 @@ def _log_activity(user_id, activity_type, details=None, caller_log_id=None):
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+# Real gap found in a security/performance audit: login()'s check used
+# to be `if user is None or not user.check_password(...)`. Python's
+# `or` short-circuits, so a NONEXISTENT username never reached
+# check_password() at all -- a login for a real username with a wrong
+# password took as long as the (deliberately slow) hash verification,
+# while a nonexistent username returned almost instantly. Both cases
+# already show the same generic "Invalid username or password"
+# message, but the response TIMING itself is a distinguishable
+# username-enumeration side channel regardless. Always running a real
+# hash verification -- against this fixed dummy hash when there's no
+# real user to check against -- makes the two cases statistically
+# indistinguishable by timing. Computed once at import time (not per
+# request) so a flood of login attempts against nonexistent usernames
+# doesn't ALSO pay the cost of re-hashing this dummy value every time.
+_DUMMY_PASSWORD_HASH = generate_password_hash('not-a-real-password-timing-normalization')
+
 # Registration rate limit — at most this many attempts per IP per window.
 REGISTER_LIMIT_COUNT = 3
 REGISTER_LIMIT_WINDOW_MINUTES = 60
@@ -325,7 +342,15 @@ def login():
             db.func.lower(User.username) == form.username.data.lower()
         ).first()
 
-        if user is None or not user.check_password(form.password.data):
+        if user is None:
+            # Always run a real hash verification -- see
+            # _DUMMY_PASSWORD_HASH's own comment above -- so this path
+            # takes statistically the same time as a real username
+            # with a wrong password, not a short-circuited instant return.
+            check_password_hash(_DUMMY_PASSWORD_HASH, form.password.data)
+            flash('Invalid username or password', 'danger')
+            return redirect(url_for('auth.login'))
+        if not user.check_password(form.password.data):
             flash('Invalid username or password', 'danger')
             return redirect(url_for('auth.login'))
 
@@ -691,6 +716,26 @@ def forgot_password():
     redirect target or page content. An account that genuinely has no
     security questions still gets its real reset token issued/emailed in
     the background here, same as before -- only the visible page changes.
+
+    SECURITY (round 2): a RESIDUAL timing oracle remained even after the
+    above -- the "no security questions on file" branch did a real DB
+    insert + commit + (when SMTP is configured) a synchronous email
+    send before responding, while the "no such account" and "has
+    security questions" branches did none of that. An attacker timing
+    responses could still distinguish "real account with no security
+    questions" from the other two cases purely by latency, even though
+    the redirect target and page content were already identical. The
+    email send -- real network I/O to a remote mail server, by far the
+    slowest and most attacker-measurable part of this branch's cost,
+    and unboundedly so against a greylisting server -- is now
+    backgrounded (same fire-and-forget pattern already used for
+    poll_now()/poll_binkp_node() elsewhere in this codebase). The
+    token generation + DB write stay synchronous: a local SQLite
+    commit is fast and low-variance enough that it isn't a
+    meaningfully exploitable signal on its own, and keeping it
+    synchronous avoids changing this route's "token is issued by the
+    time the response comes back" contract that other code (and
+    tests) depend on.
     """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
@@ -709,6 +754,21 @@ def forgot_password():
             # Still shown the decoy verify page below so the existence
             # of this account isn't distinguishable from one with real
             # security questions or one that doesn't exist at all.
+            #
+            # Token generation + the DB insert/commit stay synchronous
+            # here (fast, low-variance -- a local SQLite write, not a
+            # source of meaningfully exploitable timing signal, and
+            # keeping it synchronous means the token is reliably
+            # findable the instant this request returns, same as
+            # before). Only the SMTP send is backgrounded below (see
+            # the SECURITY round-2 docstring note above): it's real
+            # network I/O to a remote mail server, whose latency is
+            # both the dominant and the most attacker-measurable part
+            # of this branch's cost -- a slow/greylisting mail server
+            # could otherwise hang the whole request for seconds or
+            # even minutes, which was ALSO a real (non-security)
+            # responsiveness problem independent of the timing-oracle
+            # angle.
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user.id,
@@ -721,7 +781,26 @@ def forgot_password():
                                 _external=True)
             from ..mailer import smtp_enabled, send_password_reset_email
             if smtp_enabled():
-                send_password_reset_email(user, reset_url)
+                # Re-query by ID inside the thread's own app context
+                # rather than passing the live `user` ORM object
+                # across threads -- it's bound to this request's
+                # scoped session, which gets torn down once this
+                # request ends, matching the same
+                # pass-an-ID-not-a-live-object pattern already used by
+                # poll_network_now()/poll_binkp_node() elsewhere in
+                # this codebase for the exact same reason.
+                app = current_app._get_current_object()
+                user_id = user.id
+
+                def _send_reset_email(app, user_id, reset_url):
+                    with app.app_context():
+                        u = User.query.get(user_id)
+                        if u:
+                            send_password_reset_email(u, reset_url)
+
+                threading.Thread(target=_send_reset_email,
+                                 args=(app, user_id, reset_url),
+                                 daemon=True).start()
             else:
                 current_app.logger.info(
                     'Password reset requested for user %s — reset URL: %s',

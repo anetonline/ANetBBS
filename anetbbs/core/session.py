@@ -885,12 +885,38 @@ class BBSSession:
             await self.write(prompt)
         chars = []
         while True:
+            # Real gap found in a security/performance audit: this used
+            # to read directly via self.reader.read(1), bypassing
+            # read_raw()/handle_telnet_command() -- the same telnet-IAC
+            # stripping read_line()/read_key() already route through.
+            # IAC (0xFF) is > b' ', so it passed the `ch < b' '` control-
+            # byte filter below completely untouched -- a resize mid-
+            # entry landed the ENTIRE raw IAC SB NAWS ... IAC SE sequence
+            # in the password buffer verbatim. Brings read_password() up
+            # to the same protection read_line()/read_key() already had,
+            # and (see handle_telnet_command()'s own docstring) that
+            # underlying protection was itself hardened this same audit
+            # to correctly handle a sequence split across single-byte
+            # reads, not just a sequence delivered whole.
+            # allow_afk defaults to False here (unlike read_line()'s
+            # allow_afk=True) -- deliberately unchanged behavior, this
+            # fix is scoped to the IAC gap only, not adding AFK-during-
+            # password-entry handling as a side effect.
             try:
-                ch = await self.reader.read(1)
+                ch = await self.read_raw(1)
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
             if not ch:
-                raise CarrierLost('client disconnected')
+                # read_raw() can legitimately return b'' when this
+                # particular byte was consumed entirely as telnet
+                # negotiation (e.g. the final byte of an IAC SB NAWS
+                # ... IAC SE sequence) -- NOT a disconnect signal.
+                # read_raw() already raises CarrierLost itself on a
+                # true disconnect (checked against the raw, pre-
+                # telnet-processing socket read), so any non-exception
+                # return here, empty or not, means the connection is
+                # still alive; just loop and read the next byte.
+                continue
             # Most telnet/SSH clients send \r when Enter is pressed; some send \r\n
             if ch in (b'\r', b'\n'):
                 # consume any paired \n so it doesn't dirty the next read
@@ -1885,7 +1911,36 @@ class BBSSession:
             logger.debug("send_telnet_command failed: %s", e)
 
     async def handle_telnet_command(self, data):
-        """Handle incoming telnet commands"""
+        """Handle incoming telnet commands.
+
+        Real gap found in a security/performance audit: this used to be
+        a pure per-call function with no memory between calls -- but its
+        real caller, read_raw() (used by read_line()/read_key()/
+        read_password() for one keystroke at a time), always hands it
+        exactly 1 byte per call in practice: confirmed empirically that
+        asyncio.StreamReader.read(1) never returns more than 1 byte even
+        when more is already buffered on the socket. A multi-byte IAC
+        sequence -- e.g. IAC SB NAWS <4 payload bytes> IAC SE, sent
+        unprompted by most real telnet/SSH clients the instant a user
+        resizes their terminal window, an entirely ordinary action --
+        could therefore never be recognized as a single unit: only the
+        bare leading IAC byte matched `byte == IAC` and got silently
+        dropped; every OTHER byte of that same sequence (SB, the option
+        byte, non-control payload bytes, the trailing SE) arrived in a
+        FRESH call with no idea a sequence was already in progress, so
+        each fell through as if it were ordinary typed input -- landing
+        in read_line()/read_key()/read_password()'s buffers as literal
+        garbage characters (e.g. a NAWS payload byte of 0x50 is the
+        printable 'P'). self.telnet_command_buffer (declared in
+        __init__, previously unused) now carries an in-progress, not-
+        yet-complete sequence's raw bytes across calls; prepending it
+        here and re-parsing that combined buffer from the start
+        correctly resumes exactly where the previous call left off,
+        regardless of how the sequence happens to be split across
+        reads.
+        """
+        data = bytes(self.telnet_command_buffer) + bytes(data)
+        self.telnet_command_buffer = bytearray()
         if not data:
             return b''
 
@@ -1895,30 +1950,46 @@ class BBSSession:
             byte = data[i:i+1]
             if byte == IAC:
                 if i + 1 >= len(data):
+                    self.telnet_command_buffer = bytearray(data[i:])
                     break
                 command = data[i+1:i+2]
-                
+
                 if command in [WILL, WONT, DO, DONT]:
                     if i + 2 >= len(data):
+                        self.telnet_command_buffer = bytearray(data[i:])
                         break
                     option = data[i+2:i+3]
                     i += 3
                     continue
-                    
+
                 elif command == SB:
+                    sb_start = i
                     i += 2  # past IAC SB
                     if i >= len(data):
+                        self.telnet_command_buffer = bytearray(data[sb_start:])
                         break
                     option = data[i]
                     i += 1
                     # Collect payload bytes until IAC SE
                     payload = bytearray()
+                    found_se = False
                     while i < len(data):
                         if data[i:i+1] == IAC and i + 1 < len(data) and data[i+1:i+2] == SE:
                             i += 2
+                            found_se = True
                             break
                         payload.append(data[i])
                         i += 1
+                    if not found_se:
+                        # Ran out of data mid-payload -- resume from the
+                        # very start of this SB sequence next time (the
+                        # full IAC SB <option> prefix, not just the
+                        # unconsumed payload tail), since a freshly
+                        # re-entered outer loop needs that prefix to
+                        # know it's still inside a subnegotiation rather
+                        # than looking at ordinary bytes.
+                        self.telnet_command_buffer = bytearray(data[sb_start:])
+                        break
                     # NAWS: cols-hi cols-lo rows-hi rows-lo
                     if option == NAWS[0] and len(payload) >= 4:
                         cols = (payload[0] << 8) | payload[1]
@@ -1931,10 +2002,10 @@ class BBSSession:
                         if ttype:
                             self.terminal_type = ttype
                     continue
-                
+
                 i += 2
                 continue
-            
+
             result.append(ord(byte))
             i += 1
 
@@ -2042,8 +2113,15 @@ class BBSSession:
         while True:
             try:
                 char = await self.read_raw(1, allow_afk=True)
-                if not char:  # Connection closed (defensive — read_raw raises now)
-                    raise CarrierLost('client disconnected')
+                if not char:
+                    # read_raw() can legitimately return b'' when this
+                    # byte was consumed entirely as telnet negotiation
+                    # (see read_password()'s identical comment for the
+                    # full reasoning) -- read_raw() itself already
+                    # raises CarrierLost on a true disconnect, so just
+                    # loop and read the next byte rather than treating
+                    # an empty non-exception return as disconnection.
+                    continue
 
                 # Handle special characters. A real C64 keyboard's
                 # DEL/INST key sends PETSCII 0x14, not ASCII 0x7f/0x08 --
@@ -2594,6 +2672,24 @@ class BBSSession:
                 kt = getattr(self, '_kick_task', None)
                 if kt and not kt.done():
                     kt.cancel()
+            except Exception:
+                pass
+            # Real gap found in a security/performance audit: unlike
+            # _hb_task/_kick_task right above, _enforce_time_budget()'s
+            # own watchdog task (self._budget_task, only created when a
+            # sysop has configured a UserTimeBudget for this user) was
+            # never cancelled anywhere -- a normal logout left it alive,
+            # sleeping for however much of the budget window remained,
+            # holding a live reference to this now-dead session
+            # (including its reader/writer) until it finally woke up
+            # and called self.writer.close() on an already-torn-down
+            # connection. Same orphaned-background-task leak class as
+            # the v1.0.21 incident, just via asyncio tasks instead of a
+            # cached object.
+            try:
+                bt = getattr(self, '_budget_task', None)
+                if bt and not bt.done():
+                    bt.cancel()
             except Exception:
                 pass
             # Tear down NodeActivity row.

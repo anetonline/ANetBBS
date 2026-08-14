@@ -65,8 +65,21 @@ class _IrcLeg:
 
     async def connect(self):
         ctx = ssl_module.create_default_context() if self.use_ssl else None
+        # Real gap found in a security/performance audit: no explicit
+        # `limit=` was passed here, leaving readline() (below, in run())
+        # relying on asyncio's undocumented-at-this-call-site default
+        # (65536 bytes). More importantly, if a peer ever DID send a
+        # line exceeding that limit with no '\n', StreamReader.readline()
+        # raises asyncio.LimitOverrunError -- NOT a subclass of OSError/
+        # ConnectionError, so it fell straight through run()'s except
+        # clause uncaught, silently killing the read loop instead of
+        # disconnecting cleanly like every other failure mode here does.
+        # An explicit, modest limit (real IRC lines are bounded to 512
+        # bytes by RFC 2812/1459; 8 KiB is generous headroom for servers
+        # that don't enforce that) plus catching the error in run()
+        # below closes both gaps.
         self.reader, self.writer = await asyncio.open_connection(
-            self.server, self.port, ssl=ctx)
+            self.server, self.port, ssl=ctx, limit=8192)
         if self._sasl_state == 'pending':
             await self._send('CAP LS 302')
         await self._send(f'NICK {self.nick}')
@@ -103,6 +116,17 @@ class _IrcLeg:
             try:
                 raw = await self.reader.readline()
             except (OSError, ConnectionError):
+                break
+            except asyncio.LimitOverrunError:
+                # A line exceeded the connect()-time limit with no '\n'
+                # -- treat exactly like any other unrecoverable read
+                # failure (disconnect) rather than letting it propagate
+                # uncaught, which used to silently kill this loop with
+                # no cleanup and left the offending bytes sitting in the
+                # reader's internal buffer forever (readline() doesn't
+                # discard them on this error).
+                logger.warning('IRC leg %s: line exceeded read limit, disconnecting',
+                               self.server)
                 break
             if not raw:
                 break
@@ -202,7 +226,18 @@ class _MrcLeg:
 
     async def connect(self):
         self.session = aiohttp.ClientSession()
-        self.ws = await self.session.ws_connect(self.ws_url, heartbeat=30)
+        # Real gap found in a security/performance audit: no explicit
+        # max_msg_size was set here, leaving this connection to the
+        # upstream MRC bridge relying on aiohttp's own default (4 MiB)
+        # rather than a limit chosen for what this protocol actually
+        # needs -- a single chat message/event never needs anywhere
+        # close to that. An explicit, much smaller cap is defense in
+        # depth: it doesn't depend on a third-party library's default
+        # staying safe across future aiohttp versions, and bounds how
+        # much memory one oversized frame from a compromised/malicious
+        # upstream bridge can force this process to hold.
+        self.ws = await self.session.ws_connect(
+            self.ws_url, heartbeat=30, max_msg_size=262144)
         # MRC bridge protocol — handshake message naming the handle and room.
         await self._send_json({'type': 'login', 'handle': self.handle,
                                'room': self.room})

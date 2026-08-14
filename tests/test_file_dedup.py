@@ -106,15 +106,20 @@ class FileAreasSidecarCacheTests(unittest.TestCase):
 
     def test_cache_file_survives_fresh_load(self):
         """The cache is a file on disk, not an in-memory dict -- confirm
-        a fresh _load_hash_cache() call (simulating a process restart)
-        still sees a hash recorded by an earlier call."""
+        a fresh, independent read (simulating a process restart) still
+        sees a hash recorded by an earlier call. Uses
+        _read_json_sidecar() directly (a security/performance audit
+        replaced the old per-cache _load_hash_cache()/_save_hash_cache()
+        pair with a shared, lock-protected helper -- see
+        _update_json_sidecar's own docstring for the read-modify-write
+        race this closed)."""
         from anetbbs.web.file_areas import (_check_and_record_dupe,
-                                            _load_hash_cache, _hash_cache_path)
+                                            _read_json_sidecar, _hash_cache_path)
         dest = self._write('first.zip', b'persisted bytes')
         _check_and_record_dupe(self.area, dest, 'first.zip')
 
         self.assertTrue(os.path.isfile(_hash_cache_path(self.area)))
-        cache = _load_hash_cache(self.area)
+        cache = _read_json_sidecar(_hash_cache_path(self.area))
         self.assertEqual(len(cache), 1)
         self.assertIn('first.zip', cache.values())
 

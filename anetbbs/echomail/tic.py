@@ -38,6 +38,7 @@ import logging
 import shutil
 
 from ..models import db, TicFile, FileArea, FileEchoSubscription, HatchQueue
+from .areafix import _passwords_match
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +337,12 @@ def process_tic(tic_path, inbound_dir):
     # field. Any authenticated BinkP peer able to deliver a TIC could
     # file into a password-protected area regardless. Only enforced
     # when the area actually has a password set (it's opt-in).
-    if area is not None and area.password and parsed['pw'] != area.password:
+    # Real gap found in a security/performance audit: this compared
+    # the manifest's own Pw: field with plain != -- a timing side-
+    # channel, same bug class already fixed for BinkP's own M_PWD/
+    # CRAM-MD5 check and for AreaFix/FileFix's netmail-based auth.
+    if area is not None and area.password and not _passwords_match(
+            parsed['pw'], area.password):
         tic.status = 'error'
         tic.error_message = 'TIC password does not match area password'
         db.session.commit()

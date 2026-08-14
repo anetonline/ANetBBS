@@ -36,7 +36,7 @@ implementations elsewhere in the wild use for file echoes.
 import datetime
 from ..models import (db, FileArea, EchomailNetwork, NetmailMessage,
                        AreafixLog, BinkPNode, FileEchoSubscription)
-from .areafix import parse_request, _classify_request_type
+from .areafix import parse_request, _classify_request_type, _passwords_match
 
 
 def _sub_all(network):
@@ -114,7 +114,7 @@ def process_request(network, from_address, subject, body):
     # when a password was configured AND wrong -- a network with no
     # areafix_password/binkp_password set at all sailed straight
     # through with zero real authentication.
-    if not expected_pw or expected_pw != provided_pw:
+    if not expected_pw or not _passwords_match(expected_pw, provided_pw):
         return ("FileFix: password incorrect or missing — no changes made.\n", {
             'network_id': network.id,
             'from_address': from_address, 'request_type': 'badpw',
@@ -205,7 +205,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     # Same gap and fix as areafix._process_node_request(): a node with
     # no password set at all must never sail through with zero real
     # authentication.
-    if not expected_pw or expected_pw != provided_pw:
+    if not expected_pw or not _passwords_match(expected_pw, provided_pw):
         return ("FileFix: password incorrect or missing — no changes made.\n", {
             'network_id': network_id,
             'from_address': from_address, 'request_type': 'badpw',

@@ -50,7 +50,38 @@ class Config:
     
     # Security
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    
+
+    # Real gap found in a security/performance audit: no app-wide
+    # request-body size cap existed anywhere, so Werkzeug would buffer
+    # an arbitrarily large upload before ANY application code (including
+    # this file's own per-route UPLOAD_MAX_SIZE checks below) ever got a
+    # chance to reject it -- a disk/memory-exhaustion DoS reachable by
+    # any authenticated user via any file-upload endpoint, worse on an
+    # install running gunicorn directly (no reverse proxy) rather than
+    # behind the reference nginx config, which already caps this at the
+    # HTTP layer (deploy/anetbbs-nginx.conf.template's own
+    # `client_max_body_size 110m`). Matches that same 110MB figure here
+    # so the two layers agree, with a little headroom over
+    # UPLOAD_MAX_SIZE below for multipart-form overhead (boundaries,
+    # other form fields) around the actual file content.
+    MAX_CONTENT_LENGTH = 110 * 1024 * 1024
+
+    # Real gap found in a security/performance audit (follow-up to the
+    # MAX_CONTENT_LENGTH fix above): Werkzeug 2.3+ enforces a SEPARATE,
+    # smaller cap of its own -- max_form_memory_size, default 500,000
+    # bytes -- on how much of a form-encoded request body it buffers
+    # as regular (non-file) fields, independent of MAX_CONTENT_LENGTH.
+    # Left at its default, an oversized non-file form field (e.g. a
+    # wiki page body over ~500KB, see web/wiki.py's own
+    # _WIKI_BODY_MAX_CHARS check) got rejected with an opaque, generic
+    # Werkzeug 413 page BEFORE any application code -- including that
+    # deliberate, user-friendly validation with its own clear error
+    # message -- ever ran. Raised well above every real non-file form
+    # field this app has (the largest being the wiki body cap) while
+    # staying far below MAX_CONTENT_LENGTH, which still governs actual
+    # file uploads.
+    MAX_FORM_MEMORY_SIZE = 2 * 1024 * 1024
+
     # Database
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = False

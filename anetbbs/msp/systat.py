@@ -29,6 +29,29 @@ _server_thread = None
 _stop_event = threading.Event()
 _listen_sock = None
 
+# Real gap found in a security/performance audit: this UDP responder
+# answered EVERY inbound datagram, from any source, with no rate
+# limiting at all -- a classic UDP reflection/amplification vector.
+# query_systat()'s own real request is a bare 2-byte "\r\n" packet,
+# while _build_response()'s reply is easily 10-50x that (a full
+# who's-online listing gets bigger with every additional user, and
+# even the empty "No users currently active." fallback dwarfs the
+# request) -- an attacker who spoofs a victim's source IP onto tiny
+# request packets gets this server to blast amplified replies at the
+# victim, no authentication needed since the protocol has none by
+# design (matches Synchronet's own real fingerservice.js convention,
+# which has the identical shape). Can't require auth without breaking
+# real inter-BBS "who's online" discovery, so this bounds the damage
+# instead: per-source-IP AND a global cap, using the same sliding-
+# window limiter features/rate_limit.py already uses for HTTP routes
+# (its _check() has no Flask dependency, so it works fine here too).
+# A rate-limited datagram is dropped silently -- never partially
+# amplified.
+_SYSTAT_PER_IP_LIMIT = 10
+_SYSTAT_PER_IP_WINDOW = 60
+_SYSTAT_GLOBAL_LIMIT = 120
+_SYSTAT_GLOBAL_WINDOW = 60
+
 
 def start_systat_server(app):
     """Spawn the SYSTAT/Finger UDP listener thread. Idempotent."""
@@ -70,6 +93,8 @@ def _serve_loop(app):
     _listen_sock = sock
     logger.info('SYSTAT/ActiveUser UDP listening on %s:%s', bind_host, port)
 
+    from ..features.rate_limit import _check as _rate_limit_check
+
     while not _stop_event.is_set():
         try:
             data, addr = sock.recvfrom(1024)
@@ -77,6 +102,15 @@ def _serve_loop(app):
             continue
         except OSError:
             break
+        if not _rate_limit_check(f'systat:{addr[0]}', _SYSTAT_PER_IP_LIMIT,
+                                 _SYSTAT_PER_IP_WINDOW):
+            logger.debug('SYSTAT: per-IP rate limit hit for %s, dropping', addr[0])
+            continue
+        if not _rate_limit_check('systat:global', _SYSTAT_GLOBAL_LIMIT,
+                                 _SYSTAT_GLOBAL_WINDOW):
+            logger.debug('SYSTAT: global rate limit hit, dropping request from %s',
+                        addr[0])
+            continue
         try:
             response = _build_response(app)
             sock.sendto(response.encode('utf-8', errors='replace'), addr)

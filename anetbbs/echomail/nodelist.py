@@ -266,6 +266,7 @@ def _extract_nodelist_from_archive(archive_path):
     supported — ARJ/LZH require external tools and aren't standard in
     today's FTN file echoes anyway."""
     import zipfile
+    from .zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
     if not zipfile.is_zipfile(archive_path):
         return None, None
     candidates = []
@@ -280,6 +281,16 @@ def _extract_nodelist_from_archive(archive_path):
             return None, None
         candidates.sort(key=lambda c: c[0], reverse=True)
         chosen = candidates[0][1]
+        # Real gap found in a security/performance audit: reading a
+        # ZIP member's decompressed bytes with no check on its
+        # declared uncompressed size lets a small, highly-compressed
+        # archive ("zip bomb") expand to gigabytes in memory. Checked
+        # BEFORE zf.read() -- ZipInfo.file_size is free to read.
+        if chosen.file_size > MAX_MEMBER_UNCOMPRESSED:
+            raise ZipBombError(
+                f'{chosen.filename!r} declares {chosen.file_size} bytes '
+                f'uncompressed (cap {MAX_MEMBER_UNCOMPRESSED}) -- refusing '
+                'to extract')
         fd, out_path = tempfile.mkstemp(prefix='nodelist_', suffix='.txt')
         with os.fdopen(fd, 'wb') as out_fh:
             out_fh.write(zf.read(chosen.filename))

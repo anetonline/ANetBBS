@@ -38,6 +38,16 @@ from ..wiki.render import render as render_wiki, extract_outgoing_links
 
 wiki_bp = Blueprint('wiki', __name__, url_prefix='/wiki')
 
+# Real gap found in a security/performance audit: nothing capped a
+# wiki page body's length -- the only bound was Flask's app-wide
+# MAX_CONTENT_LENGTH (110 MB, sized for file uploads, a completely
+# different use case). A page body is user-authored text/markup;
+# even a very long real article runs tens of KB, so a much smaller,
+# dedicated cap closes both the DB-bloat risk (WikiPage.body is an
+# unbounded db.Text column) and the render cost risk (render_wiki()
+# runs on every view AND on every keystroke-triggered /preview call).
+_WIKI_BODY_MAX_CHARS = 500_000
+
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -336,6 +346,14 @@ def edit(slug):
                                    edit_summary=edit_summary,
                                    slug=canonical, is_new=is_new,
                                    nav=_topnav_pages())
+        if len(body) > _WIKI_BODY_MAX_CHARS:
+            flash(f'Page body too long (max {_WIKI_BODY_MAX_CHARS:,} characters).',
+                 'danger')
+            return render_template('wiki/edit.html', page=page,
+                                   title=title, body=body,
+                                   edit_summary=edit_summary,
+                                   slug=canonical, is_new=is_new,
+                                   nav=_topnav_pages())
 
         if is_new:
             page = WikiPage(slug=canonical, title=title[:200],
@@ -377,6 +395,8 @@ def edit(slug):
 def preview(slug):
     """Live preview endpoint — JS calls this from the edit form."""
     body = request.form.get('body') or ''
+    if len(body) > _WIKI_BODY_MAX_CHARS:
+        return jsonify({'error': f'Body too long (max {_WIKI_BODY_MAX_CHARS:,} characters).'}), 413
     html = str(render_wiki(body, _all_slugs()))
     return jsonify({'html': html})
 

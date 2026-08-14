@@ -157,9 +157,15 @@ Most Pis are behind NAT — your router has the public IP, not the Pi. You need:
 mkdir ~/duckdns && cd ~/duckdns
 
 # Replace TOKEN and SUBDOMAIN with yours from duckdns.org
+# NOTE: the update URL carries your DuckDNS token as a plain query
+# parameter -- deliberately NOT using curl's -k/--insecure flag here
+# (some copy-paste examples elsewhere use it) since skipping TLS
+# certificate verification on this request would let anyone in a
+# position to intercept it steal that token, with zero upside --
+# DuckDNS's certificate is a normal, valid, publicly-trusted one.
 cat > duck.sh << 'EOF'
 echo url="https://www.duckdns.org/update?domains=YOURSUBDOMAIN&token=YOURTOKEN&ip=" \
-    | curl -k -o ~/duckdns/duck.log -K -
+    | curl -o ~/duckdns/duck.log -K -
 EOF
 chmod +x duck.sh
 

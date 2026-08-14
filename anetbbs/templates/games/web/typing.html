@@ -120,7 +120,7 @@
         document.getElementById('typing-msg').style.color = '#00ff00';
         var score = wpm * (acc / 100);
         fetch(window.location.pathname.replace('/play','/') + 'score', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRFToken':document.querySelector('meta[name="csrf-token"]')?.content||''},
             body: JSON.stringify({score: Math.round(score), details:{wpm:wpm, accuracy:acc}})
         }).catch(function(){});
     }

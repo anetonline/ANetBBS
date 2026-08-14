@@ -150,7 +150,29 @@ def create_app(config_name=None):
     
     @login_manager.user_loader
     def load_user(user_id):
-        return User.query.get(int(user_id))
+        # Real gap found in a security/performance audit: this is the
+        # ONLY place Flask-Login re-establishes current_user on every
+        # request (both the regular session cookie AND the "remember
+        # me" cookie path, which login_user(remember=True) below always
+        # sets, terminate here) -- it never checked is_active/is_locked,
+        # which were previously only ever consulted at the MOMENT of a
+        # fresh login (web/auth.py's /auth/login route). A sysop
+        # banning or locking a user via the admin panel (admin.py's
+        # toggle_ban / lock_user) flipped the DB column but had zero
+        # effect on that user's ALREADY-established session -- they
+        # could keep posting/PMing/chatting until their cookie
+        # naturally expired (REMEMBER_COOKIE_DURATION isn't configured
+        # anywhere, so Flask-Login's own 365-day default applies).
+        # Returning None here makes Flask-Login treat the request as
+        # logged-out (AnonymousUserMixin) starting on the very next
+        # request after a ban/lock takes effect, for both the plain
+        # session and the remember-cookie path alike.
+        user = User.query.get(int(user_id))
+        if user is None:
+            return None
+        if not user.is_active or user.is_locked:
+            return None
+        return user
 
     @app.before_request
     def track_user_session():

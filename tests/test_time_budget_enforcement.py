@@ -187,6 +187,28 @@ class TimeBudgetEnforcementTests(unittest.TestCase):
         source = inspect.getsource(BBSSession.start)
         self.assertIn('_enforce_time_budget', source)
 
+    def test_budget_task_is_cancelled_on_session_teardown(self):
+        """Real gap found in a security/performance audit: unlike the
+        presence-heartbeat (_hb_task) and kick-watchdog (_kick_task)
+        tasks right next to it, _budget_task was created by
+        _enforce_time_budget() but never cancelled anywhere -- a
+        normal logout left it alive, sleeping for however much of the
+        budget window remained, holding a reference to the dead
+        session (including its reader/writer) until it finally woke up
+        and tried to close an already-torn-down connection. Same
+        source-inspection technique as the test above, since start()'s
+        finally: block isn't independently callable -- confirms the
+        cancellation line actually exists, in the same shape/pattern
+        as the neighboring _kick_task cancellation it was modeled on."""
+        import inspect
+        from anetbbs.core.session import BBSSession
+        source = inspect.getsource(BBSSession.start)
+        self.assertIn("getattr(self, '_budget_task', None)", source)
+        # Must actually be cancelled, not just looked up.
+        idx = source.index("getattr(self, '_budget_task', None)")
+        nearby = source[idx:idx + 200]
+        self.assertIn('.cancel()', nearby)
+
 
 if __name__ == '__main__':
     unittest.main()

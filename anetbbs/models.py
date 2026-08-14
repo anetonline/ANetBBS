@@ -1776,7 +1776,12 @@ class PeerBbs(db.Model):
     description = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     is_approved = db.Column(db.Boolean, default=True)
-    submitted_by_user_id = db.Column(db.Integer)
+    # Real gap found in a security/performance audit: every other
+    # *_user_id column in this file references db.ForeignKey('users.id')
+    # -- this one was a bare Integer column, missing that reference.
+    # Nullable (like from_user_id/to_user_id elsewhere) since a peer
+    # can be seeded/added directly by an admin with no submitting user.
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     last_polled_at = db.Column(db.DateTime)
     last_response = db.Column(db.Text)
     last_error = db.Column(db.Text)

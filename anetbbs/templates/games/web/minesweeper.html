@@ -148,7 +148,7 @@
             document.getElementById('ms-msg').textContent='🎉 YOU WIN! Score: '+score;
             document.getElementById('ms-msg').style.color='#00ff00';
             fetch(window.location.pathname.replace('/play','/') + 'score', {
-                method:'POST', headers:{'Content-Type':'application/json'},
+                method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRFToken':document.querySelector('meta[name="csrf-token"]')?.content||''},
                 body: JSON.stringify({score:score})
             }).catch(function(){});
         }

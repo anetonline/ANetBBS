@@ -24,6 +24,19 @@ comfortably above the hub's observed-live floor of 1.2.9).
 This extracts the real generation lines out of install.sh/update.sh
 and runs them in actual bash, not a reimplementation, so the test
 can't drift from what's actually shipped.
+
+Updated in a security/performance audit: install.sh/update.sh's
+MRC config.json heredocs were rewritten from bare bash `cat > ... <<
+MRCEOF` (which interpolated sysop-typed values like BBS_NAME directly
+into JSON string literals with no escaping -- a name containing a
+quote produced invalid JSON) to a Python `json.dump()`-based
+generator, with values passed through as real environment variables
+(PLATFORM_INFO=... python3 << 'MRCPYEOF' ...) rather than a literal
+"platform_info": "..." JSON string appearing directly in the shell
+script text. These tests now look for the PLATFORM_INFO="..." bash
+variable assignment instead of the (no-longer-present) raw JSON
+literal, but check the exact same regression: that value must never
+be derived from BBS_VERSION/NEW_VERSION.
 """
 import re
 import subprocess
@@ -39,9 +52,9 @@ class MrcPlatformInfoVersionDecouplingTests(unittest.TestCase):
         cls.update_sh = (cls.repo_root / 'update.sh').read_text()
 
     def _platform_info_line(self, script_text, script_name):
-        m = re.search(r'"platform_info":\s*"[^"]*",?', script_text)
+        m = re.search(r'PLATFORM_INFO="[^"]*"', script_text)
         self.assertIsNotNone(
-            m, f"couldn't find a platform_info line in {script_name}")
+            m, f"couldn't find a PLATFORM_INFO assignment in {script_name}")
         return m.group(0)
 
     def test_install_sh_platform_info_does_not_reference_bbs_version(self):
@@ -61,16 +74,17 @@ class MrcPlatformInfoVersionDecouplingTests(unittest.TestCase):
             "comment for the full story")
 
     def test_install_sh_emitted_platform_info_ignores_bbs_version_value(self):
-        """Run the real platform_info line from install.sh in actual
-        bash, with BBS_VERSION deliberately set to an obviously-fake
-        release version -- confirms it can never leak into the emitted
-        handshake string regardless of what ANetBBS version is
-        installed."""
+        """Run the real PLATFORM_INFO= assignment line from install.sh
+        in actual bash, with BBS_VERSION deliberately set to an
+        obviously-fake release version -- confirms it can never leak
+        into the emitted handshake string regardless of what ANetBBS
+        version is installed."""
         line = self._platform_info_line(self.install_sh, 'install.sh')
         script = (
             'MRC_CLIENT_COMPAT_VERSION="1.3.9"\n'
             'BBS_VERSION="v9.9.9-should-never-appear"\n'
-            f'echo {line}\n'
+            f'{line}\n'
+            'echo "$PLATFORM_INFO"\n'
         )
         out = subprocess.run(['bash', '-c', script],
                               capture_output=True, text=True)
@@ -81,7 +95,8 @@ class MrcPlatformInfoVersionDecouplingTests(unittest.TestCase):
         line = self._platform_info_line(self.update_sh, 'update.sh')
         script = (
             'NEW_VERSION="v9.9.9-should-never-appear"\n'
-            f'echo {line}\n'
+            f'{line}\n'
+            'echo "$PLATFORM_INFO"\n'
         )
         out = subprocess.run(['bash', '-c', script],
                               capture_output=True, text=True)

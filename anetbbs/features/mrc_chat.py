@@ -585,8 +585,17 @@ class MRCChat(BaseChatSystem):
         _chat_started = None
         try:
             try:
+                # Real gap found in a security/performance audit: no
+                # explicit max_msg_size was set, leaving this connection
+                # to the MRC bridge relying on aiohttp's own 4 MiB
+                # default rather than a limit chosen for what this
+                # protocol actually needs -- chat events are plain text,
+                # never anywhere close to that size. Matches the same
+                # explicit cap mrc_irc_bridge.py's own connection to this
+                # same bridge service now uses.
                 self._ws = await asyncio.wait_for(
-                    self._aiohttp_session.ws_connect(bridge_url), timeout=10)
+                    self._aiohttp_session.ws_connect(
+                        bridge_url, max_msg_size=262144), timeout=10)
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
                 # This message only ever reached the user's own terminal
                 # screen -- gone the instant the menu redraws, and

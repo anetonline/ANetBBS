@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.38`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.39`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.39 — Second, deeper security and performance audit pass, including docs (August 2026)
+
+A follow-up audit was carried out across the whole codebase, documentation, and deployment tooling — broader in scope than v1.0.38's pass, this round also covered the wiki feature and every doc file, not just application code and scripts. Additional real issues turned up and were fixed, again addressed in strict severity order: further hardening of network-facing protocol handlers, closing a couple more resource-leak and unbounded-growth points in long-running background processes, tightening several more file-permission and credential-handling spots in the install/update/container tooling, adding a few more missing rate limits and size caps, and correcting some troubleshooting documentation that could otherwise lead a sysop toward a weaker configuration than intended. New regression tests were added throughout for every fix — the full suite now sits at over 2,750 tests, all green. As with the previous round, this entry intentionally omits specifics in the interest of responsible disclosure; sysops running an older release should update at their earliest convenience.
 
 ## v1.0.38 — Full security and performance audit, hardening pass across the codebase (August 2026)
 

@@ -103,8 +103,51 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     read -rp "Install directory [/opt/anetbbs]: " UNI_DIR
     UNI_DIR="${UNI_DIR:-/opt/anetbbs}"
 
-    read -rp "Are you sure you want to completely remove ANetBBS? [y/N]: " CONFIRM
-    [[ "${CONFIRM,,}" != "y" ]] && { echo "Aborted."; exit 0; }
+    # Real gap found in a security/performance audit: UNI_DIR was a
+    # bare sysop-typed value handed straight to `rm -rf` as root with
+    # no validation at all -- a fat-fingered path (a stray "/", a
+    # missing subdirectory component, an accidentally-pasted unrelated
+    # path) or a resolved symlink pointing somewhere unexpected would
+    # be recursively deleted with nothing more than a generic y/N
+    # prompt that never even showed the sysop what path they were
+    # about to destroy. realpath -m resolves symlinks/".."/relative
+    # components (without requiring the path to already exist, so a
+    # genuinely-missing-but-otherwise-fine install dir still works);
+    # the blocklist below rejects the exact top-level FHS directories
+    # (never a real ANetBBS install location, which always lives
+    # nested under something like /opt/anetbbs); the "looks like a
+    # real install" check catches everything else a resolved-but-wrong
+    # path could still slip through; and requiring the sysop to
+    # RE-TYPE the resolved path (not just y/N) means a fat-fingered
+    # value gets confirmed against what will ACTUALLY be deleted, not
+    # against whatever they originally, possibly incorrectly, typed.
+    REAL_UNI_DIR="$(realpath -m -- "$UNI_DIR" 2>/dev/null || echo "$UNI_DIR")"
+    case "$REAL_UNI_DIR" in
+        ""|"/"|"/root"|"/root/"|"/home"|"/home/"|"/etc"|"/etc/"|"/usr"|"/usr/"| \
+        "/bin"|"/bin/"|"/sbin"|"/sbin/"|"/lib"|"/lib/"|"/lib64"|"/lib64/"| \
+        "/boot"|"/boot/"|"/var"|"/var/"|"/opt"|"/opt/"|"/tmp"|"/tmp/"| \
+        "/dev"|"/dev/"|"/proc"|"/proc/"|"/sys"|"/sys/"|"/run"|"/run/"| \
+        "/srv"|"/srv/"|"/mnt"|"/mnt/"|"/media"|"/media/")
+            fail "Refusing to uninstall: '$REAL_UNI_DIR' is a top-level system directory, not an ANetBBS install location."
+            exit 1
+            ;;
+    esac
+    if [[ ! -e "$REAL_UNI_DIR/anetbbs/__init__.py" && ! -e "$REAL_UNI_DIR/VERSION" ]]; then
+        warn "'$REAL_UNI_DIR' doesn't look like an ANetBBS install (no anetbbs/ package or VERSION file found there)."
+        read -rp "Delete it anyway? Type the FULL path to confirm: " DOUBLE_CONFIRM
+        if [[ "$DOUBLE_CONFIRM" != "$REAL_UNI_DIR" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+
+    echo
+    warn "This will PERMANENTLY delete: $REAL_UNI_DIR"
+    read -rp "Type the full path above to confirm removal: " CONFIRM
+    if [[ "$CONFIRM" != "$REAL_UNI_DIR" ]]; then
+        echo "Aborted (path did not match)."
+        exit 0
+    fi
 
     info "Stopping and removing services..."
     for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
@@ -120,7 +163,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     systemctl reload nginx 2>/dev/null || true
 
     info "Removing install directory..."
-    rm -rf "$UNI_DIR"
+    rm -rf -- "$REAL_UNI_DIR"
 
     info "Removing system user..."
     id "$UNI_USER" &>/dev/null && userdel "$UNI_USER" 2>/dev/null || true
@@ -1114,8 +1157,25 @@ if [[ "$INSTALL_MYSTIC" == "y" ]]; then
             warn "       binaries in $MYSTIC_DIR/ and re-run with MYSTIC_BBS_PATH set."
             STATUS[mystic]="fail"
         else
-        TMP_ARCHIVE="/tmp/mystic-runtime.$MYSTIC_ARCHIVE_TYPE"
-        TMP_STAGE="/tmp/mystic-installer-$$"
+        # Real gap found in a security/performance audit: these used to
+        # be fixed, predictable paths ("/tmp/mystic-runtime.$TYPE",
+        # "/tmp/mystic-installer-$$" -- a PID is guessable/enumerable
+        # via /proc, not a secret). This whole block runs as root, and
+        # /tmp is world-writable, so a local attacker on a shared box
+        # could pre-create either path as a symlink before install.sh
+        # ever runs: curl's -o follows a symlink and would write the
+        # downloaded archive through it to an arbitrary root-writable
+        # target, and mkdir -p on an existing directory symlink would
+        # silently stage (and then root-run ./install auto ... on) an
+        # attacker-controlled directory. mktemp creates both atomically
+        # with an unpredictable name, closing the pre-plant window --
+        # matches the same mktemp-based fix pattern used elsewhere in
+        # this codebase (deploy/run_upgrade.sh, build-release.sh). The
+        # archive's file extension is cosmetic: unzip/unrar/7z below
+        # all detect format from content, not from the filename, so a
+        # plain mktemp template (no extension) is sufficient.
+        TMP_ARCHIVE="$(mktemp /tmp/mystic-runtime.XXXXXX)"
+        TMP_STAGE="$(mktemp -d /tmp/mystic-installer.XXXXXX)"
 
         if [[ "$MYSTIC_ARCHIVE_TYPE" == "rar" ]] && ! command -v unrar &>/dev/null; then
             info "Installing unrar (needed to extract Mystic archive)..."
@@ -1125,7 +1185,7 @@ if [[ "$INSTALL_MYSTIC" == "y" ]]; then
             install_one_pkg unzip 2>/dev/null || true
         fi
 
-        mkdir -p "$MYSTIC_DIR" "$TMP_STAGE"
+        mkdir -p "$MYSTIC_DIR"
         if curl -fsSL --connect-timeout 15 --max-time 180 \
                 -o "$TMP_ARCHIVE" "$MYSTIC_URL" 2>/dev/null; then
             EXTRACT_OK=""
@@ -1494,26 +1554,54 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
     else
         INFO_WEB="http://$DOMAIN"
     fi
-    cat > "$MRC_CONFIG_FILE" << MRCEOF
-{
-  "mrc_backend": "$MRC_BACKEND",
-  "mrc_host": "mrc.bottomlessabyss.net",
-  "mrc_port": 5001,
-  "use_ssl": true,
-  "bridge_bbs": "$BBS_NAME",
-  "platform_info": "ANETBBS/Linux.$(uname -m)/$MRC_CLIENT_COMPAT_VERSION",
-  "info_web": "$INFO_WEB",
-  "info_sysop": "$ADMIN_USER",
-  "info_desc": "$BBS_DESC",
-  "capabilities": ["MCI", "MSGEXT", "CTCP"],
-  "web_listen_host": "127.0.0.1",
-  "web_listen_port": $MRC_BRIDGE_PORT_DEFAULT,
-  "message_rate_seconds": 0.5,
-  "iamhere_interval_seconds": 60,
-  "log_level": "INFO",
-  "data_dir": "$INSTALL_DIR/data/mrc"
+    # Real gap found in a security/performance audit: BBS_NAME/
+    # ADMIN_USER/BBS_DESC/INFO_WEB are all wizard-prompted, sysop-typed
+    # values, interpolated directly into JSON string literals with NO
+    # escaping -- a BBS name or description containing a double-quote
+    # or backslash (not unusual; "The "Final" Frontier BBS" is a
+    # perfectly reasonable name to type) produced syntactically
+    # invalid JSON, which the MRC bridge (mrc.bridge.main, reading this
+    # file via json.load()) would then crash on at every startup.
+    # Building it via Python's own json module instead guarantees
+    # correct escaping for every value regardless of what characters
+    # it contains -- the same env-var-passing pattern (never string-
+    # interpolated into source) already used for install.sh's own
+    # admin-account-setup heredocs, for the identical reason.
+    MRC_BACKEND="$MRC_BACKEND" \
+        BBS_NAME="$BBS_NAME" \
+        PLATFORM_INFO="ANETBBS/Linux.$(uname -m)/$MRC_CLIENT_COMPAT_VERSION" \
+        INFO_WEB="$INFO_WEB" \
+        ADMIN_USER="$ADMIN_USER" \
+        BBS_DESC="$BBS_DESC" \
+        MRC_BRIDGE_PORT="$MRC_BRIDGE_PORT_DEFAULT" \
+        MRC_DATA_DIR="$INSTALL_DIR/data/mrc" \
+        MRC_CONFIG_FILE="$MRC_CONFIG_FILE" \
+        python3 << 'MRCPYEOF'
+import json
+import os
+
+config = {
+    "mrc_backend": os.environ['MRC_BACKEND'],
+    "mrc_host": "mrc.bottomlessabyss.net",
+    "mrc_port": 5001,
+    "use_ssl": True,
+    "bridge_bbs": os.environ['BBS_NAME'],
+    "platform_info": os.environ['PLATFORM_INFO'],
+    "info_web": os.environ['INFO_WEB'],
+    "info_sysop": os.environ['ADMIN_USER'],
+    "info_desc": os.environ['BBS_DESC'],
+    "capabilities": ["MCI", "MSGEXT", "CTCP"],
+    "web_listen_host": "127.0.0.1",
+    "web_listen_port": int(os.environ['MRC_BRIDGE_PORT']),
+    "message_rate_seconds": 0.5,
+    "iamhere_interval_seconds": 60,
+    "log_level": "INFO",
+    "data_dir": os.environ['MRC_DATA_DIR'],
 }
-MRCEOF
+with open(os.environ['MRC_CONFIG_FILE'], 'w') as f:
+    json.dump(config, f, indent=2)
+    f.write('\n')
+MRCPYEOF
     chown "$SERVICE_USER":"$SERVICE_USER" "$MRC_CONFIG_FILE"
     chmod 640 "$MRC_CONFIG_FILE"
     ok "MRC bridge config.json generated (sysop: $ADMIN_USER, BBS: $BBS_NAME)"
@@ -1557,34 +1645,61 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data"
 chmod 755 "$INSTALL_DIR/data"
 
 cd "$INSTALL_DIR"
-ADMIN_RESULT=$(sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" << ADMINEOF
+# Real gap found in a security/performance audit: ADMIN_USER/ADMIN_PASS/
+# DOMAIN/SECRET_KEY used to be spliced unescaped into single-quoted
+# Python string literals below -- a value containing a single quote
+# (a perfectly ordinary password like O'Brien!23) broke the script
+# outright, and a deliberately crafted value could close the string
+# and inject arbitrary Python, running as SERVICE_USER here (and as
+# ROOT in the fallback attempt further down). Passed as real process
+# environment variables instead (sudo's own `VAR=value command` form,
+# which sets them for just this command regardless of env_reset) and
+# read back via os.environ -- a shell value can never break out of an
+# environment variable the way it can out of a source-code string
+# literal. The heredoc delimiter is now quoted ('ADMINEOF') so bash
+# does zero variable expansion inside it at all, closing the class of
+# bug for good rather than just the specific variables found this time.
+ADMIN_RESULT=$(sudo -u "$SERVICE_USER" \
+    INSTALL_DIR="$INSTALL_DIR" \
+    ADMIN_USER="$ADMIN_USER" \
+    ADMIN_PASS="$ADMIN_PASS" \
+    DOMAIN="$DOMAIN" \
+    SECRET_KEY="$SECRET_KEY" \
+    ENV_FILE="$ENV_FILE" \
+    PY_FORCE_OVERWRITE="$PY_FORCE_OVERWRITE" \
+    "$VENV_DIR/bin/python" << 'ADMINEOF'
 import os, sys
-sys.path.insert(0, '$INSTALL_DIR')
-os.chdir('$INSTALL_DIR')
+install_dir = os.environ['INSTALL_DIR']
+admin_user = os.environ['ADMIN_USER']
+admin_pass = os.environ['ADMIN_PASS']
+domain = os.environ['DOMAIN']
+sys.path.insert(0, install_dir)
+os.chdir(install_dir)
 os.environ['FLASK_ENV'] = 'production'
-os.environ['DATABASE_URL'] = 'sqlite:///${INSTALL_DIR}/data/anetbbs.db'
-os.environ['SECRET_KEY'] = '$SECRET_KEY'
+os.environ['DATABASE_URL'] = 'sqlite:///' + os.path.join(install_dir, 'data', 'anetbbs.db')
+# SECRET_KEY itself is already a real env var at this point (passed in
+# by the sudo command line above) -- nothing further to assign here.
 
 from dotenv import load_dotenv
-load_dotenv('$ENV_FILE')
+load_dotenv(os.environ['ENV_FILE'])
 
 from anetbbs.web_app import create_app
 from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage, EchomailReadStatus, EchomailPollLog
 
-force_overwrite = $PY_FORCE_OVERWRITE
+force_overwrite = os.environ['PY_FORCE_OVERWRITE'] == 'True'
 
 app = create_app('production')
 with app.app_context():
     db.create_all()
-    user = User.query.filter_by(username='$ADMIN_USER').first()
+    user = User.query.filter_by(username=admin_user).first()
     if user is None:
-        user = User(username='$ADMIN_USER', email='${ADMIN_USER}@${DOMAIN}', is_admin=True)
-        user.set_password('$ADMIN_PASS')
+        user = User(username=admin_user, email=f'{admin_user}@{domain}', is_admin=True)
+        user.set_password(admin_pass)
         db.session.add(user)
         db.session.commit()
         print('CREATED')
     elif force_overwrite:
-        user.set_password('$ADMIN_PASS')
+        user.set_password(admin_pass)
         user.is_admin = True
         db.session.commit()
         print('UPDATED')
@@ -1594,13 +1709,13 @@ with app.app_context():
     # create_app() above already ran _create_default_data(), which
     # bootstraps a fallback account literally named "admin" (random
     # password, logged once) if NO admin existed yet -- on a truly
-    # fresh install that fires before this script's own \$ADMIN_USER
+    # fresh install that fires before this script's own admin_user
     # creation above, leaving two full-admin accounts. Clean up that
     # fallback now if it's redundant: a different username than the one
     # just configured, and never actually used (last_login is NULL) --
     # never touches an "admin"-named account the sysop has actually
     # logged into, since that would mean it's the one they're using.
-    if '$ADMIN_USER' != 'admin':
+    if admin_user != 'admin':
         stray = User.query.filter_by(username='admin', is_admin=True).first()
         if stray is not None and stray.last_login is None:
             db.session.delete(stray)
@@ -1621,34 +1736,49 @@ if [[ $ADMIN_RC -eq 0 ]]; then
 else
     # ★ FIX 5b: If running as service user fails, try as root then fix ownership
     warn "Retrying admin setup as root..."
-    ADMIN_RESULT2=$("$VENV_DIR/bin/python" << ADMINEOF2
+    # Same env-var-passing fix as the primary attempt above -- see its
+    # comment for why. Plain `VAR=value command` (no sudo here, this
+    # branch is already running as root) sets these for just this one
+    # command the same way.
+    ADMIN_RESULT2=$(INSTALL_DIR="$INSTALL_DIR" \
+        ADMIN_USER="$ADMIN_USER" \
+        ADMIN_PASS="$ADMIN_PASS" \
+        DOMAIN="$DOMAIN" \
+        SECRET_KEY="$SECRET_KEY" \
+        ENV_FILE="$ENV_FILE" \
+        PY_FORCE_OVERWRITE="$PY_FORCE_OVERWRITE" \
+        "$VENV_DIR/bin/python" << 'ADMINEOF2'
 import os, sys
-sys.path.insert(0, '$INSTALL_DIR')
-os.chdir('$INSTALL_DIR')
+install_dir = os.environ['INSTALL_DIR']
+admin_user = os.environ['ADMIN_USER']
+admin_pass = os.environ['ADMIN_PASS']
+domain = os.environ['DOMAIN']
+sys.path.insert(0, install_dir)
+os.chdir(install_dir)
 os.environ['FLASK_ENV'] = 'production'
-os.environ['DATABASE_URL'] = 'sqlite:///${INSTALL_DIR}/data/anetbbs.db'
-os.environ['SECRET_KEY'] = '$SECRET_KEY'
+os.environ['DATABASE_URL'] = 'sqlite:///' + os.path.join(install_dir, 'data', 'anetbbs.db')
+# SECRET_KEY itself is already a real env var at this point.
 
 from dotenv import load_dotenv
-load_dotenv('$ENV_FILE')
+load_dotenv(os.environ['ENV_FILE'])
 
 from anetbbs.web_app import create_app
 from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage, EchomailReadStatus, EchomailPollLog
 
-force_overwrite = $PY_FORCE_OVERWRITE
+force_overwrite = os.environ['PY_FORCE_OVERWRITE'] == 'True'
 
 app = create_app('production')
 with app.app_context():
     db.create_all()
-    user = User.query.filter_by(username='$ADMIN_USER').first()
+    user = User.query.filter_by(username=admin_user).first()
     if user is None:
-        user = User(username='$ADMIN_USER', email='${ADMIN_USER}@${DOMAIN}', is_admin=True)
-        user.set_password('$ADMIN_PASS')
+        user = User(username=admin_user, email=f'{admin_user}@{domain}', is_admin=True)
+        user.set_password(admin_pass)
         db.session.add(user)
         db.session.commit()
         print('CREATED')
     elif force_overwrite:
-        user.set_password('$ADMIN_PASS')
+        user.set_password(admin_pass)
         user.is_admin = True
         db.session.commit()
         print('UPDATED')
@@ -1657,8 +1787,8 @@ with app.app_context():
 
     # See the matching comment in the first admin-setup attempt above --
     # create_app() may have bootstrapped a redundant fallback "admin"
-    # account before \$ADMIN_USER was created; clean it up if unused.
-    if '$ADMIN_USER' != 'admin':
+    # account before admin_user was created; clean it up if unused.
+    if admin_user != 'admin':
         stray = User.query.filter_by(username='admin', is_admin=True).first()
         if stray is not None and stray.last_login is None:
             db.session.delete(stray)
@@ -1744,6 +1874,27 @@ EnvironmentFile=$INSTALL_DIR/.env
 # NOTE: We intentionally do NOT set CapabilityBoundingSet here so that
 # sudo (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Real gap found in a security/performance audit: none of the units
+# this script generates set ANY systemd sandboxing directives at all
+# -- defense in depth if the Python process itself is ever compromised
+# via a code-execution vulnerability. NoNewPrivileges=yes is
+# deliberately OMITTED here (unlike the other 4 units below) -- it
+# would block the sudo escalation the NOTE above already documents as
+# required for the Service Control Center's restart/upgrade features.
+# PrivateTmp=yes is safe and reinforces this same audit's own /tmp
+# symlink-attack fixes elsewhere (deploy/run_restore.sh, install.sh's
+# Mystic-installer download) -- an isolated /tmp, not a restricted one.
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5
@@ -1793,6 +1944,22 @@ EnvironmentFile=$INSTALL_DIR/.env
 # (matches what update.sh writes for the same unit).
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Real gap found in a security/performance audit: no systemd
+# sandboxing directives at all on any generated unit -- see
+# anetbbs-web.service's own longer comment above. This unit never
+# calls sudo, so NoNewPrivileges=yes is safe here (unlike web).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/anetbbs
 Restart=always
 RestartSec=5
@@ -1815,6 +1982,18 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=MRC_BRIDGE_CONFIG=$INSTALL_DIR/mrc/bridge/config.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m mrc.bridge.main
 Restart=always
 RestartSec=10
@@ -1841,6 +2020,18 @@ Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m anetbbs.core.finger_server
 Restart=always
 RestartSec=10
@@ -1871,6 +2062,18 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=$VENV_DIR/bin/python -m anetbbs.echomail.binkp_server
 Restart=always
 RestartSec=5

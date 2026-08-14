@@ -1187,6 +1187,7 @@ class BinkPClient:
         import io as _io
         import os as _os
         import zipfile as _zipfile
+        from .zip_safety import iter_safe_members, ZipBombError
 
         self._debug_manifest(fname, buf)
         if self._is_fts_packet(buf):
@@ -1201,30 +1202,29 @@ class BinkPClient:
             out = []
             try:
                 with _zipfile.ZipFile(_io.BytesIO(buf)) as zf:
-                    for info in zf.infolist():
-                        if info.is_dir():
-                            continue
-                        try:
-                            inner = zf.read(info.filename)
-                        except Exception as exc:
-                            logger.warning(
-                                'BinkP: zip member %s in %s unreadable: %s',
-                                info.filename, fname, exc)
-                            continue
-                        if self._is_fts_packet(inner):
-                            self._debug_dump_packet(
-                                f'{fname}__{info.filename}', inner)
-                            try:
-                                out.extend(_parse_ftn_packet(inner))
-                            except Exception:
-                                logger.exception(
-                                    'BinkP: failed parsing %s inside %s',
+                    try:
+                        for info, inner in iter_safe_members(zf):
+                            if self._is_fts_packet(inner):
+                                self._debug_dump_packet(
+                                    f'{fname}__{info.filename}', inner)
+                                try:
+                                    out.extend(_parse_ftn_packet(inner))
+                                except Exception:
+                                    logger.exception(
+                                        'BinkP: failed parsing %s inside %s',
+                                        info.filename, fname)
+                            else:
+                                logger.info(
+                                    'BinkP: zip member %s in %s is not a '
+                                    'FTS-0001 packet — skipped',
                                     info.filename, fname)
-                        else:
-                            logger.info(
-                                'BinkP: zip member %s in %s is not a '
-                                'FTS-0001 packet — skipped',
-                                info.filename, fname)
+                    except ZipBombError as exc:
+                        logger.warning('BinkP: refusing to extract %s: %s',
+                                       fname, exc)
+                    except Exception as exc:
+                        logger.warning(
+                            'BinkP: a member of %s was unreadable: %s',
+                            fname, exc)
             except _zipfile.BadZipFile as exc:
                 logger.warning('BinkP: bad ZIP %s: %s', fname, exc)
             if out:

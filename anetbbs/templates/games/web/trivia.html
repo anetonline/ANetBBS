@@ -134,7 +134,7 @@
 
     function submitScore(s) {
         fetch(window.location.pathname.replace('/play','/') + 'score', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRFToken':document.querySelector('meta[name="csrf-token"]')?.content||''},
             body: JSON.stringify({score:s})
         }).catch(function(){});
     }
