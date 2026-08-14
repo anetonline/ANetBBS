@@ -75,17 +75,35 @@ class AnetbbsCfgPrivilegeEscalationTests(unittest.TestCase):
                          password_hash='x', access_level=100, is_admin=True)
             db.session.add_all([regular, admin])
 
-            cfg_game = Game(name='Config Tool', slug='anetbbs-cfg',
-                            game_type='door_native', is_active=False,
-                            web_enabled=False,
-                            executable_path='/bin/true')
+            # create_app() itself bundled-door-seeds a REAL Game row at
+            # slug='anetbbs-cfg' (web_app.py), but only when the
+            # anetbbs-cfg console-script binary actually exists on
+            # disk (its own 'must_exist' gate) -- true in a real
+            # install/Docker build (setup.py's console_scripts entry
+            # point gets installed for real), false in a bare
+            # `pip install -e .` dev checkout with no such binary
+            # present. A blind INSERT here collided with that real
+            # seed row's UNIQUE(slug) constraint the moment this ran
+            # somewhere the binary DOES exist (caught by CI, not by
+            # local dev testing) -- get-or-create instead, so this
+            # test's own outcome doesn't depend on which of those two
+            # environments it happens to run in.
+            cfg_game = Game.query.filter_by(slug='anetbbs-cfg').first()
+            if cfg_game is None:
+                cfg_game = Game(name='Config Tool', slug='anetbbs-cfg',
+                                game_type='door_native', is_active=False,
+                                web_enabled=False,
+                                executable_path='/bin/true')
+                db.session.add(cfg_game)
+            else:
+                cfg_game.is_active = False
             hidden_other = Game(name='Some Other Hidden Door', slug='hidden-other',
                                 game_type='door_native', is_active=False,
                                 executable_path='/bin/true')
             visible = Game(name='Visible Door', slug='visible-door',
                            game_type='door_native', is_active=True,
                            executable_path='/bin/true')
-            db.session.add_all([cfg_game, hidden_other, visible])
+            db.session.add_all([hidden_other, visible])
             db.session.commit()
 
             cls.regular_id = regular.id
