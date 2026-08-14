@@ -5,7 +5,7 @@ File gallery blueprint
 import os
 import uuid
 import mimetypes
-from flask import Blueprint, render_template, redirect, url_for, flash, send_from_directory, abort, current_app
+from flask import Blueprint, render_template, redirect, url_for, flash, send_from_directory, abort, current_app, request
 from flask_login import login_required, current_user
 from wtforms import TextAreaField, SubmitField, SelectField
 from wtforms.validators import Optional
@@ -16,6 +16,9 @@ from werkzeug.utils import secure_filename
 from ..models import db, FileUpload, FileArea
 from ..features.archive_meta import extract_archive_description
 from ..features.access_control import evaluate_access
+from .list_pagination import ListPagination
+
+FILES_PER_PAGE = 50
 
 files_bp = Blueprint('files', __name__, url_prefix='/files')
 
@@ -56,9 +59,21 @@ def allowed_file(filename):
 @files_bp.route('/')
 def list_files():
     """List all uploaded files"""
+    # Real gap found in a security/performance audit: this had no
+    # pagination at all, unlike the sibling file_areas.py blueprint,
+    # which already fixed this exact "unbounded gallery listing"
+    # pattern -- every visit rendered every visible upload row.
+    # _visible_to() depends on the related FileArea's access-control
+    # fields, which aren't easily expressed as a SQL WHERE clause, so
+    # this mirrors file_areas.py's own established approach for a
+    # post-filtered list: fetch, filter, then paginate the already-
+    # filtered in-memory list with the same ListPagination helper.
     uploads = [u for u in FileUpload.query.order_by(FileUpload.created_at.desc()).all()
               if _visible_to(current_user, u.file_area)]
-    return render_template('files/list.html', uploads=uploads)
+    page = request.args.get('page', 1, type=int)
+    pagination = ListPagination(page, FILES_PER_PAGE, len(uploads))
+    page_uploads = pagination.slice(uploads)
+    return render_template('files/list.html', uploads=page_uploads, pagination=pagination)
 
 
 @files_bp.route('/upload', methods=['GET', 'POST'])

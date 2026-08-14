@@ -28,6 +28,7 @@ from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)
 from ..echomail.qwk import _parse_messages_dat, QWK_HEADER_SIZE, QWK_BLOCK_SIZE
 from ..echomail.qwk_hub_ftp import resolve_hub_id
+from ..features.rate_limit import _check as _rate_limit_check
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,19 @@ qwk_hub_bp = Blueprint('qwk_hub', __name__, url_prefix='/qwkhub')
 
 def _auth_node():
     """Validate HTTP Basic Auth against QWKNode.  Returns the node or aborts 401."""
+    # Real gap found in a security audit: unlike /auth/login (gated by
+    # AutoBanConfig's rate limiter), this had NO throttling at all on
+    # repeated failed attempts -- a real brute-force surface against a
+    # machine-to-machine endpoint with a fixed, never-expiring password.
+    # Uses the same underlying rate-limit mechanism as /auth/login
+    # (features/rate_limit.py), keyed by source IP; checked BEFORE the
+    # DB lookup so a flood of guesses can't even trigger a query per
+    # attempt once the limit is hit.
+    client_ip = request.remote_addr or 'unknown'
+    if not _rate_limit_check(f'qwk_hub_auth:{client_ip}', limit=10, window=300):
+        logger.warning('QWK hub: rate-limited repeated auth attempts from %s', client_ip)
+        abort(429, description='QWK hub: too many authentication attempts')
+
     auth = request.authorization
     if not auth:
         abort(401, description='QWK hub: auth required')

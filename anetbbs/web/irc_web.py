@@ -257,6 +257,18 @@ class _IrcSession:
             self._emit('irc_disconnected', {'reason': reason})
             with _sessions_lock:
                 _sessions.pop(self.sid, None)
+            # Real gap found in a security/performance audit: _scrollback
+            # is deliberately keyed per-user (not per-sid) so it survives
+            # a browser reconnect while the underlying IRC connection is
+            # still alive -- see this dict's own comment above. But once
+            # THIS read loop ends, that underlying IRC connection is
+            # gone, so there's nothing left to "survive a reconnect" for
+            # -- previously the only way to clear an entry was the user
+            # explicitly running /clearscroll, so every distinct user who
+            # ever connected got a permanent entry for the life of the
+            # process. A fresh connection starts a fresh buffer anyway.
+            with _scrollback_lock:
+                _scrollback.pop(self.user_id, None)
 
     def _handle_line(self, line):
         # PING / PONG

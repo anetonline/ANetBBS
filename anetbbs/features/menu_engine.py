@@ -67,6 +67,22 @@ async def _act_door(ui, args):
         if not g:
             await ui.session.write("\r\nGame not found.\r\n")
             return None
+        # Real gap found in a security audit: this looks games up by
+        # raw numeric id with no other filtering at all, unlike every
+        # normal games listing (which filters to is_active games only).
+        # is_active=False is specifically how hidden, sysop-tool-only
+        # entries like anetbbs-cfg are kept out of every normal list
+        # (see web_app.py's _create_default_data()) -- there's no
+        # legitimate reason a manually-configured menu action should
+        # ever target one (action_args is free-text numeric entry, so
+        # this is easy to hit by accident, not just deliberately).
+        # door_runner.py's play_door_game_telnet() independently
+        # enforces the specific SSH+admin requirement for anetbbs-cfg
+        # itself; this is the general hygiene check for any hidden
+        # game, present or future.
+        if not g.is_active:
+            await ui.session.write("\r\nGame not found.\r\n")
+            return None
     await play_door_game_telnet(g, ui.session.user, ui.session)
     return None
 

@@ -23,7 +23,12 @@ Flask-SQLAlchemy>=3.1.0
 Flask-Migrate>=4.0.0
 WTForms>=3.1.0
 Werkzeug>=3.0.0
-Jinja2>=3.1.0
+# 3.1.6 floor: CVE-2024-22195/CVE-2024-34064 (xmlattr XSS),
+# CVE-2024-56326/CVE-2025-27516 (sandbox escape via str.format/attr) --
+# found + verified in a security audit. Sandbox-escape CVEs only bite
+# if a SandboxedEnvironment ever runs untrusted template source (not
+# currently done here), but the floor costs nothing to bump regardless.
+Jinja2>=3.1.6
 itsdangerous>=2.2.0
 click>=8.1.0
 blinker>=1.9.0
@@ -43,14 +48,25 @@ greenlet>=3.0.0
 python-socketio>=5.10.0
 python-engineio>=4.10.0
 simple-websocket>=1.0.0
-eventlet>=0.38.0
+# 0.40.3 floor: CVE-2025-58068, HTTP request smuggling via malformed
+# chunked-encoding trailers in eventlet's WSGI parser -- this is the
+# worker the main web app's WSGI request path runs through.
+eventlet>=0.40.3
 
 # SSH server
-asyncssh>=2.14.0
-cryptography>=42.0.0
+# 2.14.2 floor: CVE-2023-46445/CVE-2023-46446 (rogue extension/session
+# negotiation) + CVE-2023-48795 (Terrapin protocol downgrade) -- the
+# real SSH daemon callers connect to, so directly network-facing.
+asyncssh>=2.14.2
+# 44.0.1 floor: CVE-2024-26130 (NULL-pointer DoS in pkcs12 serialize)
+# + CVE-2024-12797 (vulnerable OpenSSL bundled in cryptography's own
+# wheels 42.0.0-44.0.0).
+cryptography>=44.0.1
 
 # MRC web bridge (standalone aiohttp service)
-aiohttp>=3.9.0
+# 3.12.14 floor: CVE-2025-53643, HTTP request/response smuggling via
+# incorrect chunked-trailer parsing in aiohttp's pure-Python parser.
+aiohttp>=3.12.14
 aiosignal>=1.3.0
 multidict>=6.0.0
 yarl>=1.9.0
@@ -66,15 +82,25 @@ gunicorn>=22.0.0,<23
 
 # Email validation + DNS (email-validator)
 email-validator>=2.1.0
-dnspython>=2.5.0
+# 2.6.1 floor: CVE-2023-29483 ("TuDoor" DNS response-spoofing DoS) --
+# 2.6.0 alone still had a bug in its own fix, 2.6.1 is the real floor.
+dnspython>=2.6.1
 idna>=3.6
 
-# Imaging (avatars / file uploads)
-Pillow>=10.0.0
+# Imaging (avatars / file uploads) -- processes untrusted uploads.
+# 10.3.0 floor: CVE-2023-50447 (arbitrary code execution via
+# ImageMath.eval, fixed 10.2.0) + CVE-2024-28219 (buffer overflow via
+# unbounded strcpy in _imagingcms.c, fixed 10.3.0).
+Pillow>=10.3.0
 
-# HTTP client (echomail poller / general)
-requests>=2.32.0
-urllib3>=2.2.0
+# HTTP client (echomail poller / general) -- fetches operator- and
+# sometimes remote-peer-supplied URLs.
+# 2.32.4 floor: CVE-2024-47081, .netrc credential leak via a crafted
+# URL's netloc parsing.
+requests>=2.32.4
+# 2.2.2 floor: CVE-2024-37891, Proxy-Authorization header not stripped
+# on a cross-origin redirect.
+urllib3>=2.2.2
 certifi>=2024.2.0
 charset-normalizer>=3.3.0
 

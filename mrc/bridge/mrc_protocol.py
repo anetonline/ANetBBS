@@ -1,11 +1,80 @@
 """
 MRC Protocol v1.3 packet handling for bridge service.
 """
+import re
 
 class MRCProtocol:
     SEPARATOR = '~'
     VALID_CHAR_RANGE = range(32, 126)
     RESERVED_HANDLES = ['SERVER', 'CLIENT', 'NOTME']
+
+    # Real gap found in a security/performance audit: parse_packet()
+    # below used to return every field completely raw -- sanitize_field()
+    # is only ever applied on the OUTBOUND/create_packet() side, never
+    # to INBOUND data. Safety today rests entirely on downstream
+    # consumers remembering to re-sanitize before displaying anything
+    # (anetbbs/features/mrc_chat.py's _pipe_to_ansi/_strip_pipe already
+    # do, correctly) -- a defense-in-depth gap: any future or
+    # additional consumer that forgot to re-sanitize would reopen the
+    # exact cross-network ANSI/control-byte-injection class of bug
+    # already fixed elsewhere this audit (anetirc2.py, mrc_chat.py,
+    # core/session.py, core/finger_server.py). Stripped here, at the
+    # actual parse boundary, so nothing downstream has to remember to.
+    # A self-contained copy rather than importing
+    # anetbbs.core.text_safety's version -- mrc/ is a deliberately
+    # independent package/service (its own systemd unit) and never
+    # imports from anetbbs.
+    _ESCAPE_SEQUENCE_RE = re.compile(
+        r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+    _CONTROL_BYTE_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+    @classmethod
+    def _strip_untrusted(cls, text: str) -> str:
+        if not text:
+            return ''
+        return cls._CONTROL_BYTE_RE.sub('', cls._ESCAPE_SEQUENCE_RE.sub('', text))
+
+    # Real gap found in a security/performance audit: MRC_BRIDGE_LOG_LEVEL
+    # =DEBUG's raw wire-packet trace ("MRC RAW OUT/IN", "MYSTIC RAW
+    # OUT/IN" in main.py / mystic_connection.py) logged every packet
+    # completely unredacted -- IDENTIFY/REGISTER/UPDATE/ROOMPASS carry
+    # their password as plain text inside the packet's own command
+    # field (see create_server_command()'s docstring for the real spec
+    # template, e.g. "user~bbs~room~SERVER~msgext~~IDENTIFY password~"),
+    # so turning on DEBUG tracing for any other diagnostic reason put
+    # every login password a user typed into the bridge's own log file
+    # in plaintext, permanently. main.py already had a narrower
+    # _redact_command_for_logs() used on one INFO-level line
+    # (WS server_cmd) -- centralized here so both that call site and
+    # the raw-trace lines in both main.py and mystic_connection.py
+    # (which never imports from main.py, to avoid a circular import)
+    # share one redaction word list.
+    _REDACTED_COMMAND_PREFIXES = ('IDENTIFY ', 'REGISTER ', 'UPDATE ', 'ROOMPASS ')
+
+    @classmethod
+    def redact_command_for_logs(cls, cmd: str) -> str:
+        c = (cmd or '').strip()
+        if not c:
+            return c
+        upper = c.upper()
+        for prefix in cls._REDACTED_COMMAND_PREFIXES:
+            if upper.startswith(prefix):
+                return prefix + '********'
+        return c
+
+    @classmethod
+    def redact_packet_for_logs(cls, raw: str) -> str:
+        """Redact the command field of a full raw wire packet before
+        it's written to a debug trace log. Safe to call on a partial/
+        unparsable line too -- only touches field index 6 (the
+        command/message field) when the packet has enough separators
+        to have one at all; anything shorter is returned unchanged."""
+        if not raw:
+            return raw
+        parts = raw.split(cls.SEPARATOR)
+        if len(parts) >= 7:
+            parts[6] = cls.redact_command_for_logs(parts[6])
+        return cls.SEPARATOR.join(parts)
 
     @classmethod
     def sanitize_field(cls, field: str, allow_spaces: bool = True) -> str:
@@ -48,6 +117,7 @@ class MRCProtocol:
         parts = packet.split(cls.SEPARATOR)
         if len(parts) != 7:
             raise ValueError(f"Invalid packet: expected 7 fields, got {len(parts)} (raw={packet!r})")
+        parts = [cls._strip_untrusted(p) for p in parts]
         return {
             'from_user': parts[0],
             'from_site': parts[1],

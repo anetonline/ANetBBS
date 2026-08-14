@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.37`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.38`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.38 — Full security and performance audit, hardening pass across the codebase (August 2026)
+
+A comprehensive, self-directed security and performance audit was carried out across the whole codebase, documentation, and deployment scripts — covering the web application, terminal/telnet/SSH session handling, echomail (FidoNet BinkP/QWK), MRC chat, door-game launching, and the install/update tooling. A number of real issues turned up and were fixed, addressed in order of severity: hardening of remote/cross-network-facing attack surfaces, closing several memory- and resource-leak points in long-running processes, tightening file and credential permissions across the install/update/backup scripts, adding missing resource limits and concurrency caps, and bumping several third-party dependencies to their current patched releases (see `requirements.txt`). New regression tests were added throughout — the suite now sits at over 2,600 tests, all green. In keeping with responsible disclosure, this entry intentionally omits specifics; sysops running an older release should update at their earliest convenience.
 
 ## v1.0.37 — install.sh/update.sh portability audit: real fixes for Alpine, Pi, and minimal/Docker hosts (August 2026)
 

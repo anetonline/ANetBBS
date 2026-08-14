@@ -92,6 +92,28 @@ class NotificationLoginPopupTests(unittest.TestCase):
         self.assertEqual(session.read_line_calls, 1,
                          'must block on read_line (Enter) once, not proceed silently')
 
+    def test_ansi_escape_injection_in_notification_title_and_body_is_stripped(self):
+        # Real vulnerability found in a security audit: Notification
+        # title/body can originate from a REMOTE FTN/QWK peer (e.g.
+        # notify_reply.py builds title from an inbound message's
+        # from_name, taken verbatim from the packet -- no local
+        # account required to reach this). A hostile sender could
+        # embed a raw ANSI escape sequence and have it fire on the
+        # recipient's real terminal at next login.
+        from anetbbs.features.notify import notify
+        session = _FakeSession(self.user_id)
+        evil_title = '\x1b[2J\x1b[HFAKE ADMIN wrote to you'
+        evil_body = '\x1b]0;pwned\x07in (General)'
+        with self.app.app_context():
+            notify(self.user_id, 'echomail_reply', title=evil_title,
+                  body=evil_body, target_url='/echomail/1/1')
+            self._run(session)
+        joined = ''.join(session.written)
+        self.assertNotIn('\x1b[2J', joined, 'injected escape sequence survived')
+        self.assertNotIn('\x1b]0;pwned', joined, 'injected OSC sequence survived')
+        self.assertIn('FAKE ADMIN wrote to you', joined, 'legitimate text must survive')
+        self.assertIn('in (General)', joined, 'legitimate text must survive')
+
     def test_pm_and_im_counts_still_shown(self):
         from anetbbs.models import db, PrivateMessage, InstantMessage, User
         session = _FakeSession(self.user_id)

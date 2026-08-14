@@ -89,10 +89,23 @@ def _ip_is_banned(ip):
     try:
         from ..models import IpBan
         from datetime import datetime as _dt
-        rows = IpBan.query.all()
-        active = [r.cidr for r in rows
-                  if not (r.expires_at and r.expires_at < _dt.utcnow())]
-        return _cidr_match(ip, active)
+        # Real gap found in a security audit: this used to load EVERY
+        # IpBan row ever created (expired ones included) on every
+        # single login/registration request, then filter expiry in
+        # Python. Because _auto_ban_ip() below inserts a new row every
+        # time the login rate limiter trips, and a public BBS is a
+        # routine target for scanners/credential-stuffing bots, this
+        # table only grows -- and so did the per-request cost, the
+        # same "quiet unbounded creep on a long-running worker" shape
+        # as this project's own v1.0.21 production incident. Filtering
+        # expiry in SQL means an expired row costs nothing once it's
+        # actually expired, instead of being fetched and discarded
+        # forever.
+        now = _dt.utcnow()
+        rows = (IpBan.query
+                .filter(db.or_(IpBan.expires_at.is_(None), IpBan.expires_at >= now))
+                .with_entities(IpBan.cidr).all())
+        return _cidr_match(ip, [r.cidr for r in rows])
     except Exception:
         return False
 
@@ -119,6 +132,22 @@ def _auto_ban_ip(ip):
         db.session.add(IpBan(cidr=ip, reason=reason, banned_by_id=None,
                              expires_at=expires_at))
         db.session.commit()
+        # Piggyback a low-frequency purge of long-expired rows onto the
+        # "a new ban just happened" event -- keeps the table itself
+        # bounded over time (not just the per-request query cost,
+        # already fixed in _ip_is_banned() above) without needing a
+        # separate cron job. Random 1-in-20 sample rather than every
+        # call, since this is a cheap DELETE but there's no reason to
+        # pay it on every single auto-ban.
+        import random as _random
+        if _random.randint(1, 20) == 1:
+            try:
+                cutoff = datetime.utcnow() - timedelta(days=7)
+                IpBan.query.filter(IpBan.expires_at.isnot(None),
+                                   IpBan.expires_at < cutoff).delete()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
         try:
             current_app.logger.warning('Auto-banned IP %s: %s (expires %s)',
                                        ip, reason, expires_at or 'never')

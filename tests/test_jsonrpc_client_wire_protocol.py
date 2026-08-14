@@ -24,6 +24,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -412,6 +413,43 @@ class InvalidUtf8OnTheWireTests(unittest.TestCase):
         with self._client() as c:
             result = c.read('SCOPE', 'SCORES.HIGH', LOCK_READ)
         self.assertEqual(result, {'name': 'Fearchar', 'score': 12})
+
+
+class UnboundedLineGuardTests(unittest.TestCase):
+    """Real gap found in a security/performance audit: _recv_one()'s
+    readline() had no max-line-length cap -- a broken or hostile
+    JSON-RPC peer sending an infinite line with no '\\n' terminator
+    would grow this process's memory unboundedly while readline()
+    waited forever for a terminator that never arrives. _MAX_LINE_CHARS
+    is patched down to a small value here so the test doesn't need to
+    push a real 1MB+ payload over a loopback socket to exercise it."""
+
+    def setUp(self):
+        self.server = _RecordingServer()
+        self.addCleanup(self.server.close)
+
+    def _client(self):
+        return JSONRPCClient(self.server.host, self.server.port,
+                             connect_timeout=2, recv_timeout=2)
+
+    def test_line_exceeding_the_cap_with_no_terminator_raises_cleanly(self):
+        oversized = b'{"func": "RESPONSE", "data": "' + (b'x' * 200) + b'"'  # deliberately no closing quote/brace/newline
+        self.server.queue_raw_response(oversized, oper='READ')
+        with patch.object(JSONRPCClient, '_MAX_LINE_CHARS', 50):
+            with self._client() as c:
+                with self.assertRaises(JSONRPCError) as ctx:
+                    c.read('SCOPE', 'L', LOCK_READ)
+        self.assertIn('exceeded', str(ctx.exception))
+
+    def test_a_normal_response_under_the_cap_still_works(self):
+        """Confirms the cap doesn't break real, well-formed traffic --
+        only kicks in for a line that genuinely never terminates."""
+        self.server.queue_response(
+            {'func': 'RESPONSE', 'data': {'score': 7}}, oper='READ')
+        with patch.object(JSONRPCClient, '_MAX_LINE_CHARS', 50):
+            with self._client() as c:
+                result = c.read('SCOPE', 'L', LOCK_READ)
+        self.assertEqual(result, {'score': 7})
 
 
 class ConnectionFailureTests(unittest.TestCase):

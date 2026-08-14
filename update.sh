@@ -855,14 +855,24 @@ else
         info "  No real SECRET_KEY in .env — generating one and writing it"
         DB_SECRET_KEY=$("$VENV_DIR/bin/python" -c \
             'import secrets; print(secrets.token_urlsafe(48))')
+        # Lock down permissions BEFORE writing the new key, not just
+        # after -- sed -i normally preserves an existing file's mode,
+        # but that only holds if $ENV_FILE was already 0600 to begin
+        # with (e.g. a hand-created .env, or a sed implementation that
+        # falls back to copy-not-rename across filesystems). Closing
+        # the gap on both sides of the write, same belt-and-suspenders
+        # approach as the backup-dir lock-at-creation fix above, means
+        # the SECRET_KEY is never briefly sitting in a world-readable
+        # file either way.
+        chmod 600 "$ENV_FILE" 2>/dev/null || true
         # Strip any prior SECRET_KEY line, then append the new one.
         if grep -q '^SECRET_KEY=' "$ENV_FILE"; then
             sed -i 's|^SECRET_KEY=.*|SECRET_KEY='"$DB_SECRET_KEY"'|' "$ENV_FILE"
         else
             echo "SECRET_KEY=$DB_SECRET_KEY" >> "$ENV_FILE"
         fi
-        ok "  SECRET_KEY written to $ENV_FILE (mode 0600)"
         chmod 600 "$ENV_FILE"
+        ok "  SECRET_KEY written to $ENV_FILE (mode 0600)"
     fi
     DB_URL="${EXISTING_ENV[DATABASE_URL]:-sqlite:///${INSTALL_DIR}/data/anetbbs.db}"
     DB_UPDATED=false

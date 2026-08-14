@@ -29,6 +29,16 @@ import ssl
 import sys
 
 DEFAULT_TIMEOUT = 60.0
+# Real gap found in a security/performance audit: the read loop below
+# had no total-size cap, bounded only by a per-recv idle timeout that
+# RESETS on every successful read -- a slow-but-steady malicious or
+# misbehaving server reachable via a door's http.js call could keep
+# this process's memory growing indefinitely just by trickling data
+# faster than the idle timeout. This is a short-lived, per-request
+# subprocess (dies after one call), so the blast radius is smaller
+# than a long-running daemon, but a single huge response can still
+# balloon this one process before anything else would catch it.
+MAX_RESPONSE_SIZE = 50 * 1024 * 1024
 
 
 def _do_request(args):
@@ -54,6 +64,7 @@ def _do_request(args):
             sock = ctx.wrap_socket(sock, server_hostname=host)
         sock.sendall(raw)
         chunks = []
+        total = 0
         while True:
             try:
                 chunk = sock.recv(65536)
@@ -61,6 +72,10 @@ def _do_request(args):
                 break
             if not chunk:
                 break
+            total += len(chunk)
+            if total > MAX_RESPONSE_SIZE:
+                raise ValueError(
+                    f'response exceeded {MAX_RESPONSE_SIZE} byte limit')
             chunks.append(chunk)
         response = b''.join(chunks)
     finally:

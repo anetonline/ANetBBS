@@ -79,7 +79,11 @@ case "$KIND" in
         log "copying $SRC -> $DST"
         cp -f "$SRC" "$DST"
         chown "$SERVICE_USER":"$SERVICE_USER" "$DST" 2>/dev/null || true
-        chmod 644 "$DST"
+        # Real gap found in a security/performance audit: the DB holds
+        # password hashes, session tokens, and private messages -- see
+        # install.sh's matching fix on the fresh-install path for why
+        # 600 (not 644) is correct here.
+        chmod 600 "$DST"
         log "starting anetbbs-web back up..."
         systemctl start anetbbs-web 2>/dev/null || true
         log "restore db: ok (anetbbs-web restarted)"

@@ -12,6 +12,26 @@ that matters: it's the difference between anetbbs-cfg launching in a
 couple seconds vs ~10s on a Raspberry Pi 3. Both paths point at the same
 database as the running BBS/web processes, so there's no separate
 config to keep in sync either way.
+
+Deliberately no internal auth check of its own, reviewed and confirmed
+correct in a security audit: this module has two real, independent
+launch paths, and an internal check adds no value on either one --
+
+1. Direct shell/SSH invocation (the `Usage:` above) -- whoever can run
+   this already has a real shell on the box, i.e. already-equivalent-
+   or-greater privilege than anything this tool could grant (they
+   could edit the SQLite DB directly, run their own script against the
+   same models, etc.). There's nothing meaningful to gate.
+2. Via a BBS terminal session, bridged through door_runner.py's PTY
+   machinery (see bbs_ui.py's _sysop_cfg_tool()) -- THIS is the path
+   that actually needs gating, since a regular telnet user has no
+   shell access at all. That's enforced at door_runner.py's
+   play_door_game_telnet(), the one place that actually knows the
+   calling session's protocol (SSH vs telnet) and the user's admin
+   flag -- not here. A flag passed into this process's own environment
+   claiming "caller already verified" would be checking something any
+   shell-access caller could trivially fake anyway, adding complexity
+   without closing any real gap.
 """
 import curses
 import sys

@@ -15,6 +15,7 @@ Usage:
 By default the key is the client IP. Pass `key_fn=lambda: current_user.id`
 for per-user limits.
 """
+import random
 import time
 import threading
 from collections import defaultdict, deque
@@ -23,6 +24,29 @@ from flask import request, jsonify, abort
 
 _buckets = defaultdict(deque)
 _lock = threading.Lock()
+
+# Real gap found in a security audit (ironic, in the rate limiter
+# itself): _gc() only prunes stale TIMESTAMPS out of the one bucket
+# being checked right now -- it never removes the now-empty deque
+# (or the dict KEY) from _buckets itself. Every distinct key ever
+# seen (by default the client IP; some routes key by user id) got a
+# PERMANENT entry for the life of the process, since nothing ever
+# revisits a one-time visitor's key again to notice its bucket has
+# gone fully stale. On a long-running production server hit by
+# scanning bots / dynamic IPs / many distinct users, _buckets only
+# grew -- the same "leaky per-key module-level cache" shape as this
+# project's own v1.0.21 production incident.
+#
+# No configured rate-limit window in this app is anywhere near this
+# long, so any bucket whose newest timestamp is older than this is
+# unambiguously abandoned, regardless of which specific (shorter)
+# window its own limiter actually uses -- safe to drop the whole key.
+_SWEEP_STALE_SECONDS = 3600
+# 1-in-N chance per _check() call of running the sweep -- cheap
+# enough (a single dict-comprehension pass) not to need a separate
+# timer/thread, matching the same probabilistic-purge pattern already
+# used in web/auth.py's _auto_ban_ip().
+_SWEEP_PROBABILITY = 500
 
 
 def _gc(name_key, window):
@@ -33,12 +57,21 @@ def _gc(name_key, window):
         bucket.popleft()
 
 
+def _sweep_stale_buckets():
+    cutoff = time.time() - _SWEEP_STALE_SECONDS
+    stale_keys = [k for k, v in _buckets.items() if not v or v[-1] < cutoff]
+    for k in stale_keys:
+        del _buckets[k]
+
+
 def _check(name_key, limit, window):
     with _lock:
         _gc(name_key, window)
         if len(_buckets[name_key]) >= limit:
             return False
         _buckets[name_key].append(time.time())
+        if random.randint(1, _SWEEP_PROBABILITY) == 1:
+            _sweep_stale_buckets()
         return True
 
 

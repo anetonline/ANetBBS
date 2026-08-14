@@ -4,6 +4,26 @@ Synchronet JS Compatibility Layer for ANetBBS
 
 Generates a Node.js wrapper script that provides Synchronet's JS API objects
 so that Synchronet .js door games can run on ANetBBS via PTY + xterm.js.
+
+TRUST BOUNDARY, reviewed and confirmed in a security audit -- worth
+stating explicitly rather than leaving implicit: door scripts run via
+`vm.runInThisContext()` against the real Node global context, with
+real `fs`/`child_process` access and explicit shell-out APIs
+(`bbs.exec()`, `system.exec()`/`system.popen()`). There is NO sandbox,
+jail, or restricted filesystem/network view -- a door script runs with
+the exact OS privileges of whichever service process launched it
+(anetbbs-telnet / anetbbs-web). This is not a bug or a regression --
+it deliberately mirrors real Synchronet's own door trust model, which
+has always worked this way (doors are trusted extensions, not
+isolated plugins, on every mainstream BBS platform). The practical
+consequence: setting `Game.synchronet_script_path` (Admin -> Games) is
+equivalent to granting arbitrary code execution as the BBS service
+account, exactly like `data/mods/core/*.py` (see core/mods_override.py)
+or access to the anetbbs-cfg tool -- it must only ever be something a
+fully-trusted admin can do, never a lower-privilege action. `/admin/
+games/` is already `@admin_required`-gated (confirmed in the same
+audit), so this is consistent with the trust level every other admin
+capability in this codebase already assumes -- not a new exposure.
 """
 import os
 import sys
@@ -978,6 +998,10 @@ var bbs = {
         }
         return result;
     },
+    // Real shell execution, matching Synchronet's own bbs.exec() -- see
+    // this file's top-of-file "TRUST BOUNDARY" note (Python side):
+    // deliberately unsandboxed, matches real Synchronet, only reachable
+    // via a script an admin explicitly configured.
     exec:        function (cmdline) {
         var cp = _node_require('child_process');
         try { cp.execSync(String(cmdline), {stdio: 'inherit'}); } catch (e) {}

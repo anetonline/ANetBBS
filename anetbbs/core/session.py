@@ -2206,10 +2206,21 @@ class BBSSession:
             # sites -- e.g. anetbbs/echomail/notify_reply.py's "Jane
             # wrote to you" / "in FidoNet (General)"), so list them by
             # name rather than folding into a bare count.
+            #
+            # Real vulnerability found in a security audit: title/body
+            # can originate from a REMOTE FTN/QWK peer (e.g.
+            # notify_reply.py builds title from msg.from_name, taken
+            # verbatim from an inbound netmail/echomail packet) -- no
+            # local account required to reach this. strip_untrusted_
+            # escapes() (see anetbbs/core/text_safety.py) neutralizes
+            # any ANSI/control-byte injection before it ever reaches
+            # this user's real terminal.
+            from .text_safety import strip_untrusted_escapes
             for n in unread_notifs:
-                line = f'  \x1b[33m-\x1b[0m {n.title}'
+                title = strip_untrusted_escapes(n.title)
+                line = f'  \x1b[33m-\x1b[0m {title}'
                 if n.body:
-                    line += f' \x1b[36m({n.body})\x1b[0m'
+                    line += f' \x1b[36m({strip_untrusted_escapes(n.body)})\x1b[0m'
                 await self.write(line + '\r\n')
             await self.write('\r\n\x1b[1mPress ENTER to continue...\x1b[0m')
             try:
@@ -2238,11 +2249,13 @@ class BBSSession:
             if not recents:
                 return
             await self.write('\r\n\x1b[1;33m=== Sysop Broadcasts ===\x1b[0m\r\n')
+            from .text_safety import strip_untrusted_escapes
             for b in reversed(recents):  # oldest first
                 ts = fmt_eastern(b.created_at, '%m/%d %H:%M')
                 sender = b.sender.username if b.sender else 'sysop'
                 await self.write(
-                    f'\x1b[33m[{ts}] {sender}:\x1b[0m {b.text}\r\n')
+                    f'\x1b[33m[{ts}] {strip_untrusted_escapes(sender)}:\x1b[0m '
+                    f'{strip_untrusted_escapes(b.text)}\r\n')
             await self.write('\r\n')
         except Exception:
             # Never block login on broadcast surfacing failure.
@@ -2348,6 +2361,17 @@ class BBSSession:
                     pass
             except Exception:
                 self._node_entry = None
+
+            # Real gap found in a security/performance audit:
+            # _enforce_time_budget() -- the per-session/per-day
+            # UserTimeBudget cutoff sysops can configure in
+            # /admin/users/<id> -- was fully implemented but never
+            # actually called anywhere, so a configured limit had zero
+            # effect on a real session no matter what a sysop set it to.
+            try:
+                await self._enforce_time_budget()
+            except Exception:
+                pass
 
             # Cross-protocol presence: register this user in the SAME UserSession
             # table the web uses, so the web's "online" widget shows telnet/SSH/

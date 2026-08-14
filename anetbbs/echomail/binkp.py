@@ -9,6 +9,7 @@ Handles:
 - Creates EchomailMessage records from inbound packets
 - Packages outbound EchomailMessage records into .pkt files
 """
+import os
 import struct
 import socket
 import logging
@@ -17,6 +18,11 @@ import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Same cap + reasoning as binkp_server.py's MAX_INBOUND_FILE_SIZE
+# (the inbound listener) -- see _consume_inbound_file_frame() below
+# for why this side needs it too.
+MAX_INBOUND_FILE_SIZE = int(os.environ.get('BINKP_MAX_FILE_SIZE', 100 * 1024 * 1024))
 
 # ---------------------------------------------------------------------------
 # BinkP frame constants
@@ -1259,11 +1265,46 @@ class BinkPClient:
             if cmd == CMD_FILE:
                 text = data[1:].decode('latin-1', errors='replace')
                 parts = text.split()
-                state['pending_file'] = parts[0] if parts else 'unknown.pkt'
+                candidate_name = parts[0] if parts else 'unknown.pkt'
                 try:
-                    state['pending_size'] = int(parts[1]) if len(parts) > 1 else 0
+                    candidate_size = int(parts[1]) if len(parts) > 1 else 0
                 except ValueError:
-                    state['pending_size'] = 0
+                    candidate_size = -1
+                # Real gap found in a security audit: the same
+                # unauthenticated-memory-exhaustion pattern found and
+                # fixed in binkp_server.py's inbound listener also
+                # exists here on the outbound/dial-out side -- lower
+                # severity (only reachable via a hub you've explicitly
+                # configured a password for, not anonymous crashmail),
+                # but a compromised or buggy configured hub could still
+                # OOM this poller process by declaring an arbitrarily
+                # large file size with no cap. Reject without ever
+                # growing pending_data to match; state['pending_skip']
+                # tells the DATA-frame branch below to discard bytes as
+                # they arrive instead of buffering them, in case the
+                # hub ignores our M_SKIP and sends the data anyway.
+                if candidate_size < 0 or candidate_size > MAX_INBOUND_FILE_SIZE:
+                    logger.warning(
+                        "BinkP: refusing oversized/invalid file offer %r "
+                        "(declared %s bytes, max %d) -- sending SKIP",
+                        candidate_name, parts[1] if len(parts) > 1 else '?',
+                        MAX_INBOUND_FILE_SIZE)
+                    state['pending_file'] = candidate_name
+                    state['pending_size'] = max(candidate_size, 0)
+                    state['pending_mtime'] = parts[2] if len(parts) > 2 else '0'
+                    state['pending_skip'] = True
+                    state['pending_skipped'] = 0
+                    try:
+                        self._send_cmd(CMD_SKIP,
+                                      f'{candidate_name} '
+                                      f'{parts[1] if len(parts) > 1 else "0"} '
+                                      f'{state["pending_mtime"]}')
+                    except OSError:
+                        pass
+                    return True
+                state['pending_file'] = candidate_name
+                state['pending_size'] = candidate_size
+                state['pending_skip'] = False
                 # binkd's tfile_cmp() (prothlp.c, confirmed live against
                 # its actual source) requires an EXACT match on name,
                 # size, AND this mtime before it recognizes our M_GOT as
@@ -1316,6 +1357,16 @@ class BinkPClient:
         # Data frame.
         if state.get('pending_file') is None:
             return False
+        if state.get('pending_skip'):
+            # Rejected offer (see MAX_INBOUND_FILE_SIZE check above) --
+            # count and discard bytes instead of buffering them, in
+            # case the hub ignores our M_SKIP and keeps sending.
+            state['pending_skipped'] = state.get('pending_skipped', 0) + len(data)
+            if state['pending_skipped'] >= state['pending_size']:
+                state['pending_file'] = None
+                state['pending_skip'] = False
+                state['pending_skipped'] = 0
+            return True
         state['pending_data'] += data
         if state['pending_size'] > 0 and len(state['pending_data']) >= state['pending_size']:
             fname = state['pending_file']

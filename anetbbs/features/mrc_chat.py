@@ -148,16 +148,42 @@ _TERM_PALETTES = {
 _MYSTIC_PALETTE_NAMES = frozenset({'original', 'minimal', 'bitchx', '2leet4u', 'least'})
 
 
+# Real vulnerability found in a security audit: _pipe_to_ansi() only
+# ever rewrote |NN pipe-color tokens -- it never touched any raw
+# \x1b (ESC) byte already present in the inbound text, and every
+# display call site in this file funnels chat bodies through it. MRC
+# connects this BBS to an external, multi-BBS relay network, so any
+# user on ANY affiliated BBS could put a raw ANSI/CSI/OSC escape
+# sequence in a chat message or DM and have it written straight to an
+# ANSI-mode ANetBBS user's real terminal (screen clears, spoofed
+# prompts, cursor tricks). _INJECTED_ANSI_RE matches well-formed CSI/
+# OSC sequences so they're removed cleanly (no leftover bracket/digit
+# text visible in chat); _CONTROL_RE is the actual safety net --
+# chat bodies are legitimately single-line plain text, so stripping
+# the WHOLE C0 control range (+ DEL) guarantees a bare or malformed
+# ESC can never survive even if it doesn't match the tidy pattern.
+# Applied here (the one place every inbound body already passes
+# through) rather than needing every call site patched individually.
+_INJECTED_ANSI_RE = re.compile(r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
 def _pipe_to_ansi(s: str) -> str:
     if not s:
         return ''
+    s = _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
     def _sub(m):
         return f'\x1b[{_PIPE_COLORS.get(m.group(1), "37")}m'
     return _PIPE_RE.sub(_sub, s) + '\x1b[0m'
 
 
 def _strip_pipe(s: str) -> str:
-    return _PIPE_RE.sub('', s)
+    # Same fix as _pipe_to_ansi() above -- some call sites pre-strip
+    # ANSI via _ANSI_SEQ_RE before calling this, but not all (e.g. the
+    # /mentions log stores this value for LATER display without that
+    # pre-strip), so the same two-pass removal is baked in here too
+    # rather than relying on every caller to remember it.
+    return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', _PIPE_RE.sub('', s)))
 
 
 def _visible_len(text: str) -> int:

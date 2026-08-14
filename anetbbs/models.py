@@ -3402,6 +3402,15 @@ class QWKNode(db.Model):
     name = db.Column(db.String(100), nullable=False)
     sysop = db.Column(db.String(100))
     email = db.Column(db.String(200))
+    # Deliberately plaintext, NOT bcrypt-hashed like User.password_hash
+    # -- reviewed in a security audit and kept this way on purpose: this
+    # is a shared machine-to-machine credential (like an API key) the
+    # sysop routinely needs to look back up and hand to the node's own
+    # operator again (qwk_node_detail.html displays it in the admin
+    # UI), unlike a personal user login password, which nobody
+    # legitimately needs to retrieve after the fact. Brute-forcing is
+    # mitigated instead via rate limiting on the auth endpoint itself
+    # (see qwk_hub.py's _auth_node()).
     password = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, default=True, index=True)
     last_poll_at = db.Column(db.DateTime)

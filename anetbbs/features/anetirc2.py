@@ -53,9 +53,24 @@ _THEMES = [
 ]
 
 _MIRC_RE = re.compile(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?|\x02|\x0f|\x16|\x1f|\x1d|\x01[^\x01]*\x01')
+# Real vulnerability found in a security audit: _MIRC_RE only strips
+# mIRC formatting bytes -- it never matched \x1b (ESC), so any IRC
+# user (no ANetBBS account needed) could put a raw ANSI/CSI/OSC escape
+# sequence in a PRIVMSG and have it written straight to another BBS
+# user's real terminal (screen clears, spoofed prompts, cursor tricks).
+# Two passes: _ANSI_RE first, so well-formed CSI ("\x1b[...letter")
+# and OSC ("\x1b]...BEL-or-ST") sequences are removed cleanly (no
+# leftover bracket/digit text visible in chat); then _CONTROL_RE as a
+# blanket safety net that strips the ENTIRE C0 range (+ DEL) --
+# IRC message text is legitimately single-line/plain, so nothing
+# legitimate is lost, and this is what actually guarantees a bare or
+# malformed ESC byte can never survive even if it doesn't match the
+# well-formed patterns above.
+_ANSI_RE = re.compile(r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
 
 def _strip(text: str) -> str:
-    return _MIRC_RE.sub('', text)
+    return _CONTROL_RE.sub('', _ANSI_RE.sub('', _MIRC_RE.sub('', text)))
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────

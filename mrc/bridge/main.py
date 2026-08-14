@@ -85,15 +85,7 @@ def _load_config(explicit: Optional[str] = None) -> dict:
 
 
 def _redact_command_for_logs(cmd: str) -> str:
-    c = (cmd or "").strip()
-    if not c:
-        return c
-    upper = c.upper()
-    if upper.startswith("IDENTIFY "): return "IDENTIFY ********"
-    if upper.startswith("REGISTER "): return "REGISTER ********"
-    if upper.startswith("UPDATE "):   return "UPDATE ********"
-    if upper.startswith("ROOMPASS "): return "ROOMPASS ********"
-    return c
+    return MRCProtocol.redact_command_for_logs(cmd)
 
 
 def _format_template(tpl: str, **kwargs) -> str:
@@ -483,7 +475,7 @@ class MRCConnection:
     async def send_packet(self, packet: str):
         if not packet:
             return
-        logger.debug("MRC RAW OUT: %r", packet)
+        logger.debug("MRC RAW OUT: %r", MRCProtocol.redact_packet_for_logs(packet))
         if not self.connected or not self.writer:
             self._queue_packet(packet)
             return
@@ -524,7 +516,7 @@ class MRCConnection:
                     if not self._looks_like_packet(line):
                         logger.warning(f"Skipping non-packet line: {line!r}")
                         continue
-                    logger.debug("MRC RAW IN: %r", line)
+                    logger.debug("MRC RAW IN: %r", MRCProtocol.redact_packet_for_logs(line))
                     await self._handle_packet(line)
             except asyncio.CancelledError:
                 break
@@ -1415,6 +1407,13 @@ class BridgeApp:
         finally:
             self.websockets.pop(ws_id, None)
             self._ws_remote_ip.pop(ws_id, None)
+            # Real gap found in a security/performance audit: every
+            # connection that ever sent a rate-limited message type
+            # left a permanent entry here -- this dict was never
+            # cleaned up on disconnect the way websockets/_ws_remote_ip
+            # (right above) already are, so it grew without bound over
+            # the life of this long-running bridge process.
+            self.rate_limiter.pop(ws_id, None)
             sess = self.db.get_session(str(ws_id))
             if sess:
                 eff_nick = self._session_effective_nick(sess)

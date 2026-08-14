@@ -60,6 +60,7 @@ os.environ['DATABASE_URL'] = _db_url
 # ─────────────────────────────────────────────────────────────────────────────
 
 import logging
+import re
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,7 +69,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger('anetbbs.serve')
 logger.info("INSTALL_DIR: %s", _INSTALL_DIR)
-logger.info("DATABASE_URL: %s", _db_url)
+
+# Real gap found in a security/performance audit: this used to log
+# _db_url completely raw. SQLite URLs (sqlite:///path, the only
+# officially supported backend right now) have no credentials at all
+# so this was a no-op in practice -- but ANETBBS_DB_URL is a real,
+# already-wired escape hatch for Postgres/MySQL ("Operators who
+# deliberately want Postgres... should set ANETBBS_DB_URL instead",
+# see above), whose connection strings DO carry a plaintext password
+# (scheme://user:PASSWORD@host/db) that would otherwise land in the
+# systemd journal on every single service start/restart, permanently.
+# A no-op today, latent the moment Postgres support is actually used.
+_DB_URL_CREDENTIALS_RE = re.compile(r'(://[^:/@]+):[^@/]*@')
+
+def _redact_db_url(url):
+    if not url:
+        return url
+    return _DB_URL_CREDENTIALS_RE.sub(r'\1:***@', url)
+
+logger.info("DATABASE_URL: %s", _redact_db_url(_db_url))
 
 import pathlib as _pl
 _db_path = _pl.Path(_INSTALL_DIR) / 'data' / 'anetbbs.db'

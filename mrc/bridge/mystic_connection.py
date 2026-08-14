@@ -194,7 +194,7 @@ class MysticMultiplexerConnection:
     async def send_packet(self, packet: str):
         if not packet:
             return
-        logger.debug("MYSTIC RAW OUT: %r", packet)
+        logger.debug("MYSTIC RAW OUT: %r", MRCProtocol.redact_packet_for_logs(packet))
         out_dir = mrc_outbound_dir(self.bbspath)
         out_dir.mkdir(parents=True, exist_ok=True)
         self._outbound_seq += 1
@@ -267,7 +267,7 @@ class MysticMultiplexerConnection:
                         line = raw.strip()
                         if not line:
                             continue
-                        logger.debug("MYSTIC RAW IN: %r", line)
+                        logger.debug("MYSTIC RAW IN: %r", MRCProtocol.redact_packet_for_logs(line))
                         if self._latency.check_received(line) and self.latency_callback:
                             await self.latency_callback(self._latency.latency_ms)
                         try:

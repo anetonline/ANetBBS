@@ -386,6 +386,19 @@ When in doubt: if the door pack is a self-contained JS file with its
 own data directory, it'll likely work. If it's something Synchronet
 ships *with* Synchronet (like the message reader), it won't.
 
+**Security note, confirmed in an audit**: this compat shim is
+deliberately unsandboxed — a door script has real filesystem and
+`child_process` access (`bbs.exec()`, `system.exec()`/`system.popen()`
+run real shell commands) with no jail or restricted view. This mirrors
+real Synchronet's own door model exactly (doors have always run with
+the BBS's own OS privileges there too, on every mainstream BBS
+platform) — it's not an ANetBBS-specific gap. The practical
+consequence: setting a Game's `synchronet_script_path` in Admin →
+Games grants arbitrary code execution as the BBS service account, the
+same trust level as `data/mods/core/` overrides (see above) or the
+`anetbbs-cfg` tool. Only ever point it at scripts from a source you
+trust as much as you'd trust a sysop with a shell account.
+
 ### `data/mods/` — the sysop override tree (v1.0.36+)
 
 `data/mods/` is ANetBBS's answer to real Synchronet's own `/sbbs/mods/`

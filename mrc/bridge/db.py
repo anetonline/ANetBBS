@@ -3,6 +3,7 @@ Simple file-based persistence for MRC bridge service.
 Stores user profiles and session data.
 """
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
@@ -29,8 +30,20 @@ class BridgeDB:
         return {}
 
     def _save_json(self, filepath: Path, data: dict):
-        with open(filepath, 'w') as f:
+        # Real gap found in a security/performance audit: this used
+        # to write directly to filepath, not atomically -- a crash or
+        # kill mid-write leaves a truncated/invalid JSON file behind,
+        # which _load_json() above silently treats as {} on the NEXT
+        # start, losing every user's session/profile state at once
+        # rather than just the one write in progress. Writing to a
+        # sibling temp file first and os.replace()-ing it into place
+        # means the real file is only ever fully-written JSON or the
+        # previous good version -- never a partial write, since
+        # os.replace() is atomic on both POSIX and Windows.
+        tmp_path = filepath.with_suffix(filepath.suffix + '.tmp')
+        with open(tmp_path, 'w') as f:
             json.dump(data, f, indent=2)
+        os.replace(tmp_path, filepath)
 
     def save_profile(self, handle: str, data: dict):
         self._profiles[handle] = {**data, 'updated_at': datetime.utcnow().isoformat()}

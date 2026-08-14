@@ -280,6 +280,29 @@ def cleanup_stale_sessions(app, params):
         return False, f'cleanup_stale_sessions failed: {exc!r}'
 
 
+def cleanup_stale_game_sessions(app, params):
+    """Delete/close long-stale GameSession rows and release their
+    game-center node slots.
+
+    Real gap found in a security/performance audit: anetbbs/games/
+    node_manager.py's own cleanup_stale_sessions() (a distinct
+    function from the UserSession one above -- same name, different
+    table) already existed to sweep GameSession rows a crashed/killed
+    door process left stuck at status='active' forever, permanently
+    holding a node slot other players can never reclaim -- but nothing
+    anywhere ever called it. Wired in here the same way the
+    UserSession backstop above is, rather than adding a second,
+    parallel scheduling mechanism.
+    """
+    try:
+        from ..games.node_manager import cleanup_stale_sessions as _impl
+        timeout_seconds = int((params or {}).get('timeout_seconds', 3600))
+        _impl(timeout_seconds=timeout_seconds)
+        return True, f'Swept GameSession rows stale past {timeout_seconds}s'
+    except Exception as exc:  # noqa: BLE001
+        return False, f'cleanup_stale_game_sessions failed: {exc!r}'
+
+
 def hub_generate_nodelist(app, params):
     """Generate the ANotherNetwork nodelist and publish it into the
     ANN.FILES.NODELIST file area, replacing the prior copy, so peers can
@@ -361,6 +384,7 @@ REGISTRY: Dict[str, HandlerFn] = {
     'log_rotate':           log_rotate,
     'security_check':       security_check,
     'cleanup_stale_sessions': cleanup_stale_sessions,
+    'cleanup_stale_game_sessions': cleanup_stale_game_sessions,
     'hub_generate_nodelist': hub_generate_nodelist,
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
@@ -376,6 +400,7 @@ HANDLER_META = {
     'log_rotate':     ('Rotate large logs',      'Roll any logs/*.log over the threshold to .1. Params: max_mb (default 50).'),
     'security_check': ('Security update check',  'apt + pip outdated scan, tags Ubuntu-security rows. Report at /admin/security/.'),
     'cleanup_stale_sessions': ('Clean up stale online-presence rows', "Delete UserSession rows untouched for stale_days (default 1) -- catches connections that never got a clean disconnect (dropped carrier, killed process). Params: stale_days."),
+    'cleanup_stale_game_sessions': ('Clean up stale game-center node slots', "Close GameSession rows stuck at status='active' and release their node slot, for doors whose process crashed/was killed without a clean exit. Params: timeout_seconds (default 3600)."),
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
@@ -429,5 +454,16 @@ DEFAULT_EVENTS = [
         # per user -- every install needs this backstop, not just new
         # ones.
         'schedule_json': '{"kind": "daily", "time": "05:00"}',
+    },
+    {
+        'name': 'Clean up stale game-center node slots',
+        'handler_key': 'cleanup_stale_game_sessions',
+        'params_json': '{"timeout_seconds": 3600}',
+        # 05:15 UTC — right after the UserSession backstop above, same
+        # "every install needs this, not just new ones" reasoning:
+        # this existed as dead code (nothing ever called it) until
+        # this audit wired it in, so every existing install is
+        # missing it just as much as a fresh one.
+        'schedule_json': '{"kind": "daily", "time": "05:15"}',
     },
 ]

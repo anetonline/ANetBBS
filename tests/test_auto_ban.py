@@ -235,6 +235,79 @@ class AutoBanTests(unittest.TestCase):
                 IpBan.query.filter_by(cidr='127.0.0.1').first(),
                 'the real connecting IP must be banned instead')
 
+    def test_expired_ban_no_longer_blocks_and_is_filtered_in_sql(self):
+        """Real gap found in a security audit: _ip_is_banned() used to
+        load EVERY IpBan row (expired ones included) and filter expiry
+        in Python on every single request -- unbounded query cost as
+        the table grows. Now filters expiry in SQL directly; this
+        proves the behavior is unchanged (an expired ban still doesn't
+        block) even though the query itself changed."""
+        from anetbbs.models import db, IpBan
+        from anetbbs.web.auth import _ip_is_banned
+        with self.app.app_context():
+            db.session.add(IpBan(cidr='198.51.100.1', reason='old test ban',
+                                 expires_at=datetime.utcnow() - timedelta(hours=1)))
+            db.session.commit()
+            self.assertFalse(_ip_is_banned('198.51.100.1'),
+                             'an already-expired ban must not block login')
+
+    def test_permanent_ban_still_blocks(self):
+        from anetbbs.models import db, IpBan
+        from anetbbs.web.auth import _ip_is_banned
+        with self.app.app_context():
+            db.session.add(IpBan(cidr='198.51.100.2', reason='permanent test ban',
+                                 expires_at=None))
+            db.session.commit()
+            self.assertTrue(_ip_is_banned('198.51.100.2'),
+                            'a permanent (expires_at=None) ban must still block')
+
+    def test_periodic_purge_removes_long_expired_rows(self):
+        """The 1-in-20 probabilistic purge piggybacked on _auto_ban_ip()
+        -- force it to fire every time via the random seed, and confirm
+        a long-expired row (well past the 7-day cutoff) actually gets
+        deleted, while a recent (still within the cutoff) expired row
+        is left alone."""
+        from anetbbs.models import db, AutoBanConfig, IpBan
+        from anetbbs.web.auth import _auto_ban_ip
+        with self.app.app_context():
+            cfg = AutoBanConfig.get()
+            cfg.enabled = True
+            db.session.commit()
+
+            db.session.add(IpBan(cidr='198.51.100.10', reason='ancient',
+                                 expires_at=datetime.utcnow() - timedelta(days=30)))
+            db.session.add(IpBan(cidr='198.51.100.11', reason='recently expired',
+                                 expires_at=datetime.utcnow() - timedelta(hours=1)))
+            db.session.commit()
+
+            # Force the 1-in-20 purge branch to fire deterministically
+            # instead of relying on random chance.
+            with _ForcedPurge():
+                _auto_ban_ip('198.51.100.12')
+
+            remaining = {b.cidr for b in IpBan.query.all()}
+            self.assertNotIn('198.51.100.10', remaining,
+                             'a long-expired (>7 days) row should have been purged')
+            self.assertIn('198.51.100.11', remaining,
+                          'a recently-expired (<7 days) row should NOT be purged yet')
+
+
+class _ForcedPurge:
+    """Context manager that monkeypatches random.randint so the
+    1-in-20 purge branch in _auto_ban_ip() always fires, for a
+    deterministic test instead of relying on random chance."""
+
+    def __enter__(self):
+        import random
+        self._orig = random.randint
+        random.randint = lambda a, b: 1
+        return self
+
+    def __exit__(self, *exc):
+        import random
+        random.randint = self._orig
+        return False
+
 
 if __name__ == '__main__':
     unittest.main()

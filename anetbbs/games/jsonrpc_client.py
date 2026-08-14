@@ -168,6 +168,15 @@ class JSONRPCClient:
         self._sock.settimeout(self.recv_timeout)
         self._sock.sendall(data)
 
+    # Real gap found in a security/performance audit: readline() below
+    # had no max-line-length guard -- a broken or hostile JSON-RPC peer
+    # (this is a real socket to json-sock.js's server, not just trusted
+    # local IPC) sending an infinite line with no '\n' would grow this
+    # process's memory unboundedly while readline() waits for a
+    # terminator that never arrives. Real JSON-RPC packets for this
+    # API are small control messages; 1MB is generous headroom.
+    _MAX_LINE_CHARS = 1_000_000
+
     def _recv_one(self):
         """Read and parse exactly one line-delimited JSON packet.
         Transparently answers server PINGs with a PONG (matching
@@ -175,9 +184,13 @@ class JSONRPCClient:
         -- neither is a real response to hand back to the caller."""
         self._sock.settimeout(self.recv_timeout)
         while True:
-            line = self._rfile.readline()
+            line = self._rfile.readline(self._MAX_LINE_CHARS)
             if not line:
                 raise JSONRPCError('connection closed by server')
+            if len(line) >= self._MAX_LINE_CHARS and not line.endswith('\n'):
+                raise JSONRPCError(
+                    f'line exceeded {self._MAX_LINE_CHARS} char limit with no '
+                    'terminator -- refusing to keep reading')
             line = line.strip()
             if not line:
                 continue

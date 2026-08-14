@@ -42,6 +42,27 @@ from .binkp import (
 
 logger = logging.getLogger(__name__)
 
+# Real vulnerability found in a security audit: the size field in an
+# incoming CMD_FILE header is fully attacker-controlled and was never
+# checked before this fix -- state['buf'] would grow to match whatever
+# size a peer claimed. Worse, this file-receive path is reachable with
+# ZERO authentication at all: an unrecognized peer is deliberately
+# accepted as "anonymous crashmail" (see _handle_connection below,
+# matching real FTN nodelist convention) and still proceeds to file
+# receive. Any host on the internet could connect, complete the
+# trivial handshake, and declare an arbitrarily large file size to
+# exhaust this daemon's memory. 100MB comfortably covers real echomail/
+# file-echo traffic (packets and file-echo distributions are routinely
+# well under this) while bounding the worst case; configurable via env
+# for anyone who legitimately needs larger file-echo distributions.
+MAX_INBOUND_FILE_SIZE = int(os.environ.get('BINKP_MAX_FILE_SIZE', 100 * 1024 * 1024))
+
+# Defense in depth alongside the per-file cap above: bounds how many
+# BinkP sessions can be mid-receive at once, so even many separate
+# connections each offering a just-under-the-cap file can't add up to
+# unbounded total memory.
+MAX_CONCURRENT_SESSIONS = int(os.environ.get('BINKP_MAX_CONCURRENT_SESSIONS', 20))
+
 
 # FidoNet hubs deliver mail in several wrappers:
 #
@@ -354,7 +375,13 @@ def _verify_binkp_password(stored_password, remote_pwd, challenge_bytes):
         digest = remote[len('CRAM-MD5-'):]
         expected = hmac.new(stored.encode('latin-1'), challenge_bytes,
                             hashlib.md5).hexdigest()
-        return digest.lower() == expected.lower()
+        # Real gap found in a security/performance audit: a plain ==
+        # on hex digests short-circuits on the first mismatched
+        # character, leaking (via response timing) how many leading
+        # hex digits an attacker's guess got right -- hmac.compare_digest
+        # runs in constant time regardless of where the strings first
+        # differ.
+        return hmac.compare_digest(digest.lower(), expected.lower())
     # binkp.py's client (our own outbound-dial side) sends the literal
     # placeholder "-" for M_PWD when it has no password configured --
     # a real-world BinkP convention (M_PWD historically couldn't carry
@@ -366,7 +393,11 @@ def _verify_binkp_password(stored_password, remote_pwd, challenge_bytes):
     # sentinel for the exact same "no password" state.
     if not stored and remote in ('', '-'):
         return True
-    return stored == remote
+    # Same constant-time reasoning as the CRAM-MD5 branch above -- this
+    # is the legacy plaintext-M_PWD path, still a real credential
+    # comparison.
+    return hmac.compare_digest(stored.encode('latin-1', errors='replace'),
+                               remote.encode('latin-1', errors='replace'))
 
 
 # ---------------------------------------------------------------------------
@@ -1402,8 +1433,35 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
             # "filename size unix_time offset"
             parts = body.split()
             if len(parts) >= 2:
+                try:
+                    declared_size = int(parts[1])
+                except ValueError:
+                    declared_size = -1
+                if declared_size < 0 or declared_size > MAX_INBOUND_FILE_SIZE:
+                    # Reject without ever allocating a buffer for it --
+                    # see MAX_INBOUND_FILE_SIZE's own comment above for
+                    # why this matters (unauthenticated peers can reach
+                    # this path). state['skip'] tells the DATA-frame
+                    # branch below to discard bytes as they arrive
+                    # instead of buffering them, so a peer that ignores
+                    # our M_SKIP and sends the data anyway still can't
+                    # grow memory unboundedly.
+                    logger.warning(
+                        'BinkP %s: refusing oversized/invalid file offer '
+                        '%r (declared %s bytes, max %d) -- sending SKIP',
+                        peer, parts[0], parts[1], MAX_INBOUND_FILE_SIZE)
+                    state['name'] = parts[0]
+                    state['size'] = max(declared_size, 0)
+                    state['mtime'] = parts[2] if len(parts) >= 3 else '0'
+                    state['skip'] = True
+                    state['skipped'] = 0
+                    await _send_cmd(writer, CMD_SKIP,
+                                    f"{parts[0]} {parts[1]} {state['mtime']}",
+                                    transcript=transcript)
+                    return True
                 state['name'] = parts[0]
-                state['size'] = int(parts[1])
+                state['size'] = declared_size
+                state['skip'] = False
                 # binkd's tfile_cmp() (prothlp.c) requires an EXACT match
                 # on name, size, AND this mtime before it will recognize
                 # our M_GOT as acknowledging the file it sent -- real
@@ -1449,6 +1507,19 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
     # Data frame.
     if state.get('name') is None:
         return False
+    if state.get('skip'):
+        # Rejected offer (see MAX_INBOUND_FILE_SIZE above) -- a
+        # compliant peer stops sending after M_SKIP, but count and
+        # discard bytes instead of buffering them in case a
+        # non-compliant/malicious one keeps sending anyway. Once we've
+        # seen at least as many bytes as declared, treat the file as
+        # drained and go back to waiting for the next offer.
+        state['skipped'] = state.get('skipped', 0) + len(payload)
+        if state['skipped'] >= state['size']:
+            state['name'] = None
+            state['skip'] = False
+            state['skipped'] = 0
+        return True
     state['buf'].extend(payload)
     if len(state['buf']) >= state['size']:
         files.append((state['name'], bytes(state['buf'][:state['size']])))
@@ -1979,18 +2050,36 @@ async def _serve():
     our_address = os.environ.get('BINKP_OUR_ADDRESS', '1:1/1')
     system_name = os.environ.get('BINKP_SYSTEM_NAME', 'ANetBBS')
 
+    # Defense in depth alongside MAX_INBOUND_FILE_SIZE (see its comment):
+    # bounds how many sessions -- each potentially holding up to that
+    # per-file cap in memory -- can be in flight at once, since the
+    # file-receive path requires no authentication at all.
+    _session_slots = asyncio.Semaphore(MAX_CONCURRENT_SESSIONS)
+
     async def _wrapper(reader, writer):
-        try:
-            await _handle_connection(reader, writer, our_address, system_name)
-        except (ConnectionResetError, BrokenPipeError):
-            pass  # health probe or client disconnect — not a crash
-        except Exception:
-            logger.exception('BinkP session crashed')
-        finally:
+        if _session_slots.locked():
+            # Full -- reject immediately rather than queuing forever
+            # behind the semaphore, so a flood of connections can't
+            # pile up waiting.
+            logger.warning('BinkP: refusing connection, %d sessions already active',
+                            MAX_CONCURRENT_SESSIONS)
             try:
                 writer.close()
             except Exception:
                 pass
+            return
+        async with _session_slots:
+            try:
+                await _handle_connection(reader, writer, our_address, system_name)
+            except (ConnectionResetError, BrokenPipeError):
+                pass  # health probe or client disconnect — not a crash
+            except Exception:
+                logger.exception('BinkP session crashed')
+            finally:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
 
     server = await asyncio.start_server(_wrapper, host=host, port=port)
     logger.info('BinkP listener on %s:%d as %s', host, port, our_address)

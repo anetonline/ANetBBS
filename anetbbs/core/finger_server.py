@@ -22,14 +22,25 @@ def _online_users():
     """Return list of currently-online users via UserSession."""
     try:
         from ..models import UserSession, User
+        from .text_safety import strip_untrusted_escapes as _sue
         cutoff = datetime.utcnow() - timedelta(minutes=5)
         rows = (UserSession.query
                 .filter(UserSession.last_seen >= cutoff)
                 .join(User, User.id == UserSession.user_id)
                 .all())
+        # Real gap found in a security/performance audit, follow-up to
+        # the profile-field fix in _handle() below: 'where' is mostly
+        # built from sysop-configured menu labels / fixed literals
+        # (SessionPresence.set_page()'s callers), but at least one path
+        # (mrc_chat.py's chat:mrc #<room> presence) can carry a room
+        # name a user typed themselves -- same cross-user display path
+        # (finger, no local account needed by the viewer) as the other
+        # profile fields, so sanitized the same way for consistency
+        # rather than trusting every current and future set_page()
+        # caller to only ever pass safe text.
         return [{
             'username': r.user.username,
-            'where': r.page or '',
+            'where': _sue(r.page or ''),
             'last_seen': r.last_seen,
         } for r in rows]
     except Exception:
@@ -109,10 +120,18 @@ async def _handle(reader, writer):
             if info is None:
                 out_lines.append(f'No such user: {raw}')
             else:
+                # Real gap found in a security audit: profile fields
+                # are set by the account owner and shown here to
+                # whoever fingers them -- a user could put ANSI
+                # escapes in their own display name/location/tagline/
+                # bio and have them fire on anyone (including an
+                # admin) who looks them up through a real terminal-
+                # based finger client. See text_safety.py.
+                from .text_safety import strip_untrusted_escapes as _sue
                 out_lines.append(f"Login:    {info['username']}")
-                out_lines.append(f"Name:     {info['display_name']}")
+                out_lines.append(f"Name:     {_sue(info['display_name'])}")
                 if info['location']:
-                    out_lines.append(f"Location: {info['location']}")
+                    out_lines.append(f"Location: {_sue(info['location'])}")
                 if info['last_login']:
                     out_lines.append(
                         f"Last on:  {info['last_login'].strftime('%Y-%m-%d %H:%M UTC')}")
@@ -121,12 +140,12 @@ async def _handle(reader, writer):
                     out_lines.append('Status:   Sysop')
                 if info['tagline']:
                     out_lines.append('')
-                    out_lines.append(f'Tagline:  {info["tagline"]}')
+                    out_lines.append(f'Tagline:  {_sue(info["tagline"])}')
                 if info['bio']:
                     out_lines.append('')
                     out_lines.append('Plan:')
                     for line in info['bio'].splitlines():
-                        out_lines.append(f'  {line}')
+                        out_lines.append(f'  {_sue(line)}')
 
     out_lines.append('')
     payload = ('\r\n'.join(out_lines) + '\r\n').encode('utf-8', errors='replace')

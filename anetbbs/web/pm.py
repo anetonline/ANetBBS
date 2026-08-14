@@ -26,24 +26,39 @@ class ComposeForm(FlaskForm):
     submit = SubmitField('Send')
 
 
+# Real gap found in a security/performance audit: both routes below
+# used to do a plain unbounded .all() -- every message a user ever
+# sent/received got fetched and rendered on every single visit.
+# netmail.py's equivalent routes already cap at .limit(200), but a
+# flat cap makes anything past it permanently unreachable; real
+# pagination (the same query.paginate() pattern already used
+# throughout this codebase -- see boards.py, admin.py, etc.) keeps
+# every message reachable without the unbounded per-visit cost.
+PM_PER_PAGE = 50
+
+
 @pm_bp.route('/')
 @login_required
 def inbox():
-    messages = PrivateMessage.query.filter_by(
+    page = request.args.get('page', 1, type=int)
+    pagination = PrivateMessage.query.filter_by(
         recipient_id=current_user.id,
         is_deleted_recipient=False
-    ).order_by(PrivateMessage.created_at.desc()).all()
-    return render_template('pm/inbox.html', messages=messages)
+    ).order_by(PrivateMessage.created_at.desc()).paginate(
+        page=page, per_page=PM_PER_PAGE, error_out=False)
+    return render_template('pm/inbox.html', messages=pagination.items, pagination=pagination)
 
 
 @pm_bp.route('/sent')
 @login_required
 def sent():
-    messages = PrivateMessage.query.filter_by(
+    page = request.args.get('page', 1, type=int)
+    pagination = PrivateMessage.query.filter_by(
         sender_id=current_user.id,
         is_deleted_sender=False
-    ).order_by(PrivateMessage.created_at.desc()).all()
-    return render_template('pm/sent.html', messages=messages)
+    ).order_by(PrivateMessage.created_at.desc()).paginate(
+        page=page, per_page=PM_PER_PAGE, error_out=False)
+    return render_template('pm/sent.html', messages=pagination.items, pagination=pagination)
 
 
 @pm_bp.route('/compose', methods=['GET', 'POST'])

@@ -114,12 +114,41 @@ class DoorSession:
 
     def close(self):
         """Terminate the game process and clean up the PTY fd + TCP bridge."""
+        # Real gap found in a security audit: this was the ONLY
+        # termination path for every door type except door_dos (which
+        # already got this exact fix -- see _on_bridge_close() below)
+        # -- a single SIGTERM with no confirmation and no SIGKILL
+        # fallback. A door process that ignores/blocks SIGTERM (a
+        # Node-based Synchronet-compat door parked in a synchronous
+        # call, a native binary that traps the signal, etc.) survived
+        # indefinitely as an orphaned, no-longer-tracked process after
+        # a user aborted (Ctrl+]q) or otherwise disconnected -- the
+        # same class of leak as the v1.0.21 incident, just via
+        # processes instead of a cached object. killpg (not kill)
+        # because the fork in launch_door_game() always calls
+        # os.setsid() in the child, same reasoning as
+        # _on_bridge_close() -- catches any child processes the door
+        # itself spawned too, not just the door's own top-level pid.
         try:
-            os.kill(self.pid, signal.SIGTERM)
+            os.killpg(self.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
         except OSError as exc:
             logger.warning('Kill error (session %d): %s', self.session_id, exc)
+        else:
+            def _force_kill(pid=self.pid, session_id=self.session_id):
+                import time as _t
+                _t.sleep(2)
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                else:
+                    logger.warning(
+                        'Door session %d still alive 2s after SIGTERM -- sent SIGKILL',
+                        session_id)
+            threading.Thread(target=_force_kill, daemon=True,
+                             name=f'force-kill-{self.session_id}').start()
         if self.dos_bridge is not None:
             try:
                 self.dos_bridge.stop()
@@ -2064,6 +2093,36 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
             await session.write("\r\nGame not found.\r\n")
             return False
 
+        # Real privilege-escalation bug found in a security audit:
+        # anetbbs-cfg (the standalone curses tool that can edit user
+        # security levels, echomail/hub credentials, etc.) is only
+        # ever supposed to be reachable SSH-only + admin-only, and
+        # bbs_ui.py's own _sysop_cfg_tool() docstring specifically
+        # claims it's "gated twice" so a bug elsewhere in the menu
+        # system can't bypass that. That claim was false: this
+        # function -- the actual, shared door-launch entry point -- is
+        # also reachable directly from the generic "launch a door by
+        # raw numeric id" menu action (menu_engine.py's _act_door),
+        # which performs NO admin/SSH/is_active check at all, and
+        # anetbbs-cfg's own entry point (cfg/app.py) performs no
+        # internal auth of its own either -- it fully trusts whatever
+        # called it. If a sysop ever pointed any menu item's door
+        # action at this Game's id (easy to do by accident -- it's
+        # free-text numeric entry, not a filtered picker), any logged-
+        # in user over plaintext telnet got the real tool. Enforced
+        # HERE, the one place every door-launch path actually funnels
+        # through, rather than trusting every current and future
+        # caller to remember the check.
+        if live_game.slug == 'anetbbs-cfg':
+            is_ssh = (getattr(getattr(session, 'presence', None), 'protocol', None)
+                      == 'ssh')
+            is_admin = bool(getattr(live_user, 'is_admin', False))
+            if not (is_ssh and is_admin):
+                await session.write(
+                    "\r\nThe config tool is only available to sysops over "
+                    "SSH.\r\n")
+                return False
+
         # Validate the command BEFORE launching so we can show a clear error.
         # This is a dry run purely to surface config problems early -- the
         # built command/cwd are never actually used to launch anything here
@@ -2110,8 +2169,26 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
     # live bundling Minesweeper (intermittent instant-quit race).
     await _drain_stale_session_input(session)
 
+    # Real gap found in a security audit: the message just above this
+    # promises "{_idle_t}s of zero activity will auto-abort the door"
+    # for EVERY door type routed through this function, but the actual
+    # enforcement only ever existed for door_dos (its TCP bridge's own
+    # idle_timeout, tied to bytes flowing over that specific socket --
+    # see bind_emit() above). A hung/looping door_native/door_mystic/
+    # door_synchronet process that keeps the PTY open but produces no
+    # more output, with a user who doesn't manually abort or
+    # disconnect, ran forever with zero server-side enforcement --
+    # directly contradicting what the user was told, and compounding
+    # the process-leak fix above (DoorSession.close()'s SIGKILL
+    # fallback) by giving it nothing to ever trigger on for this case.
+    # last_activity is updated by BOTH pumps below (door output OR
+    # user input either one resets the clock), matching the plain-
+    # English meaning of "activity" the message already promises.
+    last_activity = asyncio.get_event_loop().time()
+
     # Pump PTY output -> session writer
     async def _output_pump():
+        nonlocal last_activity
         while True:
             try:
                 data = await out_queue.get()
@@ -2119,6 +2196,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 break
             if not data:
                 break
+            last_activity = asyncio.get_event_loop().time()
             try:
                 if isinstance(data, bytes):
                     # Decode as cp437 to preserve box-drawing / pipe codes
@@ -2136,6 +2214,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
     abort_event = asyncio.Event()
 
     async def _input_pump():
+        nonlocal last_activity
         seen_escape = False
         while True:
             try:
@@ -2144,6 +2223,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 break
             if not ch:
                 break
+            last_activity = asyncio.get_event_loop().time()
             if seen_escape:
                 seen_escape = False
                 if ch in (b'q', b'Q'):
@@ -2182,6 +2262,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
     # orphaned in /tmp on a real install. in_task.done() is the direct,
     # immediate signal for this -- no need to wait out an idle timer, the
     # input pump already knows the instant the connection is gone.
+    idle_timeout_hit = False
     try:
         while True:
             try:
@@ -2194,6 +2275,14 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
             with _sessions_lock:
                 still_active = sid in _sessions
             if not still_active:
+                break
+            # See last_activity's own comment above _output_pump() --
+            # this is the enforcement the door-launch message promises
+            # but, before this fix, only door_dos actually had.
+            if asyncio.get_event_loop().time() - last_activity >= _idle_t:
+                logger.info('Door %s session %d auto-aborted: %ds idle',
+                           game.slug, sid, _idle_t)
+                idle_timeout_hit = True
                 break
     finally:
         for t in (out_task, in_task):
@@ -2217,6 +2306,9 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
 
     if abort_event.is_set():
         await session.write("\r\n\r\n[Door aborted by user — Ctrl+]q]\r\n")
+    elif idle_timeout_hit:
+        await session.write(
+            f"\r\n\r\n[Door auto-aborted — {_idle_t}s of zero activity]\r\n")
     else:
         # Use the wrapped read_line so telnet IAC bytes left in the buffer
         # by the door get stripped and either \r or \n terminates the prompt.
@@ -2269,6 +2361,78 @@ class _ExternalDoorSession:
             except Exception:  # pylint: disable=broad-except
                 logger.exception('external door stop failed')
             self.dos_bridge = None
+
+
+def _build_transient_app():
+    """Build a fresh, disposable Flask app + engine for a one-off DB
+    op outside a real request/session app context -- the rlogin/plain-
+    telnet terminal bridges below run inside the telnet/SSH server
+    process, not Flask, so there's no ambient app context to reuse
+    (matches the same per-call-app pattern play_door_game_telnet
+    already uses for its own setup)."""
+    import os
+    from flask import Flask
+    from anetbbs.config import get_config
+    app = Flask(__name__)
+    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+    db.init_app(app)
+    return app
+
+
+async def _allocate_external_node(game, user):
+    """Allocate a node + open a GameSession row for an external
+    (rlogin/plain-telnet) door bridge -- shared by play_rlogin_telnet
+    and play_telnet_terminal.
+
+    Real gap found in a security/performance audit: neither of those
+    two functions ever enforced Game.max_nodes at all -- unlike every
+    locally-spawned door type (play_door_game_telnet, via
+    launch_door_game) and unlike their own socketio-side twins
+    (launch_rlogin_session/launch_telnet_session right below/above,
+    which already allocate correctly) -- so a sysop-configured
+    max_nodes limit (meant to protect the REMOTE server, e.g. a TWGS
+    instance or another BBS's own node limit, from being hammered) had
+    no effect at all for terminal (telnet/SSH/rlogin) sessions: an
+    unbounded number of concurrent bridges to the same external server
+    could always be opened.
+
+    Returns (app, node, gs_id) on success, or None if no free node.
+    """
+    from ..features.db_scope import transient_app_context
+    app = _build_transient_app()
+    with transient_app_context(app):
+        node = allocate_node(game.id, game.max_nodes or 1, -1)
+        if node is None:
+            return None
+        _uid = (user.get('id') if isinstance(user, dict)
+                else getattr(user, 'id', None)) or 0
+        gs = GameSession(game_id=game.id, user_id=_uid, node_number=node,
+                         status='active')
+        db.session.add(gs)
+        db.session.commit()
+        gs_id = gs.id
+        from .node_manager import _active, _lock as _node_lock
+        with _node_lock:
+            _active[(game.id, node)] = gs_id
+    return app, node, gs_id
+
+
+def _release_external_node(app, game, node, gs_id, crashed=False):
+    """Counterpart to _allocate_external_node -- must be called on
+    every exit path once allocation succeeded, or the node stays
+    permanently held, exactly like skipping cleanup for any other door
+    type would."""
+    from ..features.db_scope import transient_app_context
+    release_node(game.id, node)
+    try:
+        with transient_app_context(app):
+            gs = GameSession.query.get(gs_id)
+            if gs is not None and gs.status == 'active':
+                gs.status = 'crashed' if crashed else 'completed'
+                gs.ended_at = datetime.utcnow()
+                db.session.commit()
+    except Exception:  # pylint: disable=broad-except
+        logger.exception('external door node release failed for session %d', gs_id)
 
 
 def launch_rlogin_session(game, user, emit_fn, bbs_name='ANetBBS'):
@@ -2456,6 +2620,18 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
     client_user = build_client_user(
         user_template, username, alias, getattr(game, 'rlogin_bbs_tag', None))
 
+    # Real gap found in a security/performance audit: this used to
+    # jump straight to connecting, with no node allocation at all --
+    # see _allocate_external_node()'s own docstring.
+    _alloc = await _allocate_external_node(game, user)
+    if _alloc is None:
+        await session.write(
+            "\r\nAll nodes for this door are currently in use — "
+            "try again later.\r\n")
+        await session.read_line("Press Enter...")
+        return False
+    _ext_app, _ext_node, _ext_gs_id = _alloc
+
     await session.write(
         f"\r\nConnecting to {host}:{port}...\r\n"
         f"  - Press Ctrl+] then 'q' to abort\r\n\r\n")
@@ -2468,6 +2644,7 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
     except (OSError, asyncio.TimeoutError) as exc:
         await session.write(f"\r\nConnection failed: {exc}\r\n")
         await session.read_line("Press Enter...")
+        _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
         return False
 
     # Send rlogin handshake. Synchronet BBS-style ordering:
@@ -2486,6 +2663,7 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         try: writer.close()
         except Exception: pass
         await session.read_line("Press Enter...")
+        _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
         return False
 
     # See _drain_stale_session_input()'s own docstring -- real bug found
@@ -2573,6 +2751,8 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         writer.close()
     except Exception:
         pass
+
+    _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=False)
 
     if abort_event.is_set():
         await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
@@ -2707,6 +2887,18 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
     else:
         host, port = server_addr, 23
 
+    # Real gap found in a security/performance audit: this used to
+    # jump straight to connecting, with no node allocation at all --
+    # see _allocate_external_node()'s own docstring.
+    _alloc = await _allocate_external_node(game, user)
+    if _alloc is None:
+        await session.write(
+            "\r\nAll nodes for this door are currently in use — "
+            "try again later.\r\n")
+        await session.read_line("Press Enter...")
+        return False
+    _ext_app, _ext_node, _ext_gs_id = _alloc
+
     await session.write(
         f"\r\nConnecting to {host}:{port}...\r\n"
         f"  - Press Ctrl+] then 'q' to abort\r\n\r\n")
@@ -2719,6 +2911,7 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
     except (OSError, asyncio.TimeoutError) as exc:
         await session.write(f"\r\nConnection failed: {exc}\r\n")
         await session.read_line("Press Enter...")
+        _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
         return False
 
     # See _drain_stale_session_input()'s own docstring -- real bug found
@@ -2813,6 +3006,8 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
         writer.close()
     except Exception:
         pass
+
+    _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=False)
 
     if abort_event.is_set():
         await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
