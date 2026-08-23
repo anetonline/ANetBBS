@@ -1,11 +1,25 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.39`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.40`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.40 — Fixed a live BinkP process-corruption bug; hub node polling and message flavor (Crash/Hold) now do what they say (August 2026)
+
+**Fixed a real production incident where BinkP delivery silently stopped working after running clean for days.** The in-app notification helper's live-toast push imported `web_app` on the fly to reach its SocketIO instance — safe from the real web process (already running under eventlet from the start), but `anetbbs-binkp.service` is a plain asyncio process that was never meant to load eventlet at all. The first time an inbound BinkP session delivered netmail to a real local user, that import triggered `eventlet.monkey_patch()` mid-process, silently corrupting already-created threading primitives and breaking the SQLAlchemy connection pool for the rest of that process's life (`RuntimeError: cannot notify on un-acquired lock` on every DB write afterward) — so outbound TIC/echomail delivery on later sessions from that same process quietly stopped working, looking like a routing problem rather than what it actually was. Fixed by checking `current_app.extensions` instead of importing `web_app` fresh — the same safe pattern already used elsewhere in the codebase for this exact class of bug. Reproduced the production traceback exactly by reverting the fix locally before confirming it, and added a regression test that does the same.
+
+**Hub-initiated polling of downstream BinkP nodes can now run on a real schedule, not just manually.** Each node can now be given its own auto-poll interval on its admin page; leaving it blank keeps the node exactly as it works today (manual/poll-in-only).
+
+**Crash and Hold now actually change delivery timing, not just a cosmetic packet flag.** Crash now fires an immediate out-of-schedule delivery attempt the moment a netmail or file-echo item is queued; Hold now actually excludes an item from our own outbound dial-out, shipping only once that peer polls in to us. File-echo/TIC distribution gets these flags for the first time, exposed as Crash/Hold checkboxes on file-area uploads.
+
+**New: inline in-place animation for sysop-defined ANSI/CP437 screens.** Any screen shown at login/logoff/etc. can now embed a short looping animation directly in its body (`@ANIMSTART@...@FRAME@...@ANIMEND@` markers, alongside the existing `@PAUSE@` pagination convention) instead of only ever being static art. No code changes needed to use it — drop an animated screen into `data/mods/text/` the same way any other custom screen override already works. Documented in `docs/04-ansi-screens.md` and the in-app wiki.
+
+**Fixed a real live bug where a SAUCE-tagged `.ans` file showed its own metadata as literal garbage text on screen** — including the main menu's own file-based art override, and every welcome/goodbye/newuser/custom screen. SAUCE stripping previously only existed inline inside the ANSI Editor's import route; now a single shared `sauce.strip()` is used everywhere a raw `.ans`/`.asc` file is read from disk.
+
+Over 2,780 tests, all green.
 
 ## v1.0.39 — Second, deeper security and performance audit pass, including docs (August 2026)
 

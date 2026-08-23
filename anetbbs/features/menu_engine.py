@@ -473,6 +473,48 @@ def _apply_menu_translations(menu_name, title, item_list, lang):
     return new_title, new_item_list
 
 
+def _load_menu_art_from_disk(menus_dir, menu_name, mode):
+    """Look up a menu's file-based ANSI/ASCII art override on disk, if
+    any -- extracted out of run_menu() as its own pure function so this
+    lookup (and the SAUCE-stripping it does) can be tested directly
+    without needing to drive the whole interactive menu loop.
+
+    wide : {menus_dir}/{menu_name}132.ans → {menu_name}.ans
+    ansi : {menus_dir}/{menu_name}.ans
+    ascii: {menus_dir}/{menu_name}.asc
+
+    Returns (screen_text, is_plain_text). screen_text is '' if no
+    override file exists or it couldn't be read -- caller falls back to
+    the menu's own DB-stored `ansi_screen` field in that case (not
+    applicable in ascii mode, which has no DB fallback).
+    """
+    import os as _os
+    from .sauce import strip as _strip_sauce
+
+    if mode == 'ascii':
+        path = _os.path.join(menus_dir, f'{menu_name}.asc')
+        if _os.path.exists(path):
+            try:
+                with open(path, 'rb') as fh:
+                    return _strip_sauce(fh.read()).decode('latin-1'), True
+            except Exception:
+                pass
+        return '', False
+
+    candidates = ([f'{menu_name}132.ans', f'{menu_name}.ans'] if mode == 'wide'
+                  else [f'{menu_name}.ans'])
+    for fname in candidates:
+        path = _os.path.join(menus_dir, fname)
+        if _os.path.exists(path):
+            try:
+                with open(path, 'rb') as fh:
+                    return _strip_sauce(fh.read()).decode('latin-1'), False
+            except Exception:
+                pass
+            break
+    return '', False
+
+
 async def run_menu(session, start='main'):
     """Run the data-driven menu loop starting at *start* menu name.
     Falls back to BBSMenuUI.show_main() if no menus exist in the DB."""
@@ -545,33 +587,9 @@ async def run_menu(session, start='main'):
             from flask import current_app as _ca
             _mode = getattr(session, 'term_mode', 'ansi')
             _menus_dir = _os.path.join(_ca.config.get('DATA_DIR', ''), 'text', 'menus')
-            is_plain_text = False
-            screen = ''
-            if _mode == 'ascii':
-                _asc = _os.path.join(_menus_dir, f'{menu.name}.asc')
-                if _os.path.exists(_asc):
-                    try:
-                        with open(_asc, 'rb') as _fh:
-                            screen = _fh.read().decode('latin-1')
-                            is_plain_text = True
-                    except Exception:
-                        pass
-            else:
-                _candidates = (
-                    [f'{menu.name}132.ans', f'{menu.name}.ans']
-                    if _mode == 'wide' else [f'{menu.name}.ans']
-                )
-                for _fname in _candidates:
-                    _fpath = _os.path.join(_menus_dir, _fname)
-                    if _os.path.exists(_fpath):
-                        try:
-                            with open(_fpath, 'rb') as _fh:
-                                screen = _fh.read().decode('latin-1')
-                        except Exception:
-                            pass
-                        break
-                if not screen:
-                    screen = menu.ansi_screen or ''
+            screen, is_plain_text = _load_menu_art_from_disk(_menus_dir, menu.name, _mode)
+            if _mode != 'ascii' and not screen:
+                screen = menu.ansi_screen or ''
 
         # ANSI palette
         RESET = '\x1b[0m'

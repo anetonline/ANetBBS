@@ -73,7 +73,8 @@ def _visible_to(user, area):
                            bypass_admin=True)
 
 
-def _hatch_if_network_area(area, dest_path, filename, description=None):
+def _hatch_if_network_area(area, dest_path, filename, description=None,
+                            is_crash=False, is_hold=False):
     """Queue a freshly-saved file for outbound TIC distribution if its
     area belongs to an echomail network (e.g. ANN.FILES.*) -- purely
     local file areas (network_id is None) have no peers to hatch to.
@@ -85,7 +86,8 @@ def _hatch_if_network_area(area, dest_path, filename, description=None):
         return
     try:
         from ..echomail.tic import hatch_local_file
-        hatch_local_file(area, dest_path, filename, description or '')
+        hatch_local_file(area, dest_path, filename, description or '',
+                         is_crash=is_crash, is_hold=is_hold)
     except Exception:
         current_app.logger.exception(
             'hatch_local_file failed for %s in area %s', filename, area.tag)
@@ -672,7 +674,9 @@ def upload(area_id):
         except Exception:
             db.session.rollback()
         _hatch_if_network_area(area, dest, safe_name,
-                               request.form.get('description'))
+                               request.form.get('description'),
+                               is_crash=bool(request.form.get('hatch_crash')),
+                               is_hold=bool(request.form.get('hatch_hold')))
         if dupe_of:
             flash(f'Uploaded {safe_name} (note: identical to existing "{dupe_of}").',
                   'warning')
@@ -981,7 +985,9 @@ def manage_upload(area_id):
                 cache[safe_name] = entry
                 return cache
             _update_json_sidecar(_desc_cache_path(area), _mutate)
-        _hatch_if_network_area(area, dest, safe_name, description)
+        _hatch_if_network_area(area, dest, safe_name, description,
+                               is_crash=bool(request.form.get('hatch_crash')),
+                               is_hold=bool(request.form.get('hatch_hold')))
         if dupe_of:
             flash(f'Uploaded {safe_name} (note: identical to existing "{dupe_of}").',
                   'warning')
@@ -1119,7 +1125,9 @@ def smart_upload():
                 pass
             dupe_of = _check_and_record_dupe(target, dest, safe)
             _hatch_if_network_area(target, dest, safe,
-                                   request.form.get('description'))
+                                   request.form.get('description'),
+                                   is_crash=bool(request.form.get('hatch_crash')),
+                                   is_hold=bool(request.form.get('hatch_hold')))
             if dupe_of:
                 flash(f'Uploaded {safe} to {target.tag} '
                       f'(note: identical to existing "{dupe_of}").', 'warning')

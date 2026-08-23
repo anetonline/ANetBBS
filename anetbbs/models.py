@@ -1688,6 +1688,19 @@ class HatchQueue(db.Model):
                           nullable=False, index=True)
     sent_at = db.Column(db.DateTime)
 
+    # Delivery flavor, mirroring NetmailMessage.is_crash/is_hold -- file-
+    # echo/TIC distribution had no such concept at all before this (only
+    # point-to-point netmail did). is_crash triggers an immediate out-of-
+    # schedule delivery attempt to this row's peer right when it's queued
+    # (see tic.hatch_local_file()); is_hold excludes the row from OUR OWN
+    # outbound dial-out (poller.py's _run_client/_run_node_client) so it
+    # only ships when the peer polls IN to us -- real FTN hold-for-pickup
+    # semantics, not just an informational flag. Unlike NetmailMessage
+    # there's no is_direct: neither flag set already means "send on the
+    # next normal scheduled poll," which is exactly what "direct" means.
+    is_crash = db.Column(db.Boolean, default=False, nullable=False)
+    is_hold = db.Column(db.Boolean, default=False, nullable=False)
+
     file_area = db.relationship('FileArea')
 
     def __repr__(self):
@@ -3307,6 +3320,22 @@ class BinkPNode(db.Model):
     binkp_host = db.Column(db.String(255))
     binkp_port = db.Column(db.Integer, default=24554)
     binkp_tls = db.Column(db.Boolean, default=False)
+
+    # Scheduled hub-initiated polling, mirroring EchomailNetwork's own
+    # poll_interval_minutes/last_poll_at (see that model's comment) --
+    # before this, dial-out to a downstream node only ever happened via
+    # the manual "Poll Now" button (poller.poll_node_now), never on a
+    # timer the way upstream hub polling already did. NULL means "don't
+    # auto-poll this node" (only meaningful once binkp_host is also
+    # set -- a poll-in-only node has nothing to dial regardless).
+    # last_poll_at is intentionally separate from last_seen_at just
+    # below: last_seen_at is stamped both when this node dials IN to us
+    # AND when we successfully dial OUT to it, so using it as the
+    # schedule's own "when did WE last poll" clock would let an
+    # unrelated inbound call from the node reset our own dial-out timer
+    # and silently suppress hub-initiated delivery.
+    poll_interval_minutes = db.Column(db.Integer, nullable=True)
+    last_poll_at = db.Column(db.DateTime, nullable=True)
 
     # Which hub identity this downstream peer belongs to (see
     # HubIdentity). Scopes inbound BinkP auth and outbound packet

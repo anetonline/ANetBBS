@@ -168,6 +168,46 @@ def poll_node_now(app, node_id: int):
             _do_poll_node(app, node)
 
 
+def trigger_immediate_delivery(app, network_id=None, to_address=None):
+    """Best-effort out-of-schedule delivery attempt for a crash-flagged
+    netmail or file-echo item -- dial out RIGHT NOW instead of waiting
+    for the next scheduled poll. Runs synchronously in the calling
+    thread; callers are expected to spawn a background thread (same
+    established pattern as send_netmail_direct_now's own callers, e.g.
+    the netmail compose route), since a real BinkP dial can take several
+    seconds and this is typically called from a web request handler.
+
+    Prefers a direct dial to a known, dialable downstream BinkPNode
+    matching *to_address* -- real crash-mail semantics is straight to
+    the actual destination, not relayed through the hub. Falls back to
+    polling the owning EchomailNetwork's hub otherwise (the node has no
+    binkp_host, or *to_address* wasn't given/didn't match any node --
+    the item still ships via that network's next real BinkP session,
+    just started immediately instead of waiting out the schedule).
+    Silently does nothing if neither resolves to anything dialable --
+    matches this function's "best-effort" framing; the item stays
+    queued for the next normal scheduled poll either way, exactly as if
+    this had never been called.
+    """
+    node = None
+    if to_address:
+        addrs = [to_address]
+        bare = to_address.split('@', 1)[0]
+        if bare and bare not in addrs:
+            addrs.append(bare)
+        with app.app_context():
+            from ..models import BinkPNode
+            node = BinkPNode.query.filter(
+                BinkPNode.ftn_address.in_(addrs),
+                BinkPNode.is_active.is_(True),
+            ).first()
+    if node is not None and (node.binkp_host or '').strip():
+        poll_node_now(app, node.id)
+        return
+    if network_id is not None:
+        poll_network_now(app, network_id)
+
+
 def send_netmail_direct_now(app, netmail_id: int):
     """Attempt immediate direct-dial delivery of a single queued outbound
     netmail that has no EchomailNetwork to route through (network_id is
@@ -264,7 +304,7 @@ def _poller_loop(app):
     while not _stop_event.wait(timeout=60):
         try:
             with app.app_context():
-                from ..models import EchomailNetwork
+                from ..models import EchomailNetwork, BinkPNode
                 networks = EchomailNetwork.query.filter_by(is_active=True).all()
                 now = datetime.utcnow()
                 for network in networks:
@@ -273,6 +313,25 @@ def _poller_loop(app):
                             _do_poll(app, network)
                         except Exception as exc:
                             logger.error("Poller: error polling %s: %s", network.name, exc)
+
+                # Scheduled hub-initiated dial-out to downstream nodes --
+                # previously the ONLY way a node ever got polled was the
+                # manual "Poll Now" button; a node with a poll_interval_minutes
+                # set now gets the same automatic, timer-driven treatment
+                # upstream networks always had. Nodes with no dial-out
+                # address (binkp_host blank -- poll-in only, the common
+                # case for NAT'd/dynamic-IP sysops) are never candidates
+                # regardless of what poll_interval_minutes says.
+                nodes = BinkPNode.query.filter_by(is_active=True).all()
+                for node in nodes:
+                    if not (node.binkp_host or '').strip():
+                        continue
+                    if _is_poll_due_node(node, now):
+                        try:
+                            _do_poll_node(app, node)
+                        except Exception as exc:
+                            logger.error("Poller: error polling node %s: %s",
+                                        node.name, exc)
         except Exception as exc:
             logger.error("Poller loop error: %s", exc)
 
@@ -288,6 +347,22 @@ def _is_poll_due(network, now: datetime) -> bool:
         return True
     minutes = max(network.poll_interval_minutes or 60, _MIN_POLL_INTERVAL_MIN)
     return now >= network.last_poll_at + timedelta(minutes=minutes)
+
+
+def _is_poll_due_node(node, now: datetime) -> bool:
+    """Return True if this downstream node is due for a scheduled
+    hub-initiated poll. poll_interval_minutes is nullable (unlike
+    EchomailNetwork's, which always has a real default) -- NULL means
+    this node opted out of scheduled dial-out entirely (manual Poll Now
+    only), not "use the 60-minute default" -- most real downstream nodes
+    are poll-in only and should never be scheduled just because a sysop
+    happened to fill in binkp_host without also asking for a timer."""
+    if node.poll_interval_minutes is None:
+        return False
+    if not node.last_poll_at:
+        return True
+    minutes = max(node.poll_interval_minutes, _MIN_POLL_INTERVAL_MIN)
+    return now >= node.last_poll_at + timedelta(minutes=minutes)
 
 
 def _self_referential_reason(network, app):
@@ -433,6 +508,12 @@ def _do_poll(app, network):
                 NetmailMessage.network_id == network.id,
                 NetmailMessage.direction == 'outbound',
                 NetmailMessage.status == 'queued',
+                # Hold-flagged netmail must NOT go out on our own
+                # outbound dial -- real FTN hold-for-pickup semantics.
+                # It still ships the moment this peer polls IN to us
+                # (get_pending_netmail_for_network's own include_hold
+                # path in binkp_server.py), just never on our schedule.
+                NetmailMessage.is_hold.isnot(True),
             ).all()
 
         outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
@@ -692,6 +773,11 @@ def _do_poll_node(app, node):
                      node.name, node.ftn_address, exc)
         raise
     finally:
+        # Stamp last_poll_at unconditionally (success or failure) -- same
+        # reasoning as _do_poll()'s own identical fix (see its comment):
+        # a failed dial-out must still back off by poll_interval_minutes,
+        # not get retried every 60s on the next scheduler tick.
+        node.last_poll_at = datetime.utcnow()
         log.completed_at = datetime.utcnow()
         if transcript_lines:
             log.transcript = _format_transcript(transcript_lines)
@@ -739,7 +825,12 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
     # ftn_address instead of network.hub_address.
     hatch_items = (HatchQueue.query
                    .filter(HatchQueue.peer_address == (node.ftn_address or ''),
-                           HatchQueue.status == 'pending')
+                           HatchQueue.status == 'pending',
+                           # Hold-flagged items only ship when this node
+                           # polls IN to us, never on our own dial-out --
+                           # same reasoning as the netmail is_hold filter
+                           # above.
+                           HatchQueue.is_hold.isnot(True))
                    .order_by(HatchQueue.queued_at)
                    .all())
     out = client.poll(outbound_messages=outbound_messages, data_dir=data_dir,
@@ -789,7 +880,8 @@ def _run_client(network, outbound_messages, app, transcript=None):
         # hub address on this connection.
         hatch_items = (HatchQueue.query
                        .filter(HatchQueue.peer_address == (network.hub_address or ''),
-                               HatchQueue.status == 'pending')
+                               HatchQueue.status == 'pending',
+                               HatchQueue.is_hold.isnot(True))
                        .order_by(HatchQueue.queued_at)
                        .all())
         out = client.poll(outbound_messages=outbound_messages,

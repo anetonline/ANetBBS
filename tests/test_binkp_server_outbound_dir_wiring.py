@@ -209,8 +209,10 @@ class OutboundDirWiringTests(unittest.TestCase):
                  patch.object(db, 'init_app', lambda app: None), \
                  patch.object(db, 'session', recording_session), \
                  patch.object(tosser_mod, 'get_pending_for_node', lambda node_id: []), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node: []), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda net_id: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_node',
+                             lambda node, include_hold=False: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_network',
+                             lambda net_id, include_hold=False: []), \
                  patch.object(mod, 'resolve_outbound_dir', lambda data_dir, addr: outbound_dir), \
                  patch.object(mod, '_send_outbound_dir_items', _fake_send_outbound_dir_items):
                 writer = _FakeWriter()

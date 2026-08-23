@@ -481,7 +481,8 @@ def process_tic(tic_path, inbound_dir):
     return tic
 
 
-def hatch_local_file(area, stored_path, filename, description=''):
+def hatch_local_file(area, stored_path, filename, description='',
+                      is_crash=False, is_hold=False):
     """Queue a locally-originated file (uploaded by a sysop/user directly,
     not received via an inbound TIC) for outbound distribution to every
     peer subscribed to this file echo.
@@ -490,6 +491,16 @@ def hatch_local_file(area, stored_path, filename, description=''):
     for a file that originates here -- there's no prior SEEN-BY/PATH to
     inherit since this IS the origin hop; build_tic_text() fills those in
     when the queued item is actually transmitted.
+
+    is_crash/is_hold apply uniformly to every peer this call queues --
+    per-call, not per-subscription, matching how a sysop actually thinks
+    about "distribute this file urgently" vs. "hold this for anyone who
+    polls" as one decision about the file being hatched, not a choice
+    made separately per recipient. is_crash triggers an immediate out-
+    of-schedule delivery attempt to each affected peer right after
+    queuing (see poller.trigger_immediate_delivery); is_hold excludes
+    the row from our own outbound dial-out entirely (poller.py's
+    _run_client/_run_node_client) until that peer polls in to us.
 
     Returns the number of peers queued (0 if nobody is subscribed, or if
     the area has no active subscriptions at all).
@@ -512,11 +523,55 @@ def hatch_local_file(area, stored_path, filename, description=''):
             seenby=json.dumps([]),
             path=json.dumps([]),
             status='pending',
+            is_crash=is_crash,
+            is_hold=is_hold,
         ))
         queued += 1
     if queued:
         db.session.commit()
+        if is_crash:
+            _trigger_immediate_delivery_for_peers(
+                {sub.peer_address for sub in subs})
     return queued
+
+
+def _trigger_immediate_delivery_for_peers(peer_addresses):
+    """Best-effort: fire an out-of-schedule delivery attempt at each
+    distinct peer address right now, in a background thread, so
+    hatch_local_file()'s caller (a web request) returns immediately
+    instead of blocking on however many real BinkP dials this implies.
+    Resolves each peer_address to its owning EchomailNetwork (if any) so
+    trigger_immediate_delivery can fall back to polling the hub when the
+    peer isn't a directly-dialable BinkPNode -- see that function's own
+    docstring for the full resolution order.
+    """
+    try:
+        from flask import current_app
+        _app = current_app._get_current_object()
+    except RuntimeError:
+        # No request/app context (e.g. called from a script or test
+        # fixture directly) -- nothing to schedule against.
+        return
+
+    def _run():
+        try:
+            with _app.app_context():
+                from ..models import EchomailNetwork
+                from .poller import trigger_immediate_delivery
+                for peer in peer_addresses:
+                    if not peer:
+                        continue
+                    net = (EchomailNetwork.query
+                           .filter_by(hub_address=peer, is_active=True)
+                           .first())
+                    trigger_immediate_delivery(
+                        _app, network_id=(net.id if net else None),
+                        to_address=peer)
+        except Exception:
+            _app.logger.exception('Hatch crash immediate-delivery failed')
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def build_tic_text(item, our_address):

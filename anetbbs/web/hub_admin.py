@@ -93,6 +93,12 @@ class BinkPNodeForm(FlaskForm):
     binkp_port = IntegerField('BinkP Port', default=24554,
                               validators=[Optional(), NumberRange(1, 65535)])
     binkp_tls = BooleanField('Use TLS when polling this node', default=False)
+    # Blank/0 = manual "Poll Now" only, matching BinkPNode.poll_interval_minutes'
+    # own NULL-means-opt-out semantics -- see that column's comment.
+    # Only meaningful once binkp_host is also set.
+    poll_interval_minutes = IntegerField(
+        'Auto-Poll Interval (minutes, blank = manual Poll Now only)',
+        validators=[Optional(), NumberRange(5, 10080)])
     # Populated dynamically in the route (SelectField needs live choices,
     # not a class-body constant) -- see _populate_identity_choices().
     # Only rendered/shown when more than one HubIdentity exists; a
@@ -464,6 +470,7 @@ def new_binkp_node():
             binkp_host=(form.binkp_host.data or '').strip() or None,
             binkp_port=form.binkp_port.data or 24554,
             binkp_tls=form.binkp_tls.data,
+            poll_interval_minutes=form.poll_interval_minutes.data or None,
             notes=form.notes.data.strip() or None,
         )
         db.session.add(node)
@@ -549,6 +556,7 @@ def edit_binkp_node(node_id):
         node.binkp_host = (form.binkp_host.data or '').strip() or None
         node.binkp_port = form.binkp_port.data or 24554
         node.binkp_tls = form.binkp_tls.data
+        node.poll_interval_minutes = form.poll_interval_minutes.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()
         flash('Node updated.', 'success')

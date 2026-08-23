@@ -1742,6 +1742,19 @@ automatically between screens in a sequence. Put `@PAUSE@` at the end of
 a variant if you want the visitor to press a key before the next one
 loads.
 
+### Inline animation
+
+A screen can also embed a short looping animation right where it
+appears in the file, instead of only ever showing static art: put
+`@ANIMSTART@<frame>@FRAME@<frame>@FRAME@...@ANIMEND@` at the point you
+want it to play. Every `<frame>` must be the same number of lines —
+that's how the player knows how far to move the cursor back up before
+drawing the next one, so mismatched frame line counts will make the
+animation drift down the screen instead of redrawing cleanly in place.
+Frame delay and loop count aren't configurable per-screen; they're
+fixed in the code. `@PAUSE@` and `@ANIMSTART@...@ANIMEND@` can both
+appear in the same screen, as many times as you like.
+
 ### Random variant: `_ran` naming
 
 Want a different single screen picked at random each login instead of

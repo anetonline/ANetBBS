@@ -302,8 +302,8 @@ class _BinkpHandlerHarness:
                  patch.object(mod, '_send_pkt_file', _fake_send_pkt_file), \
                  patch.object(tosser_mod, 'get_pending_for_node', lambda node_id: pending), \
                  patch.object(tosser_mod, 'mark_sent_for_node', lambda node_id, ids: None), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node: []), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda network_id: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node, include_hold=False: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda network_id, include_hold=False: []), \
                  patch.object(tosser_mod, 'mark_netmail_sent', lambda rows: 0):
                 # _handle_connection() now also queries queued outbound
                 # NetmailMessage rows on both the downstream_node_id and

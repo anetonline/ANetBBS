@@ -249,3 +249,39 @@ to be handled by the existing pipe-to-ANSI translator and are
 
 Unknown codes pass through visibly so you can spot what's missing
 and ask for it to be wired up.
+
+## Pagination and inline animation (ANetBBS-specific markers)
+
+These aren't Synchronet or Mystic at-codes — they're ANetBBS's own,
+recognized in any screen shown through the same shell path as the
+tables above (welcome, goodbye, newuser, `action_type = ansi` custom
+slots).
+
+**`@PAUSE@`** splits a screen into pages. Put it anywhere in the file
+and everything up to that point is shown, then the visitor sees
+`[Press any key to continue]` before the rest loads. Use as many as
+you like for a multi-page screen; see "Each variant controls its own
+pause" above for how this interacts with multi-screen sequences.
+
+**`@ANIMSTART@<frame>@FRAME@<frame>@FRAME@...@ANIMEND@`** plays a short
+looping animation in place, right where the marker sits in the file —
+useful for a waving character, a blinking light, anything that should
+visibly move without scrolling the rest of the screen. Each `<frame>`
+is one or more full lines of the same content redrawn with small
+differences (a robot's arm in a different position, a different shade
+character, etc.); every frame must be exactly the same number of
+lines, since that line count is what tells the player how far to move
+the cursor back up before redrawing the next frame — get this wrong
+(frames with different line counts) and the animation will drift down
+the screen instead of redrawing in place. There's no way to set the
+frame delay or loop count from inside the screen file itself; both are
+fixed constants in the code (`_ANIM_FRAME_DELAY` in `session.py`) — if
+a screen needs different timing, that's a code change, not a per-file
+setting. A screen can mix `@PAUSE@` and `@ANIMSTART@...@ANIMEND@`
+freely; each is handled independently wherever it appears.
+
+Building the actual frame content by hand is tedious for anything more
+than a couple of frames — the easiest path is a small one-off Python
+script that generates the CP437 art programmatically and writes out
+the finished `@ANIMSTART@...@ANIMEND@` block, rather than hand-editing
+raw escape sequences frame by frame.

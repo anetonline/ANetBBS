@@ -287,9 +287,19 @@ def mark_sent_for_node(node_id: int, message_ids: list) -> int:
     return len(updated)
 
 
-def get_pending_netmail_for_node(node):
+def get_pending_netmail_for_node(node, include_hold=False):
     """Return queued outbound NetmailMessage rows addressed to a specific
     downstream BinkPNode.
+
+    include_hold matters because this same function serves two different
+    callers with opposite hold semantics: poller.py's own outbound dial-
+    out (_do_poll_node) must NEVER send a hold-flagged netmail -- real
+    FTN hold-for-pickup means it only ships when the node itself polls IN
+    -- while binkp_server.py's inbound-listener branch (this node
+    connecting TO us) is exactly that pickup moment and must pass
+    include_hold=True to actually release it. Defaults to excluding hold
+    mail since poller.py's own scheduled/manual dial-out is the more
+    common caller.
 
     Companion to get_pending_for_node() (echomail), added for a real live
     bug: the BinkP inbound listener flushed the echomail hold queue to a
@@ -330,12 +340,14 @@ def get_pending_netmail_for_node(node):
         NetmailMessage.network_id == node.network_id,
         NetmailMessage.direction == 'outbound',
         NetmailMessage.status == 'queued')
+    if not include_hold:
+        query = query.filter(NetmailMessage.is_hold.isnot(True))
     if node_addrs:
         query = query.filter(NetmailMessage.to_address.in_(node_addrs))
     return query.all()
 
 
-def get_pending_netmail_for_network(network_id: int):
+def get_pending_netmail_for_network(network_id: int, include_hold=False):
     """Return queued outbound NetmailMessage rows for a whole network.
 
     Used by the BinkP inbound listener's network-peer branch (a
@@ -343,14 +355,18 @@ def get_pending_netmail_for_network(network_id: int):
     specific BinkPNode) -- there's no individual node address to
     disambiguate against here, so this matches poller.py's own
     network_id-only netmail gather exactly. Same underlying gap as
-    get_pending_netmail_for_node() above -- see its docstring.
+    get_pending_netmail_for_node() above -- see its docstring, including
+    the include_hold reasoning.
     """
     from ..models import NetmailMessage
 
-    return NetmailMessage.query.filter(
+    query = NetmailMessage.query.filter(
         NetmailMessage.network_id == network_id,
         NetmailMessage.direction == 'outbound',
-        NetmailMessage.status == 'queued').all()
+        NetmailMessage.status == 'queued')
+    if not include_hold:
+        query = query.filter(NetmailMessage.is_hold.isnot(True))
+    return query.all()
 
 
 def mark_netmail_sent(netmail_rows: list) -> int:

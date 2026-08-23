@@ -211,7 +211,8 @@ class UpstreamHubInboundHatchOutTests(unittest.TestCase):
                  patch.object(HatchQueue, 'status', _FakeColumn('status')), \
                  patch.object(db, 'init_app', lambda app: None), \
                  patch.object(db, 'session', recording_session), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda net_id: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_network',
+                             lambda net_id, include_hold=False: []), \
                  patch.object(mod, '_send_hatch_items', _fake_send_hatch_items):
                 writer = _FakeWriter()
                 reader = _ScriptedReader(frames)

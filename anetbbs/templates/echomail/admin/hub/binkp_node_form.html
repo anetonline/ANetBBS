@@ -65,6 +65,13 @@
             </div>
             <div class="row">
                 <div class="col-md-6 mb-3">
+                    {{ form.poll_interval_minutes.label(class="form-label") }}
+                    {{ form.poll_interval_minutes(class="form-control") }}
+                    <div class="form-text">How often to automatically dial this node and push its queue, on top of "Poll Now". Leave blank to keep this node manual/poll-in-only.</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
                     {{ form.sysop.label(class="form-label") }}
                     {{ form.sysop(class="form-control") }}
                 </div>

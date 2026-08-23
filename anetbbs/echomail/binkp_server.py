@@ -894,7 +894,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 # story (confirmed live: a sysop's own netmail reply, and
                 # a week-plus backlog of AreaFix auto-replies, both stuck
                 # in status='queued' because this node only ever calls IN).
-                outbound_nm = get_pending_netmail_for_node(node)
+                # include_hold=True: this IS the node polling in -- exactly
+                # the moment hold-flagged netmail is supposed to release.
+                outbound_nm = get_pending_netmail_for_node(node, include_hold=True)
 
                 from .poller import _NetmailAdapter
                 outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
@@ -972,8 +974,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 # outbound dial. No per-node address to disambiguate here
                 # -- this branch matches a whole EchomailNetwork (one
                 # designated counterpart), same as poller.py's own
-                # network_id-only netmail gather.
-                outbound_nm = get_pending_netmail_for_network(net_id)
+                # network_id-only netmail gather. include_hold=True: this
+                # peer polling in is exactly when hold-flagged mail
+                # should release -- see get_pending_netmail_for_node()'s
+                # docstring for the full include_hold reasoning.
+                outbound_nm = get_pending_netmail_for_network(net_id, include_hold=True)
                 outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
                 if outbound:
                     pkt_bytes = _build_ftn_packet(

@@ -943,6 +943,14 @@ def _lightweight_migrate(app):
     _ensure_column('echomail_networks', 'default_hold', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'default_direct', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'packet_password', 'VARCHAR(20)')
+    # Scheduled hub-initiated polling of downstream nodes (previously
+    # manual-only via "Poll Now") -- see BinkPNode's own comment.
+    _ensure_column('binkp_nodes', 'poll_interval_minutes', 'INTEGER')
+    _ensure_column('binkp_nodes', 'last_poll_at', 'DATETIME')
+    # Delivery flavor for file-echo/TIC distribution, mirroring
+    # NetmailMessage.is_crash/is_hold -- see HatchQueue's own comment.
+    _ensure_column('hatch_queue', 'is_crash', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('hatch_queue', 'is_hold', 'BOOLEAN NOT NULL DEFAULT 0')
     # BadAreaLog now also records the 'unsubscribed' drop reason (area
     # exists locally but is_subscribed/is_active is False), not just
     # 'unknown' -- see models.py's BadAreaLog comment.

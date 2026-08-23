@@ -37,16 +37,43 @@ def notify(user_id, kind, title='', body='', target_url=''):
         # piggybacks on the same default-namespace socket base.html
         # already opens for sysop_broadcast (see web_app.py's connect
         # handler, which joins every authenticated socket to a room named
-        # after its own user id). Lazy import: notify() runs from
-        # contexts that don't always want eventlet/SocketIO pulled in
-        # (background pollers, CLI tools), same reasoning as the
-        # sysop_broadcast emit's own lazy import in web/admin.py.
+        # after its own user id).
+        #
+        # Deliberately does NOT `from ..web_app import socketio` -- that
+        # module calls eventlet.monkey_patch() unconditionally at import
+        # time, and monkey_patch() doesn't raise on failure: it just logs
+        # warnings and leaves already-created threading primitives (locks,
+        # conditions) half-patched. A process that was never meant to run
+        # under eventlet -- background pollers, CLI tools, and
+        # binkp_server.py's plain-asyncio inbound listener, exactly the
+        # "don't always want eventlet/SocketIO pulled in" contexts this
+        # function already anticipated -- would "succeed" at that import,
+        # permanently corrupt its own SQLAlchemy connection pool ("cannot
+        # notify on un-acquired lock" on every commit after), and a plain
+        # try/except around the import would never see anything to catch,
+        # since the corruption is a side effect of a successful import,
+        # not a raised exception. Confirmed as a real production incident
+        # on bbs.a-net.fyi: an inbound BinkP session delivering netmail to
+        # a real local user triggered this exact failure the first time
+        # it happened in a 4-day-old anetbbs-binkp process, then broke
+        # every later DB write in that process for the rest of its life.
+        #
+        # Checking current_app.extensions instead (same pattern already
+        # used safely by msp/server.py's own live-toast push) never
+        # imports web_app.py at all -- 'socketio' is only registered
+        # there if THIS app is the real one web_app.create_app() built,
+        # so it's a safe no-op everywhere else. The Notification row
+        # above is written either way, so the recipient still sees it via
+        # the in-app bell/terminal banner, just without the instant live
+        # toast.
         try:
-            from ..web_app import socketio
-            socketio.emit('user_notification', {
-                'kind': kind, 'title': title, 'body': body,
-                'target_url': target_url,
-            }, room=str(user_id))
+            from flask import current_app
+            sio = current_app.extensions.get('socketio')
+            if sio is not None:
+                sio.emit('user_notification', {
+                    'kind': kind, 'title': title, 'body': body,
+                    'target_url': target_url,
+                }, room=str(user_id))
         except Exception:
             pass
     except Exception:

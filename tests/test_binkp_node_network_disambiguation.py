@@ -259,8 +259,8 @@ class NetworkDisambiguationTests(unittest.TestCase):
                  patch.object(db, 'session', recording_session), \
                  patch.object(tosser_mod, 'get_pending_for_node', lambda node_id: []), \
                  patch.object(tosser_mod, 'mark_sent_for_node', lambda node_id, ids: None), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node: []), \
-                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda network_id: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_node', lambda node, include_hold=False: []), \
+                 patch.object(tosser_mod, 'get_pending_netmail_for_network', lambda network_id, include_hold=False: []), \
                  patch.object(tosser_mod, 'mark_netmail_sent', lambda rows: 0), \
                  patch.object(mod, '_import_pkt_payload', _tracking_import_pkt_payload):
                 writer = _FakeWriter()

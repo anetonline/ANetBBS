@@ -278,13 +278,10 @@ def import_ans():
         # Strip SAUCE trailer if present so we don't get garbage chars
         # at the end. Also extract any metadata to flash for the sysop.
         try:
-            from ..features.sauce import parse as _parse_sauce
+            from ..features.sauce import parse as _parse_sauce, strip as _strip_sauce
             sauce = _parse_sauce(raw)
             if sauce:
-                # Find the EOF byte (0x1A) before the 128-byte SAUCE trailer.
-                cut = raw.rfind(b'\x1a', 0, len(raw) - 128)
-                if cut >= 0:
-                    raw = raw[:cut]
+                raw = _strip_sauce(raw)
                 bits = []
                 if sauce.get('title'):  bits.append(f'title="{sauce["title"]}"')
                 if sauce.get('author'): bits.append(f'by {sauce["author"]}')

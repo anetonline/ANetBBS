@@ -186,10 +186,14 @@ def _resolve_display_screens(directory, base_name):
 
 def _load_display_screens(paths):
     """Read and concatenate every screen in *paths*, in order. Each file
-    is decoded independently (latin-1, matching how screen bodies are
-    decoded elsewhere) and simply joined — see _resolve_display_screens
+    is SAUCE-stripped (see features/sauce.py -- an unstripped trailer
+    renders as literal garbage at the end of the screen; this was the
+    only file-based screen loader in the whole app that never did this)
+    and decoded independently (latin-1, matching how screen bodies are
+    decoded elsewhere), then simply joined — see _resolve_display_screens
     for why there's no automatic pause insertion between them."""
-    return ''.join(p.read_bytes().decode('latin-1') for p in paths)
+    from ..features.sauce import strip as _strip_sauce
+    return ''.join(_strip_sauce(p.read_bytes()).decode('latin-1') for p in paths)
 
 
 def _stock_screen(slot, mode):
@@ -217,6 +221,25 @@ def _stock_screen(slot, mode):
         if picked is not None:
             return _load_display_screens(picked), fname.endswith('.asc')
     return None, False
+
+
+# Inline in-place animation for ANSI screens: '@ANIMSTART@<frame>@FRAME@
+# <frame>@FRAME@...@ANIMEND@' embedded directly in a screen's body plays
+# each frame in place (cursor up N lines, reprint, repeat) instead of a
+# one-shot static block. N is inferred per-play from the first frame's own
+# line count -- every frame must be exactly that many '\r\n'-terminated
+# lines, so reprinting one naturally re-descends the cursor by the same N
+# it moved up, landing back exactly where it started once the last frame
+# is shown. No parameters are embedded in the marker itself (deliberately
+# NOT '@ANIM:rows:delay@' -- that shape collides with display_codes.py's
+# '@CODE:value@' stripping regex, which runs earlier in the pipeline and
+# would silently delete it before this ever sees it). Uppercase-only
+# names (ANIMSTART/FRAME/ANIMEND) match the existing @PAUSE@ precedent:
+# unknown @-codes are left in place by display_codes.apply(), not stripped.
+_SCREEN_ANIM_SPLIT_RE = re.compile(r'(@PAUSE@|@ANIMSTART@.*?@ANIMEND@)', re.DOTALL)
+_ANIM_FRAME_DELAY = 0.3  # seconds between frames -- 0.18 read as an
+# imperceptible flicker in live testing (screen already had a lot on it
+# by the time the animation fired); slower reads as an actual gesture.
 
 
 # Telnet commands
@@ -1318,6 +1341,41 @@ class BBSSession:
             # Failsafe — don't lock real users out if anything goes wrong.
             return True
 
+    async def _play_screen_animation(self, marker):
+        """Play one '@ANIMSTART@<frame>@FRAME@<frame>@...@ANIMEND@' block
+        (see _SCREEN_ANIM_SPLIT_RE) found embedded in an ANSI screen body.
+
+        Each frame is exactly N '\\r\\n'-terminated lines, N inferred from
+        the first frame — the caller (whoever authored the screen) is
+        responsible for making every frame the same line count. Playing a
+        frame is just: cursor up N lines, reprint those N lines. Because
+        every line in a frame ends in its own '\\r\\n', reprinting always
+        re-descends the cursor by exactly N, so it lands back at the exact
+        column/row it started from regardless of terminal width — no
+        column tracking needed. This only stays correct if nothing else
+        was printed between the original N lines and this marker (true by
+        construction: the marker sits immediately after them in the file).
+        Best-effort — a write/encode failure just ends the animation early
+        and leaves whatever was last drawn on screen, same failure
+        philosophy as the rest of this method's caller.
+        """
+        inner = marker[len('@ANIMSTART@'):-len('@ANIMEND@')]
+        frames = [f for f in inner.split('@FRAME@') if f]
+        if not frames:
+            return
+        rows = frames[0].count('\r\n')
+        if rows <= 0:
+            return
+        up = f'\x1b[{rows}A'.encode('latin-1')
+        try:
+            for frame in frames:
+                self.writer.write(up)
+                self.writer.write(frame.encode('latin-1'))
+                await self.writer.drain()
+                await asyncio.sleep(_ANIM_FRAME_DELAY)
+        except Exception:
+            pass
+
     async def _show_ansi_screen(self, slot, *, force_pause=False):
         """Render a sysop-defined ANSI screen by slot name. Best-effort —
         silently no-ops if the slot doesn't exist or the DB is unavailable.
@@ -1444,13 +1502,17 @@ class BBSSession:
             except Exception:
                 pass
 
-            # Split on @PAUSE@ for in-content pagination. _apply_codes leaves
-            # unknown codes in place, so @PAUSE@ survives as a literal marker.
+            # Split on @PAUSE@ (in-content pagination) and @ANIMSTART@...
+            # @ANIMEND@ (inline in-place animation, see _SCREEN_ANIM_SPLIT_RE
+            # above) — both survive _apply_codes as literal markers the same
+            # way, since unknown @-codes are left in place, not stripped.
             _PAUSE_PROMPT = (
                 b'\r\n[Press any key to continue]' if is_plain_text
                 else b'\r\n\x1b[33m[Press any key to continue]\x1b[0m'
             )
-            parts = body.split('@PAUSE@')
+            segments = _SCREEN_ANIM_SPLIT_RE.split(body)
+            parts = segments[0::2]
+            markers = segments[1::2]
 
             async def _send_part(text, prefix=b'', suffix=b''):
                 # ANSI screens are stored as Latin-1 mojibake of the original
@@ -1483,9 +1545,13 @@ class BBSSession:
                 suffix = b'\r\n' if is_last else b''
                 await _send_part(part, prefix=prefix, suffix=suffix)
                 if not is_last:
-                    self.writer.write(_PAUSE_PROMPT)
-                    await self.writer.drain()
-                    await self.read_key('')
+                    marker = markers[i]
+                    if marker == '@PAUSE@':
+                        self.writer.write(_PAUSE_PROMPT)
+                        await self.writer.drain()
+                        await self.read_key('')
+                    else:
+                        await self._play_screen_animation(marker)
 
             if force_pause or db_pause:
                 self.writer.write(_PAUSE_PROMPT)

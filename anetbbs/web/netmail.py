@@ -426,6 +426,32 @@ def compose(reply_to=None):
             flash(f'Crash-dialing {to_address} directly to deliver this reply '
                  f'— check the message for delivery status shortly.', 'info')
             return redirect(url_for('netmail.read', msg_id=m.id))
+        if m.is_crash:
+            # A normal (non-direct-crash-reply) netmail that ticked the
+            # Crash checkbox -- until now this only set the FTS-0001
+            # ATTR_CRASH bit in the eventual packet header (cosmetic
+            # metadata for the RECEIVING tosser) and otherwise sat queued
+            # for the next scheduled poll exactly like any other netmail,
+            # which defeats the entire point of marking it crash. Same
+            # background-thread pattern as the direct-crash-reply branch
+            # above.
+            import threading
+            from flask import current_app
+            from ..echomail.poller import trigger_immediate_delivery
+            _app = current_app._get_current_object()
+            _network_id = m.network_id
+            _to_address = m.to_address
+
+            def _run():
+                try:
+                    trigger_immediate_delivery(_app, network_id=_network_id,
+                                               to_address=_to_address)
+                except Exception as exc:
+                    _app.logger.error('Crash immediate-delivery thread error: %s', exc)
+
+            threading.Thread(target=_run, daemon=True).start()
+            flash('Crash-flagged -- attempting immediate delivery now.', 'info')
+            return redirect(url_for('netmail.read', msg_id=m.id))
         flash('Netmail queued for next outbound poll.', 'success')
         return redirect(url_for('netmail.read', msg_id=m.id))
 

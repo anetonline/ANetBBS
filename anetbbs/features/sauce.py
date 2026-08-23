@@ -75,6 +75,33 @@ def parse(data):
     }
 
 
+def strip(data):
+    """Return *data* with its trailing SAUCE record (and the EOF/SUB
+    byte 0x1A that precedes it) removed, if present -- a no-op
+    returning *data* unchanged when there's no SAUCE record, or if the
+    EOF byte can't be found (never worth corrupting real content over
+    unparseable metadata).
+
+    Every raw ANSI/ASCII file this BBS reads from disk and sends
+    straight to a terminal needs this -- without it, a SAUCE trailer
+    (title/author/group/etc, appended by tools like Pablo/Moebius/
+    ACiDDraw) renders as literal garbage characters at the end of the
+    screen. Previously this exact cut logic only existed inline inside
+    the ANSI Editor's import route (anetbbs/web/ansi_editor.py) -- any
+    other path that read a raw .ans file directly (main menu art,
+    welcome/goodbye/newuser/custom screens, ANSI menu overrides) had no
+    stripping at all, confirmed live: a SAUCE-tagged menu file showed
+    its own metadata on screen.
+    """
+    sauce = parse(data)
+    if not sauce:
+        return data
+    cut = data.rfind(b'\x1a', 0, len(data) - SAUCE_SIZE)
+    if cut < 0:
+        return data
+    return data[:cut]
+
+
 # Datatype enum -> human label
 DATATYPE_LABEL = {
     0: 'None',
