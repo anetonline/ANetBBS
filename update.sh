@@ -1499,6 +1499,20 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     info "Generating MRC bridge config.json ..."
     mkdir -p "$INSTALL_DIR/mrc/bridge"
     BBS_NAME="${EXISTING_ENV[BBS_NAME]:-ANetBBS}"
+    BBS_DESCRIPTION="${EXISTING_ENV[BBS_DESCRIPTION]:-}"
+    # Sysop username and the domain a sysop entered at install time were
+    # both only ever used transiently at install.sh's own runtime (for
+    # creating the DB admin account / nginx+certbot) -- neither was ever
+    # written into .env, so there's nothing reliable to read them back
+    # from here. Left blank rather than guessing (e.g. `hostname -f` for
+    # the domain, which is very often wrong for a box behind NAT/a
+    # reverse proxy) -- a blank field is honest; a wrong one is actively
+    # misleading to every other MRC-network BBS that looks this one up.
+    # Sysop can fill these in by hand in mrc/bridge/config.json after.
+    INFO_SYSOP=""
+    INFO_WEB=""
+    INFO_TELNET=""
+    INFO_SSH=""
     # web_listen_port must match the bridge's actual listen port
     # (install.sh derives it as WEB_PORT+1, written to .env as
     # MRC_BRIDGE_PORT) -- a hardcoded 8080 here would silently mismatch
@@ -1526,6 +1540,11 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     # this script's other heredocs for the identical class of bug.
     BBS_NAME="$BBS_NAME" \
         PLATFORM_INFO="ANETBBS/Linux.$(uname -m)/1.3.9" \
+        BBS_DESCRIPTION="$BBS_DESCRIPTION" \
+        INFO_SYSOP="$INFO_SYSOP" \
+        INFO_WEB="$INFO_WEB" \
+        INFO_TELNET="$INFO_TELNET" \
+        INFO_SSH="$INFO_SSH" \
         MRC_LISTEN_PORT="$MRC_LISTEN_PORT" \
         MRC_DATA_DIR="$INSTALL_DIR/data/mrc" \
         MRC_BRIDGE_CONFIG="$MRC_BRIDGE_CONFIG" \
@@ -1539,6 +1558,15 @@ config = {
     "use_ssl": True,
     "bridge_bbs": os.environ['BBS_NAME'],
     "platform_info": os.environ['PLATFORM_INFO'],
+    # Real key-name bug fixed here (same as install.sh's matching
+    # heredoc): mrc/bridge/main.py actually reads bbs_website/
+    # bbs_telnet/bbs_ssh/bbs_sysop/bbs_description, not info_*. See
+    # mrc/bridge/config.example.json, the shipped reference.
+    "bbs_website": os.environ['INFO_WEB'],
+    "bbs_telnet": os.environ['INFO_TELNET'],
+    "bbs_ssh": os.environ['INFO_SSH'],
+    "bbs_sysop": os.environ['INFO_SYSOP'],
+    "bbs_description": os.environ['BBS_DESCRIPTION'],
     "capabilities": ["MCI", "MSGEXT", "CTCP"],
     "web_listen_host": "127.0.0.1",
     "web_listen_port": int(os.environ['MRC_LISTEN_PORT']),

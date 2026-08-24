@@ -138,7 +138,10 @@ them on a fresh setup.)
 If you're enabling Finger and/or BinkP (BinkP/FidoNet setup is covered
 in §8 below; Finger is a simple RFC 1288 per-user info query service,
 see `docs/PORTS.md`), they run as their own separate systemd units,
-not part of `anetbbs.service`:
+not part of `anetbbs.service`. (The MRC bridge — inter-BBS chat — is
+also its own separate service, but its setup is enough of its own
+thing that it gets its own section, §10 below, rather than living
+here.)
 
 ```bash
 # Finger (RFC 1288) — only if you plan to enable it
@@ -256,7 +259,109 @@ already a normal dependency (installed by `pip install -e .` in step
 than crashing the rest of the BBS. See `docs/PORTS.md` for the full
 port table and firewall rules.
 
-## 10. PETSCII (Commodore 64/128) terminal support (optional)
+## 10. MRC bridge (inter-BBS chat, optional)
+
+The MRC bridge connects this BBS to the wider Multi-Relay Chat network
+so your users can chat in real time with people on other BBSes. It's
+a separate long-running process (`mrc.bridge.main`) the main app talks
+to over a local WebSocket — `pip install -e .` doesn't set this up on
+its own, and (unlike most of this guide) there's no static
+`deploy/anetbbs-mrc-bridge.service` template to copy; `install.sh`
+generates both the config and the unit file at install time.
+
+Create the config directory and `mrc/bridge/config.json` by hand:
+
+```bash
+mkdir -p /opt/anetbbs/mrc/bridge /opt/anetbbs/data/mrc
+cat > /opt/anetbbs/mrc/bridge/config.json << 'EOF'
+{
+  "mrc_backend": "native",
+  "mrc_host": "mrc.bottomlessabyss.net",
+  "mrc_port": 5001,
+  "use_ssl": true,
+  "bridge_bbs": "My Cool BBS",
+  "platform_info": "ANETBBS/Linux.x86_64/1.3.9",
+  "bbs_website": "https://yourdomain.example",
+  "bbs_telnet": "yourdomain.example:2233",
+  "bbs_ssh": "yourdomain.example:2234",
+  "bbs_sysop": "admin",
+  "bbs_description": "A description of your BBS",
+  "capabilities": ["MCI", "MSGEXT", "CTCP"],
+  "web_listen_host": "127.0.0.1",
+  "web_listen_port": 5001,
+  "message_rate_seconds": 0.5,
+  "iamhere_interval_seconds": 60,
+  "log_level": "INFO",
+  "data_dir": "/opt/anetbbs/data/mrc"
+}
+EOF
+chown anetbbs:anetbbs /opt/anetbbs/mrc/bridge/config.json
+chmod 640 /opt/anetbbs/mrc/bridge/config.json
+```
+
+`bbs_website`/`bbs_telnet`/`bbs_ssh`/`bbs_sysop`/`bbs_description` are
+what other BBSes on the MRC network see when they look this one up —
+worth actually filling in, not leaving blank. `web_listen_port` is
+conventionally `WEB_PORT + 1` (5001 for the default `WEB_PORT=5000`)
+— not enforced anywhere, just what `install.sh` itself picks; any
+free local port works as long as it matches `MRC_BRIDGE_PORT` in
+`.env` below. `platform_info`'s version suffix (`1.3.9` above)
+identifies MRC client/protocol compatibility to the hub, in the hub's
+own numbering scheme — unrelated to ANetBBS's own release version;
+check `install.sh`'s own `MRC_CLIENT_COMPAT_VERSION` if a newer floor
+is needed by the time you read this.
+
+Add to `.env`:
+
+```bash
+MRC_BRIDGE_ENABLED=true
+MRC_BRIDGE_HOST=localhost
+MRC_BRIDGE_PORT=5001
+MRC_BRIDGE_USE_SSL=false
+MRC_BRIDGE_WS_PATH=/mrcws
+MRC_BRIDGE_CONFIG=/opt/anetbbs/mrc/bridge/config.json
+```
+
+Install and start the service:
+
+```bash
+sudo tee /etc/systemd/system/anetbbs-mrc-bridge.service << 'EOF'
+[Unit]
+Description=ANetBBS MRC Bridge Service
+After=network.target
+
+[Service]
+Type=simple
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+Environment=MRC_BRIDGE_CONFIG=/opt/anetbbs/mrc/bridge/config.json
+ExecStart=/opt/anetbbs/venv/bin/python -m mrc.bridge.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now anetbbs-mrc-bridge
+sudo systemctl restart anetbbs-web anetbbs   # pick up MRC_BRIDGE_* from .env
+```
+
+If you're putting nginx in front (§7), the shipped
+`deploy/anetbbs-nginx.conf.template` already proxies `/mrcws` to this
+bridge — no extra nginx config needed as long as you used that
+template.
+
+**Optional: bridge one of your echomail networks into IRC too**
+(`anetbbs-mrc-irc-bridge@.service`, a per-network templated unit — the
+`%i` instance name is whatever identifier you choose). This is a
+separate add-on on top of the MRC bridge above, not required for MRC
+chat itself — see `anetbbs/features/mrc_irc_bridge.py` for its own
+config requirements before enabling it.
+
+## 11. PETSCII (Commodore 64/128) terminal support (optional)
 
 Dedicated telnet listener(s) for real C64/128 hardware and PETSCII
 terminal emulators (SyncTERM's C64 mode, Novaterm, CCGMS, 64NIC+).
@@ -354,16 +459,28 @@ restart anetbbs`.
   itself is missing).
 - **BBS info fields (telnet/ssh/website/description/sysop) never show
   up when other MRC clients look this BBS up** (`/bbses` + `/info <n>`
-  on another client), even with a correctly-filled-in
-  `mrc/bridge/config.json` and zero errors anywhere → check whether the
-  MRC bridge's systemd unit sets a custom `MRC_BRIDGE_CONFIG`
-  environment variable pointing at a different path than the one
-  you're editing (`systemctl show anetbbs-mrc-bridge -p Environment`).
-  If it does, edit that file instead — the running service never reads
-  the default path once an override is in place. More generally: if a
-  config file looks correct and nothing is logging an error, but the
-  feature still doesn't reflect your changes, suspect an environment
-  variable silently redirecting where that service actually reads its
+  on another client) → first check the field names in
+  `mrc/bridge/config.json` itself: the bridge reads
+  `bbs_website`/`bbs_telnet`/`bbs_ssh`/`bbs_sysop`/`bbs_description`
+  (see `mrc/bridge/config.example.json`, the shipped reference). A
+  real bug in `install.sh`/`update.sh` before this was fixed wrote the
+  wrong key names (`info_web`/`info_sysop`/`info_desc`, and never wrote
+  telnet/ssh at all) — every fresh install's info fields showed blank
+  regardless of what was entered in the wizard. Installs from before
+  the fix landed will still have the old, wrong keys in their existing
+  `config.json` and need it hand-corrected (or regenerated — delete the
+  file and re-run `install.sh`/`update.sh`) even after upgrading the
+  code itself, since neither script overwrites an existing config.json.
+  If the keys already look correct and it's still not showing up,
+  check whether the MRC bridge's systemd unit sets a custom
+  `MRC_BRIDGE_CONFIG` environment variable pointing at a different path
+  than the one you're editing (`systemctl show anetbbs-mrc-bridge -p
+  Environment`). If it does, edit that file instead — the running
+  service never reads the default path once an override is in place.
+  More generally: if a config file looks correct and nothing is
+  logging an error, but the feature still doesn't reflect your
+  changes, suspect an environment variable silently redirecting where
+  that service actually reads its
   config from.
 - **On a Raspberry Pi (or other low-RAM board), something reports
   "disk full" even though `df -h /` shows plenty of free space** →

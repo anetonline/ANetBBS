@@ -1554,6 +1554,20 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
     else
         INFO_WEB="http://$DOMAIN"
     fi
+    # Same "skip if not applicable" reasoning as INFO_WEB above, for the
+    # telnet/ssh contact fields other MRC-network BBSes see on this
+    # BBS's own /info lookup -- blank when the protocol isn't enabled
+    # or this is a local-only install, a real host:port otherwise.
+    if [[ "$DOMAIN" == "localhost" || "$ENABLE_TELNET" != "y" ]]; then
+        INFO_TELNET=""
+    else
+        INFO_TELNET="$DOMAIN:$TELNET_PORT"
+    fi
+    if [[ "$DOMAIN" == "localhost" || "$ENABLE_SSH" != "y" ]]; then
+        INFO_SSH=""
+    else
+        INFO_SSH="$DOMAIN:$SSH_PORT"
+    fi
     # Real gap found in a security/performance audit: BBS_NAME/
     # ADMIN_USER/BBS_DESC/INFO_WEB are all wizard-prompted, sysop-typed
     # values, interpolated directly into JSON string literals with NO
@@ -1571,6 +1585,8 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
         BBS_NAME="$BBS_NAME" \
         PLATFORM_INFO="ANETBBS/Linux.$(uname -m)/$MRC_CLIENT_COMPAT_VERSION" \
         INFO_WEB="$INFO_WEB" \
+        INFO_TELNET="$INFO_TELNET" \
+        INFO_SSH="$INFO_SSH" \
         ADMIN_USER="$ADMIN_USER" \
         BBS_DESC="$BBS_DESC" \
         MRC_BRIDGE_PORT="$MRC_BRIDGE_PORT_DEFAULT" \
@@ -1587,9 +1603,19 @@ config = {
     "use_ssl": True,
     "bridge_bbs": os.environ['BBS_NAME'],
     "platform_info": os.environ['PLATFORM_INFO'],
-    "info_web": os.environ['INFO_WEB'],
-    "info_sysop": os.environ['ADMIN_USER'],
-    "info_desc": os.environ['BBS_DESC'],
+    # Real bug fixed here: mrc/bridge/main.py actually reads
+    # bbs_website/bbs_telnet/bbs_ssh/bbs_sysop/bbs_description (see
+    # mrc/bridge/config.example.json, the shipped reference) -- this
+    # used to write info_web/info_sysop/info_desc instead, three wrong
+    # key names plus two fields (telnet/ssh) never written at all, so
+    # every fresh install's BBS info always showed blank to other
+    # MRC-network BBSes looking this one up, regardless of what the
+    # sysop entered in the wizard.
+    "bbs_website": os.environ['INFO_WEB'],
+    "bbs_telnet": os.environ['INFO_TELNET'],
+    "bbs_ssh": os.environ['INFO_SSH'],
+    "bbs_sysop": os.environ['ADMIN_USER'],
+    "bbs_description": os.environ['BBS_DESC'],
     "capabilities": ["MCI", "MSGEXT", "CTCP"],
     "web_listen_host": "127.0.0.1",
     "web_listen_port": int(os.environ['MRC_BRIDGE_PORT']),

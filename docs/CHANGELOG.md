@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.40`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.41`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.41 — Fixed a real bug where the MRC bridge always showed blank BBS info to the wider network; manual install docs now cover MRC setup (August 2026)
+
+**Fixed a real bug where every BBS running the MRC bridge showed blank telnet/SSH/website/sysop/description info to the wider MRC network** — the default outcome for every install, not an edge case. `install.sh`/`update.sh` wrote the wrong config key names and never wrote telnet/SSH contact info at all; fixed in both, with real telnet/SSH strings now derived at install time. Existing installs need their `mrc/bridge/config.json` corrected by hand (neither script overwrites an existing one) — see `docs/INSTALL.md`'s troubleshooting section. 12 new tests.
+
+**The manual install guide (`docs/INSTALL.md`) now covers MRC bridge setup**, the one real gap found in a full audit of the doc against current code (everything else already checked out).
 
 ## v1.0.40 — Fixed a live BinkP process-corruption bug; hub node polling and message flavor (Crash/Hold) now do what they say (August 2026)
 
