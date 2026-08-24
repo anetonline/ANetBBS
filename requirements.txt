@@ -21,7 +21,7 @@ Flask-SocketIO>=5.5.0
 Flask-WTF>=1.2.0
 Flask-SQLAlchemy>=3.1.0
 Flask-Migrate>=4.0.0
-WTForms>=3.1.0
+WTForms>=3.2.2
 Werkzeug>=3.0.0
 # 3.1.6 floor: CVE-2024-22195/CVE-2024-34064 (xmlattr XSS),
 # CVE-2024-56326/CVE-2025-27516 (sandbox escape via str.format/attr) --
