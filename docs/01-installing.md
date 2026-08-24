@@ -1,5 +1,12 @@
 # Quick Start
 
+> **Don't have root/sudo on this box, or would rather not run a
+> 2,000+ line script as root?** See
+> **[01b — No-Root Quick Start](01b-no-root-install.md)** instead — a
+> complete, verified path to a fully working BBS (web UI, telnet, SSH)
+> using nothing but your own account. The rest of this page assumes
+> you have (or are fine using) `sudo`.
+
 ## Requirements
 
 - Linux (Ubuntu 22.04+ or Debian 12+ recommended)
@@ -93,11 +100,16 @@ moment you `pip install -e .` (e.g. via the manual-install path in
 `docs/INSTALL.md`):
 
 - **`anetbbs-install`** (`anetbbs/installer/wizard.py`) — a shorter,
-  self-contained interactive Python installer. Asks install directory,
-  BBS branding, ports, `BBS_NODES`, echomail on/off, and sysop
-  credentials; writes `.env`, creates the venv, runs `pip install -e .`,
-  initializes the database + seeds the sysop account, and optionally
-  installs systemd units and `/usr/local/bin` command symlinks.
+  self-contained interactive Python installer, and the basis of the
+  no-root path in **[01b](01b-no-root-install.md)**. Asks install
+  directory, BBS branding, ports, `BBS_NODES`, echomail on/off, and
+  sysop credentials; writes `.env`, creates the venv, runs
+  `pip install -e .`, initializes the database + seeds the sysop
+  account, offers a choice of how to keep it running (system-wide
+  systemd — needs root; a systemd **user** service — no root, survives
+  logout via `loginctl enable-linger`; or none at all), and attempts
+  `/usr/local/bin` command symlinks (best-effort — silently skipped,
+  not fatal, if that directory isn't writable without root).
 - **`anetbbs-upgrade`** (`anetbbs/installer/upgrade.py`) — point it at a
   release tarball or extracted directory. Backs up `data/`, `.env`, and
   `logs/` to a timestamped directory, rsyncs the new code in, reinstalls
@@ -121,10 +133,15 @@ path:
   choice) — it always writes `FLASK_ENV=production`.
 - No nginx or Let's Encrypt/SSL prompts — TLS termination is entirely
   on you afterward.
-- No MSP/SYSTAT, Finger, or BinkP prompts — none of those `.env` vars
-  get written and none of the matching systemd units
-  (`anetbbs-finger.service`, `anetbbs-binkp.service`) get installed.
-  Set those up by hand afterward — see `docs/INSTALL.md` §6, §8, §9.
+- No Finger or BinkP prompts — neither gets set up; do that by hand
+  afterward (`docs/INSTALL.md` §8, §9). MSP/SYSTAT are explicitly
+  written as *disabled* (`MSP_ENABLED=false`/`SYSTAT_ENABLED=false`) —
+  both bind privileged ports (18/11) this wizard has no way to grant
+  capability for, so leaving them at `config.py`'s own default of
+  `true` would log a permission-denied bind failure on every boot for
+  every install this wizard creates, root or not. Turn them back on
+  in `.env` if you have root and want them (`docs/INSTALL.md` §6
+  covers the capability grant).
 - No UFW/firewall step.
 - `wizard.py` writes `IDLE_TIMEOUT_SECONDS=0` into `.env` — that's
   different from the `Config` class default of `1800` (30 minutes)

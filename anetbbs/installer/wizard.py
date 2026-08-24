@@ -100,6 +100,101 @@ def non_empty(s):
     return (bool(s.strip()), 'Required.')
 
 
+def next_steps_lines(service_mode, install_dir):
+    """The 'how do I actually start this thing' instructions printed at
+    the end of the wizard -- a real bug this fixes: the old version
+    printed a single hardcoded `sudo systemctl start anetbbs-web
+    anetbbs` line unconditionally, even for a sysop who explicitly
+    declined systemd installation a few steps earlier (service_mode
+    '3', or '2' before this function existed at all) -- confusing at
+    best (a service that was never installed), actively wrong at worst
+    (implying root is needed when the whole point of choosing that
+    path was to avoid it). Pulled out into its own function (returning
+    plain strings, not printing directly) so this specific mapping is
+    testable without driving the whole interactive wizard (real venv
+    creation, real pip install, real DB init) end to end.
+    """
+    lines = []
+    n = 1
+    if service_mode == '1':
+        lines.append(f'  {n}. Start services: '
+                     f'{C_CYAN}sudo systemctl start anetbbs-web anetbbs{C_RESET}')
+        n += 1
+    elif service_mode == '2':
+        lines.append(f'  {n}. Start services: '
+                     f'{C_CYAN}systemctl --user start anetbbs-web anetbbs{C_RESET}')
+        n += 1
+        lines.append(f'  {n}. Keep them running after you log out: '
+                     f'{C_CYAN}loginctl enable-linger $USER{C_RESET}')
+        lines.append('     (needs no root on most systems — if it errors, ask '
+                     'whoever administers this box to run it once for your '
+                     'account)')
+        n += 1
+    else:
+        pyexe = Path(install_dir) / 'venv' / 'bin'
+        lines.append(f'  {n}. Start it yourself, e.g. in tmux/screen:')
+        lines.append(f'     {C_CYAN}{pyexe}/python {install_dir}/deploy/serve.py'
+                     f'{C_RESET}  (web)')
+        lines.append(f'     {C_CYAN}{pyexe}/anetbbs{C_RESET}  '
+                     '(telnet/SSH/rlogin, if enabled)')
+        n += 1
+    lines.append(f'  {n}. Visit /admin/checklist to verify everything is configured')
+    n += 1
+    lines.append(f'  {n}. /admin/control panel for live ops')
+    return lines
+
+
+def build_env_lines(*, secret_key, db_uri, data_dir, install_dir, web_port,
+                    bbs_name, bbs_desc, sysop_name, bbs_nodes,
+                    telnet_enabled, telnet_port, ssh_enabled, ssh_port,
+                    rlogin_enabled, rlogin_port, echo_enabled, domain):
+    """Build the .env file content as a list of lines -- pulled out of
+    main() so it's directly testable without driving the whole
+    interactive wizard (real venv creation, pip install, DB init).
+
+    MSP_ENABLED/SYSTAT_ENABLED are deliberately written as `false`
+    unconditionally: config.py's own Config.MSP_ENABLED/.SYSTAT_ENABLED
+    default to `true` when unset, but this wizard never asks about
+    either (they're privileged ports, 18 and 11, out of scope for this
+    quick-start flow), so leaving them out of .env would silently
+    inherit "on" and log a permission-denied bind failure on every
+    single boot for every install this wizard creates, root or not --
+    confirmed live. install.sh's own wizard already gets this right
+    (writes *_ENABLED=false whenever the sysop declines that feature in
+    ITS OWN prompts); this brings anetbbs-install to the same safe
+    default. A failed bind doesn't crash anything else -- this is about
+    not logging a needless error on every boot, not a stability fix.
+    """
+    env_lines = [
+        'FLASK_ENV=production',
+        f'SECRET_KEY={secret_key}',
+        f'DATABASE_URL={db_uri}',
+        f'DATA_DIR={data_dir}',
+        f'LOG_FILE={install_dir}/logs/anetbbs.log',
+        'WEB_HOST=0.0.0.0',
+        f'WEB_PORT={web_port}',
+        f'BBS_NAME={bbs_name}',
+        f'BBS_DESCRIPTION={bbs_desc}',
+        f'SYSOP_NAME={sysop_name}',
+        f'BBS_NODES={bbs_nodes}',
+        f'TELNET_ENABLED={"true" if telnet_enabled else "false"}',
+        f'TELNET_PORT={telnet_port}',
+        f'SSH_ENABLED={"true" if ssh_enabled else "false"}',
+        f'SSH_PORT={ssh_port}',
+        f'SSH_HOST_KEY_FILE={data_dir}/ssh_host_key',
+        f'RLOGIN_ENABLED={"true" if rlogin_enabled else "false"}',
+        f'RLOGIN_PORT={rlogin_port}',
+        f'ECHOMAIL_ENABLED={"true" if echo_enabled else "false"}',
+        'LOG_LEVEL=INFO',
+        'IDLE_TIMEOUT_SECONDS=0',
+        'MSP_ENABLED=false',
+        'SYSTAT_ENABLED=false',
+    ]
+    if domain:
+        env_lines.append(f'BBS_DOMAIN={domain}')
+    return env_lines
+
+
 # ---------------------------------------------------------------------------
 # Wizard
 # ---------------------------------------------------------------------------
@@ -148,6 +243,20 @@ def main():
     ssh_port = ask('SSH port', default='2234',
                    validator=is_port) if ssh_enabled else '2234'
     rlogin_enabled = ask_bool('Enable rlogin?', default=False)
+    if rlogin_enabled:
+        # Unlike the web/telnet/SSH defaults above (5000/2233/2234, all
+        # unprivileged), rlogin's own conventional port 513 IS
+        # privileged (<1024) -- binding it needs root or an explicitly
+        # granted capability. Telnet/SSH avoid this because ANetBBS
+        # deliberately doesn't default to their own traditional
+        # privileged ports (23/22); rlogin's prompt still offers 513
+        # as the default since that's the real protocol convention
+        # (some rlogin clients assume it), so this warns rather than
+        # silently changing the default out from under a sysop who DOES
+        # have root and wants the conventional port.
+        warn('Port 513 is privileged (<1024) -- binding it needs root '
+             'or an explicitly granted capability. If you don\'t have '
+             'root, pick a port above 1024 (e.g. 5130) below.')
     rlogin_port = ask('rlogin port', default='513',
                       validator=is_port) if rlogin_enabled else '513'
     bbs_nodes = ask('Number of concurrent terminal nodes (1-100)',
@@ -185,31 +294,15 @@ def main():
     # 8. Write .env
     step('Writing .env')
     if not existing_env:
-        env_lines = [
-            'FLASK_ENV=production',
-            f'SECRET_KEY={secret_key}',
-            f'DATABASE_URL={db_uri}',
-            f'DATA_DIR={data_dir}',
-            f'LOG_FILE={install_dir}/logs/anetbbs.log',
-            'WEB_HOST=0.0.0.0',
-            f'WEB_PORT={web_port}',
-            f'BBS_NAME={bbs_name}',
-            f'BBS_DESCRIPTION={bbs_desc}',
-            f'SYSOP_NAME={sysop_name}',
-            f'BBS_NODES={bbs_nodes}',
-            f'TELNET_ENABLED={"true" if telnet_enabled else "false"}',
-            f'TELNET_PORT={telnet_port}',
-            f'SSH_ENABLED={"true" if ssh_enabled else "false"}',
-            f'SSH_PORT={ssh_port}',
-            f'SSH_HOST_KEY_FILE={data_dir}/ssh_host_key',
-            f'RLOGIN_ENABLED={"true" if rlogin_enabled else "false"}',
-            f'RLOGIN_PORT={rlogin_port}',
-            f'ECHOMAIL_ENABLED={"true" if echo_enabled else "false"}',
-            'LOG_LEVEL=INFO',
-            'IDLE_TIMEOUT_SECONDS=0',
-        ]
-        if domain:
-            env_lines.append(f'BBS_DOMAIN={domain}')
+        env_lines = build_env_lines(
+            secret_key=secret_key, db_uri=db_uri, data_dir=data_dir,
+            install_dir=install_dir, web_port=web_port, bbs_name=bbs_name,
+            bbs_desc=bbs_desc, sysop_name=sysop_name, bbs_nodes=bbs_nodes,
+            telnet_enabled=telnet_enabled, telnet_port=telnet_port,
+            ssh_enabled=ssh_enabled, ssh_port=ssh_port,
+            rlogin_enabled=rlogin_enabled, rlogin_port=rlogin_port,
+            echo_enabled=echo_enabled, domain=domain,
+        )
         env_path.write_text('\n'.join(env_lines) + '\n')
         env_path.chmod(0o600)
         ok(f'Wrote {env_path}')
@@ -268,20 +361,43 @@ def main():
         sys.exit(1)
     ok('DB initialized + admin user created/updated')
 
-    # 12. systemd units
-    step('systemd units (optional)')
-    if ask_bool('Install systemd unit files now?', default=True):
+    # 12. Persistent background service (optional)
+    step('Keep it running (optional)')
+    info('How should the BBS run persistently, instead of just in this')
+    info('terminal? Three options:')
+    info(f'  {C_BOLD}1{C_RESET}) System-wide systemd service — needs root once, to write')
+    info('     /etc/systemd/system/*. Starts on boot for everyone.')
+    info(f'  {C_BOLD}2{C_RESET}) User systemd service — no root at all. Runs under your own')
+    info('     account (systemctl --user); survives logout via loginctl')
+    info('     linger, which most systems let you enable for yourself.')
+    info(f'  {C_BOLD}3{C_RESET}) Skip — run it yourself (a terminal, tmux, screen, or your')
+    info('     own supervisor).')
+    service_mode = ask('Choice', default='2',
+                       validator=lambda s: (s in ('1', '2', '3'),
+                                            'Enter 1, 2, or 3.'))
+    if service_mode == '1':
         try:
             _install_systemd_units(install_dir,
                                    web_port, telnet_enabled, ssh_enabled,
                                    rlogin_enabled)
-            ok('systemd units installed (run `systemctl daemon-reload && '
-               'sudo systemctl enable --now anetbbs-web` to start)')
+            ok('System systemd units installed')
         except Exception as exc:
             err(f'Could not install systemd units: {exc}')
             warn('Skipped — install them by hand from deploy/*.service')
+            service_mode = '3'
+    elif service_mode == '2':
+        try:
+            _install_user_systemd_units(install_dir,
+                                        web_port, telnet_enabled, ssh_enabled,
+                                        rlogin_enabled)
+            ok('User systemd units installed (no root used)')
+        except Exception as exc:
+            err(f'Could not install user systemd units: {exc}')
+            warn('Skipped — install them by hand from deploy/user/*.service')
+            service_mode = '3'
     else:
-        info('Skipped — install them later from deploy/*.service')
+        info('Skipped — install one of the templates in deploy/ later, '
+             'or just run it yourself.')
 
     # 13. /usr/local/bin shortcuts
     step('Installing short command symlinks')
@@ -307,9 +423,8 @@ def main():
         print(f'  SSH:          {C_CYAN}ssh -p {ssh_port} {admin_user}@{domain or "localhost"}{C_RESET}')
     print()
     print(f'{C_GREEN}Next steps:{C_RESET}')
-    print('  1. Start services: sudo systemctl start anetbbs-web anetbbs')
-    print('  2. Visit /admin/checklist to verify everything is configured')
-    print('  3. /admin/control panel for live ops')
+    for line in next_steps_lines(service_mode, install_dir):
+        print(line)
     print()
 
 
@@ -376,6 +491,63 @@ def _install_systemd_units(install_dir, web_port, tel, ssh, rl):
         enable_list.append('anetbbs.service')
     for unit in enable_list:
         subprocess.run(['systemctl', 'enable', unit],
+                       check=False, capture_output=True)
+
+
+def _install_user_systemd_units(install_dir, web_port, tel, ssh, rl):
+    """The no-root counterpart to _install_systemd_units() above --
+    writes systemd USER units (~/.config/systemd/user/, managed with
+    `systemctl --user`, no sudo anywhere in this function) instead of
+    system-level ones. Real differences from the system-level path,
+    not just a changed target directory:
+
+    - No User=/Group= substitution -- a user unit always runs as
+      whichever account owns the user systemd instance, there's no
+      other identity it could run as.
+    - No AmbientCapabilities grant -- user units can't bind privileged
+      ports (<1024) without additional systemd privilege delegation
+      most distros don't enable by default, so this deliberately does
+      NOT attempt to make MSP/SYSTAT/Finger/FTP work here. Those
+      already require root in the system-level path (see docs/
+      INSTALL.md §6) and stay out of scope for a genuinely rootless
+      install -- this wizard's own default ports (5000/2233/2234) are
+      already unprivileged, which is the whole point.
+    - WantedBy=default.target, not multi-user.target -- the correct
+      target for a user-mode unit; multi-user.target doesn't exist in
+      a user systemd instance's own target graph.
+
+    Does NOT call `loginctl enable-linger` itself -- that's a
+    one-time, separate decision the sysop makes explicitly (see the
+    wizard's own printed next-steps), not something to do silently as
+    a side effect of installing unit files. Whether it needs root
+    varies by system (many distros allow a user to enable their own
+    linger via polkit; some hardened setups don't) -- attempting it
+    silently here and failing partway through would be a worse
+    experience than a clear, separate instruction the sysop can act on
+    (or ask a box admin to run once) when they're ready.
+    """
+    units_dir = install_dir / 'deploy' / 'user'
+    target_dir = Path.home() / '.config' / 'systemd' / 'user'
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    installed = []
+    for unit in ('anetbbs-web.service', 'anetbbs.service'):
+        src = units_dir / unit
+        if not src.exists():
+            continue
+        body = src.read_text().replace('/opt/anetbbs', str(install_dir))
+        (target_dir / unit).write_text(body)
+        installed.append(unit)
+
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=False)
+
+    enable_list = []
+    if 'anetbbs-web.service' in installed:
+        enable_list.append('anetbbs-web.service')
+    if (tel or ssh or rl) and 'anetbbs.service' in installed:
+        enable_list.append('anetbbs.service')
+    for unit in enable_list:
+        subprocess.run(['systemctl', '--user', 'enable', unit],
                        check=False, capture_output=True)
 
 

@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.41`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.42`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.42 — A genuine no-root install path, documented and verified end to end (August 2026)
+
+**New: a fully documented, verified no-root installation path** (`docs/01b-no-root-install.md`) for anyone without sudo/root access. The capability mostly already existed in `anetbbs-install` but was undocumented and had one real bug — its final instructions always said `sudo systemctl start ...` even after declining systemd entirely. Added a third, genuinely rootless service option (systemd **user** units, persisting via `loginctl enable-linger`), fixed the final instructions to match whichever choice was made, and fixed a real live bug found while proving this end to end: MSP/SYSTAT default to enabled and were never addressed by the wizard, so every install logged a permission-denied bind failure on every boot — now correctly disabled by default. Verified with a real install run as an ordinary non-root user, followed by actually booting the result and confirming clean HTTP 200s with zero permission errors. 22 new tests.
 
 ## v1.0.41 — Fixed a real bug where the MRC bridge always showed blank BBS info to the wider network; manual install docs now cover MRC setup (August 2026)
 

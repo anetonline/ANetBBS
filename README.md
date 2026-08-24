@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.41`, August 2026)
+**Status: stable** (`v1.0.42`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -10,6 +10,13 @@ Synchronet `.js` doors (LORD ships pre-installed and plays out of the box).
 
 ## Quick install (Linux)
 
+**No root/sudo access, or would rather not?** See
+[`docs/01b-no-root-install.md`](docs/01b-no-root-install.md) — a
+complete, verified path to a fully working BBS (web UI, telnet, SSH)
+using nothing but your own account, no `sudo` anywhere. The rest of
+this section covers the full-featured `install.sh` path, which does
+need root.
+
 You'll want a domain pointed at this box if you want the web admin and
 public web pages working with HTTPS — modern browsers refuse plain-HTTP
 logins, so the wizard's **production** mode pulls a Let's Encrypt cert.
@@ -18,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.41.tar.gz
-cd ANetBBS-v1.0.41
+tar xzf ANetBBS-v1.0.42.tar.gz
+cd ANetBBS-v1.0.42
 sudo bash install.sh
 ```
 
@@ -39,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.41.tar.gz
-cd ANetBBS-v1.0.41
+tar xzf ANetBBS-v1.0.42.tar.gz
+cd ANetBBS-v1.0.42
 sudo bash update.sh
 ```
 

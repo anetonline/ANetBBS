@@ -1,0 +1,18 @@
+[Unit]
+Description=ANetBBS terminal protocols (telnet / ssh / rlogin) — user service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+# Single process owns telnet, ssh, and rlogin. Which protocols
+# actually start is driven by TELNET_ENABLED / SSH_ENABLED /
+# RLOGIN_ENABLED in the .env file referenced above -- same reasoning
+# as the system-level anetbbs.service template (see its own comment).
+ExecStart=/opt/anetbbs/venv/bin/anetbbs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=ANetBBS Web Application (eventlet WSGI) — user service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/anetbbs
+EnvironmentFile=/opt/anetbbs/.env
+ExecStart=/opt/anetbbs/venv/bin/python /opt/anetbbs/deploy/serve.py
+KillMode=mixed
+TimeoutStopSec=20
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

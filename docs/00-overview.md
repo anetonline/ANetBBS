@@ -62,6 +62,7 @@ app uses, so the "who's online" widget shows everyone at once.
 ## Where to go next
 
 - [01 — Installing](01-installing.md)
+- [01b — No-root quick start](01b-no-root-install.md) — a complete, first-class path for anyone without sudo/root access
 - [02 — Sysop daily ops](02-sysop-daily-ops.md)
 - [03 — Menus and the data-driven engine](03-menus.md)
 - [04 — ANSI screens (welcome / goodbye / custom)](04-ansi-screens.md)
