@@ -93,6 +93,10 @@ class BinkPNodeForm(FlaskForm):
     binkp_port = IntegerField('BinkP Port', default=24554,
                               validators=[Optional(), NumberRange(1, 65535)])
     binkp_tls = BooleanField('Use TLS when polling this node', default=False)
+    compress_outbound = BooleanField(
+        'Compress outbound bundles sent to this node (ArcMail/FTS-0006 ZIP) '
+        '-- the node\'s own sysop can also turn this on/off remotely via '
+        'AreaFix "%COMPRESS GZIP" / "%COMPRESS OFF"', default=False)
     # Blank/0 = manual "Poll Now" only, matching BinkPNode.poll_interval_minutes'
     # own NULL-means-opt-out semantics -- see that column's comment.
     # Only meaningful once binkp_host is also set.
@@ -470,6 +474,7 @@ def new_binkp_node():
             binkp_host=(form.binkp_host.data or '').strip() or None,
             binkp_port=form.binkp_port.data or 24554,
             binkp_tls=form.binkp_tls.data,
+            compress_outbound=form.compress_outbound.data,
             poll_interval_minutes=form.poll_interval_minutes.data or None,
             notes=form.notes.data.strip() or None,
         )
@@ -556,6 +561,7 @@ def edit_binkp_node(node_id):
         node.binkp_host = (form.binkp_host.data or '').strip() or None
         node.binkp_port = form.binkp_port.data or 24554
         node.binkp_tls = form.binkp_tls.data
+        node.compress_outbound = form.compress_outbound.data
         node.poll_interval_minutes = form.poll_interval_minutes.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()

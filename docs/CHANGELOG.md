@@ -1,11 +1,51 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.44`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.45`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.45 — Real BinkP outbound bundle compression and WaZOO FREQ support; a full anetbbs-cfg audit (August 2026)
+
+Closes the two documented "Known BinkP limitations" from docs/06-echomail.md.
+
+**Outbound bundle compression** — outbound `.pkt` bundles can now be
+sent as real ZIP-compressed ArcMail bundles, per-hub/per-node, off by
+default. Turn it on from Admin → Echomail / Hub Management, from
+`anetbbs-cfg`, or remotely as a downstream node's own sysop via the
+standard AreaFix `%COMPRESS GZIP` / `%COMPRESS OFF` command (previously
+parsed but a documented no-op). Bundle naming verified against the
+real, published FTS-0006 "WaZOO Filename Conventions" document and
+Synchronet's own reference docs — day-of-week extension (`.Mo0`, etc.),
+never `.zip`.
+
+**WaZOO file requests (FREQ)** — ANetBBS can now both answer a peer's
+FREQ and send its own, following the real FTS-0006 convention. This
+turned out to be a different, older mechanism than BinkP's `M_GET`
+command (which is spec'd only for resuming an in-progress transfer,
+never for requesting an arbitrary file) — verified against the
+published FTS-0006 document rather than assumed. Answering is opt-in
+per file area (Admin → File Areas → "Allow FREQ", optional password);
+sending is queued from a new Admin → Echomail → WaZOO FREQ page.
+Matched files are delivered via the existing TIC-push queue on the
+requester's next poll, not synchronously within the same session — a
+deliberate scope choice (see `anetbbs/echomail/freq.py`'s docstring),
+not full same-session Multiple-Batch-mode.
+
+**A full audit of `anetbbs-cfg`** (the SSH/console terminal config
+tool), requested directly, plus its first dedicated documentation page
+(`docs/28-anetbbs-cfg.md`, all 16 sections covered in detail). Found
+and fixed real gaps accumulated across several releases: the System
+section's `.env` editor was missing MSP, MRC bridge, the file-upload
+moderation queue, casino starting balances, the wiki edit gate, and QWK
+hub identity fields entirely; File Areas was missing the new FREQ
+toggle. Also found and fixed a real bug reaching beyond `anetbbs-cfg`
+itself: `builtin_python` (the game type ANetCRAFT actually uses) was
+missing from both `anetbbs-cfg`'s and the **web admin's own** game-type
+choice list, meaning no admin surface at all could create a new
+`builtin_python` game through its form.
 
 ## v1.0.44 — Full security/dependency/docs audit: two real path-traversal bugs fixed, dependency floors brought current, a dead config setting wired up (August 2026)
 

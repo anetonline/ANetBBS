@@ -206,7 +206,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
         status='running' must exist right after the peer authenticates
         -- well before any file transfer, session completion, or error."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, FreqRequest, db
 
         network = _FakeEchomailNetwork(
             id=7, hub_address='1:200/100', network_type='binkp',
@@ -223,6 +223,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
         EchomailNetwork.query = _FakeQuery([network])
         EchomailMessage.query = _FakeQuery([])
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         session = _HistorySession(EchomailPollLog)
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         try:
@@ -241,6 +242,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
             del EchomailMessage.query
             del EchomailPollLog.query
             del HatchQueue.query
+            del FreqRequest.query
 
         self.assertGreaterEqual(len(session.commit_snapshots), 1,
                                 'expected at least one commit for the poll log row')
@@ -279,7 +281,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
                 self.hub_identity = None
                 self.network_id = None
 
-        from anetbbs.models import BinkPNode, HatchQueue
+        from anetbbs.models import BinkPNode, HatchQueue, FreqRequest
         node = _FakeNode(id=3, ftn_address='1:1/2', password='nodepass')
 
         frames = [
@@ -294,6 +296,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
         # needed -- _handle_connection() now also queries HatchQueue on
         # the downstream_node_id branch this test exercises.
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         session = _HistorySession(EchomailPollLog)
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         from anetbbs.echomail import tosser as tosser_mod
@@ -315,6 +318,7 @@ class PollInProgressVisibilityTests(unittest.TestCase):
             del EchomailMessage.query
             del BinkPNode.query
             del HatchQueue.query
+            del FreqRequest.query
             del EchomailPollLog.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]

@@ -45,6 +45,41 @@ CMD_NAMES = {
     CMD_BSY: 'BSY', CMD_GET: 'GET', CMD_SKIP: 'SKIP',
 }
 
+# ArcMail 0.60 / FTS-0006 bundle extension: first 2 letters of the day
+# of week the bundle was created, keyed by datetime.weekday() (Mon=0).
+# Verified against the real, published FTSC document (WaZOO Filename
+# Conventions, ftsc.org/docs/fts-0006.002) and Synchronet's own
+# reference docs (wiki.synchro.net/ref:fidonet_files), which both state
+# explicitly that a compressed bundle must NOT use ".zip" or any other
+# common archive suffix -- only this day-code extension. The sequence
+# digit that would normally follow (".Mo0", ".Mo1", ... for directory-
+# collision avoidance) is always '0' here: ANetBBS sends bundles
+# straight over a live BinkP session, never through a shared outbound
+# directory a second bundle could collide in.
+_ARCMAIL_DAY_CODES = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+
+
+def _build_outbound_bundle(pkt_data, compress=False):
+    """Returns (filename, payload) for an outbound .pkt packet -- plain
+    if `compress` is False, else a real ZIP-compressed ArcMail bundle
+    under the correct FTS-0006 filename convention. See the module-
+    level comment on _ARCMAIL_DAY_CODES for why the extension is never
+    ".zip". The receiving side needs no cooperation to unpack this:
+    every inbound path in this codebase already detects a bundle by its
+    PK\\x03\\x04 magic bytes, not its extension (see _is_zip()) --
+    the same two valid approaches FTSC's own docs describe.
+    """
+    ts_hex = f'{int(datetime.utcnow().timestamp()):08x}'
+    if not compress:
+        return f'{ts_hex}.pkt', pkt_data
+    import io as _io
+    import zipfile as _zipfile
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, 'w', _zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f'{ts_hex}.pkt', pkt_data)
+    day_code = _ARCMAIL_DAY_CODES[datetime.utcnow().weekday()]
+    return f'{ts_hex}.{day_code}0', buf.getvalue()
+
 # FTS-0001 packed-message types
 MSG_TYPE_2 = b'\x02\x00'
 
@@ -896,7 +931,8 @@ class BinkPClient:
                  use_tls: bool = False, domain: str = None,
                  transcript: list = None, packet_password: str = '',
                  default_crash: bool = False, default_hold: bool = False,
-                 default_direct: bool = False):
+                 default_direct: bool = False, compress_outbound: bool = False,
+                 freq_requests: list = None):
         self.host = host
         self.port = port
         self.our_address = our_address
@@ -911,6 +947,11 @@ class BinkPClient:
         self.default_crash = default_crash
         self.default_hold = default_hold
         self.default_direct = default_direct
+        self.compress_outbound = compress_outbound
+        # Pending FreqRequest rows (models.py) targeting this session's
+        # peer -- sent as a .REQ file alongside our normal outbound
+        # batch. See _send_freq_requests().
+        self.freq_requests = freq_requests or []
         # Per FSP-1028 the FTN domain must match [a-z0-9_~-]+, ≤8 chars.
         # Strip illegal chars from a human-readable network name.
         import re as _re
@@ -968,7 +1009,8 @@ class BinkPClient:
         """
         import os as _os
         result = {'received': [], 'sent': 0, 'hatched_ids': [], 'hatch_failures': [],
-                  'outbound_dir_sent': 0, 'outbound_dir_failures': []}
+                  'outbound_dir_sent': 0, 'outbound_dir_failures': [],
+                  'freq_sent_ids': [], 'freq_failed_ids': []}
         # Persistent inbound path — the prior /tmp default was tmpfs on
         # most distros so anything stashed vanished on restart. Computed
         # once here since _wait_got()/_send_messages() may now also need
@@ -993,6 +1035,8 @@ class BinkPClient:
                     self._send_hatch(hatch_items)
             result['outbound_dir_sent'], result['outbound_dir_failures'] = \
                 self._send_outbound_dir_files()
+            result['freq_sent_ids'], result['freq_failed_ids'] = \
+                self._send_freq_requests()
             result['received'] = self._receive_messages(data_dir)
             if self._interleaved_received:
                 result['received'].extend(self._interleaved_received)
@@ -1047,6 +1091,40 @@ class BinkPClient:
             logger.info("Hatch: shipped %s + %s to %s",
                         item.filename, tic_name, item.peer_address)
         return sent_ids, failures
+
+    def _send_freq_requests(self):
+        """Send one WaZOO .REQ file (FTS-0006) to this peer bundling
+        every pending FreqRequest row the caller scoped to them (see
+        models.FreqRequest and freq.py's module docstring) -- one line
+        per request, all in a single file, since the .REQ filename
+        itself is fixed by the addressee alone (nothing to disambiguate
+        multiple requests by). Returns (sent_ids, failed_ids).
+
+        Files the peer sends back in response arrive on a LATER
+        poll/session as ordinary inbound files, not synchronously here
+        -- see the module docstring's asymmetric-timing note.
+        """
+        if not self.freq_requests:
+            return [], []
+        from .freq import req_filename_for_address, build_req_content
+        fname = req_filename_for_address(self.hub_address)
+        if not fname:
+            logger.warning('BinkP: cannot build .REQ filename for %s '
+                           '(unparseable address) -- %d request(s) not sent',
+                           self.hub_address, len(self.freq_requests))
+            return [], [r.id for r in self.freq_requests]
+        content = build_req_content(
+            [(r.filename_pattern, r.password) for r in self.freq_requests])
+        mtime = int(datetime.utcnow().timestamp())
+        self._send_cmd(CMD_FILE, f'{fname} {len(content)} {mtime} 0')
+        self._send_data(content)
+        if self._wait_got():
+            logger.info('BinkP: sent FREQ %s to %s (%d request(s))',
+                       fname, self.hub_address, len(self.freq_requests))
+            return [r.id for r in self.freq_requests], []
+        logger.warning('BinkP: peer %s did not ack our FREQ %s',
+                       self.hub_address, fname)
+        return [], [r.id for r in self.freq_requests]
 
     def _send_outbound_dir_files(self):
         """Ship any loose files sitting in self._outbound_dir (see
@@ -1190,6 +1268,16 @@ class BinkPClient:
         from .zip_safety import iter_safe_members, ZipBombError
 
         self._debug_manifest(fname, buf)
+        from .freq import is_req_filename, process_inbound_req
+        if is_req_filename(fname):
+            try:
+                queued = process_inbound_req(buf, self.hub_address)
+                logger.info('BinkP: WaZOO FREQ from %s (%s) queued %d file(s)',
+                           self.hub_address, fname, len(queued))
+            except Exception:
+                logger.exception('BinkP: failed processing FREQ %s from %s',
+                                 fname, self.hub_address)
+            return []
         if self._is_fts_packet(buf):
             self._debug_dump_packet(fname, buf)
             try:
@@ -1646,13 +1734,14 @@ class BinkPClient:
         # e.g. binkd/SBBSecho/Mystic all use this) rather than a
         # decimal, prefixed name -- purely cosmetic/compliance, flagged
         # by a real FTN sysop reviewing a session log, unrelated to any
-        # functional bug.
-        filename = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-        size = len(pkt_data)
+        # functional bug. Optionally zipped into a real ArcMail bundle
+        # first -- see _build_outbound_bundle()'s own docstring.
+        filename, payload = _build_outbound_bundle(pkt_data, compress=self.compress_outbound)
+        size = len(payload)
         mtime = int(datetime.utcnow().timestamp())
 
         self._send_cmd(CMD_FILE, f'{filename} {size} {mtime} 0')
-        self._send_data(pkt_data)
+        self._send_data(payload)
 
         # Wait for GOT (accepted) or SKIP/ERR (rejected). Any CMD_FILE
         # the peer interleaves while we wait is received and GOT-acked

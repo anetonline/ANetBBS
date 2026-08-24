@@ -175,7 +175,7 @@ class OutboundDirWiringTests(unittest.TestCase):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
         from anetbbs.models import (EchomailNetwork, BinkPNode, EchomailMessage,
-                                    HatchQueue, db)
+                                    HatchQueue, FreqRequest, db)
 
         captured = {'dir_calls': []}
 
@@ -195,6 +195,7 @@ class OutboundDirWiringTests(unittest.TestCase):
         BinkPNode.query = _FakeQuery(nodes)
         EchomailMessage.query = _FakeQuery([])
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailNetwork, 'our_address', _FakeColumn('our_address')), \
@@ -223,6 +224,7 @@ class OutboundDirWiringTests(unittest.TestCase):
             del BinkPNode.query
             del EchomailMessage.query
             del HatchQueue.query
+            del FreqRequest.query
 
         return captured
 

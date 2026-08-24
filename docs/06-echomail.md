@@ -14,18 +14,61 @@ Hub Management admin panel. This doc covers all of them.
 - **QWK** — packet-based, popular for Dove-Net. ANetBBS can
   download / upload QWK packets over HTTP/FTP.
 
-### Known BinkP limitations (deliberate scope, not bugs)
+### Outbound bundle compression
 
-- **FREQ (file request, `M_GET`) is not implemented.** ANetBBS never
-  sends one, and doesn't answer one from a peer either. File
-  distribution here is TIC-push only (see the TIC section below) —
-  legacy FREQ is rarely used over BinkP today and isn't planned.
-- **Outbound bundles are always sent uncompressed.** Inbound zipped
-  arcmail bundles ARE accepted and unpacked fine (a peer compressing
-  their side works), but ANetBBS itself never produces a compressed
-  `.pkt` bundle on send — spec-legal (compression is optional), just
-  an asymmetry worth knowing about if you're comparing outbound
-  bandwidth against a peer that does compress.
+Outbound `.pkt` bundles can be sent compressed instead of plain —
+turned on per hub/node, off by default (every peer already accepts
+plain `.pkt`, so this only matters once you've confirmed a specific
+peer wants it). Two ways to turn it on:
+
+- **As the sysop**, from Admin → Echomail (network settings) or Admin →
+  Hub Management (per downstream node) — a plain checkbox — or via
+  `anetbbs-cfg`'s System section for the `.env`-level defaults.
+- **As a downstream node's own sysop**, remotely, via the standard
+  AreaFix command: `%COMPRESS GZIP` turns it on for bundles sent *to
+  you*, `%COMPRESS OFF` turns it back off. No action needed on the
+  hub's side.
+
+Compressed bundles are real ZIP archives, named per the actual
+ArcMail 0.60 / FTS-0006 convention verified against the published FTSC
+document and Synchronet's own reference docs: an 8-hex-digit base name
+plus a day-of-week extension (`.Mo0`, `.Tu0`, ... `.Su0`) — **never**
+`.zip` or any other common archive suffix, per that same convention.
+Any peer that content-sniffs inbound files (the norm for modern
+mailers, and what ANetBBS itself already does on receive) handles this
+with zero configuration; a peer that insists on trusting the file
+extension will also see a shape it recognizes.
+
+### WaZOO file requests (FREQ)
+
+ANetBBS can both answer a peer's file request and send its own,
+following the real FTS-0006 "WaZOO File Requests" convention — not the
+BinkP `M_GET` command, which despite its casual "request a file"
+description in some references is actually spec'd only for resuming
+an in-progress transfer of a file already being offered, never for
+requesting an arbitrary named file. A genuine FREQ travels as an
+ordinary file transfer: a small text file named `NNNNnnnn.REQ` (the
+recipient's net/node as two 4-digit hex numbers) listing wanted
+filenames, one per line, wildcards allowed (`nodelist.*`), with an
+optional per-line `!password`.
+
+- **Answering a peer's FREQ**: opt a file area in from Admin → File
+  Areas ("Allow FREQ", plus an optional FREQ password) or
+  `anetbbs-cfg`'s File Areas section. Off by default. A matching file
+  is queued for delivery to the requester the same way any other
+  TIC-push item is — it goes out on their *next* poll/connection, not
+  instantly within the same session (this codebase deliberately
+  doesn't implement BinkP's Multiple-Batch-mode same-session reply;
+  see `anetbbs/echomail/freq.py`'s module docstring for the reasoning).
+- **Sending a FREQ**: queue one from Admin → Echomail → WaZOO FREQ —
+  target address, filename/wildcard, optional password. Sent the next
+  time ANetBBS talks to that peer (either direction); whatever comes
+  back arrives as an ordinary inbound file on a later session, same
+  asymmetric timing as the receiving side above.
+
+File distribution here is otherwise TIC-push (see the TIC section
+below) — FREQ is an additional, opt-in pull mechanism on top of that,
+not a replacement for it.
 
 ### Outbound spool directory — for external programs (v1.0.34+)
 
@@ -220,7 +263,9 @@ one command per line in the body:
                     (or every subscribed area if no tag given) for this
                     node's hold queue -- a real backlog-catchup request,
                     not a subscription change
-%COMPRESS GZIP      accepted, no-op (bundles are always sent uncompressed)
+%COMPRESS GZIP      compress outbound bundles sent to you (see "Outbound
+                    bundle compression" above); %COMPRESS OFF to turn
+                    back off
 %PASSWORD newpass   hub-only: change your own AreaFix/BinkP password --
                     only reachable already authenticated with the OLD
                     password, so this can't bootstrap a password on a

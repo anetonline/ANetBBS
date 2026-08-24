@@ -38,7 +38,7 @@ from .binkp import (
     CMD_GOT, CMD_ERR, CMD_SKIP, CMD_NAMES,
     _build_cmd, _build_data,
     _build_ftn_packet, _parse_ftn_packet,
-    _sanitize_inbound_filename,
+    _sanitize_inbound_filename, _build_outbound_bundle,
     resolve_outbound_dir, list_outbound_dir_files, archive_sent_outbound_file,
 )
 
@@ -635,6 +635,8 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     net_default_crash = False
     net_default_hold = False
     net_default_direct = False
+    net_compress_outbound = False
+    node_compress_outbound = False
     # HatchQueue.peer_address for this network's hub, captured as a plain
     # scalar for the same detached-instance reason as the fields above --
     # needed later (net_id branch, file-echo hatch-out) to look up any
@@ -685,6 +687,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
             net_default_crash = bool(getattr(network, 'default_crash', False))
             net_default_hold = bool(getattr(network, 'default_hold', False))
             net_default_direct = bool(getattr(network, 'default_direct', False))
+            net_compress_outbound = bool(getattr(network, 'compress_outbound', False))
             net_hub_address = network.hub_address or ''
             # Create the EchomailPollLog row NOW, at the start of the
             # session, not only after it completes (the prior behavior --
@@ -733,6 +736,7 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     return
                 downstream_node_id = node.id
                 net_name = node.name
+                node_compress_outbound = bool(getattr(node, 'compress_outbound', False))
                 # Update last-seen timestamp.
                 node.last_seen_at = datetime.utcnow()
                 db.session.commit()
@@ -902,8 +906,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                 outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
                 if outbound:
                     pkt_bytes = _build_ftn_packet(outbound, matched_our_address, remote_addr)
-                    fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                    accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                    fname, pkt_payload = _build_outbound_bundle(
+                        pkt_bytes, compress=node_compress_outbound)
+                    accepted = await _send_pkt_file(reader, writer, fname, pkt_payload,
                                                     peer, recv_state, inbound_files,
                                                     transcript=transcript)
                     if accepted:
@@ -958,6 +963,28 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         for failed_item, message in hatch_failures:
                             record_hatch_attempt_failure(failed_item, message)
                         db.session.commit()
+
+                from ..models import FreqRequest
+                pending_freqs = (FreqRequest.query
+                                 .filter_by(target_address=node.ftn_address or '',
+                                            status='pending')
+                                 .all())
+                if pending_freqs:
+                    freq_sent_ids, freq_failed_ids = await _send_freq_requests_async(
+                        reader, writer, pending_freqs, node.ftn_address,
+                        peer, recv_state, inbound_files, transcript=transcript)
+                    if freq_sent_ids or freq_failed_ids:
+                        for rid in freq_sent_ids:
+                            row = FreqRequest.query.get(rid)
+                            if row is not None:
+                                row.status = 'sent'
+                                row.sent_at = datetime.utcnow()
+                        for rid in freq_failed_ids:
+                            row = FreqRequest.query.get(rid)
+                            if row is not None:
+                                row.status = 'failed'
+                                row.error_message = 'peer did not acknowledge the .REQ file'
+                        db.session.commit()
             elif net_id is not None:
                 from ..models import EchomailMessage
                 from .tosser import get_pending_netmail_for_network, mark_netmail_sent
@@ -987,8 +1014,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         default_crash=net_default_crash,
                         default_hold=net_default_hold,
                         default_direct=net_default_direct)
-                    fname = f'{int(datetime.utcnow().timestamp()):08x}.pkt'
-                    accepted = await _send_pkt_file(reader, writer, fname, pkt_bytes,
+                    fname, pkt_payload = _build_outbound_bundle(
+                        pkt_bytes, compress=net_compress_outbound)
+                    accepted = await _send_pkt_file(reader, writer, fname, pkt_payload,
                                                     peer, recv_state, inbound_files,
                                                     transcript=transcript)
                     if accepted:
@@ -1048,6 +1076,28 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         from .tic import record_hatch_attempt_failure
                         for failed_item, message in hatch_failures:
                             record_hatch_attempt_failure(failed_item, message)
+                        db.session.commit()
+
+                from ..models import FreqRequest
+                pending_freqs = (FreqRequest.query
+                                 .filter_by(target_address=net_hub_address,
+                                            status='pending')
+                                 .all()) if net_hub_address else []
+                if pending_freqs:
+                    freq_sent_ids, freq_failed_ids = await _send_freq_requests_async(
+                        reader, writer, pending_freqs, net_hub_address,
+                        peer, recv_state, inbound_files, transcript=transcript)
+                    if freq_sent_ids or freq_failed_ids:
+                        for rid in freq_sent_ids:
+                            row = FreqRequest.query.get(rid)
+                            if row is not None:
+                                row.status = 'sent'
+                                row.sent_at = datetime.utcnow()
+                        for rid in freq_failed_ids:
+                            row = FreqRequest.query.get(rid)
+                            if row is not None:
+                                row.status = 'failed'
+                                row.error_message = 'peer did not acknowledge the .REQ file'
                         db.session.commit()
 
         await _send_cmd(writer, CMD_EOB, transcript=transcript)
@@ -1162,6 +1212,19 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     inbound_dir = None
                     for fname, payload in inbound_files:
                         _debug_manifest(fname, payload)
+                        from .freq import is_req_filename, process_inbound_req
+                        if is_req_filename(fname):
+                            try:
+                                queued = process_inbound_req(payload, remote_addr)
+                                files_received += 1
+                                logger.info(
+                                    'BinkP: WaZOO FREQ from %s (%s) queued '
+                                    '%d file(s)', remote_addr, fname, len(queued))
+                            except Exception:
+                                logger.exception(
+                                    'BinkP: failed processing FREQ %s from %s',
+                                    fname, remote_addr)
+                            continue
                         extracted = list(_extract_packets(fname, payload))
                         if extracted:
                             if net_id is None and downstream_node_id is not None:
@@ -1719,6 +1782,36 @@ async def _send_hatch_items(reader, writer, hatch_items, our_address, peer,
         logger.info('Hatch (inbound listener): shipped %s + %s to %s',
                     item.filename, tic_name, peer)
     return sent_ids, failures
+
+
+async def _send_freq_requests_async(reader, writer, pending_freqs, target_address,
+                                    peer, state, files, transcript=None):
+    """Send one WaZOO .REQ file (FTS-0006) bundling every pending
+    FreqRequest row targeting this connected peer. Async counterpart of
+    binkp.py's BinkPClient._send_freq_requests() (the outbound-dial
+    direction) -- this is the inbound-listener direction (the target
+    peer dialed INTO us, so we get to piggyback our own FREQ onto their
+    session too). Returns (sent_ids, failed_ids)."""
+    if not pending_freqs:
+        return [], []
+    from .freq import req_filename_for_address, build_req_content
+    fname = req_filename_for_address(target_address)
+    if not fname:
+        logger.warning('BinkP (inbound listener): cannot build .REQ filename '
+                       'for %s -- %d request(s) not sent',
+                       target_address, len(pending_freqs))
+        return [], [r.id for r in pending_freqs]
+    content = build_req_content(
+        [(r.filename_pattern, r.password) for r in pending_freqs])
+    accepted = await _send_pkt_file(reader, writer, fname, content,
+                                    peer, state, files, transcript=transcript)
+    if accepted:
+        logger.info('BinkP (inbound listener): sent FREQ %s to %s (%d request(s))',
+                   fname, target_address, len(pending_freqs))
+        return [r.id for r in pending_freqs], []
+    logger.warning('BinkP (inbound listener): peer %s did not ack our FREQ %s',
+                   target_address, fname)
+    return [], [r.id for r in pending_freqs]
 
 
 async def _send_outbound_dir_items(reader, writer, outbound_dir, peer,

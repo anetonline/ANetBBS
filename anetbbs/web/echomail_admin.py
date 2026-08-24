@@ -15,7 +15,8 @@ from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
 
 from ..models import (db, EchomailNetwork, EchoArea, EchomailMessage,
-                       EchomailPollLog, BadAreaLog, UserAka, BinkPNode)
+                       EchomailPollLog, BadAreaLog, UserAka, BinkPNode,
+                       FreqRequest)
 
 echomail_admin_bp = Blueprint('echomail_admin', __name__, url_prefix='/admin/echomail')
 
@@ -60,6 +61,9 @@ class NetworkForm(FlaskForm):
         'Default: Hold (hold for pickup, don\'t push)', default=False)
     default_direct = BooleanField(
         'Default: Direct (dial straight to destination, bypass routing)',
+        default=False)
+    compress_outbound = BooleanField(
+        'Compress outbound bundles sent to this hub (ArcMail/FTS-0006 ZIP)',
         default=False)
     default_recipient = StringField(
         'Default Netmail Recipient (BBS user that catches netmail addressed '
@@ -294,6 +298,7 @@ def new_network():
             default_crash=form.default_crash.data,
             default_hold=form.default_hold.data,
             default_direct=form.default_direct.data,
+            compress_outbound=form.compress_outbound.data,
             default_recipient=form.default_recipient.data or None,
             require_real_name_netmail=form.require_real_name_netmail.data,
         )
@@ -1298,3 +1303,62 @@ def akas():
     user_akas = UserAka.query.filter_by(user_id=current_user.id).order_by(
         UserAka.is_primary.desc(), UserAka.address).all()
     return render_template('echomail/admin/akas.html', akas=user_akas)
+
+
+# ---------------------------------------------------------------------------
+# WaZOO FREQ (FTS-0006) -- outbound requests. See echomail/freq.py's module
+# docstring for the full mechanism; this is just the queue-management UI.
+# ---------------------------------------------------------------------------
+
+class FreqRequestForm(FlaskForm):
+    target_address = StringField(
+        'Peer FTN Address (e.g. 1:234/567) -- who to request from',
+        validators=[DataRequired(), Length(max=60)])
+    filename_pattern = StringField(
+        'Filename or wildcard (e.g. NODELIST.* -- no path)',
+        validators=[DataRequired(), Length(max=120)])
+    password = StringField(
+        'Password (only if that peer requires one for this file, optional)',
+        validators=[Optional(), Length(max=80)])
+    submit = SubmitField('Queue Request')
+
+
+@echomail_admin_bp.route('/freq', methods=['GET', 'POST'])
+@login_required
+@_admin_required
+def freq_requests():
+    """Queue and track outbound WaZOO FREQs -- files ANetBBS wants to
+    pull FROM a peer. Sent on our next dial to (or dial-in from) that
+    peer's address; see binkp.py's _send_freq_requests()/
+    binkp_server.py's _send_freq_requests_async(). Answering a peer's
+    OWN inbound FREQ needs no admin action at all -- see the per-
+    file-area "Allow FREQ" checkbox on the File Areas admin page
+    instead (anetbbs/templates/admin/file_areas.html)."""
+    form = FreqRequestForm()
+    if form.validate_on_submit():
+        req = FreqRequest(
+            target_address=form.target_address.data.strip(),
+            filename_pattern=form.filename_pattern.data.strip(),
+            password=form.password.data.strip() or None,
+            requested_by_id=current_user.id,
+        )
+        db.session.add(req)
+        db.session.commit()
+        flash(f'Queued FREQ for "{req.filename_pattern}" from '
+             f'{req.target_address} -- will send on the next session with '
+             f'that peer.', 'success')
+        return redirect(url_for('echomail_admin.freq_requests'))
+    requests_list = FreqRequest.query.order_by(FreqRequest.created_at.desc()).limit(200).all()
+    return render_template('echomail/admin/freq_requests.html',
+                           form=form, requests_list=requests_list)
+
+
+@echomail_admin_bp.route('/freq/<int:req_id>/delete', methods=['POST'])
+@login_required
+@_admin_required
+def delete_freq_request(req_id):
+    req = FreqRequest.query.get_or_404(req_id)
+    db.session.delete(req)
+    db.session.commit()
+    flash('Request removed.', 'success')
+    return redirect(url_for('echomail_admin.freq_requests'))

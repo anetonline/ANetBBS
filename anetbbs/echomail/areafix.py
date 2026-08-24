@@ -20,7 +20,12 @@ Supported commands (case-insensitive, one per line of the message body):
                       no-op for an upstream leaf request (process_request),
                       since there's no per-us hold queue for a network we
                       poll rather than host.
-    %COMPRESS GZIP  no-op (we always send uncompressed bundles)
+    %COMPRESS GZIP  turn on outbound bundle compression to this node
+                      (ArcMail/FTS-0006 ZIP bundles, see echomail/binkp.py's
+                      _build_outbound_bundle()). %COMPRESS OFF turns it back
+                      off. Downstream-node-only (see _process_node_request)
+                      -- no-op for an upstream leaf request, since a leaf
+                      doesn't control what ITS hub sends it.
     %PASSWORD newpass  change your own AreaFix/BinkP password. Downstream-
                       node-only (see _process_node_request) -- only reachable
                       having already passed the password check with the
@@ -81,7 +86,7 @@ def parse_request(body):
     Returns a list of (verb, target, arg) tuples where verb is one of
     '+', '-', '%'; target is the uppercased area-tag or keyword; arg is
     an optional uppercased second token (only meaningful for '%RESCAN
-    AREA.TAG' and the already-no-op '%COMPRESS GZIP') or None."""
+    AREA.TAG' and '%COMPRESS GZIP'/'%COMPRESS OFF') or None."""
     cmds = []
     for line in (body or '').splitlines():
         m = _CMD_RE.match(line)
@@ -154,7 +159,8 @@ def _help_text():
         "  %QUERY       same as %LIST\n"
         "  %RESCAN AREA.TAG  re-send every existing message in AREA.TAG\n"
         "               (bare %RESCAN re-sends every area you're subscribed to)\n"
-        "  %COMPRESS GZIP  accepted, no-op (bundles are always uncompressed)\n"
+        "  %COMPRESS GZIP  compress outbound bundles sent to you (%COMPRESS\n"
+        "               OFF to turn back off)\n"
         "  %PASSWORD newpass  change your AreaFix/BinkP password (hub-\n"
         "               managed downstream nodes only)\n"
         "  %HELP        this help text\n\n"
@@ -473,6 +479,27 @@ def _process_node_request(node, from_address, subject, body):
                     else:
                         node.password = m.group(1)
                         out_lines.append('%PASSWORD : password changed')
+            elif target == 'COMPRESS':
+                # Real gap found in a full echomail-subsystem audit: this
+                # command was documented and parsed but never actually
+                # DID anything -- see echomail/freq.py's sibling work
+                # (bundle compression is the wire-format half of the same
+                # audit; this is the per-node preference toggle for it).
+                # "GZIP" is accepted as the conventional argument (per the
+                # original AreaFix/SBBSecho convention this command comes
+                # from) even though the real compression used is ZIP/
+                # DEFLATE, not gzip -- see _build_outbound_bundle()'s own
+                # docstring for why ANetBBS follows the ArcMail/FTS-0006
+                # convention (ZIP, never a literal .gz stream) regardless
+                # of what a peer names it here.
+                if arg in ('OFF', 'NONE', 'NO'):
+                    node.compress_outbound = False
+                    out_lines.append('%COMPRESS OFF : outbound bundles to '
+                                     'you will no longer be compressed')
+                else:
+                    node.compress_outbound = True
+                    out_lines.append(f'%COMPRESS {arg or "GZIP"} : outbound '
+                                     'bundles to you will now be compressed')
             else:
                 out_lines.append(f'%{target} : ignored')
 

@@ -87,3 +87,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [25 — PETSCII (Commodore 64/128 terminal support)](25-petscii.md)
 - [26 — Synchronet door games (17 confirmed-working, download/setup guide)](26-synchronet-json-rpc-doors.md)
 - [27 — MRC chat (inter-BBS chat network, native vs Mystic connection backends)](27-mrc-chat.md)
+- [28 — `anetbbs-cfg` (terminal config tool, SSH/console)](28-anetbbs-cfg.md)

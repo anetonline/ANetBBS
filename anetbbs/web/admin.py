@@ -1700,6 +1700,8 @@ def file_areas_admin():
             fa.min_access_level = int(request.form.get('min_access_level') or 10)
             raw_wl = request.form.get('min_write_level', '').strip()
             fa.min_write_level = int(raw_wl) if raw_wl.isdigit() else None
+            fa.freq_enabled = bool(request.form.get('freq_enabled'))
+            fa.freq_password = (request.form.get('freq_password') or '').strip() or None
             db.session.commit()
             flash(f'Updated {fa.tag}.', 'success')
         elif action == 'delete':

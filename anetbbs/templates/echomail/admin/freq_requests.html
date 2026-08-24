@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}WaZOO FREQ — Echomail Admin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-download"></i> WaZOO File Requests (FREQ)</h1>
+    <p>Files ANetBBS wants to pull FROM another peer (FTS-0006). Queued
+       here, sent as a real <code>.REQ</code> file the next time we
+       dial (or are dialed by) that peer's address — any files they
+       send back arrive as ordinary inbound files on a later session,
+       not instantly.</p>
+    <p class="text-muted small">Answering a peer's own FREQ against
+        <em>your</em> files needs no queue entry — turn on "Allow FREQ"
+        on the relevant area from
+        <a href="{{ url_for('admin.file_areas_admin') }}">File Areas admin</a>
+        instead.</p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-list"></i> Requests</div>
+    <div class="card-body p-0">
+    {% if requests_list %}
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                <th>Target</th><th>Pattern</th><th>Status</th><th>Queued</th><th>Sent</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for r in requests_list %}
+                <tr>
+                    <td><code>{{ r.target_address }}</code></td>
+                    <td><code>{{ r.filename_pattern }}</code>{% if r.password %} <span class="text-muted small">(password set)</span>{% endif %}</td>
+                    <td>
+                        {% if r.status == 'sent' %}
+                            <span class="badge bg-success">sent</span>
+                        {% elif r.status == 'failed' %}
+                            <span class="badge bg-danger" title="{{ r.error_message or '' }}">failed</span>
+                        {% else %}
+                            <span class="badge bg-secondary">pending</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted">{{ r.created_at|eastern('%Y-%m-%d %H:%M', '') }}</td>
+                    <td class="small text-muted">{{ r.sent_at|eastern('%Y-%m-%d %H:%M', '—') }}</td>
+                    <td>
+                        <form method="post" action="{{ url_for('echomail_admin.delete_freq_request', req_id=r.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    onclick="return confirm('Remove this request?')">remove</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No FREQs queued.</div>
+    {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-plus-square"></i> Queue a Request</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            {{ form.csrf_token }}
+            <div class="col-md-4">
+                {{ form.target_address.label(class="form-label") }}
+                {{ form.target_address(class="form-control", placeholder="1:234/567") }}
+            </div>
+            <div class="col-md-4">
+                {{ form.filename_pattern.label(class="form-label") }}
+                {{ form.filename_pattern(class="form-control", placeholder="NODELIST.*") }}
+            </div>
+            <div class="col-md-3">
+                {{ form.password.label(class="form-label") }}
+                {{ form.password(class="form-control") }}
+            </div>
+            <div class="col-md-1">
+                {{ form.submit(class="btn btn-primary w-100") }}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-link">← Back to Echomail Admin</a>
+</div>
+{% endblock %}

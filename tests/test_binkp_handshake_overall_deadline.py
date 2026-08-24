@@ -130,7 +130,7 @@ class BinkpHandshakeOverallDeadlineTests(unittest.TestCase):
         sends M_ADR + M_PWD right away must not be cut off just because
         the overall-deadline bookkeeping now runs on every iteration."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, FreqRequest, db
 
         class _FakeColumn:
             def __init__(self, name):
@@ -232,6 +232,7 @@ class BinkpHandshakeOverallDeadlineTests(unittest.TestCase):
         EchomailMessage.query = _FakeQuery([])
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -248,6 +249,7 @@ class BinkpHandshakeOverallDeadlineTests(unittest.TestCase):
             del EchomailMessage.query
             del EchomailPollLog.query
             del HatchQueue.query
+            del FreqRequest.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(poll_logs), 1)

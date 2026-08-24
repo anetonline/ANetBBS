@@ -22,17 +22,22 @@ FIELDS = [
     {"key": "is_subscribed", "label": "Subscribed (receive from upstream)", "kind": "bool"},
     {"key": "is_sysop_only", "label": "Sysop Only", "kind": "bool"},
     {"key": "password", "label": "Area Password", "kind": "text_nullable"},
+    {"key": "freq_enabled", "label": "Allow WaZOO FREQ", "kind": "bool"},
+    {"key": "freq_password", "label": "FREQ Password (blank = none required)", "kind": "text_nullable"},
 ]
 
 HELP = [
     "Min Upload Level blank = same as Min Access Level.",
     "Network assignment (TIC routing): web admin only.",
+    "FREQ: lets other BBSes pull files from this area via WaZOO",
+    "file requests (FTS-0006) over BinkP -- see docs/06-echomail.md.",
 ]
 
 NEW_DEFAULTS = {
     "tag": "", "name": None, "description": None, "storage_path": None,
     "min_access_level": 10, "min_write_level": None, "upload_permission": "users",
     "is_active": True, "is_subscribed": True, "is_sysop_only": False, "password": None,
+    "freq_enabled": False, "freq_password": None,
 }
 
 COLUMNS = [

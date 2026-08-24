@@ -55,6 +55,9 @@ GROUPS = [
         {"key": "BBS_NODES", "label": "Concurrent Nodes (1-100)", "kind": "int"},
         {"key": "IDLE_TIMEOUT_SECONDS", "label": "Idle Kick (seconds, 0=never)", "kind": "int"},
         {"key": "AFK_WARNING_SECONDS", "label": "AFK Warning (seconds, 0=off)", "kind": "int"},
+        {"key": "BOT_GATE_TIMEOUT", "label": "Bot-Gate Timeout (seconds, pre-login challenge)", "kind": "int"},
+        {"key": "PERSONAL_PAGES_ENABLED", "label": "Personal Web Pages Enabled", "kind": "bool"},
+        {"key": "BLOCKED_COUNTRIES", "label": "Blocked Countries (comma-separated ISO codes, blank=off)", "kind": "text"},
     ]},
     {"key": "logging", "label": "Logging", "fields": [
         {"key": "LOG_LEVEL", "label": "Log Level", "kind": "choice",
@@ -66,16 +69,29 @@ GROUPS = [
         {"key": "BINKP_OUR_ADDRESS", "label": "Our Primary AKA", "kind": "text"},
         {"key": "BINKP_SYSTEM_NAME", "label": "System Name", "kind": "text"},
     ]},
+    {"key": "msp", "label": "MSP / Finger (Inter-BBS Presence)", "fields": [
+        {"key": "MSP_ENABLED", "label": "MSP Enabled (needs CAP_NET_BIND_SERVICE for port 18)", "kind": "bool"},
+        {"key": "MSP_PORT", "label": "MSP Port", "kind": "int"},
+    ]},
+    {"key": "mrc", "label": "MRC Bridge (Inter-BBS Chat)", "fields": [
+        {"key": "MRC_BRIDGE_HOST", "label": "MRC Bridge Host", "kind": "text"},
+        {"key": "MRC_BRIDGE_PORT", "label": "MRC Bridge Port", "kind": "int"},
+        {"key": "MRC_BRIDGE_WS_PATH", "label": "MRC Bridge WS Path", "kind": "text"},
+    ]},
     {"key": "files", "label": "Files / FTP", "fields": [
         {"key": "FTP_ENABLED", "label": "FTP Enabled", "kind": "bool"},
         {"key": "FTP_HOST", "label": "FTP Host", "kind": "text"},
         {"key": "FTP_PORT", "label": "FTP Port", "kind": "int"},
         {"key": "FTP_ANON_ENABLED", "label": "Anonymous FTP", "kind": "bool"},
         {"key": "FTP_PASV_PORTS", "label": "Passive Port Range", "kind": "text"},
+        {"key": "FTP_TLS_CERTFILE", "label": "FTP TLS Cert Path (blank=plain FTP)", "kind": "text"},
+        {"key": "FTP_TLS_KEYFILE", "label": "FTP TLS Key Path (blank=plain FTP)", "kind": "text"},
         {"key": "FTP_ROOT_DIR", "label": "FTP Root Dir", "kind": "text"},
         {"key": "FTP_BANNER", "label": "FTP Banner", "kind": "text"},
         {"key": "RATIO_MIN", "label": "Min Upload:Download Ratio (0=off)", "kind": "int"},
+        {"key": "FILE_MOD_QUEUE_ENABLED", "label": "Upload Moderation Queue (quarantine pending approval)", "kind": "bool"},
         {"key": "CLAMSCAN_PATH", "label": "ClamAV clamscan Path", "kind": "text"},
+        {"key": "CLAMSCAN_TIMEOUT", "label": "ClamAV Scan Timeout (seconds per file)", "kind": "int"},
     ]},
     {"key": "games", "label": "Games", "fields": [
         {"key": "GAMES_ENABLED", "label": "Games Enabled", "kind": "bool"},
@@ -86,15 +102,25 @@ GROUPS = [
         {"key": "NODEJS_PATH", "label": "Node.js Path", "kind": "text"},
         {"key": "MYSTIC_PYTHON_PATH", "label": "Mystic Python Interpreter", "kind": "text"},
         {"key": "MYSTIC_BBS_PATH", "label": "Mystic BBS Runtime Path", "kind": "text"},
+        {"key": "CASINO_BLACKJACK_START", "label": "Casino Blackjack Weekly Start Balance", "kind": "int"},
+        {"key": "CASINO_SLOTS_START", "label": "Casino Slots Weekly Start Balance", "kind": "int"},
+        {"key": "CASINO_VIDEOPOKER_START", "label": "Casino Video Poker Weekly Start Balance", "kind": "int"},
+        {"key": "CASINO_HOLDEM_START", "label": "Casino Hold'em Weekly Start Balance", "kind": "int"},
     ]},
     {"key": "echomail", "label": "Echomail", "fields": [
         {"key": "ECHOMAIL_ENABLED", "label": "Echomail Enabled", "kind": "bool"},
         {"key": "ECHOMAIL_POLL_ENABLED", "label": "Auto-Poll Enabled", "kind": "bool"},
         {"key": "ECHOMAIL_ORIGIN_LINE", "label": "Origin Line", "kind": "text"},
         {"key": "ECHOMAIL_TEAR_LINE", "label": "Tear Line", "kind": "text"},
+        {"key": "QWK_HUB_ID", "label": "QWK Hub ID (short, e.g. ANET, max 8 chars)", "kind": "text"},
+        {"key": "QWK_HUB_NAME", "label": "QWK Hub Network Name", "kind": "text"},
     ]},
     {"key": "nuv", "label": "New User Verification", "fields": [
         {"key": "NUV_ENABLED", "label": "NUV Enabled", "kind": "bool"},
+    ]},
+    {"key": "wiki", "label": "Wiki Edit Gate", "fields": [
+        {"key": "WIKI_MIN_POSTS", "label": "Minimum Post Count to Edit (0=no gate)", "kind": "int"},
+        {"key": "WIKI_MIN_DAYS", "label": "Minimum Account Age to Edit, days (0=no gate)", "kind": "int"},
     ]},
 ]
 

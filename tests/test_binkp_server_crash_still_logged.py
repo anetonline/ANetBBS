@@ -198,7 +198,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         the captured transcript must still be written, not silently
         lost."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, FreqRequest, db
 
         async def _raising_receive_files(reader, writer, peer, state, files,
                                          transcript=None):
@@ -218,6 +218,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         EchomailMessage.query = _FakeQuery([])
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -236,6 +237,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
             del EchomailMessage.query
             del EchomailPollLog.query
             del HatchQueue.query
+            del FreqRequest.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(poll_logs), 1,
@@ -257,7 +259,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         success-path logging in _import_and_log(), not the new
         error-path one."""
         from anetbbs.echomail import binkp_server as mod
-        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, db
+        from anetbbs.models import EchomailNetwork, EchomailMessage, EchomailPollLog, HatchQueue, FreqRequest, db
 
         network = _FakeEchomailNetwork(
             id=1, hub_address='1:200/100', network_type='binkp',
@@ -276,6 +278,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
         EchomailMessage.query = _FakeQuery([])
         EchomailPollLog.query = _LiveRowQuery(session.added, EchomailPollLog)
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailMessage, 'network_id', _FakeColumn('network_id')), \
@@ -292,6 +295,7 @@ class ServerCrashStillLoggedTests(unittest.TestCase):
             del EchomailMessage.query
             del EchomailPollLog.query
             del HatchQueue.query
+            del FreqRequest.query
 
         poll_logs = [obj for obj in session.added if isinstance(obj, EchomailPollLog)]
         self.assertEqual(len(poll_logs), 1)

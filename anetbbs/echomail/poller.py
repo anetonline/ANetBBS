@@ -791,7 +791,14 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
     _do_poll_node) so tests can patch this one seam exactly like existing
     poller tests patch _run_client (see test_poller_ack_gated_stamping.py)."""
     from .binkp import BinkPClient
-    from ..models import db, HatchQueue
+    from ..models import db, HatchQueue, FreqRequest
+    # Pending outbound FREQs targeting this specific node -- see
+    # models.FreqRequest and binkp.py's _send_freq_requests(). Per-node,
+    # not per-network: compression preference is per-node too (matches
+    # the AreaFix %COMPRESS command's own per-peer scope).
+    pending_freqs = (FreqRequest.query
+                     .filter_by(target_address=node.ftn_address, status='pending')
+                     .all())
     client = BinkPClient(
         host=node.binkp_host or '',
         port=node.binkp_port or 24554,
@@ -806,6 +813,8 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
         default_crash=bool(getattr(network, 'default_crash', False)),
         default_hold=bool(getattr(network, 'default_hold', False)),
         default_direct=bool(getattr(network, 'default_direct', False)),
+        compress_outbound=bool(getattr(node, 'compress_outbound', False)),
+        freq_requests=pending_freqs,
     )
     # Fallback changed from '/tmp' to 'data' (bandit B108 sweep, pre-
     # release audit): config.py's ECHOMAIL_DATA_DIR is always set in
@@ -843,9 +852,29 @@ def _run_node_client(node, network, outbound_messages, app, transcript=None):
     for failed_item, message in out.get('hatch_failures', []):
         from .tic import record_hatch_attempt_failure
         record_hatch_attempt_failure(failed_item, message)
-    if out.get('hatched_ids') or out.get('hatch_failures'):
+    _mark_freq_requests_sent(out)
+    if (out.get('hatched_ids') or out.get('hatch_failures')
+            or out.get('freq_sent_ids') or out.get('freq_failed_ids')):
         db.session.commit()
     return out
+
+
+def _mark_freq_requests_sent(out):
+    """Shared by _run_node_client/_run_client: flip FreqRequest rows to
+    'sent' or 'failed' based on a poll() result's freq_sent_ids/
+    freq_failed_ids. Does not commit -- callers already have their own
+    commit gated on "anything changed" checks."""
+    from ..models import FreqRequest
+    for rid in out.get('freq_sent_ids', []):
+        row = FreqRequest.query.get(rid)
+        if row is not None:
+            row.status = 'sent'
+            row.sent_at = datetime.utcnow()
+    for rid in out.get('freq_failed_ids', []):
+        row = FreqRequest.query.get(rid)
+        if row is not None:
+            row.status = 'failed'
+            row.error_message = 'peer did not acknowledge the .REQ file'
 
 
 def _run_client(network, outbound_messages, app, transcript=None):
@@ -856,7 +885,10 @@ def _run_client(network, outbound_messages, app, transcript=None):
     concept is BinkP-specific."""
     if network.network_type == 'binkp':
         from .binkp import BinkPClient
-        from ..models import db, HatchQueue
+        from ..models import db, HatchQueue, FreqRequest
+        pending_freqs = (FreqRequest.query
+                         .filter_by(target_address=network.hub_address, status='pending')
+                         .all())
         client = BinkPClient(
             host=network.binkp_host or '',
             port=network.binkp_port or 24554,
@@ -871,6 +903,8 @@ def _run_client(network, outbound_messages, app, transcript=None):
             default_crash=bool(getattr(network, 'default_crash', False)),
             default_hold=bool(getattr(network, 'default_hold', False)),
             default_direct=bool(getattr(network, 'default_direct', False)),
+            compress_outbound=bool(getattr(network, 'compress_outbound', False)),
+            freq_requests=pending_freqs,
         )
         data_dir = app.config.get('ECHOMAIL_DATA_DIR', 'data')
         # Pick up any pending hatch-out files for this peer (the network's
@@ -896,7 +930,9 @@ def _run_client(network, outbound_messages, app, transcript=None):
         for failed_item, message in out.get('hatch_failures', []):
             from .tic import record_hatch_attempt_failure
             record_hatch_attempt_failure(failed_item, message)
-        if out.get('hatched_ids') or out.get('hatch_failures'):
+        _mark_freq_requests_sent(out)
+        if (out.get('hatched_ids') or out.get('hatch_failures')
+                or out.get('freq_sent_ids') or out.get('freq_failed_ids')):
             db.session.commit()
         return out
 

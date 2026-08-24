@@ -221,7 +221,7 @@ class NetworkDisambiguationTests(unittest.TestCase):
     def _run(self, networks, nodes, remote_addr, remote_pwd):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
-        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, HatchQueue, db
+        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, HatchQueue, FreqRequest, db
 
         captured = {'import_calls': []}
 
@@ -246,6 +246,7 @@ class NetworkDisambiguationTests(unittest.TestCase):
         # is needed -- _handle_connection() now also queries
         # HatchQueue on the downstream_node_id branch.
         HatchQueue.query = _FakeQuery([])
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailNetwork, 'our_address', _FakeColumn('our_address')), \
@@ -271,6 +272,7 @@ class NetworkDisambiguationTests(unittest.TestCase):
             del BinkPNode.query
             del EchomailMessage.query
             del HatchQueue.query
+            del FreqRequest.query
 
         captured['session_added'] = recording_session.added
         return writer, captured

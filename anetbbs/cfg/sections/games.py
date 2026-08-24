@@ -14,7 +14,7 @@ from anetbbs.cfg import ui
 from anetbbs.models import db, Game, GameCategory, GameSession
 
 GAME_TYPE_CHOICES = [
-    "builtin_web", "door_dos_browser", "door_dos", "door_dosemu",
+    "builtin_web", "builtin_python", "door_dos_browser", "door_dos", "door_dosemu",
     "door_mystic", "door_mystic_mps", "door_native", "door_synchronet",
     "door_rlogin", "door_telnet",
 ]

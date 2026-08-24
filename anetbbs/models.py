@@ -620,6 +620,15 @@ class EchomailNetwork(db.Model):
     # are truncated at send time.
     packet_password = db.Column(db.String(20))
 
+    # Compress outbound .pkt bundles sent to this hub, per the real
+    # ArcMail 0.60 / FTS-0006 bundle-naming convention (day-of-week 2-
+    # letter code + sequence digit extension, e.g. ".Mo0" -- NOT ".zip",
+    # which the convention explicitly says a bundle should never use;
+    # see echomail/binkp.py's _build_outbound_bundle()). Off by default:
+    # every peer already accepts uncompressed .pkt, so this only matters
+    # once the sysop has confirmed the specific hub wants it.
+    compress_outbound = db.Column(db.Boolean, default=False)
+
     # Which real-world hub identity this transport row belongs to, if
     # any (see HubIdentity). Only meaningful for networks that represent
     # THIS install acting as a hub -- a plain leaf/spoke network (polling
@@ -1554,6 +1563,13 @@ class FileArea(db.Model):
     # tagged with `nodelist_domain` so `/nodelist/?domain=tqwnet` filters work.
     is_nodelist_source = db.Column(db.Boolean, default=False)
     nodelist_domain = db.Column(db.String(40))    # e.g. 'tqwnet', 'fidonet'
+    # WaZOO FREQ (FTS-0006) opt-in -- see echomail/freq.py. Off by default:
+    # a peer's inbound .REQ file only ever gets matched against areas that
+    # explicitly turned this on, same posture as every other file-area
+    # access gate in this model. freq_password, if set, must be supplied
+    # via the .REQ line's "!password" syntax to match anything here.
+    freq_enabled = db.Column(db.Boolean, default=False)
+    freq_password = db.Column(db.String(80))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     network = db.relationship('EchomailNetwork',
@@ -1705,6 +1721,36 @@ class HatchQueue(db.Model):
 
     def __repr__(self):
         return f'<HatchQueue {self.filename} -> {self.peer_address}>'
+
+
+class FreqRequest(db.Model):
+    """Outbound WaZOO FREQ (FTS-0006) -- ANetBBS itself requesting a
+    file FROM a peer, the reverse direction of echomail/freq.py's
+    process_inbound_req(). Queued here by a sysop; sent as a .REQ file
+    the next time we dial (or are dialed by) `target_address` -- see
+    binkp.py/binkp_server.py's send-side wiring. Any files the peer
+    sends back arrive as ordinary inbound files on a later
+    poll/session, same as any other inbound transfer -- there is no
+    same-session reply for a FREQ we send either, matching the
+    asymmetric-timing note in freq.py's module docstring.
+    """
+    __tablename__ = 'freq_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    target_address = db.Column(db.String(60), nullable=False, index=True)
+    filename_pattern = db.Column(db.String(120), nullable=False)
+    password = db.Column(db.String(80))
+    status = db.Column(db.String(16), default='pending', index=True)
+    # status: pending / sent / failed
+    error_message = db.Column(db.Text)
+    requested_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    sent_at = db.Column(db.DateTime)
+
+    requested_by = db.relationship('User')
+
+    def __repr__(self):
+        return f'<FreqRequest {self.filename_pattern} from {self.target_address}>'
 
 
 class SysopBroadcast(db.Model):
@@ -3320,6 +3366,12 @@ class BinkPNode(db.Model):
     binkp_host = db.Column(db.String(255))
     binkp_port = db.Column(db.Integer, default=24554)
     binkp_tls = db.Column(db.Boolean, default=False)
+
+    # Compress outbound .pkt bundles sent to this node -- same convention
+    # as EchomailNetwork.compress_outbound (see that column's comment).
+    # Settable here by the sysop, or by the node's own sysop via the
+    # AreaFix "%COMPRESS GZIP" / "%COMPRESS OFF" command (areafix.py).
+    compress_outbound = db.Column(db.Boolean, default=False)
 
     # Scheduled hub-initiated polling, mirroring EchomailNetwork's own
     # poll_interval_minutes/last_poll_at (see that model's comment) --

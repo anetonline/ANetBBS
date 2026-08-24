@@ -251,7 +251,8 @@ class _BinkpHandlerHarness:
              our_address='1:1/1', include_got=False, outbound_messages=None):
         from anetbbs.echomail import binkp_server as mod
         from anetbbs.echomail import tosser as tosser_mod
-        from anetbbs.models import EchomailNetwork, BinkPNode, EchomailMessage, HatchQueue, db
+        from anetbbs.models import (EchomailNetwork, BinkPNode, EchomailMessage,
+                                    HatchQueue, FreqRequest, db)
 
         captured = {}
         pending = outbound_messages or []
@@ -287,6 +288,12 @@ class _BinkpHandlerHarness:
         # items) -- matches the overwhelmingly common case and every
         # existing test here, none of which care about hatching.
         HatchQueue.query = _FakeQuery([])
+        # Same hazard as HatchQueue.query above, same fix: _handle_
+        # connection() now also queries FreqRequest for pending WaZOO
+        # FREQs targeting this peer (echomail/freq.py) on both the
+        # downstream_node_id and net_id branches. Empty by default --
+        # none of the existing tests in this harness care about FREQ.
+        FreqRequest.query = _FakeQuery([])
         try:
             with patch.object(EchomailNetwork, 'hub_address', _FakeColumn('hub_address')), \
                  patch.object(EchomailNetwork, 'our_address', _FakeColumn('our_address')), \
@@ -328,6 +335,7 @@ class _BinkpHandlerHarness:
             del BinkPNode.query
             del EchomailMessage.query
             del HatchQueue.query
+            del FreqRequest.query
 
         return writer, captured
 

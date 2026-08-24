@@ -943,6 +943,14 @@ def _lightweight_migrate(app):
     _ensure_column('echomail_networks', 'default_hold', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'default_direct', 'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('echomail_networks', 'packet_password', 'VARCHAR(20)')
+    # Compress outbound .pkt bundles per peer -- see the two columns'
+    # own model comments (ArcMail/FTS-0006 bundle-naming convention).
+    _ensure_column('echomail_networks', 'compress_outbound', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('binkp_nodes', 'compress_outbound', 'BOOLEAN NOT NULL DEFAULT 0')
+    # WaZOO FREQ (FTS-0006) opt-in per file area -- see FileArea's own
+    # comment and echomail/freq.py.
+    _ensure_column('file_areas', 'freq_enabled', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('file_areas', 'freq_password', 'VARCHAR(80)')
     # Scheduled hub-initiated polling of downstream nodes (previously
     # manual-only via "Poll Now") -- see BinkPNode's own comment.
     _ensure_column('binkp_nodes', 'poll_interval_minutes', 'INTEGER')

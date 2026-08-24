@@ -110,6 +110,7 @@ class GameForm(FlaskForm):
         ('door_synchronet', 'Synchronet JS Game'),
         ('door_rlogin', 'A-Net Game Server (rlogin)'),
         ('door_telnet', 'Telnet Door Server (TWGS, etc.)'),
+        ('builtin_python', 'Built-in Python Game (in-process, e.g. ANetCRAFT)'),
     ], validators=[DataRequired()])
     icon = StringField('Bootstrap Icon Class', validators=[Optional(), Length(max=50)])
     max_nodes = IntegerField('Max Simultaneous Players',

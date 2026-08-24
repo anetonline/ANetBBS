@@ -220,6 +220,18 @@
                     <input type="text" name="nodelist_domain" class="form-control form-control-sm" value="{{ fa.nodelist_domain or '' }}" placeholder="e.g. tqwnet">
                 </div>
             </div>
+            {# WaZOO FREQ (FTS-0006) opt-in -- see echomail/freq.py. A peer's
+               inbound .REQ file is only ever matched against areas that
+               explicitly turn this on. #}
+            <div class="row g-2 mt-2">
+                <div class="col-md-3">
+                    <div class="form-check"><input type="checkbox" name="freq_enabled" {% if fa.freq_enabled %}checked{% endif %} class="form-check-input"><label class="form-check-label small">Allow FREQ (peers can request files from this area)</label></div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">FREQ password (blank = none required)</label>
+                    <input type="text" name="freq_password" class="form-control form-control-sm" value="{{ fa.freq_password or '' }}" placeholder="optional">
+                </div>
+            </div>
             <div class="mt-2">
                 <button class="btn btn-primary btn-sm" name="action" value="update">Save</button>
                 <button class="btn btn-outline-danger btn-sm" name="action" value="delete"
