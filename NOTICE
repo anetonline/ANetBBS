@@ -22,3 +22,135 @@ The font is served as a static web asset at:
 
 The TTF originals and full font pack are available free of charge at:
   https://int10h.org/oldschool-pc-fonts/
+
+
+Synchronet BBS Compatibility Layer (anetbbs/games/sbbs_stubs/,
+anetbbs/games/sbbs_reference/)
+----------------------------------------------------------------------
+ANetBBS can run door games and mods originally written in Synchronet's
+JavaScript dialect (see docs/26-synchronet-json-rpc-doors.md and the
+bundled LORD door). To do that without requiring a real Synchronet
+installation, these two directories provide a compatibility layer:
+some files are ANetBBS's own original code emulating Synchronet's
+JS API, and others are Synchronet source itself, included so the
+scripts that `load()` them keep working unmodified. sbbs_reference/
+specifically holds a small set of real upstream Synchronet files kept
+verbatim for developer reference; ANetBBS's own replacement
+implementations (http.js, json-client.js, mouse_getkey.js,
+dorkit/sbbs_input.js, etc., in sbbs_stubs/) are original code, not
+copies of these.
+
+Synchronet BBS Software Version 3 is Copyright by Rob Swindell and
+distributed under the GNU General Public License, version 2 (GPLv2),
+with certain listed components (XPDEV, SMBLIB, CIOLIB, UIFC, XSDK)
+under the GNU Lesser General Public License instead. See
+https://www.synchro.net/copyright.html for Synchronet's own statement.
+A file's own header, where present, is authoritative for that file
+over this general categorization.
+
+  GPLv2 (Copyright Rob Swindell / Synchronet, unless noted) --
+  A copy of the GPLv2 license text is at:
+    anetbbs/games/sbbs_stubs/LICENSE-GPL2
+
+  - The following files carry an intact Synchronet GPLv2 header
+    naming version 2 of the license directly:
+      ftelnethelper.js, ircbot_commands.js, ircbot_functions.js,
+      irclib.js, nodedefs.js, sbbsdefs.js, uifcdefs.js,
+      user_info_to_sysop.js
+
+  - A larger set of files (roughly 60 in sbbs_stubs/, plus most of
+    sbbs_reference/) carry a Synchronet CVS `$Id:` revision tag
+    attributing authorship to Rob Swindell ("rswindell") or other
+    named Synchronet contributors (e.g. "mcmlxxix"/Matt Johnson,
+    "deuce"/Stephen Hurd, "echicken"), but the license text itself is
+    not present in the file -- it appears to have been dropped
+    somewhere between the real Synchronet source tree and this copy.
+    Given the unambiguous Synchronet-tree provenance, ANetBBS treats
+    these the same as the files above: GPLv2, per Synchronet's own
+    top-level statement that "Synchronet is comprised of ... library
+    ... and source code files, all of which are covered by version 2
+    of the [GPL]" except the LGPL exceptions named above (none of
+    which apply to these files). This list includes (non-exhaustive):
+    attrdefs.js, bayes.js, bmp_lib.js, cga_defs.js, cnfdefs.js,
+    cnflib.js, coldfuncs.js, cterm_lib.js, dnshelper.js, fido.js,
+    fidoaddr.js, fidocfg.js, fido_syscfg.js, finger_lib.js, ftp.js,
+    geoip.js, getkeye.js, gwarlib.js, hexdump_lib.js, inputline.js,
+    json-db.js, key_defs.js, layout.js, lightbar.js, lockfile.js,
+    mailproc_util.js, mapgenerator.js, menulib.js, mimehdr.js,
+    nodelist_options.js, portdefs.js, qengine.js, relpath.js,
+    salib.js, sauce_lib.js, sbbsimsg_lib.js, sbbslist_html.js,
+    sbbslist_lib.js, smbdefs.js, sockdefs.js, telnet_lib.js,
+    termcapture_lib.js, url.js, userdefs.js, userprops.js,
+    utf8_ascii.js, utf8_cp437.js, utf8_utf16.js, vga_defs.js,
+    xbimage_lib.js, xbin_defs.js, xbin_lib.js, and
+    dorkit/cga_defs.js, dorkit/graphic.js; and in sbbs_reference/:
+    http.js, json-db.js, json-sock.js, json-service.js,
+    json-svc-ctrl.js.
+
+  - cardlib.js carries its own, separate GPLv2 grant: "Licensed under
+    the GPLv2 by Randolph E. Sommerfeld <cyan@rrx.ca>". The same
+    GPLv2 text above applies; the copyright is Sommerfeld's, not
+    Swindell's.
+
+  Other third-party licenses (each file's own header is the source
+  of truth; only summarized here) --
+
+  - string.js: MIT License, Copyright (c) 2019 Behnam Mohammadi
+    (via https://github.com/behnammodi/polyfill)
+  - jpath.js: MIT-style permission license, Copyright (C) 2009-2011
+    Bryan English
+  - qrcode.js: MIT License, Copyright (c) 2009 Kazuhiko Arase
+  - sha1.js: Creative Commons Attribution 3.0, (c) Chris Veness
+    2002-2010 (http://www.movable-type.co.uk)
+  - openweathermap.js: Creative Commons Attribution-ShareAlike 4.0
+  - synchronet-json.js (sbbs_reference/): embeds Douglas Crockford's
+    json2.js, explicitly marked "Public Domain" in its own header
+
+  Everything else -- named-author files with no formal license
+  statement (contributors credited in file headers include
+  "echicken", "mcmlxxix"/Matt Johnson, "deuce"/Stephen Hurd, Michael
+  Long, Nelgin, and others across the wider Synchronet
+  door-development community), and files with no header at all --
+  ANetBBS has not independently obtained or confirmed a formal
+  license grant for. These are believed, consistent with common
+  practice in the Synchronet door-development community this
+  compatibility layer exists to support, to have been shared for use
+  within that ecosystem, but that belief is not a substitute for an
+  actual license grant. If you are the author of one of these files
+  and want to clarify its terms (or have it removed), please contact
+  ANetBBS so this notice can be corrected.
+
+
+LORD (Legend of the Red Dragon) Door Game
+(anetbbs/games/sbbs_doors/lord/)
+----------------------------------------------------------------------
+LORD is one of the most widely ported BBS door games in the hobby's
+history. The version bundled with ANetBBS is a JavaScript port for
+Synchronet; no formal license statement (GPL, MIT, or otherwise) is
+present anywhere in its own source. Provenance, per an in-game credits
+screen (grabbag/grabbag.js):
+
+  - Original game design and 1990s DOS original: Seth Able Robinson
+  - JavaScript port for Synchronet: Stephen Hurd ("Deuce")
+  - lordlib.js game-data library: credited in-file to "mcmlxxix"
+    (Matt Johnson)
+  - Synchronet itself: Rob Swindell
+
+This is bundled on the same informal, no-formal-license basis under
+which it has circulated in the BBS community for over three decades
+(LORD has been ported to dozens of BBS platforms this way). It is not
+under any OSI-approved or GPL license as distributed. The optional
+IGM add-ons (grabbag, outhouse, oorphans, pickle, barak, aratime,
+gravyard) and the ~100 informally-licensed ANSI menu art packs under
+menus/ are each separately authored, on the same freeware/shareware-
+era, non-SPDX terms typical of the BBS door-game scene; several state
+their own conditions in-file (e.g. a request that modified versions
+be clearly marked as such and credited). One file worth flagging
+specifically: pickle/LICENSE contains the unfilled-in GPLv3 template
+text (the `<year>`/`<name of author>` placeholders were never
+replaced) -- it does not constitute a completed, valid license grant
+for pickle.js, and should not be read as one.
+
+If you are one of the credited authors above (or represent them) and
+want to clarify licensing terms for this door, please contact
+ANetBBS.

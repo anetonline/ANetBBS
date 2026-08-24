@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.42`, August 2026)
+**Status: stable** (`v1.0.43`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.42.tar.gz
-cd ANetBBS-v1.0.42
+tar xzf ANetBBS-v1.0.43.tar.gz
+cd ANetBBS-v1.0.43
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.42.tar.gz
-cd ANetBBS-v1.0.42
+tar xzf ANetBBS-v1.0.43.tar.gz
+cd ANetBBS-v1.0.43
 sudo bash update.sh
 ```
 
@@ -252,7 +252,10 @@ buildx` once there's a registry to publish to.
 
 ## License
 
-See [LICENSE](LICENSE).
+See [LICENSE](LICENSE). ANetBBS bundles some third-party components
+(fonts, a Synchronet JS compatibility layer used to run Synchronet
+door games, and the LORD door game) under their own separate terms —
+see [NOTICE](NOTICE) for the full breakdown.
 
 ## Status / Caveats
 

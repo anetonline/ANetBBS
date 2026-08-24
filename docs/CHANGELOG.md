@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.42`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.43`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.43 — Third-party license audit: accurate, complete attribution for the Synchronet compatibility layer and LORD (August 2026)
+
+**A full audit of every third-party file bundled with ANetBBS's Synchronet door-game support (`anetbbs/games/sbbs_stubs/`, `anetbbs/games/sbbs_reference/`, and the pre-installed LORD door), and a rewritten `NOTICE` file reflecting exactly what was found.** No code changes — this is a licensing/attribution correctness pass, prompted by a closer read of Synchronet's own published copyright terms (GPLv2, with named LGPL exceptions that don't apply here).
+
+- **GPLv2 attribution corrected and completed.** 8 files already carried an intact Synchronet GPLv2 header; roughly 60 more carry a Synchronet CVS revision tag proving the same origin but had lost their license text somewhere along the way — these are now explicitly documented as GPLv2 too, rather than left unaddressed. `cardlib.js`'s own separate third-party GPLv2 grant (Randolph E. Sommerfeld) is called out distinctly. The actual GPLv2 license text is now bundled at `anetbbs/games/sbbs_stubs/LICENSE-GPL2` — previously referenced by nothing in the repo.
+- **Every other identifiable license correctly attributed**: MIT (`string.js`, `jpath.js`, `qrcode.js`), Creative Commons Attribution 3.0 (`sha1.js`), Creative Commons Attribution-ShareAlike 4.0 (`openweathermap.js`), and Public Domain (`json2.js`, embedded in `sbbs_reference/synchronet-json.js`).
+- **The remainder — files with a named community contributor but no formal license statement, and files with no header at all — are now honestly documented as such**, rather than silently uncategorized, with an invitation for any author to get in touch.
+- **LORD's own provenance is documented for the first time**: original design by Seth Able Robinson, JavaScript port by Stephen Hurd ("Deuce"), per an in-game credits screen — informally licensed per decades of BBS door-game community practice, not under any OSI or GPL license as bundled. Also flags that `pickle/LICENSE` (one of LORD's optional add-ons) is an unfilled GPLv3 template, not a completed license grant.
+- `README.md` and `LICENSE` now both point to `NOTICE` for the full breakdown.
 
 ## v1.0.42 — A genuine no-root install path, documented and verified end to end (August 2026)
 
