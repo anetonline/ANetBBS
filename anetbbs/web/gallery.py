@@ -8,6 +8,7 @@ with the legacy DSR locations so existing data shows up automatically.
 
 import json
 import mimetypes
+import os
 import threading
 import zipfile
 from datetime import datetime, timezone
@@ -197,7 +198,8 @@ def image(slug, filename):
     root = Path(g.get('path', ''))
     safe_path = (root / filename).resolve()
     try:
-        if not str(safe_path).startswith(str(root.resolve())):
+        root_resolved = str(root.resolve())
+        if not str(safe_path).startswith(root_resolved + os.sep):
             abort(403)
     except FileNotFoundError:
         abort(404)

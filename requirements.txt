@@ -15,14 +15,27 @@ python-dotenv>=1.0.0
 tzdata>=2024.1
 
 # Web framework (Flask app)
-Flask>=3.1.0
+# 3.1.3 floor: the previous 3.1.0 floor WAS the vulnerable version for
+# CVE-2025-47278 (session uses a fallback signing key instead of the
+# current one during SECRET_KEY_FALLBACKS rotation, fixed 3.1.1) --
+# found in a follow-up audit. Also covers CVE-2026-27205 (missing
+# `Vary: Cookie` header behind a shared cache, fixed 3.1.3).
+Flask>=3.1.3
 Flask-Login>=0.6.3
 Flask-SocketIO>=5.5.0
 Flask-WTF>=1.2.0
 Flask-SQLAlchemy>=3.1.0
 Flask-Migrate>=4.0.0
 WTForms>=3.1.0
-Werkzeug>=3.0.0
+# 3.1.6 floor: previously had NO CVE-floor comment of its own -- found
+# in a follow-up audit that the comment above (Jinja2's) reads as if it
+# covers Werkzeug too, but doesn't. Werkzeug is the WSGI layer the
+# whole app runs on. Covers CVE-2024-34069 (debugger RCE, fixed 3.0.3),
+# CVE-2023-46136 (multipart-parsing DoS), CVE-2024-49766/-49767
+# (Windows path traversal / resource exhaustion, fixed 3.0.6), and a
+# chain of Windows safe_join() device-name bypasses -- CVE-2025-66221,
+# CVE-2026-21860, CVE-2026-27199 -- only fully fixed as of 3.1.6.
+Werkzeug>=3.1.6
 # 3.1.6 floor: CVE-2024-22195/CVE-2024-34064 (xmlattr XSS),
 # CVE-2024-56326/CVE-2025-27516 (sandbox escape via str.format/attr) --
 # found + verified in a security audit. Sandbox-escape CVEs only bite
@@ -57,16 +70,31 @@ eventlet>=0.40.3
 # 2.14.2 floor: CVE-2023-46445/CVE-2023-46446 (rogue extension/session
 # negotiation) + CVE-2023-48795 (Terrapin protocol downgrade) -- the
 # real SSH daemon callers connect to, so directly network-facing.
+# (CVE-2026-45309, an AuthorizedKeysFile `%u`-token path-traversal fixed
+# in 2.23.0, doesn't touch this floor's range -- only relevant if the
+# SSH server config ever uses that token pattern, which ours doesn't.)
 asyncssh>=2.14.2
-# 44.0.1 floor: CVE-2024-26130 (NULL-pointer DoS in pkcs12 serialize)
-# + CVE-2024-12797 (vulnerable OpenSSL bundled in cryptography's own
-# wheels 42.0.0-44.0.0).
-cryptography>=44.0.1
+# 48.0.1 floor: the previous 44.0.1 floor was ITSELF inside the
+# vulnerable range for CVE-2026-69247 (PKCS#7 EnvelopedData decrypt
+# Bleichenbacher oracle, introduced 44.0.0, fixed 50.0.0) -- found in a
+# follow-up audit. 48.0.1 is the floor for the recurring "vulnerable
+# OpenSSL bundled in cryptography's own wheels" issue (same failure
+# mode as the original 42.0.0-44.0.0 floor comment, now recurring at
+# 44.0.0-48.0.1); also clears CVE-2026-26007 (SECT-curve subgroup
+# attack, fixed 46.0.5) and CVE-2026-34073 (incomplete DNS
+# name-constraint enforcement, fixed 46.0.6). The PKCS#7 oracle itself
+# only bites code that calls pkcs7_decrypt_*() on attacker-supplied
+# data and reflects the outcome, which this app doesn't do today --
+# bumped anyway since the OpenSSL-bundling issue applies regardless.
+cryptography>=48.0.1
 
 # MRC web bridge (standalone aiohttp service)
-# 3.12.14 floor: CVE-2025-53643, HTTP request/response smuggling via
-# incorrect chunked-trailer parsing in aiohttp's pure-Python parser.
-aiohttp>=3.12.14
+# 3.14.3 floor: previous 3.12.14 floor addressed one smuggling CVE
+# (2025-53643) but not its direct sequel -- CVE-2026-69243, HTTP
+# request smuggling via WebSocket upgrade (fixed 3.14.2), found in a
+# follow-up audit -- plus CVE-2026-69244 (OOB heap read in the C
+# chunked-response parser, fixed 3.14.3).
+aiohttp>=3.14.3
 aiosignal>=1.3.0
 multidict>=6.0.0
 yarl>=1.9.0
@@ -88,19 +116,29 @@ dnspython>=2.6.1
 idna>=3.6
 
 # Imaging (avatars / file uploads) -- processes untrusted uploads.
-# 10.3.0 floor: CVE-2023-50447 (arbitrary code execution via
-# ImageMath.eval, fixed 10.2.0) + CVE-2024-28219 (buffer overflow via
-# unbounded strcpy in _imagingcms.c, fixed 10.3.0).
-Pillow>=10.3.0
+# 12.3.0 floor: original 10.3.0 floor addressed CVE-2023-50447 and
+# CVE-2024-28219. A follow-up audit found the floor had drifted ~2
+# major versions stale: CVE-2026-59199 (heap OOB write in
+# Image.paste()/Image.crop() via signed coordinate overflow, fixed
+# 12.3.0) and CVE-2026-55798 (OS command injection in
+# WindowsViewer.get_command(), fixed 12.3.0), plus a run of
+# decompression-bomb-check bypasses across font/image loaders fixed
+# 10.4-11.x. Directly relevant since this package processes untrusted
+# uploads by design.
+Pillow>=12.3.0
 
 # HTTP client (echomail poller / general) -- fetches operator- and
 # sometimes remote-peer-supplied URLs.
-# 2.32.4 floor: CVE-2024-47081, .netrc credential leak via a crafted
-# URL's netloc parsing.
-requests>=2.32.4
-# 2.2.2 floor: CVE-2024-37891, Proxy-Authorization header not stripped
-# on a cross-origin redirect.
-urllib3>=2.2.2
+# 2.33.0 floor: original 2.32.4 floor covered CVE-2024-47081; bumped in
+# a follow-up audit for CVE-2026-25645 (insecure temp-file reuse in
+# extract_zipped_paths(), local-only/low severity, fixed 2.33.0).
+requests>=2.33.0
+# 2.7.0 floor: the previous 2.2.2 floor was ITSELF inside the
+# vulnerable range for CVE-2026-44431 (sensitive Authorization/Cookie
+# headers forwarded cross-origin through proxied low-level redirects,
+# range [1.23, 2.7.0), fixed 2.7.0) -- found in a follow-up audit, on
+# top of the original CVE-2024-37891 floor.
+urllib3>=2.7.0
 certifi>=2024.2.0
 charset-normalizer>=3.3.0
 

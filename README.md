@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.43`, August 2026)
+**Status: stable** (`v1.0.44`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.43.tar.gz
-cd ANetBBS-v1.0.43
+tar xzf ANetBBS-v1.0.44.tar.gz
+cd ANetBBS-v1.0.44
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.43.tar.gz
-cd ANetBBS-v1.0.43
+tar xzf ANetBBS-v1.0.44.tar.gz
+cd ANetBBS-v1.0.44
 sudo bash update.sh
 ```
 
@@ -115,14 +115,15 @@ buildx` once there's a registry to publish to.
   16-color SGR → HTML spans)
 
 ### Doors
-- **Game Center** — 20 built-in browser games (puzzle, action, cards/
+- **Game Center** — 21 built-in browser games (puzzle, action, cards/
   casino, strategy, RPG) playable with no telnet client or per-game
   setup: Hangman, Trivia, Number Guesser, Snake, Tic Tac Toe, Memory
   Match, Typing Speed Test, Minesweeper, 2048, a text adventure,
   Klondike Solitaire, Video Poker, Texas Hold'em, Blackjack, Slot
-  Machines, Galaga, Tetris, Breakout, an Ebook Reader (Project
-  Gutenberg), and **Meadowlark Valley** — an original town/farm-builder
-  sim with auto-harvesting farmer NPCs and real-time co-op building.
+  Machines, Galaga, Tetris, Breakout, ANetDarkForces (a 10-sector
+  raycaster FPS), an Ebook Reader (Project Gutenberg), and
+  **Meadowlark Valley** — an original town/farm-builder sim with
+  auto-harvesting farmer NPCs and real-time co-op building.
   See [docs/24-game-center.md](docs/24-game-center.md).
 - DOSBox-staging / dosbox-x / vanilla DOSBox auto-detect, TCP nullmodem
   bridge to the user's PTY
@@ -175,7 +176,8 @@ buildx` once there's a registry to publish to.
 - **Storage**: galleries are listed in `gallery-config.json` at the BBS
   install root (auto-seeded on first run). Files live wherever you point
   the path; the same path can be served by any other tool too.
-- **Terminal viewer** at `/home/<user>/anet-gallery.sh` — bash script
+- **Terminal viewer** at `$INSTALL_DIR/anet-gallery.sh` (default
+  `/opt/anetbbs/anet-gallery.sh`) — bash script
   using `chafa` (Unicode blocks, works in any terminal) or `img2sixel`
   (sixel-capable terminals like SyncTERM, foot, mlterm). Standalone —
   not wired into the games menu.

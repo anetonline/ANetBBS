@@ -594,7 +594,15 @@ def upload(area_id):
 
         # Sysop moderation queue — non-admin uploads go to quarantine first
         # when FILE_MOD_QUEUE_ENABLED is set.
-        queue_on = bool(current_app.config.get('FILE_MOD_QUEUE_ENABLED', False))
+        # Compared as a string, not bool(): this is a no-restart-required
+        # setting (admin.py's EDITABLE_SETTINGS), so the admin Settings
+        # page writes the raw string 'true'/'false' straight into
+        # current_app.config on save -- bool('false') is True in Python,
+        # the same gotcha admin.py's settings() route already special-
+        # cases for GAMES_INTERBBS_ENABLED. str(...).lower() == 'true'
+        # handles both that string form and the real bool Config sets
+        # at boot (str(False).lower() == 'false', correctly falsy).
+        queue_on = str(current_app.config.get('FILE_MOD_QUEUE_ENABLED', False)).lower() == 'true'
         if queue_on and not getattr(current_user, 'is_admin', False):
             from ..models import FileQueueEntry
             qdir = os.path.join(current_app.config.get('DATA_DIR', 'data'),
@@ -1071,7 +1079,10 @@ def smart_upload():
             # above) could use this route instead of the per-area form
             # to get a file live and out to network peers with ZERO
             # sysop review, even with moderation explicitly turned on.
-            queue_on = bool(current_app.config.get('FILE_MOD_QUEUE_ENABLED', False))
+            # Compared as a string, not bool() -- see upload()'s own
+            # matching comment above for why.
+            queue_on = str(current_app.config.get(
+                'FILE_MOD_QUEUE_ENABLED', False)).lower() == 'true'
             if queue_on and not getattr(current_user, 'is_admin', False):
                 from ..models import FileQueueEntry
                 import secrets as _secrets

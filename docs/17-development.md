@@ -37,9 +37,9 @@ in a new feature.
 
 ---
 
-## Doors — 10 ways in
+## Doors — 11 ways in
 
-ANetBBS supports ten distinct **door types** out of the box. Each
+ANetBBS supports eleven distinct **door types** out of the box. Each
 maps to a `Game` model row (sysop creates via `/admin/games/`) with a
 `game_type` discriminator.
 
@@ -54,6 +54,7 @@ maps to a `Game` model row (sysop creates via `/admin/games/`) with a
 | `door_rlogin` | Outbound rlogin to remote BBS game-server | none — passes user identity | DoorParty, A-Net Online, Synchronet xtrn servers |
 | `door_telnet` | Outbound telnet to remote game server, no pre-auth handshake | none | TWGS (Trade Wars Game Server) and similar telnet-only remotes |
 | `builtin_web` | Flask-routed browser game (xterm.js not needed) | none | Pure-web mini-games (Snake, 2048, Hangman…) |
+| `builtin_python` | In-process, no drop file or external process at all | none | Bundled Python game written from scratch for this door type — currently just ANetCRAFT (see [docs/14-door-games.md](14-door-games.md)) |
 | `door_dos_browser` | EmulatorJS + dosbox_pure, runs entirely client-side in the browser | none | DOS shareware bundles playable with no telnet/SSH client at all |
 
 ### Door entrypoints (config fields)

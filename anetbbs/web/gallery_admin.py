@@ -6,6 +6,7 @@ upload new file. Storage is the JSON config file used by the public
 gallery blueprint — no DB schema changes.
 """
 
+import os
 import re
 from pathlib import Path
 from flask import (
@@ -151,7 +152,7 @@ def delete_file(slug, filename):
         abort(404)
     root = Path(g.get('path', ''))
     target = (root / filename).resolve()
-    if not str(target).startswith(str(root.resolve())):
+    if not str(target).startswith(str(root.resolve()) + os.sep):
         abort(403)
     if target.is_file():
         try:

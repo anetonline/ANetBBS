@@ -1,8 +1,8 @@
 # Security defaults & production hardening
 
-This is the alpha. The defaults are designed so a fresh install isn't
-trivially compromised, but production deployment requires a few extra
-steps. Read this whole file before exposing the BBS to the internet.
+The defaults are designed so a fresh install isn't trivially
+compromised, but production deployment requires a few extra steps.
+Read this whole file before exposing the BBS to the internet.
 
 ## What's enabled by default
 

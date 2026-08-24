@@ -1,11 +1,26 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.43`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.44`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.44 — Full security/dependency/docs audit: two real path-traversal bugs fixed, dependency floors brought current, a dead config setting wired up (August 2026)
+
+**A full sweep across security, dependency freshness, and documentation accuracy, requested directly.** Three parallel reviews (dependency/CVE audit against every pinned floor in `requirements.txt`, a code security review of everything shipped since the last audit plus a fresh broad sweep, and a docs-freshness sweep across the rest of `docs/`), with every finding independently re-verified before being acted on — CVE claims checked live against OSV.dev, code findings checked by reading the actual source, before any fix was written.
+
+**Security fixes:**
+- **Two real path-traversal bugs**, both a missing-path-separator bug in a directory-confinement check (`str(path).startswith(str(root))` instead of `startswith(str(root) + os.sep)`) — a sibling directory whose name happens to start with the same prefix (e.g. a gallery at `.../nasa` and an unrelated `.../nasa-secret`) passed the check. `anetbbs/web/gallery.py`'s image route was reachable by any logged-in user for `.zip`-gallery entries (the one file type that bypasses Werkzeug's own separately-safe `send_from_directory`); `anetbbs/web/gallery_admin.py`'s file-delete route had the identical bug, admin-gated. `anetbbs/web/file_areas.py`'s equivalent route already did this correctly, confirming these were a regression rather than an accepted pattern. Both fixed to match the correct existing pattern; regression tests confirm both are exploitable pre-fix and blocked post-fix.
+- **Ebook reader's text-fetch shelled out to `curl` with an unsanitized third-party-API-supplied URL** (`anetbbs/web/ebooks.py`) — no scheme check, no private-address check, and no `--` end-of-options guard against an option-like URL. Now validated the same way every other attacker-influenceable fetch target in this app is (`core/net_safety.resolve_safe_destination`, the same helper the RSS poller's SSRF guard already used), plus a `--` separator.
+- **No rate limiting on netmail's "Crash" immediate dial-out** (`anetbbs/web/netmail.py`) — ticking Crash (or replying to a crash-delivered netmail) spawns a background thread that dials out over BinkP immediately, bypassing the normal poll schedule; unlike every other route that can trigger repeated outbound network activity, `compose()` had no rate limit at all. Now capped at 20/5min per user, matching the established pattern already used elsewhere (file uploads).
+
+**Dependency floors brought current** in `requirements.txt` — several had drifted stale since the last audit, including two that were themselves inside a newly-disclosed vulnerable range: `cryptography` (44.0.1 → 48.0.1, was in-range for CVE-2026-69247) and `urllib3` (2.2.2 → 2.7.0, was in-range for CVE-2026-44431). Also bumped: `Flask` (3.1.3, CVE-2025-47278), `aiohttp` (3.14.3, CVE-2026-69243/69244), `Pillow` (12.3.0, ~2 major versions stale, CVE-2026-59199/55798), `requests` (2.33.0, CVE-2026-25645). `Werkzeug` gained its own explicit CVE-floor comment and version pin (3.1.6) for the first time — it previously had none at all, sitting directly under a comment that actually covered a different package (Jinja2).
+
+**A real, previously-silent config gap fixed**: `FILE_MOD_QUEUE_ENABLED` (upload moderation queue) was documented in `docs/07-file-areas.md` and `docs/11-spam-control.md` as a working `.env` setting, but `anetbbs/config.py` never defined it — setting it and restarting did nothing. Wired into `Config`, `admin.py`'s live-editable settings list, and both `.env.example` files. Fixing this surfaced a second, related bug: the setting takes effect without a restart, meaning the admin Settings page can write the raw string `'false'` into the live config — and `bool('false')` is `True` in Python. Both read sites in `file_areas.py` now parse via `str(...).lower() == 'true'` instead.
+
+**Documentation fixes**: README's Game Center list was missing ANetDarkForces (a real, shipped 21st game) and gave the wrong path for the terminal gallery viewer (claimed `/home/<user>/`, actually `$INSTALL_DIR/`); `docs/17-development.md`'s door-types table was missing `builtin_python` (the exact precedent doc readers need for a from-scratch bundled Python door); `docs/SECURITY.md` dropped a stale "this is the alpha" framing left over from before the project reached its current stable v1.0.x line.
 
 ## v1.0.43 — Third-party license audit: accurate, complete attribution for the Synchronet compatibility layer and LORD (August 2026)
 

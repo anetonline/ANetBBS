@@ -18,6 +18,8 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, abort, jsonify)
 from flask_login import login_required, current_user
 
+from ..features.rate_limit import rate_limit, _user_or_ip
+
 from ..models import (db, NetmailMessage, EchomailNetwork, UserAka,
                       maybe_tag_ansi_subject)
 from ..echomail.kludges import make_msgid
@@ -180,6 +182,14 @@ def read_markdown(msg_id):
 @netmail_bp.route('/compose', methods=['GET', 'POST'])
 @netmail_bp.route('/<int:reply_to>/reply', methods=['GET', 'POST'])
 @login_required
+# Crash-flagged mail (see is_direct_crash_reply/m.is_crash below) spawns
+# an immediate outbound BinkP dial-out thread on submit, bypassing the
+# normal poll schedule -- found unthrottled in a security audit, unlike
+# every other route that can trigger repeated outbound network activity
+# (file_area_upload's own rate_limit). A regular compose without Crash
+# ticked is cheap (just a DB write + queue), but the limiter has to cover
+# the whole route since Crash is a form field, not a separate endpoint.
+@rate_limit('netmail_compose', limit=20, window=300, key_fn=_user_or_ip)
 def compose(reply_to=None):
     parent = NetmailMessage.query.get(reply_to) if reply_to else None
     if parent and not _user_owns(parent):

@@ -1091,6 +1091,7 @@ EDITABLE_SETTINGS = [
     ('PERSONAL_PAGES_ENABLED', 'Personal Web Pages (true/false)', 'text', True),
     ('NUV_ENABLED', 'New User Verification — sysop approves new users (true/false)', 'text', True),
     ('RATIO_MIN', 'File ratio min (0.05 = 5%, 0 = off)', 'text', False),
+    ('FILE_MOD_QUEUE_ENABLED', 'File upload moderation queue — quarantine non-admin uploads pending approval (true/false)', 'text', False),
     ('IDLE_TIMEOUT_SECONDS', 'Terminal idle timeout (sec, 0 = never)', 'text', True),
     ('AFK_WARNING_SECONDS', 'AFK warning + screensaver before idle timeout (sec, 0 = off)', 'text', True),
     ('BOT_GATE_TIMEOUT', 'Bot-gate timeout (sec) — pre-login challenge wait', 'text', True),

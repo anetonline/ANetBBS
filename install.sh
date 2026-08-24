@@ -315,7 +315,7 @@ done
 if [[ -n "$PYTHON_CMD" ]]; then
     info "Found Python: ${BOLD}$PYTHON_CMD ($PY_VER)${NC}"
 else
-    info "Python 3.9+ not yet installed — will install during setup."
+    info "Python 3.10+ not yet installed — will install during setup."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

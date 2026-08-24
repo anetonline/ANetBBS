@@ -24,8 +24,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import unittest
+from unittest.mock import patch
+import requests
 from anetbbs.web.ebooks import (
     _clean_gutenberg_text, _split_chapters, _get_text_format_url,
+    _curl_fetch_text,
 )
 
 # A trimmed-down but structurally faithful stand-in for a real Gutenberg
@@ -121,6 +124,54 @@ class GetTextFormatUrlTests(unittest.TestCase):
     def test_handles_empty_or_missing_formats(self):
         self.assertIsNone(_get_text_format_url({}))
         self.assertIsNone(_get_text_format_url(None))
+
+
+class CurlFetchTextGuardTests(unittest.TestCase):
+    """Regression tests for a real gap found in a security audit:
+    _curl_fetch_text() passed a Gutendex-supplied URL (a community API
+    this process doesn't control) straight into a curl argv with no
+    scheme check, no SSRF/private-address check, and no `--`
+    end-of-options guard -- unlike every other place in this codebase
+    that fetches a URL from data an attacker can influence (the RSS
+    poller's resolve_safe_destination() usage).
+    """
+
+    def test_rejects_non_http_scheme(self):
+        with self.assertRaises(requests.RequestException):
+            _curl_fetch_text('file:///etc/passwd')
+
+    def test_rejects_url_with_no_hostname(self):
+        with self.assertRaises(requests.RequestException):
+            _curl_fetch_text('http://')
+
+    def test_rejects_url_targeting_a_private_address(self):
+        with self.assertRaises(requests.RequestException):
+            _curl_fetch_text('http://127.0.0.1/secret')
+
+    def test_rejects_option_like_url_without_ever_invoking_curl(self):
+        # A value starting with "-" would be read as a curl option if
+        # ever handed to it unguarded (the `--` fix in the real argv
+        # protects against this too, but the scheme check alone
+        # already refuses this before subprocess.run is reached).
+        with patch('subprocess.run') as mock_run:
+            with self.assertRaises(requests.RequestException):
+                _curl_fetch_text('--output=/tmp/pwned')
+            mock_run.assert_not_called()
+
+    def test_allows_a_legitimate_public_https_url_through_to_curl(self):
+        url = 'https://gutenberg.org/files/11/11-0.txt'
+        with patch('anetbbs.web.ebooks.resolve_safe_destination',
+                  return_value=(2, ('93.184.216.34', 443), None)), \
+             patch('subprocess.run') as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = b'chapter text'
+            result = _curl_fetch_text(url)
+        self.assertEqual(result, 'chapter text')
+        args = mock_run.call_args[0][0]
+        # URL is the last argv element, immediately after a "--"
+        # end-of-options separator.
+        self.assertEqual(args[-1], url)
+        self.assertEqual(args[-2], '--')
 
 
 if __name__ == '__main__':

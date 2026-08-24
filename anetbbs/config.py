@@ -227,6 +227,16 @@ class Config:
     # is_verified=False and have to wait for sysop approval before they
     # can log in. Like Mystic's NUV mode.
     NUV_ENABLED = os.environ.get('NUV_ENABLED', 'false').lower() == 'true'
+    # File-area upload moderation queue — when true, a non-admin's
+    # upload is quarantined pending sysop approval instead of
+    # publishing immediately (anetbbs/web/file_areas.py). Real gap
+    # found in a docs audit: docs/07-file-areas.md and
+    # docs/11-spam-control.md both instructed sysops to set this in
+    # .env, but nothing ever read it from Config -- only via
+    # current_app.config.get(..., False) with no os.environ fallback,
+    # so setting it in .env silently did nothing.
+    FILE_MOD_QUEUE_ENABLED = os.environ.get(
+        'FILE_MOD_QUEUE_ENABLED', 'false').lower() == 'true'
     # Number of telnet/SSH/rlogin "nodes" (1-100). Each concurrent
     # terminal session occupies one node. Used by the multinode chat,
     # who's-online slot tracking, and admin capacity displays.

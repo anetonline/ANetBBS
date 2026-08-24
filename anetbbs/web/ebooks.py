@@ -44,11 +44,13 @@ import logging
 import re
 import subprocess
 from datetime import datetime
+from urllib.parse import urlparse
 
 import requests
 from flask import Blueprint, jsonify, request, Response, abort
 from flask_login import login_required, current_user
 
+from ..core.net_safety import resolve_safe_destination
 from ..models import db, EbookCache, EbookBookmark, EbookReadingHistory
 
 logger = logging.getLogger(__name__)
@@ -166,11 +168,26 @@ def _gutendex_get(path_or_url, params=None):
 def _curl_fetch_text(url, timeout=_HTTP_TIMEOUT):
     """Fetch a URL's body via the system curl binary — see module
     docstring for why this is used instead of requests for book text.
+
+    `url` comes from Gutendex's `formats` field, a community API this
+    process doesn't control — validated the same way any other
+    attacker-influenceable fetch target is (see core/net_safety.py):
+    http(s) scheme only, and the resolved address can't be internal/
+    loopback (DNS-rebinding-able like every other check of this shape,
+    but still real defense-in-depth). `--` before the URL keeps curl
+    from ever treating a value starting with `-` as an option.
     """
+    parsed = urlparse(url or '')
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise requests.RequestException(f'refused: not a plain http(s) URL: {url!r}')
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    _family, _sockaddr, ssrf_err = resolve_safe_destination(parsed.hostname, port)
+    if ssrf_err:
+        raise requests.RequestException(f'refused: {ssrf_err}')
     try:
         result = subprocess.run(
             ['curl', '-sL', '--fail', '--max-time', str(timeout),
-             '-A', _USER_AGENT, url],
+             '-A', _USER_AGENT, '--', url],
             capture_output=True, timeout=timeout + 5,
         )
     except subprocess.TimeoutExpired as exc:
