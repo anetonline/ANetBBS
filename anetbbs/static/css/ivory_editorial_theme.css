@@ -1,0 +1,175 @@
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  ANetBBS Ivory Editorial Theme                                ║
+   ║  Warm cream page, deep forest-teal accent, serif headlines.  ║
+   ║  A daytime theme that reads like a well-set publication.     ║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+
+/* ─────────────────────────────────────────
+   ROOT / GLOBAL
+───────────────────────────────────────── */
+:root {
+  --ie-forest:  #1f4d3d;
+  --ie-forest-d:#163a2d;
+  --ie-bg:      #faf6ee;
+  --ie-card:    #ffffff;
+  --ie-text:    #2b2620;
+  --ie-muted:   #6b6255;
+  --ie-border:  #ded4c0;
+}
+
+/* ─────────────────────────────────────────
+   BODY
+───────────────────────────────────────── */
+body {
+  background: var(--ie-bg) !important;
+  color: var(--ie-text) !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.65;
+}
+
+/* ─────────────────────────────────────────
+   CUSTOM SCROLLBAR
+───────────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--ie-bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--ie-border);
+  border-radius: 6px;
+  border: 2px solid var(--ie-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ie-forest); }
+
+/* ─────────────────────────────────────────
+   TEXT SELECTION
+───────────────────────────────────────── */
+::selection { background: rgba(31, 77, 61, 0.18); color: var(--ie-text); }
+
+/* ─────────────────────────────────────────
+   HEADINGS — serif for that editorial/print feel,
+   sans everywhere else for maximum on-screen legibility.
+───────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6, .navbar-brand {
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  font-weight: 700;
+  color: var(--ie-forest-d);
+}
+.navbar-brand { color: var(--ie-forest) !important; }
+
+/* ─────────────────────────────────────────
+   NAVBAR
+───────────────────────────────────────── */
+.navbar {
+  background: #efe7d6 !important;
+  border-bottom: 1px solid var(--ie-border) !important;
+}
+.navbar .nav-link { color: var(--ie-muted) !important; }
+.navbar .nav-link:hover, .navbar .nav-link.active { color: var(--ie-forest) !important; }
+
+/* ─────────────────────────────────────────
+   LINKS
+───────────────────────────────────────── */
+a { color: var(--ie-forest); text-decoration: none; }
+a:hover { color: var(--ie-forest-d); text-decoration: underline; }
+
+/* ─────────────────────────────────────────
+   BUTTONS
+───────────────────────────────────────── */
+.btn-primary, .btn-success {
+  background: var(--ie-forest) !important;
+  border-color: var(--ie-forest) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+.btn-primary:hover, .btn-success:hover {
+  background: var(--ie-forest-d) !important;
+  border-color: var(--ie-forest-d) !important;
+}
+.btn-outline-primary {
+  color: var(--ie-forest) !important;
+  border-color: var(--ie-forest) !important;
+}
+.btn-outline-primary:hover {
+  background: var(--ie-forest) !important;
+  color: #ffffff !important;
+}
+
+/* ─────────────────────────────────────────
+   CARDS — white panels lifted off the warm page
+───────────────────────────────────────── */
+.card {
+  background: var(--ie-card) !important;
+  border: 1px solid var(--ie-border) !important;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(43, 38, 32, 0.06);
+}
+
+/* ─────────────────────────────────────────
+   FORM CONTROLS
+───────────────────────────────────────── */
+.form-control, .form-select {
+  background: #ffffff !important;
+  border: 1px solid var(--ie-border) !important;
+  color: var(--ie-text) !important;
+  border-radius: 6px;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--ie-forest) !important;
+  box-shadow: 0 0 0 3px rgba(31, 77, 61, 0.14) !important;
+}
+.form-control::placeholder { color: #a89e8c; }
+
+/* ─────────────────────────────────────────
+   TABLES
+───────────────────────────────────────── */
+.table { color: var(--ie-text); }
+.table > :not(caption) > * > * {
+  border-bottom-color: var(--ie-border);
+  background: transparent;
+}
+.table-hover > tbody > tr:hover > * {
+  background: rgba(31, 77, 61, 0.05) !important;
+  color: var(--ie-text) !important;
+}
+
+/* ─────────────────────────────────────────
+   BADGES / PILLS
+───────────────────────────────────────── */
+.badge.bg-primary, .badge.text-bg-primary {
+  background: var(--ie-forest) !important;
+  color: #ffffff !important;
+}
+
+/* ─────────────────────────────────────────
+   ALERTS
+───────────────────────────────────────── */
+.alert-success {
+  background: rgba(31, 77, 61, 0.08) !important;
+  border-color: var(--ie-forest) !important;
+  color: var(--ie-forest-d) !important;
+}
+.alert-info {
+  background: #efe7d6 !important;
+  border-color: var(--ie-border) !important;
+  color: var(--ie-text) !important;
+}
+
+/* ─────────────────────────────────────────
+   FOOTER
+───────────────────────────────────────── */
+footer, .footer {
+  background: #efe7d6 !important;
+  border-top: 1px solid var(--ie-border) !important;
+  color: var(--ie-muted) !important;
+}
+
+/* ─────────────────────────────────────────
+   CODE
+───────────────────────────────────────── */
+code, pre {
+  background: #f2ecdd !important;
+  color: var(--ie-forest-d) !important;
+  border: 1px solid var(--ie-border);
+  border-radius: 6px;
+}

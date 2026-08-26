@@ -406,6 +406,16 @@ def login():
             fire('login', {'user': user.username, 'service': 'web'})
         except Exception:
             pass
+        # Real-time "X just logged in" alert for every other online user
+        # (terminal and web) -- see models.PresenceEvent's docstring.
+        try:
+            from ..models import PresenceEvent
+            db.session.add(PresenceEvent(
+                user_id=user.id, username=user.username,
+                kind='login', protocol='web'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         # Random MOTD pick.
         try:
             from ..models import MotdEntry
@@ -637,6 +647,7 @@ def register():
 def logout():
     """Logout the current user"""
     uid = current_user.id
+    uname = current_user.username
     # Fix for a real bug found live: CallerLog.duration_seconds was
     # declared on the model and shown in two admin templates but never
     # written anywhere -- every row showed 0s. Written here, before
@@ -664,6 +675,16 @@ def logout():
             from ..models import UserSession
             UserSession.query.filter_by(session_key=_sk).delete()
             db.session.commit()
+    except Exception:
+        db.session.rollback()
+    # Real-time "X just logged out" alert -- see models.PresenceEvent's
+    # docstring. Recorded before logout_user() invalidates current_user,
+    # using the uid/uname already captured above for the same reason.
+    try:
+        from ..models import PresenceEvent
+        db.session.add(PresenceEvent(
+            user_id=uid, username=uname, kind='logout', protocol='web'))
+        db.session.commit()
     except Exception:
         db.session.rollback()
     logout_user()

@@ -1105,6 +1105,61 @@ class BBSSession:
                     continue
         self._kick_task = asyncio.create_task(_watch())
 
+    def _start_presence_alert_watchdog(self):
+        """Poll for OTHER users' login/logout events and print a
+        classic "X just logged in/out" line, live, wherever this user
+        currently is in the BBS -- not just inside multinode chat
+        (features/multinode.py's own 'join'/'part' broadcast is a
+        narrower, chat-room-only courtesy; this is the general
+        cross-protocol alert most BBS software shows unconditionally).
+
+        Polls every 5 seconds (same cadence as the kick watchdog,
+        cheap enough not to matter). Starts its "already seen" marker
+        at the current max PresenceEvent id so a freshly-connected
+        session never replays history from before it connected.
+        """
+        async def _watch():
+            from ..features.bbs_ui import _app
+            last_id = 0
+            try:
+                from ..models import PresenceEvent
+                with _app().app_context():
+                    row = (PresenceEvent.query
+                          .order_by(PresenceEvent.id.desc()).first())
+                    last_id = row.id if row else 0
+            except Exception:
+                last_id = 0
+            while True:
+                try:
+                    await asyncio.sleep(5)
+                    from ..models import PresenceEvent
+                    with _app().app_context():
+                        events = (PresenceEvent.query
+                                 .filter(PresenceEvent.id > last_id)
+                                 .filter(PresenceEvent.user_id != self.user['id'])
+                                 .order_by(PresenceEvent.id.asc())
+                                 .limit(20).all())
+                        # Snapshot the fields we need INSIDE the app
+                        # context -- the ORM objects themselves go stale
+                        # the moment this `with` block exits.
+                        pending = [(e.id, e.username, e.kind) for e in events]
+                    for eid, username, kind in pending:
+                        last_id = max(last_id, eid)
+                        verb = 'logged in' if kind == 'login' else 'logged out'
+                        color = '1;32' if kind == 'login' else '1;33'
+                        try:
+                            await self.write(
+                                f"\r\n\x1b[{color}m*** {username} just "
+                                f"{verb} ***\x1b[0m\r\n")
+                        except Exception:
+                            pass
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    # Don't let a transient DB error kill the watchdog.
+                    continue
+        self._presence_alert_task = asyncio.create_task(_watch())
+
     async def _collect_security_questions(self):
         """Collect 3 password-recovery security Q&A during terminal registration."""
         if not self.user:
@@ -2503,6 +2558,10 @@ class BBSSession:
                     self._start_kick_watchdog()
                 except Exception:
                     pass
+                try:
+                    self._start_presence_alert_watchdog()
+                except Exception:
+                    pass
             except Exception:
                 self._node_entry = None
 
@@ -2531,7 +2590,8 @@ class BBSSession:
             # Detect protocol from the writer class name (TelnetWriter / SshWriter / etc)
             wname = type(self.writer).__name__.lower()
             proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
-            presence = SessionPresence(self.user['id'], protocol=proto, peer=peer)
+            presence = SessionPresence(self.user['id'], protocol=proto, peer=peer,
+                                       username=self.user.get('username', ''))
             # Stored on self so menu_engine.py/games.py/mrc_chat.py can
             # update it after the initial set_page('main') below -- see
             # menu_engine.py's dispatch point for why this was needed.

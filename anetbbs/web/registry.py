@@ -16,6 +16,8 @@ Acceptance gates before an entry appears in the public list:
     2. Sysop approval — the hub's sysop manually approves via the admin UI.
 Both must be true AND is_active=true AND a recent heartbeat present.
 """
+import hmac
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -152,7 +154,15 @@ def register():
     entry = RegistryEntry.query.filter(
         RegistryEntry.host.ilike(host)).first()
     new_token = secrets.token_urlsafe(24)
+    # Fresh every register call (new row AND re-register alike) — this
+    # is what heartbeat() now requires as proof of "same client that
+    # just registered," independent of email verification. Re-issuing
+    # it on every call also makes a legitimate peer whose stored key
+    # went stale (e.g. this row predates the security fix) self-heal
+    # the moment its registry_client.py falls back to register().
+    new_heartbeat_key = secrets.token_urlsafe(24)
     now = datetime.utcnow()
+    needs_verify_email = False
 
     if entry is None:
         # First-time registration — create row + email-token in pending.
@@ -161,22 +171,33 @@ def register():
             name=name, sysop=sysop, location=location,
             software=software, software_version=software_version,
             notes=notes, contact_email=contact_email,
-            registration_token=new_token,
+            registration_token=new_token, heartbeat_key=new_heartbeat_key,
             is_verified=False, is_approved=False, is_listed=False,
             source_ip=_peer_ip(),
             registered_at=now,
             last_heartbeat_at=now,
         )
         db.session.add(entry)
+        needs_verify_email = True
     else:
         # Re-registration. If the contact_email changes, force re-verify
-        # (someone might be trying to take over the entry). Otherwise
-        # just refresh metadata + heartbeat.
+        # AND re-approval (someone might be trying to take over the
+        # entry). Security fix: this used to reset is_verified/is_listed
+        # but leave is_approved untouched, which meant a hijacker who
+        # re-registered a known host under their own email could get
+        # verified (see below) and then ride the ORIGINAL sysop
+        # approval straight back onto the public list via the
+        # background probe's auto-relist — no fresh sysop action
+        # anywhere in that chain. is_approved is now part of what a
+        # changed contact_email invalidates.
         if entry.contact_email.lower() != contact_email.lower():
             entry.is_verified = False
+            entry.is_approved = False
             entry.is_listed = False
             entry.registration_token = new_token
             entry.contact_email = contact_email
+            needs_verify_email = True
+        entry.heartbeat_key = new_heartbeat_key
         entry.name = name
         entry.msp_port = msp_port
         entry.systat_port = systat_port
@@ -190,21 +211,62 @@ def register():
 
     db.session.commit()
 
-    # Token is returned in the response so the hub sysop can
-    # paste it to the registrant via any out-of-band channel (PM, chat, etc.).
-    return jsonify({
+    verify_url = (f"{request.host_url.rstrip('/')}"
+                 f"/registry/verify/{entry.registration_token}")
+
+    # Security fix: the verify_url used to be returned directly in this
+    # response — but that defeats the entire point of "email
+    # verification," since anyone who can POST /register (no auth
+    # required) got the token instantly, with no proof they control
+    # contact_email at all. It now gets emailed to contact_email
+    # instead, closing the register→verify→auto-relist hijack chain.
+    # Fallback: on an install with no SMTP configured, keep the old
+    # behavior (return it directly) rather than leaving the registrant
+    # with no way to ever verify — matches this project's original
+    # documented intent ("until [email] is up, the state file is the
+    # source of truth").
+    email_sent = False
+    if needs_verify_email:
+        from ..mailer import smtp_enabled, send_email
+        if smtp_enabled():
+            try:
+                email_sent, _err = send_email(
+                    contact_email,
+                    f'Verify your ANetBBS federation registration for {entry.host}',
+                    f'{entry.name} ({entry.host}) was just registered with '
+                    f'this hub. Click the link below to confirm you control '
+                    f'this contact email — once verified, the hub sysop will '
+                    f'review and approve the entry for inclusion in '
+                    f'anetbbs.lst.\n\n{verify_url}\n\n'
+                    f"If you didn't request this, you can ignore this email.")
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    'registry: failed to email verify link to %s',
+                    contact_email, exc_info=True)
+
+    message = ('Once verified, the hub sysop will review and approve '
+              'the entry for inclusion in anetbbs.lst.')
+    if not needs_verify_email:
+        message = 'Contact email already verified — ' + message
+    elif email_sent:
+        message = 'Check your email for a verification link. ' + message
+    else:
+        message = ('SMTP is not configured on this hub — click the '
+                  'verify_url below directly. ') + message
+
+    body = {
         'ok': True,
         'status': 'pending_verification' if not entry.is_verified
                   else ('listed' if entry.is_listed
                         else 'pending_approval'),
         'host': entry.host,
-        'verify_token': entry.registration_token,
-        'verify_url': f"{request.host_url.rstrip('/')}"
-                      f"/registry/verify/{entry.registration_token}",
-        'message': 'Click the verify_url to confirm your contact email. '
-                   'Once verified, the hub sysop will review and approve '
-                   'the entry for inclusion in anetbbs.lst.',
-    })
+        'heartbeat_key': entry.heartbeat_key,
+        'message': message,
+    }
+    if needs_verify_email and not email_sent:
+        body['verify_token'] = entry.registration_token
+        body['verify_url'] = verify_url
+    return jsonify(body)
 
 
 @registry_bp.route('/registry/api/v1/heartbeat', methods=['POST'])
@@ -223,6 +285,24 @@ def heartbeat():
         RegistryEntry.host.ilike(host)).first()
     if entry is None:
         return _problem(404, 'unknown host — register first')
+
+    # Security fix: heartbeat previously required nothing but a `host`
+    # string that matches an existing row — no ownership proof at all.
+    # Since `host` is published verbatim by this same hub at
+    # /anetbbs.lst and /registry/api/v1/list, anyone could silently
+    # overwrite a listed peer's public name/sysop/location/notes with
+    # zero notification (heartbeat never touches is_verified/
+    # is_approved, so the entry stayed publicly listed the whole time).
+    # Now requires the per-entry heartbeat_key issued at register time,
+    # compared in constant time. A legacy row with no key yet (created
+    # before this fix shipped) can never pass this check — that's
+    # deliberate: it forces one self-heal register() call rather than
+    # silently granting the old, unauthenticated behavior.
+    provided_key = (data.get('heartbeat_key') or '').strip()
+    if not entry.heartbeat_key or not hmac.compare_digest(
+            provided_key, entry.heartbeat_key):
+        return _problem(401, 'missing or invalid heartbeat_key — '
+                             're-register to obtain a current one')
 
     entry.last_heartbeat_at = datetime.utcnow()
     # Heartbeats can update soft metadata (sysop went on vacation,
@@ -261,13 +341,34 @@ def verify(token):
         # confirmed the registrant controls the contact email yet, so
         # there's nothing actionable for the sysop until this point.
         from ..features.notify import notify_admins
+        notify_body = (
+            f'{entry.name} ({entry.sysop or "unknown sysop"}) at '
+            f'{entry.host} has verified their contact email and is '
+            f'waiting for approval to join the federation registry.')
         notify_admins(
             'msp_join_request',
             title=f'MSP registry: {entry.host} verified, awaiting approval',
-            body=f'{entry.name} ({entry.sysop or "unknown sysop"}) at '
-                 f'{entry.host} has verified their contact email and is '
-                 f'waiting for approval to join the federation registry.',
+            body=notify_body,
             target_url='/admin/registry/')
+        # In-app notifications alone only reach a sysop who's already
+        # looking at the site -- real gap: this used to be the only
+        # signal, so a join request could sit unnoticed indefinitely.
+        # Email the actual site contact address too, best-effort (a no-op
+        # if SMTP isn't configured -- send_email() checks that itself).
+        sysop_email = (current_app.config.get('SYSOP_EMAIL') or '').strip()
+        if sysop_email:
+            try:
+                from ..mailer import send_email
+                send_email(
+                    sysop_email,
+                    f'ANetBBS federation: {entry.host} wants to join',
+                    f'{notify_body}\n\n'
+                    f'Review at: {request.host_url.rstrip("/")}'
+                    f'/admin/registry/')
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    'registry: failed to email sysop about %s', entry.host,
+                    exc_info=True)
     return render_template_string(
         '<h1>Contact email verified ✓</h1>'
         '<p>{{ host }} is now waiting for the registry sysop to approve '

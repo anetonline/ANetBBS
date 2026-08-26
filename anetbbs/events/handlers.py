@@ -303,6 +303,77 @@ def cleanup_stale_game_sessions(app, params):
         return False, f'cleanup_stale_game_sessions failed: {exc!r}'
 
 
+def cleanup_stale_registry_entries(app, params):
+    """Delete long-stale, never-verified RegistryEntry rows.
+
+    Real gap found in a security/performance audit: POST /registry/api/
+    v1/register requires no authentication (that's the protocol — any
+    BBS can announce itself) and the only real brake on registration
+    churn is a per-source-IP rate cap. An attacker rotating source IPs
+    (cheap — no CAPTCHA, no auth) can accumulate unbounded junk rows in
+    registry_entries indefinitely; nothing anywhere swept them. This is
+    the backstop: any row that has NEVER been email-verified and hasn't
+    heartbeated in `stale_days` (default 3) is safe to drop outright --
+    a legitimate registrant who's mid-verification will simply
+    re-register (idempotent, cheap) if they come back after that
+    window. Verified/approved/listed rows are never touched here.
+
+    Only meaningful on the install designated as the federation hub
+    (REGISTRY_MODE_ENABLED) — auto-seeded on every install anyway
+    (matching cleanup_stale_sessions' reasoning: every install should
+    have this backstop the moment REGISTRY_MODE_ENABLED is turned on,
+    not just fresh ones), but returns immediately as a no-op elsewhere.
+    """
+    if not app.config.get('REGISTRY_MODE_ENABLED'):
+        return True, 'not a federation hub install — nothing to clean up'
+    try:
+        from ..models import db, RegistryEntry
+        from datetime import datetime, timedelta
+        stale_days = int((params or {}).get('stale_days', 3))
+        cutoff = datetime.utcnow() - timedelta(days=stale_days)
+        # Verification status + original registration age, deliberately
+        # NOT gated on last_heartbeat_at: heartbeat requires the same
+        # per-entry key as everything else in this fix, so churning
+        # heartbeats can't be used to dodge cleanup while staying
+        # unverified forever -- an unverified row can never become
+        # publicly listed regardless of how "fresh" its heartbeat looks.
+        deleted = (RegistryEntry.query
+                  .filter(RegistryEntry.is_verified.is_(False))
+                  .filter(RegistryEntry.registered_at < cutoff)
+                  .delete(synchronize_session=False))
+        db.session.commit()
+        return True, f'Deleted {deleted} stale unverified registry row(s) older than {stale_days}d'
+    except Exception as exc:  # noqa: BLE001
+        return False, f'cleanup_stale_registry_entries failed: {exc!r}'
+
+
+def cleanup_stale_presence_events(app, params):
+    """Delete old PresenceEvent rows (the "X just logged in/out" alert
+    queue -- see models.PresenceEvent's docstring).
+
+    These rows are a delivery queue, not history -- once every active
+    terminal watchdog (polls every 5s) and the web relay thread (polls
+    every 2s) have had a chance to see a row, it has no further
+    purpose. `stale_minutes` (default 60) is generous specifically to
+    tolerate a temporary consumer outage (e.g. the web process
+    restarting) without losing rows before they're ever delivered;
+    it's not meant to imply these are worth keeping an hour on
+    purpose.
+    """
+    try:
+        from ..models import db, PresenceEvent
+        from datetime import datetime, timedelta
+        stale_minutes = int((params or {}).get('stale_minutes', 60))
+        cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+        deleted = (PresenceEvent.query
+                  .filter(PresenceEvent.created_at < cutoff)
+                  .delete(synchronize_session=False))
+        db.session.commit()
+        return True, f'Deleted {deleted} stale presence event row(s) older than {stale_minutes}m'
+    except Exception as exc:  # noqa: BLE001
+        return False, f'cleanup_stale_presence_events failed: {exc!r}'
+
+
 def hub_generate_nodelist(app, params):
     """Generate the ANotherNetwork nodelist and publish it into the
     ANN.FILES.NODELIST file area, replacing the prior copy, so peers can
@@ -385,6 +456,8 @@ REGISTRY: Dict[str, HandlerFn] = {
     'security_check':       security_check,
     'cleanup_stale_sessions': cleanup_stale_sessions,
     'cleanup_stale_game_sessions': cleanup_stale_game_sessions,
+    'cleanup_stale_registry_entries': cleanup_stale_registry_entries,
+    'cleanup_stale_presence_events': cleanup_stale_presence_events,
     'hub_generate_nodelist': hub_generate_nodelist,
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
@@ -401,6 +474,8 @@ HANDLER_META = {
     'security_check': ('Security update check',  'apt + pip outdated scan, tags Ubuntu-security rows. Report at /admin/security/.'),
     'cleanup_stale_sessions': ('Clean up stale online-presence rows', "Delete UserSession rows untouched for stale_days (default 1) -- catches connections that never got a clean disconnect (dropped carrier, killed process). Params: stale_days."),
     'cleanup_stale_game_sessions': ('Clean up stale game-center node slots', "Close GameSession rows stuck at status='active' and release their node slot, for doors whose process crashed/was killed without a clean exit. Params: timeout_seconds (default 3600)."),
+    'cleanup_stale_registry_entries': ('Federation registry: clean up unverified entries', 'Delete RegistryEntry rows that never completed email verification within stale_days (default 3). No-op on non-hub installs. Params: stale_days.'),
+    'cleanup_stale_presence_events': ('Clean up old login/logout alert events', 'Delete PresenceEvent rows (the real-time "X just logged in/out" delivery queue) older than stale_minutes (default 60).'),
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
@@ -465,5 +540,24 @@ DEFAULT_EVENTS = [
         # this audit wired it in, so every existing install is
         # missing it just as much as a fresh one.
         'schedule_json': '{"kind": "daily", "time": "05:15"}',
+    },
+    {
+        'name': 'Federation registry: clean up unverified entries',
+        'handler_key': 'cleanup_stale_registry_entries',
+        'params_json': '{"stale_days": 3}',
+        # 05:30 UTC — right after the other cleanup backstops. Seeded
+        # on every install (the handler itself is a fast no-op unless
+        # REGISTRY_MODE_ENABLED) so a hub install is protected the
+        # moment that flag is turned on, with no separate admin step.
+        'schedule_json': '{"kind": "daily", "time": "05:30"}',
+    },
+    {
+        'name': 'Clean up old login/logout alert events',
+        'handler_key': 'cleanup_stale_presence_events',
+        'params_json': '{"stale_minutes": 60}',
+        # Every 15 minutes -- this table is meant to stay small and
+        # short-lived (a delivery queue, not history), unlike the
+        # once-daily cleanups above.
+        'schedule_json': '{"kind": "interval", "minutes": 15}',
     },
 ]

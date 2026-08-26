@@ -776,6 +776,18 @@ def create_app(config_name=None):
         from .msp.registry_client import start_self_register_thread
         start_self_register_thread(app)
 
+    # Cross-protocol "X just logged in/out" alerts — relays terminal-
+    # originated PresenceEvent rows to connected browser tabs over
+    # SocketIO. Terminal sessions poll PresenceEvent directly on their
+    # own (core/session.py); this thread exists because telnet/SSH/
+    # rlogin run in a separate process from the web app in production.
+    if not (app.config.get('TESTING', False) or _one_shot_cli):
+        try:
+            from .core.presence import start_presence_alert_relay
+            start_presence_alert_relay(app)
+        except Exception:
+            app.logger.exception('Presence alert relay failed to start')
+
     return app
 
 
@@ -1401,6 +1413,48 @@ def _create_default_data():
                 ' "--theme-card-bg": "#05000a", "--theme-input-bg": "#000000",'
                 ' "--theme-input-focus": "#080010", "--theme-border": "#cc00ff",'
                 ' "--theme-stylesheet": "hackers"}'
+            ),
+        },
+        {
+            'name': 'graphite-teal',
+            'display_name': 'Graphite Teal',
+            'description': 'A neutral graphite dark theme with a single refined teal accent and Manrope headings — built for long reading sessions.',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#161a1f", "--theme-bg-dark": "#0d0f12",'
+                ' "--theme-primary": "#2dd4a7", "--theme-primary-dark": "#21a880",'
+                ' "--theme-text": "#e7e9ea", "--theme-text-muted": "#9aa0a6",'
+                ' "--theme-card-bg": "#1c2127", "--theme-input-bg": "#101317",'
+                ' "--theme-input-focus": "#171b20", "--theme-border": "#2b3138",'
+                ' "--theme-stylesheet": "graphite-teal"}'
+            ),
+        },
+        {
+            'name': 'ivory-editorial',
+            'display_name': 'Ivory Editorial',
+            'description': 'A warm cream daytime theme with a deep forest-teal accent and serif headlines — reads like a well-set publication.',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#faf6ee", "--theme-bg-dark": "#efe7d6",'
+                ' "--theme-primary": "#1f4d3d", "--theme-primary-dark": "#163a2d",'
+                ' "--theme-text": "#2b2620", "--theme-text-muted": "#6b6255",'
+                ' "--theme-card-bg": "#ffffff", "--theme-input-bg": "#ffffff",'
+                ' "--theme-input-focus": "#fbf3e3", "--theme-border": "#ded4c0",'
+                ' "--theme-stylesheet": "ivory-editorial"}'
+            ),
+        },
+        {
+            'name': 'retro-web',
+            'display_name': 'Retro Web \'99',
+            'description': 'Tiled pinstripe background, beveled Windows-95 chrome, underlined blue/purple links, Times New Roman. Best viewed in Netscape Navigator 4.0.',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#c8d4e8", "--theme-bg-dark": "#000080",'
+                ' "--theme-primary": "#0000ee", "--theme-primary-dark": "#000099",'
+                ' "--theme-text": "#000000", "--theme-text-muted": "#555555",'
+                ' "--theme-card-bg": "#ffffff", "--theme-input-bg": "#ffffff",'
+                ' "--theme-input-focus": "#ffffcc", "--theme-border": "#808080",'
+                ' "--theme-stylesheet": "retro-web"}'
             ),
         },
     ]

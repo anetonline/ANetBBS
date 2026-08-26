@@ -6,6 +6,7 @@ import logging
 import socket
 
 from .protocol import encode, MSP_DEFAULT_PORT
+from ..core.net_safety import resolve_safe_destination
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,29 @@ def send_msp(host: str, recipient: str, message: str,
     `sender_real_name` populates the MSP sender_terminal field. Synchronet
     displays it after the address; an empty value contributes to their
     `(<no name>)` rendering when IDENT is also unavailable.
+
+    SSRF guard: `host`/`port` reach this function directly from two
+    free-text, no-format-validation user inputs (the web /imsg/send
+    form and the terminal "Send Inter-BBS Instant Message" menu) with
+    no admin gate on either. Without a destination check, any logged-in
+    user could aim the server's own outbound connection at internal
+    infrastructure (loopback, RFC1918, link-local/cloud-metadata) and
+    use the distinct "delivered"/"host unreachable" outcomes as a
+    connect-success oracle for internal recon. Resolved here (not left
+    to each caller) since this is the one real choke point both inputs
+    funnel through.
     """
+    family, sockaddr, error = resolve_safe_destination(host, port)
+    if error:
+        logger.warning('MSP: refused destination %s:%s — %s', host, port, error)
+        return False
     payload = encode(recipient=recipient, sender=sender, message=message,
                      sender_terminal=sender_real_name,
                      cookie=sender_system)
     try:
-        with socket.create_connection((host, port), timeout=timeout) as s:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(sockaddr)
             s.sendall(payload)
             try:
                 s.shutdown(socket.SHUT_WR)

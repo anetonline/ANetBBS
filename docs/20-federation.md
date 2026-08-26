@@ -70,10 +70,11 @@ sudo systemctl restart anetbbs-web.service
 On the next service start, ANetBBS POSTs your metadata to the hub.
 Two acceptance gates before you appear on the public list:
 
-1. **Email verification.** The hub returns a `verify_url`. Open
-   `https://yourbbs/admin/registry/self` to see it — click through.
-   Future plan: the hub will email this URL to `SYSOP_EMAIL` directly
-   once outbound mail support is added.
+1. **Email verification.** If the hub has SMTP configured, it emails
+   the `verify_url` directly to the `contact_email` you registered
+   with — click through. If the hub has no SMTP configured, it falls
+   back to returning `verify_url` in the register response, viewable
+   at `https://yourbbs/admin/registry/self`.
 2. **Sysop approval.** After you verify, the hub sysop reviews the
    entry at `https://bbs.a-net.fyi/admin/registry/` and approves it.
 
@@ -94,8 +95,13 @@ REGISTRY_MODE_ENABLED=true
 
 Restart the web service. New endpoints become live:
 
-- `POST /registry/api/v1/register` — peers announce themselves
-- `POST /registry/api/v1/heartbeat` — daily keep-alive
+- `POST /registry/api/v1/register` — peers announce themselves.
+  Returns a `heartbeat_key` every call — save it, `/heartbeat` below
+  requires it.
+- `POST /registry/api/v1/heartbeat` — daily keep-alive. Must include
+  the `heartbeat_key` from the most recent `/register` response, or
+  the hub returns `401` (treat that the same as `404`: re-register to
+  get a current key).
 - `GET  /registry/verify/<token>` — peer sysop clicks to confirm
 - `GET  /anetbbs.lst` — public JSON list of approved peers
 - `GET  /registry/api/v1/list` — same content, machine-readable URL
@@ -355,9 +361,15 @@ else is affected.
 
 - **No federation between multiple registries yet.** v1.0a3 ships one
   hub model. Mirror-sync between registries is post-alpha (v1.0b).
-- **No public-key signing of heartbeats.** Today an entry is owned by
-  whoever holds the verify token + has been approved. Cryptographic
-  ownership is future work.
+- **No public-key signing of heartbeats.** A `POST /heartbeat` now
+  requires the per-entry `heartbeat_key` returned at register time
+  (compared with `hmac.compare_digest`, never accepted from an entry
+  that doesn't have one) — this closed a real gap where anyone who
+  knew a peer's public `host` (published verbatim in `anetbbs.lst`)
+  could overwrite that peer's public metadata with no ownership proof
+  at all. It's still a shared-secret bearer token, not asymmetric
+  cryptographic signing — a compromised key is a compromised entry.
+  Full public-key ownership is future work.
 - **`anetbbs.lst` exposed at root URL doesn't include `contact_email`**
   — that's intentional, only the hub sysop sees it via the admin UI.
 

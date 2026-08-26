@@ -1,0 +1,251 @@
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  ANetBBS Retro Web '99 Theme                                 ║
+   ║  Tiled pinstripe background · beveled Windows-95 chrome      ║
+   ║  Underlined blue/purple links · Times New Roman              ║
+   ║  Best viewed in Netscape Navigator 4.0 at 800×600.            ║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+/* ─────────────────────────────────────────
+   ROOT / GLOBAL
+───────────────────────────────────────── */
+:root {
+  --rw-navy:    #000080;
+  --rw-blue:    #0000ee;
+  --rw-visited: #551a8b;
+  --rw-bg:      #c8d4e8;
+  --rw-bg2:     #bcc9e0;
+  --rw-panel:   #d4d0c8;
+  --rw-text:    #000000;
+}
+
+/* ─────────────────────────────────────────
+   BODY — the classic unstyled-web default,
+   plus a tiled diagonal-pinstripe background.
+───────────────────────────────────────── */
+body {
+  background-color: var(--rw-bg) !important;
+  background-image: repeating-linear-gradient(
+    45deg, var(--rw-bg), var(--rw-bg) 12px, var(--rw-bg2) 12px, var(--rw-bg2) 24px
+  ) !important;
+  color: var(--rw-text) !important;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ─────────────────────────────────────────
+   CUSTOM SCROLLBAR — chunky, not the thin modern kind
+───────────────────────────────────────── */
+::-webkit-scrollbar { width: 18px; height: 18px; }
+::-webkit-scrollbar-track { background: var(--rw-panel); }
+::-webkit-scrollbar-thumb {
+  background: var(--rw-panel);
+  border: 2px outset #fff;
+}
+::-webkit-scrollbar-thumb:hover { background: #c0bcb0; }
+
+/* ─────────────────────────────────────────
+   TEXT SELECTION
+───────────────────────────────────────── */
+::selection { background: #000080; color: #ffffff; }
+
+/* ─────────────────────────────────────────
+   HEADINGS — bold serif, period-correct navy
+───────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Times New Roman', Times, Georgia, serif;
+  font-weight: 700;
+  color: var(--rw-navy);
+}
+h1 { text-decoration: underline; }
+
+/* Navbar brand: a gentle color-cycle nodding to the old
+   "under construction" rainbow-text trope. Subtle, not seizure-bait. */
+.navbar-brand {
+  font-family: 'Times New Roman', Times, Georgia, serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  animation: rw-rainbow 8s linear infinite;
+}
+@keyframes rw-rainbow {
+  0%   { color: #ff0000; }
+  20%  { color: #ff8800; }
+  40%  { color: #ffee00; }
+  60%  { color: #00aa00; }
+  80%  { color: #0000ee; }
+  100% { color: #ff0000; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .navbar-brand { animation: none; color: #ffee00; }
+}
+
+/* ─────────────────────────────────────────
+   NAVBAR — solid banner bar
+───────────────────────────────────────── */
+.navbar {
+  background: var(--rw-navy) !important;
+  border-bottom: 4px double #ffffff !important;
+}
+.navbar .nav-link { color: #ffffff !important; }
+.navbar .nav-link:hover, .navbar .nav-link.active { color: #ffee00 !important; text-decoration: underline; }
+
+/* ─────────────────────────────────────────
+   LINKS — the actual original browser defaults
+───────────────────────────────────────── */
+a { color: var(--rw-blue) !important; text-decoration: underline !important; }
+a:visited { color: var(--rw-visited) !important; }
+a:hover { color: #ff0000 !important; }
+
+/* ─────────────────────────────────────────
+   BUTTONS — beveled Windows-95 dialog buttons
+───────────────────────────────────────── */
+.btn {
+  background: var(--rw-panel) !important;
+  color: #000000 !important;
+  border: 2px outset #ffffff !important;
+  border-radius: 0 !important;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+  font-weight: 700;
+  box-shadow: none !important;
+}
+.btn:active { border-style: inset !important; }
+.btn-primary, .btn-success {
+  background: var(--rw-panel) !important;
+  color: #000080 !important;
+}
+
+/* ─────────────────────────────────────────
+   LIST GROUPS — Recent Posts / Message Boards / RSS rows etc.
+   base.html's own .list-group-item already reads --theme-card-bg/
+   --theme-text correctly (white/black here), but its :hover state
+   falls back to a hardcoded dark navy (#1a1a2e) meant for the OTHER
+   dark-on-dark themes -- wrong flash against this light theme.
+───────────────────────────────────────── */
+.list-group-item-action:hover,
+.list-group-item-action:focus {
+  background-color: #ffffcc !important;
+  color: #000000 !important;
+}
+
+/* ─────────────────────────────────────────
+   DROPDOWN MENUS
+   base.html sets these via INLINE style="background-color:var(--theme-
+   bg-dark);color:var(--theme-primary)" -- needs !important to win, and
+   this theme's own --theme-bg-dark (navy) and --theme-primary (blue)
+   are close enough in value that navy-on-navy is genuinely hard to
+   read (the OTHER themes get away with this pattern because their
+   bg-dark is near-black against a bright accent; this theme's navy
+   banner isn't dark enough for that same trick). Re-skinned as a
+   light beveled Windows-95 menu instead -- more period-authentic than
+   a dark dropdown anyway, and sidesteps the contrast problem entirely
+   rather than trying to tune two variables used everywhere else too.
+───────────────────────────────────────── */
+.dropdown-menu {
+  background-color: #d4d0c8 !important;
+  border: 2px outset #ffffff !important;
+  border-radius: 0 !important;
+}
+.dropdown-item {
+  color: #000000 !important;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+}
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background-color: var(--rw-navy) !important;
+  color: #ffffff !important;
+}
+
+/* ─────────────────────────────────────────
+   CARDS — inset "dialog box" panels
+───────────────────────────────────────── */
+.card {
+  background: #ffffff !important;
+  border: 2px inset var(--rw-panel) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.card-header {
+  background: var(--rw-panel) !important;
+  border-bottom: 2px outset #ffffff !important;
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────
+   FORM CONTROLS — sunken inset fields
+───────────────────────────────────────── */
+.form-control, .form-select {
+  background: #ffffff !important;
+  border: 2px inset var(--rw-panel) !important;
+  color: #000000 !important;
+  border-radius: 0 !important;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--rw-blue) !important;
+  box-shadow: none !important;
+  background: #ffffcc !important;
+}
+
+/* ─────────────────────────────────────────
+   TABLES
+───────────────────────────────────────── */
+.table {
+  color: #000000;
+  background: #ffffff;
+  border: 2px inset var(--rw-panel);
+}
+.table > :not(caption) > * > * {
+  border: 1px solid #808080;
+}
+.table-hover > tbody > tr:hover > * {
+  background: #ffffcc !important;
+  color: #000000 !important;
+}
+
+/* ─────────────────────────────────────────
+   BADGES / PILLS
+───────────────────────────────────────── */
+.badge.bg-primary, .badge.text-bg-primary {
+  background: var(--rw-navy) !important;
+  color: #ffee00 !important;
+  border-radius: 0 !important;
+}
+
+/* ─────────────────────────────────────────
+   ALERTS
+───────────────────────────────────────── */
+.alert {
+  border: 2px outset #ffffff !important;
+  border-radius: 0 !important;
+}
+.alert-success { background: #ccffcc !important; color: #000000 !important; }
+.alert-info { background: #ffffcc !important; color: #000000 !important; }
+.alert-danger { background: #ffcccc !important; color: #000000 !important; }
+
+/* ─────────────────────────────────────────
+   FOOTER — the obligatory period disclaimer
+───────────────────────────────────────── */
+footer, .footer {
+  background: var(--rw-panel) !important;
+  border-top: 2px outset #ffffff !important;
+  color: #000000 !important;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+}
+.footer::after {
+  content: "\2726 Best viewed in Netscape Navigator 4.0 at 800\00D7600 \2726";
+  display: block;
+  text-align: center;
+  font-size: .75rem;
+  color: #555555;
+  padding: .4rem 0 .1rem;
+}
+
+/* ─────────────────────────────────────────
+   CODE
+───────────────────────────────────────── */
+code, pre {
+  background: #ffffff !important;
+  color: #000080 !important;
+  border: 2px inset var(--rw-panel);
+  font-family: 'Courier New', monospace;
+}

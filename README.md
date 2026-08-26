@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.46`, August 2026)
+**Status: stable** (`v1.0.48`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.46.tar.gz
-cd ANetBBS-v1.0.46
+tar xzf ANetBBS-v1.0.48.tar.gz
+cd ANetBBS-v1.0.48
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.46.tar.gz
-cd ANetBBS-v1.0.46
+tar xzf ANetBBS-v1.0.48.tar.gz
+cd ANetBBS-v1.0.48
 sudo bash update.sh
 ```
 
@@ -219,6 +219,10 @@ buildx` once there's a registry to publish to.
   picker), PMs, file browsing + XMODEM download, who's-online, profile,
   Number Guessing, and sysop-buildable custom menus at
   `/admin/petscii-menus/`. See [docs/25-petscii.md](docs/25-petscii.md).
+- **Live "X just logged in/out" presence alerts** — classic multi-node
+  BBS behavior: every other currently-online user sees it in real time,
+  wherever they are (a menu, a board, chat) — terminal and web alike,
+  regardless of which side someone connects from.
 
 ### Sysop tools
 - **ANetBBS Pulse** — read-only, mobile-first status dashboard at

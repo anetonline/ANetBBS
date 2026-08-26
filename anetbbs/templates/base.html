@@ -325,6 +325,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/enhanced_theme.css') }}">
       {% elif '"hackers"' in effective_theme.css_variables %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/hackers_theme.css') }}">
+      {% elif '"graphite-teal"' in effective_theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/graphite_teal_theme.css') }}">
+      {% elif '"ivory-editorial"' in effective_theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ivory_editorial_theme.css') }}">
+      {% elif '"retro-web"' in effective_theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/retro_web_theme.css') }}">
       {% endif %}
     {% endif %}
     {% endif %}
@@ -738,6 +744,30 @@
                 </div>`;
                 c.appendChild(t);
                 setTimeout(() => t.remove(), 30000);
+            });
+            // Classic multi-node "X just logged in/out" alert -- every
+            // OTHER online user sees this, terminal and web alike (see
+            // core/presence.py's relay thread + models.PresenceEvent).
+            // Server broadcasts to everyone; skip our own event here
+            // rather than trying to exclude server-side, since seeing
+            // "you just logged in" about yourself would be pointless.
+            const myUserId = {{ current_user.id | tojson }};
+            sock.on('presence_alert', d => {
+                if (d.user_id === myUserId) return;
+                const c = document.getElementById('bcastContainer');
+                if (!c) return;
+                const isLogin = d.kind === 'login';
+                const t = document.createElement('div');
+                t.className = `toast show align-items-center text-bg-${isLogin ? 'success' : 'secondary'} border-0 mb-2`;
+                const uname = String(d.username || '?').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+                t.innerHTML = `<div class="d-flex">
+                    <div class="toast-body">
+                        ${isLogin ? '🟢' : '⚪'} <strong>${uname}</strong> just ${isLogin ? 'logged in' : 'logged out'}
+                    </div>
+                    <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+                c.appendChild(t);
+                setTimeout(() => t.remove(), 15000);
             });
         } catch (e) { console.warn('sysop broadcast socket failed:', e); }
     })();

@@ -7,17 +7,25 @@ here's my metadata, ping me back if you care."
 
 Behavior:
 1. On startup, if REGISTRY_SELF_REGISTER=true, POST /register with
-   our metadata. The hub returns a verify_url + token.
-2. We persist the verify_url to a state file so the sysop can find
-   it later (instead of digging through gunicorn logs). Eventually
-   when the email system is up, the hub will email it directly to
-   SYSOP_EMAIL — but until then, the local state file is the source
-   of truth.
+   our metadata. If SMTP is configured on the hub, it emails a
+   verify_url to our contact_email directly (proving we control that
+   mailbox — this used to be returned in the raw API response instead,
+   which defeated the point of "verification"; see registry.py's own
+   docstring for the security fix). Without hub-side SMTP, the hub
+   falls back to returning verify_url in the response, which we
+   persist to a state file so the sysop can find it later (instead of
+   digging through gunicorn logs).
+2. The response also carries a `heartbeat_key` — a separate per-entry
+   secret (not tied to email verification) the hub now requires on
+   every heartbeat, so a heartbeat can't be sent by anyone who merely
+   knows our public host. Persisted to the same state file and
+   attached to every heartbeat below.
 3. Daily heartbeat keeps last_seen current and lets us update soft
    metadata (e.g. the sysop changed the BBS name).
 4. If a heartbeat returns 404 (hub doesn't know us — could happen
-   if the hub sysop deleted our entry, or we changed hosts), we
-   fall back to a full register.
+   if the hub sysop deleted our entry, or we changed hosts) or 401
+   (our stored heartbeat_key is missing/stale), we fall back to a
+   full register to obtain a current key.
 
 Self-registration is **opt-in** (REGISTRY_SELF_REGISTER=false by
 default). Sysops who don't want their BBS published on a federation
@@ -140,18 +148,29 @@ def _loop(app):
 
 
 def _tick(app):
-    """One iteration: try heartbeat, fall back to register on 404.
+    """One iteration: try heartbeat, fall back to register on 404 or 401.
 
     Returns a dict describing what happened -- {'ok': bool, 'action':
     'heartbeat'|'register'|'skipped', 'reason': str (on failure),
-    'verify_url': str (on a fresh register)}. Callers that only care
-    about the daily background loop can ignore the return value, but
-    anything showing the sysop a result (the setup wizard, the
-    "register now" admin button) needs it: previously this function
-    just `return`d silently on every failure path -- including when
-    REGISTRY_URL was blank -- so callers had no way to tell success
-    from a silent no-op, and ended up showing a flat "success" message
-    regardless of what (if anything) actually happened.
+    'verify_url': str (on a fresh register, only when the hub couldn't
+    email it -- see below)}. Callers that only care about the daily
+    background loop can ignore the return value, but anything showing
+    the sysop a result (the setup wizard, the "register now" admin
+    button) needs it: previously this function just `return`d silently
+    on every failure path -- including when REGISTRY_URL was blank --
+    so callers had no way to tell success from a silent no-op, and
+    ended up showing a flat "success" message regardless of what (if
+    anything) actually happened.
+
+    Security fix: heartbeat now requires a `heartbeat_key` the hub
+    issues at register time (previously, anyone who knew our public
+    `host` could heartbeat as us and silently overwrite our public
+    metadata -- see anetbbs/web/registry.py for the hub-side fix).
+    That key is persisted in the local state file and sent on every
+    heartbeat below. A hub reply of 401 means it doesn't recognize our
+    key (e.g. this state file predates the fix, or the hub's row was
+    reset) -- treated the same as 404: fall through and re-register to
+    obtain a current one.
     """
     base = (app.config.get('REGISTRY_URL') or '').rstrip('/')
     if not base:
@@ -162,7 +181,8 @@ def _tick(app):
     sess = requests.Session()
 
     # Heartbeat first (cheaper than re-register). If the hub returns
-    # 404 we don't exist there yet — fall through to register.
+    # 404 (unknown host) or 401 (missing/stale heartbeat_key) we can't
+    # heartbeat as-is — fall through to register.
     if state.get('host_registered') == meta['host']:
         try:
             r = sess.post(f'{base}/registry/api/v1/heartbeat',
@@ -170,7 +190,8 @@ def _tick(app):
                                 'name': meta['name'],
                                 'sysop': meta['sysop'],
                                 'location': meta['location'],
-                                'software_version': meta['software_version']},
+                                'software_version': meta['software_version'],
+                                'heartbeat_key': state.get('heartbeat_key', '')},
                           timeout=15)
             if r.status_code == 200:
                 state['last_heartbeat_at'] = datetime.utcnow().isoformat() + 'Z'
@@ -179,9 +200,10 @@ def _tick(app):
                 logger.info('registry-client: heartbeat to %s ok (%s)',
                             base, r.json().get('is_listed', '?'))
                 return {'ok': True, 'action': 'heartbeat'}
-            elif r.status_code == 404:
-                logger.info('registry-client: hub %s says we are unknown '
-                            '— re-registering', base)
+            elif r.status_code in (404, 401):
+                logger.info('registry-client: hub %s returned %d — '
+                            're-registering to obtain a current key',
+                            base, r.status_code)
             else:
                 logger.warning('registry-client: heartbeat %s returned %d: %s',
                                base, r.status_code, r.text[:200])
@@ -191,7 +213,7 @@ def _tick(app):
             logger.warning('registry-client: heartbeat failed: %s', exc)
             return {'ok': False, 'action': 'heartbeat', 'reason': str(exc)}
 
-    # Full register (first time, or after a 404 fallback).
+    # Full register (first time, or after a 404/401 fallback).
     try:
         r = sess.post(f'{base}/registry/api/v1/register', json=meta,
                       timeout=20)
@@ -201,14 +223,17 @@ def _tick(app):
             state['host_registered'] = meta['host']
             state['last_register_at'] = datetime.utcnow().isoformat() + 'Z'
             state['last_response'] = body
+            state['heartbeat_key'] = body.get('heartbeat_key') or ''
+            # verify_url is only present when the hub had no SMTP
+            # configured to email it instead — see registry.py.
             state['verify_url'] = body.get('verify_url') or ''
             _save_state(app, state)
             logger.info(
-                'registry-client: registered with %s — status=%s '
-                'verify_url=%s', base, body.get('status'),
-                body.get('verify_url'))
+                'registry-client: registered with %s — status=%s',
+                base, body.get('status'))
             return {'ok': True, 'action': 'register',
-                    'verify_url': body.get('verify_url') or ''}
+                    'verify_url': body.get('verify_url') or '',
+                    'message': body.get('message') or ''}
         else:
             logger.warning('registry-client: register %s returned %d: %s',
                            base, r.status_code, r.text[:200])

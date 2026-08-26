@@ -1,6 +1,28 @@
 {% extends "base.html" %}
 {% block title %}Inter-BBS IM — {{ config.BBS_NAME }}{% endblock %}
 
+{% block extra_css %}
+<style>
+/* Unread-row treatment driven entirely by theme variables (not a
+   hardcoded color pair) so it stays legible under every theme,
+   including future ones, instead of clashing with whichever accent
+   color happens to be active. */
+tr.imsg-unread > * {
+    border-top: 1px solid var(--theme-primary, #89b4fa);
+    border-bottom: 1px solid var(--theme-primary, #89b4fa);
+    background-color: color-mix(in srgb, var(--theme-primary, #89b4fa) 10%, transparent);
+}
+tr.imsg-unread > *:first-child { border-left: 3px solid var(--theme-primary, #89b4fa); }
+.imsg-unread-dot {
+    display: inline-block;
+    width: .5rem; height: .5rem; border-radius: 50%;
+    background: var(--theme-primary, #89b4fa);
+    margin-right: .4rem;
+    box-shadow: 0 0 6px var(--theme-primary, #89b4fa);
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container my-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -38,8 +60,11 @@
             </thead>
             <tbody>
                 {% for m in messages %}
-                <tr class="{% if not m.is_read %}table-warning{% endif %}">
-                    <td><strong>{{ m.sender_label or '(anon)' }}</strong></td>
+                <tr class="{% if not m.is_read %}imsg-unread{% endif %}">
+                    <td>
+                        {% if not m.is_read %}<span class="imsg-unread-dot" aria-label="Unread"></span>{% endif %}
+                        <strong>{{ m.sender_label or '(anon)' }}</strong>
+                    </td>
                     <td><code>{{ m.sender_host }}</code></td>
                     <td><pre style="margin:0; white-space:pre-wrap; max-width:600px;">{{ m.body }}</pre></td>
                     <td>{{ m.received_at|eastern('%Y-%m-%d %H:%M') }}</td>

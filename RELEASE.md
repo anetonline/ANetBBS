@@ -1,3 +1,27 @@
+# ANetBBS v1.0.48 — Live "X just logged in/out" presence alerts (August 2026)
+
+Classic multi-node BBS behavior, requested directly: whenever someone logs in or logs out, every OTHER currently-online user sees a real-time alert — wherever they currently are on the BBS, not just inside a dedicated chat room. This works across every front-end ANetBBS has, in every combination: log in on telnet and users on SSH, rlogin, and the web all see it live; log in on the web and every terminal user sees it too; the same in both directions for logouts.
+
+Nobody is ever alerted about their own login or logout — the whole point is knowing who else just showed up or stepped away.
+
+**Why this needed a small relay, not just a broadcast.** Telnet, SSH, and rlogin run in one process; the web app runs in a separate one, in a real deployment. A login happening in one process has no direct way to reach a live browser tab connected to the other, so this ships with a lightweight real-time queue (`PresenceEvent`) that both sides poll independently — each active terminal session watches for events meant for it, and a small relay thread in the web process re-broadcasts new events over the existing live-update channel so browser tabs see them the moment they happen. A scheduled housekeeping job keeps that queue small, since it's only ever a delivery mechanism, never a log.
+
+Every part of this — both login/logout write paths, both delivery paths, the self-exclusion behavior, and the housekeeping job — has its own dedicated regression test, including a test that exercises the actual production code that prints the alert into a live terminal session, not a re-implementation of its logic. Full test suite green.
+
+A full, dedicated security and hardening pass over the MSP inter-BBS instant messaging subsystem and the federation registry — the one major subsystem that hadn't yet had a targeted audit of its own, following the two prior full-codebase passes.
+
+**Federation registry.** Tightened authentication on the hub-side registration API so a peer's public metadata can no longer be altered without proof of ownership, closed a re-registration edge case that could let stale approval state carry forward incorrectly, and added a scheduled cleanup job for registry entries that never complete verification. The join-request notification that fires when a peer verifies its contact email now also emails the hub sysop directly (previously it only ever produced an in-app notification, easy to miss if you weren't already looking at the admin panel).
+
+**MSP inbound/outbound.** Added destination validation to the outbound message-send and "who's online" lookup paths, and added rate limiting plus connection bounds to the inbound MSP listener, matching the same hardening already in place on the SYSTAT responder.
+
+**Inter-BBS Instant Messages inbox.** The unread-row highlight now derives its color from the active theme instead of a fixed color pair, so it stays legible under every theme rather than only the ones it happened to be tuned against.
+
+**Three new themes.** Graphite Teal and Ivory Editorial — a dark and a light professional option, each with its own deliberate type pairing rather than a straight palette swap of an existing theme — and Retro Web '99, a tiled-background, beveled, Windows-95/GeoCities-era pastiche theme, added purely for fun.
+
+**Two legibility fixes caught from real screenshots.** The homepage's Recent Posts and Message Boards lists had a hardcoded color style baked directly into the template, bypassing the theme system entirely — harmless-looking under some themes, illegible under others. Removed, so those rows now correctly inherit from whichever theme is active like every other list on the site already does. Retro Web '99's admin dropdown menu was also hard to read (two of its own color choices were too close in value for how that component is styled site-wide) — given its own light, beveled treatment instead.
+
+Every fix in this pass has a dedicated regression test, several of them verified by first reproducing the failure against the pre-fix code and confirming the fix actually closes it, not just reasoning through the change. Full test suite green.
+
 # ANetBBS v1.0.46 — ANetBBS Pulse: a read-only mobile status dashboard (August 2026)
 
 A new admin-only sysop dashboard, built for a phone, reachable at `/admin/pulse/` and installable to a home screen as a standalone app on Android and iOS alike. One glance shows live callers (terminal and web), per-service health with CPU/RAM pulled from the existing metrics sampler, disk usage, host uptime, and rolling 24-hour activity totals — auto-refreshing every 15 seconds without a manual reload.

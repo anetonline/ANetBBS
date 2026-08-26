@@ -213,8 +213,17 @@ def directory_refresh():
 
 @imsg_bp.route('/directory/<int:entry_id>/who')
 @login_required
+@rate_limit('imsg-directory-who', limit=20, window=3600, key_fn=_user_or_ip)
 def directory_who(entry_id):
-    """SYSTAT/Finger-over-UDP a remote BBS to see who's online."""
+    """SYSTAT/Finger-over-UDP a remote BBS to see who's online.
+
+    Rate-limited like send() -- this makes a real network round-trip
+    (up to systat.py's own timeout) per request, so an unthrottled loop
+    over it would tie up a worker per call; combined with the
+    destination now being validated (query_systat()'s SSRF guard), the
+    rate limit also bounds how fast someone can probe hosts even within
+    the allowed (non-private) address space.
+    """
     from ..models import BbsDirectoryEntry
     from ..msp.systat import query_systat
     entry = BbsDirectoryEntry.query.get_or_404(entry_id)

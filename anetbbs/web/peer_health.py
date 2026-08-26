@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from flask import (Blueprint, current_app, jsonify, render_template)
 from flask_login import login_required
 
+from ..core.net_safety import resolve_safe_destination
 from ..models import db, RegistryEntry
 from .access_control import require_admin_or_403 as _require_admin
 
@@ -44,12 +45,27 @@ def _relative_age(dt):
 
 
 def _systat_probe(host, port, timeout=3.0):
-    """One-shot probe. TCP first (most reliable), UDP fallback."""
+    """One-shot probe. TCP first (most reliable), UDP fallback.
+
+    SSRF guard: unlike msp/systat.py's query_systat() (used by the
+    automatic background probe cycle and already fixed for this),
+    this ADMIN-triggered "Probe now" button had its own separate,
+    unguarded TCP+UDP connect implementation — found in the same
+    audit that fixed query_systat(). `host` is RegistryEntry data,
+    not locally trusted (a peer's own self-registered value), so
+    without a check an admin session could be used to make the
+    server originate a TCP or UDP connection at arbitrary internal
+    infrastructure. Resolved once and connected to the resolved
+    address (not the original hostname string) for both protocols.
+    """
     started = time.monotonic()
+    family, sockaddr, error = resolve_safe_destination(host, int(port or 11))
+    if error:
+        return False, (time.monotonic() - started) * 1000, error
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
-            s.connect((host, int(port or 11)))
+            s.connect(sockaddr)
             try:
                 s.send(b'\n')
             except OSError:
@@ -62,9 +78,9 @@ def _systat_probe(host, port, timeout=3.0):
     except (socket.timeout, ConnectionRefusedError, OSError):
         pass
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        with socket.socket(family, socket.SOCK_DGRAM) as s:
             s.settimeout(timeout)
-            s.sendto(b'\n', (host, int(port or 11)))
+            s.sendto(b'\n', sockaddr)
             data, _ = s.recvfrom(2048)
         return True, (time.monotonic() - started) * 1000, data[:200].decode('utf-8', 'replace')
     except (socket.timeout, OSError) as exc:

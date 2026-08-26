@@ -1016,6 +1016,17 @@ class RegistryEntry(db.Model):
     # Provenance + verification
     contact_email = db.Column(db.String(255), nullable=False)
     registration_token = db.Column(db.String(64), index=True)  # email-verify
+    # Per-entry secret the registrant must echo back on every heartbeat.
+    # Security fix: heartbeat() used to accept ANY caller who merely
+    # knew a registered `host` (published verbatim in the public
+    # /anetbbs.lst) and let them silently overwrite that peer's public
+    # name/sysop/location/notes with no ownership proof at all. Issued
+    # fresh on every successful /register (new row or re-register) and
+    # returned ONLY in that response -- never emailed, never shown in
+    # any admin UI -- since proving "same client that just registered"
+    # is a different, weaker guarantee than proving email ownership
+    # (that's what registration_token/is_verified is for).
+    heartbeat_key = db.Column(db.String(64))
     is_verified = db.Column(db.Boolean, default=False, index=True)
     is_approved = db.Column(db.Boolean, default=False, index=True)
     is_listed = db.Column(db.Boolean, default=False, index=True)
@@ -2732,6 +2743,40 @@ class NodeActivity(db.Model):
     kick_reason = db.Column(db.String(200))
 
     user = db.relationship('User')
+
+
+class PresenceEvent(db.Model):
+    """A login/logout event, for real-time "X just logged in/out" alerts
+    to every other currently-online user -- terminal (telnet/SSH/rlogin/
+    PETSCII) and web alike, classic multi-node BBS behavior.
+
+    Deliberately NOT an audit log (CallerLog/UserActivity already cover
+    that) -- purely a short-lived delivery queue. Two independent
+    consumers poll it: each terminal session's own presence-alert
+    watchdog (core/session.py), and a background relay thread in the
+    web process (web_app.py) that re-emits new rows over SocketIO so
+    browser tabs see them live too. The relay thread exists specifically
+    because telnet/SSH/rlogin run in a SEPARATE process
+    (anetbbs.service) from the web app (anetbbs-web.service) in a real
+    deployment -- a terminal-originated login has no other way to reach
+    a browser tab's live socket. `username` is denormalized (not just a
+    user_id FK lookup) so a poll never needs a join and the event still
+    reads sensibly if the user is deleted before it's swept. Rows are
+    swept by the `cleanup_stale_presence_events` scheduled job well
+    before they'd ever be mistaken for history."""
+    __tablename__ = 'presence_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    username = db.Column(db.String(80), nullable=False)
+    kind = db.Column(db.String(10), nullable=False)  # 'login' | 'logout'
+    protocol = db.Column(db.String(16))  # web/telnet/ssh/rlogin/petscii40/...
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False, index=True)
+
+    def __repr__(self):
+        return f'<PresenceEvent {self.username} {self.kind}>'
 
 
 class MenuTranslation(db.Model):

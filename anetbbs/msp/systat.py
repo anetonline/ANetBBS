@@ -225,11 +225,27 @@ _WEB_AREA_LABELS = {
 def query_systat(host: str, port: int = 11, timeout: float = 5.0) -> str:
     """Outbound: ask a remote BBS for its active-user list. Returns the
     text body, or '' on failure. Sends an empty UDP packet and reads
-    the single-datagram reply per Finger-over-UDP convention."""
+    the single-datagram reply per Finger-over-UDP convention.
+
+    SSRF guard: `host` is directory-sourced data (a BbsDirectoryEntry's
+    hostname/IP), not locally trusted -- it's populated from a remote
+    peer-list pull (msp/directory.py, msp/anetbbs_directory.py) or, on
+    the hub, from whatever a peer self-registered. Without a check, the
+    "Who's online" feature (imsg.py's directory_who(), reachable by any
+    logged-in user with no admin gate) turns into a UDP probe primitive
+    against arbitrary internal targets. Resolved once and connected to
+    the resolved address (not the original hostname string) to avoid a
+    DNS-rebinding gap between validation and send.
+    """
+    from ..core.net_safety import resolve_safe_destination
+    family, sockaddr, error = resolve_safe_destination(host, port)
+    if error:
+        logger.info('SYSTAT query to %s:%s refused — %s', host, port, error)
+        return ''
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        with socket.socket(family, socket.SOCK_DGRAM) as s:
             s.settimeout(timeout)
-            s.sendto(b'\r\n', (host, port))
+            s.sendto(b'\r\n', sockaddr)
             data, _addr = s.recvfrom(8192)
             try:
                 return data.decode('utf-8')

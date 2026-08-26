@@ -37,7 +37,7 @@ def _read_requirements():
 
 setup(
     name="anetbbs",
-    version="1.0.46",
+    version="1.0.48",
     packages=find_packages(),
     install_requires=_read_requirements(),
     entry_points={

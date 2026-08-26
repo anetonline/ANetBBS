@@ -81,7 +81,7 @@
                 {% if recent_posts %}
                     <div class="list-group">
                         {% for post in recent_posts %}
-                            <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
+                            <a href="{{ url_for('boards.view_post', post_id=post.id) }}" class="list-group-item list-group-item-action">
                                 <div class="d-flex w-100 justify-content-between">
                                     <h6 class="mb-1">{{ post.subject }}</h6>
                                     <small>{{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
@@ -106,7 +106,7 @@
                 {% if boards %}
                     <div class="list-group">
                         {% for board in boards %}
-                            <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="list-group-item list-group-item-action" style="background-color: #0a0a0a; border-color: #00ff00; color: #00ff00;">
+                            <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="list-group-item list-group-item-action">
                                 <div class="d-flex w-100 justify-content-between">
                                     <h6 class="mb-1">{{ board.name }}</h6>
                                 </div>
@@ -135,7 +135,7 @@
                             <p class="small">{{ bulletin.content }}</p>
                             <small class="text-muted">Posted {{ bulletin.created_at|eastern('%Y-%m-%d') }}</small>
                         </div>
-                        {% if not loop.last %}<hr style="border-color: #00ff00;">{% endif %}
+                        {% if not loop.last %}<hr>{% endif %}
                     {% endfor %}
                 </div>
             </div>

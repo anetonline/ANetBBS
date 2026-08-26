@@ -1,11 +1,57 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.46`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.48`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.48 — Live "X just logged in/out" presence alerts (August 2026)
+
+Classic multi-node BBS behavior: every other currently-online user now
+sees a real-time alert when someone logs in or logs out, wherever
+they currently are on the BBS (a menu, a board, chat) — not just
+inside a dedicated chat room. Works across every front-end and every
+combination of them: a telnet login is seen live by users on SSH,
+rlogin, or the web, and a web login is seen live by every terminal
+user, and vice versa for logouts. Nobody is alerted about their own
+login or logout.
+
+Terminal and web run in separate processes in a real deployment, so
+this required a small real-time relay between them rather than
+piggybacking on a single in-process mechanism — see
+`models.PresenceEvent`'s docstring for the design.
+
+Every part of this has a dedicated regression test, including the
+actual production watchdog code that prints the alert into an active
+terminal session (not a re-implementation of its logic). Full test
+suite green.
+
+## v1.0.47 — MSP/federation registry security audit; three new themes (August 2026)
+
+A full security and hardening pass over the MSP inter-BBS instant
+messaging subsystem and the federation registry (never previously
+targeted by a dedicated audit): tightened authentication on the
+registry's hub-side API, closed several outbound and inbound
+network-request validation gaps, added rate limiting and connection
+bounds to the inbound MSP listener, and added a scheduled cleanup job
+for stale registry entries. The federation registry's join-request
+notification now also emails the hub sysop directly (previously
+in-app only), and the Inter-BBS Instant Messages inbox's unread-row
+styling is now theme-aware instead of a fixed color pair that could
+clash with some themes.
+
+Also: three new site themes — **Graphite Teal** and **Ivory Editorial**
+(a dark and a light professional option, each with its own type
+pairing), and **Retro Web '99** (a tiled-background, beveled,
+Windows-95-era pastiche, for fun). Also fixed: a pre-existing bug on
+the homepage where the Recent Posts and Message Boards lists had a
+hardcoded color style that ignored the active theme entirely, and a
+low-contrast admin dropdown menu specific to Retro Web '99.
+
+Every fix in this pass has a dedicated regression test. Full test
+suite green.
 
 ## v1.0.46 — ANetBBS Pulse: a read-only mobile status dashboard (August 2026)
 
