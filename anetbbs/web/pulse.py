@@ -1,10 +1,9 @@
 """ANetBBS Pulse -- read-only, mobile-first sysop status dashboard."""
 import os
 import shutil
-import time
 from datetime import datetime, timedelta
 
-from flask import (Blueprint, Response, current_app, jsonify, render_template,
+from flask import (Blueprint, current_app, jsonify, render_template,
                    send_from_directory)
 from flask_login import login_required
 
