@@ -466,6 +466,7 @@ def create_app(config_name=None):
     from .web.oneliners import ol_bp
     from .web.qwk_user import qwk_user_bp
     from .web.control import control_bp
+    from .web.pulse import pulse_bp
     from .web.upgrades import upgrades_api_bp, upgrades_admin_bp
     from .web.healthz import healthz_bp
     from .web.preflight import preflight_bp
@@ -552,6 +553,7 @@ def create_app(config_name=None):
     app.register_blueprint(ol_bp)
     app.register_blueprint(qwk_user_bp)
     app.register_blueprint(control_bp)
+    app.register_blueprint(pulse_bp)
     # Upgrades: federation API + sysop "Check for updates" UI.
     # The API is called by peer ANetBBS hosts (no browser) so exempt
     # it from CSRF for the same reason the registry API is.

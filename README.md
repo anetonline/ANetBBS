@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.45`, August 2026)
+**Status: stable** (`v1.0.46`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.45.tar.gz
-cd ANetBBS-v1.0.45
+tar xzf ANetBBS-v1.0.46.tar.gz
+cd ANetBBS-v1.0.46
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.45.tar.gz
-cd ANetBBS-v1.0.45
+tar xzf ANetBBS-v1.0.46.tar.gz
+cd ANetBBS-v1.0.46
 sudo bash update.sh
 ```
 
@@ -221,6 +221,10 @@ buildx` once there's a registry to publish to.
   `/admin/petscii-menus/`. See [docs/25-petscii.md](docs/25-petscii.md).
 
 ### Sysop tools
+- **ANetBBS Pulse** — read-only, mobile-first status dashboard at
+  `/admin/pulse/`, installable to a phone's home screen (Android +
+  iOS). Live callers, service health, disk/uptime, 24-hour activity —
+  no service-control actions, no shell, nothing writable.
 - Echomail dashboard with poll logs, AreaFix log, bad-areas review
 - File-area admin
 - Manual `+TAG`/`-TAG` AreaFix-to-hub form

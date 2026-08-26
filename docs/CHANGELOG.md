@@ -1,11 +1,29 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.45`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.46`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.46 — ANetBBS Pulse: a read-only mobile status dashboard (August 2026)
+
+A new admin-only status dashboard at `/admin/pulse/`, built for a phone:
+live callers (terminal + web), per-service health with CPU/RAM pulled
+from the existing metrics sampler, disk and host uptime, and 24-hour
+activity totals, auto-refreshing every 15 seconds. Installable to a
+phone's home screen as a standalone app on both Android and iOS.
+
+Read-only by design. No service-control actions, no shell, no arbitrary
+log access, and no unauthenticated status endpoint — every route
+requires an authenticated admin account through the same gate already
+used across the rest of the admin surface. API responses are marked
+`private, no-store`; caller IP and peer addresses are never included in
+the payload. The installable service worker caches only the dashboard's
+own static assets and explicitly refuses to cache anything under
+`/admin/`. Each data section degrades independently on a database
+hiccup instead of failing the whole dashboard.
 
 ## v1.0.45 — Real BinkP outbound bundle compression and WaZOO FREQ support; a full anetbbs-cfg audit (August 2026)
 

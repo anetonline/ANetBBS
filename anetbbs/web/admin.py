@@ -327,6 +327,7 @@ ADMIN_HUB_SECTIONS = {
             ('admin.checklist', 'Launch Checklist', 'bi-check2-square', 'Pre-launch readiness checklist'),
             ('main.tutorial', 'Sysop Tutorial', 'bi-mortarboard', 'Guided sysop walkthrough'),
             ('control.index', 'Control Panel', 'bi-sliders', 'Live node control'),
+            ('pulse.index', 'ANetBBS Pulse', 'bi-phone', 'Read-only mobile status dashboard'),
             ('upgrades_admin.index', 'Check for Updates', 'bi-arrow-up-circle', 'ANetBBS version updates'),
             ('preflight.index', 'Preflight Checklist', 'bi-clipboard2-check', 'Pre-update sanity checks'),
             ('events_admin.index', 'Scheduled Events', 'bi-calendar2-event', 'Cron-style maintenance jobs'),

@@ -1,0 +1,48 @@
+.pulse { --cyan:#00d4ff; --green:#2ee59d; --red:#ff5577; --amber:#ffc857; --panel:#111a27; --line:#243349; max-width:760px; margin:0 auto; }
+.pulse-topbar,.pulse-actions,.pulse-banner,.pulse-section-heading,.pulse-row,.pulse-row-main,.pulse-footer { display:flex; align-items:center; }
+.pulse-topbar { justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.pulse-topbar h1 { color:#f4f8ff; font-size:clamp(1.45rem,7vw,2rem); margin:0; }
+.pulse-eyebrow { color:var(--cyan); font-size:.72rem; font-weight:800; letter-spacing:.18em; margin:0 0 .15rem; }
+.pulse-actions { gap:.55rem; }
+.pulse-button,.pulse-icon-button { background:#152538; border:1px solid #315071; color:#dff8ff; border-radius:.75rem; min-height:44px; padding:.55rem .85rem; }
+.pulse-icon-button { width:44px; padding:0; }
+.pulse-icon-button.spinning i { display:inline-block; animation:pulse-spin .65s linear infinite; }
+.pulse-banner { background:linear-gradient(135deg,#102436,#10201d); border:1px solid #1f7559; border-radius:1rem; gap:.8rem; padding:1rem; margin-bottom:1rem; }
+.pulse-banner strong,.pulse-banner small { display:block; }
+.pulse-banner small { color:#9aadc2; margin-top:.15rem; }
+.pulse-status-dot { width:13px; height:13px; border-radius:50%; background:var(--green); box-shadow:0 0 15px rgba(46,229,157,.8); flex:0 0 auto; }
+.pulse-banner.pulse-bad { border-color:#88374b; background:linear-gradient(135deg,#2c1420,#151823); }
+.pulse-banner.pulse-bad .pulse-status-dot { background:var(--red); box-shadow:0 0 15px rgba(255,85,119,.8); }
+.pulse-banner.pulse-loading .pulse-status-dot { background:var(--amber); box-shadow:0 0 15px rgba(255,200,87,.65); }
+.pulse-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.7rem; }
+.pulse-card { background:var(--panel); border:1px solid var(--line); border-radius:.9rem; padding:.9rem; min-width:0; }
+.pulse-card span,.pulse-card small { display:block; color:#91a4bb; }
+.pulse-card span { font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.pulse-card strong { display:block; color:#f5f9ff; font-size:1.55rem; line-height:1.25; margin:.15rem 0; overflow:hidden; text-overflow:ellipsis; }
+.pulse-card small { font-size:.74rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pulse-section { margin-top:1.35rem; }
+.pulse-section-heading { justify-content:space-between; gap:1rem; margin-bottom:.55rem; }
+.pulse-section-heading h2 { color:#eaf4ff; font-size:1rem; margin:0; }
+.pulse-caption { color:#8094ab; font-size:.75rem; }
+.pulse-pill { background:#17364b; color:var(--cyan); border-radius:999px; font-size:.75rem; font-weight:800; padding:.2rem .55rem; }
+.pulse-list { background:var(--panel); border:1px solid var(--line); border-radius:.9rem; overflow:hidden; }
+.pulse-row { justify-content:space-between; gap:.7rem; padding:.75rem .85rem; border-bottom:1px solid var(--line); }
+.pulse-row:last-child { border-bottom:0; }
+.pulse-row-main { gap:.65rem; min-width:0; }
+.pulse-row-copy { min-width:0; }
+.pulse-row strong,.pulse-row small { display:block; }
+.pulse-row strong { color:#edf6ff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pulse-row small { color:#869ab1; font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pulse-led { width:9px; height:9px; border-radius:50%; background:var(--green); flex:0 0 auto; }
+.pulse-led.bad { background:var(--red); }
+.pulse-led.warn { background:var(--amber); }
+.pulse-badge { border:1px solid #315071; border-radius:999px; color:#a9c3dc; font-size:.68rem; padding:.18rem .45rem; white-space:nowrap; }
+.pulse-badge.good { border-color:#27775f; color:var(--green); }
+.pulse-badge.bad { border-color:#8b3850; color:#ff8da4; }
+.pulse-empty { color:#8296ad; margin:0; padding:1rem; text-align:center; }
+.pulse-activity { margin-top:1.35rem; }
+.pulse-footer { justify-content:space-between; border-top:1px solid var(--line); color:#7f93aa; font-size:.75rem; margin-top:1.5rem; padding:1rem 0 .25rem; }
+@keyframes pulse-spin { to { transform:rotate(360deg); } }
+@media (min-width:600px) { .pulse-summary,.pulse-activity { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media (max-width:430px) { .container { border:0; border-radius:0; margin:0; padding:16px 13px 22px; } .pulse-row { padding:.72rem; } }
+

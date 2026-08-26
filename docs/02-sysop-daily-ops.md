@@ -44,6 +44,27 @@ template directly — it ships with a literal `__SERVICE_USER__`
 placeholder, not a real username, so a plain copy installs a rule that
 matches nobody.
 
+## /admin/pulse — ANetBBS Pulse (mobile status dashboard)
+
+A read-only, mobile-first version of the two panels above, meant for
+checking on the BBS from a phone rather than a desk. Shows live callers
+(terminal + web), per-service health with CPU/RAM from the metrics
+sampler, disk usage, host uptime, and rolling 24-hour totals — no
+scrolling, no service-control buttons, just a quick "is everything OK"
+glance, auto-refreshing every 15 seconds.
+
+Open it once in a mobile browser while signed in as admin, then use
+**Add to Home Screen** (Android/Chrome shows an in-page Install button;
+iPhone/Safari needs the Share menu) to get a standalone app icon —
+HTTPS is required for this to work, same as any installable PWA. It
+reuses the existing admin session and Control Panel's own service
+probes, so there's nothing separate to configure.
+
+Deliberately has no write access anywhere: no start/stop/restart, no
+shell, no log browsing, no caller IP/peer addresses in the payload.
+For anything beyond a status glance — kicking a session, restarting a
+service, reading a journal — use the full Control Panel above.
+
 ## /admin/checklist — first-launch checklist
 
 Walks through what you've configured vs not (admin password changed,

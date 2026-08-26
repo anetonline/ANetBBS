@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}ANetBBS Pulse - {{ config.BBS_NAME }}{% endblock %}
+
+{% block head_extra %}
+<meta name="theme-color" content="#00d4ff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ANet Pulse">
+<link rel="manifest" href="{{ url_for('pulse.manifest') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='pulse/apple-touch-icon.png') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='pulse/pulse.css') }}">
+{% endblock %}
+
+{% block content %}
+<main class="pulse" data-status-url="{{ url_for('pulse.status') }}"
+      data-sw-url="{{ url_for('pulse.service_worker') }}">
+  <header class="pulse-topbar">
+    <div>
+      <p class="pulse-eyebrow">SYSOP STATUS</p>
+      <h1 id="pulse-bbs-name">{{ config.BBS_NAME }}</h1>
+    </div>
+    <div class="pulse-actions">
+      <button id="pulse-install" class="pulse-button" type="button" hidden>Install</button>
+      <button id="pulse-refresh" class="pulse-icon-button" type="button" aria-label="Refresh status">
+        <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+      </button>
+    </div>
+  </header>
+
+  <section id="pulse-banner" class="pulse-banner pulse-loading" aria-live="polite">
+    <span class="pulse-status-dot"></span>
+    <div>
+      <strong id="pulse-health">Checking ANetBBS...</strong>
+      <small id="pulse-updated">Connecting to the local status API</small>
+    </div>
+  </section>
+
+  <section class="pulse-grid pulse-summary" aria-label="Summary">
+    <article class="pulse-card"><span>Callers</span><strong id="total-online">--</strong><small>terminal + web</small></article>
+    <article class="pulse-card"><span>Services</span><strong id="healthy-services">--</strong><small id="service-ratio">checking</small></article>
+    <article class="pulse-card"><span>Disk</span><strong id="disk-used">--</strong><small id="disk-free">checking</small></article>
+    <article class="pulse-card"><span>Host uptime</span><strong id="host-uptime">--</strong><small id="pulse-version">ANetBBS</small></article>
+  </section>
+
+  <section class="pulse-section">
+    <div class="pulse-section-heading"><h2>Live callers</h2><span id="caller-count" class="pulse-pill">0</span></div>
+    <div id="live-callers" class="pulse-list"><p class="pulse-empty">Loading callers...</p></div>
+  </section>
+
+  <section class="pulse-section">
+    <div class="pulse-section-heading"><h2>Services</h2><span class="pulse-caption">process + listener health</span></div>
+    <div id="pulse-services" class="pulse-list"><p class="pulse-empty">Loading services...</p></div>
+  </section>
+
+  <section class="pulse-grid pulse-activity" aria-label="Activity over the last 24 hours">
+    <article class="pulse-card"><span>New users</span><strong id="new-users">--</strong><small>last 24 hours</small></article>
+    <article class="pulse-card"><span>New posts</span><strong id="new-posts">--</strong><small>last 24 hours</small></article>
+    <article class="pulse-card"><span>Total users</span><strong id="total-users">--</strong><small>registered</small></article>
+    <article class="pulse-card"><span>Total posts</span><strong id="total-posts">--</strong><small>all boards</small></article>
+  </section>
+
+  <section class="pulse-section">
+    <div class="pulse-section-heading"><h2>Recent callers</h2><span class="pulse-caption">latest 8 logins</span></div>
+    <div id="recent-callers" class="pulse-list"><p class="pulse-empty">Loading caller history...</p></div>
+  </section>
+
+  <footer class="pulse-footer">
+    <span>Read-only dashboard</span>
+    <a href="{{ url_for('control.index') }}">Full Control Center</a>
+  </footer>
+</main>
+<script defer src="{{ url_for('static', filename='pulse/pulse.js') }}"></script>
+{% endblock %}
+

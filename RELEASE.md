@@ -1,3 +1,11 @@
+# ANetBBS v1.0.46 — ANetBBS Pulse: a read-only mobile status dashboard (August 2026)
+
+A new admin-only sysop dashboard, built for a phone, reachable at `/admin/pulse/` and installable to a home screen as a standalone app on Android and iOS alike. One glance shows live callers (terminal and web), per-service health with CPU/RAM pulled from the existing metrics sampler, disk usage, host uptime, and rolling 24-hour activity totals — auto-refreshing every 15 seconds without a manual reload.
+
+Deliberately read-only: there is no service-control action anywhere in it, no shell, no arbitrary log access, and no unauthenticated status endpoint of any kind. Every route — the dashboard page, the status API, the manifest, and the service worker — requires an authenticated admin account through the same `require_admin_or_403` gate already used across the rest of the admin surface. API responses are marked `private, no-store` so nothing gets cached by a shared proxy; caller IP addresses and peer addresses are deliberately omitted from the payload entirely, matching the privacy stance already established for InterBBS Last Callers. The installable service worker exists only for PWA install support — it caches the dashboard's own static assets (CSS/JS/icons) and nothing else, explicitly refusing anything under `/admin/`.
+
+Each data section — live terminal nodes, live web sessions, and the user/board/post totals — queries and degrades independently, so a single unhealthy or mid-migration table produces an empty/zero section instead of failing the whole dashboard, the same resilience the caller-log section already had.
+
 # ANetBBS v1.0.45 — Real BinkP outbound bundle compression and WaZOO FREQ support; a full anetbbs-cfg audit (August 2026)
 
 Closes both items under docs/06-echomail.md's old "Known BinkP limitations" heading — FREQ and outbound compression were previously documented as deliberately out of scope; both are now real, working features.
