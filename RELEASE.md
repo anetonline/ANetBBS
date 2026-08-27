@@ -1,3 +1,55 @@
+# ANetBBS v1.0.49 — Watch It Live, Postcards, guest play, auto-social-posting (August 2026)
+
+Four related features aimed at the same goal: giving ANetBBS something
+genuinely new and shareable to show off, and lowering the friction
+between someone seeing a link and actually experiencing the BBS. All
+four are documented in `docs/` (`29-watch-live.md`, `30-postcards.md`,
+`31-social-posting.md`, and an added section in `24-game-center.md`).
+
+**Watch It Live** (`/watch`, off by default — `PUBLIC_WATCH_ENABLED`).
+A public, no-login page showing real-time who's-online activity —
+username, connection protocol, and a coarse "what they're doing" label
+— styled as a retro terminal display, meant to be shared or embedded
+off-site. Built on the same privacy-conscious labeling `/who` already
+uses (never a raw URL, room name, or message content), with its own
+per-user opt-out in profile settings independent of normal Who's
+Online visibility, since this is the first place that presence data is
+shown to the anonymous public internet rather than only other
+logged-in users.
+
+**Postcards** (`/postcards`, any logged-in user, no feature flag).
+Compose retro CP437 art in the browser using the same grid editor
+engine as the admin ANSI Editor, then get a public share link and a
+real downloadable PNG — something that pastes cleanly into a social
+post, not a terminal screenshot. Kept in its own database table,
+separate from the admin-curated ANSI Editor library, so user-made
+postcards never clutter the tool sysops use to manage real menu/banner
+art.
+
+**Guest play on 13 web arcade games** (Hangman, Trivia, Number Guesser,
+Snake, Tic Tac Toe, Memory Match, Typing Speed Test, Minesweeper, 2048,
+Text Adventure, Galaga, Tetris, Breakout). These games already ran
+entirely client-side with no backend process per session — the only
+thing blocking a social-media click from landing on real, immediate
+gameplay was a login wall on the play route. A per-game "playable
+without an account" toggle (admin-controlled, off by default,
+deliberately never applied to the wallet/casino games or anything with
+a persistent account-tied save) removes that wall where it's safe to.
+A guest's score is never saved to the leaderboard; the play screen
+shows a clear "create a free account" prompt instead.
+
+**Auto-social-posting queue** (`/admin/social/`, off by default —
+`SOCIAL_POSTING_ENABLED`). A new #1 leaderboard score or a round-number
+BBS milestone (every 100th user, every 1000th post) now queues a
+draft Bluesky/Mastodon post — a rendered highlight-card image plus an
+editable caption — for a sysop to review. Nothing posts automatically;
+approving a draft posts it for real, immediately, to every platform
+with credentials configured, and shows the resulting post URL or a
+clear per-platform error. Bluesky and Mastodon only (not Facebook,
+whose posting API requires Meta app review and business verification,
+not a simple self-service token); credentials are `.env`-only, never
+database-stored.
+
 # ANetBBS v1.0.48 — Live "X just logged in/out" presence alerts (August 2026)
 
 Classic multi-node BBS behavior, requested directly: whenever someone logs in or logs out, every OTHER currently-online user sees a real-time alert — wherever they currently are on the BBS, not just inside a dedicated chat room. This works across every front-end ANetBBS has, in every combination: log in on telnet and users on SSH, rlogin, and the web all see it live; log in on the web and every terminal user sees it too; the same in both directions for logouts.

@@ -556,6 +556,12 @@ def register():
         db.session.commit()
         _log_activity(user.id, 'register')
 
+        try:
+            from ..features.social_queue import maybe_queue_user_milestone
+            maybe_queue_user_milestone(User.query.count())
+        except Exception:
+            current_app.logger.exception('maybe_queue_user_milestone failed')
+
         if nuv_on:
             # NUV needs an actual sysop click to resolve -- unlike email
             # verification (self-service, user clicks their own emailed

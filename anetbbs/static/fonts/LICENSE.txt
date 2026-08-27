@@ -10,6 +10,14 @@ License         : Creative Commons Attribution-ShareAlike 4.0 International
 This file was converted from the original TTF distribution to WOFF format.
 As a derivative work, it is distributed under the same CC BY-SA 4.0 license.
 
+Ac437_IBM_VGA_9x16.ttf
+-----------------------
+The same font, converted back from the .woff above to a plain .ttf via a
+faithful WOFF1 table extraction (not a font-editor rebuild) so it can be
+loaded server-side by Pillow for PNG rendering (see
+features/ansi_png.py) -- Pillow/FreeType can't load .woff directly. Same
+license as the .woff above.
+
 Under CC BY-SA 4.0 you are free to:
   Share  — copy and redistribute the material in any medium or format
   Adapt  — remix, transform, and build upon the material for any purpose

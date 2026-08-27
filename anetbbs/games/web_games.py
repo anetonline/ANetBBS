@@ -4,6 +4,16 @@ Built-in Web Game Registry for ANetBBS Game Center.
 
 Each entry describes a self-contained browser game that runs entirely
 client-side and does not need a PTY/terminal session.
+
+'guest_playable': True on an entry seeds Game.guest_playable=True the
+FIRST time that row is created -- like name/description/category/icon,
+it's a starting default a sysop can change via the admin games editor,
+not a value re-forced on every boot (see web_app.py's WEB_GAMES seeding
+loop). Only set on games with no server-side per-user state to worry
+about for an anonymous visitor: no WebGameWallet (real virtual currency
+-- videopoker/holdem/blackjack/slots), no persistent account-tied saves
+(ebooks/meadowlark-valley/darkforces). Every card/casino/save-slot game
+is deliberately left off this list even though it's also 'builtin_web'.
 """
 
 WEB_GAMES = [
@@ -15,6 +25,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-alphabet',
         'web_game_module': 'hangman',
+        'guest_playable': True,
         'sort_order': 10,
     },
     {
@@ -25,6 +36,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-question-circle',
         'web_game_module': 'trivia',
+        'guest_playable': True,
         'sort_order': 20,
     },
     {
@@ -35,6 +47,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-123',
         'web_game_module': 'numguess',
+        'guest_playable': True,
         'sort_order': 30,
     },
     {
@@ -45,6 +58,7 @@ WEB_GAMES = [
         'category': 'action',
         'icon': 'bi-arrow-repeat',
         'web_game_module': 'snake',
+        'guest_playable': True,
         'sort_order': 40,
     },
     {
@@ -55,6 +69,7 @@ WEB_GAMES = [
         'category': 'strategy',
         'icon': 'bi-grid-3x3',
         'web_game_module': 'tictactoe',
+        'guest_playable': True,
         'sort_order': 50,
     },
     {
@@ -64,6 +79,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-layers',
         'web_game_module': 'memory',
+        'guest_playable': True,
         'sort_order': 60,
     },
     {
@@ -74,6 +90,7 @@ WEB_GAMES = [
         'category': 'other',
         'icon': 'bi-keyboard',
         'web_game_module': 'typing',
+        'guest_playable': True,
         'sort_order': 70,
     },
     {
@@ -84,6 +101,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-bomb',
         'web_game_module': 'minesweeper',
+        'guest_playable': True,
         'sort_order': 80,
     },
     {
@@ -93,6 +111,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-grid-fill',
         'web_game_module': '2048',
+        'guest_playable': True,
         'sort_order': 90,
     },
     {
@@ -103,6 +122,7 @@ WEB_GAMES = [
         'category': 'rpg',
         'icon': 'bi-map',
         'web_game_module': 'adventure',
+        'guest_playable': True,
         'sort_order': 100,
     },
     {
@@ -163,6 +183,7 @@ WEB_GAMES = [
         'category': 'action',
         'icon': 'bi-rocket-takeoff',
         'web_game_module': 'galaga',
+        'guest_playable': True,
         'sort_order': 160,
     },
     {
@@ -174,6 +195,7 @@ WEB_GAMES = [
         'category': 'puzzle',
         'icon': 'bi-grid-1x2',
         'web_game_module': 'tetris',
+        'guest_playable': True,
         'sort_order': 170,
     },
     {
@@ -185,6 +207,7 @@ WEB_GAMES = [
         'category': 'action',
         'icon': 'bi-circle',
         'web_game_module': 'breakout',
+        'guest_playable': True,
         'sort_order': 180,
     },
     {

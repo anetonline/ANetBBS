@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.48`, August 2026)
+**Status: stable** (`v1.0.49`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.48.tar.gz
-cd ANetBBS-v1.0.48
+tar xzf ANetBBS-v1.0.49.tar.gz
+cd ANetBBS-v1.0.49
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.48.tar.gz
-cd ANetBBS-v1.0.48
+tar xzf ANetBBS-v1.0.49.tar.gz
+cd ANetBBS-v1.0.49
 sudo bash update.sh
 ```
 
@@ -124,6 +124,9 @@ buildx` once there's a registry to publish to.
   raycaster FPS), an Ebook Reader (Project Gutenberg), and
   **Meadowlark Valley** — an original town/farm-builder sim with
   auto-harvesting farmer NPCs and real-time co-op building.
+  13 of them (Hangman through Breakout) can be played with **no
+  account at all** — a per-game admin toggle, off for anything using
+  the wallet economy or a persistent save.
   See [docs/24-game-center.md](docs/24-game-center.md).
 - DOSBox-staging / dosbox-x / vanilla DOSBox auto-detect, TCP nullmodem
   bridge to the user's PTY
@@ -223,12 +226,25 @@ buildx` once there's a registry to publish to.
   BBS behavior: every other currently-online user sees it in real time,
   wherever they are (a menu, a board, chat) — terminal and web alike,
   regardless of which side someone connects from.
+- **Watch It Live** (`/watch`, off by default) — a public, no-login
+  page showing real-time who's-online activity, styled as a retro
+  terminal display, meant to be shared or embedded off-site. See
+  [docs/29-watch-live.md](docs/29-watch-live.md).
+- **Postcards** (`/postcards`) — any logged-in user composes retro
+  CP437 art with the same grid editor as the admin ANSI Editor, then
+  gets a public share link and a downloadable PNG for sharing off
+  platform. See [docs/30-postcards.md](docs/30-postcards.md).
 
 ### Sysop tools
 - **ANetBBS Pulse** — read-only, mobile-first status dashboard at
   `/admin/pulse/`, installable to a phone's home screen (Android +
   iOS). Live callers, service health, disk/uptime, 24-hour activity —
   no service-control actions, no shell, nothing writable.
+- **Auto-social-posting queue** (`/admin/social/`, off by default) —
+  a new #1 leaderboard score or a round-number BBS milestone queues a
+  draft Bluesky/Mastodon post (rendered image + editable caption) for
+  a sysop to review; nothing posts automatically. See
+  [docs/31-social-posting.md](docs/31-social-posting.md).
 - Echomail dashboard with poll logs, AreaFix log, bad-areas review
 - File-area admin
 - Manual `+TAG`/`-TAG` AreaFix-to-hub form

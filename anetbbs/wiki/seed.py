@@ -3800,6 +3800,12 @@ place — no telnet client, no per-game setup, just log in and click
 Play. Most games track your score on a shared leaderboard
 (`/games/scoreboard`).
 
+Most of the puzzle/action games (Snake, Tetris, 2048, Minesweeper,
+Hangman, Trivia, and more — look for the green "No login needed"
+badge) can also be played instantly with **no account at all**. A
+guest's score just doesn't get saved to the leaderboard — create a
+free account any time to start keeping your scores.
+
 ## Puzzle
 
 - **Hangman** — guess the hidden word one letter at a time before the

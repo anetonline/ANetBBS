@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ card.name }} — ANetBBS Postcard</title>
+<meta name="description" content="A retro ANSI/PETSCII postcard made on {{ card.created_by.username if card.created_by else 'ANetBBS' }}'s BBS.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta property="og:title" content="{{ card.name }}">
+<meta property="og:description" content="A retro ANSI/PETSCII postcard, made on an ANetBBS-powered BBS.">
+<meta property="og:image" content="{{ url_for('postcards.png', slug=card.slug, _external=True) }}">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  @font-face {
+    font-family: 'VGA437';
+    src: url("{{ url_for('static', filename='fonts/Ac437_IBM_VGA_9x16.woff') }}") format('woff');
+    font-display: swap;
+  }
+
+  :root {
+    --bg: #050806;
+    --panel: #0b1410;
+    --line: #163425;
+    --fg: #c8ffd9;
+    --fg-dim: #5f9c7c;
+    --accent: #39ff88;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'VGA437', 'Courier New', monospace;
+    min-height: 100%;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 1rem;
+    gap: 1rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: normal;
+    color: var(--accent);
+    text-shadow: 0 0 6px rgba(57,255,136,0.45);
+    text-align: center;
+  }
+
+  .byline {
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  .art-wrap {
+    background: #000;
+    border: 1px solid var(--line);
+    padding: 10px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  .art-row { display: flex; white-space: pre; line-height: 1; }
+  .art-cell {
+    width: 10px;
+    height: 18px;
+    text-align: center;
+    line-height: 18px;
+    font-size: 14px;
+    flex: none;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.45em 0.9em;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    text-decoration: none;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    background: transparent;
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(57,255,136,0.1); }
+
+  .share-row {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 480px;
+  }
+  .share-row input {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 0.8rem;
+    padding: 0.4em 0.6em;
+    border-radius: 3px;
+  }
+
+  footer {
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--fg-dim);
+  }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>{{ card.name }}</h1>
+<div class="byline">
+  by {{ card.created_by.username if card.created_by else '?' }}
+  &middot; made with ANetBBS
+</div>
+
+<div class="art-wrap">
+{% set palette = ['#ffffff','#000000','#00007f','#009300',
+                  '#ff0000','#7f0000','#9c009c','#fc7f00',
+                  '#ffff00','#00fc00','#009393','#00ffff',
+                  '#0000fc','#ff00ff','#7f7f7f','#d2d2d2'] %}
+{% set bg_palette = palette[:8] %}
+{% set w = grid.width or card.width %}
+{% for r in range(grid.height or card.height) %}
+<div class="art-row">
+{%- for c in range(w) -%}
+{%- set idx = r * w + c -%}
+{%- set cell = grid.cells[idx] if idx < (grid.cells|length) else None -%}
+<span class="art-cell" style="color:{{ palette[(cell.fg if cell else 15) | int] }};background:{{ bg_palette[(cell.bg if cell else 1) | int] }};">{{ (cell.c if cell else ' ') | escape }}</span>
+{%- endfor -%}
+</div>
+{% endfor %}
+</div>
+
+<div class="actions">
+  <a class="btn" href="{{ url_for('postcards.png', slug=card.slug) }}" download><i class="bi bi-image"></i> Download PNG</a>
+  <a class="btn" href="{{ url_for('postcards.raw_ansi', slug=card.slug) }}"><i class="bi bi-download"></i> Download .ans</a>
+</div>
+
+<div class="share-row">
+  <input type="text" readonly value="{{ share_url }}" onclick="this.select();" id="shareUrl">
+  <button class="btn" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('shareUrl').value)">Copy Link</button>
+</div>
+
+<footer>
+  Made with <a href="https://github.com/anetonline/anetbbs-rebuilt" target="_blank" rel="noopener">ANetBBS</a> —
+  old-school terminal BBS, meet the modern web.
+</footer>
+
+</body>
+</html>

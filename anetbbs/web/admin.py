@@ -298,6 +298,7 @@ ADMIN_HUB_SECTIONS = {
             ('gallery_admin.index', 'Galleries', 'bi-images', 'Image gallery moderation'),
             ('rss_admin.index', 'RSS Feeds', 'bi-rss-fill', 'Syndicated feed sources'),
             ('games_admin.dashboard', 'Door Games', 'bi-controller', 'Door game configuration'),
+            ('social_admin.index', 'Social Posting Queue', 'bi-share-fill', 'Review/approve Bluesky + Mastodon drafts'),
         ],
     },
     'network': {
@@ -1090,6 +1091,8 @@ EDITABLE_SETTINGS = [
     ('BBS_DOMAIN', 'Public domain (e.g. bbs.example.com)', 'text', False),
     ('BBS_NODES', 'Number of nodes (1-100)', 'text', True),
     ('PERSONAL_PAGES_ENABLED', 'Personal Web Pages (true/false)', 'text', True),
+    ('PUBLIC_WATCH_ENABLED', 'Public "Watch It Live" page — no login required to view (true/false)', 'text', False),
+    ('SOCIAL_POSTING_ENABLED', 'Auto-social-posting queue — queues Bluesky/Mastodon drafts for sysop approval (true/false)', 'text', False),
     ('NUV_ENABLED', 'New User Verification — sysop approves new users (true/false)', 'text', True),
     ('RATIO_MIN', 'File ratio min (0.05 = 5%, 0 = off)', 'text', False),
     ('FILE_MOD_QUEUE_ENABLED', 'File upload moderation queue — quarantine non-admin uploads pending approval (true/false)', 'text', False),

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Edit: {{ card.name }}{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-postcard"></i> {{ card.name }}</h1>
+    <p>
+        {{ card.width }}×{{ card.height }}
+    </p>
+</div>
+
+<div class="mb-2 d-flex flex-wrap gap-1 align-items-center">
+    <a href="{{ url_for('postcards.view', slug=card.slug) }}" class="btn btn-outline-success btn-sm" target="_blank">
+        <i class="bi bi-share"></i> Share Page
+    </a>
+    <a href="{{ url_for('postcards.raw_ansi', slug=card.slug) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-download"></i> .ans
+    </a>
+    <a href="{{ url_for('postcards.index') }}" class="btn btn-link btn-sm">← My Postcards</a>
+</div>
+
+{% set save_url = url_for('postcards.save', slug=card.slug) %}
+{% set preview_url = url_for('postcards.view', slug=card.slug) %}
+{% include "ansi_editor/_editor_widget.html" %}
+
+<div class="card mt-3">
+    <div class="card-body">
+        <p class="small text-muted mb-1">Save your work, then use "Share Page" above to see (and copy) the public link and downloadable image.</p>
+    </div>
+</div>
+{% endblock %}

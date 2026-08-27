@@ -3,7 +3,7 @@
 Message boards blueprint for forum/bulletin board features
 """
 from datetime import datetime
-from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, jsonify, current_app
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Length
@@ -238,6 +238,12 @@ def new_post(board_id):
             pass
 
         try:
+            from ..features.social_queue import maybe_queue_post_milestone
+            maybe_queue_post_milestone(Post.query.count())
+        except Exception:
+            current_app.logger.exception('maybe_queue_post_milestone failed')
+
+        try:
             from ..features.notify import notify, notify_mentions
             url = url_for('boards.view_post', post_id=post.id)
             notify_mentions(f'{clean_subject}\n{clean_content}',
@@ -458,6 +464,12 @@ def reply_post(post_id):
                           'subject': reply.subject, 'content': clean_content})
         except Exception:
             pass
+
+        try:
+            from ..features.social_queue import maybe_queue_post_milestone
+            maybe_queue_post_milestone(Post.query.count())
+        except Exception:
+            current_app.logger.exception('maybe_queue_post_milestone failed')
 
         # Notifications: @mentions plus a direct ping to the parent author
         # so they know someone replied to their post (unless self-reply).

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}My Postcards{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-postcard"></i> My Postcards</h1>
+    <p class="text-muted">Retro ANSI/PETSCII art with a public link + image, ready to share anywhere.</p>
+</div>
+
+<div class="mb-3">
+    <a href="{{ url_for('postcards.create') }}" class="btn btn-primary">
+        <i class="bi bi-plus-square"></i> New Postcard
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if postcards %}
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr>
+                <th>Name</th><th>Size</th><th>Updated</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for c in postcards %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('postcards.edit', slug=c.slug) }}">
+                            <strong>{{ c.name }}</strong>
+                        </a>
+                        <code class="text-muted ms-2 small">{{ c.slug }}</code>
+                    </td>
+                    <td>{{ c.width }}×{{ c.height }}</td>
+                    <td><small>{{ c.updated_at|eastern('%Y-%m-%d %H:%M', '—') }}</small></td>
+                    <td>
+                        <a href="{{ url_for('postcards.edit', slug=c.slug) }}" class="btn btn-sm btn-outline-primary">edit</a>
+                        <a href="{{ url_for('postcards.view', slug=c.slug) }}" class="btn btn-sm btn-outline-success">share</a>
+                        <form method="post" action="{{ url_for('postcards.delete', slug=c.slug) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-link text-danger p-0"
+                                    onclick="return confirm('Delete {{ c.name }}?')">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="p-3 text-muted">No postcards yet — click "New Postcard" to start.</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

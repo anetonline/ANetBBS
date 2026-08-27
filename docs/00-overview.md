@@ -88,3 +88,6 @@ app uses, so the "who's online" widget shows everyone at once.
 - [26 — Synchronet door games (17 confirmed-working, download/setup guide)](26-synchronet-json-rpc-doors.md)
 - [27 — MRC chat (inter-BBS chat network, native vs Mystic connection backends)](27-mrc-chat.md)
 - [28 — `anetbbs-cfg` (terminal config tool, SSH/console)](28-anetbbs-cfg.md)
+- [29 — Watch It Live (public no-login activity page)](29-watch-live.md)
+- [30 — Postcards (shareable ANSI/PETSCII art)](30-postcards.md)
+- [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)

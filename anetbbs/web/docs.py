@@ -112,7 +112,7 @@ DOC_CATEGORIES = [
     ('Daily Operations', 'bi-gear', [
         '02-sysop-daily-ops', '03-menus',
         '09-multinode-nodespy', '11-spam-control',
-        '12-upgrading',
+        '12-upgrading', '31-social-posting',
     ]),
     ('Networks & Mail', 'bi-envelope', [
         '06-echomail', '07-file-areas',
@@ -122,9 +122,11 @@ DOC_CATEGORIES = [
     ]),
     ('Doors & Games', 'bi-controller', [
         '05-external-programs', '14-door-games', '15-synchronet-compat',
+        '24-game-center',
     ]),
     ('Web Features', 'bi-globe2', [
         '10-personal-pages', '13-image-galleries', '16-rss-reader',
+        '29-watch-live', '30-postcards',
     ]),
     ('Development', 'bi-code-slash', [
         '17-development',

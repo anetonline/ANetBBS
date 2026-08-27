@@ -135,6 +135,13 @@ class User(UserMixin, db.Model):
     # Python attribute. The "Lock User" admin feature has never actually
     # locked anyone out, on the web OR the terminal.
     is_locked = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    # Excludes this user from the public /watch live activity page (no
+    # login required to view it) -- distinct from is_hidden-style content
+    # moderation flags elsewhere in this file. /who already shows the same
+    # presence data, but only to other logged-in BBS users; /watch is the
+    # first place that data is shown to the anonymous public internet, so
+    # it gets its own opt-out rather than reusing/overloading another flag.
+    public_watch_optout = db.Column(db.Boolean, default=False, nullable=False)
 
     # Relationships
     posts = db.relationship('Post', backref='author', lazy='dynamic', cascade='all, delete-orphan')
@@ -337,6 +344,16 @@ class Game(db.Model):
     # before with no config changes required.
     web_enabled = db.Column(db.Boolean, default=True)
     terminal_enabled = db.Column(db.Boolean, default=True)
+    # Lets an anonymous, no-login visitor open /<slug>/play directly --
+    # off by default, and only meaningful for a game that genuinely needs
+    # no server-side account state to run (a stateless client-side
+    # arcade game). Deliberately NOT auto-enabled for anything using
+    # WebGameWallet (real per-user virtual currency) or persistent
+    # per-user save state (Meadowlark Valley, DarkForces, the ebook
+    # reader) -- an anonymous "account" has nowhere to keep that. Score
+    # submission (submit_score()) still requires a real login regardless
+    # of this flag, so guest play never pollutes the leaderboard.
+    guest_playable = db.Column(db.Boolean, default=False, nullable=False)
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -2099,6 +2116,37 @@ class Webhook(db.Model):
     board = db.relationship('Board')
 
 
+class SocialPost(db.Model):
+    """A queued Bluesky/Mastodon post, generated from a notable in-app
+    event (a new #1 leaderboard score, a round-number BBS milestone).
+    Deliberately queue-then-approve, not auto-post: a sysop reviews,
+    optionally edits the caption, and either approves (posts to every
+    configured+enabled platform right then) or skips. See
+    features/social_queue.py for what creates these rows and
+    web/social_admin.py for the review UI.
+
+    dedupe_key prevents the same event queuing twice -- e.g.
+    'high_score:<game_id>:<game_score_id>' or 'milestone:users:500' --
+    enforced with a unique index rather than trusting every call site to
+    check first.
+    """
+    __tablename__ = 'social_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    trigger_kind = db.Column(db.String(20), nullable=False)   # 'high_score' | 'milestone'
+    trigger_label = db.Column(db.String(200))                 # human-readable, e.g. "Snake -- new #1"
+    dedupe_key = db.Column(db.String(200), unique=True, nullable=False)
+    text = db.Column(db.Text, nullable=False)                 # editable caption
+    image_path = db.Column(db.String(500))                    # PNG under data/social_posts/
+    status = db.Column(db.String(20), default='pending', nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    posted_at = db.Column(db.DateTime)
+    result_json = db.Column(db.Text)   # {"bluesky": "https://...", "mastodon": "error: ..."}
+
+    def __repr__(self):
+        return f'<SocialPost {self.id} {self.trigger_kind} {self.status}>'
+
+
 class Achievement(db.Model):
     """A badge a user can earn. Defined here so sysop sees the catalog."""
     __tablename__ = 'achievements'
@@ -2350,6 +2398,41 @@ class AnsiArt(db.Model):
 
     def __repr__(self):
         return f'<AnsiArt {self.slug}>'
+
+
+class Postcard(db.Model):
+    """A shareable ANSI/PETSCII "postcard" -- any logged-in user's own
+    art, made with the same grid editor as AnsiArt (web/ansi_editor.py),
+    published at a public, no-login `/postcards/<slug>` link with a PNG
+    export for off-platform sharing (social media, etc).
+
+    Deliberately a SEPARATE table from AnsiArt rather than a shared one
+    with a "user-made" flag: AnsiArt backs admin-curated, reusable BBS
+    assets (menu banners, welcome/goodbye screens) and its own admin
+    index page lists every row with no filter -- mixing in an arbitrary
+    volume of user-made postcards would flood that sysop tool. Same
+    storage shape as AnsiArt (grid_json for reload, ansi_text
+    pre-rendered for telnet/download) since it's built by the exact same
+    editor engine.
+    """
+    __tablename__ = 'postcards'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    slug = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    width = db.Column(db.Integer, default=60)
+    height = db.Column(db.Integer, default=20)
+    grid_json = db.Column(db.Text)
+    ansi_text = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    created_by = db.relationship('User')
+
+    def __repr__(self):
+        return f'<Postcard {self.slug}>'
 
 
 class IrcChannelLog(db.Model):

@@ -223,6 +223,29 @@ class Config:
     # auto-index.html resolution.
     PERSONAL_PAGES_ENABLED = os.environ.get(
         'PERSONAL_PAGES_ENABLED', 'false').lower() == 'true'
+    # Public "Watch It Live" page (anetbbs/web/watch.py) — a no-login
+    # activity ticker meant to be shared/embedded off-site. Off by
+    # default: it's a real, deliberate broadening of who's-online
+    # visibility from "logged-in BBS users only" to "anyone on the
+    # internet," so a sysop has to opt in explicitly.
+    PUBLIC_WATCH_ENABLED = os.environ.get(
+        'PUBLIC_WATCH_ENABLED', 'false').lower() == 'true'
+    # Auto-social-posting queue (anetbbs/features/social_queue.py,
+    # web/social_admin.py) -- notable events (new high scores, BBS
+    # milestones) get queued as a draft Bluesky/Mastodon post for a
+    # sysop to review and approve; never posts on its own. Off by
+    # default. Credentials are env-vars only, never DB-stored (unlike
+    # Webhook.secret) -- this is one sysop-wide credential pair per
+    # platform, not a per-row setting, and keeping it out of the
+    # database means it never shows up in a DB export/backup. Leaving
+    # either platform's credentials blank simply skips that platform at
+    # post time -- a sysop can configure just one of the two.
+    SOCIAL_POSTING_ENABLED = os.environ.get(
+        'SOCIAL_POSTING_ENABLED', 'false').lower() == 'true'
+    BLUESKY_HANDLE = os.environ.get('BLUESKY_HANDLE', '')
+    BLUESKY_APP_PASSWORD = os.environ.get('BLUESKY_APP_PASSWORD', '')
+    MASTODON_INSTANCE_URL = os.environ.get('MASTODON_INSTANCE_URL', '')
+    MASTODON_ACCESS_TOKEN = os.environ.get('MASTODON_ACCESS_TOKEN', '')
     # New User Verification — when true, fresh registrations are marked
     # is_verified=False and have to wait for sysop approval before they
     # can log in. Like Mystic's NUV mode.

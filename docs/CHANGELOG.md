@@ -1,11 +1,35 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.48`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.49`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.49 — Watch It Live, Postcards, guest play, auto-social-posting (August 2026)
+
+Four features aimed at giving ANetBBS something new to show off and
+lowering the friction between a social-media link and someone actually
+trying the BBS — see `docs/29-watch-live.md`, `docs/30-postcards.md`,
+`docs/31-social-posting.md`, and the new section in
+`docs/24-game-center.md` for full details.
+
+- **Watch It Live** (`/watch`, off by default): a public, no-login page
+  showing real-time who's-online activity, styled as a retro terminal
+  display, meant to be shared or embedded off-site.
+- **Postcards** (`/postcards`): any logged-in user can compose retro
+  CP437 art and get a public share link plus a downloadable PNG, built
+  on the same grid editor as the admin ANSI Editor but kept in its own
+  table so user postcards never clutter that admin tool.
+- **Guest play**: 13 stateless web arcade games (Snake, Tetris, 2048,
+  Minesweeper, and more) can now be played with no account — a social
+  click leads straight to real gameplay instead of a login wall. Never
+  enabled on the wallet/casino games or anything with a persistent save.
+- **Auto-social-posting queue** (`/admin/social/`, off by default): a
+  new #1 high score or a round-number BBS milestone queues a draft
+  Bluesky/Mastodon post — with a rendered image and editable caption —
+  for a sysop to review and approve. Nothing posts automatically.
 
 ## v1.0.48 — Live "X just logged in/out" presence alerts (August 2026)
 

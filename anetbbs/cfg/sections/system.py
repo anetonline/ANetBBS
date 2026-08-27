@@ -57,6 +57,8 @@ GROUPS = [
         {"key": "AFK_WARNING_SECONDS", "label": "AFK Warning (seconds, 0=off)", "kind": "int"},
         {"key": "BOT_GATE_TIMEOUT", "label": "Bot-Gate Timeout (seconds, pre-login challenge)", "kind": "int"},
         {"key": "PERSONAL_PAGES_ENABLED", "label": "Personal Web Pages Enabled", "kind": "bool"},
+        {"key": "PUBLIC_WATCH_ENABLED", "label": "Public \"Watch It Live\" Page Enabled", "kind": "bool"},
+        {"key": "SOCIAL_POSTING_ENABLED", "label": "Auto-Social-Posting Queue Enabled", "kind": "bool"},
         {"key": "BLOCKED_COUNTRIES", "label": "Blocked Countries (comma-separated ISO codes, blank=off)", "kind": "text"},
     ]},
     {"key": "logging", "label": "Logging", "fields": [

@@ -11,5 +11,14 @@
     </a>
 </div>
 
+{% if is_guest %}
+<div class="alert alert-info d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 mb-2">
+    <span><i class="bi bi-person-badge"></i> Playing as a guest — your score won't be saved.</span>
+    <a href="{{ url_for('auth.register') }}" class="btn btn-sm btn-outline-primary">
+        Create a free account
+    </a>
+</div>
+{% endif %}
+
 {% include "games/web/" + module + ".html" %}
 {% endblock %}

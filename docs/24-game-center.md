@@ -65,6 +65,33 @@ for the model/config details.
 | Ebook Reader | `ebooks` | Search/read free public-domain books (Project Gutenberg via Gutendex), bookmarks + reading history shared between web and terminal. |
 | Typing Speed Test | `typing` | Measure WPM against a passage. |
 
+## Guest / no-login play
+
+A game can be marked **"Playable without an account"** in its admin
+edit form (Admin → Games) — when set, `/games/<slug>/play` works for
+an anonymous visitor, not just a logged-in user. Off by default, and
+only meaningful for a game with no server-side per-user state: never
+turn it on for anything using the `WebGameWallet` casino economy
+(Blackjack, Video Poker, Hold'em, Slots — real virtual currency an
+anonymous "account" has nowhere to keep) or a persistent per-account
+save (Meadowlark Valley, ANetDarkForces, the Ebook Reader).
+
+As shipped, guest play is enabled for: Hangman, Trivia Challenge,
+Number Guesser, Snake, Tic Tac Toe, Memory Match, Typing Speed Test,
+Minesweeper, 2048, Text Adventure, Galaga, Tetris, and Breakout —
+every game in the catalog with no wallet or save-slot dependency.
+Klondike Solitaire is deliberately left off that list (it's arguably
+just as safe, but its "personal best" framing feels more natural tied
+to an account) — flip it on yourself if you'd rather include it.
+
+A guest sees a "Playing as a guest" banner with a "Create a free
+account" link on the play screen, and a "No login needed" badge on
+the game's lobby card and detail page. A guest's score is never
+saved — `submit_score()` responds with a friendly "create an account
+to save your score" message instead of the normal save, so the
+game's own JS doesn't need any special handling for the logged-out
+case.
+
 ## Adding a new web game
 
 See the "Built-in web games" subsection of

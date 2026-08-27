@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ bbs_name }} — Watch It Live</title>
+<meta name="description" content="Real-time activity on {{ bbs_name }}, an ANetBBS-powered bulletin board system.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  @font-face {
+    font-family: 'VGA437';
+    src: url("{{ url_for('static', filename='fonts/Ac437_IBM_VGA_9x16.woff') }}") format('woff');
+    font-display: swap;
+  }
+
+  :root {
+    --bg: #050806;
+    --panel: #0b1410;
+    --line: #163425;
+    --fg: #c8ffd9;
+    --fg-dim: #5f9c7c;
+    --accent: #39ff88;
+    --accent-dim: #1f8c53;
+    --amber: #ffcf5c;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'VGA437', 'Courier New', monospace;
+    height: 100%;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+  }
+
+  header {
+    padding: 1.25rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: normal;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    text-shadow: 0 0 6px rgba(57,255,136,0.45);
+  }
+
+  h1 .bbs-name { color: var(--fg); text-shadow: none; }
+
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.8rem;
+    color: var(--amber);
+    letter-spacing: 0.1em;
+  }
+
+  .live-dot {
+    width: 0.55em;
+    height: 0.55em;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  main {
+    flex: 1;
+    padding: 1.5rem;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .count-chip {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 0.5rem 0.9rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+  }
+
+  .count-chip strong {
+    color: var(--accent);
+    font-size: 1rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  thead th {
+    text-align: left;
+    color: var(--fg-dim);
+    font-weight: normal;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  tbody td {
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  tbody tr:hover { background: rgba(57,255,136,0.05); }
+
+  .username { color: var(--accent); }
+
+  .proto-tag {
+    display: inline-block;
+    padding: 0.05em 0.5em;
+    border: 1px solid var(--accent-dim);
+    border-radius: 2px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    letter-spacing: 0.05em;
+  }
+
+  .empty {
+    color: var(--fg-dim);
+    padding: 2rem 0.5rem;
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+  }
+
+  footer {
+    padding: 1rem 1.5rem 1.5rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--fg-dim);
+  }
+
+  footer a { color: var(--accent-dim); }
+
+  @media (prefers-color-scheme: light) {
+    /* This page intentionally stays a single CRT-terminal look regardless
+       of the viewer's OS theme -- it's meant to read as "a live terminal",
+       not adapt like an ordinary web page. */
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&gt;<span class="bbs-name">{{ bbs_name }}</span>_ watch it live</h1>
+  <span class="live-badge"><span class="live-dot"></span>LIVE</span>
+</header>
+
+<main>
+  <div class="counts" id="counts"></div>
+  <table id="sessions-table" style="display:none;">
+    <thead>
+      <tr><th>User</th><th>Protocol</th><th>Doing</th><th>Since</th></tr>
+    </thead>
+    <tbody id="sessions-body"></tbody>
+  </table>
+  <div class="empty" id="empty-state">Nobody's online right now — check back soon.</div>
+</main>
+
+<footer>
+  Powered by <a href="https://github.com/anetonline/anetbbs-rebuilt" target="_blank" rel="noopener">ANetBBS</a> —
+  old-school terminal BBS, meet the modern web.
+</footer>
+
+<script>
+(function () {
+  var countsEl = document.getElementById('counts');
+  var tableEl = document.getElementById('sessions-table');
+  var bodyEl = document.getElementById('sessions-body');
+  var emptyEl = document.getElementById('empty-state');
+
+  function relTime(iso) {
+    var then = new Date(iso).getTime();
+    var secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+    if (secs < 60) return secs + 's ago';
+    var mins = Math.round(secs / 60);
+    return mins + 'm ago';
+  }
+
+  function render(data) {
+    countsEl.innerHTML = '';
+    var totalChip = document.createElement('div');
+    totalChip.className = 'count-chip';
+    totalChip.innerHTML = '<strong>' + data.total + '</strong> online';
+    countsEl.appendChild(totalChip);
+    Object.keys(data.counts).sort().forEach(function (proto) {
+      var chip = document.createElement('div');
+      chip.className = 'count-chip';
+      chip.innerHTML = '<strong>' + data.counts[proto] + '</strong> ' + proto;
+      countsEl.appendChild(chip);
+    });
+
+    if (!data.sessions.length) {
+      tableEl.style.display = 'none';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    tableEl.style.display = '';
+    bodyEl.innerHTML = '';
+    data.sessions.forEach(function (row) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td class="username">' + row.username + '</td>' +
+        '<td><span class="proto-tag">' + row.protocol + '</span></td>' +
+        '<td>' + row.where_label + '</td>' +
+        '<td>' + relTime(row.last_seen) + '</td>';
+      bodyEl.appendChild(tr);
+    });
+  }
+
+  function poll() {
+    fetch('{{ url_for("watch.api_snapshot") }}', {cache: 'no-store'})
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () { /* skip this tick, try again next interval */ });
+  }
+
+  poll();
+  setInterval(poll, 5000);
+})();
+</script>
+</body>
+</html>

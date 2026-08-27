@@ -63,6 +63,7 @@ TOOLS_HUB_SECTIONS = {
         'icon': 'bi-person-workspace',
         'tools': [
             ('web_terminal.index', 'Web Terminal', 'bi-terminal-fill', 'Classic ANSI menus in your browser', {}, True),
+            ('postcards.index', 'Postcards', 'bi-postcard', 'Compose shareable ANSI/PETSCII art', {}, True),
             ('personal_pages.my_pages', 'My Web Pages', 'bi-globe2', 'User-edited homepages on the BBS', {}, True),
             ('gemini.index', 'Gemini Capsules', 'bi-stars', 'Your gemtext capsule', {}, True),
             ('saved.index', 'Saved Messages', 'bi-bookmark-star', 'Messages you bookmarked', {}, True),

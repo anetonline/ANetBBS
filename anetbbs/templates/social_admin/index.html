@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Auto-Social-Posting Queue{% endblock %}
+
+{% block head %}
+{{ super() if super }}
+<style>
+  .sp-banner { background: linear-gradient(135deg,#0b3d24,#146c43); color:#fff; border-radius:.75rem; padding:1.25rem 1.5rem; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,.25); }
+  .sp-card { border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.08); margin-bottom:1rem; }
+  .sp-thumb { width: 100%; max-width: 360px; border-radius: .4rem; border: 1px solid #333; }
+  .sp-platform-chip { display:inline-block; padding:.15rem .55rem; border-radius:1rem; font-size:.75rem; margin-right:.35rem; }
+  .sp-chip-on { background:#0f5132; color:#d1e7dd; }
+  .sp-chip-off { background:#4a4a4a; color:#ccc; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="sp-banner d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h1 class="m-0"><i class="bi bi-share-fill"></i> Auto-Social-Posting Queue</h1>
+      <div class="text-white-50 mt-1">
+        New high scores and BBS milestones, queued as drafts. Nothing posts until you approve it.
+      </div>
+    </div>
+    <div>
+      <span class="sp-platform-chip {{ 'sp-chip-on' if configured.bluesky else 'sp-chip-off' }}">
+        <i class="bi {{ 'bi-check-circle' if configured.bluesky else 'bi-x-circle' }}"></i> Bluesky
+      </span>
+      <span class="sp-platform-chip {{ 'sp-chip-on' if configured.mastodon else 'sp-chip-off' }}">
+        <i class="bi {{ 'bi-check-circle' if configured.mastodon else 'bi-x-circle' }}"></i> Mastodon
+      </span>
+    </div>
+  </div>
+
+  {% if not configured.bluesky and not configured.mastodon %}
+  <div class="alert alert-warning">
+    Neither platform has credentials configured — set
+    <code>BLUESKY_HANDLE</code>/<code>BLUESKY_APP_PASSWORD</code> and/or
+    <code>MASTODON_INSTANCE_URL</code>/<code>MASTODON_ACCESS_TOKEN</code> in
+    your <code>.env</code> before approving anything here.
+  </div>
+  {% endif %}
+
+  <h5 class="mt-3">Pending ({{ pending|length }})</h5>
+  {% if not pending %}
+    <div class="alert alert-secondary">Nothing waiting for review right now.</div>
+  {% else %}
+    {% for p in pending %}
+    <div class="card sp-card">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <img class="sp-thumb" src="{{ url_for('social_admin.image', post_id=p.id) }}" alt="">
+          </div>
+          <div class="col-md-8">
+            <div class="text-muted small mb-1">
+              {{ p.trigger_label }} &middot; queued {{ p.created_at|eastern('%Y-%m-%d %H:%M', '—') }}
+            </div>
+            <form method="post" action="{{ url_for('social_admin.save', post_id=p.id) }}" class="mb-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <textarea name="text" class="form-control" rows="3">{{ p.text }}</textarea>
+              <button class="btn btn-sm btn-outline-secondary mt-1">
+                <i class="bi bi-save"></i> Save edits
+              </button>
+            </form>
+            <form method="post" action="{{ url_for('social_admin.approve', post_id=p.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-success btn-sm"
+                      onclick="return confirm('Post this now to every configured platform? This is real and public.')">
+                <i class="bi bi-send-fill"></i> Approve &amp; Post
+              </button>
+            </form>
+            <form method="post" action="{{ url_for('social_admin.skip', post_id=p.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-x-lg"></i> Skip
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
+
+  <h5 class="mt-4">Recent history</h5>
+  {% if not history %}
+    <div class="text-muted">Nothing posted or skipped yet.</div>
+  {% else %}
+    <table class="table table-sm">
+      <thead><tr><th>When</th><th>Trigger</th><th>Status</th><th>Result</th></tr></thead>
+      <tbody>
+        {% for p in history %}
+        <tr>
+          <td><small>{{ (p.posted_at or p.created_at)|eastern('%Y-%m-%d %H:%M', '—') }}</small></td>
+          <td>{{ p.trigger_label }}</td>
+          <td>
+            {% if p.status == 'posted' %}<span class="badge bg-success">posted</span>
+            {% elif p.status == 'skipped' %}<span class="badge bg-secondary">skipped</span>
+            {% elif p.status == 'failed' %}<span class="badge bg-danger">failed</span>
+            {% else %}<span class="badge bg-light text-dark">{{ p.status }}</span>{% endif %}
+          </td>
+          <td><small class="text-muted">
+            {% if p.result_json %}
+              {% for k, v in (p.result_json | from_json).items() %}{{ k }}: {{ v }}<br>{% endfor %}
+            {% endif %}
+          </small></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}

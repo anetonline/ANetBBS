@@ -62,6 +62,12 @@ class UpdateProfileForm(FlaskForm):
         "available to you. Optional otherwise."))
     date_of_birth = DateField('Date of Birth', validators=[Optional()])
     show_email = BooleanField('Show Email Publicly')
+    public_watch_optout = BooleanField('Hide me from the public "Watch It Live" page',
+                          description=(
+        "That page (if the sysop has enabled it) shows a live list of who's "
+        "online and roughly what they're doing to anyone on the internet, "
+        "no login required -- unlike Who's Online, which only other logged-in "
+        "users can see. Check this to leave yourself off it."))
     avatar_url = StringField('Avatar URL', validators=[Optional(), Length(max=500)])
     avatar_file = WTFFileField('Upload Avatar', validators=[Optional(), FileAllowed(['jpg', 'jpeg', 'png', 'gif', 'webp'], 'Images only!')])
     theme_id = SelectField('Theme', coerce=int, validators=[Optional()])
@@ -292,6 +298,7 @@ def edit():
         current_user.real_name = form.real_name.data or None
         current_user.date_of_birth = form.date_of_birth.data
         current_user.show_email = form.show_email.data
+        current_user.public_watch_optout = form.public_watch_optout.data
 
         # Handle theme selection
         theme_id = form.theme_id.data
@@ -350,6 +357,7 @@ def edit():
         form.real_name.data = current_user.real_name
         form.date_of_birth.data = current_user.date_of_birth
         form.show_email.data = current_user.show_email
+        form.public_watch_optout.data = current_user.public_watch_optout
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
         form.sixel_mode.data = current_user.sixel_mode or 'auto'

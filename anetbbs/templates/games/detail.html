@@ -35,11 +35,14 @@
                     <dt class="col-sm-4">Active Now</dt>
                     <dd class="col-sm-8">{{ active_sessions | length }}</dd>
                 </dl>
-                {% if current_user.is_authenticated %}
+                {% if current_user.is_authenticated or game.guest_playable %}
                 <a href="{{ url_for('games.play', slug=game.slug) }}"
                    class="btn btn-primary mt-2">
                     <i class="bi bi-play-fill"></i> Play Now
                 </a>
+                {% if not current_user.is_authenticated %}
+                <span class="badge bg-success ms-1"><i class="bi bi-unlock"></i> No login needed</span>
+                {% endif %}
                 {% else %}
                 <a href="{{ url_for('auth.login') }}" class="btn btn-primary mt-2">
                     <i class="bi bi-box-arrow-in-right"></i> Login to Play

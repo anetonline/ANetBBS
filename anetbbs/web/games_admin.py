@@ -120,6 +120,12 @@ class GameForm(FlaskForm):
     is_multiplayer = BooleanField('Multiplayer', default=False)
     web_enabled = BooleanField('Web enabled', default=True)
     terminal_enabled = BooleanField('Terminal enabled', default=True)
+    guest_playable = BooleanField(
+        'Playable without an account (no-login guest demo)', default=False,
+        description=('Only turn this on for a game with no server-side '
+                     'per-user state -- not one using the wallet/casino '
+                     'system or a persistent per-account save. Score '
+                     'submission still requires a real login either way.'))
     share_scores_interbbs = BooleanField(
         'Share high scores via InterBBS score sharing', default=True)
 
@@ -432,6 +438,7 @@ def _populate_game(game, form):
     game.is_multiplayer = form.is_multiplayer.data
     game.web_enabled = form.web_enabled.data
     game.terminal_enabled = form.terminal_enabled.data
+    game.guest_playable = form.guest_playable.data
     game.share_scores_interbbs = form.share_scores_interbbs.data
     game.executable_path = _strip_or_none(form.executable_path.data)
     game.working_directory = _strip_or_none(form.working_directory.data)

@@ -101,6 +101,11 @@
                         {{ form.show_email.label(class="form-check-label") }}
                     </div>
                     {% endif %}
+                    <div class="mb-3 form-check">
+                        {{ form.public_watch_optout(class="form-check-input") }}
+                        {{ form.public_watch_optout.label(class="form-check-label") }}
+                        <div class="form-text">{{ form.public_watch_optout.description }}</div>
+                    </div>
                     {% if field_config.date_of_birth %}
                     <div class="mb-3">
                         {{ form.date_of_birth.label(class="form-label") }}

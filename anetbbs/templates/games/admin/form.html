@@ -113,6 +113,17 @@
                 {{ form.share_scores_interbbs.label(class="form-check-label") }}
             </div>
         </div>
+        <div class="col-md-6 d-flex align-items-end pb-1">
+            <div class="form-check">
+                {{ form.guest_playable(class="form-check-input") }}
+                {{ form.guest_playable.label(class="form-check-label") }}
+            </div>
+        </div>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-md-12">
+            <small class="text-muted">{{ form.guest_playable.description }}</small>
+        </div>
     </div>
     <div class="row g-3 mb-3">
         <div class="col-md-12">

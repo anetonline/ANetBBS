@@ -168,12 +168,17 @@ def detail(slug):
 
 
 @games_bp.route('/<slug>/play')
-@login_required
 def play(slug):
-    """Launch a game for the current user."""
+    """Launch a game for the current user, or for an anonymous guest if
+    the game has been explicitly marked guest_playable (see the field's
+    doc comment on the Game model -- only meaningful for a stateless
+    client-side game). Not a blanket @login_required since that decision
+    now depends on which game this is, not just "is there a session"."""
     game = Game.query.filter_by(slug=slug, is_active=True, web_enabled=True).first_or_404()
     if not _game_accessible(game):
         abort(403)
+    if not current_user.is_authenticated and not game.guest_playable:
+        return current_app.login_manager.unauthorized()
 
     if game.game_type == 'builtin_web':
         module = game.web_game_module or slug
@@ -190,6 +195,7 @@ def play(slug):
             template,
             game=game,
             module=module,
+            is_guest=not current_user.is_authenticated,
         )
 
     if game.game_type == 'door_dos_browser':
@@ -232,12 +238,23 @@ def dos_frame(slug):
 
 
 @games_bp.route('/<slug>/score', methods=['POST'])
-@login_required
 def submit_score(slug):
-    """Accept a score submission from a web game (AJAX)."""
+    """Accept a score submission from a web game (AJAX).
+
+    Deliberately not @login_required: a guest_playable game's own JS
+    doesn't know or care whether the visitor is logged in, and calls
+    this the same way either way. @login_required would answer an
+    anonymous POST with an HTML redirect to the login page, which the
+    game's `fetch(...).then(r => r.json())` would then fail to parse --
+    a confusing console error for something that isn't actually a bug.
+    A plain 200 JSON response here is a response any such JS already
+    handles fine, logged in or not."""
     game = Game.query.filter_by(slug=slug, is_active=True).first_or_404()
     if not _game_accessible(game):
         abort(403)
+    if not current_user.is_authenticated:
+        return {'status': 'guest',
+               'message': 'Create a free account to save your score!'}
     data = request.get_json(silent=True) or {}
     # Sanity bound, not a full fix (HIGH finding from a full audit): these
     # games compute their own score client-side with no server replay, so
@@ -263,6 +280,12 @@ def submit_score(slug):
         post_score_to_interbbs(entry)
     except Exception:
         logger.exception('post_score_to_interbbs failed for score %s', entry.id)
+
+    try:
+        from ..features.social_queue import maybe_queue_high_score
+        maybe_queue_high_score(entry)
+    except Exception:
+        logger.exception('maybe_queue_high_score failed for score %s', entry.id)
 
     return {'status': 'ok', 'score': score_value}
 

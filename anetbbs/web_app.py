@@ -487,6 +487,9 @@ def create_app(config_name=None):
     from .web.hub_admin import hub_admin_bp
     from .web.qwk_hub import qwk_hub_bp
     from .web.network_join import network_join_bp
+    from .web.watch import watch_bp
+    from .web.postcards import postcards_bp
+    from .web.social_admin import social_admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -585,6 +588,9 @@ def create_app(config_name=None):
     app.register_blueprint(docs_bp)
     app.register_blueprint(wiki_bp)
     app.register_blueprint(guru_bp)
+    app.register_blueprint(watch_bp)
+    app.register_blueprint(postcards_bp)
+    app.register_blueprint(social_admin_bp)
     # Logon/logoff modules and graffiti wall admin.
     app.register_blueprint(login_modules_admin_bp)
     app.register_blueprint(file_bulletins_admin_bp)
@@ -890,6 +896,10 @@ def _lightweight_migrate(app):
     # this column never existed on old installs, so admin.py's "Lock
     # User" toggle silently never persisted anything.
     _ensure_column('users', 'is_locked', 'BOOLEAN NOT NULL DEFAULT 0')
+    # Users: opt out of the public /watch live-activity page.
+    _ensure_column('users', 'public_watch_optout', 'BOOLEAN NOT NULL DEFAULT 0')
+    # Games: no-login guest play, off by default.
+    _ensure_column('games', 'guest_playable', 'BOOLEAN NOT NULL DEFAULT 0')
     # User profile fields (added across releases; many old DBs missing them)
     _ensure_column('users', 'display_name', 'VARCHAR(100)')
     _ensure_column('users', 'bio', 'TEXT')
@@ -1770,6 +1780,7 @@ def _create_default_data():
                 web_game_module=game_data['web_game_module'],
                 sort_order=game_data.get('sort_order', 0),
                 is_active=True,
+                guest_playable=game_data.get('guest_playable', False),
             ))
         else:
             game.game_type = 'builtin_web'
