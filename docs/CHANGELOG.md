@@ -1,11 +1,16 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.50`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.51`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.51 — CI lint fix (August 2026)
+
+Removes an unused import flagged by pyflakes in the CI code-scan job. No
+functional change.
 
 ## v1.0.50 — Postcard/ANSI Editor save fix (August 2026)
 

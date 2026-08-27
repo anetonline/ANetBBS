@@ -17,7 +17,7 @@ import json
 import logging
 import os
 
-from flask import (Blueprint, abort, current_app, flash, jsonify,
+from flask import (Blueprint, abort, current_app, flash,
                    redirect, render_template, request, send_file, url_for)
 from flask_login import login_required
 

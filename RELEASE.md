@@ -1,3 +1,7 @@
+# ANetBBS v1.0.51 — CI lint fix (August 2026)
+
+Removes an unused import (`jsonify`) from `anetbbs/web/social_admin.py` that pyflakes correctly flagged as dead code, failing the `code-scan` CI job. No functional change. Also independently re-ran `bandit -r anetbbs/ -ll` against the full tree to confirm nothing else was outstanding.
+
 # ANetBBS v1.0.50 — Postcard/ANSI Editor save fix (August 2026)
 
 Fixes a real bug in the previous release: the shared grid-editor widget's Save button (used by both `/postcards` and the admin ANSI Editor) POSTed with no CSRF token, so every save failed with `400 Bad Request` once CSRF protection was actually active — the earlier testing missed this because the test suite's own config disables CSRF protection entirely, so the gap was never exercised. Fixed by reading the page's existing CSRF meta tag and attaching it to the save request, the same way this app's other JS-driven POSTs already do. Confirmed the admin ANSI Editor shared the identical bug, silently broken before this release too — this fix resolves both.
