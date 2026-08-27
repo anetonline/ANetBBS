@@ -1,3 +1,9 @@
+# ANetBBS v1.0.50 — Postcard/ANSI Editor save fix (August 2026)
+
+Fixes a real bug in the previous release: the shared grid-editor widget's Save button (used by both `/postcards` and the admin ANSI Editor) POSTed with no CSRF token, so every save failed with `400 Bad Request` once CSRF protection was actually active — the earlier testing missed this because the test suite's own config disables CSRF protection entirely, so the gap was never exercised. Fixed by reading the page's existing CSRF meta tag and attaching it to the save request, the same way this app's other JS-driven POSTs already do. Confirmed the admin ANSI Editor shared the identical bug, silently broken before this release too — this fix resolves both.
+
+Also fixes: the `/watch` and Postcards public pages linked to the wrong GitHub repo in their footer, and a test asserting an exact "how many tools" count that the new Postcards menu entry pushed past.
+
 # ANetBBS v1.0.49 — Watch It Live, Postcards, guest play, auto-social-posting (August 2026)
 
 Four related features aimed at the same goal: giving ANetBBS something

@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.49`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.50`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.50 — Postcard/ANSI Editor save fix (August 2026)
+
+Fixes a real bug from v1.0.49: the grid-editor widget shared by
+`/postcards` and the admin ANSI Editor POSTed saves with no CSRF token,
+so every save failed with `400 Bad Request` under real CSRF protection
+(the test suite's own config disables CSRF, so this was never caught).
+Fixed by attaching the page's existing CSRF token to the save request —
+also fixes the same, previously-unnoticed bug in the admin ANSI Editor.
+Also fixes an incorrect GitHub link in the `/watch` and Postcards page
+footers, and a test asserting an exact tools-menu count that the new
+Postcards entry had pushed past.
 
 ## v1.0.49 — Watch It Live, Postcards, guest play, auto-social-posting (August 2026)
 

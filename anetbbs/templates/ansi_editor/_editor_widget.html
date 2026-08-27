@@ -690,9 +690,11 @@
         const status = document.getElementById('saveStatus');
         status.textContent = 'saving…';
         try {
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrf = csrfMeta ? csrfMeta.getAttribute('content') : '';
             const r = await fetch('{{ save_url }}', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     grid: { width: W, height: H, cells: cells },

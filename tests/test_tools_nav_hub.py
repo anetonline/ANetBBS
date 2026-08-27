@@ -96,16 +96,16 @@ class ToolsNavHubTests(unittest.TestCase):
         self.assertIn('Log in to see tools here',
                       client.get('/tools/community').get_data(as_text=True))
 
-    def test_authenticated_user_sees_all_24_tools_across_sections(self):
+    def test_authenticated_user_sees_all_25_tools_across_sections(self):
         client = self._client_as(self.user_id)
         total = 0
         for section in ('community', 'directory', 'content', 'personal', 'info'):
             resp = client.get(f'/tools/{section}')
             total += resp.get_data(as_text=True).count('card-title')
-        # 23 without network join (REGISTRY_MODE_ENABLED off by default
+        # 24 without network join (REGISTRY_MODE_ENABLED off by default
         # in tests) -- Join Our Network only appears when the hub's
-        # network-join form is actually turned on, bringing it to 24.
-        self.assertEqual(total, 23)
+        # network-join form is actually turned on, bringing it to 25.
+        self.assertEqual(total, 24)
 
     def test_bbs_history_card_resolves_its_slug_kwarg(self):
         """BBS History is the one tool needing a url_for() kwarg
