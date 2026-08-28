@@ -1,11 +1,40 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.53`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.54`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.54 — Fixed a real OOM: unbounded log reads and a logging-handler leak (August 2026)
+
+Fixes the root cause of a severe memory problem found live: repeated
+freezes and kernel OOM-kills of an 11-12GB `python` process during
+test runs, traced to two bugs working together.
+
+`anetbbs/web/admin.py`'s Settings page (and its sysop-console `tail`
+command) read a log file's last N lines with `f.readlines()[-N:]` —
+loading the *entire* file into memory before slicing. Fine on a fresh
+install, but a log with no rotation grows unbounded, and this one had
+reached 6.1GB / 80 million lines. Both call sites now share a helper
+that seeks near the end of the file and reads a small, fixed-size
+window instead, regardless of file size.
+
+Separately — and the real reason the log got that large in the first
+place — `_configure_logging()` added a new log handler on every app
+instance created without ever removing the previous one, and Flask's
+per-app logger is never garbage-collected by name, so handlers piled
+up within one long-running process and every log line was written
+once per accumulated handler. Fixed by clearing prior handlers before
+adding new ones, and by capping the log file itself with real
+rotation (20MB × 5 backups) so it can't grow unbounded again either
+way.
+
+Verified with a full ~3,000-test suite run, memory-capped and
+monitored throughout: peak memory across the entire run is now ~570MB,
+down from the ~12GB that was crashing the machine. New regression
+tests cover both fixes.
 
 ## v1.0.53 — Node monitor fixes: live refresh, a real Peer bug, and Game Center status (August 2026)
 

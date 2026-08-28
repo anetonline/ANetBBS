@@ -798,9 +798,31 @@ def create_app(config_name=None):
 
 
 def _configure_logging(app):
-    """Configure application logging"""
+    """Configure application logging.
+
+    Two real bugs found live (2026-08-28, Jerry's dev laptop repeatedly
+    OOM-killed): bbs.log had grown to 6.1GB / 80M+ lines with a plain
+    logging.FileHandler and no rotation at all. Separately, and the
+    bigger reason it got that large in the first place: this function
+    used to unconditionally addHandler() a NEW FileHandler every call,
+    but Flask's app.logger is cached by name -- Python's logging module
+    never garbage-collects a named logger -- so within one long-running
+    process (this repo's own test suite calls create_app() once per
+    test file, dozens of times in a single `pytest a.py b.py c.py ...`
+    invocation), handlers piled up on the SAME logger across every
+    call. logging dispatches every record to every attached handler, so
+    each pileup meant every subsequent log line got written once per
+    accumulated handler -- an ordinary log's line count compounding
+    across a whole dev session is how it reached 80 million lines.
+    Fixed together: clear any handlers this function itself previously
+    attached before adding fresh ones (so repeated create_app() calls
+    in one process can't accumulate), and cap the file with rotation so
+    even a single handler can't grow the file unbounded again.
+    """
+    from logging.handlers import RotatingFileHandler
+
     log_level = getattr(logging, app.config['LOG_LEVEL'])
-    
+
     # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
@@ -808,19 +830,32 @@ def _configure_logging(app):
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     console_handler.setFormatter(console_formatter)
-    
-    # File handler
-    file_handler = logging.FileHandler(app.config['LOG_FILE'])
+
+    # File handler -- rotating (20MB x 5 backups, ~100MB max on disk)
+    # instead of an unbounded plain FileHandler.
+    file_handler = RotatingFileHandler(
+        app.config['LOG_FILE'], maxBytes=20 * 1024 * 1024, backupCount=5)
     file_handler.setLevel(log_level)
     file_handler.setFormatter(console_formatter)
-    
-    # Configure app logger
+
+    # Configure app logger -- drop any StreamHandler/FileHandler this
+    # function attached on a PRIOR call (e.g. an earlier create_app()
+    # in the same process) before adding this call's pair, so repeated
+    # calls can't pile up duplicate handlers.
+    app.logger.handlers = [
+        h for h in app.logger.handlers
+        if not isinstance(h, (logging.StreamHandler, logging.FileHandler))]
     app.logger.setLevel(log_level)
     app.logger.addHandler(console_handler)
     app.logger.addHandler(file_handler)
-    
-    # Also configure root logger for SQLAlchemy, etc.
-    logging.basicConfig(level=log_level, handlers=[console_handler, file_handler])
+
+    # Also configure root logger for SQLAlchemy, etc. force=True
+    # replaces any handlers a prior call already installed on the root
+    # logger, for the same reason as app.logger above -- plain
+    # basicConfig() is a no-op once the root logger already has any
+    # handlers, which would otherwise leave root pointing at a PRIOR
+    # call's (possibly already-rotated-away) file handler forever.
+    logging.basicConfig(level=log_level, handlers=[console_handler, file_handler], force=True)
 
 
 def _lightweight_migrate(app):

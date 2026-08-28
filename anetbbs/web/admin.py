@@ -1199,6 +1199,32 @@ def _env_path():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', '.env')
 
 
+def _tail_lines(path, count, window_bytes=262144):
+    """Return the last `count` lines of the file at `path`, reading at
+    most `window_bytes` from disk regardless of the file's real size.
+
+    Real OOM found live (2026-08-28, Jerry's dev laptop repeatedly
+    freezing/OOM-killed): both callers used to do `f.readlines()[-N:]`,
+    which reads the ENTIRE file before slicing -- fine on a fresh
+    install, but a log with no rotation can grow unbounded (bbs.log
+    reached 6.1GB / 80M+ lines live). Reading that into a Python list of
+    per-line string objects costs far more than the file's raw size
+    (CPython's per-object overhead across tens of millions of small
+    strings), landing squarely in the 11-12GB range the kernel's OOM
+    killer reported. Seeking near the end and reading a small, fixed-
+    size window instead keeps memory bounded no matter how large the
+    file is. The default 256KB is generous headroom for 100 lines even
+    at bbs.log's own measured ~76 bytes/line average.
+    """
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        window = min(size, window_bytes)
+        f.seek(size - window)
+        chunk = f.read().decode('utf-8', errors='replace')
+    return chunk.splitlines(keepends=True)[-count:]
+
+
 @admin_bp.route('/settings', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1282,13 +1308,13 @@ def settings():
                 flash(f'Failed to save settings: {exc}', 'danger')
         return redirect(url_for('admin.settings'))
 
-    # Read last 100 lines of log file
+    # Read last 100 lines of log file -- see _tail_lines()'s own
+    # docstring for the real OOM this avoids.
     log_lines = []
     log_file = current_app.config.get('LOG_FILE', '')
     if log_file and os.path.exists(log_file):
         try:
-            with open(log_file, 'r') as f:
-                log_lines = f.readlines()[-100:]
+            log_lines = _tail_lines(log_file, 100)
         except Exception:
             log_lines = ['Could not read log file.']
 
@@ -3438,8 +3464,10 @@ def _run_sysop_command(cmd):
                         '/tmp/anetbbs_dos_dosbox.log'):  # nosec B108 -- allowlist itself, not an unsafe write/read target
             return 'tail: only allowed paths: /var/log/syslog, /var/log/messages, /var/log/anetbbs.log, /tmp/anetbbs_dos_dosbox.log'
         try:
-            with open(path) as fh:
-                return ''.join(fh.readlines()[-50:])
+            # Same bounded-window helper as settings()'s log tail --
+            # these are real system/app logs (syslog especially) that
+            # can grow to many GB on a long-running box.
+            return ''.join(_tail_lines(path, 50))
         except Exception as exc:
             return f'error: {exc}'
     if cmd_low.startswith('journalctl '):
