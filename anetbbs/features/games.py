@@ -19,6 +19,19 @@ class GameManager:
         from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
             _w = ui_width(self.session)
+            # NodeSpy/anetbbs-monitor heartbeat -- real gap found live
+            # (2026-08-28): _heartbeat_node only ever fired from
+            # menu_engine.py's generic menu dispatch and _launch() below,
+            # so a sysop watching "Doing" saw it frozen at "entered BBS"
+            # for anyone browsing the Game Center itself rather than
+            # actually playing a door -- GameManager's screens are their
+            # own bespoke read_line loops, never routed through
+            # menu_engine.py at all.
+            if hasattr(self.session, '_heartbeat_node'):
+                try:
+                    self.session._heartbeat_node(page='games', action='menu: Game Center')
+                except Exception:
+                    pass
             if not await write_menu_art(self.session, 'game_center'):
                 await self.session.write(banner('Game Center', _w))
                 for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
@@ -107,6 +120,11 @@ class GameManager:
         GRN = '\x1b[1;32m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         while True:
             _iw = ui_width(self.session)
+            if hasattr(self.session, '_heartbeat_node'):
+                try:
+                    self.session._heartbeat_node(page='games:doors', action='menu: Door Games')
+                except Exception:
+                    pass
             # Two columns per category row -- one game per line ran off the
             # bottom of a real 24-row terminal once the door count passed
             # ~10 (Jerry: "once you get so many, you cant see them all...
@@ -231,6 +249,11 @@ class GameManager:
         art_slot = f'door_games_{slug}'
         while True:
             _iw = ui_width(self.session)
+            if hasattr(self.session, '_heartbeat_node'):
+                try:
+                    self.session._heartbeat_node(page='games:doors', action=f'menu: {cat_name}')
+                except Exception:
+                    pass
             _cols = 2
             _col_w = max(20, (_iw // _cols) - 2)
             if not await write_menu_art(self.session, art_slot):
@@ -383,6 +406,12 @@ class GameManager:
     async def play_number_guess(self):
         """Built-in number guessing — no door, pure session I/O."""
         import random
+        if hasattr(self.session, '_heartbeat_node'):
+            try:
+                self.session._heartbeat_node(page='games:number-guess',
+                                             action='playing: Number Guessing')
+            except Exception:
+                pass
         number = random.randint(1, 100)
         tries = 0
 

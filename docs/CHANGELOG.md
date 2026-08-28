@@ -1,11 +1,47 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.52`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.53`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.53 — Node monitor fixes: live refresh, a real Peer bug, and Game Center status (August 2026)
+
+Three real bugs found testing v1.0.52's new `anetbbs-monitor` live:
+
+- **The screen never actually refreshed.** `anetbbs-monitor` opened one
+  database session for its whole run instead of a fresh one per
+  refresh tick (every other poller in this codebase already does the
+  latter, for exactly this reason) — SQLAlchemy kept serving the
+  first query's cached rows, so "Doing"/"Idle" looked permanently
+  frozen the instant the tool started, even though the underlying
+  data was updating correctly the whole time. Fixed, and confirmed
+  with a 5000-iteration stress run that peak memory stays flat — the
+  fix reuses one app instance the same way the rest of this codebase
+  already does, not the create-a-new-app-per-call pattern that caused
+  the real v1.0.21 memory leak.
+- **The Peer column showed a timestamp instead of an address**, e.g.
+  `2026-08-28 10:44` — a pre-existing bug in `core/session.py`: the
+  real IP:port wasn't computed until after the node-slot was already
+  claimed with a session timestamp standing in for it, so that
+  timestamp is what ended up in `NodeActivity.peer` (and therefore in
+  the web NodeSpy panel and the in-BBS Node Monitor too, not just this
+  new tool). Fixed by computing the real address first and reusing it
+  everywhere it's needed.
+- **"Doing" never updated for anyone just browsing the Game Center**
+  (only actually launching a door updated it) — Game Center runs its
+  own menu loops entirely separate from the generic menu system that
+  every other heartbeat hooks into. Now updates on entering Game
+  Center, the door list, a category submenu, and the built-in Number
+  Guessing game.
+
+Also: the monitor's columns are wider (protocol now fits
+`petscii40`/`petscii80`, not just `telnet`/`ssh`; the activity column
+fits a full label like "Away From Keyboard (screensaver)" without
+truncating), and "Doing" is relabeled "Action" for clarity. All four
+fixes have new regression tests.
 
 ## v1.0.52 — Live node monitor, and a real fix to the presence-alert gap (August 2026)
 

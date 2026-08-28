@@ -1,3 +1,13 @@
+# ANetBBS v1.0.53 — Node monitor fixes: live refresh, a real Peer bug, and Game Center status (August 2026)
+
+Three real bugs found testing v1.0.52's new `anetbbs-monitor` live. First, the screen never actually refreshed: it opened one database session for the whole run instead of a fresh one per tick the way every other poller in this codebase already does, so SQLAlchemy kept serving the very first query's cached rows — "Doing"/"Idle" looked frozen from the moment the tool started even though the underlying data was updating correctly. Fixed, and stress-tested for 5000 iterations to confirm memory stays flat; the fix reuses one long-lived app instance, not the create-a-new-app-per-call pattern that caused the real v1.0.21 memory leak.
+
+Second, the Peer column showed a timestamp (e.g. `2026-08-28 10:44`) instead of a network address — a pre-existing bug in `core/session.py`, not new to this release: the real IP:port wasn't computed until after the multinode slot was already claimed with a session timestamp standing in for it, so that timestamp propagated into `NodeActivity.peer` and from there into every NodeSpy-style view, not just this new tool. Fixed by computing the real address once, before it's needed, and reusing it everywhere.
+
+Third, "Doing" never updated for a user just browsing the Game Center — only actually launching a door updated it, since Game Center runs its own menu loops entirely separate from the generic menu system every other status update hooks into. Now updates on entering Game Center, the door list, a category submenu, and the built-in Number Guessing game.
+
+Also widens the monitor's columns (protocol now fits `petscii40`/`petscii80`; the activity column fits a full label like "Away From Keyboard (screensaver)" without truncating) and relabels "Doing" to "Action". New regression tests cover all four fixes.
+
 # ANetBBS v1.0.52 — Live node monitor, and a real fix to the presence-alert gap (August 2026)
 
 Adds `anetbbs-monitor`, a live auto-refreshing terminal node monitor in the tradition of Synchronet's `uMonitor` and Mystic's `nodespy`/`mis server`: run it directly on the server (or over SSH) to see every node's slot, username, protocol, peer address, current activity, connection duration, and idle time, refreshing once a second, with a kick action. It's not new tracking — it's a new front end onto the same `NodeActivity` rows the web admin's Control Center → NodeSpy panel and the in-BBS Sysop Tools → Node Monitor already read and write, so a kick from any of the three tools is identical to the other two. Launch with `anetbbs-monitor` (or `python -m anetbbs.monitor.app` from a checkout); see `docs/32-node-monitor.md` for the full column reference and known limitations.

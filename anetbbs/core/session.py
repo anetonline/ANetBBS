@@ -2529,6 +2529,28 @@ class BBSSession:
 
             await self._maybe_send_steady_cursor()
 
+            # Peer address, computed once and reused below for both the
+            # multinode roster and UserSession presence -- real bug found
+            # live (2026-08-28): this used to be computed AFTER
+            # acquire_slot() below, which was called with
+            # str(self._session_started_at) (a timestamp) in the "peer"
+            # argument's place instead, since the real address wasn't
+            # available yet at that point. That timestamp then propagated
+            # into NodeActivity.peer via _open_node_activity() below,
+            # showing e.g. "2026-08-28 10:44" in the Peer column of every
+            # NodeSpy-style view (web panel, in-BBS Node Monitor,
+            # anetbbs-monitor) instead of an IP:port.
+            peer = ''
+            try:
+                addr = self.writer.get_extra_info('peername')
+                if addr:
+                    peer = f'{addr[0]}:{addr[1]}' if isinstance(addr, tuple) else str(addr)
+            except Exception:
+                pass
+            # Detect protocol from the writer class name (TelnetWriter / SshWriter / etc)
+            wname = type(self.writer).__name__.lower()
+            proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
+
             # Multinode slot acquisition — claim a node 1..BBS_NODES so
             # the user shows up on the multinode roster. If all nodes are
             # in use we politely turn the user away.
@@ -2536,11 +2558,7 @@ class BBSSession:
                 from ..features.multinode import acquire_slot, broadcast
                 max_nodes = max(1, min(100,
                     int(os.environ.get('BBS_NODES', '8'))))
-                wname = type(self.writer).__name__.lower()
-                proto = ('ssh' if 'ssh' in wname else
-                         ('rlogin' if 'rlogin' in wname else 'telnet'))
-                self._node_entry = acquire_slot(self.user, proto,
-                                                str(self._session_started_at),
+                self._node_entry = acquire_slot(self.user, proto, peer,
                                                 max_nodes,
                                                 session=self)
                 if self._node_entry is None:
@@ -2578,18 +2596,10 @@ class BBSSession:
 
             # Cross-protocol presence: register this user in the SAME UserSession
             # table the web uses, so the web's "online" widget shows telnet/SSH/
-            # rlogin users alongside web users.
+            # rlogin users alongside web users. peer/proto already computed
+            # above for the multinode slot -- reused here rather than
+            # recomputed, so there's exactly one place that derives them.
             from .presence import SessionPresence
-            peer = ''
-            try:
-                addr = self.writer.get_extra_info('peername')
-                if addr:
-                    peer = f'{addr[0]}:{addr[1]}' if isinstance(addr, tuple) else str(addr)
-            except Exception:
-                pass
-            # Detect protocol from the writer class name (TelnetWriter / SshWriter / etc)
-            wname = type(self.writer).__name__.lower()
-            proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
             presence = SessionPresence(self.user['id'], protocol=proto, peer=peer,
                                        username=self.user.get('username', ''))
             # Stored on self so menu_engine.py/games.py/mrc_chat.py can

@@ -150,8 +150,21 @@ def _draw(stdscr, nodes, total_slots, sel):
     header = f" {TITLE} :: {online}/{total_slots} online :: {datetime.now().strftime('%H:%M:%S')} "
     _addstr(stdscr, 0, 0, header.ljust(w - 1), _attr(1, curses.A_REVERSE))
 
-    col_header = (f"  {'Slot':>4}  {'User':<15} {'Proto':<6} {'Peer':<16} "
-                  f"{'Doing':<25} {'Since':>7} {'Idle':>7}")
+    # Column widths as named constants, shared by the header and every row,
+    # so the two can't drift out of alignment the way two independently
+    # hand-formatted f-strings can. USER/PROTO/PEER/ACTION widths are sized
+    # for real values seen live: PROTO must fit "petscii40"/"petscii80" (9
+    # chars, per models.PresenceEvent's own protocol column comment) not
+    # just "telnet"/"rlogin" (6); ACTION must fit phrases like "Away From
+    # Keyboard (screensaver)" (33 chars, core/session.py's own AFK label)
+    # without truncating mid-word.
+    W_SLOT, W_USER, W_PROTO, W_PEER, W_ACTION, W_TIME = 4, 15, 10, 20, 34, 8
+
+    def _fmt_row(slot_s, user_s, proto_s, peer_s, action_s, since_s, idle_s):
+        return (f"  {slot_s:>{W_SLOT}}  {user_s:<{W_USER}} {proto_s:<{W_PROTO}} "
+                f"{peer_s:<{W_PEER}} {action_s:<{W_ACTION}} {since_s:>{W_TIME}} {idle_s:>{W_TIME}}")
+
+    col_header = _fmt_row('Slot', 'User', 'Proto', 'Peer', 'Action', 'Since', 'Idle')
     _addstr(stdscr, 1, 0, col_header, curses.A_BOLD)
 
     visible = max(0, h - 3)
@@ -161,16 +174,16 @@ def _draw(stdscr, nodes, total_slots, sel):
         row = nodes.get(slot)
         attr = _attr(2) if i == sel else 0
         if row is None:
-            line = f"  {slot:>4}  -- waiting for call --"
+            line = f"  {slot:>{W_SLOT}}  -- waiting for call --"
             _addstr(stdscr, y, 0, line, attr or _attr(3, curses.A_DIM))
             continue
-        page = (row.page or '')[:11]
-        action = (row.action or page or '')[:25]
+        page = (row.page or '')[:W_ACTION]
+        action = (row.action or page or '')[:W_ACTION]
         since = _fmt_delta(now - row.started_at) if row.started_at else '?'
         idle = _fmt_delta(now - row.last_seen) if row.last_seen else '?'
-        line = (f"  {slot:>4}  {(row.username or '?')[:15]:<15} "
-                f"{(row.protocol or '?')[:6]:<6} {(row.peer or '')[:16]:<16} "
-                f"{action:<25} {since:>7} {idle:>7}")
+        line = _fmt_row(str(slot), (row.username or '?')[:W_USER],
+                        (row.protocol or '?')[:W_PROTO], (row.peer or '')[:W_PEER],
+                        action, since, idle)
         _addstr(stdscr, y, 0, line, attr)
 
     footer = " [Up/Down] Select  [K] Kick  [R] Refresh  [Q] Quit "
@@ -178,7 +191,22 @@ def _draw(stdscr, nodes, total_slots, sel):
     stdscr.refresh()
 
 
-def _run(stdscr):
+def _run(stdscr, app):
+    """Every DB read/write below opens its OWN fresh `with
+    app.app_context():` block per call, rather than one context wrapping
+    this whole function -- real bug found live (2026-08-28): a single
+    long-lived app context keeps one SQLAlchemy session open for the
+    entire curses session, and without an explicit refresh, its ORM
+    identity map kept serving the FIRST query's cached row objects
+    forever -- "Doing"/"Idle" looked frozen the instant this tool
+    started, even though core/session.py's heartbeat was genuinely
+    updating the underlying row the whole time (confirmed: restarting
+    the tool immediately showed the current value). Every other poller
+    in this codebase (core/presence.py's _relay_loop, core/session.py's
+    own kick/presence-alert watchdogs) already opens app_context fresh
+    per poll for exactly this reason -- this just brings the monitor in
+    line with that established pattern instead of introducing a new one.
+    """
     safe_curs_set(0)
     try:
         init_colors()
@@ -188,7 +216,8 @@ def _run(stdscr):
     sel = 0
     flash = None
     while True:
-        nodes = fetch_live_nodes()
+        with app.app_context():
+            nodes = fetch_live_nodes()
         total_slots = _bbs_nodes()
         h, _w = stdscr.getmaxyx()
         visible = max(1, min(total_slots, max(0, h - 3)))
@@ -216,17 +245,17 @@ def _run(stdscr):
             if slot in nodes:
                 reason = prompt_text(
                     stdscr, f"Kick reason for slot {slot} [Disconnected by sysop]: ") or ''
-                _ok, msg = kick_node(slot, reason)
+                with app.app_context():
+                    _ok, msg = kick_node(slot, reason)
                 flash = msg
 
 
 def main():
     app = create_minimal_app()
-    with app.app_context():
-        try:
-            curses.wrapper(_run)
-        except KeyboardInterrupt:
-            pass
+    try:
+        curses.wrapper(_run, app)
+    except KeyboardInterrupt:
+        pass
     print("Goodbye.")
     return 0
 
