@@ -1,3 +1,9 @@
+# ANetBBS v1.0.55 — Manual social posts, and a CI test-suite OOM fix (August 2026)
+
+Adds a manual compose option to the auto-social-posting queue: **+ New Post** on `/admin/social/` lets a sysop write a caption (plus an optional image) for anything the automatic high-score/milestone triggers don't catch — a version bump, a new feature, an event. It queues exactly like an automatic draft, pending until approved. Queuing any draft — automatic or manual — now also sends every admin a real ANetBBS notification (bell-badge, plus a live toast for an already-open tab), closing a real gap: previously the only way to know something was waiting was to check the page yourself.
+
+Also fixes the GitHub Actions Docker-build workflow's own test step, which had started failing (run 33169124736) from the same class of issue just fixed in v1.0.54: running the full ~2,986-test suite as a single continuous process accumulates memory gradually across roughly 440 test files — no single runaway test, about 5MB/file compounding to ~2.85GB by the end, confirmed via a local reproduction with RSS sampled throughout — and the CI runner's own OOM killer was ending the job partway through. The workflow now runs the suite in 15 batches, matching the same safe local pattern already in use for this repo's own test runs, resetting that accumulation between groups; confirmed locally that the exact new command completes the full suite at under 600MB peak.
+
 # ANetBBS v1.0.54 — Fixed a real OOM: unbounded log reads and a logging-handler leak (August 2026)
 
 Fixes the root cause of a severe memory problem found live: Jerry's dev laptop repeatedly froze for 30+ seconds and the kernel OOM-killed an 11-12GB `python` process during test runs. Traced to two bugs working together, found by bisecting test batches down to a single file while monitoring real RSS.

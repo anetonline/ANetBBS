@@ -8,6 +8,8 @@ from the approve() view below, in response to a real sysop click.
 
 Routes:
     GET  /admin/social/            -- queue (pending first, then recent history)
+    GET  /admin/social/new         -- compose a manual post (a version bump, a new feature, ...)
+    POST /admin/social/new         -- queue it
     GET  /admin/social/<id>/image  -- serve the rendered PNG
     POST /admin/social/<id>/save   -- edit the caption text
     POST /admin/social/<id>/approve -- post to every configured+enabled platform
@@ -23,6 +25,12 @@ from flask_login import login_required
 
 from ..models import SocialPost, db
 from .access_control import require_admin_or_403
+
+# Manual-post image upload cap. Generous for a screenshot/banner, well
+# short of anything that would strain the platform APIs (Bluesky caps
+# images at 1MB server-side and Mastodon typically several MB, both
+# handled as a normal per-platform error at approve-time either way).
+MANUAL_POST_IMAGE_MAX_SIZE = 5 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 social_admin_bp = Blueprint('social_admin', __name__, url_prefix='/admin/social')
@@ -44,6 +52,57 @@ def index():
     }
     return render_template('social_admin/index.html', pending=pending,
                            history=history, configured=configured)
+
+
+@social_admin_bp.route('/new', methods=['GET', 'POST'])
+@login_required
+def new_post():
+    """Manual counterpart to the automatic high-score/milestone
+    triggers -- for a version bump, a new feature, or anything else
+    that isn't a detectable in-app event. Queues exactly like an
+    automatic trigger: pending here until a sysop approves it."""
+    require_admin_or_403()
+    if request.method == 'GET':
+        return render_template('social_admin/new.html')
+
+    text = (request.form.get('text') or '').strip()
+    if not text:
+        flash('Post text cannot be empty.', 'danger')
+        return render_template('social_admin/new.html',
+                               text=text), 400
+
+    png_bytes = None
+    f = request.files.get('image')
+    if f and f.filename:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(0)
+        if size > MANUAL_POST_IMAGE_MAX_SIZE:
+            flash(f'Image too large. Maximum size is '
+                 f'{MANUAL_POST_IMAGE_MAX_SIZE // (1024 * 1024)}MB.', 'danger')
+            return render_template('social_admin/new.html', text=text), 400
+        try:
+            from io import BytesIO
+            from PIL import Image
+            raw = f.read()
+            img = Image.open(BytesIO(raw))
+            img.verify()  # cheap corruption check before the real decode below
+            img = Image.open(BytesIO(raw)).convert('RGB')
+            out = BytesIO()
+            img.save(out, format='PNG')
+            png_bytes = out.getvalue()
+        except Exception:
+            flash('That file is not a readable image.', 'danger')
+            return render_template('social_admin/new.html', text=text), 400
+
+    from ..features.social_queue import queue_manual_post
+    post = queue_manual_post(text, png_bytes, label='Manual post')
+    if post is None:
+        flash('Failed to queue post — please try again.', 'danger')
+        return render_template('social_admin/new.html', text=text), 400
+
+    flash('Queued for review below.', 'success')
+    return redirect(url_for('social_admin.index'))
 
 
 @social_admin_bp.route('/<int:post_id>/image')

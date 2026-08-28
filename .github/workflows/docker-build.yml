@@ -45,11 +45,31 @@ jobs:
           tags: anetbbs:ci
 
       - name: Run test suite inside the built image
+        # Batched, not a single `pytest tests/` invocation. Real CI
+        # failure found live (2026-08-28, run 33169124736): the whole
+        # suite in one process accumulates memory gradually across
+        # roughly 440 files/2986 tests -- no single runaway test, just
+        # ~5MB/file compounding to ~2.85GB by the end (confirmed via a
+        # local reproduction with RSS sampled every 5s) -- and got OOM-
+        # killed partway through on a constrained runner. Splitting into
+        # 15 groups, each its own `python -m pytest` subprocess, resets
+        # that accumulation between groups (matches the pattern already
+        # used for safe local test runs on Jerry's dev machine -- see
+        # feedback_safe_test_execution.md). `-x` is kept per group so a
+        # real failure inside any one group still stops the job.
         run: |
           docker run --rm \
             -e FLASK_ENV=testing \
             anetbbs:ci \
-            python -m pytest tests/ -x -q
+            bash -c '
+              set -e
+              cd /app
+              ls tests/*.py | split -n l/15 -d - /tmp/tbatch_
+              for f in /tmp/tbatch_*; do
+                echo "=== batch $f ==="
+                python -m pytest $(cat "$f") -x -q
+              done
+            '
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')

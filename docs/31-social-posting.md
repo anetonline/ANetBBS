@@ -2,9 +2,11 @@
 
 Turns notable BBS activity into a ready-to-post Bluesky/Mastodon
 draft automatically — a new #1 leaderboard score, a round-number BBS
-milestone (every 100th registered user, every 1000th board post).
-**It never posts on its own.** Every draft sits in a review queue
-until a sysop approves it.
+milestone (every 100th registered user, every 1000th board post) —
+plus, for anything the automatic triggers don't catch (a version bump,
+a new feature, an event), a sysop can compose a post directly.
+**It never posts on its own.** Every draft, automatic or manual, sits
+in a review queue until a sysop approves it.
 
 ## Enabling it
 
@@ -44,6 +46,25 @@ an editable caption, and two buttons:
   never blocks the other one from posting).
 - **Skip** — discards it, nothing is ever posted.
 
+**+ New Post**, top right of the queue page, opens a compose form:
+caption text (required) and an optional image (PNG/JPG, up to 5MB —
+leave it blank for a text-only post). Use this for anything the
+automatic triggers below don't catch: "ANetBBS v1.0.55 is live —
+fixes X, adds Y", an upcoming event, a door game you just added. It
+queues exactly like an automatic draft — nothing posts until you
+approve it from the same page.
+
+## Getting notified
+
+Queuing a draft — automatic or manual — sends every admin a normal
+ANetBBS notification (the same bell-icon/notification-page mechanism
+used for pending user approvals, bad echomail areas, and everything
+else that needs sysop attention): a persistent entry you'll see the
+next time you're on the web admin, plus a live toast if you already
+have a browser tab open when it happens. There's no email or
+terminal-side alert for this specifically — checking the queue page
+directly always shows the current, complete state either way.
+
 ## What triggers a draft
 
 | Trigger | Where it's detected |
@@ -51,20 +72,24 @@ an editable caption, and two buttons:
 | New #1 high score on any web arcade game | `submit_score()` in `anetbbs/web/games.py`, right after a real (non-guest) score is saved |
 | Every 100th registered user | Right after a registration completes, `anetbbs/web/auth.py` |
 | Every 1000th board post (new threads and replies both count) | `anetbbs/web/boards.py` |
+| Manual (sysop-composed) | **+ New Post** on the queue page, any time |
 
-All three live entirely inside ANetBBS's own database — this release
-does not wire up achievements from the separate door games (RDQ3,
-ANetCHESS, LORD2), since those keep their own state in their own
-programs, not this database.
+The three automatic triggers live entirely inside ANetBBS's own
+database — this release does not wire up achievements from the
+separate door games (RDQ3, ANetCHESS, LORD2), since those keep their
+own state in their own programs, not this database.
 
-The same event never queues twice — enforced by a unique dedupe key
-on the `SocialPost` row, not just by each trigger's own "is this
-really new" check.
+The same automatic event never queues twice — enforced by a unique
+dedupe key on the `SocialPost` row, not just by each trigger's own "is
+this really new" check. A manual post has no natural event to dedupe
+against, so each one you compose queues as its own separate draft —
+nothing stops you from writing two if you want to.
 
 ## Related files
 
-- `anetbbs/features/social_queue.py` — trigger detection + dedupe
-  (the only code that ever creates a `SocialPost` row).
+- `anetbbs/features/social_queue.py` — trigger detection, dedupe, and
+  the admin notification (the only code that ever creates a
+  `SocialPost` row).
 - `anetbbs/features/social_card.py` — the highlight-card PNG renderer.
 - `anetbbs/features/social_bluesky.py`, `social_mastodon.py` — the two
   platform API clients (the only code that ever calls Bluesky or

@@ -22,13 +22,18 @@
         New high scores and BBS milestones, queued as drafts. Nothing posts until you approve it.
       </div>
     </div>
-    <div>
-      <span class="sp-platform-chip {{ 'sp-chip-on' if configured.bluesky else 'sp-chip-off' }}">
-        <i class="bi {{ 'bi-check-circle' if configured.bluesky else 'bi-x-circle' }}"></i> Bluesky
-      </span>
-      <span class="sp-platform-chip {{ 'sp-chip-on' if configured.mastodon else 'sp-chip-off' }}">
-        <i class="bi {{ 'bi-check-circle' if configured.mastodon else 'bi-x-circle' }}"></i> Mastodon
-      </span>
+    <div class="text-end">
+      <div class="mb-2">
+        <span class="sp-platform-chip {{ 'sp-chip-on' if configured.bluesky else 'sp-chip-off' }}">
+          <i class="bi {{ 'bi-check-circle' if configured.bluesky else 'bi-x-circle' }}"></i> Bluesky
+        </span>
+        <span class="sp-platform-chip {{ 'sp-chip-on' if configured.mastodon else 'sp-chip-off' }}">
+          <i class="bi {{ 'bi-check-circle' if configured.mastodon else 'bi-x-circle' }}"></i> Mastodon
+        </span>
+      </div>
+      <a href="{{ url_for('social_admin.new_post') }}" class="btn btn-light btn-sm">
+        <i class="bi bi-plus-lg"></i> New Post
+      </a>
     </div>
   </div>
 
@@ -50,7 +55,11 @@
       <div class="card-body">
         <div class="row g-3">
           <div class="col-md-4">
+            {% if p.image_path %}
             <img class="sp-thumb" src="{{ url_for('social_admin.image', post_id=p.id) }}" alt="">
+            {% else %}
+            <div class="text-muted small fst-italic">(text only — no image)</div>
+            {% endif %}
           </div>
           <div class="col-md-8">
             <div class="text-muted small mb-1">

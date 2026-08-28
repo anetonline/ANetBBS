@@ -1,11 +1,31 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.54`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.55`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.55 — Manual social posts, and a CI test-suite OOM fix (August 2026)
+
+**New:** the auto-social-posting queue now has a manual compose option
+(**+ New Post** on `/admin/social/`) for anything the automatic
+triggers don't catch — a version bump, a new feature, an event. Text
+plus an optional image, queued for review exactly like an automatic
+draft; nothing posts until approved. Queuing any draft — automatic or
+manual — now also notifies every admin (bell-badge + live toast for an
+open tab), answering a real gap: there was previously no way to know a
+post was waiting without checking the page yourself.
+
+**Fixed:** the GitHub Actions Docker-build workflow's own test run
+was failing from the same class of memory issue fixed in v1.0.54 —
+running the full ~2,986-test suite as one continuous process
+accumulates memory gradually (no single runaway test, roughly 5MB/file
+compounding to ~2.85GB by the end) and was getting OOM-killed on the
+CI runner. Now runs in 15 batches, each its own process, resetting
+that accumulation between groups — confirmed locally to complete the
+full suite at under 600MB peak instead.
 
 ## v1.0.54 — Fixed a real OOM: unbounded log reads and a logging-handler leak (August 2026)
 

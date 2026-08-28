@@ -53,7 +53,7 @@ def _queue(dedupe_key, trigger_kind, trigger_label, text, png_bytes):
     each caller's own "is this really new" logic alone."""
     if SocialPost.query.filter_by(dedupe_key=dedupe_key).first() is not None:
         return None
-    image_path = _save_image(png_bytes)
+    image_path = _save_image(png_bytes) if png_bytes else None
     post = SocialPost(
         trigger_kind=trigger_kind,
         trigger_label=trigger_label,
@@ -70,7 +70,41 @@ def _queue(dedupe_key, trigger_kind, trigger_label, text, png_bytes):
         # concurrent request queuing the same event at the same time.
         db.session.rollback()
         return None
+    # Real gap Jerry hit live: nothing told a sysop a post was waiting --
+    # the queue page was the only way to find out, and there was no
+    # answer to "will I get a notification or do I have to manually
+    # check this page." Reuses the same admin-notification path other
+    # review queues already use (NUV pending users, bad echomail areas,
+    # etc.) -- a persistent bell-badge notification plus a live toast
+    # for any admin with a browser tab already open, honoring each
+    # admin's own per-kind notify_prefs toggle same as every other kind.
+    try:
+        from .notify import notify_admins
+        notify_admins('social_post_queued',
+                      title=f'Social post queued: {trigger_label}',
+                      body=text[:200],
+                      target_url='/admin/social/')
+    except Exception:
+        logger.exception('social_post_queued notify failed for post %r',
+                         getattr(post, 'id', None))
     return post
+
+
+def queue_manual_post(text, png_bytes=None, label=None):
+    """Sysop-composed post -- the manual counterpart to the automatic
+    high-score/milestone triggers above, for announcing a version bump,
+    a new feature, or anything else that isn't a detectable in-app
+    event. No SOCIAL_POSTING_ENABLED gate: unlike the automatic
+    triggers (which fire unattended and need an explicit opt-in), this
+    only ever runs in direct response to a sysop's own click on the
+    already-admin-gated queue page -- consistent with save()/skip()/
+    approve() on that same page, none of which check the flag either.
+    Has no natural business key to dedupe on (unlike a specific game
+    score or milestone count), so each call gets its own dedupe_key.
+    """
+    import uuid
+    return _queue(f'manual:{uuid.uuid4().hex}', 'manual',
+                 label or 'Manual post', text, png_bytes)
 
 
 def maybe_queue_high_score(score):

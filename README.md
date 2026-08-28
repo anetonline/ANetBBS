@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.54`, August 2026)
+**Status: stable** (`v1.0.55`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.54.tar.gz
-cd ANetBBS-v1.0.54
+tar xzf ANetBBS-v1.0.55.tar.gz
+cd ANetBBS-v1.0.55
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.54.tar.gz
-cd ANetBBS-v1.0.54
+tar xzf ANetBBS-v1.0.55.tar.gz
+cd ANetBBS-v1.0.55
 sudo bash update.sh
 ```
 
@@ -243,7 +243,9 @@ buildx` once there's a registry to publish to.
 - **Auto-social-posting queue** (`/admin/social/`, off by default) —
   a new #1 leaderboard score or a round-number BBS milestone queues a
   draft Bluesky/Mastodon post (rendered image + editable caption) for
-  a sysop to review; nothing posts automatically. See
+  a sysop to review, plus a manual compose option for anything else
+  (a version bump, a new feature); nothing posts automatically, and
+  queuing a draft notifies every admin. See
   [docs/31-social-posting.md](docs/31-social-posting.md).
 - Echomail dashboard with poll logs, AreaFix log, bad-areas review
 - File-area admin

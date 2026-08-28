@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}New Social Post{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width: 720px;">
+  <h1><i class="bi bi-pencil-square"></i> New Social Post</h1>
+  <div class="text-muted mb-3">
+    For anything the automatic queue doesn't catch — a version bump, a
+    new feature, an event. Queues exactly like an automatic post: you
+    still approve it from the <a href="{{ url_for('social_admin.index') }}">queue</a>
+    before anything goes out.
+  </div>
+
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label" for="text">Post text</label>
+      <textarea id="text" name="text" class="form-control" rows="4"
+               placeholder="e.g. ANetBBS v1.0.54 is live — fixed a real memory leak, plus...">{{ text or '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="image">Image (optional)</label>
+      <input type="file" id="image" name="image" class="form-control" accept="image/*">
+      <div class="form-text">PNG/JPG, up to 5MB. Leave blank to post text only.</div>
+    </div>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-inbox-fill"></i> Queue for review
+    </button>
+    <a href="{{ url_for('social_admin.index') }}" class="btn btn-outline-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
