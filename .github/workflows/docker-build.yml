@@ -57,6 +57,15 @@ jobs:
         # used for safe local test runs on Jerry's dev machine -- see
         # feedback_safe_test_execution.md). `-x` is kept per group so a
         # real failure inside any one group still stops the job.
+        #
+        # Real CI-only failure found live (run 33174099347): piping
+        # `ls` straight into `split -n l/N -d -` failed with "split: -:
+        # cannot determine file size" on this image's coreutils (Debian
+        # bookworm) -- `-n l/N` mode needs a seekable regular file to
+        # compute even chunk boundaries, which a pipe isn't, even
+        # though the equivalent piped command worked fine on the dev
+        # machine's own coreutils. Listing to a real file first sidesteps
+        # the whole seekability question regardless of coreutils version.
         run: |
           docker run --rm \
             -e FLASK_ENV=testing \
@@ -64,7 +73,8 @@ jobs:
             bash -c '
               set -e
               cd /app
-              ls tests/*.py | split -n l/15 -d - /tmp/tbatch_
+              ls tests/*.py > /tmp/tfiles.txt
+              split -n l/15 -d /tmp/tfiles.txt /tmp/tbatch_
               for f in /tmp/tbatch_*; do
                 echo "=== batch $f ==="
                 python -m pytest $(cat "$f") -x -q
