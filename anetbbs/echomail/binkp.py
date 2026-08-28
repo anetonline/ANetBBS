@@ -1906,7 +1906,30 @@ class BinkPClient:
                 self._sock.settimeout(5.0)
             except (OSError, AttributeError):
                 pass
-            for _ in range(5000):
+            # No fixed frame-count or total-time cap here -- real OOM-
+            # adjacent bug found live (2026-08-28, Jerry's real FidoNet
+            # hub: 1359 files/66MB stuck in its queue for 9 days,
+            # resending in full on every poll). This used to be `for _
+            # in range(5000):`, the exact same class of bug already
+            # fixed once in this file for _send_messages' ack-wait loop
+            # (see that method's own "old `for _ in range(20)` limit"
+            # comment) -- a fixed frame-count budget is inherently
+            # fragile against any transfer bigger than the count
+            # anticipated. 66MB alone needs roughly 16,000+ 4096-byte
+            # DATA frames, before even counting the 1359 CMD_FILE
+            # headers -- more than 3x the old cap, so a real, large,
+            # otherwise-healthy backlog got cut off mid-transfer on
+            # every single attempt: Jerry watched a session go through
+            # "quite many of the 1000+ files" before ANetBBS's own code
+            # gave up and disconnected, leaving whatever was still
+            # in-flight un-GOT-acked -- which is exactly why the hub's
+            # queue never shrank despite every session logging as a
+            # clean success. The 5.0s per-frame socket timeout set just
+            # above is what actually bounds this loop now: as long as
+            # the hub keeps sending, we keep receiving, for however many
+            # files/frames that takes; a real stall or hangup still
+            # exits via the except clause below exactly as before.
+            while True:
                 try:
                     is_cmd, data = self._recv_frame_logged()
                 except (ConnectionError, OSError) as exc:
@@ -1952,9 +1975,6 @@ class BinkPClient:
                     self._consume_inbound_file_frame(is_cmd, data, state)
                 finally:
                     self._interleaved_received = before
-            # else (5000 frames exhausted without reaching got_eob >= 2):
-            # give up rather than waiting forever -- falls through below.
-
         # Per binkp/1.1 (binkp11.txt): a session only counts as
         # successfully finished once a round passes where NEITHER side
         # sends nor receives any command between two consecutive M_EOB

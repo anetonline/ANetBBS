@@ -1,11 +1,34 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.55`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.56`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.56 — Fixed a real FidoNet hub queue that never drained (August 2026)
+
+Reported live: a real FidoNet hub (`1:123/3003@fidonet`) had 1359
+files / 66MB stuck in its queue for 9 days, resending the entire
+backlog on every single poll even though ANetBBS logged every session
+as a clean success. Watching a live session showed why: ANetBBS's own
+code was disconnecting partway through a large receive, after going
+through "quite many of the 1000+ files."
+
+Root cause: `BinkPClient._receive_messages()`'s receive loop was
+hard-capped at 5000 frames total. A 66MB transfer needs roughly 16,000
+individual 4096-byte data frames alone, before even counting the 1359
+per-file headers — more than 3x the cap. Once a real transfer grew
+past that count, the loop gave up and moved on, leaving everything
+still in-flight unacknowledged — which is exactly why the hub's queue
+never shrank despite the session otherwise completing normally. This
+is the same class of bug already fixed once elsewhere in this file (an
+earlier `range(20)` cap on a different loop, replaced with a time-based
+wait) — fixed the same way here: the fixed count is gone entirely, and
+the loop is now bounded only by its existing 5-second per-frame idle
+timeout, so a real stall still ends the session cleanly but a large,
+healthy transfer is no longer cut off arbitrarily.
 
 ## v1.0.55 — Manual social posts, and a CI test-suite OOM fix (August 2026)
 
