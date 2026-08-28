@@ -99,6 +99,36 @@ class PresenceAlertsTests(unittest.TestCase):
             self.assertEqual(ev.username, 'alice')
             self.assertEqual(ev.protocol, 'web')
 
+    def test_web_registration_records_a_presence_event(self):
+        """Real gap found live (2026-08-27): register() calls login_user()
+        directly on a brand-new account (when NUV/email-verification
+        aren't gating it) but, unlike login(), never wrote a
+        PresenceEvent -- so an existing user's login/logout notified
+        everyone else fine, but a NEW user completing registration and
+        landing in an immediate session never did. Same SECURITY_QUESTIONS
+        list register() itself validates against."""
+        from anetbbs.models import SECURITY_QUESTIONS
+        client = self.app.test_client()
+        resp = client.post('/auth/register', data={
+            'username': 'carol', 'email': 'carol@example.com',
+            'password': 'password12345', 'password2': 'password12345',
+            'question_1': SECURITY_QUESTIONS[0], 'answer_1': 'answer one',
+            'question_2': SECURITY_QUESTIONS[1], 'answer_2': 'answer two',
+            'question_3': SECURITY_QUESTIONS[2], 'answer_3': 'answer three',
+        }, follow_redirects=False)
+        self.assertIn(resp.status_code, (302, 303), resp.get_data(as_text=True))
+        with self.app.app_context():
+            from anetbbs.models import User, PresenceEvent
+            carol = User.query.filter_by(username='carol').first()
+            self.assertIsNotNone(carol, 'registration itself did not succeed')
+            ev = (PresenceEvent.query
+                 .filter_by(user_id=carol.id, kind='login').first())
+            self.assertIsNotNone(
+                ev, 'a brand-new registered-and-logged-in user recorded no '
+                    'presence alert')
+            self.assertEqual(ev.username, 'carol')
+            self.assertEqual(ev.protocol, 'web')
+
     def test_web_logout_records_a_presence_event(self):
         client = self.app.test_client()
         client.post('/auth/login', data={

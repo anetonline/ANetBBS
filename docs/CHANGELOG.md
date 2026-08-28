@@ -1,11 +1,29 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.51`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.52`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.52 — Live node monitor, and a real fix to the presence-alert gap (August 2026)
+
+**New:** `anetbbs-monitor`, a live auto-refreshing terminal node
+monitor (Synchronet `uMonitor` / Mystic `nodespy` style) — who's
+connected, on what protocol, from where, doing what, with a kick
+action, no browser needed. It's a new front end onto the same
+`NodeActivity` data the web admin's NodeSpy panel and the in-BBS Sysop
+Tools Node Monitor already use, so a kick from any of the three looks
+identical to the other two. See `docs/32-node-monitor.md`.
+
+**Fixed:** a real gap in the live "X just logged in/out" presence
+alerts (v1.0.48): an existing user's login/logout correctly notified
+every other online user, but a brand-new account completing
+registration and landing straight in a session never did — the
+registration route logs the new user in directly and never had the
+alert-recording step the separate login route has. Fixed by adding the
+same step there. Covered by a new regression test.
 
 ## v1.0.51 — CI lint fix (August 2026)
 

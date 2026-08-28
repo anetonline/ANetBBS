@@ -112,7 +112,7 @@ DOC_CATEGORIES = [
     ('Daily Operations', 'bi-gear', [
         '02-sysop-daily-ops', '03-menus',
         '09-multinode-nodespy', '11-spam-control',
-        '12-upgrading', '31-social-posting',
+        '12-upgrading', '31-social-posting', '32-node-monitor',
     ]),
     ('Networks & Mail', 'bi-envelope', [
         '06-echomail', '07-file-areas',

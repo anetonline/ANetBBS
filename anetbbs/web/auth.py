@@ -606,6 +606,22 @@ def register():
         flash(f'Account created successfully! Welcome, {user.username}!', 'success')
         login_user(user, remember=True)
 
+        # Real-time "X just logged in" alert for every other online user
+        # (terminal and web) -- see models.PresenceEvent's docstring. This
+        # block is separate from login()'s identical one: a brand-new
+        # account that registers straight into a session (no NUV/email
+        # verification gate) never passes through login(), so without this
+        # a new-user registration silently never notified anyone -- the
+        # real gap reported live (2026-08-27).
+        try:
+            from ..models import PresenceEvent
+            db.session.add(PresenceEvent(
+                user_id=user.id, username=user.username,
+                kind='login', protocol='web'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         # Welcome PM from the sysop. Best-effort, never blocks registration.
         try:
             from ..models import User as _U, PrivateMessage as _PM

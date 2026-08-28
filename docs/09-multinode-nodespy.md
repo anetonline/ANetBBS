@@ -44,6 +44,14 @@ every 4 seconds and shows:
 
 Stale rows (>5 min) auto-hide.
 
+## anetbbs-monitor (CLI)
+
+The same `node_activity` data NodeSpy shows, live in a terminal —
+`anetbbs-monitor` at a shell, no browser needed. Same kick mechanism,
+same auto-hide-after-5-minutes rule. See
+[32 — anetbbs-monitor](32-node-monitor.md) for launching it, reading
+the screen, and kicking a node from it.
+
 ## Underlying tables
 
 If you want to query directly:

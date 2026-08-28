@@ -1,3 +1,9 @@
+# ANetBBS v1.0.52 — Live node monitor, and a real fix to the presence-alert gap (August 2026)
+
+Adds `anetbbs-monitor`, a live auto-refreshing terminal node monitor in the tradition of Synchronet's `uMonitor` and Mystic's `nodespy`/`mis server`: run it directly on the server (or over SSH) to see every node's slot, username, protocol, peer address, current activity, connection duration, and idle time, refreshing once a second, with a kick action. It's not new tracking — it's a new front end onto the same `NodeActivity` rows the web admin's Control Center → NodeSpy panel and the in-BBS Sysop Tools → Node Monitor already read and write, so a kick from any of the three tools is identical to the other two. Launch with `anetbbs-monitor` (or `python -m anetbbs.monitor.app` from a checkout); see `docs/32-node-monitor.md` for the full column reference and known limitations.
+
+Also fixes a real gap in the v1.0.48 presence-alert feature: an existing user's login or logout correctly triggered the live "X just logged in/out" alert for every other online user, but a brand-new account completing registration and being logged in immediately never did — the registration route logs the user in directly and was missing the alert-recording step the separate login route already has. Fixed by adding the same step to registration, with a new regression test covering it.
+
 # ANetBBS v1.0.51 — CI lint fix (August 2026)
 
 Removes an unused import (`jsonify`) from `anetbbs/web/social_admin.py` that pyflakes correctly flagged as dead code, failing the `code-scan` CI job. No functional change. Also independently re-ran `bandit -r anetbbs/ -ll` against the full tree to confirm nothing else was outstanding.

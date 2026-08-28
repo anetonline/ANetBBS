@@ -91,3 +91,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [29 — Watch It Live (public no-login activity page)](29-watch-live.md)
 - [30 — Postcards (shareable ANSI/PETSCII art)](30-postcards.md)
 - [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)
+- [32 — `anetbbs-monitor` (live node monitor, SSH/console)](32-node-monitor.md)

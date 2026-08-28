@@ -37,7 +37,7 @@ def _read_requirements():
 
 setup(
     name="anetbbs",
-    version="1.0.51",
+    version="1.0.52",
     packages=find_packages(),
     install_requires=_read_requirements(),
     entry_points={
@@ -45,6 +45,7 @@ setup(
             'anetbbs=anetbbs.main:main',
             'anetbbs-web=anetbbs.web_app:main',
             'anetbbs-cfg=anetbbs.cfg.app:main',
+            'anetbbs-monitor=anetbbs.monitor.app:main',
             'anetbbs-install=anetbbs.installer.wizard:main',
             'anetbbs-upgrade=anetbbs.installer.upgrade:main',
             'anetbbs-symlinks=anetbbs.installer.symlinks:main',

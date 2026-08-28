@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.51`, August 2026)
+**Status: stable** (`v1.0.52`, August 2026)
 
 A modern multi-node BBS for the FidoNet/Synchronet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:5000`).
 
 ```
-tar xzf ANetBBS-v1.0.51.tar.gz
-cd ANetBBS-v1.0.51
+tar xzf ANetBBS-v1.0.52.tar.gz
+cd ANetBBS-v1.0.52
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.51.tar.gz
-cd ANetBBS-v1.0.51
+tar xzf ANetBBS-v1.0.52.tar.gz
+cd ANetBBS-v1.0.52
 sudo bash update.sh
 ```
 
@@ -260,6 +260,11 @@ buildx` once there's a registry to publish to.
   last-callers log, backup browsing, and `.env` system settings — no
   browser required. `python -m anetbbs.cfg` from a checkout, or
   `anetbbs-cfg` once installed.
+- `anetbbs-monitor` — live, auto-refreshing node monitor (uMonitor /
+  nodespy style): who's connected, on what protocol, from where, doing
+  what, with a kick action, refreshing every second in a terminal — no
+  browser required. `python -m anetbbs.monitor.app` from a checkout, or
+  `anetbbs-monitor` once installed.
 
 ## Documentation
 
@@ -276,6 +281,7 @@ buildx` once there's a registry to publish to.
 - [`docs/25-petscii.md`](docs/25-petscii.md) — PETSCII (C64/128) terminal support
 - [`docs/26-synchronet-json-rpc-doors.md`](docs/26-synchronet-json-rpc-doors.md) — 17 confirmed-working Synchronet door games (download/setup)
 - [`docs/28-anetbbs-cfg.md`](docs/28-anetbbs-cfg.md) — `anetbbs-cfg`, the SSH/console terminal config tool
+- [`docs/32-node-monitor.md`](docs/32-node-monitor.md) — `anetbbs-monitor`, the SSH/console live node monitor
 
 ## License
 
