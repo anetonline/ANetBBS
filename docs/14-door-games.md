@@ -148,12 +148,22 @@ directory (Synchronet style) in the door's command line.
 | `door.sys`    | 52-line `DOOR.SYS`          | LORD, TradeWars, classic DOS doors           |
 | `dorinfo`     | `DORINFO1.DEF`              | Some 90s DOS doors                           |
 | `door32.sys`  | `DOOR32.SYS`                | Modern doors that want comm/sock handles     |
+| `chain.txt`   | 30-line `CHAIN.TXT`         | WWIV-style doors                             |
+| `sfdoors.dat` | `SFDOORS.DAT`               | Spitfire-style doors                         |
+| `bbsdev.drp`  | 19-line `BBSDEV.DRP`        | Newer OpenDoors-based doors (RDQ3, ANetCHESS) — see below |
 | `none`        | (skipped)                   | Self-contained doors that read no drop file  |
 
 Set `Game.drop_file_path` to where the door expects to read it. The
 path is %-token expanded (see below) — so the canonical pattern is
 `%Pdoor32.sys` for "the door32.sys file in this caller's per-node
 scratch dir".
+
+`bbsdev.drp` is different from every other type here in one way: per
+its own spec, the door is required to discover the file via a
+`BBSDEV_DRP` environment variable, not just by finding a correctly
+named file in its working directory — ANetBBS sets that variable
+automatically for the launched door, so no extra configuration is
+needed beyond picking `bbsdev.drp` as the drop file type.
 
 ## Token vocabulary
 

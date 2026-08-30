@@ -1,11 +1,39 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.56`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.57`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.57 — Node monitor visibility fix, and BBSDEV.DRP dropfile support (August 2026)
+
+Fixes a real bug in `anetbbs-monitor`, the live CLI node monitor: an
+already-connected user could fail to show up at all, and a freshly
+logged-in user could show correctly at first and then silently vanish
+a few minutes later, even while still fully connected. Root cause: the
+underlying presence data (`NodeActivity.last_seen`) was only ever
+refreshed by active menu navigation, door play, chat, or an AFK-state
+change — a session that just sat idle on one screen never touched any
+of those, so it aged out of the 5-minute online window every presence
+surface uses (the web NodeSpy panel and the in-BBS Node Monitor share
+the same underlying data, and the same fix). The cross-process watchdog
+that already polls every session every 5 seconds now also keeps its
+presence timestamp fresh on each poll, closing the gap at the source.
+`anetbbs-monitor` itself also got a small polish pass: an AFK session
+now shows in a distinct color, a session that still hasn't checked in
+after the fix above gets flagged rather than silently disappearing, and
+a database hiccup on a refresh tick shows a warning instead of taking
+down the whole screen.
+
+Adds support for BBSDEV.DRP, a newer drop-file format for launching
+door games (an alternative to DOOR32.SYS with a richer, UTF-8-aware
+field set). A door game can now be configured with drop file type
+`bbsdev.drp` in the Game Center admin; a standalone converter,
+`tools/door32_to_bbsdev_drp.py`, is also included for turning an
+existing DOOR32.SYS from another BBS package into a compatible
+BBSDEV.DRP file.
 
 ## v1.0.56 — Fixed a real FidoNet hub queue that never drained (August 2026)
 
