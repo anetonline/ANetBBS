@@ -1399,7 +1399,8 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     drop_path = None
     try:
         drop_path = write_drop_file(user, game, node, minutes_remaining,
-                                     bbs_name, token_ctx=token_ctx)
+                                     bbs_name, token_ctx=token_ctx,
+                                     sysop_name=sysop)
     except Exception as exc:  # pylint: disable=broad-except
         logger.warning('Drop file error for game %s: %s', game.slug, exc)
 
@@ -1579,6 +1580,13 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
             os.environ['TERM'] = os.environ.get('TERM', 'ansi')
             os.environ['COLUMNS'] = '80'
             os.environ['LINES'] = '25'
+            # BBSDEV.DRP's own spec requires this: "the BBS MUST set
+            # the environment variable BBSDEV_DRP... The door MUST
+            # read it directly from its environment" -- unlike every
+            # other drop file format here, a bare file in the working
+            # directory isn't the primary/required discovery path.
+            if (getattr(game, 'drop_file_type', '') or '').lower() == 'bbsdev.drp' and drop_path:
+                os.environ['BBSDEV_DRP'] = drop_path
 
             # Synchronet-specific env vars — needed by both jsexec (real
             # runtime) and stock JS doors that read them. Inferred from

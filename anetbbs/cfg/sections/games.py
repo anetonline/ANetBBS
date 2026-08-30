@@ -19,7 +19,7 @@ GAME_TYPE_CHOICES = [
     "door_rlogin", "door_telnet",
 ]
 
-DROP_FILE_CHOICES = ["none", "door.sys", "dorinfo", "door32.sys"]
+DROP_FILE_CHOICES = ["none", "door.sys", "dorinfo", "door32.sys", "bbsdev.drp"]
 
 GAME_FIELDS = [
     {"key": "name", "label": "Name", "kind": "text"},

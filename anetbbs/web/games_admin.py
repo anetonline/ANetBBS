@@ -141,6 +141,7 @@ class GameForm(FlaskForm):
         ('door32.sys', 'DOOR32.SYS'),
         ('chain.txt', 'CHAIN.TXT'),
         ('sfdoors.dat', 'SFDOORS.DAT'),
+        ('bbsdev.drp', 'BBSDEV.DRP'),
     ], default='none', validators=[Optional()], validate_choice=False)
     drop_file_path = StringField('Drop File Path', validators=[Optional(), Length(max=500)])
     use_dosbox = BooleanField('Use DOSBox/dosemu2', default=False)

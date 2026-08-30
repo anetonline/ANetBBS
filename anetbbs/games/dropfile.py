@@ -2,12 +2,15 @@
 """
 Drop File Generator for ANetBBS Game Center
 
-Generates the major drop file formats (DOOR.SYS, DORINFO1.DEF, DOOR32.SYS)
-from a user session so that classic BBS door games can be launched.
+Generates the major drop file formats (DOOR.SYS, DORINFO1.DEF, DOOR32.SYS,
+CHAIN.TXT, SFDOORS.DAT, BBSDEV.DRP) from a user session so that classic
+BBS door games can be launched.
 """
 import os
 from datetime import datetime
 from pathlib import Path
+
+from .. import __version__ as _ANETBBS_VERSION
 
 
 def _u(user, field, default=None):
@@ -425,8 +428,98 @@ def generate_sfdoors_dat(user, node_number, minutes_remaining=60, bbs_name='ANet
     return content
 
 
+def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
+                        output_path=None, sysop_name=None):
+    """
+    Generate a BBSDEV.DRP drop file (RealDeuce's bbsdev.drp spec,
+    https://github.com/RealDeuce/bbsdev.drp) -- a newer, UTF-8/CRLF-
+    strict, 19-line format. Field layout confirmed directly against the
+    spec's own ABNF grammar and reference examples, same
+    verify-against-the-real-consumer discipline used throughout this
+    module for the other formats (and against the reader added to
+    OpenDoors itself for RDQ3/ANetCHESS, third_party/OpenDoors's own
+    ODInEx1.c FOUND_BBSDEV_DRP branch).
+
+    Only the "stdio" communications type is emitted here -- ANetBBS
+    launches every door_native game (RDQ3, ANetCHESS) over a PTY with
+    fd 0/1/2 as the real channel, and BBSDEV.DRP's "stdio" type is a
+    clean, dedicated way to say that. This sidesteps the fragile
+    Comm-Type=2/Handle=-1 "use stdio" SENTINEL DOOR32.SYS callers have
+    to use instead (see generate_door32()'s own comm_handle docstring,
+    and door32.c's WriteFixedDoor32Sys() on the RDQ3/ANetCHESS side,
+    which exists ONLY to work around that sentinel not being understood
+    generically) -- BBSDEV.DRP has no equivalent hack to work around.
+    door_dos/door_dosemu games are DOS binaries under FOSSIL emulation,
+    a communications type this generator (and the OpenDoors reader
+    it's paired with) doesn't support, so they keep using DOOR32.SYS/
+    DOOR.SYS instead; write_drop_file() only calls this generator for
+    games a sysop has explicitly configured with drop_file_type
+    'bbsdev.drp'.
+
+    Per spec, a producer MUST also announce the file via the
+    BBSDEV_DRP environment variable in the door's own environment --
+    that's the door_runner.py fork's job (see its BBSDEV_DRP env var
+    assignment, set from this function's return value), not this
+    generator's.
+
+    Args:
+        user: User model instance
+        node_number: Integer node number
+        minutes_remaining: Session time remaining in minutes
+        bbs_name: Name of the BBS (used for both line 14's software
+            name and line 15's board name -- ANetBBS doesn't track
+            those as two separate concepts the way the spec allows)
+        output_path: Full path to write the file (optional)
+        sysop_name: Sysop's alias for line 16. Defaults to 'Sysop',
+            matching generate_dorinfo()'s own hardcoded fallback, when
+            the caller (write_drop_file(), via door_runner.py) doesn't
+            have a real configured value to pass.
+
+    Returns:
+        String content of the drop file
+    """
+    user_id = _u(user, 'id') or 0
+    username = _u(user, 'username') or 'User'
+    security_level = 100 if _u(user, 'is_admin') else 50
+
+    lines = [
+        '1.0',                          # 1: Format version
+        'stdio',                        # 2: Communications type
+        '',                             # 3: Communications parameters (empty for stdio)
+        username,                       # 4: User alias
+        str(user_id),                   # 5: Unique user key (opaque; the DB user id)
+        '80',                           # 6: Screen width
+        '24',                           # 7: Screen height
+        'Y',                            # 8: ANSI
+        'N',                            # 9: RIP
+        '',                             # 10: CTerm version (not detected)
+        '',                             # 11: Time of logoff (no forced deadline)
+        'IBM437',                       # 12: Encoding
+        'en-US',                        # 13: Language
+        f'ANetBBS {_ANETBBS_VERSION}',  # 14: BBS software name and version
+        bbs_name,                       # 15: Board name
+        sysop_name or 'Sysop',          # 16: Sysop alias
+        # 17: Access level -- the "sysop" token is more portable/
+        # expressive than a magic security number, and BBSDEV.DRP is
+        # the one format here that actually defines it; every other
+        # generator in this module has no equivalent to reach for.
+        'sysop' if _u(user, 'is_admin') else str(security_level),
+        str(node_number),               # 18: Node number
+        'N',                            # 19: Show local display
+    ]
+
+    content = '\r\n'.join(lines) + '\r\n'
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(content)
+
+    return content
+
+
 def write_drop_file(user, game, node_number, minutes_remaining=60,
-                    bbs_name='ANetBBS', token_ctx=None):
+                    bbs_name='ANetBBS', token_ctx=None, sysop_name=None):
     """
     Write the appropriate drop file for a game.
 
@@ -439,6 +532,8 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
         token_ctx: Optional Synchronet/Mystic %-token context. When supplied,
                    `Game.drop_file_path` is %-expanded — so a sysop can write
                    `%Pdoor32.sys` instead of `data/temp/node{node}/door32.sys`.
+        sysop_name: Sysop alias, used only by the bbsdev.drp generator
+                   (the only format here with a dedicated field for it).
 
     Returns:
         Path to the written drop file, or None if drop_file_type is 'none'
@@ -484,6 +579,7 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
             'door32.sys': 'DOOR32.SYS',
             'chain.txt': 'CHAIN.TXT',
             'sfdoors.dat': 'SFDOORS.DAT',
+            'bbsdev.drp': 'BBSDEV.DRP',
         }.get(drop_type, 'DOOR.SYS')
         output_path = os.path.join(output_path.rstrip('/'), filename_for_type)
 
@@ -510,5 +606,8 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
         generate_chain_txt(user, node_number, minutes_remaining, bbs_name, output_path)
     elif drop_type == 'sfdoors.dat':
         generate_sfdoors_dat(user, node_number, minutes_remaining, bbs_name, output_path)
+    elif drop_type == 'bbsdev.drp':
+        generate_bbsdev_drp(user, node_number, minutes_remaining, bbs_name, output_path,
+                            sysop_name=sysop_name)
 
     return output_path
