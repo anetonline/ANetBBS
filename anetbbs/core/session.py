@@ -1054,12 +1054,29 @@ class BBSSession:
         self._budget_task = asyncio.create_task(_budget_watchdog())
 
     def _start_kick_watchdog(self):
-        """Poll our own NodeActivity row for a sysop kick request.
+        """Poll our own NodeActivity row for a sysop kick request, and
+        keep last_seen alive while we're at it.
 
         The /admin/control/nodespy/<slot>/kick endpoint runs in the
         anetbbs-web (gunicorn) process; terminal sessions live in
         anetbbs-telnet. They don't share memory, so the kick endpoint
         flips `kick_requested` on our DB row and we notice here.
+
+        Real bug found live (2026-08-30): `last_seen` was ONLY bumped by
+        `_heartbeat_node()`, itself only called from active menu
+        navigation/door-game/MRC/AFK-transition call sites. A session
+        that just sits on one screen -- reading a message, idling in a
+        door that doesn't heartbeat every tick, watching MRC without
+        typing -- never touches any of those call sites, so last_seen
+        goes stale and the session silently drops out of every
+        presence surface's 5-minute online cutoff (web NodeSpy, the
+        in-BBS Node Monitor, and anetbbs-monitor) even though it's
+        fully connected. This watchdog already polls our row every 5s
+        regardless of what the user is doing, so it's the natural place
+        to keep last_seen fresh independent of activity, instead of
+        adding a second timer -- fixes the "still connected but shows
+        as offline/never showed up at all" symptom at the source, for
+        every consumer of NodeActivity, not just one of them.
 
         Polls every 5 seconds while we have a NodeActivity row.
         """
@@ -1083,6 +1100,12 @@ class BBSSession:
                             # starts clean.
                             try:
                                 _db.session.delete(row)
+                                _db.session.commit()
+                            except Exception:
+                                _db.session.rollback()
+                        elif row:
+                            row.last_seen = datetime.utcnow()
+                            try:
                                 _db.session.commit()
                             except Exception:
                                 _db.session.rollback()

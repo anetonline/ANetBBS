@@ -169,6 +169,41 @@ class NodeMonitorCliTests(unittest.TestCase):
             else:
                 os.environ['BBS_NODES'] = orig
 
+    def test_afk_action_prefixes_match_what_session_py_actually_writes(self):
+        """Regression guard against this module's AFK-coloring drifting
+        from the real action labels core/session.py's AFK detection
+        writes (session.py:618,629,662) -- a fourth implementation of
+        something this file's own docstring already flags as a drift
+        risk for the cutoff/kick constants."""
+        from anetbbs.monitor.app import _AFK_ACTION_PREFIXES
+        for label in ('Possibly AFK', 'Away From Keyboard (screensaver)'):
+            self.assertTrue(label.startswith(_AFK_ACTION_PREFIXES),
+                            f'{label!r} should be recognized as AFK')
+        self.assertFalse('Returned from AFK'.startswith(_AFK_ACTION_PREFIXES),
+                         'a session that just returned from AFK should no '
+                         'longer be styled as AFK')
+        self.assertFalse('menu: main'.startswith(_AFK_ACTION_PREFIXES))
+
+    def test_fetch_live_nodes_db_error_is_catchable_per_tick(self):
+        """The render loop (_run) wraps fetch_live_nodes() in a
+        try/except so one bad DB tick shows a warning instead of
+        crashing curses out from under a sysop -- verified here at the
+        function-call level (the loop itself isn't practically
+        testable without a real terminal, per this file's own
+        docstring), by confirming a broken app context actually raises
+        rather than silently returning nothing (i.e. that there really
+        is something for _run's try/except to catch)."""
+        from anetbbs.monitor.app import fetch_live_nodes
+        app = _fresh_app(str(Path(self._tmp.name) / 'e.db'))
+        with app.app_context():
+            from anetbbs.models import db
+            db.session.close()
+            db.engine.dispose()
+            import os as _os
+            _os.remove(db.engine.url.database)
+            with self.assertRaises(Exception):
+                fetch_live_nodes()
+
 
 if __name__ == '__main__':
     unittest.main()

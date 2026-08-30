@@ -77,6 +77,24 @@ def _bbs_nodes():
     return max(1, min(100, int(os.environ.get('BBS_NODES', '8'))))
 
 
+# Action-label prefixes core/session.py's AFK detection actually writes
+# (session.py:618,629,662) -- checked with a plain prefix match rather
+# than an exact set, since "Away From Keyboard (screensaver)" carries a
+# suffix. Used to color AFK rows distinctly from actively-navigating
+# ones instead of a "top notch" monitor giving them identical styling.
+_AFK_ACTION_PREFIXES = ('Possibly AFK', 'Away From Keyboard')
+
+# How close to the 5-minute online cutoff a row has to be before this
+# tool flags it as "about to age out" -- a real, connected session that
+# just hasn't heartbeated in a while (see core/session.py's
+# _start_kick_watchdog docstring for the bug this guards against: that
+# watchdog now refreshes last_seen every 5s independent of activity, so
+# a healthy connected session should essentially never sit in this
+# window; seeing one here for more than a poll or two is itself worth a
+# sysop's attention -- e.g. a session whose asyncio task is wedged).
+STALE_WARNING_SECONDS = 60
+
+
 def fetch_live_nodes():
     """NodeActivity rows within the online cutoff, keyed by slot.
     Mirrors web/control.py:nodespy_json's query."""
@@ -141,14 +159,24 @@ def _addstr(win, y, x, text, attr=0):
         pass
 
 
-def _draw(stdscr, nodes, total_slots, sel):
+def _draw(stdscr, nodes, total_slots, sel, db_error=None):
     stdscr.erase()
     h, w = stdscr.getmaxyx()
     online = len(nodes)
     now = datetime.utcnow()
 
     header = f" {TITLE} :: {online}/{total_slots} online :: {datetime.now().strftime('%H:%M:%S')} "
-    _addstr(stdscr, 0, 0, header.ljust(w - 1), _attr(1, curses.A_REVERSE))
+    if db_error:
+        # A DB hiccup (locked file, transient connection error) must not
+        # take the whole curses screen down -- last known rows just keep
+        # showing (possibly stale) with a visible warning in the header
+        # until a later tick succeeds again, same "best-effort, keep
+        # going" posture as every other DB touch point in this
+        # codebase's session.py. Folded into the header bar rather than
+        # its own row so no row position below ever shifts.
+        header = f" {TITLE} :: DB ERROR: {db_error} -- showing last known state "
+    _addstr(stdscr, 0, 0, header.ljust(w - 1),
+            _attr(4 if db_error else 1, curses.A_REVERSE | curses.A_BOLD))
 
     # Column widths as named constants, shared by the header and every row,
     # so the two can't drift out of alignment the way two independently
@@ -180,13 +208,28 @@ def _draw(stdscr, nodes, total_slots, sel):
         page = (row.page or '')[:W_ACTION]
         action = (row.action or page or '')[:W_ACTION]
         since = _fmt_delta(now - row.started_at) if row.started_at else '?'
-        idle = _fmt_delta(now - row.last_seen) if row.last_seen else '?'
+        idle_td = (now - row.last_seen) if row.last_seen else None
+        idle = _fmt_delta(idle_td) if idle_td is not None else '?'
         line = _fmt_row(str(slot), (row.username or '?')[:W_USER],
                         (row.protocol or '?')[:W_PROTO], (row.peer or '')[:W_PEER],
                         action, since, idle)
+        if not attr:
+            # Selection highlight (attr already set above) always wins;
+            # otherwise flag AFK sessions and rows nearing the online
+            # cutoff distinctly rather than styling every online row
+            # identically regardless of what it's actually telling a
+            # sysop.
+            is_afk = (row.action or '').startswith(_AFK_ACTION_PREFIXES)
+            is_stale_warning = (idle_td is not None and
+                                idle_td.total_seconds() >= STALE_WARNING_SECONDS)
+            if is_stale_warning:
+                attr = _attr(4)
+            elif is_afk:
+                attr = _attr(3)
         _addstr(stdscr, y, 0, line, attr)
 
-    footer = " [Up/Down] Select  [K] Kick  [R] Refresh  [Q] Quit "
+    footer = (" [Up/Down] Select  [K] Kick  [R] Refresh  [Q] Quit  "
+              f"::  yellow=AFK  red=not heartbeating >{STALE_WARNING_SECONDS}s ")
     _addstr(stdscr, h - 1, 0, footer.ljust(w - 1), _attr(1, curses.A_REVERSE))
     stdscr.refresh()
 
@@ -215,14 +258,25 @@ def _run(stdscr, app):
     stdscr.timeout(REFRESH_MS)
     sel = 0
     flash = None
+    nodes = {}
     while True:
-        with app.app_context():
-            nodes = fetch_live_nodes()
+        # A transient DB error (e.g. "database is locked" during a
+        # write-heavy moment elsewhere) must not crash the whole curses
+        # screen out from under a sysop mid-diagnosis -- keep showing
+        # the last known rows with a visible warning instead, and keep
+        # retrying every tick, same best-effort posture the rest of
+        # this codebase's DB touch points already use.
+        db_error = None
+        try:
+            with app.app_context():
+                nodes = fetch_live_nodes()
+        except Exception as exc:
+            db_error = str(exc)[:120] or type(exc).__name__
         total_slots = _bbs_nodes()
         h, _w = stdscr.getmaxyx()
         visible = max(1, min(total_slots, max(0, h - 3)))
         sel = max(0, min(sel, visible - 1))
-        _draw(stdscr, nodes, total_slots, sel)
+        _draw(stdscr, nodes, total_slots, sel, db_error=db_error)
         if flash:
             from anetbbs.cfg.ui import show_message
             show_message(stdscr, flash)
@@ -245,9 +299,12 @@ def _run(stdscr, app):
             if slot in nodes:
                 reason = prompt_text(
                     stdscr, f"Kick reason for slot {slot} [Disconnected by sysop]: ") or ''
-                with app.app_context():
-                    _ok, msg = kick_node(slot, reason)
-                flash = msg
+                try:
+                    with app.app_context():
+                        _ok, msg = kick_node(slot, reason)
+                    flash = msg
+                except Exception as exc:
+                    flash = f'Kick failed: {str(exc)[:100] or type(exc).__name__}'
 
 
 def main():
