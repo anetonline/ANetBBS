@@ -18,6 +18,7 @@ with. This reproduces the exact failure condition -- app=None, no
 ambient Flask context active -- and confirms the session actually gets
 marked completed instead of silently failing.
 """
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -37,6 +38,24 @@ class CleanupSessionSafeNoAmbientContextTests(unittest.TestCase):
         self._ctx = self.app.app_context()
         self._ctx.push()
         db.create_all()
+
+        # _cleanup_session_safe(app=None) -- exactly what this test
+        # exercises -- builds its OWN throwaway Flask app internally
+        # (`Flask(__name__)` + `get_config(os.environ.get('FLASK_ENV',
+        # 'production'))`, see door_runner.py) rather than reusing this
+        # test's app context. Same real gotcha test_door_games_menu_
+        # layout.py's own setUp() already documents and fixes for
+        # show_door_menu()'s identical pattern: without FLASK_ENV=
+        # testing set here, that internal get_config() call resolves to
+        # ProductionConfig instead of the SAME TestingConfig.
+        # SQLALCHEMY_DATABASE_URI _fresh_app() just patched -- pointing
+        # cleanup at a completely different (real, un-created) database
+        # and making "no such table" failures depend entirely on
+        # whatever FLASK_ENV happened to be left set by an earlier test
+        # in the same process, rather than this test's own setup.
+        self._orig_flask_env = os.environ.get('FLASK_ENV')
+        os.environ['FLASK_ENV'] = 'testing'
+        self.addCleanup(self._restore_flask_env)
 
         user = User(username='tester', email='t@example.com')
         user.set_password('x')
@@ -60,6 +79,12 @@ class CleanupSessionSafeNoAmbientContextTests(unittest.TestCase):
 
     def _pop_if_needed(self):
         pass  # already popped in setUp; nothing to clean up
+
+    def _restore_flask_env(self):
+        if self._orig_flask_env is None:
+            os.environ.pop('FLASK_ENV', None)
+        else:
+            os.environ['FLASK_ENV'] = self._orig_flask_env
 
     def test_cleanup_with_app_none_still_marks_session_completed(self):
         from anetbbs.games import door_runner
