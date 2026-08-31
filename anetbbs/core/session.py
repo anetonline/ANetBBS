@@ -2577,34 +2577,60 @@ class BBSSession:
             # Multinode slot acquisition — claim a node 1..BBS_NODES so
             # the user shows up on the multinode roster. If all nodes are
             # in use we politely turn the user away.
+            #
+            # Real gap found in a security/performance audit: this used
+            # to be ONE try/except wrapping acquire_slot() AND
+            # everything after it (broadcast, _open_node_activity) --
+            # `except Exception: self._node_entry = None` at the bottom
+            # meant an exception raised by broadcast() or
+            # _open_node_activity() (both best-effort, not expected to
+            # ever actually raise, but not guaranteed not to) would
+            # CLOBBER an already-successfully-acquired self._node_entry
+            # back to None. start()'s own finally: block only releases
+            # the multinode slot `if self._node_entry is not None`, so
+            # that reset permanently leaked the slot until process
+            # restart (multinode.py's _NODES dict has no independent
+            # stale-session backstop the way node_manager.py's _active
+            # does). Narrowed to wrap ONLY the actual acquire_slot()
+            # call -- the only step that can legitimately mean "we never
+            # got a slot at all" -- so nothing after a successful
+            # acquisition can un-acquire it.
+            # Computed before the try: so it's always defined for the
+            # "all nodes in use" message below even if the import or
+            # acquire_slot() itself raises before reaching that point.
+            max_nodes = max(1, min(100, int(os.environ.get('BBS_NODES', '8'))))
             try:
                 from ..features.multinode import acquire_slot, broadcast
-                max_nodes = max(1, min(100,
-                    int(os.environ.get('BBS_NODES', '8'))))
                 self._node_entry = acquire_slot(self.user, proto, peer,
                                                 max_nodes,
                                                 session=self)
-                if self._node_entry is None:
-                    await self.write(
-                        f"\r\n\x1b[1;31mAll {max_nodes} nodes are "
-                        f"in use — try again later.\x1b[0m\r\n")
-                    return
+            except Exception:
+                self._node_entry = None
+            if self._node_entry is None:
+                await self.write(
+                    f"\r\n\x1b[1;31mAll {max_nodes} nodes are "
+                    f"in use — try again later.\x1b[0m\r\n")
+                return
+            try:
                 broadcast(self.user.get('username', '?'),
                           f'logged in on node {self._node_entry.slot} '
                           f'({proto})', kind='join')
-                # Open the NodeActivity row for sysop NodeSpy and start
-                # the cross-process kick watchdog.
-                self._open_node_activity(proto)
-                try:
-                    self._start_kick_watchdog()
-                except Exception:
-                    pass
-                try:
-                    self._start_presence_alert_watchdog()
-                except Exception:
-                    pass
             except Exception:
-                self._node_entry = None
+                pass
+            # Open the NodeActivity row for sysop NodeSpy and start
+            # the cross-process kick watchdog.
+            try:
+                self._open_node_activity(proto)
+            except Exception:
+                pass
+            try:
+                self._start_kick_watchdog()
+            except Exception:
+                pass
+            try:
+                self._start_presence_alert_watchdog()
+            except Exception:
+                pass
 
             # Real gap found in a security/performance audit:
             # _enforce_time_budget() -- the per-session/per-day
@@ -2831,6 +2857,25 @@ class BBSSession:
                 kt = getattr(self, '_kick_task', None)
                 if kt and not kt.done():
                     kt.cancel()
+            except Exception:
+                pass
+            # Real gap found in a security/performance audit
+            # (2026-08-31): _start_presence_alert_watchdog()'s own task
+            # (self._presence_alert_task) had NO cancellation anywhere
+            # in this file -- unlike _hb_task/_kick_task right above it
+            # and _budget_task below, which each got this exact fix
+            # already for the same reason. Every session that reaches
+            # a successful login starts this watchdog, so this was a
+            # guaranteed, 100%-reproduction task leak on every single
+            # session: its `while True: await asyncio.sleep(5); ...`
+            # closure keeps the whole BBSSession object graph (reader,
+            # writer, user dict) alive forever after logoff, the same
+            # unbounded per-connection accumulation shape as the
+            # v1.0.21 incident.
+            try:
+                pat = getattr(self, '_presence_alert_task', None)
+                if pat and not pat.done():
+                    pat.cancel()
             except Exception:
                 pass
             # Real gap found in a security/performance audit: unlike

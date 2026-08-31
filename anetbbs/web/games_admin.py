@@ -376,6 +376,7 @@ def _tw2_game_ini():
 
 
 @games_admin_bp.route('/tw2/reset-universe', methods=['POST'])
+@login_required
 @_admin_required
 def tw2_reset_universe():
     wiped = []

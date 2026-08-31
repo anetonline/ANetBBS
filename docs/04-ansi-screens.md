@@ -151,7 +151,6 @@ lifecycle screens above):
 | Slot name      | Menu shown                                    |
 | -------------- | --------------------------------------------- |
 | `chat`         | Chat Systems top menu (IRC / MRC / Local) — skipped entirely when MRC is disabled (`MRC_BRIDGE_ENABLED`), falling back to the generated menu instead; a custom `chat.ans` hardcoding an MRC line needs updating by hand if you disable MRC |
-| `irc_chat`     | IRC Chat — server connection options          |
 | `sysop_users`  | Sysop → Manage Users list header             |
 | `sysop_boards` | Sysop → Manage Boards list header            |
 | `sysop_status` | Sysop → Server Status header                 |

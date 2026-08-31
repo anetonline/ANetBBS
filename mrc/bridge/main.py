@@ -820,7 +820,7 @@ class BridgeApp:
             if not sess:
                 return
             if not sess.get("in_room"):
-                self.db.delete_session(str(ws_id))
+                await self.db.delete_session_async(str(ws_id))
                 return
             if _casefold(self._session_effective_nick(sess)) != key:
                 return
@@ -837,7 +837,7 @@ class BridgeApp:
             # hub's MRC Trust state for this handle immediately, forcing
             # a fresh /identify on the very next join even though the
             # bridge's own connection to the hub never dropped).
-            self.db.delete_session(str(ws_id))
+            await self.db.delete_session_async(str(ws_id))
             await self._sync_mystic_rooms()
             logger.info(f"Applied delayed disconnect logoff for handle={eff_nick} room={room}")
         except asyncio.CancelledError:
@@ -1064,7 +1064,7 @@ class BridgeApp:
         # these early replies get lost.
         sess["waiting_for_identify"] = False
         sess["in_room"]              = True
-        self.db.save_session(ws_id_str, sess)
+        await self.db.save_session_async(ws_id_str, sess)
         await self._sync_mystic_rooms()
 
         await self._send_join_payloads(eff_nick, room, sess.get("remote_ip", ""))
@@ -1202,7 +1202,7 @@ class BridgeApp:
                                 await self._complete_join_after_identify(ws_id_str, sess)
                             else:
                                 sess["waiting_for_identify"] = False
-                                self.db.save_session(ws_id_str, sess)
+                                await self.db.save_session_async(ws_id_str, sess)
                                 await self._broadcast_info("Identified. Now use /join <room> to enter chat.")
                         else:
                             # Default (non-strict) mode: the session's
@@ -1234,7 +1234,7 @@ class BridgeApp:
                     handle = (sess.get("handle") or "").strip()
                     if handle and nick and (sess.get("nick") in (None, "", handle) or nick.startswith(handle)):
                         sess["nick"] = nick
-                        self.db.save_session(ws_id_str, sess)
+                        await self.db.save_session_async(ws_id_str, sess)
 
         if from_user == "SERVER":
             await self._maybe_refresh_userlist_on_server_text(msg)
@@ -1426,7 +1426,7 @@ class BridgeApp:
                     self.pending_disconnects[key] = asyncio.create_task(self._delayed_session_logoff(ws_id, eff_nick, room))
                     logger.info(f"WebSocket disconnected: {ws_id} (grace {self.ws_disconnect_grace_seconds:.1f}s for handle={eff_nick} room={room})")
                 else:
-                    self.db.delete_session(str(ws_id))
+                    await self.db.delete_session_async(str(ws_id))
                     await self._sync_mystic_rooms()
                     logger.info(f"WebSocket disconnected: {ws_id}")
             else:
@@ -1555,7 +1555,7 @@ class BridgeApp:
             "tz_offset":            _clamp_tz_offset(prof.get("tz_offset", 0)),
             "palette":              _sanitize_no_tilde(prof.get("palette") or "", 20),
         }
-        self.db.save_session(str(ws_id), sess)
+        await self.db.save_session_async(str(ws_id), sess)
 
         # Normal case (identify_required_mode=False, the default): join
         # immediately, same as the reference client -- no reason to make
@@ -1626,7 +1626,7 @@ class BridgeApp:
             "style_suffix_color": suffix_color,
             "typing_color":       typing_color,
         })
-        self.db.save_session(str(ws_id), sess)
+        await self.db.save_session_async(str(ws_id), sess)
 
         handle = (sess.get("handle") or "").strip()
         if handle:
@@ -1640,7 +1640,7 @@ class BridgeApp:
                 "style_suffix_color": suffix_color,
                 "typing_color":       typing_color,
             })
-            self.db.save_profile(handle, existing)
+            await self.db.save_profile_async(handle, existing)
 
         await self._safe_send(ws, {
             "type":            "style_updated",
@@ -1716,13 +1716,13 @@ class BridgeApp:
             return
 
         sess.update(updates)
-        self.db.save_session(str(ws_id), sess)
+        await self.db.save_session_async(str(ws_id), sess)
 
         handle = (sess.get("handle") or "").strip()
         if handle:
             existing = self.db.get_profile(handle) or {}
             existing.update(updates)
-            self.db.save_profile(handle, existing)
+            await self.db.save_profile_async(handle, existing)
 
         await self._safe_send(ws, {
             "type":    "prefs_updated",
@@ -1865,7 +1865,7 @@ class BridgeApp:
             sess["waiting_for_identify"] = False
             sess["in_room"]              = True
             sess["room"]                 = new_room
-            self.db.save_session(str(ws_id), sess)
+            await self.db.save_session_async(str(ws_id), sess)
             # Real bug found live: this room-CHANGE path (a caller
             # already connected doing /join <room>) is entirely separate
             # from _complete_join_after_identify's initial-join path --
@@ -1931,7 +1931,7 @@ class BridgeApp:
         # the hub's own /who or CHATTERS listing may show this handle
         # lingering until the next reconnect's fresh join, or the hub's
         # own idle timeout, cleans it up.
-        self.db.delete_session(str(ws_id))
+        await self.db.delete_session_async(str(ws_id))
         await self._sync_mystic_rooms()
         await self._safe_send(ws, {"type": "left", "message": "Left the room"})
 

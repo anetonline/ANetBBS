@@ -55,6 +55,14 @@ In `cmd` you can use:
 
 So `lord.sh -drop {dropdir}` works.
 
+Do **not** wrap these tokens in your own quotes (e.g. `'{user}'`) —
+the engine already shell-quotes every substituted value before
+splicing it into the command, so `{user}`/`{userid}`/`{dropdir}` are
+always safe to use bare, even when a username contains a space or
+apostrophe. Adding your own quotes around an already-quoted value
+breaks the shell's own parsing (a loud syntax error, not a silent
+failure) rather than working.
+
 ## Safety
 
 `exec` runs whatever the sysop configured, **as the user that runs the

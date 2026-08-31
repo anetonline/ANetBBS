@@ -44,6 +44,7 @@ import re
 from datetime import datetime
 
 from .routing import parse_address
+from .areafix import _passwords_match
 from ..models import db, FileArea, FileUpload, HatchQueue
 
 # Per FTS-0006: "netnode.REQ", the addressee's net/node as two 4-digit
@@ -176,7 +177,17 @@ def process_inbound_req(content, requester_address, our_address=''):
         if len(queued_rows) >= MAX_FILES_PER_REQUEST:
             break
         for area in areas:
-            if area.freq_password and (req_line['password'] or '') != area.freq_password:
+            # Real gap found in a security/performance audit: this
+            # compared the attacker-supplied FREQ password with plain
+            # != -- a timing side-channel letting an attacker who can
+            # time repeated FREQ attempts statistically recover a
+            # password-protected area's password byte-by-byte. Same
+            # bug class already fixed for BinkP's own M_PWD/CRAM-MD5
+            # check and this exact netmail-based robot-auth module's
+            # own Areafix password (see areafix.py's _passwords_match,
+            # reused here rather than duplicated).
+            if area.freq_password and not _passwords_match(
+                    area.freq_password, req_line['password'] or ''):
                 continue
             uploads = (FileUpload.query
                       .filter_by(file_area_id=area.id)

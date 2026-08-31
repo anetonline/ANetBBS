@@ -165,6 +165,18 @@ named file in its working directory — ANetBBS sets that variable
 automatically for the launched door, so no extra configuration is
 needed beyond picking `bbsdev.drp` as the drop file type.
 
+**`door32.sys` and real OpenDoors-based doors** — confirmed live with
+[Cepheus Trader](https://bbsdev.net/): DOOR32.SYS has no genuine
+"stdio" communications type of its own (only local/serial/telnet), so
+for a `door_native` game this BBS falls back to a Comm Type 2 / Handle
+-1 sentinel a few FreePascal door kits recognize as "use stdio" —
+OpenDoors itself does not, and treats -1 as a real (invalid) socket
+handle, which silently never connects (a black screen, not a crash or
+error). If a `door_native` game using `door32.sys` won't come up,
+switch its drop file type to `chain.txt` or `bbsdev.drp` instead —
+both give the door a real, unambiguous way to know it's talking over
+stdio.
+
 ## Token vocabulary
 
 You can use these in `Game.executable_path`, `Game.working_directory`,

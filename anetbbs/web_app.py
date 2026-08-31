@@ -139,7 +139,17 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
-    socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet',
+    # Real gap found in a security/performance audit: cors_allowed_origins
+    # explicitly overrode python-engineio's own default with "*", allowing
+    # ANY origin's page to open a Socket.IO connection here carrying the
+    # user's session cookie -- every real client in this app connects
+    # same-origin (io('/', ...) in base.html/terminal/index.html etc.),
+    # so there is no legitimate cross-origin use case. Omitting the
+    # kwarg restores engineio's built-in default (None), which derives
+    # the allowed origin from the request's own scheme+host (and the
+    # X-Forwarded-* pair when present, so it still works behind a
+    # reverse proxy) -- same-origin only, no config needed.
+    socketio.init_app(app, async_mode='eventlet',
                       ping_timeout=60, ping_interval=25,
                       logger=False, engineio_logger=False)
     csrf.init_app(app)

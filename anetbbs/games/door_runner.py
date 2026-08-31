@@ -40,11 +40,6 @@ DOSEMU2_INSTALL_HINT = (
 _sessions = {}
 _sessions_lock = threading.Lock()
 
-# Pending DOS bridges waiting for PTY to be bound — keyed by tmp_id stamped
-# into the dosbox conf path so launch_door_game's parent can pair them up.
-_bridge_registry = {}
-
-
 class DoorSession:
     """Represents a running door game PTY session."""
 
@@ -476,7 +471,8 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
     if game.game_type == 'door_dos':
         return _build_dos_command(game, node_number, cwd, token_ctx=token_ctx,
-                                   bridge_port=bridge_port)
+                                   bridge_port=bridge_port,
+                                   temp_files_out=temp_files_out)
 
     if game.game_type == 'door_dosemu':
         import shutil
@@ -508,7 +504,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         return cmd, cwd if wd_raw else os.path.dirname(exe)
 
     if game.game_type == 'door_mystic':
-        return _build_mystic_python_command(game, cwd)
+        return _build_mystic_python_command(game, cwd, temp_files_out=temp_files_out)
 
     if game.game_type == 'door_mystic_mps':
         mystic = os.environ.get('MYSTIC_BBS_PATH', '/usr/local/bin/mystic')
@@ -801,7 +797,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
 
 
 def _build_dos_command(game, node_number, cwd, token_ctx=None,
-                       bridge_port=None):
+                       bridge_port=None, temp_files_out=None):
     """Build a DOSBox invocation using TCP nullmodem (works with VANILLA DOSBox).
 
     Architecture (adapted from binkterm-php's dosbox-bridge):
@@ -1050,6 +1046,16 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
                                       prefix='anetbbs_dos_', delete=False)
     tmp.write(conf)
     tmp.close()
+    # Real gap found in a security/performance audit: this file is
+    # written with delete=False and never registered anywhere for
+    # cleanup -- the exact same leak already found and fixed once in
+    # this file for the Synchronet-JS compat path (see _build_command's
+    # own temp_files_out docstring: "hundreds had accumulated on a real
+    # install... contributing to a disk-full incident"). door_dos is
+    # one of the most heavily-used game types here, so this was likely
+    # the highest-volume of the file leaks found this round.
+    if temp_files_out is not None:
+        temp_files_out.append(tmp.name)
     logger.info('DOS door config written to %s (dosbox=%s, headless=%s)',
                 tmp.name, os.path.basename(dosbox), headless)
     base_cmd = [dosbox, '-conf', tmp.name, '-noconsole', '-exit']
@@ -1257,7 +1263,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
     return cmd, game_dir
 
 
-def _build_mystic_python_command(game, cwd):
+def _build_mystic_python_command(game, cwd, temp_files_out=None):
     """For door_mystic Python scripts: run them via a wrapper that injects
     mystic_compat module-level helpers so `write/writeln/getstr/...` work
     without explicit imports (matching Mystic's bbs_io global behavior).
@@ -1346,6 +1352,12 @@ def _build_mystic_python_command(game, cwd):
                                       prefix='anetbbs_', delete=False)
     tmp.write(wrapper)
     tmp.close()
+    # Real gap found in a security/performance audit: same leak class
+    # as _build_dos_command()'s dosbox.conf above -- delete=False with
+    # no cleanup registration, the exact bug already found and fixed
+    # once in this file for the Synchronet-JS compat path.
+    if temp_files_out is not None:
+        temp_files_out.append(tmp.name)
     return [python, tmp.name], cwd
 
 
@@ -1388,7 +1400,22 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     # Build the substitution context once. `drop_file_path` gets filled
     # in after we actually write the drop file (so `%f` can resolve to
     # the post-substitution path the game will read).
-    sysop = os.environ.get('SYSOP_NAME', 'Sysop')
+    # Real gap found in a security/performance audit: this always read
+    # SYSOP_NAME from the process environment, while the OTHER sysop-
+    # name resolution in this same file (search for BBS_SYSOP_NAME
+    # below, used for Synchronet @SYSOP@ expansion) prefers the live
+    # Flask app config and only falls back to the environment. Since
+    # this `sysop` value feeds BOTH the %-token substitution AND every
+    # dropfile format's own sysop-name field (BBSDEV.DRP, DOOR32.SYS,
+    # etc.), the two paths could disagree about the sysop's name after
+    # an admin-panel change that updates config without a full process
+    # restart. Matched to the same config-first, env-fallback order.
+    try:
+        from flask import current_app as _ca
+        sysop = (_ca.config.get('SYSOP_NAME', '') if _ca else '') or \
+            os.environ.get('SYSOP_NAME', 'Sysop')
+    except Exception:
+        sysop = os.environ.get('SYSOP_NAME', 'Sysop')
     token_ctx = build_token_context(
         user=user, node_number=node,
         minutes_left=minutes_remaining, bbs_name=bbs_name,
@@ -1675,7 +1702,36 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         try: os.close(com1_rx_r)
         except OSError: pass
     gs.pid = pid
-    db.session.commit()
+    # Real gap found in a security/performance audit: this commit()
+    # (and every earlier fd/DB operation in this function's OWN failure
+    # paths above -- build-command failure, PTY-open failure, fork
+    # failure -- already wrapped in try/except with a real gs.status =
+    # 'crashed' + release_node() cleanup) was bare. A transient failure
+    # here (SQLite "database is locked" under concurrent write load --
+    # a condition node_manager.py's own docstring already acknowledges
+    # as real) would propagate out of this function AFTER the child was
+    # already execvp()'d and running: the DoorSession below is never
+    # created, _sessions[gs.id] is never set, the waitpid watcher never
+    # starts, master_fd is never closed -- an untracked, never-reaped
+    # child process plus a leaked fd, with GameSession.status stuck at
+    # 'active' until node_manager.cleanup_stale_sessions()'s 1-hour
+    # backstop. The actual harm is the exception aborting everything
+    # AFTER this line, not gs.pid failing to persist -- so on failure,
+    # roll back and log, but let session-publishing continue exactly as
+    # if the commit had succeeded (the DoorSession, _sessions entry,
+    # and waitpid watcher below don't themselves depend on this commit
+    # having landed).
+    try:
+        db.session.commit()
+    except Exception:
+        logger.exception(
+            'Failed to persist pid=%d for session %d after fork -- '
+            'continuing anyway so the running child stays tracked',
+            pid, gs.id)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
     door_session = DoorSession(gs.id, master_fd, pid)
     door_session.dos_bridge = dos_bridge   # None for non-door_dos sessions
@@ -2651,8 +2707,18 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
             timeout=15)
     except (OSError, asyncio.TimeoutError) as exc:
         await session.write(f"\r\nConnection failed: {exc}\r\n")
-        await session.read_line("Press Enter...")
+        # Real gap found in a security/performance audit: releasing the
+        # node AFTER read_line() meant a client that's already
+        # disconnected at this exact moment (the same network blip that
+        # broke the remote connect, or the user simply closing their
+        # client while looking at this error) raises CarrierLost out of
+        # read_line() before the release call is ever reached -- leaking
+        # the node slot and leaving GameSession.status stuck at 'active'
+        # until node_manager.cleanup_stale_sessions()'s 1-hour backstop.
+        # Releasing first means the slot is freed regardless of whether
+        # the user is still there to see the message.
         _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
+        await session.read_line("Press Enter...")
         return False
 
     # Send rlogin handshake. Synchronet BBS-style ordering:
@@ -2670,8 +2736,11 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
         await session.write(f"\r\nrlogin handshake failed: {exc}\r\n")
         try: writer.close()
         except Exception: pass
-        await session.read_line("Press Enter...")
+        # Release before read_line() -- see the connect-failure branch
+        # above for why (a disconnected client raises CarrierLost out
+        # of read_line() and skips whatever comes after it).
         _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
+        await session.read_line("Press Enter...")
         return False
 
     # See _drain_stale_session_input()'s own docstring -- real bug found
@@ -2918,8 +2987,12 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
             timeout=15)
     except (OSError, asyncio.TimeoutError) as exc:
         await session.write(f"\r\nConnection failed: {exc}\r\n")
-        await session.read_line("Press Enter...")
+        # Release before read_line() -- see play_rlogin_terminal()'s
+        # matching connect-failure branch for why (a disconnected
+        # client raises CarrierLost out of read_line() and skips
+        # whatever comes after it, leaking the node slot).
         _release_external_node(_ext_app, game, _ext_node, _ext_gs_id, crashed=True)
+        await session.read_line("Press Enter...")
         return False
 
     # See _drain_stale_session_input()'s own docstring -- real bug found

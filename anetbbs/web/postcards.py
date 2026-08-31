@@ -21,6 +21,7 @@ from flask import (Blueprint, Response, abort, flash, jsonify,
 from flask_login import current_user, login_required
 
 from ..features.ansi_png import render_grid_png
+from ..features.rate_limit import rate_limit, _user_or_ip
 from ..models import Postcard, db
 from .ansi_editor import _slugify, render_ansi_text
 
@@ -44,6 +45,13 @@ def index():
 
 @postcards_bp.route('/new', methods=['GET', 'POST'])
 @login_required
+# Real gap found in a security/performance audit: unlike every other
+# user-content-creation route in this app (board_post, netmail_compose,
+# file_area_upload, pm's own inline PM limiter), this route had no
+# rate limit at all -- any logged-in user could POST here in a tight
+# loop and create an unbounded number of Postcard rows. Same threshold
+# already used for the equivalent board_post/netmail_compose routes.
+@rate_limit('postcard_create', limit=20, window=300, key_fn=_user_or_ip)
 def create():
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip() or 'Untitled Postcard'
@@ -89,8 +97,37 @@ def save(slug):
     if not grid or 'cells' not in grid:
         return jsonify({'ok': False, 'error': 'missing grid'}), 400
     card.name = payload.get('name') or card.name
-    card.width = int(grid.get('width') or card.width)
-    card.height = int(grid.get('height') or card.height)
+    # Real gap found in a security/performance audit: create() clamps
+    # width/height to [20,100]/[5,40], but save() (an authenticated JS
+    # fetch(), same route class as new.html's own editor) took the
+    # client JSON's width/height completely unclamped. Confirmed live
+    # (a real >60s hang reproduced against unfixed code, not just
+    # reasoned through): render_ansi_text() a few lines below loops
+    # width*height times SYNCHRONOUSLY on every save() call itself, no
+    # need to wait for anyone to view the postcard -- an authenticated
+    # user submitting one oversized save can hang the request/worker
+    # directly. features/ansi_png.py's render_grid_png() -- reached by
+    # the PUBLIC, no-login /postcards/<slug>.png route -- has the exact
+    # same width*height loop plus an Image.new() sized width*_CELL_W by
+    # height*_CELL_H, and reads width/height back OUT of the stored
+    # grid_json (not the card.width/card.height columns), so an
+    # unclamped save is ALSO re-triggerable by any anonymous visitor
+    # afterward. Same failure class as the v1.0.54 OOM incident.
+    # Clamping only card.width/card.height (a first attempt at this
+    # fix) would NOT have closed either path -- neither reads those
+    # columns. The clamp has to land inside `grid` itself, before it's
+    # serialized or passed to render_ansi_text(), matching create()'s
+    # own [20,100]/[5,40] bounds.
+    try:
+        grid['width'] = max(20, min(100, int(grid.get('width') or card.width)))
+    except (TypeError, ValueError):
+        grid['width'] = card.width
+    try:
+        grid['height'] = max(5, min(40, int(grid.get('height') or card.height)))
+    except (TypeError, ValueError):
+        grid['height'] = card.height
+    card.width = grid['width']
+    card.height = grid['height']
     card.grid_json = json.dumps(grid)
     card.ansi_text = render_ansi_text(grid)
     card.updated_at = datetime.utcnow()

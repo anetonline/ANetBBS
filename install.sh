@@ -1715,6 +1715,20 @@ from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage,
 force_overwrite = os.environ['PY_FORCE_OVERWRITE'] == 'True'
 
 app = create_app('production')
+# Real gap found in a security/performance audit: db.create_all() below
+# is what actually gives birth to anetbbs.db (holding password hashes,
+# session tokens, private messages) -- it used to be created at
+# whatever mode the ambient umask left it (typically 644, world-
+# readable) and only locked down to 600 by a chmod much later in this
+# script (search for "chmod 600" near the DB_FILE variable), leaving a
+# real window where the freshly-created DB is readable by any local
+# user. Same class of bug already fixed for the .env file (see its own
+# "umask 177" comment above) -- same fix here: set the restrictive
+# umask immediately before the file is born instead of chmod'ing after
+# the fact. create_app() has already made every data-subdirectory it
+# needs by this point (at the normal ambient umask), so this doesn't
+# affect directory permissions, only the .db file(s) created from here on.
+os.umask(0o177)
 with app.app_context():
     db.create_all()
     user = User.query.filter_by(username=admin_user).first()
@@ -1794,6 +1808,20 @@ from anetbbs.models import db, User, EchomailNetwork, EchoArea, EchomailMessage,
 force_overwrite = os.environ['PY_FORCE_OVERWRITE'] == 'True'
 
 app = create_app('production')
+# Real gap found in a security/performance audit: db.create_all() below
+# is what actually gives birth to anetbbs.db (holding password hashes,
+# session tokens, private messages) -- it used to be created at
+# whatever mode the ambient umask left it (typically 644, world-
+# readable) and only locked down to 600 by a chmod much later in this
+# script (search for "chmod 600" near the DB_FILE variable), leaving a
+# real window where the freshly-created DB is readable by any local
+# user. Same class of bug already fixed for the .env file (see its own
+# "umask 177" comment above) -- same fix here: set the restrictive
+# umask immediately before the file is born instead of chmod'ing after
+# the fact. create_app() has already made every data-subdirectory it
+# needs by this point (at the normal ambient umask), so this doesn't
+# affect directory permissions, only the .db file(s) created from here on.
+os.umask(0o177)
 with app.app_context():
     db.create_all()
     user = User.query.filter_by(username=admin_user).first()

@@ -104,8 +104,23 @@ def serve_root_page(path):
         return _try_serve(target)
 
     # /folder/...
-    target_base = base / head
-    if not target_base.is_dir():
+    # Real gap found in a security/performance audit: unlike the
+    # `~user` branch just above (which regex-validates `username`
+    # before ever touching the filesystem), `head` here was used
+    # completely unvalidated. A path of '../<rest>' makes
+    # target_base = base / '..' resolve to data/personal_pages/'s
+    # PARENT (i.e. data/ itself), which .is_dir() happily confirms --
+    # and _safe_resolve()'s own containment check is then evaluated
+    # against that already-escaped target_base, so it passes trivially,
+    # serving anything under data/ (including data/admin_password.txt,
+    # the initial-admin plaintext password written on first boot) to
+    # any request that reaches this 404 fallback. Resolving target_base
+    # itself through the SAME containment check _safe_resolve() applies
+    # to `rest` -- confirming it's still really inside `base` -- closes
+    # this the same way the `~user` branch is already closed, instead
+    # of trusting a bare .is_dir() truthiness check.
+    target_base = _safe_resolve(base, head)
+    if target_base is None or not target_base.is_dir():
         return None
     target = _safe_resolve(target_base, rest) if rest else target_base
     return _try_serve(target)

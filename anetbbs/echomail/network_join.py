@@ -13,6 +13,8 @@ import logging
 import os
 import zipfile
 
+from .zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,8 +73,25 @@ def extract_member_text(zip_path, member_name):
         return None
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            # Real gap found in a security/performance audit: this had
+            # no cap on the DECLARED uncompressed size (a zip bomb) --
+            # the exact pattern zip_safety.py exists to close, and every
+            # other ZIP-extraction site in this codebase already checks
+            # it. Reachable via the PUBLIC, unauthenticated "apply to
+            # join this network" upload form -- a crafted small zip
+            # expands to hundreds of MB+ in memory the moment a sysop
+            # opens the review page that calls this. Checking
+            # ZipInfo.file_size first (free, no decompression cost) is
+            # what actually prevents the bomb from ever being
+            # decompressed.
+            info = zf.getinfo(member_name)
+            if info.file_size > MAX_MEMBER_UNCOMPRESSED:
+                raise ZipBombError(
+                    f'{member_name!r} declares {info.file_size} bytes '
+                    f'uncompressed (cap {MAX_MEMBER_UNCOMPRESSED}) -- '
+                    'refusing to extract')
             raw = zf.read(member_name)
-    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+    except (zipfile.BadZipFile, KeyError, OSError, ZipBombError) as exc:
         logger.warning('network_join: could not extract %r from %s: %s',
                        member_name, zip_path, exc)
         return None

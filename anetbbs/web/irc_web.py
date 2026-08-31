@@ -27,6 +27,7 @@ from flask_socketio import emit
 
 from ..models import db, IrcServerConfig, IrcPreset
 from ..features.irc_format import to_html as _irc_to_html, strip_codes as _irc_strip
+from ..core.net_safety import resolve_safe_destination
 
 
 logger = logging.getLogger(__name__)
@@ -153,8 +154,26 @@ class _IrcSession:
         SASL handshake state is driven by `_handle_line` reading server replies;
         we only kick off the handshake here. If SASL isn't configured we skip
         CAP entirely and just register normally."""
+        # Real gap found in a security/performance audit: unlike
+        # web_terminal.py's outbound telnet client (the same "any
+        # logged-in user, not just admins, supplies a raw host:port"
+        # shape), this had no SSRF guard at all -- any user could point
+        # "IRC server" at internal infrastructure and read back
+        # banner/response data via the irc_error/irc_raw/irc_system
+        # events, a semi-blind SSRF + internal port-scan oracle. Same
+        # shared guard, same resolve-once-then-connect-to-that-sockaddr
+        # pattern (never re-resolving self.server at connect time, which
+        # would reopen the DNS-rebinding gap the guard exists to close).
+        # No own_ports exception -- this feature has no legitimate
+        # reason to reach this BBS's own loopback services.
+        family, sockaddr, error = resolve_safe_destination(self.server, self.port)
+        if error:
+            self._emit('irc_error', {'message': error})
+            return False
         try:
-            sock = socket.create_connection((self.server, self.port), timeout=20)
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sock.settimeout(20)
+            sock.connect(sockaddr)
             # The connect timeout sticks on the socket → blocking recv() will
             # return socket.timeout after 20s of no traffic. Clear it so
             # recv() blocks forever; we rely on TCP keepalive + IRC PING/PONG
@@ -272,7 +291,14 @@ class _IrcSession:
                         self.sid, duration, line_count, reason)
             self._emit('irc_disconnected', {'reason': reason})
             with _sessions_lock:
-                _sessions.pop(self.sid, None)
+                # Real gap found in a security/performance audit: a
+                # blind pop(self.sid) here can clobber a NEWER session
+                # that has since replaced this one at the same sid, the
+                # same shape already fixed in web_terminal.py's
+                # _TermSession.run(). Only remove the entry if it still
+                # points at THIS session.
+                if _sessions.get(self.sid) is self:
+                    _sessions.pop(self.sid, None)
             # Real gap found in a security/performance audit: _scrollback
             # is deliberately keyed per-user (not per-sid) so it survives
             # a browser reconnect while the underlying IRC connection is
@@ -544,8 +570,11 @@ def index():
     # Real gap found live: with no per-user saved config, the connect form
     # fell back to a hardcoded irc.libera.chat/6667/no-SSL -- completely
     # ignoring Admin -> IRC Server Presets, which only ever drove the
-    # TERMINAL IRC client (features/irc_chat.py), never this page. Use the
-    # sysop's top-priority active preset as the same kind of fallback here.
+    # TERMINAL IRC client (features/irc_chat.py, removed as confirmed
+    # dead code in a later security/performance audit -- MRC chat and
+    # this web client are the maintained chat paths now), never this
+    # page. Use the sysop's top-priority active preset as the same
+    # kind of fallback here.
     default_preset = None
     if saved is None:
         default_preset = (IrcPreset.query

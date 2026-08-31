@@ -279,19 +279,33 @@ def sync_wall_inbound(app, params):
         if not area_ids:
             return True, 'no ANET_WALL areas configured'
 
-        known_ids = {
-            r[0] for r in db.session.query(WallPost.remote_msg_id)
-            .filter(WallPost.remote_msg_id.isnot(None)).all()
-        }
+        # Real gap found in a security/performance audit: this used to
+        # load the FULL set of already-imported remote_msg_ids AND the
+        # FULL set of every inbound EchomailMessage ever received in
+        # these areas into Python on every scheduled tick, forever --
+        # cost grows with total historical volume, not with what's new
+        # since the last run. Pushed the "already imported" check into
+        # the query itself (an indexed NOT IN subquery against
+        # WallPost.remote_msg_id, which is unique+indexed) so only the
+        # not-yet-imported rows are ever pulled into Python. Rows with
+        # msg_id IS NULL are deliberately still included every tick --
+        # they can never earn a remote_msg_id to be excluded by, so
+        # re-scanning them is the existing, intended behavior (see this
+        # function's own docstring), not part of the gap being fixed.
+        known_msgids = db.session.query(WallPost.remote_msg_id).filter(
+            WallPost.remote_msg_id.isnot(None))
         rows = (EchomailMessage.query
                 .filter(EchomailMessage.area_id.in_(area_ids),
                         EchomailMessage.direction == 'inbound')
+                .filter(db.or_(EchomailMessage.msg_id.is_(None),
+                              ~EchomailMessage.msg_id.in_(known_msgids)))
                 .all())
+        seen_this_tick = set()
         for msg in rows:
             if not msg.msg_id:
                 skipped_no_msgid += 1
                 continue
-            if msg.msg_id in known_ids:
+            if msg.msg_id in seen_this_tick:
                 continue
 
             body = msg.body or ''
@@ -308,7 +322,7 @@ def sync_wall_inbound(app, params):
             )
             db.session.add(wp)
             db.session.commit()
-            known_ids.add(msg.msg_id)
+            seen_this_tick.add(msg.msg_id)
             imported += 1
         return True, f'imported {imported}, skipped {skipped_no_msgid} (no msg_id)'
     except Exception as exc:
@@ -337,19 +351,24 @@ def sync_lastcallers_inbound(app, params):
         if not area_ids:
             return True, 'no ANET_LASTCALLERS areas configured'
 
-        known_ids = {
-            r[0] for r in db.session.query(CallerLog.remote_msg_id)
-            .filter(CallerLog.remote_msg_id.isnot(None)).all()
-        }
+        # Same fix as sync_wall_inbound above: push the "already
+        # imported" dedup check into an indexed NOT IN subquery instead
+        # of loading the full historical set + full inbound-message set
+        # into Python on every tick.
+        known_msgids = db.session.query(CallerLog.remote_msg_id).filter(
+            CallerLog.remote_msg_id.isnot(None))
         rows = (EchomailMessage.query
                 .filter(EchomailMessage.area_id.in_(area_ids),
                         EchomailMessage.direction == 'inbound')
+                .filter(db.or_(EchomailMessage.msg_id.is_(None),
+                              ~EchomailMessage.msg_id.in_(known_msgids)))
                 .all())
+        seen_this_tick = set()
         for msg in rows:
             if not msg.msg_id:
                 skipped_no_msgid += 1
                 continue
-            if msg.msg_id in known_ids:
+            if msg.msg_id in seen_this_tick:
                 continue
 
             body_lines = (msg.body or '').split('\n')
@@ -370,7 +389,7 @@ def sync_lastcallers_inbound(app, params):
             )
             db.session.add(cl)
             db.session.commit()
-            known_ids.add(msg.msg_id)
+            seen_this_tick.add(msg.msg_id)
             imported += 1
         return True, f'imported {imported}, skipped {skipped_no_msgid} (no msg_id)'
     except Exception as exc:
@@ -500,19 +519,24 @@ def sync_scores_inbound(app, params):
         if not area_ids:
             return True, 'no ANET_GAMESCORES areas configured'
 
-        known_ids = {
-            r[0] for r in db.session.query(GameScore.remote_msg_id)
-            .filter(GameScore.remote_msg_id.isnot(None)).all()
-        }
+        # Same fix as sync_wall_inbound above: push the "already
+        # imported" dedup check into an indexed NOT IN subquery instead
+        # of loading the full historical set + full inbound-message set
+        # into Python on every tick.
+        known_msgids = db.session.query(GameScore.remote_msg_id).filter(
+            GameScore.remote_msg_id.isnot(None))
         rows = (EchomailMessage.query
                 .filter(EchomailMessage.area_id.in_(area_ids),
                         EchomailMessage.direction == 'inbound')
+                .filter(db.or_(EchomailMessage.msg_id.is_(None),
+                              ~EchomailMessage.msg_id.in_(known_msgids)))
                 .all())
+        seen_this_tick = set()
         for msg in rows:
             if not msg.msg_id:
                 skipped_no_msgid += 1
                 continue
-            if msg.msg_id in known_ids:
+            if msg.msg_id in seen_this_tick:
                 continue
 
             body_lines = (msg.body or '').split('\n')
@@ -542,7 +566,7 @@ def sync_scores_inbound(app, params):
             )
             db.session.add(gs)
             db.session.commit()
-            known_ids.add(msg.msg_id)
+            seen_this_tick.add(msg.msg_id)
             imported += 1
         return True, (f'imported {imported}, skipped {skipped_no_msgid} (no msg_id), '
                       f'skipped {skipped_no_local_game} (no local game / opted out)')

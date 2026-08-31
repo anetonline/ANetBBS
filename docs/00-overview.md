@@ -92,3 +92,4 @@ app uses, so the "who's online" widget shows everyone at once.
 - [30 — Postcards (shareable ANSI/PETSCII art)](30-postcards.md)
 - [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)
 - [32 — `anetbbs-monitor` (live node monitor, SSH/console)](32-node-monitor.md)
+- [33 — Presence alerts (real-time "X just logged in/out")](33-presence-alerts.md)

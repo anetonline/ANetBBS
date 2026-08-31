@@ -12,11 +12,13 @@ import os
 import zipfile
 import struct
 from datetime import datetime
-from flask import Blueprint, send_file, request, redirect, url_for, flash, render_template
+from flask import (Blueprint, send_file, request, redirect, url_for, flash,
+                   render_template, current_app)
 from flask_login import login_required, current_user
 
 from ..models import (db, EchomailMessage, EchoArea, EchomailLastRead)
 from ..features.access_control import evaluate_access
+from ..echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
 
 
 qwk_user_bp = Blueprint('qwk_user', __name__, url_prefix='/qwk')
@@ -65,8 +67,18 @@ def _build_qwk_blob(user):
     """Construct a minimal QWK packet (CONTROL.DAT + MESSAGES.DAT zipped).
     Format follows the original PCBoard / qwk-classic layout.
     """
-    bbs_name = os.environ.get('BBS_NAME', 'ANetBBS')
-    sysop = os.environ.get('SYSOP_NAME', 'Sysop')
+    # Real gap found in a security/performance audit: these read the
+    # process environment only, but an admin changing BBS Name/Sysop
+    # Name via the setup wizard writes the new value into
+    # current_app.config immediately (no restart needed) while never
+    # touching os.environ itself (only .env on disk, which needs a
+    # restart to take effect) -- see web/admin.py's _setup_wizard_impl().
+    # QWK packets built right after such a change would keep embedding
+    # the stale name until the next process restart. Prefer the live
+    # config, matching every other web/*.py call site that reads these
+    # (registry.py, imsg.py, hub_admin.py, qwk_hub.py).
+    bbs_name = current_app.config.get('BBS_NAME') or os.environ.get('BBS_NAME', 'ANetBBS')
+    sysop = current_app.config.get('SYSOP_NAME') or os.environ.get('SYSOP_NAME', 'Sysop')
 
     # Active areas this user has access to.
     areas = _qwk_accessible_areas(user)
@@ -224,7 +236,26 @@ def upload():
             if not target:
                 flash('No MESSAGES.DAT in the REP.', 'danger')
                 return redirect(url_for('qwk_user.index'))
+            # Real gap found in a security/performance audit: z.read()
+            # here had no cap on the DECLARED uncompressed size, letting
+            # a small, highly-compressed REP expand to gigabytes in
+            # memory the instant it's read (a zip bomb) -- reachable by
+            # any logged-in user with QWK access, not admin-only.
+            # Checking ZipInfo.file_size (free, no decompression cost)
+            # before z.read() is what actually prevents the bomb from
+            # ever being decompressed. Same shared cap already used by
+            # every other ZIP-extraction site in this codebase (see
+            # echomail/zip_safety.py's own docstring for the incident
+            # that established this pattern).
+            info = z.getinfo(target)
+            if info.file_size > MAX_MEMBER_UNCOMPRESSED:
+                raise ZipBombError(
+                    f'{target!r} declares {info.file_size} bytes uncompressed '
+                    f'(cap {MAX_MEMBER_UNCOMPRESSED}) -- refusing to extract')
             data = z.read(target)
+    except ZipBombError:
+        flash('REP packet rejected: declared size too large.', 'danger')
+        return redirect(url_for('qwk_user.index'))
     except Exception as exc:
         flash(f'Could not unzip: {exc}', 'danger')
         return redirect(url_for('qwk_user.index'))

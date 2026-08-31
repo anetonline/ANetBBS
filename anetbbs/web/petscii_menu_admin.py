@@ -66,7 +66,7 @@ def new_menu():
             name=name[:50], title=title[:100],
             prompt=request.form.get('prompt') or 'Choice: ',
             is_default=bool(request.form.get('is_default')),
-            min_access=int(request.form.get('min_access') or 0),
+            min_access=request.form.get('min_access', 0, type=int),
             theme_color=theme_color if theme_color in COLOR_NAMES else None,
         )
         db.session.add(m); db.session.commit()
@@ -85,7 +85,7 @@ def edit_menu(menu_id):
         m.title = (request.form.get('title') or m.title)[:100]
         m.prompt = (request.form.get('prompt') or 'Choice: ')[:100]
         m.is_default = bool(request.form.get('is_default'))
-        m.min_access = int(request.form.get('min_access') or 0)
+        m.min_access = request.form.get('min_access', 0, type=int)
         theme_color = (request.form.get('theme_color') or '').strip().upper()
         m.theme_color = theme_color if theme_color in COLOR_NAMES else None
         db.session.commit()
@@ -118,8 +118,8 @@ def add_item(menu_id):
         label=(request.form.get('label') or 'Item')[:80],
         action_type=request.form.get('action_type') or 'logoff',
         action_args=(request.form.get('action_args') or '')[:255] or None,
-        min_access=int(request.form.get('min_access') or 0),
-        sort_order=int(request.form.get('sort_order') or 0),
+        min_access=request.form.get('min_access', 0, type=int),
+        sort_order=request.form.get('sort_order', 0, type=int),
         is_visible=True,
     )
     db.session.add(item); db.session.commit()
@@ -145,8 +145,8 @@ def edit_item(item_id):
     it.label = (request.form.get('label') or it.label)[:80]
     it.action_type = request.form.get('action_type') or it.action_type
     it.action_args = (request.form.get('action_args') or '')[:255] or None
-    it.min_access = int(request.form.get('min_access') or 0)
-    it.sort_order = int(request.form.get('sort_order') or 0)
+    it.min_access = request.form.get('min_access', 0, type=int)
+    it.sort_order = request.form.get('sort_order', 0, type=int)
     it.is_visible = bool(request.form.get('is_visible'))
     db.session.commit()
     return redirect(url_for('petscii_menu_admin.edit_menu', menu_id=it.menu_id))

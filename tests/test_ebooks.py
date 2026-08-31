@@ -173,6 +173,27 @@ class CurlFetchTextGuardTests(unittest.TestCase):
         self.assertEqual(args[-1], url)
         self.assertEqual(args[-2], '--')
 
+    def test_pins_curl_to_the_resolved_address_closing_the_dns_rebind_gap(self):
+        """Real gap found in a LATER security/performance audit round
+        (2026-08-31): resolve_safe_destination() resolved once and
+        validated that address, but the URL string handed to curl
+        still carried the plain hostname -- curl re-resolves it
+        entirely independently at connect time, reopening the exact
+        DNS-rebinding TOCTOU window resolving once is supposed to
+        close. `--resolve host:port:ip` pins curl's own lookup for
+        that host:port to the already-validated address."""
+        url = 'https://gutenberg.org/files/11/11-0.txt'
+        with patch('anetbbs.web.ebooks.resolve_safe_destination',
+                  return_value=(2, ('93.184.216.34', 443), None)), \
+             patch('subprocess.run') as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = b'chapter text'
+            _curl_fetch_text(url)
+        args = mock_run.call_args[0][0]
+        self.assertIn('--resolve', args)
+        resolve_idx = args.index('--resolve')
+        self.assertEqual(args[resolve_idx + 1], 'gutenberg.org:443:93.184.216.34')
+
 
 if __name__ == '__main__':
     unittest.main()

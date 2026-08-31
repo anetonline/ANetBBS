@@ -39,7 +39,25 @@ def slug_for(kind, target_id, user=None):
 
 
 @m_bp.route('/<slug>')
+@login_required
 def resolve(slug):
+    # Real gap found in a security/performance audit: this route had
+    # no @login_required at all (get_link() below, which mints the
+    # slug, already requires it) -- an entirely anonymous visitor with
+    # a leaked/guessed slug could confirm whether a PM or netmail
+    # permalink resolves to something real (a 302 redirect) versus
+    # never having existed (404 right here) with zero identity or
+    # rate-limit exposure. This alone doesn't close the narrower
+    # same-account "exists but isn't yours" distinction (that target
+    # route's own 403 is still distinguishable from a 404) -- fully
+    # closing that would mean duplicating each target module's full
+    # ownership logic here (netmail.py's _user_owns() also checks
+    # AKAs/name-matching, not just a simple id compare), which risks
+    # silent drift from the real check more than it's worth for a
+    # slug space (base62^6) that isn't brute-forceable in the first
+    # place. Requiring login at least attributes and rate-limits any
+    # probing attempt to a real account instead of leaving it fully
+    # anonymous.
     row = MessageSlug.query.filter_by(slug=slug).first()
     if row is None:
         abort(404)

@@ -20,6 +20,8 @@ from flask import (
 from flask_login import login_required
 from werkzeug.http import is_resource_modified
 
+from ..echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
+
 gallery_bp = Blueprint('gallery', __name__, url_prefix='/gallery')
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.gif', '.png', '.bmp', '.webp'}
@@ -141,8 +143,24 @@ def _read_first_image_from_zip(zip_path):
     member_name, mimetype = found
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            # Real gap found in a security/performance audit: no cap
+            # on the DECLARED uncompressed size (a zip bomb) -- the
+            # exact pattern zip_safety.py exists to close, and every
+            # other ZIP-extraction site in this codebase already checks
+            # it. Since galleries can point at TIC-fed file-area
+            # directories, an external network peer could plant a
+            # malicious zip that any logged-in user triggers just by
+            # browsing to it. Checking ZipInfo.file_size first (free,
+            # no decompression cost) is what actually prevents the
+            # bomb from ever being decompressed.
+            info = zf.getinfo(member_name)
+            if info.file_size > MAX_MEMBER_UNCOMPRESSED:
+                raise ZipBombError(
+                    f'{member_name!r} declares {info.file_size} bytes '
+                    f'uncompressed (cap {MAX_MEMBER_UNCOMPRESSED}) -- '
+                    'refusing to extract')
             data = zf.read(member_name)
-    except (zipfile.BadZipFile, OSError, KeyError):
+    except (zipfile.BadZipFile, OSError, KeyError, ZipBombError):
         return None
     return data, mimetype
 

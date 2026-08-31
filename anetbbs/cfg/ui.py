@@ -105,9 +105,22 @@ def confirm(stdscr, text, default_no=True):
     lines = text.split("\n")
     prompt = "[y/N]" if default_no else "[Y/n]"
     lines = lines + [prompt]
-    h = len(lines) + 4
-    w = max(len(l) for l in lines) + 6
-    win = curses.newwin(h, w, max(0, (curses.LINES - h) // 2), max(0, (curses.COLS - w) // 2))
+    # Real gap found in a security/performance audit: h/w were never
+    # bounds-clamped against the actual screen size (unlike every other
+    # curses call in this module -- see safe_curs_set()/_safe_addstr()'s
+    # own docstrings for the same class of gap already fixed there).
+    # curses.newwin() raises curses.error whenever a requested window
+    # doesn't fit the terminal (a long confirmation string on a narrow
+    # PTY, or a mid-session resize), which would otherwise crash the
+    # whole anetbbs-cfg tool on an unhandled exception. Clamp both
+    # dimensions to fit the current screen, and fail soft (auto-answer
+    # the default) if even a minimal window can't be created at all.
+    h = min(len(lines) + 4, max(1, curses.LINES))
+    w = min(max(len(l) for l in lines) + 6, max(1, curses.COLS))
+    try:
+        win = curses.newwin(h, w, max(0, (curses.LINES - h) // 2), max(0, (curses.COLS - w) // 2))
+    except curses.error:
+        return not default_no
     win.box()
     for i, line in enumerate(lines):
         _safe_addstr(win, 1 + i, 2, line)

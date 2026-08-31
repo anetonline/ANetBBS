@@ -330,6 +330,31 @@ class PresenceAlertsTests(unittest.TestCase):
         self.assertFalse(any('alice' in line for line in written),
                          f'alice must not be alerted about her own login: {written}')
 
+    def test_presence_alert_task_is_cancelled_on_session_teardown(self):
+        """Real gap found in a security/performance audit (2026-08-31):
+        unlike _hb_task/_kick_task/_budget_task, all cancelled in
+        BBSSession.start()'s finally: block, _presence_alert_task
+        (created by _start_presence_alert_watchdog(), this same file's
+        own subject) had NO corresponding cancellation anywhere in
+        session.py -- a guaranteed, 100%-reproduction leak since every
+        session that reaches a successful login starts this watchdog.
+        Its `while True: await asyncio.sleep(5); ...` closure keeps the
+        whole BBSSession object graph (reader, writer, user dict) alive
+        forever after logoff -- same unbounded per-connection
+        accumulation shape as the v1.0.21 incident.
+
+        Same source-inspection technique as test_time_budget_
+        enforcement.py's own test_budget_task_is_cancelled_on_session_
+        teardown, for the identical reason: start()'s finally: block
+        isn't independently callable in isolation."""
+        import inspect
+        from anetbbs.core.session import BBSSession
+        source = inspect.getsource(BBSSession.start)
+        self.assertIn("getattr(self, '_presence_alert_task', None)", source)
+        idx = source.index("getattr(self, '_presence_alert_task', None)")
+        nearby = source[idx:idx + 200]
+        self.assertIn('.cancel()', nearby)
+
     # -- Cleanup handler ---------------------------------------------------
 
     def test_cleanup_deletes_old_events_keeps_recent(self):

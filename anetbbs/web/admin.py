@@ -488,8 +488,23 @@ def edit_user(user_id):
 
         user.username = form.username.data
         user.email = form.email.data
-        user.is_admin = form.is_admin.data
-        user.is_active = form.is_active.data
+        # Real gap found in a security/performance audit: unlike
+        # delete_user()/toggle_ban() below, this route had no self-
+        # guard at all -- an admin editing their OWN account here
+        # could unwittingly strip their own admin flag or deactivate
+        # themselves via this form (e.g. a stray unchecked checkbox on
+        # submit), with no other admin necessarily around to undo it.
+        # Everything else on the form still applies to your own
+        # account as normal; only these two self-demoting fields are
+        # refused when the target is the account making the request.
+        if user.id == current_user.id:
+            if form.is_admin.data != user.is_admin or form.is_active.data != user.is_active:
+                flash('Your own admin/active status cannot be changed from '
+                     'this form — ask another admin, or use a different '
+                     'account.', 'warning')
+        else:
+            user.is_admin = form.is_admin.data
+            user.is_active = form.is_active.data
 
         if form.new_password.data:
             user.set_password(form.new_password.data)
@@ -2193,9 +2208,28 @@ def manage_user(user_id):
                 user.access_level = int(request.form.get('access_level') or 10)
             except ValueError:
                 pass
-            user.is_admin = bool(request.form.get('is_admin'))
-            user.is_active = bool(request.form.get('is_active'))
-            user.is_locked = bool(request.form.get('is_locked'))
+            # Real gap found in a security/performance audit: same
+            # missing self-guard as edit_user() above -- an admin
+            # editing their own account here could strip their own
+            # admin flag, deactivate, or lock themselves out via this
+            # form with no other admin necessarily around to undo it.
+            # Same fix: refuse just these self-demoting fields when
+            # the target is the account making the request, applying
+            # everything else on the form as normal.
+            _new_is_admin = bool(request.form.get('is_admin'))
+            _new_is_active = bool(request.form.get('is_active'))
+            _new_is_locked = bool(request.form.get('is_locked'))
+            if user.id == current_user.id:
+                if (_new_is_admin != user.is_admin
+                        or _new_is_active != user.is_active
+                        or _new_is_locked != user.is_locked):
+                    flash('Your own admin/active/lock status cannot be '
+                         'changed from this form — ask another admin, or '
+                         'use a different account.', 'warning')
+            else:
+                user.is_admin = _new_is_admin
+                user.is_active = _new_is_active
+                user.is_locked = _new_is_locked
             user.is_verified = bool(request.form.get('is_verified'))
             # Time budget upsert
             try:

@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.57`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.58`** (August 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.58 — Third security and performance audit pass, including the MRC bridge (August 2026)
+
+A third, broader audit pass was carried out across the whole codebase, covering areas the first two rounds (v1.0.38, v1.0.39) didn't reach in depth — the standalone MRC↔IRC bridge daemon, echomail's netmail-command bots and hub-side message fan-out, the terminal config tool's own screen handling, and the web application's scheduled-job and background-sync paths, alongside a fresh pass over the areas the earlier rounds already covered. Real issues turned up and were fixed, again addressed in strict severity order: closing a shell-command-construction gap in the door-launch menu system, hardening several more network-facing and inter-process protocol handlers, fixing a handful of lost-update races in per-user counters and a couple of user-submission paths, improving responsiveness in the MRC bridge under concurrent load, closing a few more resource-growth and unbounded-query points in long-running background jobs, adding several more missing rate limits and size/dimension caps, tightening a login-required gap and a couple of self-service admin-account safeguards, and removing a confirmed-dead legacy code path along with the stale documentation that referenced it. New regression tests were added throughout for every fix — the full suite now sits at over 3,100 tests, all green. As with the previous two rounds, this entry intentionally omits specifics in the interest of responsible disclosure; sysops running an older release should update at their earliest convenience.
 
 ## v1.0.57 — Node monitor visibility fix, and BBSDEV.DRP dropfile support (August 2026)
 

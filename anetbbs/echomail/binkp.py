@@ -1180,7 +1180,7 @@ class BinkPClient:
         frame-count budget with our GOT never reached, even though the
         peer fully received and processed what we sent.
         """
-        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': bytearray()}
         deadline = time.monotonic() + (timeout_sec or self.timeout)
         while time.monotonic() < deadline:
             is_cmd, data = self._recv_frame_logged()
@@ -1406,7 +1406,7 @@ class BinkPClient:
                 # actual root cause of a real hub (binkd/1.1a-113)
                 # resending its entire backlog every poll for months.
                 state['pending_mtime'] = parts[2] if len(parts) > 2 else '0'
-                state['pending_data'] = b''
+                state['pending_data'] = bytearray()
                 logger.debug(
                     "BinkP: receiving file %s (%d bytes expected)",
                     state['pending_file'], state['pending_size'])
@@ -1455,10 +1455,20 @@ class BinkPClient:
                 state['pending_skip'] = False
                 state['pending_skipped'] = 0
             return True
-        state['pending_data'] += data
+        # Real gap found in a security/performance audit: `bytes +=`
+        # here is O(n) per append (a full reallocation+copy of the
+        # whole buffer so far), so accumulating a large inbound file
+        # frame-by-frame is O(n^2) total work as it grows toward the
+        # 100MB cap -- real CPU/memory churn on exactly the large-batch
+        # catch-up transfers involved in the 2026-08-30 hub-queue
+        # incident. binkp_server.py's equivalent inbound path already
+        # uses a bytearray + .extend() (O(1) amortized) for this same
+        # reason; `pending_data` is now a bytearray from initialization
+        # (see this method's three callers) so this matches it.
+        state['pending_data'].extend(data)
         if state['pending_size'] > 0 and len(state['pending_data']) >= state['pending_size']:
             fname = state['pending_file']
-            buf = state['pending_data'][:state['pending_size']]
+            buf = bytes(state['pending_data'][:state['pending_size']])
             inbound_dir = self._inbound_dir or 'data/binkp/inbound'
             msgs = self._import_completed(fname, buf, inbound_dir)
             if msgs:
@@ -1488,7 +1498,7 @@ class BinkPClient:
                 logger.info("BinkP: hub closed before GOT ack (clean): %s", exc)
             state['pending_file'] = None
             state['pending_size'] = 0
-            state['pending_data'] = b''
+            state['pending_data'] = bytearray()
             state['pending_mtime'] = '0'
         return True
 
@@ -1650,7 +1660,23 @@ class BinkPClient:
         password_sent = False
         authenticated = False
 
-        for _ in range(50):
+        # Real gap found in a security/performance audit: this was
+        # still hard-capped at 50 frames, the same "fixed iteration
+        # count standing in for a proper timeout" bug shape already
+        # fixed twice elsewhere in this exact file (_send_messages'
+        # own GOT-wait loop, and _receive_messages' 5000-frame cap that
+        # caused the real 2026-08-30 hub-queue incident -- see that
+        # fix's own comment for the full incident writeup). A hub
+        # whose verbose banner/NUL lines legitimately run past 50
+        # before ADR/OK would fail the handshake outright even though
+        # nothing is actually wrong. No new deadline-tracking needed:
+        # _connect() already sets the socket's timeout to self.timeout
+        # (60s default) via socket.create_connection(...), and that
+        # timeout STICKS for every subsequent recv() on this same
+        # socket object -- so this loop is already correctly bounded
+        # per-frame by the existing connection timeout, same as
+        # _receive_messages' own fix relies on its 5-second timeout.
+        while True:
             is_cmd, data = self._recv_frame_logged()
             if not is_cmd:
                 continue
@@ -1765,7 +1791,7 @@ class BinkPClient:
         # indefinitely. A frame-count limit is inherently fragile
         # against any peer that talks a lot before acking; a time
         # deadline isn't.
-        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': bytearray()}
         accepted = False
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
@@ -1881,7 +1907,7 @@ class BinkPClient:
         # shared with the ack-wait loops in _wait_got/_send_messages --
         # see that method's docstring. This loop only needs to handle
         # the frame types those callers AREN'T waiting for: EOB and ERR.
-        state = {'pending_file': None, 'pending_size': 0, 'pending_data': b''}
+        state = {'pending_file': None, 'pending_size': 0, 'pending_data': bytearray()}
 
         # If both EOB rounds were already satisfied above (the peer's
         # round arrived early and we couldn't complete our own second

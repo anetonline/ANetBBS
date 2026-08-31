@@ -2,6 +2,7 @@
 Simple file-based persistence for MRC bridge service.
 Stores user profiles and session data.
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -46,23 +47,72 @@ class BridgeDB:
         os.replace(tmp_path, filepath)
 
     def save_profile(self, handle: str, data: dict):
+        """Synchronous -- blocks the calling thread on disk I/O. Only
+        call this from a genuinely synchronous context (e.g. a script,
+        or tests); async code (main.py's aiohttp handlers) must use
+        save_profile_async() instead -- see its docstring."""
         self._profiles[handle] = {**data, 'updated_at': datetime.utcnow().isoformat()}
         self._save_json(self.profiles_file, self._profiles)
+
+    async def save_profile_async(self, handle: str, data: dict):
+        """Real gap found in a security/performance audit: every save
+        here is a FULL rewrite of the entire profiles.json file (cost
+        grows with the total number of stored profiles, not just the
+        one being changed), and main.py's aiohttp WebSocket handlers
+        used to call the synchronous save_profile() directly -- a
+        blocking disk write executed right on the asyncio event loop
+        stalls EVERY other concurrently-connected MRC client for its
+        duration, and that duration only grows as more profiles
+        accumulate over the bridge's lifetime. The in-memory dict
+        mutation happens immediately (cheap, GIL-atomic); only the
+        actual file write is offloaded to a thread pool executor so
+        the event loop stays responsive. A snapshot (shallow copy) is
+        handed to the executor rather than the live dict, since
+        another coroutine could otherwise mutate self._profiles
+        concurrently while the executor thread is still iterating it
+        for json.dump() (a real "dictionary changed size during
+        iteration" hazard, not just a style preference)."""
+        self._profiles[handle] = {**data, 'updated_at': datetime.utcnow().isoformat()}
+        snapshot = dict(self._profiles)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._save_json, self.profiles_file, snapshot)
 
     def get_profile(self, handle: str) -> Optional[dict]:
         return self._profiles.get(handle)
 
     def save_session(self, session_id: str, data: dict):
+        """Synchronous -- see save_profile()'s docstring; async code
+        must use save_session_async() instead."""
         self._sessions[session_id] = {**data, 'updated_at': datetime.utcnow().isoformat()}
         self._save_json(self.sessions_file, self._sessions)
+
+    async def save_session_async(self, session_id: str, data: dict):
+        """Async, executor-offloaded write -- see save_profile_async()'s
+        docstring for the full rationale (identical shape, sessions.json
+        instead of profiles.json)."""
+        self._sessions[session_id] = {**data, 'updated_at': datetime.utcnow().isoformat()}
+        snapshot = dict(self._sessions)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._save_json, self.sessions_file, snapshot)
 
     def get_session(self, session_id: str) -> Optional[dict]:
         return self._sessions.get(session_id)
 
     def delete_session(self, session_id: str):
+        """Synchronous -- see save_profile()'s docstring; async code
+        must use delete_session_async() instead."""
         if session_id in self._sessions:
             del self._sessions[session_id]
             self._save_json(self.sessions_file, self._sessions)
+
+    async def delete_session_async(self, session_id: str):
+        """Async, executor-offloaded write -- see save_profile_async()'s
+        docstring for the full rationale."""
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+            snapshot = dict(self._sessions)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._save_json, self.sessions_file, snapshot)
 
     def list_profiles(self) -> Dict[str, dict]:
         return self._profiles.copy()

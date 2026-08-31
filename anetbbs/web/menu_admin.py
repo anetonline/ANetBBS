@@ -99,12 +99,23 @@ def new_menu():
         if BbsMenu.query.filter_by(name=name).first():
             flash(f"Menu '{name}' already exists.", 'danger')
             return redirect(url_for('menu_admin.new_menu'))
+        # Real gap found in a security/performance audit: every
+        # min_access/sort_order field in this file used to be
+        # `int(request.form.get(...) or 0)` -- a non-numeric submitted
+        # value (a sysop typo, a malformed autofill) raised an
+        # unhandled ValueError and 500'd the whole admin form instead
+        # of just rejecting the bad value. Werkzeug's own `type=int`
+        # coercion already catches the conversion failure internally
+        # and falls back to the given default, so this is a drop-in
+        # fix at every call site in this file (and
+        # petscii_menu_admin.py's identical copy) with no custom
+        # helper needed.
         m = BbsMenu(
             name=name[:50], title=title[:100],
             ansi_screen=request.form.get('ansi_screen') or '',
             prompt=request.form.get('prompt') or 'Choice: ',
             is_default=bool(request.form.get('is_default')),
-            min_access=int(request.form.get('min_access') or 0),
+            min_access=request.form.get('min_access', 0, type=int),
         )
         db.session.add(m); db.session.commit()
         return redirect(url_for('menu_admin.edit_menu', menu_id=m.id))
@@ -121,7 +132,7 @@ def edit_menu(menu_id):
         m.ansi_screen = request.form.get('ansi_screen') or ''
         m.prompt = (request.form.get('prompt') or 'Choice: ')[:100]
         m.is_default = bool(request.form.get('is_default'))
-        m.min_access = int(request.form.get('min_access') or 0)
+        m.min_access = request.form.get('min_access', 0, type=int)
         db.session.commit()
         flash('Menu saved.', 'success')
         return redirect(url_for('menu_admin.edit_menu', menu_id=m.id))
@@ -150,8 +161,8 @@ def add_item(menu_id):
         label=(request.form.get('label') or 'Item')[:80],
         action_type=request.form.get('action_type') or 'logoff',
         action_args=(request.form.get('action_args') or '')[:255] or None,
-        min_access=int(request.form.get('min_access') or 0),
-        sort_order=int(request.form.get('sort_order') or 0),
+        min_access=request.form.get('min_access', 0, type=int),
+        sort_order=request.form.get('sort_order', 0, type=int),
         is_visible=True,
     )
     db.session.add(item); db.session.commit()
@@ -177,8 +188,8 @@ def edit_item(item_id):
     it.label = (request.form.get('label') or it.label)[:80]
     it.action_type = request.form.get('action_type') or it.action_type
     it.action_args = (request.form.get('action_args') or '')[:255] or None
-    it.min_access = int(request.form.get('min_access') or 0)
-    it.sort_order = int(request.form.get('sort_order') or 0)
+    it.min_access = request.form.get('min_access', 0, type=int)
+    it.sort_order = request.form.get('sort_order', 0, type=int)
     it.is_visible = bool(request.form.get('is_visible'))
     db.session.commit()
     return redirect(url_for('menu_admin.edit_menu', menu_id=it.menu_id))

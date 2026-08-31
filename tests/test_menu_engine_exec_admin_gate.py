@@ -55,3 +55,42 @@ def test_user_with_no_session_user_dict_is_denied():
     result = asyncio.run(_act_exec(ui, 'echo hello'))
     assert result is None
     assert any('Access denied' in w for w in ui.session.written)
+
+
+def test_username_with_a_space_is_not_word_split_into_the_shell_command():
+    """Regression test for a real Low-severity finding from a security/
+    performance audit (2026-08-31): {user}/{userid}/{dropdir} used to
+    be spliced into the shell command string with no quoting at all.
+    Usernames are restricted at registration (auth.py's RegisterForm)
+    but the allowed charset still includes spaces and apostrophes --
+    either can still break a sysop-authored command template's own
+    quoting, or (for an unquoted template, the documented convention --
+    see docs/05-external-programs.md's `lord.sh -drop {dropdir}`
+    example) split what should be ONE argument into several.
+
+    `printf '[%s]' {user}` reveals argument boundaries directly: one
+    bracket pair per argument printf actually received. An unquoted
+    substitution of a two-word username produces TWO bracket pairs
+    (word-split into separate shell words); a properly quoted one
+    produces exactly ONE, with the space preserved inside it."""
+    ui = _FakeUI({'id': 1, 'username': 'John Doe', 'is_admin': True})
+    asyncio.run(_act_exec(ui, "printf '[%s]' {user}"))
+    output = ''.join(ui.session.written)
+    assert '[John Doe]' in output, output
+    assert '[John][Doe]' not in output, output
+
+
+def test_username_with_an_apostrophe_cannot_break_out_of_template_quoting():
+    """The other half of the same fix, using the documented unquoted
+    convention (docs/05-external-programs.md's own `lord.sh -drop
+    {dropdir}` example -- sysops are not expected to add their own
+    quotes around these tokens). Before this fix, an apostrophe in the
+    username spliced in raw could still close/reopen quoting elsewhere
+    in a sysop's template if one happened to be nearby; shlex.quote()
+    escapes it so the username always reaches the child process as one
+    literal argument, apostrophe included, regardless of what
+    surrounds it in the template."""
+    ui = _FakeUI({'id': 2, 'username': "O'Brien", 'is_admin': True})
+    asyncio.run(_act_exec(ui, "printf '[%s]' {user}"))
+    output = ''.join(ui.session.written)
+    assert "[O'Brien]" in output, output

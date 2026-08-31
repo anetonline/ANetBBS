@@ -957,5 +957,100 @@ class TransportInvariantTests(unittest.TestCase):
                       "InterBBS Wall loop-prevention design breaks.")
 
 
+class InboundSyncPushesDedupIntoSqlTests(unittest.TestCase):
+    """Regression test for a real Medium-severity finding from a
+    security/performance audit (2026-08-31): all three inbound sync
+    handlers (sync_wall_inbound, sync_lastcallers_inbound,
+    sync_scores_inbound) used to load the FULL set of already-imported
+    remote_msg_ids AND the FULL set of every inbound EchomailMessage
+    ever received in the relevant areas into Python on EVERY scheduled
+    tick, forever -- cost grows with total historical volume, not with
+    what's new since the last run. Fixed by pushing the "already
+    imported" check into the query itself (an indexed NOT IN subquery
+    against the target table's remote_msg_id column).
+
+    The functional correctness of this (same rows imported, dedup
+    still works, NULL msg_id still re-scanned) is already covered
+    exhaustively by InterbbsSyncTests/InterbbsLastCallersTests/
+    InterbbsScoresTests above, and all of those still pass unmodified
+    against this fix. What's new here is a direct check that the
+    *mechanism* changed: capture the actual SQL sent to the DB during
+    a sync call and confirm the SELECT against echomail_messages
+    itself carries a NOT IN subquery, rather than an unfiltered SELECT
+    followed by Python-side filtering against a fully-materialized set."""
+
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_app(str(Path(self._tmp.name) / 'a.db'))
+        with self.app.app_context():
+            from anetbbs.models import db
+            db.create_all()
+
+    def _network(self):
+        from anetbbs.models import db, EchomailNetwork
+        net = EchomailNetwork(
+            name='ANotherNetwork', network_type='binkp',
+            our_address='1:2/3.4')
+        db.session.add(net)
+        db.session.commit()
+        return net
+
+    def test_wall_sync_filters_already_known_messages_in_sql_not_python(self):
+        from sqlalchemy import event
+        from anetbbs.echomail.interbbs_sync import (
+            sync_wall_inbound, ensure_special_area, WALL_AREA_TAG)
+        from anetbbs.models import db, EchomailMessage
+
+        with self.app.app_context():
+            net = self._network()
+            self.app.config['WALL_INTERBBS_NETWORK_ID'] = net.id
+            area = ensure_special_area(net, WALL_AREA_TAG)
+            db.session.add(EchomailMessage(
+                area_id=area.id, network_id=net.id, msg_id='MSG-CAPTURE-1',
+                from_name='Someone', to_name='All', subject='ANET-WALL-POST',
+                body='captured\nquery', direction='inbound',
+            ))
+            db.session.commit()
+
+            captured_statements = []
+
+            def _capture(conn, cursor, statement, parameters, context, executemany):
+                captured_statements.append(statement)
+
+            event.listen(db.engine, 'before_cursor_execute', _capture)
+            try:
+                ok, out = sync_wall_inbound(self.app, {})
+            finally:
+                event.remove(db.engine, 'before_cursor_execute', _capture)
+            self.assertTrue(ok, out)
+
+            select_statements = [
+                s for s in captured_statements
+                if 'FROM echomail_messages' in s and 'SELECT' in s.upper()]
+            self.assertTrue(select_statements,
+                            'expected at least one SELECT against '
+                            'echomail_messages')
+            self.assertTrue(
+                any('NOT IN' in s.upper() for s in select_statements),
+                'the SELECT against echomail_messages must carry the '
+                'dedup filter (NOT IN a subquery against '
+                'wall_posts.remote_msg_id) in the SQL itself -- if this '
+                'regresses back to an unfiltered SELECT, every tick '
+                'goes back to loading full inbound-message history into '
+                'Python again')
+
+
 if __name__ == '__main__':
     unittest.main()

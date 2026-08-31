@@ -237,6 +237,13 @@
             <div class="col-md-3">
                 {{ form.drop_file_type.label(class="form-label") }}
                 {{ form.drop_file_type(class="form-control") }}
+                <small class="text-muted">A real OpenDoors-based door (confirmed with
+                <a href="https://bbsdev.net/" target="_blank" rel="noopener">Cepheus Trader</a>)
+                may not accept <code>DOOR32.SYS</code> here &mdash; DOOR32.SYS has no real
+                "stdio" communications type of its own, and the sentinel this BBS falls back
+                to for a native door (Comm Type 2 / Handle -1) isn't understood generically,
+                only by a few FreePascal door kits. Prefer <code>CHAIN.TXT</code> or
+                <code>BBSDEV.DRP</code> for this game type if the door doesn't come up.</small>
             </div>
             <div class="col-md-3">
                 {{ form.drop_file_path.label(class="form-label") }}

@@ -60,5 +60,21 @@ class TicReusesTheSameHelperTests(unittest.TestCase):
         self.assertIs(tic._passwords_match, _passwords_match)
 
 
+class FreqReusesTheSameHelperTests(unittest.TestCase):
+    """Real gap found in a LATER security/performance audit round
+    (2026-08-31): freq.py's per-area FREQ password check was missed
+    by the original sweep above -- it still compared with plain !=.
+    Same fix, same shared helper, same identity-check guard against a
+    future refactor reintroducing a separate copy. Functional
+    correctness of the per-area password gate itself (right password
+    matches, wrong one doesn't) is already covered end-to-end by
+    tests/test_freq_inbound_matching.py's own
+    test_area_password_required_and_enforced -- this only confirms the
+    comparison is now routed through the constant-time helper."""
+    def test_freq_imports_the_shared_areafix_helper(self):
+        from anetbbs.echomail import freq
+        self.assertIs(freq._passwords_match, _passwords_match)
+
+
 if __name__ == '__main__':
     unittest.main()

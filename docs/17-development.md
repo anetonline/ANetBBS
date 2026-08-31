@@ -397,10 +397,22 @@ each one sends.
 ```bash
 cd <install>
 venv/bin/pip install -r requirements-dev.txt   # one-time, pulls in pytest
-venv/bin/pytest tests/
+FLASK_ENV=testing venv/bin/pytest tests/
 # or:
-venv/bin/python -m unittest discover -s tests -p "test_*.py"
+FLASK_ENV=testing venv/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
+
+Set `FLASK_ENV=testing` at the **process** level, not just inside a
+test file — several modules resolve their own DB/config fallback via
+`get_config(os.environ.get('FLASK_ENV', 'production'))` at import time
+or on first use (e.g. `core/presence.py`'s `_resolve_db_uri()`), and
+that read happens before any individual test's own setup code runs. A
+test (or a whole file) that behaves correctly when run alone but fails
+oddly as part of the full suite — or vice versa — is worth checking
+against this before assuming it's a real regression; confirm with
+`git stash` against unmodified code first if the cause isn't obvious.
+This is also how CI and `build-release.sh` invoke the suite, so
+matching it locally is what actually reproduces a CI-only failure.
 
 `requirements-dev.txt` is needed either way: `tests/test_mrc_integration.py`
 uses real `@pytest.fixture` decorators, so pytest has to be installed

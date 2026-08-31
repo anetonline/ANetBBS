@@ -294,6 +294,55 @@ class ExternalDoorNodeAllocationTests(unittest.TestCase):
             self.assertIsNotNone(gs)
             self.assertEqual(gs.status, 'crashed')
 
+    def test_connect_failure_releases_the_node_even_when_the_client_is_already_gone(self):
+        """Real gap found in a security/performance audit: the
+        connect-failure branches in play_telnet_terminal/
+        play_rlogin_telnet used to call
+        `await session.read_line(...)` BEFORE `_release_external_node(
+        ...)` -- if the client is already disconnected at that exact
+        moment (the same network blip that broke the remote connect,
+        or the user simply closing their own client while looking at
+        the error), read_line() raises CarrierLost and the release
+        call is never reached, leaking the node slot. The sibling test
+        above (test_connect_failure_releases_the_node_and_marks_the_
+        session_crashed) never caught this because its _FakeSession.
+        read_line() always returns cleanly instead of raising -- this
+        test uses a session whose read_line() raises CarrierLost, the
+        real exception class core/session.py's own read_line() raises
+        on a dead connection, to reproduce the actual failure mode."""
+        from anetbbs.games.door_runner import play_telnet_terminal
+        from anetbbs.games import node_manager
+        from anetbbs.core.session import CarrierLost
+
+        class _AlreadyGoneSession(_FakeSession):
+            async def read_line(self, prompt=''):
+                self.read_line_calls.append(prompt)
+                raise CarrierLost('client already disconnected')
+
+        refused = _RefusingPort()
+        session = _AlreadyGoneSession()
+        session.reader.close()
+
+        async def _drive():
+            game = self._make_game(max_nodes=1, port=refused.port)
+            game_id = game.id
+            with self.assertRaises(CarrierLost):
+                await play_telnet_terminal(game, self.user, session)
+            return game_id
+
+        with self.app.app_context():
+            game_id = asyncio.run(_drive())
+
+        self.assertNotIn((game_id, 1), node_manager._active,
+                         'the node must be released even though read_line() '
+                         'raised -- release must happen BEFORE read_line(), '
+                         'not after')
+        with self.app.app_context():
+            from anetbbs.models import GameSession
+            gs = GameSession.query.filter_by(game_id=game_id).first()
+            self.assertIsNotNone(gs)
+            self.assertEqual(gs.status, 'crashed')
+
 
 if __name__ == '__main__':
     unittest.main()

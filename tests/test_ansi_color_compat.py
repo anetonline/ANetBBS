@@ -51,6 +51,15 @@ _EXCLUDED = {
 # loudly and specifically if any of THESE regress, without being a
 # broad lint rule for the entire codebase (some future new module
 # might have a deliberate reason to use 90-97, e.g. a web-only path).
+#
+# features/anetirc_door.py, features/irc.py, and features/irc_chat.py
+# were removed in a security/performance audit (2026-08-31) as
+# confirmed dead code -- the standalone terminal-native IRC client/
+# chat menu they implemented had zero live call sites anywhere
+# (menu_engine.py's action dispatch, core/session.py, every blueprint
+# registration) after MRC chat and the web IRC client became the
+# maintained chat paths; only irc_web.py's own historical comment
+# still mentioned it by name.
 _CHECKED_MODULES = [
     'features/ansi_ui.py',
     'features/menu_engine.py',
@@ -59,7 +68,6 @@ _CHECKED_MODULES = [
     'features/bbs_ui.py',
     'features/wall.py',
     'features/mrc_chat.py',
-    'features/anetirc_door.py',
     'features/anedit.py',
     'installer/wizard.py',
 ]

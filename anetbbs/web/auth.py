@@ -2,6 +2,7 @@
 """
 Authentication blueprint for user login, registration, and logout
 """
+import random
 import secrets
 import threading
 import time
@@ -26,6 +27,26 @@ from ..features.rate_limit import rate_limit
 # In-memory country-lookup cache: ip -> (country_code, expiry_timestamp)
 _geoip_cache: dict = {}
 _geoip_lock = threading.Lock()
+# Real gap found in a security/performance audit: entries here were
+# written on every cache miss but never evicted -- expiry is only
+# checked on READ, so a stale entry for an IP that never comes back
+# just sits in the dict forever. On a long-running production process
+# with BLOCKED_COUNTRIES set (this feature exists specifically to
+# reject scanner/credential-stuffing traffic, so every distinct
+# attacking source IP gets its own permanent entry), this is the same
+# "quiet unbounded creep on a long-running worker" shape as the
+# v1.0.21 incident, and structurally the same bug
+# features/rate_limit.py's own _buckets dict already has a fix for
+# (probabilistic sweep on write). Same pattern here.
+_GEOIP_SWEEP_PROBABILITY = 500  # ~1-in-500 writes triggers a sweep
+
+
+def _sweep_stale_geoip_entries():
+    now = time.time()
+    stale_ips = [ip for ip, (_country, expiry) in _geoip_cache.items()
+                if expiry < now]
+    for ip in stale_ips:
+        del _geoip_cache[ip]
 
 
 def _client_ip():
@@ -186,6 +207,8 @@ def _ip_country_blocked(ip):
 
         with _geoip_lock:
             _geoip_cache[ip] = (country, now + 3600)
+            if random.randint(1, _GEOIP_SWEEP_PROBABILITY) == 1:
+                _sweep_stale_geoip_entries()
 
         return country in countries
     except Exception:

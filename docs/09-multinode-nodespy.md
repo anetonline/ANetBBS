@@ -24,6 +24,10 @@ Commands inside the chat:
 Join/part are announced automatically. Web users do NOT appear in
 multinode chat — they have IRC / MRC / shoutbox.
 
+Every user's login/logout (any protocol, not just inside chat) also
+triggers a separate, broader alert wherever they currently are in the
+BBS — see [33 — Presence alerts](33-presence-alerts.md).
+
 ## NodeSpy (sysop)
 
 **Admin → Control Panel → NodeSpy** (`/admin/control/`).

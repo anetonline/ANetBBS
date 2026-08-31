@@ -85,75 +85,91 @@ def _flask_app():
 
 
 async def _handle(reader, writer):
+    # Real gap found in a security/performance audit: finger (port 79,
+    # RFC 1288) is unauthenticated and directly internet-facing (its
+    # own systemd unit, no auth of any kind). The old code only caught
+    # asyncio.TimeoutError around reader.readline() -- readline() has
+    # no explicit limit= here, so it uses asyncio.start_server()'s
+    # default 64KiB buffer, and any client sending >64KB with no \n
+    # raises asyncio.LimitOverrunError, which was NOT caught. That
+    # exception propagated straight out of _handle(), skipping the
+    # writer.close()/wait_closed() cleanup entirely (it only ran inside
+    # a LATER try/finally, past the failure point) -- a trivial,
+    # remote, unauthenticated, repeatable fd leak. Wrapping the whole
+    # handler in one try/finally guarantees the connection is always
+    # torn down on every exit path, not just the ones an earlier
+    # narrower except clause happened to anticipate.
     peer = writer.get_extra_info('peername')
+    raw = ''
+    payload = b''
     try:
-        data = await asyncio.wait_for(reader.readline(), timeout=10)
-    except asyncio.TimeoutError:
-        writer.close()
-        return
+        try:
+            data = await asyncio.wait_for(reader.readline(), timeout=10)
+        except (asyncio.TimeoutError, asyncio.LimitOverrunError, ValueError):
+            return
 
-    raw = data.decode('utf-8', errors='replace').strip()
-    # Strip the optional /W (RFC 1288) verbose flag
-    if raw.lower().startswith('/w '):
-        raw = raw[3:].strip()
-    elif raw.lower() == '/w':
-        raw = ''
+        raw = data.decode('utf-8', errors='replace').strip()
+        # Strip the optional /W (RFC 1288) verbose flag
+        if raw.lower().startswith('/w '):
+            raw = raw[3:].strip()
+        elif raw.lower() == '/w':
+            raw = ''
 
-    bbs_name = os.environ.get('BBS_NAME', 'ANetBBS')
-    out_lines = [f'== {bbs_name} finger service ==', '']
+        bbs_name = os.environ.get('BBS_NAME', 'ANetBBS')
+        out_lines = [f'== {bbs_name} finger service ==', '']
 
-    app = _flask_app()
-    with app.app_context():
-        if not raw:
-            users = _online_users()
-            if users:
-                out_lines.append(f'Currently online ({len(users)}):')
-                for u in users:
-                    out_lines.append(
-                        f"  {u['username']:<20} "
-                        f"{u['where'][:30]:<30} "
-                        f"(last seen {u['last_seen'].strftime('%H:%M')})")
+        app = _flask_app()
+        with app.app_context():
+            if not raw:
+                users = _online_users()
+                if users:
+                    out_lines.append(f'Currently online ({len(users)}):')
+                    for u in users:
+                        out_lines.append(
+                            f"  {u['username']:<20} "
+                            f"{u['where'][:30]:<30} "
+                            f"(last seen {u['last_seen'].strftime('%H:%M')})")
+                else:
+                    out_lines.append('No users online right now.')
             else:
-                out_lines.append('No users online right now.')
-        else:
-            info = _user_info(raw)
-            if info is None:
-                out_lines.append(f'No such user: {raw}')
-            else:
-                # Real gap found in a security audit: profile fields
-                # are set by the account owner and shown here to
-                # whoever fingers them -- a user could put ANSI
-                # escapes in their own display name/location/tagline/
-                # bio and have them fire on anyone (including an
-                # admin) who looks them up through a real terminal-
-                # based finger client. See text_safety.py.
-                from .text_safety import strip_untrusted_escapes as _sue
-                out_lines.append(f"Login:    {info['username']}")
-                out_lines.append(f"Name:     {_sue(info['display_name'])}")
-                if info['location']:
-                    out_lines.append(f"Location: {_sue(info['location'])}")
-                if info['last_login']:
-                    out_lines.append(
-                        f"Last on:  {info['last_login'].strftime('%Y-%m-%d %H:%M UTC')}")
-                out_lines.append(f"Calls:    {info['login_count']}")
-                if info['is_admin']:
-                    out_lines.append('Status:   Sysop')
-                if info['tagline']:
-                    out_lines.append('')
-                    out_lines.append(f'Tagline:  {_sue(info["tagline"])}')
-                if info['bio']:
-                    out_lines.append('')
-                    out_lines.append('Plan:')
-                    for line in info['bio'].splitlines():
-                        out_lines.append(f'  {_sue(line)}')
+                info = _user_info(raw)
+                if info is None:
+                    out_lines.append(f'No such user: {raw}')
+                else:
+                    # Real gap found in a security audit: profile fields
+                    # are set by the account owner and shown here to
+                    # whoever fingers them -- a user could put ANSI
+                    # escapes in their own display name/location/tagline/
+                    # bio and have them fire on anyone (including an
+                    # admin) who looks them up through a real terminal-
+                    # based finger client. See text_safety.py.
+                    from .text_safety import strip_untrusted_escapes as _sue
+                    out_lines.append(f"Login:    {info['username']}")
+                    out_lines.append(f"Name:     {_sue(info['display_name'])}")
+                    if info['location']:
+                        out_lines.append(f"Location: {_sue(info['location'])}")
+                    if info['last_login']:
+                        out_lines.append(
+                            f"Last on:  {info['last_login'].strftime('%Y-%m-%d %H:%M UTC')}")
+                    out_lines.append(f"Calls:    {info['login_count']}")
+                    if info['is_admin']:
+                        out_lines.append('Status:   Sysop')
+                    if info['tagline']:
+                        out_lines.append('')
+                        out_lines.append(f'Tagline:  {_sue(info["tagline"])}')
+                    if info['bio']:
+                        out_lines.append('')
+                        out_lines.append('Plan:')
+                        for line in info['bio'].splitlines():
+                            out_lines.append(f'  {_sue(line)}')
 
-    out_lines.append('')
-    payload = ('\r\n'.join(out_lines) + '\r\n').encode('utf-8', errors='replace')
-    try:
-        writer.write(payload)
-        await writer.drain()
-    except (OSError, ConnectionError):
-        pass
+        out_lines.append('')
+        payload = ('\r\n'.join(out_lines) + '\r\n').encode('utf-8', errors='replace')
+        try:
+            writer.write(payload)
+            await writer.drain()
+        except (OSError, ConnectionError):
+            pass
     finally:
         try:
             writer.close()

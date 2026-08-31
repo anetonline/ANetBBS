@@ -33,6 +33,40 @@ from .list_pagination import ListPagination
 
 _IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
 FILES_PER_PAGE = 50
+# Real gap found in a security/performance audit: the max source size
+# thumbnail() will decode before downscaling -- see its own call site
+# comment. 40 megapixels comfortably covers any real uploaded photo
+# (a 40MP image is already a large professional camera's raw output)
+# while still catching the "huge but not Pillow's-own-hard-limit-huge"
+# range its built-in decompression-bomb guard only warns about.
+_MAX_THUMBNAIL_SOURCE_PIXELS = 40_000_000
+
+
+def _bump_file_ratio(user_id, *, bytes_col, files_col, bytes_delta):
+    """Atomically increment one direction of a user's FileRatio counters.
+
+    Real gap found in a security/performance audit: both call sites used
+    to be a Python-side read-then-write (`r.bytes_x = (r.bytes_x or 0) +
+    delta`) -- two concurrent downloads/uploads for the same user both
+    reading the same starting value and both writing back `start +
+    their_own_delta` lose one of the two increments, the same class of
+    bug fixed in features/file_quota.py's consume_quota(). Rewritten as
+    a single atomic SQL UPDATE so the database itself serializes
+    concurrent increments instead of losing one to whichever request's
+    write lands last. `bytes_col`/`files_col` are the FileRatio column
+    objects to increment (FileRatio.bytes_downloaded/files_downloaded or
+    FileRatio.bytes_uploaded/files_uploaded)."""
+    from ..models import FileRatio
+
+    row = FileRatio.query.filter_by(user_id=user_id).first()
+    if row is None:
+        row = FileRatio(user_id=user_id)
+        db.session.add(row)
+        db.session.commit()
+    db.session.query(FileRatio).filter_by(user_id=user_id).update(
+        {bytes_col: bytes_col + bytes_delta, files_col: files_col + 1},
+        synchronize_session=False)
+    db.session.commit()
 
 
 def _is_image(name):
@@ -479,16 +513,20 @@ def download(area_id, filename):
 
     # Bump download counter (best-effort).
     try:
-        from ..models import FileRatio, db as _db
-        r = FileRatio.query.filter_by(user_id=current_user.id).first()
-        if r is None:
-            r = FileRatio(user_id=current_user.id)
-            _db.session.add(r)
-        r.bytes_downloaded = (r.bytes_downloaded or 0) + file_size
-        r.files_downloaded = (r.files_downloaded or 0) + 1
-        _db.session.commit()
+        from ..models import FileRatio
+        _bump_file_ratio(current_user.id,
+                        bytes_col=FileRatio.bytes_downloaded,
+                        files_col=FileRatio.files_downloaded,
+                        bytes_delta=file_size)
     except Exception:
-        pass
+        # Real gap found in a security/performance audit: same class as
+        # the ratio-check gap above (see its own comment) -- fails open
+        # (a broken ratio counter shouldn't block a legitimate
+        # download) but must still be logged, or a real bug here
+        # silently stops tracking every download with zero trace.
+        db.session.rollback()
+        current_app.logger.exception(
+            'download ratio-counter bump crashed for user %s', current_user.id)
     consume_quota(current_user, file_size)
 
     # send_from_directory handles directory traversal safely.
@@ -533,6 +571,27 @@ def thumbnail(area_id, filename):
                 return send_from_directory(area.storage_path, filename)
             os.makedirs(thumb_dir, exist_ok=True)
             with Image.open(src) as im:
+                # Real gap found in a security/performance audit:
+                # Image.open() itself is lazy (header-only, cheap) --
+                # the expensive full pixel decode only happens on the
+                # first operation that actually needs pixel data, here
+                # thumbnail(). Pillow's own built-in decompression-bomb
+                # guard (Image.MAX_IMAGE_PIXELS) only *warns* between 1x
+                # and 2x its default threshold (~179 megapixels) and
+                # only raises above 2x -- a merely huge (not maximally
+                # huge) crafted or malformed image in that warn-only
+                # range would still fully decode into memory before
+                # ever getting downscaled to a 256px thumbnail. Check
+                # the cheap header-reported dimensions before triggering
+                # that decode, and skip straight to the raw-file
+                # fallback (same one already used below for any other
+                # failure) rather than decoding something this large
+                # just to immediately shrink it.
+                width, height = im.size
+                if width * height > _MAX_THUMBNAIL_SOURCE_PIXELS:
+                    raise ValueError(
+                        f'source image too large for thumbnailing: '
+                        f'{width}x{height}')
                 im.thumbnail((256, 256))
                 if im.mode in ('RGBA', 'LA', 'P'):
                     im = im.convert('RGBA')
@@ -543,7 +602,16 @@ def thumbnail(area_id, filename):
                 with open(thumb_path, 'wb') as f:
                     f.write(buf.getvalue())
     except Exception:
-        # Any failure: serve the original
+        # Any failure: serve the original. Logged at debug level, not
+        # exception/warning -- this path is also hit routinely by the
+        # (expected, not a bug) oversized-source-image rejection above
+        # for any large legitimate photo, so logging it at a visible
+        # level by default would just be noise; debug still makes a
+        # genuinely unexpected Pillow/permissions failure discoverable
+        # without normal operation flooding the log.
+        current_app.logger.debug(
+            'thumbnail generation failed for %s in area %s; serving original',
+            filename, area.tag, exc_info=True)
         return send_from_directory(area.storage_path, filename)
     return send_file(thumb_path, mimetype='image/png',
                      max_age=86400)
@@ -672,15 +740,18 @@ def upload(area_id):
         # Bump upload ratio counter.
         try:
             from ..models import FileRatio
-            r = FileRatio.query.filter_by(user_id=current_user.id).first()
-            if r is None:
-                r = FileRatio(user_id=current_user.id)
-                db.session.add(r)
-            r.bytes_uploaded = (r.bytes_uploaded or 0) + os.path.getsize(dest)
-            r.files_uploaded = (r.files_uploaded or 0) + 1
-            db.session.commit()
+            _bump_file_ratio(current_user.id,
+                            bytes_col=FileRatio.bytes_uploaded,
+                            files_col=FileRatio.files_uploaded,
+                            bytes_delta=os.path.getsize(dest))
         except Exception:
+            # Real gap found in a security/performance audit: same
+            # class as the download-side counter bump above -- fails
+            # open (a broken ratio counter shouldn't block a legitimate
+            # upload) but must still be logged.
             db.session.rollback()
+            current_app.logger.exception(
+                'upload ratio-counter bump crashed for user %s', current_user.id)
         _hatch_if_network_area(area, dest, safe_name,
                                request.form.get('description'),
                                is_crash=bool(request.form.get('hatch_crash')),
@@ -1122,7 +1193,12 @@ def smart_upload():
                     flash(f'Rejected: virus ({r.signature}).', 'danger')
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
-                pass
+                # Real gap found in a security/performance audit: this
+                # is smart_upload()'s own copy of upload()'s virus-scan
+                # block, which already logs this exact failure -- this
+                # copy was silently swallowing it instead. Same fail-
+                # open policy, now with the same trace on failure.
+                current_app.logger.exception('virus scan crashed; allowing upload')
             # Optional archive integrity test
             try:
                 from ..features.archive_meta import test_archive_integrity
@@ -1133,7 +1209,8 @@ def smart_upload():
                     flash(f'Rejected: corrupt archive ({ar.message}).', 'danger')
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
-                pass
+                # Same gap and fix as the virus-scan block just above.
+                current_app.logger.exception('archive integrity test crashed; allowing upload')
             dupe_of = _check_and_record_dupe(target, dest, safe)
             _hatch_if_network_area(target, dest, safe,
                                    request.form.get('description'),

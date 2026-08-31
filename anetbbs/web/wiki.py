@@ -30,6 +30,7 @@ from flask import (Blueprint, render_template, request, redirect,
                    url_for, abort, flash, jsonify, current_app)
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func
+from sqlalchemy.exc import IntegrityError
 
 from ..models import db, WikiPage, WikiRevision, Post
 from ..wiki.slug import slugify
@@ -303,6 +304,40 @@ def view(slug):
 # Edit / save
 # ----------------------------------------------------------------------
 
+def _edit_gate_message(user):
+    """Real gap found in a security/performance audit: this check used
+    to live inline in edit() only -- revert() (which also writes a new
+    WikiRevision and overwrites page.body/page.title, exactly like a
+    normal save) never called it at all, only the page-lock check. A
+    brand-new account with zero posts, which edit() correctly blocks,
+    could still vandalize any unlocked page by POSTing straight to
+    /wiki/<slug>/revert/<rev_num> with any existing revision number --
+    discarding every later legitimate edit with no reputation gate
+    stopping them. Extracted so both routes enforce the identical
+    check instead of edit()'s own copy silently drifting out of sync
+    with whichever route the gate was meant to cover.
+
+    Returns the flash message string if the current user is blocked by
+    the minimum-post-count/account-age gate, or None if they may
+    proceed (admins are always exempt)."""
+    if getattr(user, 'is_admin', False):
+        return None
+    min_posts = int(current_app.config.get('WIKI_MIN_POSTS', 5))
+    min_days = int(current_app.config.get('WIKI_MIN_DAYS', 3))
+    if not (min_posts or min_days):
+        return None
+    post_count = Post.query.filter_by(author_id=user.id).count()
+    account_age = (datetime.utcnow() - user.created_at).days
+    if post_count >= min_posts and account_age >= min_days:
+        return None
+    parts = []
+    if post_count < min_posts:
+        parts.append(f'at least {min_posts} post{"s" if min_posts != 1 else ""}')
+    if account_age < min_days:
+        parts.append(f'an account at least {min_days} day{"s" if min_days != 1 else ""} old')
+    return f'Wiki editing requires {" and ".join(parts)}.'
+
+
 @wiki_bp.route('/<slug>/edit', methods=['GET', 'POST'])
 @login_required
 def edit(slug):
@@ -319,21 +354,10 @@ def edit(slug):
         return redirect(url_for('wiki.view', slug=canonical))
 
     # Edit gate — minimum post count + account age (admins exempt).
-    if not getattr(current_user, 'is_admin', False):
-        min_posts = int(current_app.config.get('WIKI_MIN_POSTS', 5))
-        min_days = int(current_app.config.get('WIKI_MIN_DAYS', 3))
-        if min_posts or min_days:
-            post_count = Post.query.filter_by(author_id=current_user.id).count()
-            account_age = (datetime.utcnow() - current_user.created_at).days
-            blocked = (post_count < min_posts) or (account_age < min_days)
-            if blocked:
-                parts = []
-                if post_count < min_posts:
-                    parts.append(f'at least {min_posts} post{"s" if min_posts != 1 else ""}')
-                if account_age < min_days:
-                    parts.append(f'an account at least {min_days} day{"s" if min_days != 1 else ""} old')
-                flash(f'Wiki editing requires {" and ".join(parts)}.', 'warning')
-                return redirect(url_for('wiki.view', slug=canonical))
+    gate_message = _edit_gate_message(current_user)
+    if gate_message:
+        flash(gate_message, 'warning')
+        return redirect(url_for('wiki.view', slug=canonical))
 
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
@@ -450,6 +474,10 @@ def revert(slug, rev_num):
     if (page.is_locked
             and not getattr(current_user, 'is_admin', False)):
         abort(403)
+    gate_message = _edit_gate_message(current_user)
+    if gate_message:
+        flash(gate_message, 'warning')
+        return redirect(url_for('wiki.view', slug=page.slug))
     target = page.revisions.filter_by(rev_num=rev_num).first_or_404()
     _save_revision(page, target.body, target.title,
                    f'Reverted to revision {rev_num}', current_user)
@@ -516,8 +544,28 @@ def rename(slug):
         return redirect(url_for('wiki.view', slug=page.slug))
     old_slug = page.slug
     page.slug = new_slug
-    _save_revision(page, page.body, page.title,
-                   f'Renamed from {old_slug} to {new_slug}', current_user)
-    db.session.commit()
+    try:
+        # Real gap found in a security/performance audit: the check
+        # above and this write aren't atomic -- two concurrent renames
+        # to the SAME new_slug could both pass the check, then the
+        # second one hits WikiPage.slug's own unique constraint and
+        # raised an unhandled 500 instead of the same friendly message
+        # the check above already gives a sequential collision. The
+        # try/except has to wrap _save_revision() too, not just the
+        # explicit commit() below -- _save_revision()'s own query
+        # (looking up the last WikiRevision.rev_num) triggers
+        # SQLAlchemy's autoflush, which is what actually flushes the
+        # pending page.slug change and hits the constraint, before
+        # this function's own commit() is ever reached. Admin-only and
+        # needs precise double-submission timing to hit for real, so
+        # low-severity/cosmetic -- but free to fix with the same
+        # pattern already used for polls.py's vote() race.
+        _save_revision(page, page.body, page.title,
+                       f'Renamed from {old_slug} to {new_slug}', current_user)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash(f'A page already exists at /wiki/{new_slug}.', 'danger')
+        return redirect(url_for('wiki.view', slug=old_slug))
     flash(f'Renamed /wiki/{old_slug} → /wiki/{new_slug}.', 'success')
     return redirect(url_for('wiki.view', slug=new_slug))

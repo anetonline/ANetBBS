@@ -183,7 +183,19 @@ class _TermSession:
             self.connected = False
             self._emit('term_disconnected', {})
             with _lock:
-                _sessions.pop(self.sid, None)
+                # Real gap found in a security/performance audit: a
+                # blind pop(self.sid) here can clobber a NEWER session
+                # that has since replaced this one at the same sid --
+                # e.g. two term_open events racing for the same sid
+                # (a rapid reconnect racing a slow-connecting prior
+                # open) each create their own _TermSession and each
+                # eventually run() to completion; whichever's finally
+                # block runs LAST would otherwise evict the dict entry
+                # regardless of which session is actually current.
+                # Only remove the entry if it still points at THIS
+                # session.
+                if _sessions.get(self.sid) is self:
+                    _sessions.pop(self.sid, None)
 
     def _emit(self, event, payload):
         from ..web_app import socketio

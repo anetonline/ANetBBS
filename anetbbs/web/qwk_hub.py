@@ -28,6 +28,7 @@ from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)
 from ..echomail.qwk import _parse_messages_dat, QWK_HEADER_SIZE, QWK_BLOCK_SIZE
 from ..echomail.qwk_hub_ftp import resolve_hub_id
+from ..echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
 from ..features.rate_limit import _check as _rate_limit_check
 
 logger = logging.getLogger(__name__)
@@ -267,8 +268,22 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
                 logger.warning('QWK hub REP from %s: no %s in zip (found: %s)',
                                node.packet_id, msg_filename, list(zf.namelist()))
                 return 0
+            # Real gap found in a security/performance audit: zf.read()
+            # here had no cap on the DECLARED uncompressed size (a zip
+            # bomb). Checking ZipInfo.file_size first (free, no
+            # decompression cost) is what actually prevents the bomb
+            # from ever being decompressed -- same shared cap every
+            # other ZIP-extraction site in this codebase already uses.
+            info = zf.getinfo(inner_name)
+            if info.file_size > MAX_MEMBER_UNCOMPRESSED:
+                logger.warning(
+                    'QWK hub REP from %s: %s declares %d bytes uncompressed '
+                    '(cap %d) -- refusing to extract',
+                    node.packet_id, inner_name, info.file_size,
+                    MAX_MEMBER_UNCOMPRESSED)
+                return 0
             msg_bytes = zf.read(inner_name)
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, ZipBombError):
         logger.warning('QWK hub REP from %s: bad zip', node.packet_id)
         return 0
 

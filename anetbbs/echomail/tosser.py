@@ -180,11 +180,7 @@ def toss_area_messages(area_id: int, node_id: int = None, force: bool = False) -
     from ..models import (
         db, EchomailMessage, BinkPNode, EchoAreaNode, BinkPHoldQueue,
     )
-
-    query = EchomailMessage.query.filter_by(area_id=area_id)
-    messages = query.all()
-    if not messages:
-        return 0
+    from sqlalchemy import func
 
     if node_id is not None:
         subs_query = EchoAreaNode.query.filter_by(
@@ -201,12 +197,35 @@ def toss_area_messages(area_id: int, node_id: int = None, force: bool = False) -
     subs = subs_query.all()
     if not subs:
         return 0
+    node_ids = [s.node_id for s in subs]
+
+    # Real gap found in a security/performance audit: this used to
+    # load EVERY message ever posted to the area on every call, even
+    # though most of a long-running area's history already has a hold-
+    # queue row for every currently-targeted node (the steady state
+    # for a node well past its initial catchup) -- cost grows with
+    # total area history, not with what's actually still outstanding.
+    # Pre-filter in SQL to only the messages that DON'T yet have a
+    # hold-queue row for every target node (skipped entirely when
+    # force=True, which must reconsider already-'sent' rows too, so it
+    # keeps the original full scan by design).
+    query = EchomailMessage.query.filter_by(area_id=area_id)
+    if not force:
+        fully_queued = (
+            db.session.query(BinkPHoldQueue.message_id)
+            .filter(BinkPHoldQueue.node_id.in_(node_ids))
+            .group_by(BinkPHoldQueue.message_id)
+            .having(func.count(func.distinct(BinkPHoldQueue.node_id)) == len(node_ids))
+        )
+        query = query.filter(~EchomailMessage.id.in_(fully_queued))
+    messages = query.all()
+    if not messages:
+        return 0
 
     # Fetch all existing hold entries for these messages in one query --
     # full row objects (not just id tuples) so `force` can update them
     # in place rather than only checking membership.
     msg_ids = [m.id for m in messages]
-    node_ids = [s.node_id for s in subs]
     existing = {}
     for row in (
         BinkPHoldQueue.query

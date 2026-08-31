@@ -80,15 +80,32 @@ _CMD_RE = re.compile(
 _PASSWORD_CMD_RE = re.compile(r'^\s*%PASSWORD\s+(\S+)', re.IGNORECASE | re.MULTILINE)
 
 
+_MAX_PARSED_COMMANDS = 500
+
+
 def parse_request(body):
     """Pull recognized commands out of an areafix netmail body.
 
     Returns a list of (verb, target, arg) tuples where verb is one of
     '+', '-', '%'; target is the uppercased area-tag or keyword; arg is
     an optional uppercased second token (only meaningful for '%RESCAN
-    AREA.TAG' and '%COMPRESS GZIP'/'%COMPRESS OFF') or None."""
+    AREA.TAG' and '%COMPRESS GZIP'/'%COMPRESS OFF') or None.
+
+    Real gap found in a security/performance audit: no cap on how many
+    commands a single netmail body could produce -- shared by both
+    areafix.py and filefix.py's hub-side processing, each of which does
+    a real DB round-trip per command (subscribe/unsubscribe lookups).
+    Any BinkP peer with a valid session can send netmail addressed to
+    the areafix/filefix robot; a body crafted with thousands of +/-TAG
+    lines would make a single inbound netmail do thousands of DB
+    queries in one pass. _MAX_PARSED_COMMANDS is far more than any
+    real AreaFix/FileFix session would ever need (the entire command
+    vocabulary is under 10 distinct verbs), so this only affects
+    abuse, not legitimate use."""
     cmds = []
     for line in (body or '').splitlines():
+        if len(cmds) >= _MAX_PARSED_COMMANDS:
+            break
         m = _CMD_RE.match(line)
         if not m:
             continue

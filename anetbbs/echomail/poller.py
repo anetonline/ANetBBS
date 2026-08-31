@@ -1115,6 +1115,28 @@ def _import_message(network, msg_data: dict) -> int:
         existing = EchomailMessage.query.filter_by(msg_id=msg_id, area_id=area.id).first()
         if existing:
             return 0
+    else:
+        # Real gap found in a security/performance audit: _import_netmail()
+        # already has a content-based dedup fallback (sender+subject+
+        # network within a time window) for exactly this case -- a
+        # tosser that doesn't guarantee a MSGID kludge on every post --
+        # since a peer regenerating/omitting MSGID on resend defeats the
+        # exact-match check above and causes the same message to be
+        # re-imported on EVERY poll forever. Echomail never got the
+        # equivalent, matched here per-area (msg_id dedup above is also
+        # per-area) rather than per-network, since the same subject from
+        # the same poster legitimately appears in different areas.
+        from_name = (msg_data.get('from_name') or '')[:120]
+        subject = (msg_data.get('subject') or '')[:200]
+        recent_cutoff = datetime.utcnow() - timedelta(hours=_CONTENT_DEDUP_WINDOW_HOURS)
+        content_dup = EchomailMessage.query.filter(
+            EchomailMessage.area_id == area.id,
+            EchomailMessage.from_name == from_name,
+            EchomailMessage.subject == subject,
+            EchomailMessage.created_at >= recent_cutoff,
+        ).first()
+        if content_dup:
+            return 0
 
     # CRITICAL: wrap the insert in a nested transaction (SAVEPOINT) so
     # one bad message in a 50k-batch rescan doesn't poison the whole

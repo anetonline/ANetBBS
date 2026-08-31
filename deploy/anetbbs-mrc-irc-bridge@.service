@@ -1,3 +1,11 @@
+# Reference template only -- install.sh and update.sh do not generate
+# this unit (it's an opt-in add-on, see docs/INSTALL.md section 10);
+# copy it to /etc/systemd/system/ yourself and replace every
+# `anetbbs`/`/opt/anetbbs` below with your own values if you installed
+# somewhere else -- using it as-is only matches the documented
+# defaults. ReadWritePaths= below in particular MUST match your real
+# data directory or the bridge cannot write to its database at all
+# under the filesystem sandboxing this unit applies.
 [Unit]
 Description=ANetBBS MRC ↔ IRC Bridge (id=%i)
 After=network.target anetbbs.service anetbbs-mrc-bridge.service
@@ -11,6 +19,34 @@ EnvironmentFile=/opt/anetbbs/.env
 ExecStart=/opt/anetbbs/venv/bin/python -m anetbbs.features.mrc_irc_bridge --bridge-id %i
 Restart=always
 RestartSec=10
+
+# Real gap found in a security/performance audit: this unit had none
+# of the systemd sandboxing directives its sibling units are gaining
+# elsewhere in this audit round. It's a good candidate for a strict
+# baseline -- a pure network daemon (outbound to IRC, local MRC bridge,
+# and the app DB) with no subprocess spawning and no file logging
+# (logging.basicConfig here goes to stderr, captured by the journal
+# like every other unit already), so a locked-down filesystem doesn't
+# risk breaking a door-game subprocess the way it could on the unit
+# that actually launches door games.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/anetbbs/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

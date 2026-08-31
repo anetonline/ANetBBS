@@ -94,14 +94,37 @@ def consume_quota(user, size_bytes):
     same convention as FileRatio's existing bump-before-send pattern in
     web/file_areas.py's download() route (counted at send-initiation,
     not confirmed delivery -- BinkP/ZMODEM/HTTP all lack a reliable
-    post-hoc completion signal cheap enough to gate on here)."""
-    from ..models import db
+    post-hoc completion signal cheap enough to gate on here).
+
+    Real gap found in a security/performance audit: this used to be a
+    Python-side read-then-write (`row.bytes_used_today = (row.
+    bytes_used_today or 0) + size_bytes`) -- two concurrent downloads
+    both reading the same starting value and both writing back
+    `start + their_own_size` lose one of the two increments (a classic
+    read-modify-write race), silently undercounting usage under any
+    real concurrent traffic. Rewritten as a single atomic SQL UPDATE
+    (`bytes_used_today = bytes_used_today + :size`), so the database
+    itself serializes concurrent increments instead of losing one to
+    whichever request's write lands last."""
+    from ..models import db, FileQuotaUsage
 
     if _get(user, 'is_admin', False):
         return
     user_id = _get(user, 'id')
     if user_id is None:
         return
-    row = _get_or_reset_usage_row(user_id)
-    row.bytes_used_today = (row.bytes_used_today or 0) + size_bytes
+    # Ensure the row exists (and is reset for a new day) before the
+    # atomic increment -- this part still has a benign race (two
+    # concurrent first-downloads-of-the-day could both try to create
+    # the row), but _get_or_reset_usage_row() already handles that via
+    # the DB's own unique constraint / idempotent creation, and it
+    # doesn't lose any byte-count data either way since the increment
+    # below is what actually matters.
+    _get_or_reset_usage_row(user_id)
+    today = _today_str()
+    db.session.query(FileQuotaUsage).filter_by(
+        user_id=user_id, day=today
+    ).update(
+        {FileQuotaUsage.bytes_used_today: FileQuotaUsage.bytes_used_today + size_bytes},
+        synchronize_session=False)
     db.session.commit()

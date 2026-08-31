@@ -8,6 +8,7 @@ Falls back to a hard-coded default menu if no menus are configured (so a
 fresh install still works without a sysop having to set up menus).
 """
 import logging
+import shlex
 from .bbs_ui import BBSMenuUI, _app
 from ..core.tz import fmt_eastern
 
@@ -287,10 +288,22 @@ async def _act_exec(ui, args):
             logger.exception('dropfile write failed; running without one')
 
     # Substitute simple variables in the command.
+    #
+    # Real gap found in a security/performance audit: these values used
+    # to be spliced into the shell command string raw, with no quoting.
+    # Usernames are already restricted to a safe-looking charset at
+    # registration (see auth.py's RegisterForm username Regexp), but
+    # that charset still allows spaces and apostrophes -- either one
+    # can still break a sysop-authored command template's OWN quoting
+    # (e.g. `mydoor -u '{user}'`), turning what the sysop intended as
+    # one quoted argument into multiple, or reopening a quote the
+    # template didn't expect to be reopened. shlex.quote() makes every
+    # substituted value safe to splice into ANY shell command
+    # regardless of the surrounding template's own quoting style.
     subs = {
-        '{user}':     user.get('username', ''),
-        '{userid}':   str(user.get('id', '')),
-        '{dropdir}':  drop_dir or '',
+        '{user}':     shlex.quote(user.get('username', '')),
+        '{userid}':   shlex.quote(str(user.get('id', ''))),
+        '{dropdir}':  shlex.quote(drop_dir or ''),
     }
     rendered = cmd
     for k, v in subs.items():

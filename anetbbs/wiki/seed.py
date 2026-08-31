@@ -1693,7 +1693,6 @@ These replace the banner at the top of the named menu. The menu items
 | `game_center.ans` | Game Center (top-level games menu) |
 | `door_games.ans` | Door Games list (shows installed doors) |
 | `chat.ans` | Chat Systems menu |
-| `irc_chat.ans` | IRC Chat menu |
 | `dialout.ans` | Dial Out — Visit Another BBS |
 | `sysop_users.ans` | Sysop -> Manage Users list header |
 | `sysop_boards.ans` | Sysop -> Manage Boards list header |

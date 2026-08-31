@@ -112,7 +112,28 @@ def admin_bulk_import():
             domain = (request.form.get(key) or '').strip().lower()
             if not domain:
                 continue
-            path = os.path.join(scan_dir, filename)
+            # Real gap found in a security/performance audit: `filename`
+            # (a raw POST form-field-key suffix) and `scan_dir` were
+            # joined with no traversal check at all -- a filename of
+            # "../../../etc/passwd" (or any path containing a separator)
+            # made `path` resolve outside scan_dir entirely, and
+            # imported entries become visible to EVERY logged-in user
+            # via /nodelist/ afterward, not just this admin. This route
+            # already requires is_admin, but "admin-only" isn't a
+            # reason to skip validating admin-supplied input -- an
+            # admin session compromised via XSS/CSRF could otherwise be
+            # used to exfiltrate arbitrary server file contents into a
+            # public listing. Reject anything that isn't a bare
+            # filename, and confirm the resolved path is still really
+            # inside scan_dir as defense in depth.
+            if filename != os.path.basename(filename) or filename in ('', '.', '..'):
+                errors.append(f'{filename!r}: invalid filename')
+                continue
+            scan_dir_real = os.path.realpath(scan_dir)
+            path = os.path.realpath(os.path.join(scan_dir, filename))
+            if os.path.dirname(path) != scan_dir_real:
+                errors.append(f'{filename!r}: invalid filename')
+                continue
             if not os.path.isfile(path):
                 errors.append(f'{filename}: file not found')
                 continue

@@ -173,21 +173,44 @@ def _curl_fetch_text(url, timeout=_HTTP_TIMEOUT):
     process doesn't control — validated the same way any other
     attacker-influenceable fetch target is (see core/net_safety.py):
     http(s) scheme only, and the resolved address can't be internal/
-    loopback (DNS-rebinding-able like every other check of this shape,
-    but still real defense-in-depth). `--` before the URL keeps curl
-    from ever treating a value starting with `-` as an option.
+    loopback. `--` before the URL keeps curl from ever treating a
+    value starting with `-` as an option.
+
+    Real gap found in a security/performance audit: resolve_safe_
+    destination() resolves once and validates that address, but the
+    original code then handed curl the plain `url` string -- curl
+    re-resolves the hostname ENTIRELY INDEPENDENTLY at connect time,
+    reopening the exact DNS-rebinding TOCTOU window resolve_safe_
+    destination()'s own docstring says resolving once is supposed to
+    close ("a hostname that resolves safely at check-time could
+    resolve to an internal address by connect-time"). Every OTHER
+    caller of this helper (web_terminal.py, finger.py, irc_web.py)
+    connects a raw socket directly to the resolved sockaddr, pinning
+    it -- shelling out to curl needs the equivalent: `--resolve
+    host:port:ip` pins curl's own DNS lookup for exactly this host:port
+    pair to the already-validated address, while curl still sends the
+    correct Host header and TLS SNI/cert validation against the real
+    hostname (unlike rewriting the URL to a bare IP, which would break
+    both of those). Residual, lower-priority gap: `-L` (follow
+    redirects) means a redirect to a DIFFERENT host isn't covered by
+    this single --resolve pin and would be freshly resolved at that
+    hop -- not closed here, since Gutendex is a fixed, non-attacker-
+    controlled catalog API rather than an arbitrary user-submitted URL.
     """
     parsed = urlparse(url or '')
     if parsed.scheme not in ('http', 'https') or not parsed.hostname:
         raise requests.RequestException(f'refused: not a plain http(s) URL: {url!r}')
     port = parsed.port or (443 if parsed.scheme == 'https' else 80)
-    _family, _sockaddr, ssrf_err = resolve_safe_destination(parsed.hostname, port)
+    _family, sockaddr, ssrf_err = resolve_safe_destination(parsed.hostname, port)
     if ssrf_err:
         raise requests.RequestException(f'refused: {ssrf_err}')
+    resolved_ip = sockaddr[0]
     try:
         result = subprocess.run(
             ['curl', '-sL', '--fail', '--max-time', str(timeout),
-             '-A', _USER_AGENT, '--', url],
+             '-A', _USER_AGENT,
+             '--resolve', f'{parsed.hostname}:{port}:{resolved_ip}',
+             '--', url],
             capture_output=True, timeout=timeout + 5,
         )
     except subprocess.TimeoutExpired as exc:
