@@ -355,8 +355,17 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
                              '(this message skipped, earlier ones in this '
                              'batch are unaffected)', node.packet_id)
             continue
-        area.total_messages = (area.total_messages or 0) + 1
-        area.last_message_at = datetime.utcnow()
+        # Real gap found in a security/performance audit: this was a
+        # Python-side read-then-write, the same lost-update-race shape
+        # already fixed for this exact counter in poller.py/
+        # binkp_server.py's own import paths -- reachable concurrently
+        # since a QWK hub upload can land while a BinkP session is also
+        # importing into the same EchoArea. Cosmetic display stat, not
+        # data loss, but fixed with the same atomic SQL UPDATE pattern.
+        db.session.query(EchoArea).filter_by(id=area.id).update(
+            {EchoArea.total_messages: EchoArea.total_messages + 1,
+             EchoArea.last_message_at: datetime.utcnow()},
+            synchronize_session=False)
         imported += 1
 
     if imported:

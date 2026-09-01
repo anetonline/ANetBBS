@@ -885,7 +885,58 @@ def registry_index():
                       RegistryEntry.is_approved.desc(),
                       RegistryEntry.registered_at.desc())
             .all()) if is_hub else []
-    return render_template('admin/registry.html', rows=rows, is_hub=is_hub)
+    probe_settings = {
+        'heartbeat_stale_hours': current_app.config.get('REGISTRY_HEARTBEAT_STALE_HOURS', 72),
+        'probe_interval_sec': current_app.config.get('REGISTRY_PROBE_INTERVAL_SEC', 3600),
+        'probe_failure_threshold': current_app.config.get('REGISTRY_PROBE_FAILURE_THRESHOLD', 72),
+    }
+    return render_template('admin/registry.html', rows=rows, is_hub=is_hub,
+                           probe_settings=probe_settings)
+
+
+@admin_bp.route('/registry/probe-settings', methods=['POST'])
+@login_required
+@admin_required
+def registry_probe_settings():
+    """Persist the probe/staleness tunables a sysop reported having to
+    "always go back in and re-list sites" over — previously .env-only
+    and undiscoverable from the admin UI. Also pushes into the live
+    running config so probe.py's _loop() (which now re-reads these
+    every pass, see anetbbs/msp/probe.py) picks them up on the very
+    next probe cycle with no service restart needed."""
+    def _positive_int(name, minimum=1):
+        raw = (request.form.get(name) or '').strip()
+        try:
+            val = int(raw)
+        except ValueError:
+            return None
+        return val if val >= minimum else None
+
+    stale_hours = _positive_int('heartbeat_stale_hours')
+    interval_sec = _positive_int('probe_interval_sec', minimum=60)
+    fail_threshold = _positive_int('probe_failure_threshold')
+
+    if stale_hours is None or interval_sec is None or fail_threshold is None:
+        flash('Registry probe settings not saved — all three fields must '
+              'be positive whole numbers (interval at least 60 seconds).',
+              'danger')
+        return redirect(url_for('admin.registry_index'))
+
+    env_updates = {
+        'REGISTRY_HEARTBEAT_STALE_HOURS': str(stale_hours),
+        'REGISTRY_PROBE_INTERVAL_SEC': str(interval_sec),
+        'REGISTRY_PROBE_FAILURE_THRESHOLD': str(fail_threshold),
+    }
+    try:
+        _write_env_keys(_env_path(), env_updates)
+        current_app.config['REGISTRY_HEARTBEAT_STALE_HOURS'] = stale_hours
+        current_app.config['REGISTRY_PROBE_INTERVAL_SEC'] = interval_sec
+        current_app.config['REGISTRY_PROBE_FAILURE_THRESHOLD'] = fail_threshold
+        flash('Registry probe settings saved — takes effect on the next '
+              'probe cycle, no restart needed.', 'success')
+    except Exception as exc:
+        flash(f'Registry probe settings update failed: {exc}', 'warning')
+    return redirect(url_for('admin.registry_index'))
 
 
 @admin_bp.route('/registry/<int:entry_id>/approve', methods=['POST'])

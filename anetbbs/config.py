@@ -180,12 +180,30 @@ class Config:
     # start counting against it. The probe thread itself runs every
     # REGISTRY_PROBE_INTERVAL_SEC and drops `is_listed` to false after
     # REGISTRY_PROBE_FAILURE_THRESHOLD consecutive failures.
+    #
+    # Real gap found live (2026-09-01, Jerry): SYSTAT probing is plain
+    # UDP with no retry within a single attempt -- one dropped packet
+    # (ordinary packet loss, a peer's NAT/firewall quirk) counted as a
+    # full failure, and the old defaults (3 failures x 1hr interval =
+    # ~3 hours) delisted a genuinely-healthy peer fast enough that
+    # transient network hiccups looked like real outages. probe.py's
+    # own _probe_once() DOES re-list automatically on the next
+    # successful probe -- but if a peer's UDP path is just unreliable
+    # (not actually offline), it may never get a clean probe again,
+    # needing the sysop to notice and manually re-approve/re-list.
+    # Raised to ~3 days at the default 1hr interval (matches Jerry's
+    # own "3 days or something" ask) and added a same-attempt retry in
+    # probe.py to cut down on false failures from a single lost packet
+    # in the first place. Also now editable from Admin -> Federation
+    # Registry (web/admin.py's registry_probe_settings()) instead of
+    # only via .env + a restart -- these were entirely env-var-only
+    # before, which is what "make it configurable" was asking for.
     REGISTRY_HEARTBEAT_STALE_HOURS = int(os.environ.get(
-        'REGISTRY_HEARTBEAT_STALE_HOURS', '48'))
+        'REGISTRY_HEARTBEAT_STALE_HOURS', '72'))
     REGISTRY_PROBE_INTERVAL_SEC = int(os.environ.get(
         'REGISTRY_PROBE_INTERVAL_SEC', '3600'))
     REGISTRY_PROBE_FAILURE_THRESHOLD = int(os.environ.get(
-        'REGISTRY_PROBE_FAILURE_THRESHOLD', '3'))
+        'REGISTRY_PROBE_FAILURE_THRESHOLD', '72'))
     REGISTRY_HEARTBEAT_INTERVAL_SEC = int(os.environ.get(
         'REGISTRY_HEARTBEAT_INTERVAL_SEC', '86400'))   # daily
 

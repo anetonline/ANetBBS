@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.58`** (August 2026). This file covers `v1.0.0`
+Current release: **`v1.0.59`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.59 — Echomail area-tag case fix, and federation registry probe reliability (September 2026)
+
+Fixed a live-caught echomail bug: inbound mail tagged with an area name in a different letter case than the locally configured area (e.g. `ann.test` vs. the stored `ANN.TEST`) was rejected as an unknown area and routed to the Bad Areas queue, even though the area genuinely existed. Inbound area tags are now normalized to uppercase before lookup, matching the case convention already used everywhere else area tags are stored and matched. A related lost-update race on each area's per-message counters and last-message timestamp — present in the same inbound-import code paths, plus the QWK hub's REP-packet importer — was also closed with an atomic update.
+
+Fixed two issues with the federation registry (the directory that lists and cross-links other ANetBBS hubs): a mislabeled field in the `anetbbs-cfg` terminal tool meant a sysop entering their notification address under "Sysop Email" was actually writing to an unrelated setting, leaving the real join-request notification address unset without any obvious sign of the problem — the field is now correctly labeled and the right setting has its own entry. Separately, the periodic peer health check could delist a genuinely healthy peer after a small handful of single dropped UDP probes, with no way to adjust the timing short of hand-editing `.env` and restarting the service; the health check now retries a probe a few times before counting it as failed, the default thresholds are considerably more forgiving, and the interval/failure-threshold/staleness values are now editable live from Admin → Federation Registry, taking effect immediately with no restart required.
 
 ## v1.0.58 — Third security and performance audit pass, including the MRC bridge (August 2026)
 

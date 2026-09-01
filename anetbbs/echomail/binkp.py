@@ -848,7 +848,6 @@ def _parse_ftn_packet(data: bytes):
                 head = head.strip().upper()
                 val = val.strip()
             if head == 'MSGID':
-                msg_id = val.split(' ', 1)[0] + (' ' + val.split(' ', 1)[1] if ' ' in val else '')
                 msg_id = val
             elif head in ('REPLY', 'REPLYID'):
                 reply_id = val

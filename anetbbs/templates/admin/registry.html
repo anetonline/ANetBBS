@@ -18,6 +18,38 @@
 </div>
 {% else %}
 
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <i class="bi bi-sliders"></i> Probe / Staleness Settings
+    </div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('admin.registry_probe_settings') }}" class="row g-3 align-items-end">
+            {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <div class="col-md-3">
+                <label class="form-label small">Probe interval (seconds)</label>
+                <input type="number" min="60" step="1" name="probe_interval_sec" class="form-control form-control-sm"
+                       value="{{ probe_settings.probe_interval_sec }}">
+                <small class="text-muted">How often each listed peer is SYSTAT-probed.</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Delist after this many consecutive failed probes</label>
+                <input type="number" min="1" step="1" name="probe_failure_threshold" class="form-control form-control-sm"
+                       value="{{ probe_settings.probe_failure_threshold }}">
+                <small class="text-muted">At the default interval, 72 ≈ 3 days before a peer drops off the public list.</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Heartbeat staleness (hours)</label>
+                <input type="number" min="1" step="1" name="heartbeat_stale_hours" class="form-control form-control-sm"
+                       value="{{ probe_settings.heartbeat_stale_hours }}">
+                <small class="text-muted">A peer's own daily heartbeat older than this is also treated as stale.</small>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary btn-sm">Save — takes effect immediately</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {% set pending_verify = rows | selectattr('is_verified', 'equalto', false) | list %}
 {% set pending_approve = rows | selectattr('is_verified', 'equalto', true) | selectattr('is_approved', 'equalto', false) | list %}
 {% set listed = rows | selectattr('is_listed', 'equalto', true) | list %}

@@ -95,5 +95,54 @@ class EnvRoundTripTests(unittest.TestCase):
         self.assertEqual(cfg_system._to_env_value("int", 2233), "2233")
 
 
+class SysopEmailFieldLabelingTests(unittest.TestCase):
+    """Regression test for a real live bug reported by Jerry (2026-09-01):
+    this tool's "Sysop Email" field actually wrote BBS_EMAIL -- a
+    completely different, unrelated variable (door_runner.py overwrites
+    it per-session with whichever PLAYER's email is running a door) --
+    while SYSOP_EMAIL, the variable the federation registry's join-
+    request notification actually reads, had no field here at all. Jerry
+    set "Sysop Email" here expecting it to control registry
+    notifications; it didn't, and he never got notified when a peer
+    wanted to join. Fixed by relabeling BBS_EMAIL accurately and adding
+    a real, clearly-labeled SYSOP_EMAIL field."""
+
+    def _all_fields(self):
+        fields = []
+        for group in cfg_system.GROUPS:
+            fields.extend(group["fields"])
+        return fields
+
+    def _field_by_key(self, key):
+        for f in self._all_fields():
+            if f["key"] == key:
+                return f
+        return None
+
+    def test_sysop_email_field_exists_and_maps_to_the_real_env_key(self):
+        field = self._field_by_key("SYSOP_EMAIL")
+        self.assertIsNotNone(
+            field, "SYSOP_EMAIL -- the key registry.py's verify() and "
+            "msp/registry_client.py actually read for sysop "
+            "notifications/self-registration contact info -- must have "
+            "its own field in this tool")
+        self.assertEqual(field["kind"], "text")
+
+    def test_bbs_email_field_is_no_longer_mislabeled_as_sysop_email(self):
+        field = self._field_by_key("BBS_EMAIL")
+        self.assertIsNotNone(field)
+        self.assertNotEqual(
+            field["label"], "Sysop Email",
+            "BBS_EMAIL must not be labeled \"Sysop Email\" -- it is a "
+            "completely different variable (per-session player-email "
+            "passthrough to door games), and that exact mislabeling is "
+            "what caused Jerry to configure the wrong field expecting "
+            "it to control registry join-request notifications")
+
+    def test_sysop_email_field_is_not_itself_mislabeled_as_bbs_email(self):
+        field = self._field_by_key("SYSOP_EMAIL")
+        self.assertNotIn("BBS", field["label"])
+
+
 if __name__ == "__main__":
     unittest.main()

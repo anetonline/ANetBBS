@@ -1037,6 +1037,22 @@ def _import_message(network, msg_data: dict) -> int:
     if not area_tag:
         return _import_netmail(network, msg_data)
 
+    # Real live bug reported: a peer/tosser that ships the AREA: kludge
+    # lowercase (or mixed-case) -- 'ann.test' instead of 'ANN.TEST' --
+    # failed this area's lookup entirely and got dropped to BadAreaLog
+    # as "unknown", even though the area obviously exists under its
+    # uppercase tag. FTS-0004 area tags are conventionally uppercase,
+    # and every OTHER place in this codebase that matches a tag against
+    # EchoArea.tag already normalizes to upper() before comparing (see
+    # areafix.py/filefix.py's area_map construction, and
+    # echomail_admin.py's own tag=tag.upper() on create) -- this was
+    # the one inbound-import path that still did a raw, case-sensitive
+    # comparison. Uppercasing here, once, at the point area_tag first
+    # enters this function, fixes the main EchoArea lookup below AND
+    # the BadAreaLog dedup in _record_bad_area() in one place, since
+    # every later use in this function reads from this same variable.
+    area_tag = area_tag.strip().upper()
+
     # ----------------- Echomail -----------------
     # NO PATH-based loop detection on import. The old check rejected any
     # message whose PATH contained our address — but Mystic (and every
@@ -1178,8 +1194,24 @@ def _import_message(network, msg_data: dict) -> int:
             db.session.flush()
             # Update area stats — also inside the savepoint so failure
             # rolls these back too (no orphaned counter increment).
-            area.total_messages = (area.total_messages or 0) + 1
-            area.last_message_at = datetime.utcnow()
+            #
+            # Real gap found in a security/performance audit: this used
+            # to be a Python-side read-then-write
+            # (`area.total_messages = (area.total_messages or 0) + 1`)
+            # -- the same lost-update-race shape already fixed this
+            # audit round for FileRatio/file_quota counters, except this
+            # one is reachable from TWO independent, genuinely
+            # concurrent code paths hitting the SAME EchoArea row: this
+            # outbound-poll import and binkp_server.py's own inbound-
+            # listener import (a downstream node or upstream hub can
+            # dial IN at any time, including while a scheduled/manual
+            # outbound poll of that same network is also running). A
+            # cosmetic display stat, not data loss, but free to fix with
+            # the same atomic SQL UPDATE pattern already established.
+            db.session.query(EchoArea).filter_by(id=area.id).update(
+                {EchoArea.total_messages: EchoArea.total_messages + 1,
+                 EchoArea.last_message_at: datetime.utcnow()},
+                synchronize_session=False)
     except Exception as exc:
         # Savepoint already rolled back; outer session is still valid.
         logger.warning(

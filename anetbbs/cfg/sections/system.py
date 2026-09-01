@@ -50,7 +50,26 @@ GROUPS = [
         {"key": "BBS_DOMAIN", "label": "Public Domain", "kind": "text"},
         {"key": "BBS_PUBLIC_HOST", "label": "Public Hostname Override", "kind": "text"},
         {"key": "SYSOP_NAME", "label": "Sysop Name", "kind": "text"},
-        {"key": "BBS_EMAIL", "label": "Sysop Email", "kind": "text"},
+        # Real gap found live (2026-09-01): this field was labeled
+        # "Sysop Email" but actually writes BBS_EMAIL, a completely
+        # different, unrelated variable -- door_runner.py overwrites it
+        # per-session with whichever PLAYER's own email is running a
+        # door (games/synchronet_compat.py, games/mystic_compat.py
+        # read it back as "the current user's email" for legacy door
+        # compat), so a static value set here only matters as a
+        # fallback before any door session ever runs. SYSOP_EMAIL (the
+        # actual sysop notification address -- federation join-request
+        # alerts, registry self-registration contact info) was only
+        # ever exposed in the web setup wizard's Federation section,
+        # framed entirely around registering WITH someone else's hub --
+        # invisible to a sysop who already IS the hub and has no reason
+        # to go near that section, even though the same field also
+        # controls where their own incoming join-request notifications
+        # land. Relabeled BBS_EMAIL accurately and added a real,
+        # clearly-labeled SYSOP_EMAIL field here so a hub admin can set
+        # it without hand-editing .env or stumbling into the wizard.
+        {"key": "BBS_EMAIL", "label": "Door Contact Email (per-play fallback)", "kind": "text"},
+        {"key": "SYSOP_EMAIL", "label": "Sysop Notification Email", "kind": "text"},
         {"key": "BBS_LOCATION", "label": "Location", "kind": "text"},
         {"key": "BBS_NODES", "label": "Concurrent Nodes (1-100)", "kind": "int"},
         {"key": "IDLE_TIMEOUT_SECONDS", "label": "Idle Kick (seconds, 0=never)", "kind": "int"},

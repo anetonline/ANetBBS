@@ -14,8 +14,11 @@ columns and feeds the staleness logic:
 This runs in a daemon thread inside the hub's anetbbs-web.service
 (gunicorn) process, NOT the asyncio terminal-server process. Probing is
 synchronous-blocking (one peer at a time) but UDP-only, so per-peer
-latency is at worst the 5s timeout. With a 1-hour interval and tens of
-peers that's fine — anything bigger would need an async/parallel rewrite.
+latency is at worst a few times the 5s timeout (a few quick retries
+happen within one probe, see _probe_with_retries() -- UDP has no
+delivery guarantee, so a single lost packet shouldn't count as a real
+failure). With a 1-hour interval and tens of peers that's fine --
+anything bigger would need an async/parallel rewrite.
 """
 import logging
 import threading
@@ -45,7 +48,7 @@ def start_probe_thread(app):
     _thread.start()
     logger.info('Registry: SYSTAT prober started (interval=%ds, fail-threshold=%d)',
                 app.config.get('REGISTRY_PROBE_INTERVAL_SEC', 3600),
-                app.config.get('REGISTRY_PROBE_FAILURE_THRESHOLD', 3))
+                app.config.get('REGISTRY_PROBE_FAILURE_THRESHOLD', 72))
 
 
 def stop_probe_thread():
@@ -55,10 +58,15 @@ def stop_probe_thread():
 def _loop(app):
     from ..models import db, RegistryEntry
 
-    interval = app.config.get('REGISTRY_PROBE_INTERVAL_SEC', 3600)
-    fail_threshold = app.config.get('REGISTRY_PROBE_FAILURE_THRESHOLD', 3)
-
     while not _stop.is_set():
+        # Real gap found live: these used to be read ONCE at thread
+        # start and cached for the process lifetime, so a sysop
+        # changing them via Admin -> Federation Registry had no effect
+        # until the whole web service restarted. Re-read fresh every
+        # pass instead -- a live settings change now takes effect on
+        # the very next probe cycle.
+        interval = app.config.get('REGISTRY_PROBE_INTERVAL_SEC', 3600)
+        fail_threshold = app.config.get('REGISTRY_PROBE_FAILURE_THRESHOLD', 72)
         try:
             _probe_once(app, db, RegistryEntry, fail_threshold)
         except Exception:
@@ -68,6 +76,26 @@ def _loop(app):
         while slept < interval and not _stop.is_set():
             time.sleep(min(5, interval - slept))
             slept += 5
+
+
+# Real gap found live: query_systat() is a single unacknowledged UDP
+# datagram with no retry at all -- one lost packet (ordinary loss, not
+# the peer actually being down) counted as a full probe failure. A few
+# quick retries within the SAME probe pass costs almost nothing (UDP
+# round-trips on a healthy path are sub-second) and turns "one lost
+# packet" back into what it actually is -- noise, not a real failure.
+_PROBE_RETRIES = 3
+_PROBE_RETRY_DELAY_SEC = 1.5
+
+
+def _probe_with_retries(host, port):
+    """True if ANY of a few quick attempts gets a real SYSTAT reply."""
+    for attempt in range(_PROBE_RETRIES):
+        if query_systat(host, port, timeout=5.0):
+            return True
+        if attempt < _PROBE_RETRIES - 1:
+            time.sleep(_PROBE_RETRY_DELAY_SEC)
+    return False
 
 
 def _probe_once(app, db, RegistryEntry, fail_threshold):
@@ -85,8 +113,7 @@ def _probe_once(app, db, RegistryEntry, fail_threshold):
                         RegistryEntry.is_active.is_(True))
                 .all())
         for entry in rows:
-            ok = bool(query_systat(entry.host, entry.systat_port or 11,
-                                   timeout=5.0))
+            ok = _probe_with_retries(entry.host, entry.systat_port or 11)
             entry.last_probe_at = datetime.utcnow()
             entry.last_probe_ok = ok
             if ok:

@@ -1903,6 +1903,18 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
         path_json = json.dumps(m.get('path') or []) if m.get('path') else None
         chrs = find_kludge(kludges, 'CHRS') or 'CP437 2'
 
+        # Real live bug reported: a peer/tosser that ships the AREA:
+        # kludge lowercase (or mixed-case) -- 'ann.test' instead of
+        # 'ANN.TEST' -- failed the EchoArea lookup below entirely and
+        # got dropped to BadAreaLog as "unknown", even though the area
+        # obviously exists under its uppercase tag. Same fix as
+        # poller.py's _import_message() (the outbound-poll receive
+        # path) -- see its own comment for why uppercase is the right
+        # normalization to match (FTS-0004 convention, and every other
+        # place in this codebase that matches a tag against
+        # EchoArea.tag already does this).
+        m['area_tag'] = (m['area_tag'] or '').strip().upper() or None
+
         if m['area_tag']:
             if network_id is None:
                 # Anonymous/unrecognized peer -- echomail requires real
@@ -1994,8 +2006,22 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # accurate "Messages" and "Last Activity" columns. The QWK
             # poller does this in poller.py — the listener path was missing
             # it, leading to "0 messages" on areas that had real content.
-            area.total_messages = (area.total_messages or 0) + 1
-            area.last_message_at = datetime.utcnow()
+            #
+            # Real gap found in a security/performance audit: this used
+            # to be a Python-side read-then-write, the same lost-update-
+            # race shape already fixed for FileRatio/file_quota counters
+            # -- and this one is reachable from TWO genuinely concurrent
+            # code paths hitting the SAME EchoArea row: this inbound-
+            # listener session and poller.py's own outbound-poll import
+            # (a scheduled/manual poll of the same network can run
+            # while a peer is also dialing IN). Cosmetic display stat,
+            # not data loss, but free to fix with the same atomic SQL
+            # UPDATE pattern already established. See poller.py's own
+            # _import_message() for the matching fix.
+            db.session.query(EchoArea).filter_by(id=area.id).update(
+                {EchoArea.total_messages: EchoArea.total_messages + 1,
+                 EchoArea.last_message_at: datetime.utcnow()},
+                synchronize_session=False)
         else:
             # NETMAIL — point-to-point
             msgid = find_kludge(kludges, 'MSGID')
