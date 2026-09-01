@@ -2977,6 +2977,36 @@ def _create_default_data():
             db.session.add(Game(**kw))
     db.session.commit()
 
+    # Real live bug found (2026-09-01, reported by Jerry): the bundled
+    # "A-Net Game Server" row (slug a-net-game-server, in BUNDLED_DOORS
+    # above) is re-created here with a FRESH, never-coordinated random
+    # password/tag whenever it's missing -- including right after a
+    # sysop deletes it because they'd already configured their OWN
+    # A-Net Game Server entry under a different slug before this
+    # bundled row ever existed. The next service restart silently
+    # resurrected it, active by default, which
+    # anet_game_import.py's base_server_credentials() then either
+    # flagged as a second, ambiguous candidate, or -- worse, if the
+    # sysop's own entry were ever deactivated -- would have silently
+    # used as THE candidate, applying throwaway credentials nobody
+    # configured to every game the bulk-import tool creates. Self-
+    # correct the same way the ANetDarkForces block below handles a
+    # similar "shouldn't silently be active" case: if a DIFFERENT
+    # active door_rlogin game is already pointed at the real A-Net
+    # Online host, this bundled row must never be the active one.
+    from .features.anet_game_import import _ANET_HOST_MARKER as _anet_host_marker
+    _anet_bundled = Game.query.filter_by(slug='a-net-game-server').first()
+    if _anet_bundled is not None and _anet_bundled.is_active:
+        _other_active_anet = (
+            Game.query
+            .filter(Game.slug != 'a-net-game-server')
+            .filter_by(game_type='door_rlogin', is_active=True)
+            .filter(Game.executable_path.ilike(f'%{_anet_host_marker}%'))
+            .first())
+        if _other_active_anet is not None:
+            _anet_bundled.is_active = False
+            db.session.commit()
+
     # ANetDarkForces (Terminal) was removed from BUNDLED_DOORS above (see
     # its comment) -- so it's simply never seeded on a fresh install, but
     # an install that already has the row from a prior release (v1.0b2.

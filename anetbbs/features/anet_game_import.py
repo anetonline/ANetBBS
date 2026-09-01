@@ -145,30 +145,93 @@ def build_game_kwargs(game, category_slug, host_port, password, bbs_tag,
     }
 
 
-def base_server_credentials():
-    """Read host/password/tag off the bundled 'A-Net Game Server' Game
-    row (slug a-net-game-server) so every imported game reuses the
-    exact same already-configured remote-server identity -- no new
-    credentials for the sysop to enter. Returns
-    (host_port, password, bbs_tag) or raises AnetGameImportError if
-    that row is missing/misconfigured (should not happen on a normal
-    install -- it's bundled and active by default)."""
-    from ..models import Game
-    base = Game.query.filter_by(slug='a-net-game-server').first()
-    if base is None:
-        raise AnetGameImportError(
-            "The bundled \"A-Net Game Server\" game (slug "
-            "a-net-game-server) wasn't found -- configure that first "
-            "at Admin → Door Games, then try the import again.")
-    host_port = (base.executable_path or '').strip()
-    args = (base.command_line_args or '').strip()
+_ANET_HOST_MARKER = 'a-net-online.lol'
+
+
+def _extract_credentials(game):
+    """(host_port, password, bbs_tag) for one Game row, or None if it's
+    missing a server address or password (not usable as a credential
+    source)."""
+    host_port = (game.executable_path or '').strip()
+    args = (game.command_line_args or '').strip()
     # command_line_args is '<user template> <password> [terminal]' --
     # the password is always the second whitespace-separated token.
     parts = args.split()
     password = parts[1] if len(parts) >= 2 else ''
     if not host_port or not password:
+        return None
+    return host_port, password, (game.rlogin_bbs_tag or '').strip()
+
+
+def base_server_credentials():
+    """Find the sysop's real, ACTIVE A-Net Game Server credentials --
+    host/password/BBS-tag -- so every imported game reuses the exact
+    same already-configured remote-server identity, no new credentials
+    for the sysop to enter.
+
+    Real live bug found (2026-09-01, reported by Jerry): this used to
+    hard-lookup Game.slug == 'a-net-game-server' -- the BUNDLED seed
+    row's slug specifically. A sysop who had already added their own
+    A-Net Game Server entry (a different slug) before that bundled row
+    ever existed, and then left the later-added bundled row inactive
+    rather than deleting it, got the bundled row's own random,
+    never-actually-used credentials (generated once, the first time it
+    was seeded, and never touched since) silently copied onto every
+    single imported game instead of their real, active configuration --
+    450+ games created with the wrong password and BBS tag in one shot.
+
+    Fixed to require ACTIVE door_rlogin game(s) pointed at the real
+    A-Net Online host, found by content rather than by a specific
+    hardcoded slug. A sysop can legitimately have MANY such rows --
+    Jerry's own real setup has one general "A-Net Game Server" browse-
+    menu entry plus over a dozen of his own hand-added direct-to-door
+    entries (one per game, each carrying the same shared per-BBS
+    password/tag) -- so more than one active match is only treated as
+    a genuine, unresolvable ambiguity if they DISAGREE on host/
+    password/tag. When every active candidate agrees, that shared
+    value is exactly what should be reused; only conflicting values
+    mean this can't safely guess.
+
+    Returns (host_port, password, bbs_tag) or raises
+    AnetGameImportError if no usable, unambiguous value can be found.
+    """
+    from ..models import Game
+    candidates = (Game.query
+                  .filter_by(game_type='door_rlogin', is_active=True)
+                  .filter(Game.executable_path.ilike(f'%{_ANET_HOST_MARKER}%'))
+                  # Exclude games this same import tool already created
+                  # (slug_for_code()'s own 'anet-' prefix) -- every one
+                  # of those is ALSO an active door_rlogin pointed at
+                  # this same host, so without this exclusion, running
+                  # the import a second time always finds more than one
+                  # match (the real config entry PLUS every previously-
+                  # imported game) and wrongly reports ambiguity.
+                  .filter(~Game.slug.like('anet-%'))
+                  .order_by(Game.id)
+                  .all())
+    if not candidates:
         raise AnetGameImportError(
-            'The bundled "A-Net Game Server" game is missing its '
-            'server address or password -- check its configuration at '
-            'Admin → Door Games before importing.')
-    return host_port, password, (base.rlogin_bbs_tag or '').strip()
+            'No active door_rlogin game pointed at your A-Net Game '
+            'Server was found -- configure (and activate) it first at '
+            'Admin → Door Games, then try the import again.')
+
+    usable = [(g, _extract_credentials(g)) for g in candidates]
+    usable = [(g, creds) for g, creds in usable if creds is not None]
+    if not usable:
+        raise AnetGameImportError(
+            'None of your active door_rlogin games pointed at A-Net '
+            'Online have both a server address and a password set -- '
+            'check their configuration at Admin → Door Games before '
+            'importing.')
+
+    distinct_creds = {creds for _, creds in usable}
+    if len(distinct_creds) > 1:
+        names = ', '.join(f'"{g.name}" (slug {g.slug})' for g, _ in usable)
+        raise AnetGameImportError(
+            f'Found {len(usable)} active door_rlogin games pointed at '
+            f'A-Net Online with DIFFERENT server/password/tag values, '
+            f'so it is not safe to guess which one is correct: {names}. '
+            f'Deactivate the one(s) you are not using, then try the '
+            f'import again.')
+
+    return next(iter(distinct_creds))

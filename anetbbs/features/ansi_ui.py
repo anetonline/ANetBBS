@@ -95,6 +95,18 @@ def ui_width(session) -> int:
     return max(64, min(131, cols - 1))
 
 
+def ui_height(session) -> int:
+    """Return the terminal's row count, clamped to [10, 100] so a caller
+    computing a page size never has to guard against a tiny/absurd
+    value. Real live bug found (2026-09-01, reported by Jerry): a
+    category with 100+ door games dumped every single one onto one
+    unpaginated screen -- fine on a resizable client with real
+    scrollback, but genuinely unusable on a fixed-height terminal.
+    Callers that paginate a list should size each page off this."""
+    rows = getattr(session, 'window_size', (80, 24))[1]
+    return max(10, min(100, rows))
+
+
 def load_menu_ansi(slot: str, mode: str = 'ansi'):
     """Return raw bytes for a menu art file, or None if nothing is found.
 

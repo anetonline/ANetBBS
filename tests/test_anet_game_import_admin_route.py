@@ -223,7 +223,39 @@ class AnetImportAdminRouteTests(unittest.TestCase):
                            data={'cat_arcade': '__new__'},
                            follow_redirects=True)
         self.assertEqual(r.status_code, 200)
-        self.assertIn(b'a-net-game-server', r.data)
+        self.assertIn(b'No active', r.data)
+        with app.app_context():
+            self.assertIsNone(Game.query.filter_by(slug='anet-lord408').first())
+
+    def test_post_with_only_an_inactive_base_server_shows_clear_error(self):
+        """Direct regression test for the real live bug (2026-09-01):
+        an inactive bundled a-net-game-server row must never be usable
+        as the credential source, even when it's the only door_rlogin
+        row pointed at the real host -- it must be treated exactly
+        like "missing", not silently used."""
+        app = _make_app(str(Path(self._tmp.name) / 'f2.db'))
+        client = app.test_client()
+        self._login_as_admin(app, client)
+        from anetbbs.models import db, Game
+        with app.app_context():
+            game = Game.query.filter_by(slug='a-net-game-server').first()
+            if game is None:
+                game = Game(name='A-Net Game Server', slug='a-net-game-server',
+                           game_type='door_rlogin')
+                db.session.add(game)
+            game.is_active = False
+            game.executable_path = 'game.a-net-online.lol:513'
+            game.command_line_args = '@USER@ neverUsedPassword'
+            game.rlogin_bbs_tag = 'TBIG'
+            db.session.commit()
+
+        with patch('anetbbs.features.anet_game_import.scrape_games',
+                   return_value=_FAKE_GAMES):
+            r = client.post('/admin/games/anet-import',
+                           data={'cat_arcade': '__new__'},
+                           follow_redirects=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'No active', r.data)
         with app.app_context():
             self.assertIsNone(Game.query.filter_by(slug='anet-lord408').first())
 

@@ -156,6 +156,65 @@ class AnetGameServerSeedTests(unittest.TestCase):
         self.assertNotEqual(tag_a, tag_b,
             'two separate installs should not end up with the same BBS tag')
 
+    def test_bundled_row_self_deactivates_when_a_different_active_anet_game_exists(self):
+        """Direct regression test for a real live bug reported by
+        Jerry (2026-09-01): he'd added his own A-Net Game Server entry
+        (different slug) before the bundled row ever existed, then
+        deleted the later-added bundled row once he found it was
+        wrong. The NEXT app boot's seed loop silently resurrected it
+        -- active by default, with a brand new random password/tag --
+        which anet_game_import.py's base_server_credentials() then
+        either flagged as ambiguous or, worse, could have used
+        outright if his real entry were ever deactivated. The bundled
+        row must self-correct to inactive whenever a different active
+        door_rlogin game is already pointed at the real host, exactly
+        like the ANetDarkForces block below handles its own "must not
+        silently stay active" case."""
+        app = _fresh_app(str(Path(self._tmp.name) / 'f.db'))
+        from anetbbs.models import db, Game
+        from anetbbs.web_app import _create_default_data
+
+        with app.app_context():
+            db.create_all()
+            # Sysop's own, pre-existing, real config -- different slug,
+            # already active, created before the bundled seed ever ran.
+            db.session.add(Game(
+                name='My Real A-Net Games', slug='my-real-anet-games',
+                game_type='door_rlogin', is_active=True,
+                executable_path='game.a-net-online.lol:513',
+                command_line_args='@USER@ RealPassword999'))
+            db.session.commit()
+
+            # First boot: bundled row gets created fresh (simulating
+            # the sysop having deleted a stale one previously).
+            _create_default_data()
+            bundled = Game.query.filter_by(slug='a-net-game-server').first()
+            self.assertIsNotNone(bundled)
+            self.assertFalse(
+                bundled.is_active,
+                'the bundled row must self-deactivate, not stay active '
+                'and become a second candidate/silent credential source')
+
+            real = Game.query.filter_by(slug='my-real-anet-games').first()
+            self.assertTrue(real.is_active,
+                            "the sysop's own real entry must be untouched")
+
+    def test_bundled_row_stays_active_when_it_is_the_only_anet_game(self):
+        """Sanity check the fix above doesn't over-correct: on a
+        normal install with no separate sysop-added entry, the bundled
+        row is the only door_rlogin pointed at A-Net Online and must
+        stay active exactly as before."""
+        app = _fresh_app(str(Path(self._tmp.name) / 'g.db'))
+        from anetbbs.models import db, Game
+        from anetbbs.web_app import _create_default_data
+
+        with app.app_context():
+            db.create_all()
+            _create_default_data()
+            bundled = Game.query.filter_by(slug='a-net-game-server').first()
+            self.assertIsNotNone(bundled)
+            self.assertTrue(bundled.is_active)
+
     def test_other_bundled_doors_still_default_to_max_nodes_one(self):
         # Regression guard for the setdefault() fix -- confirms it didn't
         # accidentally change behavior for doors that rely on the

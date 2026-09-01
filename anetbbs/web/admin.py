@@ -11,6 +11,8 @@ from wtforms import StringField, TextAreaField, SubmitField, BooleanField, Passw
 from wtforms.validators import DataRequired, Length, Optional, ValidationError, NumberRange
 from flask_wtf import FlaskForm
 
+from sqlalchemy.exc import IntegrityError
+
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Board, Post, Message, Theme, UserSession,
                        UserActivity, RegistrationAttempt, PasswordResetToken,
@@ -533,9 +535,37 @@ def delete_user(user_id):
         return redirect(url_for('admin.users'))
 
     if request.method == 'POST':
-        db.session.delete(user)
-        db.session.commit()
-        flash(f'User {user.username} deleted.', 'success')
+        username = user.username
+        # Real live bug reported by Jerry (2026-09-01): "Internal Server
+        # Error... I just tried to delete a user and got this." Root
+        # cause: User has 50+ NOT NULL foreign keys pointing at it
+        # across the schema (GameSession.user_id, PrivateMessage.
+        # sender_id, etc.) with no cascade configured on most of them --
+        # SQLAlchemy's default behavior on parent delete is to try to
+        # NULL each child's FK column, which a NOT NULL column
+        # naturally rejects at the database level, surfacing as an
+        # unhandled IntegrityError -> raw 500 for ANY user with real
+        # activity (a fresh, never-used account has nothing to collide
+        # with, which is why this was easy to miss testing). A full,
+        # correct fix means deciding real per-table data-retention
+        # semantics (should a user's PMs survive for the other party?
+        # should their posts get reassigned to a "deleted user"
+        # placeholder or removed?) -- a genuine design decision, not
+        # something to guess at under a live-bug banner. This closes
+        # the crash itself: catch the failure, roll back cleanly, and
+        # point the sysop at the existing, already-working alternative
+        # (ban/deactivate) instead of a raw error page.
+        try:
+            db.session.delete(user)
+            db.session.commit()
+            flash(f'User {username} deleted.', 'success')
+        except IntegrityError:
+            db.session.rollback()
+            flash(f'Could not delete {username} — they have related '
+                 f'records (games played, messages, posts, etc.) that '
+                 f'block deletion. Use Ban/Deactivate instead, which '
+                 f'disables the account without needing to remove its '
+                 f'history.', 'danger')
         return redirect(url_for('admin.users'))
 
     return render_template('admin/confirm_delete.html',
@@ -580,10 +610,27 @@ def bulk_users():
     users = [u for u in users if u.id != current_user.id]
 
     if action == 'delete':
+        # Same IntegrityError-on-NOT-NULL-FK gap as delete_user() above
+        # -- per-user commit so one blocked account (real activity data)
+        # doesn't also roll back the deletion of every OTHER selected
+        # user who happened to be safely deletable.
+        deleted = 0
+        blocked = []
         for user in users:
-            db.session.delete(user)
-        db.session.commit()
-        flash(f'Deleted {len(users)} users.', 'success')
+            try:
+                db.session.delete(user)
+                db.session.commit()
+                deleted += 1
+            except IntegrityError:
+                db.session.rollback()
+                blocked.append(user.username)
+        if deleted:
+            flash(f'Deleted {deleted} user(s).', 'success')
+        if blocked:
+            flash(f'Could not delete {len(blocked)} user(s) with related '
+                 f'records (games played, messages, etc.): '
+                 f'{", ".join(blocked)}. Use Ban/Deactivate instead.',
+                 'danger')
     elif action == 'ban':
         for user in users:
             user.is_active = False

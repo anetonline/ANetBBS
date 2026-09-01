@@ -190,7 +190,22 @@
 
     term.onData(function (data) {
         if (sessionId !== null) {
-            socket.emit('game_input', { session_id: sessionId, input: data });
+            // Real live bug reported by Jerry (2026-09-01): "the delete
+            // key is not working... I tried to backspace to make a
+            // spelling correction and it does nothing." xterm.js sends
+            // DEL (0x7f) for the Backspace key by default -- classic BBS
+            // door software (Synchronet, Mystic, most native doors, and
+            // remote rlogin/telnet game servers like A-Net Online's) was
+            // written for the traditional BS (0x08) convention instead,
+            // same as what a real terminal client (SyncTerm, etc.)
+            // normally sends. ANetBBS's own telnet/SSH terminal client
+            // already treats BOTH bytes as backspace when reading from
+            // the user (see core/session.py's is_backspace checks) --
+            // this is the same normalization applied on the way OUT to
+            // whatever's actually running the door, which doesn't get
+            // that same defensive either-or treatment.
+            var out = data.replace(/\x7f/g, '\x08');
+            socket.emit('game_input', { session_id: sessionId, input: out });
         }
     });
 

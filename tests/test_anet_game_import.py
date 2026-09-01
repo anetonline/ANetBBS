@@ -206,34 +206,33 @@ class BaseServerCredentialsTests(unittest.TestCase):
         self.addCleanup(self._ctx.pop)
         db.create_all()
 
-    def test_missing_bundled_row_raises_clear_error(self):
-        # a-net-game-server is itself one of web_app.py's bundled-door
-        # seed slugs (create_app() seeds it automatically on a fresh
-        # DB) -- delete it first rather than assuming a fresh DB has
-        # no such row, per the bundled-door-slug test-collision trap
-        # (see the anetbbs-release skill).
+    def _clear_bundled_seed_row(self):
+        """a-net-game-server is one of web_app.py's bundled-door seed
+        slugs (create_app() seeds it automatically on a fresh DB) --
+        remove it so each test starts from a clean slate, per the
+        bundled-door-slug test-collision trap (see the anetbbs-release
+        skill)."""
         from anetbbs.models import db, Game
         existing = Game.query.filter_by(slug='a-net-game-server').first()
         if existing is not None:
             db.session.delete(existing)
             db.session.commit()
+
+    def test_no_active_anet_game_raises_clear_error(self):
+        self._clear_bundled_seed_row()
         with self.assertRaises(AnetGameImportError) as cm:
             base_server_credentials()
-        self.assertIn('a-net-game-server', str(cm.exception))
+        self.assertIn('No active', str(cm.exception))
 
-    def test_reads_host_password_and_tag_from_bundled_row(self):
-        # a-net-game-server is a bundled slug -- query-or-update the
-        # already-seeded row instead of blind-inserting a duplicate
-        # (would UNIQUE-constraint-fail whenever the seed already ran).
+    def test_reads_host_password_and_tag_from_the_one_active_match(self):
+        self._clear_bundled_seed_row()
         from anetbbs.models import db, Game
-        game = Game.query.filter_by(slug='a-net-game-server').first()
-        if game is None:
-            game = Game(name='A-Net Game Server', slug='a-net-game-server',
-                       game_type='door_rlogin')
-            db.session.add(game)
-        game.executable_path = 'game.a-net-online.lol:513'
-        game.command_line_args = '@USER@ mySecretPass123'
-        game.rlogin_bbs_tag = 'ANET'
+        db.session.add(Game(
+            name='My Real Game Server', slug='my-real-anet-server',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@ mySecretPass123',
+            rlogin_bbs_tag='ANET'))
         db.session.commit()
         host_port, password, tag = base_server_credentials()
         self.assertEqual(host_port, 'game.a-net-online.lol:513')
@@ -241,17 +240,135 @@ class BaseServerCredentialsTests(unittest.TestCase):
         self.assertEqual(tag, 'ANET')
 
     def test_missing_password_in_command_line_args_raises(self):
+        self._clear_bundled_seed_row()
         from anetbbs.models import db, Game
-        game = Game.query.filter_by(slug='a-net-game-server').first()
-        if game is None:
-            game = Game(name='A-Net Game Server', slug='a-net-game-server',
-                       game_type='door_rlogin')
-            db.session.add(game)
-        game.executable_path = 'game.a-net-online.lol:513'
-        game.command_line_args = '@USER@'  # no password token
+        db.session.add(Game(
+            name='My Real Game Server', slug='my-real-anet-server',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@'))  # no password token
         db.session.commit()
         with self.assertRaises(AnetGameImportError):
             base_server_credentials()
+
+    def test_an_inactive_row_is_never_used_even_if_it_is_the_only_one(self):
+        """Direct regression test for the real live bug reported by
+        Jerry (2026-09-01): a sysop who added their own A-Net Game
+        Server entry, under a DIFFERENT slug, before the bundled
+        a-net-game-server row ever existed, and later left the bundled
+        row inactive rather than deleting it -- the old code did
+        `Game.query.filter_by(slug='a-net-game-server').first()`,
+        finding the inactive BUNDLED row (with its own random,
+        never-actually-used auto-generated password/tag) regardless of
+        is_active, and silently copied those wrong credentials onto
+        every single imported game. An inactive row, bundled slug or
+        not, must never be usable as the credential source."""
+        from anetbbs.models import db, Game
+        bundled = Game.query.filter_by(slug='a-net-game-server').first()
+        if bundled is None:
+            bundled = Game(name='A-Net Game Server', slug='a-net-game-server',
+                          game_type='door_rlogin')
+            db.session.add(bundled)
+        bundled.is_active = False
+        bundled.executable_path = 'game.a-net-online.lol:513'
+        bundled.command_line_args = '@USER@ neverActuallyUsedPassword'
+        bundled.rlogin_bbs_tag = 'TBIG'
+        db.session.commit()
+
+        with self.assertRaises(AnetGameImportError) as cm:
+            base_server_credentials()
+        self.assertIn('No active', str(cm.exception))
+
+    def test_two_active_matches_raises_an_ambiguity_error_instead_of_guessing(self):
+        """The other half of the same bug class: even when both
+        candidates are active, silently picking one (by slug, by id,
+        by whatever) is exactly the kind of guess that caused the
+        original bug. Must fail loudly and name both candidates so the
+        sysop can deactivate the one they don't want, instead of
+        silently using the wrong one."""
+        # Deliberately NOT slugged 'anet-*' -- that prefix is reserved
+        # for games THIS tool creates (see slug_for_code()) and is
+        # excluded from candidate matching for exactly that reason
+        # (see the idempotent-rerun regression this excludes).
+        self._clear_bundled_seed_row()
+        from anetbbs.models import db, Game
+        db.session.add(Game(
+            name='First Server', slug='my-first-server',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@ pass1'))
+        db.session.add(Game(
+            name='Second Server', slug='my-second-server',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@ pass2'))
+        db.session.commit()
+
+        with self.assertRaises(AnetGameImportError) as cm:
+            base_server_credentials()
+        msg = str(cm.exception)
+        self.assertIn('my-first-server', msg)
+        self.assertIn('my-second-server', msg)
+
+    def test_previously_imported_games_are_excluded_from_candidates(self):
+        """Direct regression test for a real bug caught while testing
+        the fix above: every game THIS tool creates is itself an
+        active door_rlogin pointed at the same host, so re-running the
+        import without this exclusion always found more than one
+        candidate (the real config entry PLUS every already-imported
+        game) and wrongly raised the ambiguity error on the second
+        run, forever, for every sysop who ever imports more than
+        once."""
+        self._clear_bundled_seed_row()
+        from anetbbs.models import db, Game
+        db.session.add(Game(
+            name='My Real Server', slug='my-real-server',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@ realpass', rlogin_bbs_tag='REAL'))
+        db.session.add(Game(
+            name='Legend of the Red Dragon', slug='anet-lord408',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args='@USER@ realpass xtrn=LORD408'))
+        db.session.commit()
+
+        host_port, password, tag = base_server_credentials()
+        self.assertEqual(password, 'realpass')
+        self.assertEqual(tag, 'REAL')
+
+    def test_many_agreeing_candidates_is_not_treated_as_ambiguous(self):
+        """Direct regression test for a real live bug reported by
+        Jerry (2026-09-01): his real setup has ONE general "A-Net Game
+        Server" browse-menu entry plus over a DOZEN of his own hand-
+        added direct-to-door entries (Immortal Barons, LORD, BRE,
+        etc.), each an independently-created active door_rlogin row
+        pointed at the same host, all sharing the same per-BBS
+        password/tag. The ambiguity check must only fire on real
+        DISAGREEMENT between candidates, not merely "more than one
+        row" -- otherwise a sysop with this completely normal, common
+        setup could never use the import tool at all."""
+        self._clear_bundled_seed_row()
+        from anetbbs.models import db, Game
+        shared_args = '@USER@ SharedPassword777'
+        db.session.add(Game(
+            name='A-Net Game Server', slug='A-NET-GAME-SERVER',
+            game_type='door_rlogin', is_active=True,
+            executable_path='game.a-net-online.lol:513',
+            command_line_args=shared_args, rlogin_bbs_tag=''))
+        for name, slug in [('Immortal Barons', 'imb.777'),
+                           ('LORD', 'lord.777'), ('BRE', 'bre.777')]:
+            db.session.add(Game(
+                name=name, slug=slug, game_type='door_rlogin', is_active=True,
+                executable_path='game.a-net-online.lol:513',
+                command_line_args=f'{shared_args} xtrn={slug}',
+                rlogin_bbs_tag=''))
+        db.session.commit()
+
+        host_port, password, tag = base_server_credentials()
+        self.assertEqual(host_port, 'game.a-net-online.lol:513')
+        self.assertEqual(password, 'SharedPassword777')
+        self.assertEqual(tag, '')
 
 
 if __name__ == '__main__':

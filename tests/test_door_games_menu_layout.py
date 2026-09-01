@@ -378,10 +378,10 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         asyncio.run(GameManager(session).show_door_menu())
         txt = session.transcript()
         self.assertIn('CUSTOM_SUBMENU_ART_MARKER', txt, msg=txt)
-        # The generated layout's own "Pick a game (number or B)" prompt
-        # still has to appear (art doesn't replace input handling), but
-        # the generated HEADER/hbar block must not, since art took over.
-        self.assertIn('Pick a game (number or B)', txt, msg=txt)
+        # The generated layout's own prompt still has to appear (art
+        # doesn't replace input handling), but the generated HEADER/
+        # hbar block must not, since art took over.
+        self.assertIn('Pick a game (number, N/P, or B)', txt, msg=txt)
 
 
 if __name__ == '__main__':

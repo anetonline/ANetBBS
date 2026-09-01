@@ -1,3 +1,13 @@
+# ANetBBS v1.0.62 — A-Net Game Server credential fix, door-list pagination, and two more live fixes (September 2026)
+
+Fixed a real bug in the A-Net Game Server bulk-import tool: it could pick the wrong credentials (host/password/BBS tag) to apply to imported games when more than one matching game-server entry existed on an install, silently applying stale or incorrect values across every imported door instead of the sysop's real, active configuration. The tool now requires an unambiguous, agreed-upon credential source across all matching active entries, and fails with a clear message rather than guessing when it can't determine one. A related gap meant the bundled "A-Net Game Server" entry could resurface active (with freshly-regenerated random credentials) after being removed; it now stays correctly deactivated whenever a sysop's own separate configuration is already active.
+
+Fixed a UX problem with large door-game categories: a category with more entries than fit on one screen previously wrote everything to the terminal in one unpaginated block. Category listings now page through results with `[N]ext`/`[P]rev` navigation, sized to the actual terminal height.
+
+Fixed the Backspace key not working when playing a door game through the web interface — the browser terminal was sending a byte classic BBS door software doesn't recognize as backspace; it's now translated to the byte those programs expect.
+
+Fixed an Internal Server Error when deleting a user with any real activity history (game sessions, private messages, posts, etc.) from the admin panel — the delete now fails gracefully with guidance to use Ban/Deactivate instead, rather than crashing.
+
 # ANetBBS v1.0.61 — Fixed a real rlogin/telnet door freeze, and A-Net Game Server bulk import (September 2026)
 
 Fixed a live-reported freeze: playing a door through an external rlogin or telnet game server (including A-Net Online's own game server) could hang indefinitely if the remote server went quiet without actually closing the connection — a hung remote process, a stalled door. The bridge's own socket read had no timeout, so the session sat frozen with no way to recover short of the remote end eventually dropping the connection. Every other door-launch path in this codebase already enforced an idle timeout; this closes the one remaining gap, on both the rlogin and telnet terminal-bridge paths.

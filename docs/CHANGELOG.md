@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.61`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.62`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.62 — A-Net Game Server credential fix, door-list pagination, and two more live fixes (September 2026)
+
+Fixed a real bug in the A-Net Game Server bulk-import tool: it could pick the wrong credentials (host/password/BBS tag) to apply to imported games when more than one matching game-server entry existed on an install, silently applying stale or incorrect values across every imported door instead of the sysop's real, active configuration. The tool now requires an unambiguous, agreed-upon credential source across all matching active entries, and fails with a clear message rather than guessing when it can't determine one. A related gap meant the bundled "A-Net Game Server" entry could resurface active (with freshly-regenerated random credentials) after being removed; it now stays correctly deactivated whenever a sysop's own separate configuration is already active.
+
+Fixed a UX problem with large door-game categories: a category with more entries than fit on one screen previously wrote everything to the terminal in one unpaginated block. Category listings now page through results with `[N]ext`/`[P]rev` navigation, sized to the actual terminal height.
+
+Fixed the Backspace key not working when playing a door game through the web interface — the browser terminal was sending a byte classic BBS door software doesn't recognize as backspace; it's now translated to the byte those programs expect.
+
+Fixed an Internal Server Error when deleting a user with any real activity history (game sessions, private messages, posts, etc.) from the admin panel — the delete now fails gracefully with guidance to use Ban/Deactivate instead, rather than crashing.
 
 ## v1.0.61 — Fixed a real rlogin/telnet door freeze, and A-Net Game Server bulk import (September 2026)
 

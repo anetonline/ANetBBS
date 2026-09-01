@@ -236,45 +236,91 @@ class GameManager:
         menu. Deliberately one level deep only -- a submenu category's
         own games are always shown flat here, no further nesting.
 
+        Paginated: a category with more entries than fit on one screen
+        (real live bug reported 2026-09-01 -- a 100+-game category from
+        the A-Net Game Server bulk import ran off the bottom of a fixed-
+        height terminal with no way to see the rest) shows one page at a
+        time with [N]ext/[P]rev navigation, matching this codebase's
+        existing --MORE-- pagination convention (see bbs_ui.py's
+        _page_lines). Numbering stays absolute across pages (game #47 is
+        always #47, whichever page it's currently showing on) so a
+        remembered number always picks the same game.
+
         Custom art: checked under the slot name `door_games_<category-
         slug>` (e.g. a category with slug "synchronet-doors" looks for
         data/text/menus/door_games_synchronet-doors.ans), mirroring the
         top-level door menu's own `door_games` slot -- falls back to
-        this generated layout if no matching file exists. See
-        docs/04-ansi-screens.md's slot-names reference and
-        docs/14-door-games.md's "Categories and submenu sections"."""
-        from .ansi_ui import write_menu_art, ui_width
+        this generated layout if no matching file exists. Custom art is
+        only ever shown for page 1 (art is a fixed, hand-drawn screen --
+        there's no per-page variant of it), later pages always use the
+        generated layout. See docs/04-ansi-screens.md's slot-names
+        reference and docs/14-door-games.md's "Categories and submenu
+        sections"."""
+        from .ansi_ui import write_menu_art, ui_width, ui_height
         CYAN = '\x1b[1;36m'; WHT = '\x1b[1;37m'; YEL = '\x1b[1;33m'
         GRN = '\x1b[1;32m'; BOLD = '\x1b[1m'; RESET = '\x1b[0m'; DIM = '\x1b[37m'
         art_slot = f'door_games_{slug}'
+        _cols = 2
+        # Chrome around the game grid on the generated layout: top hbar,
+        # title, hbar, (footer nav line), "B. Back" line, bottom hbar,
+        # blank line, prompt line -- 8 fixed lines not available for
+        # game rows.
+        _chrome_rows = 8
+        page = 0
         while True:
             _iw = ui_width(self.session)
+            _ih = ui_height(self.session)
             if hasattr(self.session, '_heartbeat_node'):
                 try:
                     self.session._heartbeat_node(page='games:doors', action=f'menu: {cat_name}')
                 except Exception:
                     pass
-            _cols = 2
             _col_w = max(20, (_iw // _cols) - 2)
-            if not await write_menu_art(self.session, art_slot):
+            rows_per_page = max(3, _ih - _chrome_rows)
+            page_size = rows_per_page * _cols
+            total_pages = max(1, (len(games) + page_size - 1) // page_size)
+            page = max(0, min(page, total_pages - 1))
+            start = page * page_size
+            end = min(start + page_size, len(games))
+            page_games = games[start:end]
+
+            if page > 0 or not await write_menu_art(self.session, art_slot):
                 hbar = '═' * _iw
                 title = cat_name.center(_iw)
                 await self.session.write(f"\r\n{BOLD}{CYAN}{hbar}{RESET}\r\n")
                 await self.session.write(f"{WHT}{title}{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n")
                 cells = []
-                for i, g in enumerate(games, start=1):
+                for i, g in enumerate(page_games, start=start + 1):
                     name_col = g['name'][:_col_w - 5]
                     cells.append(f"{YEL}{i:2d}{DIM}. {GRN}{name_col:<{_col_w - 5}}{RESET}")
                 for i in range(0, len(cells), _cols):
                     row = '  '.join(cells[i:i + _cols])
                     await self.session.write(f"  {row}\r\n")
+                if total_pages > 1:
+                    await self.session.write(
+                        f"  {DIM}-- page {page + 1}/{total_pages} "
+                        f"({start + 1}-{end} of {len(games)}) --{RESET}\r\n")
+                    nav = []
+                    if page > 0:
+                        nav.append(f"{YEL}P{DIM}. {GRN}Prev page{RESET}")
+                    if page < total_pages - 1:
+                        nav.append(f"{YEL}N{DIM}. {GRN}Next page{RESET}")
+                    if nav:
+                        await self.session.write("  " + "   ".join(nav) + "\r\n")
                 await self.session.write(f"  {YEL}B{DIM}. {GRN}Back{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
 
-            choice = await self.session.read_line("Pick a game (number or B): ")
+            choice = (await self.session.read_line("Pick a game (number, N/P, or B): ") or '').strip()
             if not choice or choice.lower() in ('b', 'q'):
                 return
+            low = choice.lower()
+            if low == 'n' and page < total_pages - 1:
+                page += 1
+                continue
+            if low == 'p' and page > 0:
+                page -= 1
+                continue
             try:
                 idx = int(choice) - 1
                 if 0 <= idx < len(games):
