@@ -100,6 +100,30 @@ class ServerImportUsesParsedAddressesTests(unittest.TestCase):
         from unittest.mock import patch
         from anetbbs.echomail.binkp import _build_ftn_packet
 
+        # Real CI-only failure found live (2026-09-01): binkp_server.py
+        # and routing.py are both imported for the first time below, by
+        # `from anetbbs.echomail import binkp_server as mod` -- if that
+        # first-ever import happens to occur INSIDE the
+        # patch('anetbbs.models.EchomailNetwork') block a few lines down,
+        # routing.py's own top-level `from ..models import
+        # EchomailNetwork` (routing.py:21) permanently binds routing.py's
+        # module-level name to the mock, since Python only executes a
+        # module's top-level statements once and caches the result --
+        # unpatching anetbbs.models.EchomailNetwork afterward does NOT
+        # un-freeze routing.py's already-bound copy. This corrupted every
+        # later test in the same process that relies on routing.py's real
+        # EchomailNetwork (AttributeError: '_FakeQuery' object has no
+        # attribute 'all', from a completely unrelated test file) --
+        # invisible locally where routing.py/binkp_server.py had almost
+        # always already been imported by something else first, but
+        # reliable in CI's fresh-process alphabetical batching where this
+        # file can run before anything else has touched them. Importing
+        # both for real here, before any patching starts, guarantees
+        # their module-level bindings are the real classes regardless of
+        # what test order runs this file in.
+        from anetbbs.echomail import binkp_server as mod
+        from anetbbs.echomail import routing as _routing  # noqa: F401
+
         # Different zones purely as realistic test data -- @INTL is now
         # always emitted for netmail regardless of zone match (see
         # test_binkp_intl_always_emitted.py); this test is about the
@@ -157,7 +181,6 @@ class ServerImportUsesParsedAddressesTests(unittest.TestCase):
             fake_area.query = _FakeQuery()
             fake_network.query = _FakeQuery()
             fake_db.session = _NoOpSession()
-            from anetbbs.echomail import binkp_server as mod
             mod._import_pkt_payload(pkt, network_id=1, filename='test.pkt')
 
         self.assertEqual(captured.get('to_address'), '1200:1/2.5',
