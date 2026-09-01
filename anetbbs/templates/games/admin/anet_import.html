@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Add A-Net Game Server games — Admin — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-cloud-download"></i> Add games from A-Net Game Server</h3>
+    <a href="{{ url_for('games_admin.dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-left"></i> Dashboard
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ 'success' if cat == 'success' else 'danger' if cat == 'danger' else 'warning' }}">{{ msg }}</div>
+{% endfor %}
+{% endif %}
+{% endwith %}
+
+<p class="small" style="color:#007700;">
+    Found <strong>{{ total_games }}</strong> games across <strong>{{ categories | length }}</strong>
+    categories on A-Net Online's game server. Pick where each category should land on your
+    BBS, or leave a category set to <em>Skip</em> to not import it at all. Every imported game
+    reuses the host/password/tag already configured on the bundled
+    <strong>A-Net Game Server</strong> entry — nothing else to set up. Re-running this later is
+    safe; games already imported are skipped, not duplicated.
+</p>
+
+<form method="post" action="{{ url_for('games_admin.anet_import_confirm') }}">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Source category (A-Net Game Server)</th>
+                <th>Games</th>
+                <th>Import into</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cat in categories %}
+            <tr>
+                <td>{{ cat.name }}</td>
+                <td>
+                    {{ cat.count }}
+                    {% if cat.new_count != cat.count %}
+                    <br><small style="color:#007700;">{{ cat.new_count }} new, {{ cat.count - cat.new_count }} already imported</small>
+                    {% endif %}
+                </td>
+                <td>
+                    <select name="cat_{{ cat.key }}" class="form-select form-select-sm" style="max-width:320px;">
+                        <option value="">— Skip —</option>
+                        <option value="__new__">+ Create new category "{{ cat.name }}"</option>
+                        {% for lc in local_cats %}
+                        <option value="{{ lc.slug }}">{{ lc.name }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center" style="color:#007700;">No categories found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <button type="submit" class="btn btn-primary"
+            onclick="return confirm('Import the selected categories now?');">
+        <i class="bi bi-cloud-download"></i> Import selected categories
+    </button>
+</form>
+{% endblock %}

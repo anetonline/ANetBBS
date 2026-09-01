@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.60`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.61`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.61 — Fixed a real rlogin/telnet door freeze, and A-Net Game Server bulk import (September 2026)
+
+Fixed a live-reported freeze: playing a door through an external rlogin or telnet game server (including A-Net Online's own game server) could hang indefinitely if the remote server went quiet without actually closing the connection — a hung remote process, a stalled door. The bridge's own socket read had no timeout, so the session sat frozen with no way to recover short of the remote end eventually dropping the connection. Every other door-launch path in this codebase already enforced an idle timeout; this closes the one remaining gap, on both the rlogin and telnet terminal-bridge paths.
+
+Added a bulk-import tool for A-Net Online's game server: Admin → Door Games → Add games from A-Net Game Server fetches the live game list, groups it by the remote site's own categories, and lets a sysop map each one onto a local category (or skip it, or create a new one) before importing. Every imported game reuses the host, password, and BBS tag already configured on the bundled A-Net Game Server entry, direct-launching via the existing `xtrn=` convention — nothing else to configure per game. Re-running the import later to pick up newly added games is safe; already-imported games are skipped, not duplicated.
 
 ## v1.0.60 — ANetBBS as an rlogin game-server target (inbound) (September 2026)
 

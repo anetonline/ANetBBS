@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 from flask import (Blueprint, render_template, redirect, url_for,
-                   flash, current_app)
+                   flash, current_app, request)
 from flask_login import login_required
 from flask_wtf import FlaskForm
 from wtforms import (StringField, TextAreaField, SelectField, IntegerField,
@@ -516,3 +516,132 @@ def delete_category(cat_id):
     db.session.commit()
     flash(f'Category "{name}" deleted.', 'success')
     return redirect(url_for('games_admin.list_categories'))
+
+
+# ---------------------------------------------------------------------------
+# A-Net Game Server bulk import
+# ---------------------------------------------------------------------------
+
+@games_admin_bp.route('/anet-import', methods=['GET'])
+@login_required
+@_admin_required
+def anet_import():
+    """Review page: scrape the live A-Net Game Server listing, group by
+    its own on-page categories, and let the sysop map each one to a
+    local category (or skip it, or create a new local category) before
+    actually importing anything -- see anet_import_confirm() for the
+    POST that does the real work. Nothing is written to the DB here."""
+    from ..features.anet_game_import import (
+        scrape_games, group_by_category, category_form_key,
+        AnetGameImportError)
+    try:
+        games = scrape_games()
+    except AnetGameImportError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('games_admin.dashboard'))
+
+    grouped = group_by_category(games)
+    local_cats = GameCategory.query.order_by(GameCategory.sort_order, GameCategory.name).all()
+    already_imported = {
+        g.slug for g in Game.query.filter(Game.slug.like('anet-%')).all()
+    }
+    categories = []
+    for name, cat_games in grouped.items():
+        from ..features.anet_game_import import slug_for_code
+        new_count = sum(1 for g in cat_games
+                        if slug_for_code(g['code']) not in already_imported)
+        categories.append({
+            'name': name,
+            'key': category_form_key(name),
+            'count': len(cat_games),
+            'new_count': new_count,
+        })
+
+    return render_template('games/admin/anet_import.html',
+                           categories=categories, local_cats=local_cats,
+                           total_games=len(games))
+
+
+@games_admin_bp.route('/anet-import', methods=['POST'])
+@login_required
+@_admin_required
+def anet_import_confirm():
+    """Actually create Game rows for every game in a selected/mapped
+    category. Re-scrapes rather than trusting a POSTed payload of
+    hundreds of games -- re-fetching a live page moments after the GET
+    that rendered this form is far simpler and safer than serializing
+    450+ rows through hidden form fields. Idempotent: a game whose
+    computed slug already exists (from a previous import run) is
+    skipped, not duplicated, so re-running the import later to pick up
+    newly added games on the remote server is safe."""
+    from ..features.anet_game_import import (
+        scrape_games, group_by_category, category_form_key, slug_for_code,
+        build_game_kwargs, base_server_credentials, AnetGameImportError)
+
+    try:
+        host_port, password, bbs_tag = base_server_credentials()
+    except AnetGameImportError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('games_admin.dashboard'))
+
+    try:
+        games = scrape_games()
+    except AnetGameImportError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('games_admin.dashboard'))
+
+    grouped = group_by_category(games)
+    existing_slugs = {g.slug for g in Game.query.with_entities(Game.slug).all()}
+    existing_cat_slugs = {c.slug for c in GameCategory.query.all()}
+
+    imported = 0
+    skipped_existing = 0
+    categories_touched = 0
+
+    for name, cat_games in grouped.items():
+        key = category_form_key(name)
+        action = (request.form.get(f'cat_{key}') or '').strip()
+        if not action:
+            continue  # this category wasn't selected -- skip entirely
+
+        if action == '__new__':
+            target_slug = category_form_key(name)
+            if target_slug not in existing_cat_slugs:
+                db.session.add(GameCategory(name=name, slug=target_slug))
+                existing_cat_slugs.add(target_slug)
+        else:
+            # An existing local category slug the sysop picked from the
+            # dropdown. Fall back to 'other' if it somehow no longer
+            # exists (e.g. deleted between GET and POST) rather than
+            # erroring the whole batch out.
+            target_slug = action if action in existing_cat_slugs else 'other'
+
+        categories_touched += 1
+        for g in cat_games:
+            slug = slug_for_code(g['code'])
+            if not slug or slug in existing_slugs:
+                skipped_existing += 1
+                continue
+            kwargs = build_game_kwargs(g, target_slug, host_port, password, bbs_tag)
+            db.session.add(Game(**kwargs))
+            existing_slugs.add(slug)
+            imported += 1
+
+    if imported == 0 and categories_touched == 0:
+        flash('No categories were selected -- nothing imported.', 'warning')
+        return redirect(url_for('games_admin.anet_import'))
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash('Import failed partway through due to a duplicate slug -- '
+             'no changes were saved. Try again.', 'danger')
+        return redirect(url_for('games_admin.anet_import'))
+
+    flash(f'Imported {imported} new game(s) across {categories_touched} '
+         f'categor{"y" if categories_touched == 1 else "ies"}'
+         + (f'; {skipped_existing} already imported previously and were '
+            f'skipped.' if skipped_existing else '.'),
+         'success')
+    return redirect(url_for('games_admin.list_games'))

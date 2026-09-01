@@ -172,3 +172,12 @@ psutil>=5.9.0
 # call, no external wordlist file to ship) — imported lazily and degrades
 # silently if ever missing, same pattern as markdown/bleach above.
 pyspellchecker>=0.8.0
+
+# HTML parsing for the A-Net Game Server bulk-import tool
+# (anetbbs/features/anet_game_import.py, Admin -> Door Games -> Add
+# games from A-Net Game Server) — parses the same page Jerry's own
+# reference scraper script parses. Pure-Python html.parser backend by
+# default (no lxml/C-extension dependency needed); imported lazily so
+# a missing install degrades to a clear error on that one admin page
+# rather than breaking anything else.
+beautifulsoup4>=4.12.0

@@ -808,6 +808,28 @@ users apart from everyone else's. You're free to change either at
 Coordinate `YOUR_PASSWORD` and your BBS Tag with the remote sysop. The
 tag namespaces inbound users from each visitor BBS.
 
+### Bulk-importing all of A-Net Online's games
+
+Hand-adding one `Game` row per door on a 450+-game server isn't
+realistic, so **Admin → Door Games → Add games from A-Net Game
+Server** does it for you: it fetches the live game list straight from
+`a-net-online.lol/gameserver/`, groups it by that site's own
+categories, and lets you map each category onto one of your own local
+categories (or skip it, or create a new local category with the same
+name) before importing anything. Every imported game is created as a
+`door_rlogin` type that direct-launches via `xtrn=<code>` — see
+"Direct-to-door" below — and reuses the exact same host, password, and
+BBS tag already configured on the bundled "A-Net Game Server" entry
+above, so there's nothing else to set up per game.
+
+The import is idempotent: a game whose computed slug (`anet-<code>`,
+lowercased) already exists from a previous run is skipped rather than
+duplicated, so re-running it later to pick up newly added games on the
+remote server is always safe. Requires the `beautifulsoup4` package
+(added as a regular dependency — `pip install -e .` again after
+upgrading if this page 404s or errors on a bare-metal install that
+predates this feature).
+
 ### Direct-to-door
 
 For a per-game menu entry that drops the user straight into a

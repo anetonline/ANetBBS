@@ -2751,12 +2751,34 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
     await _drain_stale_session_input(session)
 
     abort_event = asyncio.Event()
+    # Real live bug reported (2026-09-01): "playing a door game on A-Net
+    # game server... froze on the ANetBBS side, I had to manually back
+    # out on the A-Net Game Server side." Root cause: _output_pump()'s
+    # `reader.read(4096)` below had no timeout at all -- if the remote
+    # rlogin server went quiet without ever closing the TCP connection
+    # (a hung remote process, a stalled door), this coroutine blocked
+    # forever waiting for bytes that were never coming, and since
+    # asyncio.wait(..., FIRST_COMPLETED) below only unblocks once EITHER
+    # pump finishes, the whole session sat frozen until something on the
+    # REMOTE end finally closed the socket -- exactly what backing out
+    # on the game-server side did. Every other door-launch path in this
+    # file already has an idle timeout (DOOR_IDLE_TIMEOUT, see
+    # play_door_game_telnet/launch_telnet_session above); this one
+    # (and its sibling play_telnet_terminal below) were the two gaps.
+    idle_event = asyncio.Event()
+    try:
+        idle_timeout = int(os.environ.get('DOOR_IDLE_TIMEOUT', '300'))
+    except ValueError:
+        idle_timeout = 300
 
     # Pump bytes from the rlogin socket -> the BBS user's terminal
     async def _output_pump():
         while not abort_event.is_set():
             try:
-                data = await reader.read(4096)
+                data = await asyncio.wait_for(reader.read(4096), timeout=idle_timeout)
+            except asyncio.TimeoutError:
+                idle_event.set()
+                break
             except Exception:
                 break
             if not data:
@@ -2806,7 +2828,7 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
     in_task = asyncio.ensure_future(_input_pump())
 
     # Wait for either pump to finish (remote disconnects, user aborts,
-    # or socket errors out)
+    # idle timeout, or socket errors out)
     try:
         done, pending = await asyncio.wait(
             [out_task, in_task],
@@ -2833,6 +2855,14 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
 
     if abort_event.is_set():
         await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
+    elif idle_event.is_set():
+        await session.write(
+            f"\r\n\r\n[No data from the remote for {idle_timeout}s — "
+            f"disconnecting.]\r\n")
+        try:
+            await session.read_line("Press Enter to continue...")
+        except Exception:
+            pass
     else:
         try:
             await session.read_line(
@@ -3004,6 +3034,15 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
 
     iac = TelnetIACFilter()
     abort_event = asyncio.Event()
+    # Same idle-timeout gap as play_rlogin_telnet()'s own _output_pump
+    # -- see that function's comment for the real live freeze this
+    # closes. Identical fix here since this pump loop has the exact
+    # same shape.
+    idle_event = asyncio.Event()
+    try:
+        idle_timeout = int(os.environ.get('DOOR_IDLE_TIMEOUT', '300'))
+    except ValueError:
+        idle_timeout = 300
 
     # Pump bytes from the telnet socket -> the BBS user's terminal.
     # Option-negotiation sequences are filtered out of what the user
@@ -3011,7 +3050,10 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
     async def _output_pump():
         while not abort_event.is_set():
             try:
-                data = await reader.read(4096)
+                data = await asyncio.wait_for(reader.read(4096), timeout=idle_timeout)
+            except asyncio.TimeoutError:
+                idle_event.set()
+                break
             except Exception:
                 break
             if not data:
@@ -3092,6 +3134,14 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
 
     if abort_event.is_set():
         await session.write("\r\n\r\n[Session aborted by user — Ctrl+]q]\r\n")
+    elif idle_event.is_set():
+        await session.write(
+            f"\r\n\r\n[No data from the remote for {idle_timeout}s — "
+            f"disconnecting.]\r\n")
+        try:
+            await session.read_line("Press Enter to continue...")
+        except Exception:
+            pass
     else:
         try:
             await session.read_line(
