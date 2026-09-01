@@ -902,7 +902,7 @@ pointed at this install) can rlogin straight into ANetBBS and land
 directly in a specific door — no menu-diving, and the connection hangs
 up automatically when the door exits. This is what makes ANetBBS
 itself usable as an A-Net Game Server-style target for other BBSes,
-mirroring exactly how Jerry's own A-Net Game Server behaves for
+mirroring exactly how A-Net Online's own game server behaves for
 inbound game-server-style rlogin connections.
 
 Implemented in `anetbbs/core/rlogin_server.py` (handshake parsing +

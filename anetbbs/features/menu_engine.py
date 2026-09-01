@@ -367,15 +367,34 @@ async def _act_exec(ui, args):
                 proc.terminate()
         except Exception:
             pass
-        out_task.cancel()
         if in_task:
             in_task.cancel()
-        for t in (out_task, in_task):
-            if t:
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+            try:
+                await in_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        # Real CI-only bug found live (2026-09-01): cancelling out_task
+        # immediately after proc.wait() returns is racy -- the child's
+        # stdout pipe can still have its last chunk sitting unread at
+        # that exact moment (proc.wait() only guarantees the child has
+        # exited, not that pump_out()'s current/next read() has been
+        # serviced by the event loop yet). Rarely loses on a quiet
+        # local machine; a loaded/shared CI runner hit it often enough
+        # to silently truncate or drop a short-lived command's entire
+        # output. Give pump_out() a bounded window to drain to EOF
+        # naturally instead of yanking it out from under a pending
+        # read; only cancel if it's still going after that (a child
+        # that leaked its stdout fd to a grandchild process).
+        try:
+            await asyncio.wait_for(out_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            out_task.cancel()
+            try:
+                await out_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        except Exception:
+            pass
 
     await ui.session.write(f"\r\n[ {name} exited (rc={proc.returncode}) ]\r\n")
     return None

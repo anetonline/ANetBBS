@@ -13,6 +13,7 @@ own min_access, since this action type is sysop-only by design.
 import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -94,3 +95,58 @@ def test_username_with_an_apostrophe_cannot_break_out_of_template_quoting():
     asyncio.run(_act_exec(ui, "printf '[%s]' {user}"))
     output = ''.join(ui.session.written)
     assert "[O'Brien]" in output, output
+
+
+class _SlowStdout:
+    """Simulates a child process's stdout pipe where the first read()
+    doesn't return until slightly after the process itself has already
+    exited -- exactly the ordering a loaded/shared CI runner's event
+    loop scheduling can produce (see test below)."""
+    def __init__(self, chunks, delay):
+        self._chunks = list(chunks)
+        self._delay = delay
+        self._first = True
+
+    async def read(self, n):
+        if self._first:
+            self._first = False
+            await asyncio.sleep(self._delay)
+        if self._chunks:
+            return self._chunks.pop(0)
+        return b''
+
+
+class _FakeProc:
+    def __init__(self, chunks, read_delay):
+        self.stdout = _SlowStdout(chunks, read_delay)
+        self.stdin = None
+        self.returncode = 0
+
+    async def wait(self):
+        return 0
+
+    def terminate(self):
+        pass
+
+
+def test_exec_output_is_not_dropped_when_the_last_stdout_read_is_still_pending_at_exit():
+    """Direct regression test for a real CI-only bug (2026-09-01, GitHub
+    Actions run 33536073707): _act_exec()'s output-pump task used to be
+    cancelled the instant proc.wait() returned, with no chance to drain
+    whatever chunk of stdout was still sitting unread at that exact
+    moment. proc.wait() only guarantees the child process has exited --
+    not that the event loop has gotten around to servicing pump_out()'s
+    pending read() yet. That race almost never loses on a quiet local
+    machine (which is why this passed every local venv sweep), but a
+    loaded/shared CI runner hit it often enough to silently drop a
+    short-lived command's entire output. Simulated here deterministically
+    (a fake subprocess whose first stdout read() doesn't resolve until
+    after wait() has already returned) instead of relying on real OS
+    scheduling timing, which would be flaky in the opposite direction."""
+    ui = _FakeUI({'id': 3, 'username': 'testuser', 'is_admin': True})
+    fake_proc = _FakeProc([b'[testuser]'], read_delay=0.05)
+    with patch('asyncio.create_subprocess_shell',
+               AsyncMock(return_value=fake_proc)):
+        asyncio.run(_act_exec(ui, "printf '[%s]' {user}"))
+    output = ''.join(ui.session.written)
+    assert '[testuser]' in output, output

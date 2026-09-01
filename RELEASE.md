@@ -1,3 +1,7 @@
+# ANetBBS v1.0.65 — Fixed a CI-flaky output-truncation race (September 2026)
+
+Fixed a timing race (caught via an intermittent CI failure on a busier build server, not a live report) that could truncate or drop the last bit of output from a custom menu item's "run an external program" action: the moment the child process exited, its output-forwarding task was cancelled immediately, with no guarantee the last already-buffered chunk had actually been read and sent to the caller yet. Now that task gets a short window to finish draining normally before being cancelled.
+
 # ANetBBS v1.0.64 — rlogin direct-door goodbye-screen fix (September 2026)
 
 Fixed a live-reported cosmetic bug: a caller who reached a door directly through the rlogin game-server target feature (`xtrn=<slug>`, added in v1.0.60) saw the sysop's goodbye screen and the plain "Goodbye!" text right before the connection hung up on exit. A game-server-style connection like this is expected to just hang up silently the moment the door exits — the same behavior a real Synchronet rlogin game-server target has — so the goodbye screen is now skipped for this specific connection type only; every other logoff path (normal menu logoff, idle timeout, dropped carrier) is unaffected.

@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.64`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.65`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.65 — Fixed a CI-flaky output-truncation race (September 2026)
+
+Fixed a timing race (caught via an intermittent CI failure on a busier build server, not a live report) that could truncate or drop the last bit of output from a custom menu item's "run an external program" action: the moment the child process exited, its output-forwarding task was cancelled immediately, with no guarantee the last already-buffered chunk had actually been read and sent to the caller yet. Now that task gets a short window to finish draining normally before being cancelled.
 
 ## v1.0.64 — rlogin direct-door goodbye-screen fix (September 2026)
 
