@@ -224,11 +224,39 @@ def create_app(config_name=None):
             if user_session is None:
                 user_session = UserSession(user_id=current_user.id, session_key=key)
                 db.session.add(user_session)
+
+            # Real bug found live (2026-09-01, reported by Jerry): a
+            # user actively chatting in MRC showed up in who's-online
+            # on page "/mrc/auth-check" with IP 127.0.0.1 instead of
+            # their own page/IP. Root cause: /mrc/auth-check is nginx's
+            # own internal auth_request sub-request (see mrc_web.py's
+            # own docstring -- "never reached by users directly, nginx
+            # is the only caller") -- nginx forwards the browser's
+            # session cookie when making that sub-request, so Flask
+            # sees a genuinely authenticated request, but the actual
+            # HTTP connection is nginx-to-Flask on localhost, not the
+            # user's browser -- request.remote_addr is nginx's own
+            # loopback address, not the user's real IP.
+            #
+            # First fix attempt skipped this endpoint entirely (like the
+            # static-asset skip above) -- that stopped the wrong page/IP
+            # from being recorded, but also stopped last_seen from ever
+            # being refreshed for it. A user who opens MRC and then just
+            # chats over the WebSocket (no other page loads) makes no
+            # further Flask requests at all except nginx's own repeated
+            # auth_request re-checks, so without SOME heartbeat here they
+            # silently aged out of who's-online's 5-minute window despite
+            # being actively online in the chat room the whole time --
+            # reported live immediately after that first fix shipped.
+            # Right fix: still refresh last_seen (keep them "online"),
+            # just don't let this one internal-only endpoint overwrite
+            # page/ip_address/user_agent with nginx's own values.
             user_session.user_id = current_user.id
             user_session.last_seen = datetime.utcnow()
-            user_session.ip_address = request.remote_addr
-            user_session.user_agent = request.user_agent.string[:255] if request.user_agent.string else None
-            user_session.page = request.path
+            if request.endpoint != 'mrc.auth_check':
+                user_session.ip_address = request.remote_addr
+                user_session.user_agent = request.user_agent.string[:255] if request.user_agent.string else None
+                user_session.page = request.path
             try:
                 db.session.commit()
             except Exception:

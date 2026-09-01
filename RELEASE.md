@@ -1,3 +1,9 @@
+# ANetBBS v1.0.63 — Who's Online / registration audit-trail fixes (September 2026)
+
+Fixed Who's Online showing an actively-chatting MRC user on a confusing internal page ("/mrc/auth-check") with the wrong IP address (127.0.0.1) instead of their real page and IP — that endpoint is an internal check nginx makes on the server's own behalf, not something a real visit should ever be attributed to. (IP addresses on this page are sysop-only and have never been visible to other users.) A user chatting purely over the WebSocket, with no other page loads, still shows correctly as online the whole time — only the mistaken page/IP is corrected, not the activity heartbeat itself.
+
+Fixed a gap where a newly self-registered account that lands straight into a session (no email/sysop-approval gate configured) never showed up in the caller log and its login count/last-login stayed stuck at "Never" — even while actively online — until its second-ever login. New accounts are now tracked from their very first session.
+
 # ANetBBS v1.0.62 — A-Net Game Server credential fix, door-list pagination, and two more live fixes (September 2026)
 
 Fixed a real bug in the A-Net Game Server bulk-import tool: it could pick the wrong credentials (host/password/BBS tag) to apply to imported games when more than one matching game-server entry existed on an install, silently applying stale or incorrect values across every imported door instead of the sysop's real, active configuration. The tool now requires an unambiguous, agreed-upon credential source across all matching active entries, and fails with a clear message rather than guessing when it can't determine one. A related gap meant the bundled "A-Net Game Server" entry could resurface active (with freshly-regenerated random credentials) after being removed; it now stays correctly deactivated whenever a sysop's own separate configuration is already active.

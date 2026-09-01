@@ -627,7 +627,42 @@ def register():
             return render_template('auth/pending_approval.html', username=user.username)
 
         flash(f'Account created successfully! Welcome, {user.username}!', 'success')
+
+        # Real gap found live (2026-09-01, reported by Jerry): a user
+        # who registers straight into a session (no NUV/email
+        # verification gate) never passes through login() above, so
+        # this was the ONE path into the site that skipped
+        # user.update_login() and the CallerLog write entirely --
+        # login_count/last_login stayed stuck at their defaults
+        # (0/never) and the admin caller log showed nothing for that
+        # user's very first session, no matter how long they stayed
+        # online, until (if ever) they logged out and back in through
+        # the real login() route. Mirrors login()'s own identical
+        # block so a brand-new account is tracked from its first
+        # session, not just its second.
+        user.update_login()
         login_user(user, remember=True)
+        try:
+            from ..models import CallerLog
+            _cl = CallerLog(
+                user_id=user.id, username=user.username,
+                service='web', ip_address=_client_ip())
+            db.session.add(_cl)
+            db.session.commit()
+            flask_session['caller_log_id'] = _cl.id
+            try:
+                from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
+                post_lastcaller_to_interbbs(_cl)
+            except Exception:
+                pass
+        except Exception:
+            db.session.rollback()
+        _log_activity(user.id, 'login')
+        try:
+            from ..features.webhooks import fire
+            fire('login', {'user': user.username, 'service': 'web'})
+        except Exception:
+            pass
 
         # Real-time "X just logged in" alert for every other online user
         # (terminal and web) -- see models.PresenceEvent's docstring. This

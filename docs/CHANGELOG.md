@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.62`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.63`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.63 — Who's Online / registration audit-trail fixes (September 2026)
+
+Fixed Who's Online showing an actively-chatting MRC user on a confusing internal page ("/mrc/auth-check") with the wrong IP address (127.0.0.1) instead of their real page and IP — that endpoint is an internal check nginx makes on the server's own behalf, not something a real visit should ever be attributed to. (IP addresses on this page are sysop-only and have never been visible to other users.) A user chatting purely over the WebSocket, with no other page loads, still shows correctly as online the whole time — only the mistaken page/IP is corrected, not the activity heartbeat itself.
+
+Fixed a gap where a newly self-registered account that lands straight into a session (no email/sysop-approval gate configured) never showed up in the caller log and its login count/last-login stayed stuck at "Never" — even while actively online — until its second-ever login. New accounts are now tracked from their very first session.
 
 ## v1.0.62 — A-Net Game Server credential fix, door-list pagination, and two more live fixes (September 2026)
 

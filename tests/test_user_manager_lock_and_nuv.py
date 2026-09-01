@@ -123,6 +123,24 @@ class UserManagerLockAndNuvTests(unittest.TestCase):
             self.assertIsNone(auth_result)
         finally:
             os.environ.pop('NUV_ENABLED', None)
+            # Real test-isolation bug found live (2026-09-01): the
+            # importlib.reload(_cfg) above re-evaluates Config's
+            # module-level `NUV_ENABLED = os.environ.get(...)` class
+            # attribute (computed once at class-body-definition time,
+            # not per-request) while the env var above is set to
+            # 'true' -- baking True into Config/TestingConfig/
+            # ProductionConfig.NUV_ENABLED for the rest of the pytest
+            # PROCESS, not just this test. Popping the env var alone
+            # doesn't undo that -- the module has to be reloaded AGAIN,
+            # now that the env var is gone, to actually restore the
+            # class attribute back to its real default (False). Without
+            # this, every OTHER test file that runs later in the same
+            # process and relies on registration/login working without
+            # an NUV approval gate (e.g.
+            # test_registration_auto_login_caller_log.py) silently hits
+            # "Awaiting Approval" instead.
+            import importlib
+            importlib.reload(cfg_mod)
 
     def test_create_user_with_nuv_disabled_is_immediately_usable(self):
         from anetbbs.core.user_manager import UserManager
