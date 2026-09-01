@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.63`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.64`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.64 — rlogin direct-door goodbye-screen fix (September 2026)
+
+Fixed a live-reported cosmetic bug: a caller who reached a door directly through the rlogin game-server target feature (`xtrn=<slug>`, added in v1.0.60) saw the sysop's goodbye screen and the plain "Goodbye!" text right before the connection hung up on exit. A game-server-style connection like this is expected to just hang up silently the moment the door exits — the same behavior a real Synchronet rlogin game-server target has — so the goodbye screen is now skipped for this specific connection type only; every other logoff path (normal menu logoff, idle timeout, dropped carrier) is unaffected.
 
 ## v1.0.63 — Who's Online / registration audit-trail fixes (September 2026)
 

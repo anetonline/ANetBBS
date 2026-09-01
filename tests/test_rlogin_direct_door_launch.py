@@ -298,6 +298,49 @@ class StartDirectDoorBranchStructureTests(unittest.TestCase):
         self.assertTrue(found, 'expected an `if self._direct_door_slug:` '
                                 'branch in start()')
 
+    def test_direct_door_branch_sets_launched_flag_before_returning(self):
+        """Regression test for a real live bug (Jerry, 2026-09-01): rlogin
+        into a direct door worked, but on exit the session showed the
+        sysop's goodbye.ans (and the plain 'Goodbye!' text) before
+        disconnecting -- a real Synchronet game-server target just hangs
+        up silently, no BBS chrome. Root cause: start()'s finally: block
+        unconditionally shows the goodbye screen/text on every exit path,
+        with no way to tell a direct-door session apart from a normal one.
+        Fix: self._direct_door_launched is set True right before the
+        early return, so finally: can skip the goodbye screen for it."""
+        from anetbbs.core.session import BBSSession
+        source = textwrap.dedent(inspect.getsource(BBSSession.start))
+        tree = ast.parse(source)
+        found = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            if ast.unparse(node.test) != 'self._direct_door_slug':
+                continue
+            found = True
+            body_src = '\n'.join(ast.unparse(stmt) for stmt in node.body)
+            self.assertIn('self._direct_door_launched = True', body_src,
+                          'a successful direct-door launch must set '
+                          '_direct_door_launched before returning, so the '
+                          'finally: block knows to skip the goodbye screen')
+        self.assertTrue(found)
+
+    def test_goodbye_screen_and_text_are_skipped_for_direct_door_sessions(self):
+        from anetbbs.core.session import BBSSession
+        source = inspect.getsource(BBSSession.start)
+        ansi_idx = source.index("_show_ansi_screen('goodbye')")
+        # Walk backward from the call to the nearest enclosing `if` guard
+        # and confirm it checks the flag, rather than just asserting the
+        # substring appears somewhere in the (very long) method.
+        guard_start = source.rindex('if ', 0, ansi_idx)
+        guard_line = source[guard_start:source.index(':', guard_start)]
+        self.assertIn('not self._direct_door_launched', guard_line)
+
+        goodbye_text_idx = source.index('"\\r\\nGoodbye!\\r\\n"')
+        guard_start = source.rindex('if ', 0, goodbye_text_idx)
+        guard_line = source[guard_start:source.index(':', guard_start)]
+        self.assertIn('not self._direct_door_launched', guard_line)
+
     def test_direct_door_branch_runs_after_presence_is_established(self):
         """The branch must come after `self.presence = presence` -- games.py's
         _launch() calls presence.set_page(...), which would crash with an

@@ -1,3 +1,7 @@
+# ANetBBS v1.0.64 — rlogin direct-door goodbye-screen fix (September 2026)
+
+Fixed a live-reported cosmetic bug: a caller who reached a door directly through the rlogin game-server target feature (`xtrn=<slug>`, added in v1.0.60) saw the sysop's goodbye screen and the plain "Goodbye!" text right before the connection hung up on exit. A game-server-style connection like this is expected to just hang up silently the moment the door exits — the same behavior a real Synchronet rlogin game-server target has — so the goodbye screen is now skipped for this specific connection type only; every other logoff path (normal menu logoff, idle timeout, dropped carrier) is unaffected.
+
 # ANetBBS v1.0.63 — Who's Online / registration audit-trail fixes (September 2026)
 
 Fixed Who's Online showing an actively-chatting MRC user on a confusing internal page ("/mrc/auth-check") with the wrong IP address (127.0.0.1) instead of their real page and IP — that endpoint is an internal check nginx makes on the server's own behalf, not something a real visit should ever be attributed to. (IP addresses on this page are sysop-only and have never been visible to other users.) A user chatting purely over the WebSocket, with no other page loads, still shows correctly as online the whole time — only the mistaken page/IP is corrected, not the activity heartbeat itself.

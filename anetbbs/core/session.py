@@ -337,6 +337,12 @@ class BBSSession:
         self._forced_term_mode = forced_term_mode
         self._forced_width = forced_width
         self._direct_door_slug = (direct_door_slug or '').strip() or None
+        # Set True once _launch_direct_door() actually hands off to a game
+        # -- lets the finally: block in start() skip the goodbye screen for
+        # a game-server-style connection, matching Synchronet's own rlogin
+        # game-server target, which hangs up silently rather than showing
+        # BBS chrome the caller never asked to see.
+        self._direct_door_launched = False
         # CP437 — the encoding ANSI BBSes have always spoken. SyncTERM,
         # NetRunner, mTelnet, and modern terminals all support it (most
         # auto-detect via the IBM-PC font). v172 briefly flipped this to
@@ -2764,6 +2770,7 @@ class BBSSession:
             # speaks when connecting OUT to other game servers.
             if self._direct_door_slug:
                 if await self._launch_direct_door(self._direct_door_slug):
+                    self._direct_door_launched = True
                     return
                 # Unknown/inactive/inaccessible slug -- _launch_direct_door
                 # already showed the user why, fall through to a normal
@@ -2981,9 +2988,10 @@ class BBSSession:
             # directly to the socket, bypassing write()'s petscii branch --
             # so petscii sessions skip straight to the plain-text fallback,
             # which already goes through write() correctly.
-            if self.term_mode != 'petscii':
+            if self.term_mode != 'petscii' and not self._direct_door_launched:
                 try:
                     await self._show_ansi_screen('goodbye')
                 except Exception:
                     pass
-            await self.write("\r\nGoodbye!\r\n")
+            if not self._direct_door_launched:
+                await self.write("\r\nGoodbye!\r\n")
