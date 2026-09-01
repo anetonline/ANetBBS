@@ -9,6 +9,21 @@ Protocol summary (RFC 1282):
   1. Client connects and sends a NUL-terminated string: "<client-user>\0<server-user>\0<terminal/speed>\0"
   2. Server acknowledges with a single NUL byte.
   3. Normal bidirectional data flow follows.
+
+Game-server-style connections (Synchronet-compatible; see
+anetbbs/games/rlogin_bridge.py's own outbound client, which already
+speaks this exact convention to Jerry's A-Net Game Server): the same
+three handshake fields carry a different meaning than plain RFC 1282
+rlogin. client-user-name = PASSWORD, server-user-name = BBS USERNAME
+(same field RFC 1282 already uses for this), and terminal/speed may be
+'xtrn=<slug>/<speed>' instead of a bare terminal type, requesting a
+direct launch straight into that door -- the connection hangs up when
+the door exits, exactly like a real Synchronet rlogin game-server
+target. A plain interactive rlogin client (no xtrn=, client-user-name
+holding the caller's own local OS username rather than a BBS password)
+still works normally: the one silent auto-login attempt just fails and
+falls through to an interactive password prompt, the same fallback
+ssh_server.py already relies on for SSH.
 """
 import asyncio
 import logging
@@ -63,10 +78,16 @@ class RloginServer:
             writer.write(b'\x00')
             await writer.drain()
 
-            # The handshake's server_user is who the client wants to log in as.
-            # Pass it as prefill so the BBS session can skip the username prompt.
+            # The handshake's server_user is who the client wants to log in as;
+            # client_user doubles as a password guess for a game-server-style
+            # connection (see module docstring) -- BBSSession.login_screen()
+            # already handles a wrong/absent guess by falling through to an
+            # interactive prompt, so this is safe for plain rlogin clients too.
+            xtrn_slug = _parse_xtrn_slug(header.get('terminal_speed', ''))
             session = BBSSession(reader, writer, self.config,
-                                 prefill_username=header.get('server_user'))
+                                 prefill_username=header.get('server_user'),
+                                 prefill_password=header.get('client_user'),
+                                 direct_door_slug=xtrn_slug)
             await session.start()
         except asyncio.IncompleteReadError:
             logger.debug('rlogin connection from %s closed during handshake', addr)
@@ -107,6 +128,21 @@ class RloginServer:
             self._shutdown_event.set()
             if self.server:
                 self.server.close()
+
+
+def _parse_xtrn_slug(terminal_speed):
+    """Extract a direct-door slug from an rlogin terminal/speed field
+    formatted as 'xtrn=<slug>/<speed>' (or bare 'xtrn=<slug>') -- the
+    same convention ANetBBS's own outbound rlogin_bridge.py already
+    sends to Jerry's A-Net Game Server. Returns None for an ordinary
+    terminal type like 'xterm/57600' or an empty/missing field."""
+    if not terminal_speed:
+        return None
+    prefix = 'xtrn='
+    if not terminal_speed.lower().startswith(prefix):
+        return None
+    slug = terminal_speed[len(prefix):].split('/', 1)[0].strip()
+    return slug or None
 
 
 async def _read_rlogin_header(reader):

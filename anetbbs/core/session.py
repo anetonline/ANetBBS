@@ -304,7 +304,8 @@ class BBSSession:
                  config: Dict[str, Any], prefill_username: Optional[str] = None,
                  prefill_password: Optional[str] = None,
                  forced_term_mode: Optional[str] = None,
-                 forced_width: Optional[int] = None):
+                 forced_width: Optional[int] = None,
+                 direct_door_slug: Optional[str] = None):
         """
         prefill_username: when set (typically from SSH or rlogin), the login flow
             skips the welcome menu + username prompt.
@@ -319,6 +320,14 @@ class BBSSession:
             Overrides the normal window-size/TTYPE-based term_mode property.
         forced_width: paired with forced_term_mode -- 40 or 80, matching
             which PETSCII port (40-col vs 80-col) the connection came in on.
+        direct_door_slug: set by rlogin_server.py when the inbound handshake's
+            terminal/speed field carried 'xtrn=<slug>' (Jerry's own A-Net Game
+            Server convention, and the same one ANetBBS's own outbound
+            rlogin_bridge.py already speaks to other game servers). On a
+            successful login, start() launches this game directly -- skipping
+            logon modules and the main menu -- and the session ends (hanging
+            up the connection) when the game exits, matching how a real
+            Synchronet rlogin game-server target behaves.
         """
         self.reader = reader
         self.writer = writer
@@ -327,6 +336,7 @@ class BBSSession:
         self.user = None
         self._forced_term_mode = forced_term_mode
         self._forced_width = forced_width
+        self._direct_door_slug = (direct_door_slug or '').strip() or None
         # CP437 — the encoding ANSI BBSes have always spoken. SyncTERM,
         # NetRunner, mTelnet, and modern terminals all support it (most
         # auto-detect via the IBM-PC font). v172 briefly flipped this to
@@ -2483,6 +2493,53 @@ class BBSSession:
             # Never block login on broadcast surfacing failure.
             pass
 
+    async def _launch_direct_door(self, slug: str) -> bool:
+        """Resolve `slug` (from an rlogin xtrn= handshake, see
+        rlogin_server.py / self._direct_door_slug) to a Game row and
+        launch it via the same GameManager._launch() path the Game
+        Center menu uses. Returns True once a game was actually found
+        and handed off to _launch() -- regardless of how play itself
+        goes, since _launch() already catches and reports its own
+        errors -- so the caller knows to end the session afterward
+        rather than fall through to the normal main menu. Returns
+        False for an unknown/inactive/inaccessible slug so the caller
+        can fall back to a normal interactive session instead of
+        stranding an otherwise-validly-authenticated user with no way
+        in -- ANetBBS is a full BBS, not just a game server, unlike
+        the Synchronet game-server target this convention mirrors."""
+        try:
+            from ..features.bbs_ui import _app
+            from ..models import Game
+            with _app().app_context():
+                g = Game.query.filter_by(slug=slug, is_active=True).first()
+                if g is None:
+                    await self.write(
+                        f"\r\n\x1b[1;31mUnknown game code '{slug}'.\x1b[0m\r\n")
+                    return False
+                # Same default fallback GameManager.show_door_menu() uses
+                # for a user with no access_level set, for consistency.
+                user_access = (self.user or {}).get('access_level') or 10
+                if (g.min_access_level or 0) > user_access:
+                    await self.write(
+                        "\r\n\x1b[1;31mYou don't have access to that "
+                        "game.\x1b[0m\r\n")
+                    return False
+                game_dict = {
+                    'id': g.id, 'name': g.name, 'game_type': g.game_type,
+                    'web_game_module': g.web_game_module or '',
+                }
+        except Exception as exc:
+            logger.error('Direct door lookup failed for slug=%r: %s', slug, exc)
+            try:
+                await self.write(
+                    "\r\n\x1b[1;31mCould not launch that game.\x1b[0m\r\n")
+            except Exception:
+                pass
+            return False
+
+        await self.games._launch(game_dict)
+        return True
+
     async def show_main_menu(self):
         menu = (
             "\r\n"
@@ -2695,6 +2752,23 @@ class BBSSession:
                         pass
             except Exception:
                 pass
+
+            # Direct door launch -- rlogin game-server-style connection
+            # (xtrn=<slug> in the handshake's terminal/speed field; see
+            # rlogin_server.py and BBSSession.__init__'s direct_door_slug
+            # docstring). Skips logon modules and the main menu entirely
+            # and ends the session (hanging up the connection) once the
+            # game exits -- matching Jerry's own Synchronet game server's
+            # behavior for the identical convention, and the exact
+            # convention ANetBBS's own outbound rlogin_bridge.py already
+            # speaks when connecting OUT to other game servers.
+            if self._direct_door_slug:
+                if await self._launch_direct_door(self._direct_door_slug):
+                    return
+                # Unknown/inactive/inaccessible slug -- _launch_direct_door
+                # already showed the user why, fall through to a normal
+                # interactive session rather than stranding an otherwise-
+                # validly-authenticated user with no way in.
 
             # Fast logon check — if the sysop has enabled it, offer the user
             # a chance to skip logon modules and jump straight to the menu.

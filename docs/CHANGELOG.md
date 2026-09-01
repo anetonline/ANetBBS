@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.59`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.60`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.60 — ANetBBS as an rlogin game-server target (inbound) (September 2026)
+
+ANetBBS's inbound rlogin listener can now act as a game-server target for other BBSes, the mirror image of the existing outbound `door_rlogin` game type. A connecting client sends the same handshake convention ANetBBS's own outbound rlogin client already speaks — password and username in the (inverted) standard rlogin fields, plus an optional `xtrn=<slug>` in the terminal field naming one of this BBS's own `Game.slug` values. A caller who includes `xtrn=` authenticates and lands directly in that door, no menu-diving, and the connection hangs up automatically once the door exits. A caller connecting without `xtrn=`, or requesting an unknown/inactive/access-gated slug, gets a normal interactive session instead of being dropped, so ANetBBS keeps working as a full BBS rather than becoming a pure game-server appliance.
 
 ## v1.0.59 — Echomail area-tag case fix, and federation registry probe reliability (September 2026)
 

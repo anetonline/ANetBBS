@@ -20,6 +20,12 @@ through their terminal:
 
 All of them get added at **Admin → Subsystems → Door Games → Add Game**.
 
+> ANetBBS can also work the other way — as an rlogin game-server
+> *target* for other BBSes to launch any of the above door types
+> directly, the same convention `door_rlogin` speaks outbound. See
+> "Acting as an rlogin game-server target (inbound)" near the end of
+> this doc.
+
 ## Categories and submenu sections
 
 Every game/door belongs to a category (**Admin → Games → Categories**),
@@ -861,3 +867,101 @@ same everywhere:
   socket) will sit there until the caller sends Ctrl+]q or the remote
   socket actually closes/EOFs. If you hit a door that can go quiet
   mid-session, budget for this — nothing will auto-recover it.
+
+## Acting as an rlogin game-server target (inbound)
+
+Everything above is ANetBBS as the *client*, dialing out to someone
+else's game server. ANetBBS's own inbound rlogin listener
+(`RLOGIN_ENABLED=true` in `.env`; see `docs/01-installing.md` for the
+port default — 513 — and firewall implications of enabling rlogin at
+all) understands the exact same wire convention in reverse, so another
+BBS (or a script, or a sysop's own outbound `door_rlogin` config
+pointed at this install) can rlogin straight into ANetBBS and land
+directly in a specific door — no menu-diving, and the connection hangs
+up automatically when the door exits. This is what makes ANetBBS
+itself usable as an A-Net Game Server-style target for other BBSes,
+mirroring exactly how Jerry's own A-Net Game Server behaves for
+inbound game-server-style rlogin connections.
+
+Implemented in `anetbbs/core/rlogin_server.py` (handshake parsing +
+field wiring) and `anetbbs/core/session.py` (`BBSSession`'s
+`direct_door_slug` param and `_launch_direct_door()` method, called
+from `start()` right after login/presence/multinode setup but before
+logon modules or the main menu are ever reached).
+
+### Handshake field meaning
+
+Interpreted exactly like the "Wire format quirk" section above
+(Synchronet-style, inverted from plain RFC 1282 rlogin):
+
+| Handshake field    | Meaning here                                              |
+|---------------------|------------------------------------------------------------|
+| client-user-name    | the caller's BBS **password**                              |
+| server-user-name    | the caller's BBS **username**                              |
+| terminal/speed      | `xterm/57600` for an ordinary login, or `xtrn=<slug>/<speed>` for a direct door launch |
+
+`<slug>` is that game's `Game.slug` value from **Admin → Door Games**
+— an ANetBBS-native identifier, *not* a Synchronet xtrn.cnf code, and
+not tied to any particular `game_type`. Any active game your BBS can
+already launch from the Game Center — `door_native`, `door_dos`,
+`door_mystic`, `builtin_python`, even another `door_rlogin`
+pass-through to a third BBS — works as an `xtrn=` target, because the
+direct-launch path calls the exact same `GameManager._launch()`
+function the Game Center menu uses.
+
+### Worked example
+
+Say you've added Trade Wars 2002 at slug `tw2` with `min_access_level`
+0. A game-server-style rlogin client (another sysop's `door_rlogin`
+config pointed at your BBS, or a raw rlogin call) connects as:
+
+```
+client-user-name: mypassword123
+server-user-name: jerry
+terminal/speed:   xtrn=tw2/57600
+```
+
+`jerry` authenticates silently with `mypassword123` (falling back to
+an interactive password prompt on a wrong guess, same as SSH), then
+lands directly in Trade Wars 2002 — no Game Center, no main menu. When
+the door exits, the connection closes.
+
+To hand this to another sysop, give them:
+- Your host:port (`RLOGIN_HOST`/`RLOGIN_PORT`, default port 513)
+- A username + password on your BBS for their users to share (a
+  dedicated low-access-level account works well here, the same
+  pattern A-Net Online's own bundled game server uses — see "Bundled
+  by default" above)
+- The `Game.slug` for each door you want to expose this way
+
+They configure it exactly like the "Adding A-Net Online's game
+server" worked example above, just pointed at your BBS instead —
+`command_line_args` = `SHARED_USERNAME SHARED_PASSWORD xtrn=tw2`.
+
+### Fallback behavior (unknown/inaccessible slug)
+
+If the requested slug doesn't exist, isn't active, or the user's
+access level doesn't meet the game's `min_access_level`, the caller
+sees a short message explaining why and lands in the normal main menu
+instead of being disconnected — ANetBBS is a full BBS, not just a game
+server, so a stale or mistyped door code shouldn't strand an
+otherwise-valid login with no way in.
+
+### Plain interactive rlogin clients are unaffected
+
+A real interactive `rlogin` client (no `xtrn=`, and whose
+client-user-name slot holds the caller's own local OS username rather
+than a real BBS password) still works normally — the one silent
+auto-login guess just fails and falls through to the ordinary
+interactive password prompt, the same fallback SSH already relies on
+today for a client that sends a wrong/empty password.
+
+### Security note
+
+rlogin carries no encryption (see the top of this doc's rlogin
+warnings, and `RloginServer`'s own startup warning) — the password
+sent in the client-user-name field is plaintext on the wire, same as
+every other rlogin credential. Only enable `RLOGIN_ENABLED` on a
+trusted network path, and treat any shared game-server credential the
+same way you'd treat A-Net Online's own bundled game server password:
+easy to rotate, not reused anywhere sensitive.
