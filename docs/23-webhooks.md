@@ -92,7 +92,7 @@ raw unfiltered input.
 Default rendering (no template) is just `json.dumps(payload)` — e.g.
 for `login`:
 ```json
-{"user": "jerry", "service": "telnet"}
+{"user": "sysop", "service": "telnet"}
 ```
 
 ## Custom body templates

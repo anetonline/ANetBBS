@@ -31,7 +31,7 @@ access as this tool could grant them.
 ```
  ANetBBS Node Monitor :: 2/8 online :: 21:04:35
   Slot  User            Proto  Peer             Doing                     Since   Idle
-     1  jerry           ssh    10.0.0.5         reading Fido/GENERAL      14:02    0:02
+     1  sysop           ssh    10.0.0.5         reading Fido/GENERAL      14:02    0:02
      2  guest42         telnet 203.0.113.9      door: LORD2               13:58    0:41
      3  -- waiting for call --
      4  -- waiting for call --

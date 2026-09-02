@@ -1,3 +1,13 @@
+# ANetBBS v1.0.67 — Follow-up from the fourth audit pass, plus a CI-only test fix (September 2026)
+
+Follows up on three items from the v1.0.66 audit pass that were deliberately left open pending a product decision rather than being fixed on the spot:
+
+- The web IRC client's SASL EXTERNAL (TLS client-certificate) support was already fully implemented at the connection layer but had no way to actually reach it — no UI, no way to supply a certificate. It's now wired up end-to-end: a sysop-facing toggle in the web IRC client lets a user paste in certificate/key PEM text, which the server writes to a fresh, server-named, permission-locked temporary location for the duration of that one connection and removes on every disconnect path. The client never supplies a server-side file path — only the certificate content itself — so this can't be used to reference or probe any file already on the server.
+- Closed a low-severity anonymous resource-exhaustion gap in inbound FidoNet file-request (FREQ) handling: a fully unauthenticated connection could queue an unbounded number of file-request entries with no realistic way for them to ever be delivered, since outbound delivery only ever happens to a real, already-configured node. Now rate-limited per source address and globally, matching the same bounding approach already used for other unauthenticated network responders in this codebase.
+- A small number of historical changelog and documentation entries referenced the sysop by name; these have been reworded to be name-neutral, matching the rest of the project's documentation.
+
+Also fixed a CI-only test failure (caught in an actual GitHub Actions run, not reproducible locally): a new regression test added in v1.0.66 patched the wrong module-level path for its test isolation, letting it silently succeed against the real project data directory locally while failing outright against a fresh checkout in CI. The test itself is corrected; no application code was affected.
+
 # ANetBBS v1.0.66 — Fourth security/performance audit pass, plus correctness fixes and documentation cleanup (September 2026)
 
 A fourth broad audit pass was carried out across the entire codebase — every service, every protocol handler, and the documentation/wiki — using the same severity-tiered approach as the three prior rounds (v1.0.38, v1.0.39, v1.0.58). As with those rounds, this entry intentionally omits vulnerability specifics in the interest of responsible disclosure; sysops running an older release should update at their earliest convenience. In summary, this pass:
@@ -77,7 +87,7 @@ Also fixes the GitHub Actions Docker-build workflow's own test step, which had s
 
 # ANetBBS v1.0.54 — Fixed a real OOM: unbounded log reads and a logging-handler leak (August 2026)
 
-Fixes the root cause of a severe memory problem found live: Jerry's dev laptop repeatedly froze for 30+ seconds and the kernel OOM-killed an 11-12GB `python` process during test runs. Traced to two bugs working together, found by bisecting test batches down to a single file while monitoring real RSS.
+Fixes the root cause of a severe memory problem found live: a dev laptop repeatedly froze for 30+ seconds and the kernel OOM-killed an 11-12GB `python` process during test runs. Traced to two bugs working together, found by bisecting test batches down to a single file while monitoring real RSS.
 
 `anetbbs/web/admin.py`'s Settings page (and its sysop-console `tail` command) read a log file's last N lines with `f.readlines()[-N:]` — loading the entire file into memory before slicing. Fine on a fresh install, but a log with no rotation grows unbounded, and this one had reached 6.1GB / 80 million lines; `TestingConfig` never overrides `LOG_FILE`, so any test hitting that route read the real file. Both call sites now share a `_tail_lines()` helper that seeks near the end and reads a bounded 256KB window regardless of file size.
 
@@ -384,7 +394,7 @@ A sysop report that `visudo` rejected `deploy/sudoers.anetbbs` on a host whose `
 
 **New: `anetbbs-cfg`, a full-screen curses terminal admin tool** in the spirit of Synchronet's `SCFG` / Mystic's `mystic -cfg` — a standalone console command, independent of the web admin and of whether the network services are even running. Run it with `python -m anetbbs.cfg` from a checkout, or `anetbbs-cfg` once installed; it uses the same `create_app()`/database as the web and BBS processes, so changes show up immediately everywhere.
 
-First version shipped 5 sections; **expanded to 16 total sections for near-full web-admin parity**, per Jerry's priority order:
+First version shipped 5 sections; **expanded to 16 total sections for near-full web-admin parity**, in priority order:
 - **Boards & Message Areas** — add/edit/delete/reorder, access levels
 - **Echomail Networks & Areas** — pick a network, drill into its echo areas; BinkP host/port/passwords, AreaFix password, poll interval
 - **Echomail Hub** — AreaFix log, poll log, QWK node request approve/deny (mirrors the web admin's exact packet-id validation + random-password credential generation)
@@ -428,7 +438,7 @@ Also fixed a long-standing drift found along the way: `anetbbs/__init__.py`'s `_
 
 # ANetBBS v1.0.18 — AFK warning + matrix-rain screensaver; MRC wide-terminal sizing fix (August 2026)
 
-**AFK warning + screensaver for the terminal client.** New `AFK_WARNING_SECONDS` setting (`.env`, default `0` = off), mirroring a real Mystic Pascal AFK script Jerry pointed at as a reference. After that many seconds of no keystrokes at any menu prompt, the caller sees a live countdown warning ("You've been idle a while..."); if nobody responds, a generated matrix-rain screensaver takes over the screen. A keystroke at either stage cancels/dismisses it — consumed, not passed through as a real menu selection — and returns to exactly where the caller was (prompt redrawn, plus any already-typed partial line for `read_line`). If the sysop also has `IDLE_TIMEOUT_SECONDS` set and nobody ever comes back, the existing hard idle-disconnect still fires afterward, unchanged.
+**AFK warning + screensaver for the terminal client.** New `AFK_WARNING_SECONDS` setting (`.env`, default `0` = off), mirroring a real Mystic Pascal AFK script used as a reference. After that many seconds of no keystrokes at any menu prompt, the caller sees a live countdown warning ("You've been idle a while..."); if nobody responds, a generated matrix-rain screensaver takes over the screen. A keystroke at either stage cancels/dismisses it — consumed, not passed through as a real menu selection — and returns to exactly where the caller was (prompt redrawn, plus any already-typed partial line for `read_line`). If the sysop also has `IDLE_TIMEOUT_SECONDS` set and nobody ever comes back, the existing hard idle-disconnect still fires afterward, unchanged.
 
 Scoped deliberately narrow: only `read_key()`/`read_line()`/`read_key_arrow()` (the actual menu-navigation primitives) can trigger this. `read_raw()` is also called directly by several other features (door games' own poll loops, IRC/telnet bridges, the ANSI editor, dialout) with their own timeout/retry semantics and broad exception handlers that would have silently misinterpreted an AFK interruption as "the game/door ended" rather than "resume where you were" — a real risk found auditing every `read_raw()` call site before wiring this up. Those are completely unaffected; only the three intended entry points opt in via a new `allow_afk` parameter.
 

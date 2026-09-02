@@ -30,11 +30,27 @@ class AnetcraftSavePathTraversalTests(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self._orig_save_dir = anetcraft_mod.SAVE_DIR
         anetcraft_mod.SAVE_DIR = Path(self._tmp)
+        # Real CI-only failure found live (2026-09-02, GitHub Actions run
+        # 33654440160): SHARED_SAVE is a SEPARATE module-level constant
+        # (SAVE_DIR / 'multiplayer.json'), computed once at import time
+        # -- patching SAVE_DIR alone does NOT redirect it. The sole/host
+        # player leaving (_mp_leave() -> _mp_save()) writes to
+        # SHARED_SAVE, i.e. the REAL data/doors/anetcraft/multiplayer.json
+        # in the actual checkout, not this test's sandboxed tempdir. That
+        # directory happened to already exist on the dev sandbox (real
+        # anetcraft data from prior manual use), silently masking the
+        # bug locally -- but doesn't exist in a fresh CI checkout, so
+        # SHARED_SAVE.write_text() raised FileNotFoundError (parent dir
+        # missing) before the test's own assertions ever ran. Must
+        # sandbox SHARED_SAVE the same way SAVE_DIR is sandboxed.
+        self._orig_shared_save = anetcraft_mod.SHARED_SAVE
+        anetcraft_mod.SHARED_SAVE = Path(self._tmp) / 'multiplayer.json'
         self._orig_mp = dict(anetcraft_mod._MP)
         anetcraft_mod._MP.clear()
 
     def tearDown(self):
         anetcraft_mod.SAVE_DIR = self._orig_save_dir
+        anetcraft_mod.SHARED_SAVE = self._orig_shared_save
         anetcraft_mod._MP.clear()
         anetcraft_mod._MP.update(self._orig_mp)
         shutil.rmtree(self._tmp, ignore_errors=True)

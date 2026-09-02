@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.66`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.67`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.67 — Follow-up from the fourth audit pass, plus a CI-only test fix (September 2026)
+
+Follows up on three items from the v1.0.66 audit pass that were deliberately left open pending a product decision rather than being fixed on the spot:
+
+- The web IRC client's SASL EXTERNAL (TLS client-certificate) support was already fully implemented at the connection layer but had no way to actually reach it — no UI, no way to supply a certificate. It's now wired up end-to-end: a sysop-facing toggle in the web IRC client lets a user paste in certificate/key PEM text, which the server writes to a fresh, server-named, permission-locked temporary location for the duration of that one connection and removes on every disconnect path. The client never supplies a server-side file path — only the certificate content itself — so this can't be used to reference or probe any file already on the server.
+- Closed a low-severity anonymous resource-exhaustion gap in inbound FidoNet file-request (FREQ) handling: a fully unauthenticated connection could queue an unbounded number of file-request entries with no realistic way for them to ever be delivered, since outbound delivery only ever happens to a real, already-configured node. Now rate-limited per source address and globally, matching the same bounding approach already used for other unauthenticated network responders in this codebase.
+- A small number of historical changelog and documentation entries referenced the sysop by name; these have been reworded to be name-neutral, matching the rest of the project's documentation.
+
+Also fixed a CI-only test failure (caught in an actual GitHub Actions run, not reproducible locally): a new regression test added in v1.0.66 patched the wrong module-level path for its test isolation, letting it silently succeed against the real project data directory locally while failing outright against a fresh checkout in CI. The test itself is corrected; no application code was affected.
 
 ## v1.0.66 — Fourth security/performance audit pass, plus correctness fixes and documentation cleanup (September 2026)
 
@@ -530,13 +540,13 @@ Fixed by replacing the delegated `read_line()` call with a proper PETSCII-safe c
 
 ## v1.0.22 — Terminal echomail-reply network bug, live presence detail, activity log drill-down, echomail admin logging, calendar/board polish (August 2026)
 
-**Fixed a real bug: replying to an echomail message from the terminal never actually reached the network.** `read_echo_area()`'s inline reply composer (`anetbbs/features/bbs_ui.py`) was a fourth local-compose write path into `EchomailMessage` that never got the `toss_message()` fix the other three composers (the dedicated Compose Echomail menu item, the web composer, and PETSCII's composer) already had — a terminal reply sat in the local DB, visible on read-back, but was never queued into any downstream node's hold queue at all. This is the exact bug Jerry hit replying to a test message on a real network. Also fixed: none of the three terminal/PETSCII composers set `tear_line`/`origin_line` (the FTN `* Origin:` footer), even though the web composer always has — all three now read `ECHOMAIL_TEAR_LINE`/`ECHOMAIL_ORIGIN_LINE` from config like the web route does.
+**Fixed a real bug: replying to an echomail message from the terminal never actually reached the network.** `read_echo_area()`'s inline reply composer (`anetbbs/features/bbs_ui.py`) was a fourth local-compose write path into `EchomailMessage` that never got the `toss_message()` fix the other three composers (the dedicated Compose Echomail menu item, the web composer, and PETSCII's composer) already had — a terminal reply sat in the local DB, visible on read-back, but was never queued into any downstream node's hold queue at all. This was caught replying to a test message on a real network. Also fixed: none of the three terminal/PETSCII composers set `tear_line`/`origin_line` (the FTN `* Origin:` footer), even though the web composer always has — all three now read `ECHOMAIL_TEAR_LINE`/`ECHOMAIL_ORIGIN_LINE` from config like the web route does.
 
 **"Who's on" now shows real detail instead of being frozen at "main" all session.** Root cause: `SessionPresence.set_page()` — the exact method built for this — was hardcoded to fire exactly once, at login, and never stored on the session for anything else to call again. Now updated from `menu_engine.py`'s central action dispatch (every top-level menu action: games, chat, boards, files, echo, pm, ...) plus finer detail from `games.py` (which door) and `mrc_chat.py` (which room) — both the terminal Who's Online command and the web `/who/` page benefit, along with the sysop's NodeSpy panel.
 
 **New per-session activity log with a real drill-down.** The caller log now has a "View Activity" link per session, showing a full chronological timeline — login, menu actions, doors played/exited, MRC chat sessions with duration, logout — built on the existing (but nearly unused) `UserActivity` audit table rather than a new system. Also fixed a bug found along the way: `CallerLog.duration_seconds` was declared on the model and shown in two admin templates but never actually written anywhere — every row showed 0s; both web and terminal sessions now record real duration on logout.
 
-**Echomail admin logging got substantially more detail**, all things Jerry specifically asked for after going through the hub over the weekend: poll logs are now filterable by downstream node, not just network; the AreaFix log gained a from-address (node) filter; and node detail pages gained a full File Area Subscriptions card — view what file areas a node is subscribed to and add/remove them, mirroring the existing message-area subscription UI, which didn't exist for file areas at all before this.
+**Echomail admin logging got substantially more detail**, driven by real needs found going through the hub over a weekend: poll logs are now filterable by downstream node, not just network; the AreaFix log gained a from-address (node) filter; and node detail pages gained a full File Area Subscriptions card — view what file areas a node is subscribed to and add/remove them, mirroring the existing message-area subscription UI, which didn't exist for file areas at all before this.
 
 **Calendar**: a sysop can now delete past events from the main calendar view, not just upcoming ones — the delete button simply never rendered for the "Recent past events" list.
 
@@ -609,7 +619,7 @@ immediately everywhere.
 
 First version shipped 5 sections (Boards, Echomail Networks/Areas, File
 Areas, Users & Security, System Settings); **expanded to 16 total
-sections for near-full web-admin parity**, per Jerry's priority order:
+sections for near-full web-admin parity**, in priority order:
 
 - **Boards & Message Areas** — add/edit/delete/reorder, access levels
 - **Echomail Networks & Areas** — pick a network, drill into its echo
@@ -702,7 +712,7 @@ Also fixed a long-standing drift found along the way: `anetbbs/__init__.py`'s `_
 
 ## v1.0.18 — AFK warning + matrix-rain screensaver; MRC wide-terminal sizing fix (August 2026)
 
-**AFK warning + screensaver for the terminal client.** New `AFK_WARNING_SECONDS` setting (`.env`, default `0` = off), mirroring a real Mystic Pascal AFK script Jerry pointed at as a reference. After that many seconds of no keystrokes at any menu prompt, the caller sees a live countdown warning ("You've been idle a while..."); if nobody responds, a generated matrix-rain screensaver takes over the screen. A keystroke at either stage cancels/dismisses it — consumed, not passed through as a real menu selection — and returns to exactly where the caller was (prompt redrawn, plus any already-typed partial line for `read_line`). If the sysop also has `IDLE_TIMEOUT_SECONDS` set and nobody ever comes back, the existing hard idle-disconnect still fires afterward, unchanged.
+**AFK warning + screensaver for the terminal client.** New `AFK_WARNING_SECONDS` setting (`.env`, default `0` = off), mirroring a real Mystic Pascal AFK script used as a reference. After that many seconds of no keystrokes at any menu prompt, the caller sees a live countdown warning ("You've been idle a while..."); if nobody responds, a generated matrix-rain screensaver takes over the screen. A keystroke at either stage cancels/dismisses it — consumed, not passed through as a real menu selection — and returns to exactly where the caller was (prompt redrawn, plus any already-typed partial line for `read_line`). If the sysop also has `IDLE_TIMEOUT_SECONDS` set and nobody ever comes back, the existing hard idle-disconnect still fires afterward, unchanged.
 
 Scoped deliberately narrow: only `read_key()`/`read_line()`/`read_key_arrow()` (the actual menu-navigation primitives) can trigger this. `read_raw()` is also called directly by several other features (door games' own poll loops, IRC/telnet bridges, the ANSI editor, dialout) with their own timeout/retry semantics and broad exception handlers that would have silently misinterpreted an AFK interruption as "the game/door ended" rather than "resume where you were" — a real risk found auditing every `read_raw()` call site before wiring this up. Those are completely unaffected; only the three intended entry points opt in via a new `allow_afk` parameter.
 
@@ -818,7 +828,7 @@ Swept everything else that could plausibly carry a stale version claim in the sa
 
 **A real bug also caught in this window, before deploy.** A live TIC delivery (`tqwinfo.zip`, a legitimate file-echo distribution) sat unfiled for hours despite arriving cleanly and passing CRC. Root cause: `process_tic()` (`anetbbs/echomail/tic.py`) falls back to a default storage path whenever a `FileArea` doesn't have one explicitly configured — but that default was hardcoded to `/var/lib/anetbbs/file_areas/<TAG>`, a location the BBS service (running as an unprivileged user in every real install) has no permission to create. Every retry failed with a permission error one directory level deeper than the last, only ever recovering if someone manually built the path by hand as root — not something that happens unattended. This would hit any file area with no storage path set, including ones auto-created on the fly from an unrecognized TIC area tag, so it wasn't a one-off. Fixed: the default now lives under `{DATA_DIR}/file_areas/<TAG>`, the same convention every other on-disk default in the app already follows (uploads, avatars, echomail). Also updated the two admin-form placeholder examples that suggested the broken `/var/lib/anetbbs` path by example. 1 new test (`test_unset_storage_path_defaults_under_data_dir_not_var_lib`), confirming an area with no storage path files successfully with zero manual intervention.
 
-Folded into the same v1.0.6 rather than a separate release, since it was caught before Jerry deployed the docs-only build — same pattern as v1.0.5's `find_aka_for_network` fix landing before its own first deploy.
+Folded into the same v1.0.6 rather than a separate release, since it was caught before the docs-only build was deployed — same pattern as v1.0.5's `find_aka_for_network` fix landing before its own first deploy.
 
 ## v1.0.5 — MRC protocol audit: message-length and color bugs (August 2026)
 

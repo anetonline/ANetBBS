@@ -146,6 +146,35 @@ _PKT_EXT_RE = re.compile(
 # one of the Mystic bundle patterns by coincidence.
 _MAIL_BUNDLE_EXT_EXCLUSIONS = frozenset({'.tic', '.crt'})
 
+# Real Low finding from a security/performance audit (2026-09-02):
+# WaZOO FREQ processing is reachable by a fully anonymous "crashmail"
+# connection, and each accepted FREQ can queue up to
+# freq.MAX_FILES_PER_REQUEST (100) HatchQueue rows -- rows an anonymous
+# requester (no real BinkPNode/EchomailNetwork match) can never
+# actually have delivered, since outbound hatch delivery only ever
+# happens through the two authenticated code paths. Same per-IP +
+# global sliding-window shape already used for the SYSTAT UDP responder
+# (msp/systat.py) and the MSP responder (msp/server.py).
+_FREQ_PER_IP_LIMIT = 10
+_FREQ_PER_IP_WINDOW = 60
+_FREQ_GLOBAL_LIMIT = 60
+_FREQ_GLOBAL_WINDOW = 60
+
+
+def _freq_rate_limited(remote_addr):
+    """Return True if an inbound WaZOO FREQ from `remote_addr` should
+    be dropped (per-IP or global sliding-window limit hit), False if
+    it's OK to process. Extracted as its own function so it's testable
+    without needing a full BinkP session handshake."""
+    from ..features.rate_limit import _check as _rate_limit_check
+    if not _rate_limit_check(f'binkp-freq:{remote_addr}',
+                             _FREQ_PER_IP_LIMIT, _FREQ_PER_IP_WINDOW):
+        return True
+    if not _rate_limit_check('binkp-freq:global',
+                             _FREQ_GLOBAL_LIMIT, _FREQ_GLOBAL_WINDOW):
+        return True
+    return False
+
 
 def _is_fts_packet(payload):
     return len(payload) >= 60 and payload[18:20] in (b'\x02\x00', b'\x02\x01')
@@ -1214,6 +1243,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         _debug_manifest(fname, payload)
                         from .freq import is_req_filename, process_inbound_req
                         if is_req_filename(fname):
+                            if _freq_rate_limited(remote_addr):
+                                logger.debug(
+                                    'BinkP: FREQ rate limit hit for %s, '
+                                    'dropping %s', remote_addr, fname)
+                                continue
                             try:
                                 queued = process_inbound_req(payload, remote_addr)
                                 files_received += 1

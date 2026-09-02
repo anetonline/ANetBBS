@@ -86,6 +86,13 @@
             <input id="cfg_sasl_pass" type="password" class="form-control form-control-sm"
                    placeholder="" style="width:120px;" autocomplete="new-password">
         </div>
+        <div class="form-check mb-1">
+            <input id="cfg_cert_toggle" class="form-check-input" type="checkbox">
+            <label class="form-check-label" for="cfg_cert_toggle" style="font-size:0.85rem;"
+                   title="SASL EXTERNAL -- authenticate via a TLS client certificate instead of a password">
+                Client Cert
+            </label>
+        </div>
         <button id="btn_connect" class="btn btn-success btn-sm">
             <i class="bi bi-plug"></i> Connect
         </button>
@@ -95,6 +102,27 @@
         <button id="btn_save" class="btn btn-outline-secondary btn-sm" title="Save these settings">
             <i class="bi bi-bookmark"></i>
         </button>
+    </div>
+
+    <div class="irc-config" id="cfg_cert_panel" style="display:none;">
+        <div style="flex:1; min-width:260px;">
+            <label class="form-label mb-0" style="font-size:0.75rem;">
+                Client Certificate (PEM) — SASL EXTERNAL / CertFP
+            </label>
+            <textarea id="cfg_cert_pem" class="form-control form-control-sm" rows="4"
+                      style="font-family:monospace; font-size:0.75rem;"
+                      placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+                      autocomplete="off" spellcheck="false"></textarea>
+        </div>
+        <div style="flex:1; min-width:260px;">
+            <label class="form-label mb-0" style="font-size:0.75rem;">
+                Client Private Key (PEM) — never leaves this connection except to be stored briefly server-side for the duration of your session
+            </label>
+            <textarea id="cfg_key_pem" class="form-control form-control-sm" rows="4"
+                      style="font-family:monospace; font-size:0.75rem;"
+                      placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+                      autocomplete="off" spellcheck="false"></textarea>
+        </div>
     </div>
 
     <div class="irc-channels" id="channels">
@@ -440,6 +468,12 @@
     });
 
     // --- UI handlers ---
+    const certToggle = document.getElementById('cfg_cert_toggle');
+    const certPanel = document.getElementById('cfg_cert_panel');
+    certToggle.addEventListener('change', () => {
+        certPanel.style.display = certToggle.checked ? 'flex' : 'none';
+    });
+
     btnConnect.addEventListener('click', () => {
         const server = document.getElementById('cfg_server').value.trim();
         const port = parseInt(document.getElementById('cfg_port').value, 10) || 6667;
@@ -449,11 +483,21 @@
         const autojoin = channelsCfg.split(',').map(s => s.trim()).filter(Boolean);
         const saslUser = document.getElementById('cfg_sasl_user').value.trim();
         const saslPass = document.getElementById('cfg_sasl_pass').value;
-        socket.emit('irc_connect', {
+        const payload = {
             server, port, use_ssl: useSsl, nick, autojoin,
             sasl_user: saslUser || null,
             sasl_pass: saslPass || null,
-        });
+        };
+        // SASL EXTERNAL (client certificate) -- only sent when the
+        // "Client Cert" toggle is on, and never as a server-side file
+        // path, just the pasted PEM text itself.
+        if (certToggle.checked) {
+            const certPem = document.getElementById('cfg_cert_pem').value.trim();
+            const keyPem = document.getElementById('cfg_key_pem').value.trim();
+            payload.client_cert_pem = certPem || null;
+            payload.client_key_pem = keyPem || null;
+        }
+        socket.emit('irc_connect', payload);
     });
 
     btnDisconnect.addEventListener('click', () => {

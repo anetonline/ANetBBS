@@ -135,6 +135,12 @@ class _IrcSession:
         self.sasl_mechanism = (sasl_mechanism or 'PLAIN').upper()
         self.client_cert_path = client_cert_path
         self.client_key_path = client_key_path
+        # Set by on_irc_connect() below when the user pasted cert/key PEM
+        # material for SASL EXTERNAL -- the temp dir holding
+        # client_cert_path/client_key_path, cleaned up on quit() so a
+        # user's key material doesn't linger on disk after they
+        # disconnect.
+        self._temp_cert_dir = None
         if self.sasl_mechanism == 'EXTERNAL':
             self.sasl_state = 'pending'
         elif sasl_user and sasl_pass:
@@ -231,6 +237,16 @@ class _IrcSession:
                 except OSError:
                     pass
                 self.connected = False
+        self._cleanup_temp_cert()
+
+    def _cleanup_temp_cert(self):
+        """Remove the temp dir holding a pasted SASL EXTERNAL cert/key,
+        if one was created for this session. Idempotent -- safe to call
+        even if connect() itself failed before ever getting this far."""
+        if self._temp_cert_dir:
+            import shutil as _shutil
+            _shutil.rmtree(self._temp_cert_dir, ignore_errors=True)
+            self._temp_cert_dir = None
 
     # ------------------------------------------------------------------
     # Receive loop — runs in eventlet greenthread
@@ -299,6 +315,11 @@ class _IrcSession:
                 # points at THIS session.
                 if _sessions.get(self.sid) is self:
                     _sessions.pop(self.sid, None)
+            # This is the natural end-of-connection path (server closed
+            # us, socket error, etc.) -- doesn't go through quit(), so
+            # needs its own cleanup of any pasted SASL EXTERNAL cert/key
+            # temp files.
+            self._cleanup_temp_cert()
             # Real gap found in a security/performance audit: _scrollback
             # is deliberately keyed per-user (not per-sid) so it survives
             # a browser reconnect while the underlying IRC connection is
@@ -613,6 +634,45 @@ def save_settings():
     return ('', 204)
 
 
+_MAX_CLIENT_CERT_PEM_LEN = 16384  # generous but bounded -- a real PEM is a few KB
+
+
+def _validate_client_cert_request(cert_pem, key_pem, use_ssl):
+    """Return an error message string if a pasted SASL EXTERNAL cert/
+    key request is invalid, or None if it's OK to proceed. Pure
+    validation, no side effects -- see _prepare_client_cert() for the
+    actual temp-file writing."""
+    if not (cert_pem and key_pem):
+        return ('SASL EXTERNAL needs both a client certificate AND a '
+                'private key -- only one was provided.')
+    if not use_ssl:
+        return ('SASL EXTERNAL (client certificate) requires SSL -- '
+                'check the SSL box too.')
+    if len(cert_pem) > _MAX_CLIENT_CERT_PEM_LEN or len(key_pem) > _MAX_CLIENT_CERT_PEM_LEN:
+        return 'Certificate or key is too large.'
+    return None
+
+
+def _prepare_client_cert(cert_pem, key_pem):
+    """Write pasted PEM cert/key text to a fresh, per-connection temp
+    dir (mode 0600 on both files) that only this process ever names.
+    Deliberately takes PEM TEXT only, never a path -- a caller can
+    never reference an arbitrary file already on this host this way.
+    Returns (temp_dir, cert_path, key_path); caller is responsible for
+    eventually removing temp_dir (see _IrcSession._cleanup_temp_cert())."""
+    import tempfile as _tempfile
+    temp_cert_dir = _tempfile.mkdtemp(prefix='irc_cert_')
+    cert_path = os.path.join(temp_cert_dir, 'cert.pem')
+    key_path = os.path.join(temp_cert_dir, 'key.pem')
+    with open(cert_path, 'w') as f:
+        f.write(cert_pem + '\n')
+    with open(key_path, 'w') as f:
+        f.write(key_pem + '\n')
+    os.chmod(cert_path, 0o600)
+    os.chmod(key_path, 0o600)
+    return temp_cert_dir, cert_path, key_path
+
+
 # ---------------------------------------------------------------------------
 # SocketIO handlers — registered by web_app.py after the socketio is bound
 # ---------------------------------------------------------------------------
@@ -661,10 +721,45 @@ def register_socketio_handlers(socketio):
         sasl_user = (data.get('sasl_user') or '').strip() or None
         sasl_pass = (data.get('sasl_pass') or '').strip() or None
 
+        # SASL EXTERNAL (TLS client-cert / CertFP) -- real Low finding
+        # from a security/performance audit (2026-09-02): _IrcSession
+        # already fully supported this (connect()'s own
+        # ctx.load_cert_chain() call), but nothing ever wired a way to
+        # actually reach it -- no UI, no socketio payload field. Wired
+        # here rather than removed. Deliberately does NOT take a
+        # server-side file path from the client at all (that would let
+        # any logged-in user probe/reference arbitrary files readable by
+        # the anetbbs process) -- the user pastes PEM text instead.
+        # Validation + temp-file writing are extracted into their own
+        # module-level functions (below) so they're testable without
+        # needing the full socketio/flask-login stack this handler runs
+        # under.
+        sasl_mechanism = 'PLAIN'
+        client_cert_path = None
+        client_key_path = None
+        temp_cert_dir = None
+        cert_pem = (data.get('client_cert_pem') or '').strip()
+        key_pem = (data.get('client_key_pem') or '').strip()
+        if cert_pem or key_pem:
+            error = _validate_client_cert_request(cert_pem, key_pem, use_ssl)
+            if error:
+                emit('irc_error', {'message': error})
+                return
+            temp_cert_dir, cert_path, key_path = _prepare_client_cert(
+                cert_pem, key_pem)
+            sasl_mechanism = 'EXTERNAL'
+            client_cert_path = cert_path
+            client_key_path = key_path
+
         sess = _IrcSession(sid, server, port, use_ssl, nick, username, realname,
                            sasl_user=sasl_user, sasl_pass=sasl_pass,
+                           sasl_mechanism=sasl_mechanism,
+                           client_cert_path=client_cert_path,
+                           client_key_path=client_key_path,
                            user_id=current_user.id)
+        sess._temp_cert_dir = temp_cert_dir
         if not sess.connect():
+            sess._cleanup_temp_cert()
             return
 
         with _sessions_lock:
@@ -673,7 +768,7 @@ def register_socketio_handlers(socketio):
         socketio.start_background_task(sess.run)
         emit('irc_connected', {
             'server': server, 'port': port, 'nick': nick, 'use_ssl': use_ssl,
-            'sasl': bool(sasl_user)})
+            'sasl': bool(sasl_user) or sasl_mechanism == 'EXTERNAL'})
 
         # Auto-join configured channels — supports "#chan" or "#chan key"
         for ch in (data.get('autojoin') or []):
