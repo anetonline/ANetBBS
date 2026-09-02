@@ -280,6 +280,41 @@ class AreafixTests(unittest.TestCase):
                 node_id=node.id, echo_area_id=area.id).first(),
                 'wrong password must not create a subscription')
 
+    def test_handle_areafix_netmail_with_no_resolvable_network_still_queues_a_reply(self):
+        """Real Low finding from a security/performance audit
+        (2026-09-02): when the inbound netmail's network_id doesn't
+        resolve to a real EchomailNetwork AND the sender isn't a known
+        downstream node, process_request(None, ...) still computes a
+        real, informative response ("Network not configured.") -- but
+        neither the `if network is not None:` nor the
+        `elif downstream_node:` branch matched, so that reply was
+        silently discarded (a real dead-branch gap, not a design
+        choice). Now a reply must still be queued."""
+        from anetbbs.models import db, NetmailMessage
+        from anetbbs.echomail.areafix import handle_areafix_netmail
+
+        with self.app.app_context():
+            inbound = NetmailMessage(
+                network_id=None, from_address='9:9/9', to_address='1:1/1',
+                from_name='Stranger', to_name='areafix', subject='whatever',
+                body='+SOME.AREA\n', direction='inbound', status='received')
+            db.session.add(inbound)
+            db.session.commit()
+            nm_id = inbound.id
+
+            response = handle_areafix_netmail(nm_id)
+            self.assertIn('not configured', response.lower())
+
+            reply = (NetmailMessage.query
+                    .filter_by(direction='outbound', from_name='Areafix',
+                               to_address='9:9/9')
+                    .order_by(NetmailMessage.id.desc()).first())
+            self.assertIsNotNone(
+                reply, 'the "network not configured" reply must still be '
+                       'queued, not silently discarded')
+            self.assertEqual(reply.status, 'queued')
+            self.assertIn('not configured', reply.body.lower())
+
     def test_parse_request_captures_rescan_argument(self):
         """Real report: a real downstream sysop sent repeated
         "%RESCAN AREA.TAG" requests trying to recover a backlog he'd

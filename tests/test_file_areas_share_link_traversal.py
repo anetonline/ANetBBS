@@ -111,6 +111,32 @@ class FileAreaShareLinkTraversalTests(unittest.TestCase):
             self.assertIsNotNone(link)
             self.assertEqual(link.filename, 'real.zip')
 
+    def test_download_still_works_when_storage_path_is_itself_a_symlink(self):
+        """Real Low finding from a security/performance audit
+        (2026-09-02): the traversal guard compared a lexically-
+        normalized candidate path (normpath, does not resolve symlinks)
+        against a fully symlink-resolved storage_path prefix
+        (realpath) -- if storage_path itself is ever a symlink, the two
+        sides silently mismatched and a perfectly legitimate download
+        404'd. Confirmed by actually symlinking storage_path here (not
+        exploitable as a security hole -- fails closed -- but a real
+        functional bug for that configuration)."""
+        real_dir = os.path.join(self.work_dir, 'real_storage')
+        symlink_dir = os.path.join(self.work_dir, 'storage_via_symlink')
+        os.makedirs(real_dir)
+        os.symlink(real_dir, symlink_dir)
+        with open(os.path.join(real_dir, 'legit.zip'), 'wb') as f:
+            f.write(b'legit contents')
+
+        area_id = self._make_area('SYMLINKAREA', symlink_dir)
+
+        client = self._client_as(self.user_id)
+        resp = client.get(f'/file-areas/{area_id}/legit.zip')
+        self.assertEqual(resp.status_code, 200,
+                         'a legitimate file must still download correctly '
+                         'when storage_path is itself a symlink')
+        self.assertEqual(resp.get_data(), b'legit contents')
+
     def test_fetch_shared_rejects_a_link_with_a_traversal_filename(self):
         """Defense-in-depth: even if a SharedFileLink row somehow has a
         bad filename (e.g. created before this fix), the actual

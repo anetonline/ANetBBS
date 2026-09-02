@@ -4233,6 +4233,17 @@ async def _compose_echomail(self):
         from flask import current_app
         _tear = current_app.config.get('ECHOMAIL_TEAR_LINE', '--- ANetBBS v1.0')
         _origin = current_app.config.get('ECHOMAIL_ORIGIN_LINE', 'ANetBBS')
+        # Sysop-configured word-filter blocklist -- web/boards.py's
+        # composers already run subject/body through this; the terminal
+        # echomail composer (this one) never did, matching the same gap
+        # already fixed here once for board posts (see the comment on
+        # the board-post composer elsewhere in this file).
+        try:
+            from .word_filter import apply as _wf_apply
+            subject = _wf_apply(subject)
+            body = _wf_apply(body)
+        except Exception:
+            pass
         em = EchomailMessage(
             area_id=area_id,
             network_id=network_id,

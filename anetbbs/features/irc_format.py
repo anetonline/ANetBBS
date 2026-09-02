@@ -1,7 +1,17 @@
 # anetbbs/features/irc_format.py
 """
-mIRC formatting code parsers — shared by the web IRC client (HTML output)
-and the telnet/SSH/rlogin IRC chat (ANSI escape output).
+mIRC formatting code parser — used by the web IRC client (HTML output).
+
+The telnet/SSH/rlogin IRC client (features/anetirc2.py) does NOT use
+this module's ANSI rendering -- it strips mIRC formatting codes
+outright via its own dedicated `_MIRC_RE`, rather than rendering them
+as ANSI escapes. A real to_ansi() ANSI-rendering counterpart to
+to_html() below existed here once (found dead -- zero callers anywhere
+in the codebase -- in a security/performance audit, 2026-09-02) and
+was removed rather than kept unreachable; if terminal IRC color
+rendering is ever wanted, re-derive it from to_html()'s parsing logic
+rather than resurrecting the removed code verbatim (git history has it
+if needed as a reference).
 
 mIRC formatting codes (de-facto IRC standard):
     \x02            bold
@@ -134,105 +144,6 @@ def to_html(text):
             i += 1
 
     out.append('</span>' * open_spans)
-    return ''.join(out)
-
-
-# ---------------------------------------------------------------------------
-# ANSI rendering (telnet/SSH/rlogin IRC client)
-# ---------------------------------------------------------------------------
-
-# mIRC color → ANSI fg / bg codes (16-color basic palette).
-_ANSI_FG = [
-    97,   # 00 white      -> bright white
-    30,   # 01 black
-    34,   # 02 blue
-    32,   # 03 green
-    91,   # 04 red        -> bright red
-    31,   # 05 brown      -> red
-    35,   # 06 magenta
-    33,   # 07 orange     -> yellow
-    93,   # 08 yellow     -> bright yellow
-    92,   # 09 lt green   -> bright green
-    36,   # 10 cyan
-    96,   # 11 lt cyan    -> bright cyan
-    94,   # 12 lt blue    -> bright blue
-    95,   # 13 pink       -> bright magenta
-    90,   # 14 grey       -> bright black
-    37,   # 15 lt grey    -> white
-]
-_ANSI_BG = [c + 10 for c in _ANSI_FG]   # bg = fg + 10
-
-
-def to_ansi(text):
-    """Convert IRC-formatted text to ANSI escape codes for terminal display.
-
-    Drops unknown control bytes. Always emits a final reset so subsequent
-    output isn't accidentally colored."""
-    if not text:
-        return ''
-
-    out = []
-    bold = italic = underline = reverse = False
-    cur_fg = cur_bg = None
-
-    def emit_state():
-        codes = ['0']  # reset, then re-apply
-        if bold:      codes.append('1')
-        if italic:    codes.append('3')
-        if underline: codes.append('4')
-        if reverse:   codes.append('7')
-        if cur_fg is not None:
-            codes.append(str(_ANSI_FG[cur_fg]))
-        if cur_bg is not None:
-            codes.append(str(_ANSI_BG[cur_bg]))
-        out.append('\x1b[' + ';'.join(codes) + 'm')
-
-    i = 0
-    n = len(text)
-    while i < n:
-        c = text[i]
-        if c == '\x02':
-            bold = not bold; emit_state(); i += 1
-        elif c == '\x1d':
-            italic = not italic; emit_state(); i += 1
-        elif c == '\x1f':
-            underline = not underline; emit_state(); i += 1
-        elif c == '\x16':
-            reverse = not reverse; emit_state(); i += 1
-        elif c == '\x0f':
-            bold = italic = underline = reverse = False
-            cur_fg = cur_bg = None
-            out.append('\x1b[0m'); i += 1
-        elif c == '\x03':
-            j = i + 1
-            fg_digits = ''
-            while j < n and text[j].isdigit() and len(fg_digits) < 2:
-                fg_digits += text[j]; j += 1
-            bg_digits = ''
-            if j < n and text[j] == ',' and j + 1 < n and text[j + 1].isdigit():
-                j += 1
-                while j < n and text[j].isdigit() and len(bg_digits) < 2:
-                    bg_digits += text[j]; j += 1
-            if fg_digits == '' and bg_digits == '':
-                cur_fg = cur_bg = None
-            else:
-                if fg_digits:
-                    cur_fg = int(fg_digits) % 16
-                if bg_digits:
-                    cur_bg = int(bg_digits) % 16
-            emit_state()
-            i = j
-        elif c == '\x04':
-            i += 1
-            skipped = 0
-            while i < n and skipped < 6 and text[i] in '0123456789abcdefABCDEF':
-                i += 1; skipped += 1
-        elif c < ' ':
-            i += 1
-        else:
-            out.append(c); i += 1
-
-    out.append('\x1b[0m')
     return ''.join(out)
 
 

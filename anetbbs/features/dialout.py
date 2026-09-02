@@ -132,12 +132,32 @@ class DialoutMenu:
         await self._connect(host, host, port, 'telnet')
 
     async def _connect(self, name, host, port, proto):
+        # Real gap found in a security/performance audit: unlike every
+        # other outbound-connect path in this codebase (web_terminal.py,
+        # the RSS feed-URL/image fetches, finger.py, msp/client.py,
+        # etc.), this one dialed `host` directly with no SSRF guard at
+        # all -- and reaches every logged-in user by default (no
+        # min_access override on the seeded menu item), not just admins.
+        # Applied at this shared chokepoint (not just _custom_destination)
+        # so it also covers sysop-configured directory entries, matching
+        # net_safety.py's own stance that a reachable-via-compromised-
+        # admin-session path still needs the guard. Resolve once, then
+        # connect to the pinned literal address -- connecting by hostname
+        # again here would reopen the DNS-rebinding TOCTOU gap the guard
+        # exists to close.
+        from ..core.net_safety import resolve_safe_destination
+        _family, sockaddr, ssrf_err = resolve_safe_destination(host, port)
+        if ssrf_err:
+            await self.session.write(
+                f"\r\n{FG['red']}Connect failed: {ssrf_err}{RESET}\r\n")
+            await self.session.read_line('Press Enter...')
+            return
         await self.session.write(
             f"\r\n{FG['cyan']}Connecting to {name} ({host}:{port}) - "
             f"Press Ctrl+] then Q to disconnect.{RESET}\r\n\r\n")
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=15)
+                asyncio.open_connection(sockaddr[0], sockaddr[1]), timeout=15)
         except (OSError, asyncio.TimeoutError) as exc:
             await self.session.write(
                 f"\r\n{FG['red']}Connect failed: {exc}{RESET}\r\n")

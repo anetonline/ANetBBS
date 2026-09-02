@@ -180,4 +180,28 @@ for you.)
 | `venv/`                      | Python virtual env            |
 | `.env`                       | runtime config (mode 0600)    |
 
+## Migrating users from another BBS
+
+Coming from Synchronet or Mystic and want to bring your existing user
+accounts over instead of starting from scratch? `anetbbs-import-users`
+(installed as a console script; also runnable as `python
+tools/import_users.py`) reads a Synchronet `user.dat` or Mystic
+`users.dat` file directly and creates matching ANetBBS accounts.
+
+```sh
+# Dry-run first — shows what would be imported, touches nothing
+anetbbs-import-users --dry-run synchronet /sbbs/data/user/user.dat
+
+# Live import, with placeholder emails generated from your domain
+anetbbs-import-users synchronet /sbbs/data/user/user.dat \
+    --email-domain mybbs.net
+```
+
+Passwords are never migrated (the two systems use incompatible
+hashing) — each imported account gets a random 16-character temporary
+password, written to a CSV report (`--report`, default
+`import_report.csv`) alongside each user's handle, so you can notify
+them individually. `--on-conflict skip|update|rename` controls what
+happens when an imported username already exists locally.
+
 ## After install — see the [launch checklist](02-sysop-daily-ops.md)

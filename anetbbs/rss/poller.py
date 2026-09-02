@@ -12,7 +12,6 @@ in the admin UI), call :func:`fetch_one_now`.
 """
 import os
 import logging
-import socket
 import threading
 from datetime import datetime, timedelta
 from html import unescape
@@ -108,28 +107,66 @@ def _import_one_feed(app, feed_id):
             logger.warning('RSS fetch refused for %s: %s', feed.name, ssrf_err)
             return 0
 
+        # Real gap found in a LATER security/performance audit round
+        # (2026-09-02): resolve_safe_destination() above validates the
+        # resolved IP, but the code then used to hand feedparser.parse()
+        # the plain URL string -- feedparser re-resolves the hostname
+        # entirely independently at its own connect time, reopening the
+        # exact DNS-rebinding TOCTOU window resolving-once is supposed
+        # to close (confirmed reachable: the old
+        # test_public_https_url_passes_validation_and_reaches_feedparser
+        # test asserted feedparser.parse() was called with the plain
+        # hostname URL, proving the gap was real, not theoretical).
+        # Fixed the same way the sibling gap in
+        # anetbbs/web/ebooks.py's _gutendex_get() was closed: shell out
+        # to curl with --resolve host:port:ip to pin the fetch to the
+        # already-validated address (still sends the correct Host
+        # header / TLS SNI against the real hostname, unlike rewriting
+        # the URL to a bare IP, which would break both), then hand
+        # feedparser the raw response bytes instead of a URL --
+        # feedparser accepts a byte-string directly and does no further
+        # network I/O in that case, so no separate timeout workaround
+        # is needed for the parse step (curl's own --max-time covers
+        # the only real network call now).
+        import subprocess
+        resolved_ip = _sockaddr[0]
         try:
-            # feedparser.parse() has no timeout= parameter of its own
-            # (checked its real signature) -- socket.setdefaulttimeout()
-            # is the standard, widely-used workaround for exactly this
-            # gap. It's a PROCESS-GLOBAL setting, not thread-local, so
-            # this saves/restores whatever was there before rather than
-            # assuming it was unset, and restores it immediately after
-            # this one call in a finally -- the window where it's
-            # active is bounded to this fetch alone.
-            _prev_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(_FEED_FETCH_TIMEOUT)
-            try:
-                parsed = feedparser.parse(url, request_headers={
-                    'User-Agent': 'ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)'
-                })
-            finally:
-                socket.setdefaulttimeout(_prev_timeout)
+            result = subprocess.run(
+                ['curl', '-sL', '--fail', '--max-time', str(_FEED_FETCH_TIMEOUT),
+                 '-A', 'ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)',
+                 '--resolve', f'{host}:{port}:{resolved_ip}',
+                 '--', url],
+                capture_output=True, timeout=_FEED_FETCH_TIMEOUT + 5,
+            )
+        except subprocess.TimeoutExpired:
+            feed.last_error = f'fetch timed out after {_FEED_FETCH_TIMEOUT}s'
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            logger.warning('RSS fetch timed out for %s', feed.name)
+            return 0
         except Exception as exc:  # pylint: disable=broad-except
             feed.last_error = f'fetch failed: {exc}'
             feed.last_fetched_at = datetime.utcnow()
             db.session.commit()
             logger.warning('RSS fetch failed for %s: %s', feed.name, exc)
+            return 0
+        if result.returncode != 0:
+            feed.last_error = (
+                f'fetch failed: curl exited {result.returncode}: '
+                f'{result.stderr.decode(errors="replace")[:200]}')
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            logger.warning('RSS fetch failed for %s: curl exited %s',
+                           feed.name, result.returncode)
+            return 0
+
+        try:
+            parsed = feedparser.parse(result.stdout)
+        except Exception as exc:  # pylint: disable=broad-except
+            feed.last_error = f'parse failed: {exc}'
+            feed.last_fetched_at = datetime.utcnow()
+            db.session.commit()
+            logger.warning('RSS parse failed for %s: %s', feed.name, exc)
             return 0
 
         if parsed.bozo and not parsed.entries:
@@ -157,11 +194,12 @@ def _import_one_feed(app, feed_id):
             if RssItem.query.filter_by(feed_id=feed.id, guid=guid).first():
                 continue
             html = _get_content_html(entry)
+            raw_link = (entry.get('link') or '')[:1000]
             item = RssItem(
                 feed_id=feed.id,
                 guid=guid,
                 title=(entry.get('title') or '')[:500],
-                link=(entry.get('link') or '')[:1000],
+                link=raw_link if _is_safe_http_url(raw_link) else '',
                 author=(entry.get('author') or '')[:200] or None,
                 summary=_strip_html(entry.get('summary') or '')[:4000] or None,
                 content_html=html,
@@ -198,13 +236,36 @@ def _get_content_html(entry):
     return None
 
 
+def _is_safe_http_url(url):
+    """Reject anything that isn't a plain http(s) URL.
+
+    Real Medium finding from a security/performance audit
+    (2026-09-02): RssItem.link/image_url are rendered directly into
+    href=/src= attributes with no scheme validation
+    (anetbbs/templates/rss/item.html, feed.html, river.html) -- unlike
+    this app's own board-post linkifier (web/render_msg.py's
+    _linkify()), which only ever linkifies https?://. Both columns
+    come straight from external, publisher-controlled feed content
+    (not the sysop) with no allowlist. A malicious or compromised feed
+    could set an item's link to a javascript: URI; a logged-in user
+    clicking the article link would execute it same-origin. Applied at
+    ingest time here so every template rendering RssItem.link/
+    image_url is protected without needing its own copy of this check.
+    """
+    try:
+        from urllib.parse import urlparse
+        return urlparse((url or '').strip()).scheme in ('http', 'https')
+    except Exception:
+        return False
+
+
 def _extract_image_url(entry, content_html):
     """Return the first image URL associated with this feed entry, or None."""
     # 1. media:thumbnail (e.g. YouTube, Flickr)
     thumbs = getattr(entry, 'media_thumbnail', None) or []
     for t in thumbs:
         url = (t.get('url') if hasattr(t, 'get') else None) or ''
-        if url:
+        if url and _is_safe_http_url(url):
             return url[:1000]
     # 2. media:content with image/* type
     media = getattr(entry, 'media_content', None) or []
@@ -213,7 +274,7 @@ def _extract_image_url(entry, content_html):
             continue
         if m.get('type', '').startswith('image/'):
             url = m.get('url', '') or ''
-            if url:
+            if url and _is_safe_http_url(url):
                 return url[:1000]
     # 3. enclosures
     for enc in getattr(entry, 'enclosures', []):
@@ -221,12 +282,12 @@ def _extract_image_url(entry, content_html):
             continue
         if enc.get('type', '').startswith('image/'):
             url = enc.get('href', '') or enc.get('url', '') or ''
-            if url:
+            if url and _is_safe_http_url(url):
                 return url[:1000]
     # 4. first <img src> in HTML body
     if content_html:
         m = re.search(r'<img[^>]+src=["\']([^"\']{8,})', content_html, re.IGNORECASE)
-        if m:
+        if m and _is_safe_http_url(m.group(1)):
             return m.group(1)[:1000]
     return None
 

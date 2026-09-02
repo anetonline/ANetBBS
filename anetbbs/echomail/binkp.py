@@ -621,6 +621,37 @@ def _build_ftn_packet(messages, our_addr: str, hub_addr: str,
         # raw, every line after the first carries a stray \n that breaks
         # strict parsers (Mystic AreaFix won't recognize ^A kludges or the
         # password line, silently drops the netmail).
+        #
+        # Real High finding from a security/performance audit
+        # (2026-09-02): a comment right below here claimed user-typed
+        # tear/origin lines were stripped before assembly -- they never
+        # actually were. Any logged-in user composing an echomail/
+        # netmail message could type a plain line like "AREA:SOME_AREA"
+        # or forge a "* Origin: SomeoneElse (1:2/3.4)" line (no special
+        # encoding needed), and have it treated as authoritative FTN
+        # control data by any downstream tosser that scans EVERY line
+        # for these prefixes rather than only the true first line --
+        # including this codebase's OWN inbound parser (see the
+        # matching per-line prefix checks a bit further down this same
+        # file). A literal SOH (0x01) byte additionally forges fake
+        # kludges (MSGID/REPLY spoofing). Neutralize any line matching
+        # these prefixes -- none of them are something a normal message
+        # body would legitimately start a line with -- before this
+        # message goes out to the whole network.
+        def _neutralize_forged_ftn_lines(text):
+            out = []
+            for line in text.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+                if '\x01' in line:
+                    out.append('')
+                    continue
+                head = line.lstrip().upper()
+                if (head.startswith('AREA:') or head.startswith('SEEN-BY:')
+                        or head.startswith('---') or head.startswith('* ORIGIN:')):
+                    out.append('')
+                    continue
+                out.append(line)
+            return '\n'.join(out)
+        body_text = _neutralize_forged_ftn_lines(body_text)
         body_text = (body_text.replace('\r\n', '\n')
                               .replace('\r', '\n')
                               .replace('\n', '\r'))

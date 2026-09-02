@@ -495,12 +495,27 @@ def compose(area_id, reply_to_id=None):
             if _t:
                 body = body.rstrip('\n') + format_tagline_append(_t.text)
 
+        # Real Medium finding from a security/performance audit
+        # (2026-09-02): the sysop-configured word-filter blocklist is
+        # applied consistently to boards (web/boards.py), PMs, oneliners,
+        # and shoutbox, but was never applied to echomail composition --
+        # web or terminal. Since echomail is broadcast to the entire FTN
+        # network (potentially many external BBSes over BinkP), this is
+        # a wider-blast-radius gap than the surfaces already covered.
+        subject_data = form.subject.data
+        try:
+            from ..features import word_filter as _wf
+            subject_data = _wf.apply(subject_data or '')
+            body = _wf.apply(body or '')
+        except Exception:
+            pass
+
         msg = EchomailMessage(
             area_id=form.area_id.data,
             network_id=echo_area.network_id,
             from_name=post_name,
             to_name=form.to_name.data,
-            subject=maybe_tag_ansi_subject(form.subject.data, body),
+            subject=maybe_tag_ansi_subject(subject_data, body),
             body=body,
             tear_line=tear,
             origin_line=origin,
@@ -633,13 +648,23 @@ def netmail_compose():
             if _t:
                 body = body.rstrip('\n') + format_tagline_append(_t.text)
 
+        # See the sibling compose() route above for the full explanation
+        # -- word-filter blocklist gap, applies here identically.
+        subject_data = form.subject.data
+        try:
+            from ..features import word_filter as _wf
+            subject_data = _wf.apply(subject_data or '')
+            body = _wf.apply(body or '')
+        except Exception:
+            pass
+
         msg = EchomailMessage(
             area_id=area.id,
             network_id=network.id,
             from_name=post_name,
             to_name=form.to_name.data.strip(),
             to_address=(form.to_address.data or '').strip() or None,
-            subject=maybe_tag_ansi_subject(form.subject.data, body),
+            subject=maybe_tag_ansi_subject(subject_data, body),
             body=body,
             tear_line=tear,
             origin_line=origin,

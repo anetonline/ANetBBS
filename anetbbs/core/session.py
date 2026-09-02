@@ -1095,6 +1095,19 @@ class BBSSession:
         every consumer of NodeActivity, not just one of them.
 
         Polls every 5 seconds while we have a NodeActivity row.
+
+        Real gap found in a security/performance audit: the web session
+        path already rechecks is_active/is_locked on every single
+        request (web_app.py's load_user()), since flipping the DB
+        column via admin.py's toggle_ban()/lock_user() has no effect on
+        a session that's already running — that's the entire point of
+        this recheck. The terminal path (telnet/SSH/rlogin) never got
+        the same fix: self.user is a plain dict snapshotted once at
+        login and never re-validated, so a banned/locked user's
+        already-connected terminal session kept full access
+        indefinitely. This watchdog already polls every 5s regardless
+        of activity, so it's the natural place to add the same recheck
+        here too, rather than a second timer.
         """
         async def _watch():
             while True:
@@ -1103,15 +1116,21 @@ class BBSSession:
                     nid = getattr(self, '_node_activity_id', None)
                     if not nid:
                         return
-                    from ..models import NodeActivity, db as _db
+                    from ..models import NodeActivity, User, db as _db
                     from ..features.bbs_ui import _app
                     kicked = False
                     reason = ''
                     with _app().app_context():
+                        uid = (getattr(self, 'user', None) or {}).get('id')
+                        u = User.query.get(uid) if uid else None
+                        if u is not None and (not u.is_active or u.is_locked):
+                            kicked = True
+                            reason = 'your account has been locked or deactivated'
                         row = NodeActivity.query.get(nid)
                         if row and row.kick_requested:
                             kicked = True
                             reason = row.kick_reason or 'Disconnected by sysop'
+                        if kicked and row:
                             # Clear flag + delete row so a reconnect
                             # starts clean.
                             try:
@@ -2546,6 +2565,34 @@ class BBSSession:
         await self.games._launch(game_dict)
         return True
 
+    def _resolve_start_menu(self) -> str:
+        """Which BbsMenu name run_menu() should start at for a normal
+        (non-PETSCII, non-direct-door) login.
+
+        Real Medium finding from a security/performance audit: this
+        call used to hardcode start='main' unconditionally --
+        BbsMenu.is_default is fully wired in the admin UI
+        (menu_admin.py's edit-form checkbox + list-page badge), a
+        sysop could check it on a different menu and see the UI
+        confirm the change, but every session still entered at the
+        literally-named 'main' menu regardless; the setting had zero
+        effect. Mirrors petscii_ui.py's own is_default lookup for its
+        sibling PetsciiMenu model, which already worked correctly.
+        Falls back to 'main' (the original hardcoded behavior) if no
+        menu is marked default, or on any DB error -- this runs on the
+        critical path into the menu loop and must never block login.
+        """
+        try:
+            from ..features.bbs_ui import _app as _bbs_app
+            from ..models import BbsMenu
+            with _bbs_app().app_context():
+                default_menu = BbsMenu.query.filter_by(is_default=True).first()
+                if default_menu:
+                    return default_menu.name
+        except Exception:
+            pass
+        return 'main'
+
     async def show_main_menu(self):
         menu = (
             "\r\n"
@@ -2853,7 +2900,7 @@ class BBSSession:
                     from ..features.petscii_ui import run_petscii_menu
                     await run_petscii_menu(self)
                 else:
-                    await run_menu(self, start='main')
+                    await run_menu(self, start=self._resolve_start_menu())
             except (CarrierLost, BrokenPipeError, ConnectionResetError,
                     ConnectionAbortedError):
                 # Clean unwind — client (or a TCP port probe) disconnected.

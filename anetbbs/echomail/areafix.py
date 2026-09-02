@@ -602,6 +602,35 @@ def handle_areafix_netmail(netmail_id):
             created_at=datetime.datetime.utcnow(),
         )
         db.session.add(reply)
+    else:
+        # Real Low finding from a security/performance audit
+        # (2026-09-02): when the sender is neither a known downstream
+        # node NOR resolved to a real network (nm.network_id unset or
+        # pointing at a network that's since been deleted/deactivated),
+        # process_request(None, ...) still computes a real, informative
+        # response body ("Network not configured.") -- but this branch
+        # simply didn't exist, so that reply was silently discarded
+        # (only the AreafixLog 'error' row survived). Queue it anyway,
+        # best-effort, mirroring the downstream_node branch above --
+        # same as that branch, reply_network_id may not resolve to a
+        # deliverable network, but that's an existing, accepted
+        # limitation of this queue-and-hope pattern, not a reason to
+        # not even try.
+        reply = NetmailMessage(
+            network_id=nm.network_id,
+            from_address=None,
+            to_address=nm.from_address,
+            from_name='Areafix',
+            to_name=nm.from_name,
+            subject=f'Re: {nm.subject or "areafix"}',
+            body=response,
+            direction='outbound',
+            status='queued',
+            chrs='UTF-8 4',
+            is_local=True,
+            created_at=datetime.datetime.utcnow(),
+        )
+        db.session.add(reply)
 
     db.session.add(AreafixLog(**log_kwargs))
     db.session.commit()

@@ -346,8 +346,21 @@ def save(art_id):
         return jsonify({'ok': False, 'error': 'missing grid'}), 400
     art.name = payload.get('name') or art.name
     art.description = payload.get('description', art.description)
-    art.width = int(grid.get('width') or art.width)
-    art.height = int(grid.get('height') or art.height)
+    # Real Low finding from a security/performance audit (2026-09-02):
+    # unlike create()/import_ans() above, this never clamped width/
+    # height to the same [20,132]/[5,50] bounds. Must clamp the GRID
+    # DICT's own width/height too, not just the stored art.width/
+    # art.height columns -- render_ansi_text() below reads width/height
+    # straight out of `grid` itself, so clamping only the columns still
+    # left its nested row/col loop free to attempt a huge iteration
+    # (confirmed: an initial fix that clamped only the columns still
+    # hung on a 999999x999999 grid, caught by this fix's own test).
+    # Admin-only, so low severity, but the same clamp costs nothing to
+    # apply consistently.
+    art.width = max(20, min(132, int(grid.get('width') or art.width)))
+    art.height = max(5, min(50, int(grid.get('height') or art.height)))
+    grid['width'] = art.width
+    grid['height'] = art.height
     art.grid_json = json.dumps(grid)
     art.ansi_text = render_ansi_text(grid)
     art.updated_at = datetime.utcnow()

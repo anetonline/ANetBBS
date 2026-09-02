@@ -460,7 +460,14 @@ def download(area_id, filename):
     if not area.storage_path or not os.path.isdir(area.storage_path):
         abort(404)
 
-    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    # Real Low finding from a security/performance audit (2026-09-02):
+    # this compared a lexically-normalized path (normpath, does not
+    # resolve symlinks) against a fully symlink-resolved prefix
+    # (realpath) -- if storage_path itself is ever configured behind a
+    # symlink, the two sides silently mismatch (fails closed -- every
+    # download/thumbnail/share 404s -- not a security hole, but worth
+    # the same realpath() on both sides for consistency).
+    full = os.path.realpath(os.path.join(area.storage_path, filename))
     if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
         abort(404)
     if not os.path.isfile(full):
@@ -549,7 +556,7 @@ def thumbnail(area_id, filename):
     if not _is_image(filename):
         abort(404)
 
-    src = os.path.normpath(os.path.join(area.storage_path, filename))
+    src = os.path.realpath(os.path.join(area.storage_path, filename))
     # Defense against path traversal — confirm src is inside storage_path.
     if not src.startswith(os.path.realpath(area.storage_path) + os.sep):
         abort(404)
@@ -803,7 +810,14 @@ def create_share(area_id, filename):
     # an oracle (success/failure reveals whether an arbitrary path
     # exists on the server) and would have persisted a SharedFileLink
     # pointing outside the area's storage directory either way.
-    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    # Real Low finding from a security/performance audit (2026-09-02):
+    # this compared a lexically-normalized path (normpath, does not
+    # resolve symlinks) against a fully symlink-resolved prefix
+    # (realpath) -- if storage_path itself is ever configured behind a
+    # symlink, the two sides silently mismatch (fails closed -- every
+    # download/thumbnail/share 404s -- not a security hole, but worth
+    # the same realpath() on both sides for consistency).
+    full = os.path.realpath(os.path.join(area.storage_path, filename))
     if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
         flash('File not found.', 'danger')
         return redirect(url_for('file_areas.view_area', area_id=area.id))
@@ -846,7 +860,7 @@ def fetch_shared(token):
     # Defense-in-depth: create_share() now blocks a traversal filename
     # from ever being stored, but re-check here too in case a
     # SharedFileLink row predates that fix.
-    fpath = os.path.normpath(os.path.join(area.storage_path, link.filename))
+    fpath = os.path.realpath(os.path.join(area.storage_path, link.filename))
     if not fpath.startswith(os.path.realpath(area.storage_path) + os.sep):
         abort(404)
     if not os.path.isfile(fpath):
@@ -927,7 +941,14 @@ def manage_delete(area_id):
     if not area.storage_path:
         flash('No storage path set for this area.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
-    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    # Real Low finding from a security/performance audit (2026-09-02):
+    # this compared a lexically-normalized path (normpath, does not
+    # resolve symlinks) against a fully symlink-resolved prefix
+    # (realpath) -- if storage_path itself is ever configured behind a
+    # symlink, the two sides silently mismatch (fails closed -- every
+    # download/thumbnail/share 404s -- not a security hole, but worth
+    # the same realpath() on both sides for consistency).
+    full = os.path.realpath(os.path.join(area.storage_path, filename))
     if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
         flash('Invalid path.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))
@@ -969,7 +990,14 @@ def manage_desc(area_id):
     # currently exploitable on this Linux-only deployment (no os.sep
     # means no way to leave the directory), but kept consistent with the
     # established pattern rather than relying on that.
-    full = os.path.normpath(os.path.join(area.storage_path, filename))
+    # Real Low finding from a security/performance audit (2026-09-02):
+    # this compared a lexically-normalized path (normpath, does not
+    # resolve symlinks) against a fully symlink-resolved prefix
+    # (realpath) -- if storage_path itself is ever configured behind a
+    # symlink, the two sides silently mismatch (fails closed -- every
+    # download/thumbnail/share 404s -- not a security hole, but worth
+    # the same realpath() on both sides for consistency).
+    full = os.path.realpath(os.path.join(area.storage_path, filename))
     if not full.startswith(os.path.realpath(area.storage_path) + os.sep):
         flash('Invalid path.', 'danger')
         return redirect(url_for('file_areas.manage_files', area_id=area.id))

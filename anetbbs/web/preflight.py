@@ -299,9 +299,26 @@ def _check_federation_reachable(cfg):
                       'Outbound HTTPS to the hub is blocked. Federation directory will be stale.')
 
 
+# Real Medium finding from a security/performance audit (2026-09-02):
+# this used to only check the LITERAL string 'change-me-in-production',
+# which has never been this codebase's actual insecure default -- that's
+# 'dev-secret-key-change-in-production' (config.py's Config.SECRET_KEY
+# fallback, also checked by web_app.py's own boot-time guard and
+# installer/upgrade.py's auto-heal step). An install still running the
+# real known-insecure default got a false-positive "ok" here, on the
+# one page whose whole job is to catch this before a sysop goes live.
+# Matches the exact set web_app.py's own `_bad_defaults` checks.
+_KNOWN_BAD_SECRET_KEYS = {
+    'dev-secret-key-change-in-production',
+    'changeme',
+    'your-secret-key-here',
+    '',
+}
+
+
 def _check_secret_key(cfg):
     key = cfg.get('SECRET_KEY') or ''
-    if not key or 'insecure' in key.lower() or key == 'change-me-in-production' or len(key) < 32:
+    if key in _KNOWN_BAD_SECRET_KEYS or 'insecure' in key.lower() or len(key) < 32:
         return _check('Strong SECRET_KEY', 'fail', 'using a known-weak default',
                       'Set SECRET_KEY in .env to a 32+ character random string before exposing publicly.')
     return _check('Strong SECRET_KEY', 'ok', f'set ({len(key)} chars)')

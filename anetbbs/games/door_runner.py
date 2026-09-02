@@ -2349,6 +2349,30 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 idle_timeout_hit = True
                 break
     finally:
+        # Real Medium finding from a security/performance audit
+        # (2026-09-02): out_queue is fed from the PTY-reader background
+        # THREAD via loop.call_soon_threadsafe() -- there's no
+        # guarantee that scheduled callback has actually run and
+        # delivered the door's last chunk of output into out_queue (and
+        # from there into _output_pump()'s own pending out_queue.get())
+        # by the instant the outer polling loop above notices the door
+        # process has exited and reaches this finally: block. Same bug
+        # shape just fixed in menu_engine.py's _act_exec()
+        # (asyncio.wait_for(out_task, timeout=...) before cancelling,
+        # instead of cancelling immediately) -- adapted here since
+        # out_task has no natural completion signal of its own (no
+        # sentinel is ever pushed to out_queue, so this always hits its
+        # own timeout; the point is giving the event loop a short
+        # bounded window to run any already-scheduled
+        # call_soon_threadsafe callback and let _output_pump() consume
+        # it before it gets cancelled out from under that pending read).
+        if not out_task.done():
+            try:
+                await asyncio.wait_for(out_task, timeout=0.3)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
         for t in (out_task, in_task):
             if not t.done():
                 t.cancel()

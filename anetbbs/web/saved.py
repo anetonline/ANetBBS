@@ -107,6 +107,20 @@ def index():
     decorated = []
     for r in rows:
         target = _resolve(r.kind, r.target_id)
+        # Real Low finding from a security/performance audit
+        # (2026-09-02): _can_view() is enforced when a message is
+        # bookmarked (add() below), but this list rendered subject/
+        # sender straight from _resolve() with no re-check -- if a
+        # board/echo area's min_access_level is raised (or the user's
+        # own access level is lowered) after they already bookmarked
+        # something from it, their /saved/ page kept showing that
+        # message's subject+sender indefinitely, even though visiting
+        # it directly would now 403. Re-check on every render, same as
+        # add() already does, and redact instead of leaking details for
+        # a row that no longer passes.
+        can_view = target is not None and _can_view(r.kind, target)
+        if target is not None and not can_view:
+            target = None
         decorated.append({
             'row': r,
             'kind_label': _KIND_LABELS.get(r.kind, r.kind),

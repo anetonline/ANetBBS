@@ -16,7 +16,6 @@ anetbbs/
 │   │   ├── sbbs_stubs/   ← Synchronet API surface (pure Node)
 │   │   ├── sbbs_doors/   ← bundled doors (LORD lives here)
 │   │   └── web_games.py  ← in-browser mini-game registry
-│   ├── mrc/              ← MRC chat client + namespace
 │   ├── msp/              ← Inter-BBS IM (RFC 1312)
 │   ├── rss/              ← RSS poller + reader
 │   ├── wiki/             ← collaborative wiki engine
@@ -30,6 +29,10 @@ anetbbs/
 ├── vendor/               ← shipped third-party binaries (Mystic, BotWars…)
 └── mrc/                  ← standalone MRC bridge daemon (aiohttp-based)
 ```
+
+(The MRC *chat client* itself isn't a separate package — it lives inside
+`anetbbs/features/` as `mrc_chat.py`/`mrc_chat_ascii.py`/`mrc_chat_petscii.py`/
+`mrc_irc_bridge.py`, plus `anetbbs/web/mrc_web.py` for the web client.)
 
 Everything in `anetbbs/` is one Python package. Blueprints register
 themselves via `create_app()` in `web_app.py` — that's where to wire

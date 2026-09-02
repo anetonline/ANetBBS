@@ -398,6 +398,30 @@ def handle_filefix_netmail(netmail_id):
             created_at=datetime.datetime.utcnow(),
         )
         db.session.add(reply)
+    else:
+        # Real Low finding from a security/performance audit
+        # (2026-09-02) -- identical gap to areafix.py's
+        # handle_areafix_netmail(): when the sender is neither a known
+        # downstream node NOR resolved to a real network,
+        # process_request(None, ...) still computes a real, informative
+        # response body, but it was silently discarded with no matching
+        # branch to queue it. Queue it anyway, best-effort, mirroring
+        # the downstream_node branch above.
+        reply = NetmailMessage(
+            network_id=nm.network_id,
+            from_address=None,
+            to_address=nm.from_address,
+            from_name='FileFix',
+            to_name=nm.from_name,
+            subject=f'Re: {nm.subject or "filefix"}',
+            body=response,
+            direction='outbound',
+            status='queued',
+            chrs='UTF-8 4',
+            is_local=True,
+            created_at=datetime.datetime.utcnow(),
+        )
+        db.session.add(reply)
 
     db.session.add(AreafixLog(**log_kwargs))
     db.session.commit()

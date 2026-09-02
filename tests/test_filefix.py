@@ -224,6 +224,38 @@ class FilefixTests(unittest.TestCase):
             self.assertEqual(reply.to_address, '1:1/2')
             self.assertEqual(reply.status, 'queued')
 
+    def test_handle_filefix_netmail_with_no_resolvable_network_still_queues_a_reply(self):
+        """Real Low finding from a security/performance audit
+        (2026-09-02) -- identical gap to areafix.py's
+        handle_areafix_netmail(): when neither a real network nor a
+        known downstream node resolves, process_request(None, ...)'s
+        real, informative response was silently discarded with no
+        matching branch to queue it."""
+        from anetbbs.models import db, NetmailMessage
+        from anetbbs.echomail.filefix import handle_filefix_netmail
+
+        with self.app.app_context():
+            inbound = NetmailMessage(
+                network_id=None, from_address='9:9/8', to_address='1:1/1',
+                from_name='Stranger', to_name='filefix', subject='whatever',
+                body='+SOME.AREA\n', direction='inbound', status='received')
+            db.session.add(inbound)
+            db.session.commit()
+            nm_id = inbound.id
+
+            response = handle_filefix_netmail(nm_id)
+            self.assertIn('not configured', response.lower())
+
+            reply = (NetmailMessage.query
+                    .filter_by(direction='outbound', from_name='FileFix',
+                               to_address='9:9/8')
+                    .order_by(NetmailMessage.id.desc()).first())
+            self.assertIsNotNone(
+                reply, 'the "network not configured" reply must still be '
+                       'queued, not silently discarded')
+            self.assertEqual(reply.status, 'queued')
+            self.assertIn('not configured', reply.body.lower())
+
     def test_handle_filefix_netmail_hub_path_end_to_end(self):
         from anetbbs.models import (db, EchomailNetwork, FileArea, NetmailMessage,
                                     BinkPNode, FileEchoSubscription)

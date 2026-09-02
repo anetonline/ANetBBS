@@ -338,6 +338,20 @@ def compose(reply_to=None):
             if _t:
                 body = body.rstrip('\n') + format_tagline_append(_t.text)
 
+        # Real Medium finding from a security/performance audit
+        # (2026-09-02): the sysop-configured word-filter blocklist is
+        # applied consistently to boards (web/boards.py), PMs, oneliners,
+        # and shoutbox, but was never applied to netmail composition --
+        # web or terminal. Since netmail can cross to another BBS
+        # entirely (via BinkP), this is a wider-blast-radius gap than
+        # the surfaces already covered.
+        try:
+            from ..features import word_filter as _wf
+            subject = _wf.apply(subject or '')
+            body = _wf.apply(body or '')
+        except Exception:
+            pass
+
         # Generate kludges
         from_name = post_name
         msgid_value = make_msgid(from_address)

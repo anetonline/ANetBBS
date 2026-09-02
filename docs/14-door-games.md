@@ -939,11 +939,11 @@ config pointed at your BBS, or a raw rlogin call) connects as:
 
 ```
 client-user-name: mypassword123
-server-user-name: jerry
+server-user-name: sysop
 terminal/speed:   xtrn=tw2/57600
 ```
 
-`jerry` authenticates silently with `mypassword123` (falling back to
+`sysop` authenticates silently with `mypassword123` (falling back to
 an interactive password prompt on a wrong guess, same as SSH), then
 lands directly in Trade Wars 2002 — no Game Center, no main menu. When
 the door exits, the connection closes.

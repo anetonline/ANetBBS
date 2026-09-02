@@ -379,8 +379,25 @@ def process_tic(tic_path, inbound_dir):
             data_dir = current_app.config.get('DATA_DIR') or 'data'
         except RuntimeError:
             data_dir = 'data'
-        area.storage_path = os.path.join(data_dir, 'file_areas',
-                                         area.tag.replace('/', '_'))
+        # Real Medium finding from a security/performance audit
+        # (2026-09-02): area.tag comes straight from the peer-supplied
+        # TIC manifest's Area: line (only uppercased, see parsed['area']
+        # above) -- a manifest containing "Area .." auto-creates a
+        # FileArea whose storage_path normalizes to data_dir ITSELF
+        # (os.path.normpath('data/file_areas/..') -> 'data'), landing
+        # the attached binary directly in DATA_DIR instead of under
+        # file_areas/. Reachable by ANY BinkP peer able to deliver a
+        # TIC, including a fully unauthenticated anonymous crashmail
+        # connection (binkp_server.py dispatches .tic-shaped files
+        # unconditionally, no net_id/downstream_node_id gate). The '/'
+        # replacement below already existed; '.'/'..'/empty were not
+        # rejected -- same class of gap _sanitize_inbound_filename()
+        # (this module's sibling fix for the attached binary's own
+        # File: field) already closes for filenames.
+        tag_component = (area.tag or '').replace('/', '_').replace('\\', '_').strip()
+        if tag_component in ('', '.', '..'):
+            tag_component = 'UNKNOWN_AREA'
+        area.storage_path = os.path.join(data_dir, 'file_areas', tag_component)
     try:
         os.makedirs(area.storage_path, exist_ok=True)
         dest = os.path.join(area.storage_path, safe_filename)

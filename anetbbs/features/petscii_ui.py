@@ -700,6 +700,15 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
                               maybe_tag_ansi_subject)
         area = EchoArea.query.get(area_id)
         network = EchomailNetwork.query.get(area.network_id) if area else None
+        # Sysop-configured word-filter blocklist -- see bbs_ui.py's
+        # ANSI echomail composer for the full explanation; same gap,
+        # same fix, for the PETSCII composer.
+        try:
+            from .word_filter import apply as _wf_apply
+            subject = _wf_apply(subject)
+            body = _wf_apply(body)
+        except Exception:
+            pass
         msg = EchomailMessage(
             area_id=area_id,
             network_id=area.network_id if area else None,

@@ -252,6 +252,69 @@ class TicSecurityFixesTests(unittest.TestCase):
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    def test_area_tag_of_dotdot_cannot_escape_file_areas_directory(self):
+        """Real Medium finding from a security/performance audit
+        (2026-09-02): a TIC manifest whose Area: line is literally '..'
+        auto-creates a FileArea (no matching area existed) whose
+        storage_path -- when left to process_tic()'s own DATA_DIR-based
+        default -- normalized to DATA_DIR itself
+        (os.path.normpath('data/file_areas/..') == 'data'), landing the
+        attached binary directly in DATA_DIR instead of under
+        file_areas/. Reachable by ANY BinkP peer able to deliver a TIC,
+        including a fully unauthenticated anonymous crashmail
+        connection -- binkp_server.py dispatches .tic-shaped files with
+        no net_id/downstream_node_id gate."""
+        from anetbbs.models import db, FileArea
+        from anetbbs.echomail.tic import process_tic
+
+        work_dir = tempfile.mkdtemp(prefix='tic_areatraversal_test_')
+        try:
+            inbound_dir = os.path.join(work_dir, 'inbound')
+            data_dir = os.path.join(work_dir, 'data')
+            os.makedirs(inbound_dir, exist_ok=True)
+            os.makedirs(data_dir, exist_ok=True)
+
+            bin_name = 'payload.zip'
+            with open(os.path.join(inbound_dir, bin_name), 'wb') as f:
+                f.write(b'PK\x03\x04fake zip contents')
+
+            tic_path = os.path.join(inbound_dir, 'evil_area.tic')
+            with open(tic_path, 'w', encoding='cp437') as f:
+                f.write(f'File {bin_name}\nArea ..\nDesc x\n')
+
+            orig_data_dir = self.app.config.get('DATA_DIR')
+            self.app.config['DATA_DIR'] = data_dir
+            try:
+                with self.app.app_context():
+                    self.assertIsNone(
+                        FileArea.query.filter_by(tag='..').first(),
+                        'test setup error: an area for this tag should not '
+                        'already exist')
+                    tic = process_tic(tic_path, inbound_dir)
+
+                    area = FileArea.query.filter_by(tag='..').first()
+                    self.assertIsNotNone(area)
+                    self.assertNotEqual(
+                        os.path.normpath(area.storage_path),
+                        os.path.normpath(data_dir),
+                        'a ".." area tag must not make storage_path resolve '
+                        'to DATA_DIR itself -- that plants the attached '
+                        'file directly in DATA_DIR instead of under '
+                        'file_areas/')
+                    self.assertTrue(
+                        os.path.normpath(area.storage_path).startswith(
+                            os.path.normpath(os.path.join(data_dir, 'file_areas'))),
+                        f'storage_path must stay inside file_areas/, got: '
+                        f'{area.storage_path}')
+                    self.assertEqual(tic.status, 'filed')
+                    # And DATA_DIR itself must not have received the file.
+                    self.assertNotIn(bin_name, os.listdir(data_dir))
+            finally:
+                if orig_data_dir is not None:
+                    self.app.config['DATA_DIR'] = orig_data_dir
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     def test_area_with_no_password_set_ignores_pw_field(self):
         """password is opt-in -- an area with none set must keep
         working exactly as before, regardless of what Pw: says."""

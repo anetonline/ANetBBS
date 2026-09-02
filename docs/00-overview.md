@@ -9,31 +9,37 @@ ANSI art, FidoNet echomail, door games).
 
 ```
                          ┌───────────────────────┐
-                         │   nginx (HTTPS / 80)  │
-                         └──────────┬────────────┘
+                         │   nginx (HTTPS / 80)   │
+                         └──────────┬─────────────┘
                                     │
-            ┌─────────┬───────┼───────┬───────┬──────┬────────────┐
-            ▼         ▼       ▼       ▼       ▼      ▼            ▼
-     anetbbs-web   telnet   ssh    rlogin   ftp   binkp   anetbbs-mrc-bridge
-     (Flask +      (asyncio (asyncssh) (asyncio (pyftpdlib (asyncio  (aiohttp /
-      eventlet      telnet)            rlogin)  thread)    listener)  WebSocket)
-      native WSGI            └── all in anetbbs.service ─┘
-      server, via
-      deploy/serve.py)
-            │           │           │            │             │
-            └───────────┴─────┬─────┴────────────┴─────────────┘
-                              │
-                       ┌──────▼──────┐
-                       │   SQLite     │   ← single shared DB
-                       │  /data/      │     all services agree on
-                       │  anetbbs.db  │     users, posts, sessions,
-                       └──────────────┘     menus, ratios, etc.
+       ┌────────────────┬──────────┼───────────────┬──────────────────────┐
+       ▼                 ▼                          ▼                      ▼
+  anetbbs-web    anetbbs.service (ONE process)  anetbbs-binkp       anetbbs-mrc-bridge
+  (Flask +       telnet + ssh + rlogin + ftp,    (asyncio            (aiohttp /
+   eventlet      all four in a single process    listener)           WebSocket)
+   native WSGI   -- see deploy/anetbbs.service)
+   server, via
+   deploy/serve.py)
+       │                          │                        │                  │
+       └──────────────────────────┴───────────┬────────────┴──────────────────┘
+                                                │
+                                         ┌──────▼──────┐
+                                         │   SQLite     │   ← single shared DB
+                                         │  /data/      │     all services agree on
+                                         │  anetbbs.db  │     users, posts, sessions,
+                                         └──────────────┘     menus, ratios, etc.
 ```
 
-Each protocol runs as a separate systemd service. They all read the
-same `.env`, use the same SQLite DB, and the BBS terminal services
-sync their live presence into the same `UserSession` table the web
-app uses, so the "who's online" widget shows everyone at once.
+Each *service* (not each protocol) runs separately — telnet, SSH,
+rlogin, and FTP all live inside ONE process (`anetbbs.service`), while
+the web app, the BinkP listener, and the MRC↔IRC bridge each run as
+their own separate systemd unit. Run `systemctl list-units --type=service
+| grep anet` to see exactly which unit owns what before reading a
+journal — `journalctl -u anetbbs` covers telnet/SSH/rlogin/FTP but
+never BinkP or the web app, a real mix-up worth avoiding. All units
+read the same `.env`, use the same SQLite DB, and the BBS terminal
+services sync their live presence into the same `UserSession` table
+the web app uses, so the "who's online" widget shows everyone at once.
 
 ## What it can do
 
@@ -58,6 +64,10 @@ app uses, so the "who's online" widget shows everyone at once.
   for real Commodore 64/128 hardware and PETSCII emulators, on its
   own opt-in ports. Boards, echomail, PMs, files (incl. XMODEM
   download), Number Guessing, and sysop-buildable custom menus.
+- **Collaborative wiki** at `/wiki/` — markdown bodies, `[[Page]]`
+  cross-links, per-page revision history/diff/revert, full-text
+  search, 52 seeded reference pages. See the [README's Wiki
+  section](../README.md#wiki) for the full feature list.
 
 ## Where to go next
 
@@ -93,3 +103,13 @@ app uses, so the "who's online" widget shows everyone at once.
 - [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)
 - [32 — `anetbbs-monitor` (live node monitor, SSH/console)](32-node-monitor.md)
 - [33 — Presence alerts (real-time "X just logged in/out")](33-presence-alerts.md)
+
+### Reference
+
+- [Installing (general)](INSTALL.md)
+- [Installing on a Raspberry Pi](INSTALL-PI.md)
+- [Ports reference](PORTS.md)
+- [Security notes](SECURITY.md)
+- [Changelog](CHANGELOG.md) / [beta build-number history](CHANGELOG-beta.md)
+- [MSP loopback self-test](MSP_LOOPBACK_TEST.md)
+- [Filebase migration notes](FILEBASE-MIGRATION.md)

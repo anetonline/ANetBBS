@@ -862,6 +862,18 @@ _MP: dict     = {}   # module-level multiplayer shared state (all sessions share
 def _player_color(username: str) -> tuple:
     return PLAYER_COLORS[sum(ord(c) for c in username) % len(PLAYER_COLORS)]
 
+
+def _safe_username(username: str) -> str:
+    """Sanitize a username for use as a save-file name component. Real
+    path-traversal bug found in a full access-control audit: a username
+    containing '/'/'..' spliced raw into a save filename could read/
+    overwrite another player's save or write outside SAVE_DIR entirely.
+    Shared by every save-path helper below -- a follow-up audit found
+    the single-player _save_path() had been fixed but the two
+    multiplayer-inventory paths (_mp_join/_mp_leave) still built their
+    filename from the raw username directly, bypassing this."""
+    return ''.join(c for c in username if c.isalnum() or c in '-_') or 'player'
+
 TICK     = 0.08    # seconds per frame (~12 fps)
 GRAV     = 0.35
 JUMP_V   = -2.8
@@ -912,15 +924,8 @@ class ANetCraft:
     # ── save / load ──────────────────────────────────────────────────────────
 
     def _save_path(self) -> Path:
-        # Real path-traversal bug found in a full access-control audit:
-        # username was spliced into the save filename with no
-        # sanitization, unlike the identical pattern in
-        # features/darkforces_term.py -- a username containing '/'/'..'
-        # could read/overwrite another player's save or write outside
-        # SAVE_DIR entirely.
         SAVE_DIR.mkdir(parents=True, exist_ok=True)
-        safe_name = ''.join(c for c in self.username if c.isalnum() or c in '-_') or 'player'
-        return SAVE_DIR / f'{safe_name}.json'
+        return SAVE_DIR / f'{_safe_username(self.username)}.json'
 
     def save(self):
         # Fold the active dimension into the cache so every dimension the
@@ -1000,7 +1005,7 @@ class ANetCraft:
         self.game_mode  = 'survival'
         self._mp_mode   = True
 
-        inv_path = SAVE_DIR / f'mp_{self.username}.json'
+        inv_path = SAVE_DIR / f'mp_{_safe_username(self.username)}.json'
         if inv_path.exists():
             try:
                 self.player = Player.from_dict(json.loads(inv_path.read_text()))
@@ -1016,7 +1021,7 @@ class ANetCraft:
     def _mp_leave(self):
         if self.username in _MP.get('players', {}):
             del _MP['players'][self.username]
-        inv_path = SAVE_DIR / f'mp_{self.username}.json'
+        inv_path = SAVE_DIR / f'mp_{_safe_username(self.username)}.json'
         inv_path.write_text(json.dumps(self.player.to_dict()))
         if _MP.get('host') == self.username:
             remaining = list(_MP.get('players', {}).keys())

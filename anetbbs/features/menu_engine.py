@@ -591,7 +591,23 @@ async def run_menu(session, start='main'):
         with _app().app_context():
             menu = BbsMenu.query.filter_by(name=current).first()
             if not menu:
-                await session.write(f"\r\nMenu '{current}' not found.\r\n")
+                # Real High finding from a security/performance audit: a
+                # broken `goto` target (a sysop deleted/renamed a
+                # submenu that's still linked from elsewhere, or typo'd
+                # one when saving a menu item) used to write an error
+                # and `return` here -- which unwinds all the way out of
+                # run_menu() and, per core/session.py's top-level
+                # finally: block, kills the user's ENTIRE session
+                # (disconnects them) instead of just failing that one
+                # navigation. petscii_ui.py's own menu loop already
+                # fails safe into its hardcoded default menu for the
+                # identical bug shape; the ANSI/main menu engine never
+                # got the same fix. Mirror it here rather than
+                # dead-ending the session.
+                logger.warning(
+                    "goto target menu %r not found; falling back to "
+                    "the hardcoded default menu", current)
+                await ui.show_main()
                 return
             if menu.min_access > access:
                 await session.write("\r\nAccess denied.\r\n")

@@ -915,7 +915,7 @@
     // explicit public MRC_BRIDGE_HOST) -- see anetbbs/web/mrc_web.py.
     // buildWsUrlForChoice() below uses this instead of location.host
     // when set.
-    window.MRC_WS_HOST_OVERRIDE = "{{ mrc_ws_host_override }}";
+    window.MRC_WS_HOST_OVERRIDE = {{ mrc_ws_host_override | tojson }};
   </script>
   <script src="{{ url_for('static', filename='mrc/client.js') }}"></script>
   <script>

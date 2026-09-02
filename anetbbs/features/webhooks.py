@@ -68,12 +68,30 @@ def fire(event, payload):
         def _runner():
             status, err = _do_post(url, body, headers)
             try:
-                row = Webhook.query.get(wid)
-                if row:
-                    row.last_called_at = datetime.utcnow()
-                    row.last_status = status or 0
-                    row.last_error = err
-                    db.session.commit()
+                # Real Medium finding from a security/performance
+                # audit (2026-09-02): a bare threading.Thread has no
+                # Flask app context of its own -- unlike every other
+                # background-thread DB touch in this codebase (e.g.
+                # sysop_paging.py's own webhook-firing call site,
+                # which explicitly wraps in `with _app().app_context()`
+                # for exactly this reason), this ran Webhook.query.get()/
+                # db.session.commit() with no context at all, raising
+                # RuntimeError: Working outside of application context
+                # -- silently swallowed by the bare except below.
+                # Effect: last_called_at/last_status/last_error were
+                # NEVER persisted for any webhook delivery, even a
+                # successful one; the admin webhook UI would show
+                # "never called" forever. _app() is the same lightweight
+                # transient Flask+SQLAlchemy context used elsewhere in
+                # this codebase for exactly this cross-context need.
+                from .bbs_ui import _app as _bbs_app
+                with _bbs_app().app_context():
+                    row = Webhook.query.get(wid)
+                    if row:
+                        row.last_called_at = datetime.utcnow()
+                        row.last_status = status or 0
+                        row.last_error = err
+                        db.session.commit()
             except Exception:
                 pass
 

@@ -85,6 +85,52 @@ class MRCWsHostOverrideTests(unittest.TestCase):
         end = body.index('"', start)
         return body[start:end]
 
+    def test_a_quote_in_the_override_value_cannot_break_out_of_the_js_string(self):
+        """Real Low finding from a security/performance audit
+        (2026-09-02): mrc_ws_host_override used to be interpolated into
+        the JS global with plain Jinja auto-escaping (HTML-entity
+        encoding) rather than a JS-safe encoder -- a fragile,
+        non-standard pattern that only avoided breaking out by luck of
+        the surrounding markup, not by design (in docker-single mode
+        this value is partly built from request.host, the client-
+        supplied Host header). Fixed via `| tojson`, a real JSON/JS
+        string encoder. Tests the template's rendering directly with a
+        value containing a literal double-quote + inline script payload
+        -- the actual property the fix addresses -- rather than trying
+        to smuggle one through a real HTTP Host header, which Werkzeug
+        itself already normalizes/rejects before the view ever sees it.
+        """
+        with self.app.test_request_context('/mrc/'):
+            from flask import render_template
+            rendered_page = render_template(
+                'mrc/index.html',
+                mrc_ws_host_override='evil.com";alert(1);//',
+                suggested_handle='',
+            )
+        self.assertEqual(
+            rendered_page.count('window.MRC_WS_HOST_OVERRIDE ='), 1)
+        marker = 'window.MRC_WS_HOST_OVERRIDE = '
+        start = rendered_page.index(marker) + len(marker)
+        # Parse the JSON value directly from that position -- the
+        # payload's own raw text contains literal ';' characters
+        # (from "alert(1);//"), so a naive search for the next ';'
+        # would truncate mid-string; raw_decode() finds the real end
+        # of the JSON literal regardless of what it contains.
+        import json
+        decoded, end = json.JSONDecoder().raw_decode(rendered_page[start:])
+        self.assertEqual(decoded, 'evil.com";alert(1);//',
+                         'the fix must not mangle a legitimate value, '
+                         'only safely escape it')
+        # And the very next non-whitespace character after the JSON
+        # value must be the statement terminator, not more JS content
+        # that escaped out of the string (i.e. nothing was interpreted
+        # as separate code).
+        after = rendered_page[start + end:start + end + 5].strip()
+        self.assertTrue(after.startswith(';'),
+                        f'expected the JSON literal to be immediately '
+                        f'followed by the statement terminator, got: '
+                        f'{after!r}')
+
     def test_docker_single_overrides_to_bridge_port_on_browser_host(self):
         """The actual bug: docker-single mode has no nginx, so the page
         must tell the browser to use <its own hostname>:<bridge port>

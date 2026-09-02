@@ -1,3 +1,16 @@
+# ANetBBS v1.0.66 — Fourth security/performance audit pass, plus correctness fixes and documentation cleanup (September 2026)
+
+A fourth broad audit pass was carried out across the entire codebase — every service, every protocol handler, and the documentation/wiki — using the same severity-tiered approach as the three prior rounds (v1.0.38, v1.0.39, v1.0.58). As with those rounds, this entry intentionally omits vulnerability specifics in the interest of responsible disclosure; sysops running an older release should update at their earliest convenience. In summary, this pass:
+
+- Closed several real gaps where a user-facing feature had no meaningful boundary check at all, including an outbound dial-out feature that could be pointed at internal infrastructure, and a case where banning or locking a user account had no effect on that user's already-connected terminal session.
+- Fixed a case where a bulk network-fetch feature validated a destination once but then reconnected to it independently, reopening a timing gap the validation was meant to close.
+- Closed a handful of smaller gaps in inbound network-protocol handling (FidoNet file distribution, echomail/netmail composition) where untrusted peer-supplied data wasn't fully constrained before being trusted or relayed further.
+- Fixed several real correctness bugs found along the way: a broken menu link that could end a user's entire session instead of just failing that one navigation; a sysop-configurable setting that had no effect despite the admin UI showing it as active; a background task that could lose in-flight output under load; and a background delivery mechanism that was silently failing to record its own results.
+- Removed a small amount of confirmed-dead code (superseded implementations with zero remaining callers) and closed several minor consistency/hardening gaps that weren't proven exploitable today but were worth tightening anyway.
+- Corrected several inaccuracies in the documentation (an out-of-date architecture diagram, a stale claim about a security default, a couple of file-path references) and filled in a few real, previously-undocumented gaps (a user-migration tool, several configuration options, and the wiki feature itself never having its own entry in the doc index).
+
+New regression tests were added throughout — every fix in this pass has one, verified against the pre-fix code before being counted as done.
+
 # ANetBBS v1.0.65 — Fixed a CI-flaky output-truncation race (September 2026)
 
 Fixed a timing race (caught via an intermittent CI failure on a busier build server, not a live report) that could truncate or drop the last bit of output from a custom menu item's "run an external program" action: the moment the child process exited, its output-forwarding task was cancelled immediately, with no guarantee the last already-buffered chunk had actually been read and sent to the caller yet. Now that task gets a short window to finish draining normally before being cancelled.

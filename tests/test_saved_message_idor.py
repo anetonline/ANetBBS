@@ -150,6 +150,52 @@ class SavedMessageIdorTests(unittest.TestCase):
             self._saved_count_for(self.other_id, 'pm', self.pm_id), 1,
             'the actual owner must still be able to bookmark their own PM')
 
+    def test_saved_list_stops_showing_subject_once_access_is_revoked(self):
+        """Real Low finding from a security/performance audit
+        (2026-09-02): _can_view() is enforced at bookmark-time (add(),
+        tested above) but index() rendered subject/sender straight from
+        _resolve() with no re-check. If an echo area's min_access_level
+        is raised (or the user's own access level is lowered) AFTER
+        they already bookmarked a message from it, /saved/ kept showing
+        that message's real subject+sender indefinitely, even though
+        opening it directly would now 403."""
+        from anetbbs.models import db, EchomailNetwork, EchoArea, EchomailMessage
+
+        with self.app.app_context():
+            net = EchomailNetwork.query.filter_by(name='TestNet').first()
+            area = EchoArea(network_id=net.id, tag='REVOKE.TEST',
+                            name='Revoke Test', is_sysop_only=False,
+                            min_access_level=0)
+            db.session.add(area)
+            db.session.commit()
+            msg = EchomailMessage(
+                area_id=area.id, network_id=net.id,
+                from_name='Someone', to_name='All',
+                subject='TotallySecretSubjectXYZ', body='body')
+            db.session.add(msg)
+            db.session.commit()
+            area_id = area.id
+            msg_id = msg.id
+
+        client = self._client_as(self.low_id)
+        # Bookmark while access is still open.
+        client.post('/saved/add', data={'kind': 'echomail', 'target_id': msg_id})
+        self.assertEqual(
+            self._saved_count_for(self.low_id, 'echomail', msg_id), 1,
+            'test setup error: bookmark should have succeeded while '
+            'access was still open')
+
+        # Sysop tightens the area's access requirement afterward.
+        with self.app.app_context():
+            area = EchoArea.query.get(area_id)
+            area.min_access_level = 999
+            db.session.commit()
+
+        resp = client.get('/saved/')
+        self.assertNotIn(b'TotallySecretSubjectXYZ', resp.data,
+                         'the real subject must not still be shown once '
+                         'access has been revoked')
+
     def test_pm_resolves_against_the_real_privatemessage_table(self):
         """The wrong-model bug: kind='pm' used to resolve against
         Message (bulletins) instead of PrivateMessage."""

@@ -97,8 +97,13 @@ Read this whole file before exposing the BBS to the internet.
   is started in production mode (`FLASK_ENV=production` or
   `config_name='production'`), it raises `RuntimeError` and refuses to
   boot. In development it just logs a loud warning.
-- **Session cookie `HttpOnly` + `SameSite=Lax`** by default. Production
-  config also sets `Secure` (cookie only sent over HTTPS).
+- **Session cookie `HttpOnly` + `SameSite=Lax`** by default. `Secure`
+  (cookie only sent over HTTPS) is **not** set automatically by
+  production mode — it defaults to off everywhere, HTTP-only installs
+  included, and only turns on when you explicitly set
+  `SESSION_COOKIE_SECURE=true` in `.env` (see "What you MUST do for
+  production" below). Deploying behind HTTPS without setting this
+  leaves the session cookie sendable over a plain HTTP connection too.
 - **Optional virus scan** on uploads if `clamav-daemon` is installed —
   infected files are deleted before the DB row is created.
 - **Anonymous visitors default to access_level 0.** Found and fixed in a
@@ -121,7 +126,9 @@ Read this whole file before exposing the BBS to the internet.
    path. The `deploy/anetbbs-nginx.conf.template` is a starting point.
    Without a TLS terminator, every login posts plaintext over HTTP.
 4. **Set `FLASK_ENV=production`** so the prod config kicks in
-   (`Secure` cookies, stricter SECRET_KEY check).
+   (stricter SECRET_KEY check). **Separately, also set
+   `SESSION_COOKIE_SECURE=true` in `.env` once you're behind HTTPS** —
+   production mode does not turn this on for you.
 5. **Pick one privileged-port option** for MSP/SYSTAT (see
    `docs/INSTALL.md` §6). Leaving the default ports unbound silently
    degrades inter-BBS messaging — peers will get `connection refused`.

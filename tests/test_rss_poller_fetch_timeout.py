@@ -8,15 +8,18 @@ indefinitely, blocking every OTHER active feed's refresh for as long
 as the hang lasted -- no upper bound at all. Found in a
 security/performance audit.
 
-Fixed via the standard socket.setdefaulttimeout() workaround (the only
-one available since feedparser exposes no timeout parameter itself),
-scoped tightly around just the feedparser.parse() call and restored
-immediately afterward in a finally -- it's a process-global setting,
-not thread-local, so this test also confirms it doesn't leak past the
-call.
+Originally fixed via the socket.setdefaulttimeout() workaround, scoped
+around the feedparser.parse() call itself. A LATER security/
+performance audit round (2026-09-02) replaced that fetch mechanism
+entirely -- feedparser.parse() used to be handed the raw feed URL,
+which re-resolved the hostname independently at connect time,
+reopening a DNS-rebinding SSRF gap (see test_rss_feed_url_ssrf.py).
+The fix fetches via curl (pinned to the already-validated resolved
+address) and hands feedparser the raw bytes instead, so the bound is
+now curl's own `--max-time` flag rather than the socket-global
+workaround -- this file was updated to match.
 """
 import os
-import socket
 import sys
 import unittest
 from pathlib import Path
@@ -64,88 +67,54 @@ class RssPollerFetchTimeoutTests(unittest.TestCase):
             db.session.commit()
             return feed.id
 
-    def test_a_bounded_socket_timeout_is_active_during_the_fetch(self):
-        """Proves a timeout is actually applied around the fetch --
-        the mocked feedparser.parse() reads socket.getdefaulttimeout()
-        from INSIDE the call to confirm it's set to the expected bound,
-        not left at whatever the process default was."""
+    def test_a_bounded_max_time_is_passed_to_curl(self):
+        """Proves a timeout bound is actually applied to the fetch --
+        the curl invocation must carry --max-time set to the expected
+        bound, not run unbounded."""
         import anetbbs.rss.poller as poller_mod
         from anetbbs.models import RssFeed
 
         url = 'https://example.com/feed.xml'
         feed_id = self._make_feed(url)
-
-        observed = {}
-
-        def _fake_parse(*args, **kwargs):
-            observed['timeout_during_call'] = socket.getdefaulttimeout()
-            return mock.Mock(bozo=False, entries=[], feed={})
+        fake_result = mock.Mock(returncode=0, stdout=b'<rss></rss>', stderr=b'')
 
         with mock.patch('anetbbs.core.net_safety.resolve_safe_destination',
                         return_value=(2, ('93.184.216.34', 443), None)), \
-             mock.patch('feedparser.parse', side_effect=_fake_parse):
+             mock.patch('subprocess.run', return_value=fake_result) as mock_run, \
+             mock.patch('feedparser.parse',
+                        return_value=mock.Mock(bozo=False, entries=[], feed={})):
             poller_mod._import_one_feed(self.app, feed_id)
 
-        self.assertEqual(observed.get('timeout_during_call'),
-                         poller_mod._FEED_FETCH_TIMEOUT,
-                         'a bounded timeout must be active for the '
-                         'duration of the feedparser.parse() call')
+        args = mock_run.call_args[0][0]
+        self.assertIn('--max-time', args)
+        idx = args.index('--max-time')
+        self.assertEqual(args[idx + 1], str(poller_mod._FEED_FETCH_TIMEOUT))
         with self.app.app_context():
             feed = RssFeed.query.get(feed_id)
             self.assertIsNone(feed.last_error)
 
-    def test_the_global_timeout_is_restored_after_the_fetch_completes(self):
-        """The socket default timeout is process-global, not
-        thread-local -- must not leak past this one fetch and affect
-        unrelated code elsewhere in the process."""
-        import anetbbs.rss.poller as poller_mod
-        from anetbbs.models import RssFeed
-
-        url = 'https://example.com/feed2.xml'
-        feed_id = self._make_feed(url)
-
-        original = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(None)
-        try:
-            with mock.patch('anetbbs.core.net_safety.resolve_safe_destination',
-                            return_value=(2, ('93.184.216.34', 443), None)), \
-                 mock.patch('feedparser.parse',
-                           return_value=mock.Mock(bozo=False, entries=[], feed={})):
-                poller_mod._import_one_feed(self.app, feed_id)
-
-            self.assertIsNone(
-                socket.getdefaulttimeout(),
-                'the process-global socket default timeout must be '
-                'restored to what it was before this fetch, not left '
-                'set to the feed-fetch bound')
-        finally:
-            socket.setdefaulttimeout(original)
-
-    def test_timeout_is_restored_even_when_feedparser_raises(self):
-        """Guard against the finally: block being skipped on an
-        exception path."""
+    def test_curl_timeout_is_handled_gracefully_not_left_hanging(self):
+        """When curl itself times out (subprocess.TimeoutExpired), the
+        fetch must fail gracefully with a clear last_error -- not raise
+        an unhandled exception that would kill the poller thread and
+        block every other feed behind it."""
+        import subprocess
         import anetbbs.rss.poller as poller_mod
         from anetbbs.models import RssFeed
 
         url = 'https://example.com/feed3.xml'
         feed_id = self._make_feed(url)
 
-        original = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(None)
-        try:
-            with mock.patch('anetbbs.core.net_safety.resolve_safe_destination',
-                            return_value=(2, ('93.184.216.34', 443), None)), \
-                 mock.patch('feedparser.parse',
-                           side_effect=OSError('simulated network failure')):
-                count = poller_mod._import_one_feed(self.app, feed_id)
+        with mock.patch('anetbbs.core.net_safety.resolve_safe_destination',
+                        return_value=(2, ('93.184.216.34', 443), None)), \
+             mock.patch('subprocess.run',
+                        side_effect=subprocess.TimeoutExpired(cmd='curl', timeout=20)):
+            count = poller_mod._import_one_feed(self.app, feed_id)
 
-            self.assertEqual(count, 0)
-            self.assertIsNone(socket.getdefaulttimeout())
-            with self.app.app_context():
-                feed = RssFeed.query.get(feed_id)
-                self.assertIn('fetch failed', feed.last_error)
-        finally:
-            socket.setdefaulttimeout(original)
+        self.assertEqual(count, 0)
+        with self.app.app_context():
+            feed = RssFeed.query.get(feed_id)
+            self.assertIn('timed out', feed.last_error)
 
 
 if __name__ == '__main__':
