@@ -854,7 +854,6 @@ class Renderer:
 # ─── Game ─────────────────────────────────────────────────────────────────────
 
 SAVE_DIR      = Path(__file__).parent.parent.parent / 'data' / 'doors' / 'anetcraft'
-SHARED_SAVE   = SAVE_DIR / 'multiplayer.json'
 PLAYER_COLORS = [(220,60,60),(60,80,220),(220,190,50),(60,200,180),
                  (200,60,200),(220,140,50),(100,210,60),(180,100,220)]
 _MP: dict     = {}   # module-level multiplayer shared state (all sessions share this)
@@ -873,6 +872,10 @@ def _safe_username(username: str) -> str:
     multiplayer-inventory paths (_mp_join/_mp_leave) still built their
     filename from the raw username directly, bypassing this."""
     return ''.join(c for c in username if c.isalnum() or c in '-_') or 'player'
+
+
+def _shared_save_path() -> Path:
+    return SAVE_DIR / 'multiplayer.json'
 
 TICK     = 0.08    # seconds per frame (~12 fps)
 GRAV     = 0.35
@@ -981,10 +984,11 @@ class ANetCraft:
         return _MP.get('host') == self.username
 
     def _mp_join(self):
+        shared_save = _shared_save_path()
         if not _MP:
-            if SHARED_SAVE.exists():
+            if shared_save.exists():
                 try:
-                    d = json.loads(SHARED_SAVE.read_text())
+                    d = json.loads(shared_save.read_text())
                     world = World.from_dict(d['world'])
                     mobs  = [Mob.from_dict(m) for m in d.get('mobs', [])]
                     tick  = d.get('tick', 0)
@@ -1036,7 +1040,7 @@ class ANetCraft:
         data = {'world': _MP['world'].to_dict(),
                 'mobs':  [m.to_dict() for m in _MP['mobs']],
                 'tick':  _MP['tick']}
-        SHARED_SAVE.write_text(json.dumps(data))
+        _shared_save_path().write_text(json.dumps(data))
 
     async def _mp_chat_prompt(self) -> str:
         buf = ''
