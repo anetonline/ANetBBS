@@ -147,7 +147,7 @@ markdown>=3.5
 bleach>=6.1
 
 # RSS / Atom parser for the in-app feed reader (anetbbs.rss.poller)
-feedparser>=6.0
+feedparser>=6.0.12
 
 # FTP server (anetbbs.ftp) — serves the FileArea tree to anonymous + auth users.
 pyftpdlib>=2.0.0
