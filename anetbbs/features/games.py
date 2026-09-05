@@ -33,6 +33,7 @@ class GameManager:
                 except Exception:
                     pass
             if not await write_menu_art(self.session, 'game_center'):
+                await self.session.clear_screen()
                 await self.session.write(banner('Game Center', _w))
                 for hk, lbl in (('1', 'Door Games (LORD, TradeWars, etc.)'),
                                 ('2', 'Number Guessing (built-in)'),
@@ -143,6 +144,7 @@ class GameManager:
             # numbering in sync with what's actually on screen.
             numbered = []
             if not await write_menu_art(self.session, 'door_games'):
+                await self.session.clear_screen()
                 hbar = '═' * _iw
                 title = "Door Games".center(_iw)
                 await self.session.write(f"\r\n{BOLD}{CYAN}{hbar}{RESET}\r\n")
@@ -171,7 +173,7 @@ class GameManager:
                         plural = 'door' if count == 1 else 'doors'
                         await self.session.write(
                             f"  {YEL}{num:2d}{DIM}. {GRN}{BOLD}{cat_name}{RESET}"
-                            f"{DIM} → ({count} {plural}){RESET}\r\n")
+                            f"{DIM} -> ({count} {plural}){RESET}\r\n")
                         numbered.append(('submenu', slug, cat_name))
                         num += 1
                         rendered_submenu_slugs.add(slug)
@@ -285,6 +287,7 @@ class GameManager:
             page_games = games[start:end]
 
             if page > 0 or not await write_menu_art(self.session, art_slot):
+                await self.session.clear_screen()
                 hbar = '═' * _iw
                 title = cat_name.center(_iw)
                 await self.session.write(f"\r\n{BOLD}{CYAN}{hbar}{RESET}\r\n")

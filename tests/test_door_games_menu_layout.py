@@ -73,6 +73,9 @@ class _FakeSession:
     async def write(self, text):
         self.written.append(text)
 
+    async def clear_screen(self):
+        await self.write('\x1b[2J\x1b[H\x1b[0m')
+
     async def read_line(self, prompt=''):
         if prompt:
             await self.write(prompt)
@@ -320,7 +323,7 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         top_txt = probe.transcript()
         strategy_num = None
         for line in top_txt.split('\r\n'):
-            if 'Strategy' in line and '→' in line:
+            if 'Strategy' in line and '->' in line:
                 m = re.search(r'(\d+)', re.sub(r'\x1b\[[0-9;]*m', '', line))
                 strategy_num = int(m.group(1)) if m else None
         self.assertIsNotNone(strategy_num, f'could not find Strategy section line in:\n{top_txt}')
@@ -369,7 +372,7 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         top_txt = probe.transcript()
         section_num = None
         for line in top_txt.split('\r\n'):
-            if 'Custom Art Cat' in line and '→' in line:
+            if 'Custom Art Cat' in line and '->' in line:
                 m = re.search(r'(\d+)', re.sub(r'\x1b\[[0-9;]*m', '', line))
                 section_num = int(m.group(1)) if m else None
         self.assertIsNotNone(section_num, f'could not find section line in:\n{top_txt}')

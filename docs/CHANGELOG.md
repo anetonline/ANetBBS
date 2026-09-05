@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.67`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.68`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.68 — Door Games menu fixes (September 2026)
+
+Fixed a cosmetic bug in the terminal Door Games menu where category section lines (e.g. "Puzzle / Casino") showed a literal `?` in place of a small arrow separator before the door count — a non-CP437-safe character that got mangled on the way to the terminal. Replaced with a plain ASCII arrow that renders correctly everywhere. Also added a screen clear before each Door Games menu/submenu redraw, so a menu shorter than a full screen no longer leaves the previous menu's leftover content stacked above it.
 
 ## v1.0.67 — Follow-up from the fourth audit pass, plus a CI-only test fix (September 2026)
 

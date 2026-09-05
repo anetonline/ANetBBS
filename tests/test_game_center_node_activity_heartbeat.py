@@ -74,6 +74,9 @@ class _FakeSession:
     async def write(self, text):
         self.written.append(text)
 
+    async def clear_screen(self):
+        await self.write('\x1b[2J\x1b[H\x1b[0m')
+
     async def read_line(self, prompt=''):
         if prompt:
             await self.write(prompt)
