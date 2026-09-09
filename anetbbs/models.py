@@ -124,6 +124,17 @@ class User(UserMixin, db.Model):
     # back to handle if not). Areas/networks that DO require a real
     # name always use it regardless of this preference.
     echomail_name_pref = db.Column(db.String(10), default='handle')
+    # Login-time "scan for new messages" preference, classic-BBS-style
+    # tri-state: 'ask' (prompt "Scan for new messages? [Y/n]" each login,
+    # the stock default), 'auto' (always show it, no prompt), or 'off'
+    # (never show it). Only affects the terminal (telnet/SSH/rlogin)
+    # login flow -- the web UI already surfaces new mail/PMs/notifications
+    # as live always-on badges, so it has no equivalent prompt to gate.
+    # NULL (pre-migration rows, added via web_app.py's generic
+    # nullable-no-default auto-sweep rather than an explicit _ensure_column
+    # call) is treated as 'ask' at every read site, matching this
+    # column's own Python-level default rather than a SQL one.
+    msg_scan_pref = db.Column(db.String(10), default='ask')
     # New User Verification — sysop approves before user can log in
     # (only enforced when NUV_ENABLED config flag is set).
     is_verified = db.Column(db.Boolean, default=True, index=True)

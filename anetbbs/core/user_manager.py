@@ -150,6 +150,7 @@ class UserManager:
             "cursor_style": getattr(user, 'cursor_style', None) or 'default',
             "real_name": getattr(user, 'real_name', None) or '',
             "echomail_name_pref": getattr(user, 'echomail_name_pref', None) or 'handle',
+            "msg_scan_pref": getattr(user, 'msg_scan_pref', None) or 'ask',
             "language": getattr(user, 'language', None) or 'en',
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login": user.last_login.isoformat() if user.last_login else None,

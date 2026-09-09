@@ -2423,11 +2423,17 @@ class BBSSession:
         banner -- easy to miss entirely on a fast connection or a client
         with limited scrollback, and it didn't say who or where. Silent
         (no pop-up, no pause) if nothing is waiting.
+
+        Returns (pm_n, unread_notifs) when something was actually shown,
+        or None when there was nothing pending (or no user) -- callers
+        that want to offer a "jump straight into the relevant reader"
+        follow-up (see _maybe_scan_new_messages()) use the return value
+        to know what's actually worth offering.
         """
         try:
             uid = self.user.get('id') if isinstance(self.user, dict) else None
             if not uid:
-                return
+                return None
             from ..models import (PrivateMessage, InstantMessage,
                                   Notification)
             pm_n = (PrivateMessage.query
@@ -2442,7 +2448,7 @@ class BBSSession:
             except Exception:
                 unread_notifs = []
             if not (pm_n or im_n or unread_notifs):
-                return
+                return None
 
             await self.write(
                 '\r\n\x1b[1;33m'
@@ -2484,6 +2490,70 @@ class BBSSession:
                 await self.read_line('')
             except Exception:
                 pass
+            return (pm_n, unread_notifs)
+        except Exception:
+            return None
+
+    async def _maybe_scan_new_messages(self):
+        """Gate _show_notification_summary() behind the user's
+        msg_scan_pref (classic-BBS-style tri-state -- see User.msg_scan_pref
+        in models.py): 'off' skips it entirely, 'ask' prompts
+        "Scan for new messages? [Y/n]" first, 'auto' shows it unconditionally
+        (today's pre-existing behavior). Unset/legacy sessions default to
+        'ask', matching the column's own Python-level default.
+
+        When the summary actually showed something, also offers a one-key
+        shortcut straight into whichever reader(s) have something new --
+        Private Messages, Message Boards (reply/mention notifications), or
+        Echomail (echomail_reply notifications) -- rather than dropping the
+        user back at the notification list with no way to act on it. ANSI/
+        ASCII only: PETSCII has its own dedicated menu loop
+        (features/petscii_ui.py) that these ANSI-native reader methods
+        aren't built for, so PETSCII sessions just get the summary itself.
+        """
+        try:
+            pref = None
+            if isinstance(self.user, dict):
+                pref = self.user.get('msg_scan_pref')
+            pref = pref or 'ask'
+            if pref == 'off':
+                return
+            if pref == 'ask':
+                resp = (await self.read_line(
+                    '\r\n\x1b[1;33mScan for new messages? [Y/n]:\x1b[0m ') or '')
+                if resp.strip().lower() == 'n':
+                    return
+
+            result = await self._show_notification_summary()
+            if not result or self.term_mode == 'petscii':
+                return
+            pm_n, unread_notifs = result
+            has_board = any(n.kind in ('reply', 'mention') for n in unread_notifs)
+            has_echo = any(n.kind == 'echomail_reply' for n in unread_notifs)
+
+            opts = []
+            if pm_n:
+                opts.append(('P', 'rivate Messages'))
+            if has_board:
+                opts.append(('B', 'oards'))
+            if has_echo:
+                opts.append(('E', 'chomail'))
+            if not opts:
+                return
+            label = '  '.join(f'\x1b[1;36m[{k}]\x1b[0m{rest}' for k, rest in opts)
+            resp = (await self.read_line(
+                f'\r\n\x1b[1mRead now? {label}  or \x1b[1;36m[Enter]\x1b[0m to continue: '
+            ) or '').strip().upper()
+            if not resp:
+                return
+            from ..features.bbs_ui import BBSMenuUI
+            ui = BBSMenuUI(self)
+            if resp == 'P' and pm_n:
+                await ui.list_pm_inbox()
+            elif resp == 'B' and has_board:
+                await ui.list_boards()
+            elif resp == 'E' and has_echo:
+                await ui.list_echo_areas()
         except Exception:
             pass
 
@@ -2880,14 +2950,17 @@ class BBSSession:
 
             # Surface any unread sysop broadcasts on entry — telnet/SSH/rlogin
             # users see them on the way into the menu loop, mirroring the
-            # toast that pops in the web UI.
-            await self._show_notification_summary()
+            # toast that pops in the web UI. The new-message scan itself is
+            # gated behind the user's msg_scan_pref (auto/ask/off) --
+            # see _maybe_scan_new_messages()'s own docstring.
+            await self._maybe_scan_new_messages()
             await self._show_pending_broadcasts()
             # Establish the baseline for check_new_notifications()'s
             # "while already online" check in the menu loop below --
             # everything unread as of THIS point was already covered by
-            # _show_notification_summary() above, so the menu loop must
-            # only announce notifications that arrive AFTER login.
+            # _maybe_scan_new_messages() above (whether or not it actually
+            # displayed anything), so the menu loop must only announce
+            # notifications that arrive AFTER login.
             from ..features.notify import check_new_notifications
             await check_new_notifications(self)
             try:

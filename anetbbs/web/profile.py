@@ -99,6 +99,17 @@ class UpdateProfileForm(FlaskForm):
         "real-name requirement always use your real name regardless of "
         "this setting -- set Real Name above first if you want to post "
         "in those."))
+    msg_scan_pref = SelectField('Scan for new messages at login (telnet/SSH)',
+                                validators=[Optional()], choices=[
+        ('ask', 'Ask each login (default)'),
+        ('auto', 'Always scan automatically'),
+        ('off', 'Never scan'),
+    ], description=(
+        "Only affects telnet/SSH/rlogin terminal sessions -- the web UI "
+        "already shows new mail/PMs/notifications as always-on badges, "
+        "so it has no equivalent prompt. Ask shows a Y/N prompt at "
+        "login; Auto shows the summary every time with no prompt; Off "
+        "skips it entirely."))
     submit = SubmitField('Update Profile')
 
     def __init__(self, original_email, *args, **kwargs):
@@ -307,6 +318,7 @@ def edit():
         current_user.sixel_mode = form.sixel_mode.data or 'auto'
         current_user.cursor_style = form.cursor_style.data or 'default'
         current_user.echomail_name_pref = form.echomail_name_pref.data or 'handle'
+        current_user.msg_scan_pref = form.msg_scan_pref.data or 'ask'
 
         # Handle avatar upload
         if form.avatar_file.data and form.avatar_file.data.filename:
@@ -363,6 +375,7 @@ def edit():
         form.sixel_mode.data = current_user.sixel_mode or 'auto'
         form.cursor_style.data = current_user.cursor_style or 'default'
         form.echomail_name_pref.data = current_user.echomail_name_pref or 'handle'
+        form.msg_scan_pref.data = current_user.msg_scan_pref or 'ask'
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)

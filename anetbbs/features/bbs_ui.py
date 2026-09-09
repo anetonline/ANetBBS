@@ -4315,6 +4315,9 @@ _PROFILE_CURSOR_CHOICES = (('Default (unchanged)', 'default'),
                            ('Spinning (Synchronet-style)', 'spinning'))
 _PROFILE_ECHOMAIL_NAME_CHOICES = (('My handle (display name)', 'handle'),
                                   ('My real name', 'real_name'))
+_PROFILE_MSGSCAN_CHOICES = (('Ask each login (default)', 'ask'),
+                            ('Always scan automatically', 'auto'),
+                            ('Never scan', 'off'))
 
 
 async def _edit_profile_field(self, kind, attr, label):
@@ -4411,6 +4414,18 @@ async def _edit_profile_field(self, kind, attr, label):
                 u.echomail_name_pref = value
                 db.session.commit()
 
+    elif kind == 'msgscan':
+        picked, value = await self._pick_choice(
+            'Scan for new messages at login', list(_PROFILE_MSGSCAN_CHOICES))
+        if picked:
+            with _app().app_context():
+                u = User.query.get(self.session.user['id'])
+                u.msg_scan_pref = value
+                db.session.commit()
+            await self.session.write(
+                f"\r\n{FG['cyan']}Takes effect next time you connect.{RESET}\r\n")
+            await self.session.read_line("Press Enter...")
+
     elif kind == 'lang':
         # No enforced list of valid language codes exists anywhere in
         # this codebase (MenuTranslation's docstring only gives
@@ -4471,6 +4486,9 @@ async def _edit_profile(self):
                         dict((v, l) for l, v in _PROFILE_ECHOMAIL_NAME_CHOICES).get(
                             u.echomail_name_pref or 'handle', u.echomail_name_pref)))
             rows.append(('lang', 'language', 'Language code', u.language or 'en'))
+            rows.append(('msgscan', 'msg_scan_pref', 'Scan for new messages at login',
+                        dict((v, l) for l, v in _PROFILE_MSGSCAN_CHOICES).get(
+                            u.msg_scan_pref or 'ask', u.msg_scan_pref)))
             return rows
 
     while True:

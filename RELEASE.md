@@ -1,3 +1,16 @@
+# ANetBBS v1.0.69 — Classic "scan for new messages?" login preference (September 2026)
+
+Added the classic BBS login-time new-message scan to the terminal (telnet/SSH/rlogin) client, as a new per-user preference:
+
+- **New profile setting, "Scan for new messages at login"** (terminal: Edit Profile; web: Profile → Terminal Capabilities), with three modes:
+  - **Ask each login** (the stock default) — prompts `Scan for new messages? [Y/n]:` right after logon-module screens, before the main menu. Pressing Enter (or Y) proceeds; N skips it silently for that session.
+  - **Always scan automatically** — shows the summary every login with no prompt.
+  - **Never scan** — skips it entirely, restoring the exact behavior of every version before this one.
+- What gets scanned is unread items addressed to *you*: private messages, inter-BBS instant messages, and notifications (board replies/mentions, echomail replies, netmail, achievements) — the same summary the terminal already showed unconditionally on every login as of a recent release, now gated behind this preference instead of always appearing. It does not scan for general new activity in boards/echomail areas you haven't been replied to in — the web UI already covers that separately via its own always-on unread badges.
+- **New:** when something is actually found (whether via "ask" + yes, or "auto"), the terminal now offers a one-key shortcut straight into the relevant reader — `[P]rivate Messages`, `[B]oards`, and/or `[E]chomail`, only listing whichever of those actually has something new — instead of just showing the list and dropping the caller back at the main menu with no way to act on it.
+- ANSI/ASCII terminal sessions only. PETSCII sessions still see the notification summary itself, but not the new jump-in shortcut menu, since PETSCII's own dedicated menu system doesn't share the ANSI-native reader screens this reuses.
+- The preference only affects the terminal — the web UI has no equivalent prompt, since its own always-visible nav-bar badges (PM/IM/notification bell) already serve the same purpose there without needing a login-time interruption.
+
 # ANetBBS v1.0.68 — Door Games menu fixes (September 2026)
 
 Fixed a cosmetic bug in the terminal Door Games menu where category section lines (e.g. "Puzzle / Casino") showed a literal `?` in place of a small arrow separator before the door count — a non-CP437-safe character that got mangled on the way to the terminal. Replaced with a plain ASCII arrow that renders correctly everywhere. Also added a screen clear before each Door Games menu/submenu redraw, so a menu shorter than a full screen no longer leaves the previous menu's leftover content stacked above it.
