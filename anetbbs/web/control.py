@@ -425,15 +425,12 @@ def index():
         1 for s in services
         if s['listener_summary'] in ('all_down', 'partial'))
 
-    # Web users — anyone with a UserSession row in the last 5 min.
-    five_min_ago = datetime.utcnow() - timedelta(minutes=5)
-    web_sessions = (UserSession.query
-                    .filter(UserSession.last_seen >= five_min_ago)
-                    .order_by(UserSession.last_seen.desc()).all())
-
+    # who.json (fetched by the template's own refreshWho() on load) is
+    # the live source for the "Online" panel now -- no server-rendered
+    # fallback list needed here, matching the NodeSpy panel's own
+    # "Loading…" placeholder convention.
     return render_template('admin/control.html',
                            services=services,
-                           web_sessions=web_sessions,
                            summary={'running': running,
                                     'total': total,
                                     'listener_problems': listener_problems})
@@ -710,8 +707,17 @@ def nodespy_kick(slot):
 @control_bp.route('/who.json')
 @login_required
 def who_json():
-    """Live who's-online JSON — used by the auto-refreshing panel."""
+    """Live who's-online JSON — used by the auto-refreshing panel.
+
+    Includes every UserSession row (web and terminal alike — terminal
+    presence also writes here, see core/presence.py), but only WEB
+    rows are kickable from here: NodeSpy already owns terminal kicks
+    (a live asyncio-polled connection, not a request-driven cookie
+    session), and a UserSession.kick_requested flag would silently
+    never take effect against a terminal process, which never runs
+    web_app.py's before_request hooks at all."""
     _require_admin()
+    from ..core.presence_labels import classify
     five_min_ago = datetime.utcnow() - timedelta(minutes=5)
     rows = (UserSession.query
             .filter(UserSession.last_seen >= five_min_ago)
@@ -719,11 +725,72 @@ def who_json():
     out = []
     for r in rows:
         u = User.query.get(r.user_id) if r.user_id else None
+        protocol, _where = classify(r.page)
         out.append({
+            'id': r.id,
             'username': u.username if u else '?',
             'page': r.page or '',
             'ip': r.ip_address or '',
             'agent': (r.user_agent or '')[:40],
             'last_seen': (r.last_seen.isoformat() + 'Z') if r.last_seen else '',
+            'protocol': protocol,
+            'kickable': protocol == 'web',
         })
     return jsonify(out)
+
+
+@control_bp.route('/who/<int:session_id>/kick', methods=['POST'])
+@login_required
+def who_kick(session_id):
+    """Forcibly log out a web UserSession. Enforced on that browser's
+    NEXT request (web_app.py's track_user_session() checks
+    kick_requested), not a live background poll — see UserSession's
+    own model comment for why that's the best a cookie-based session
+    can do. Refuses a terminal-protocol row (see who_json()'s own
+    docstring) rather than silently setting a flag that would never
+    be checked."""
+    _require_admin()
+    from ..models import db, UserActivity
+    from ..core.presence_labels import classify
+    reason = (request.form.get('reason') or '').strip() \
+             or 'Disconnected by sysop'
+
+    row = UserSession.query.get(session_id)
+    if row is None:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'error': 'no such session'}), 404
+        flash('No such session.', 'warning')
+        return redirect(url_for('control.index'))
+
+    protocol, _where = classify(row.page)
+    if protocol != 'web':
+        msg = f'Session {session_id} is a {protocol} session — use NodeSpy to kick it.'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'error': msg}), 400
+        flash(msg, 'warning')
+        return redirect(url_for('control.index'))
+
+    target_user = User.query.get(row.user_id) if row.user_id else None
+    target_name = target_user.username if target_user else '?'
+    row.kick_requested = True
+    row.kick_reason = reason[:200]
+
+    db.session.add(UserActivity(
+        user_id=current_user.id,
+        activity_type='kick_web_session',
+        details=f'session {session_id} ({target_name}): {reason}',
+        ip_address=request.remote_addr,
+        service='web'))
+    try:
+        db.session.commit()
+        ok = True
+        msg = f'Kick requested for {target_name}. Takes effect on their next request.'
+    except Exception as exc:  # pylint: disable=broad-except
+        db.session.rollback()
+        ok = False
+        msg = f'Kick flag commit failed: {exc}'
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'ok': ok, 'message': msg})
+    flash(msg, 'success' if ok else 'danger')
+    return redirect(url_for('control.index'))

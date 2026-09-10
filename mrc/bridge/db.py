@@ -21,6 +21,42 @@ class BridgeDB:
         self._profiles = self._load_json(self.profiles_file) or {}
         self._sessions = self._load_json(self.sessions_file) or {}
 
+    def discard_stale_sessions(self):
+        """Call this exactly once, right after constructing the
+        BridgeDB a real bridge PROCESS will actually run with (see
+        main.py's BridgeApp.__init__) -- NOT from __init__ itself,
+        since tests legitimately construct multiple BridgeDB instances
+        against the same data_dir within one process to verify
+        save/load round-trips, and those aren't stale by any
+        definition that matters.
+
+        Real bug found live: a session loaded from a PREVIOUS bridge
+        process's sessions.json can never be legitimately live in a
+        NEW process -- session_id is str(id(ws)), a Python object
+        identity from that old process's own memory, meaningless here
+        (and could even collide with a brand-new connection's id(ws)
+        in THIS process). Trusting it as if it might still be real is
+        what let a session survive a bridge restart/crash/deploy as a
+        permanent "ghost": main.py's keepalive_loop/
+        _rejoin_all_sessions/periodic refreshers kept re-announcing it
+        to the upstream hub forever, since none of them checked it
+        against any live websocket -- invisible locally (messages to a
+        dead ws_id are silently dropped) but visibly "present" in the
+        room to every other BBS on the network. Reported live: a
+        user's handle stayed visible in a room days after they'd
+        actually disconnected, surviving multiple bridge restarts in
+        between. main.py's _live_sessions() (checked against
+        self.websockets) is defense in depth for any OTHER way a
+        session's websocket could go away without its db row being
+        cleaned up in lockstep, not a substitute for this one-time
+        startup discard. profiles.json is unaffected -- registered
+        handle/password data is a separate, genuinely-persistent
+        store this method never touches.
+        """
+        if self._sessions:
+            self._sessions = {}
+            self._save_json(self.sessions_file, self._sessions)
+
     def _load_json(self, filepath: Path) -> Optional[dict]:
         if filepath.exists():
             try:

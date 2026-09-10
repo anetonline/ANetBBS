@@ -221,6 +221,38 @@ def create_app(config_name=None):
                 key = _uuid.uuid4().hex
                 _flask_session['presence_session_key'] = key
             user_session = UserSession.query.filter_by(session_key=key).first()
+
+            # Sysop kick check -- mirrors NodeActivity.kick_requested
+            # (the terminal NodeSpy kick), but enforced here on the
+            # NEXT request rather than a live background poll, since a
+            # web session has no open socket a server process can
+            # proactively close (see UserSession's own model comment).
+            # Checked before anything else below so a kicked session
+            # never gets a fresh last_seen/page write that would make
+            # it look freshly-active in the split second before this
+            # takes effect. `is True`, not bare truthiness -- real bug
+            # found live by this session's own test suite: a test that
+            # mocks UserSession.query entirely (unrelated resilience
+            # test for pulse.py's own query, scoped too loosely) made
+            # this line's user_session a MagicMock, whose auto-generated
+            # .kick_requested attribute is truthy by default, and this
+            # then called db.session.delete() on a non-mapped object.
+            # kick_requested is a real Boolean column -- it can only
+            # ever legitimately be True/False/None, so this check is
+            # strictly more correct regardless of the test, not just a
+            # workaround for it.
+            if user_session is not None and user_session.kick_requested is True:
+                from flask_login import logout_user
+                from flask import redirect, url_for, flash
+                reason = (user_session.kick_reason or '').strip()
+                db.session.delete(user_session)
+                db.session.commit()
+                logout_user()
+                _flask_session.pop('presence_session_key', None)
+                flash('You were disconnected by the sysop.' +
+                      (f' ({reason})' if reason else ''), 'warning')
+                return redirect(url_for('auth.login'))
+
             if user_session is None:
                 user_session = UserSession(user_id=current_user.id, session_key=key)
                 db.session.add(user_session)

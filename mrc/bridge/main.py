@@ -615,6 +615,12 @@ class BridgeApp:
 
         data_dir = self.config.get("data_dir", str(_BRIDGE_DIR / "data"))
         self.db  = BridgeDB(data_dir)
+        # See BridgeDB.discard_stale_sessions()'s own docstring -- a
+        # session persisted by a PREVIOUS bridge process can never be
+        # live in this one; this BridgeApp construction is the one
+        # place that's unconditionally true, so it's the right (and
+        # only) place to call this, not BridgeDB.__init__ itself.
+        self.db.discard_stale_sessions()
 
         self.websockets:   Dict[int, web.WebSocketResponse] = {}
         self.rate_limiter: Dict[int, float]                 = {}
@@ -849,11 +855,16 @@ class BridgeApp:
                 self.pending_disconnects.pop(key, None)
 
     def _sessions_for_user(self, user: str) -> Set[str]:
+        # _live_sessions(), not self.db.list_sessions() directly -- a
+        # stale/ghost session (see _live_sessions()'s own docstring)
+        # matching `user` here would make should_respond (this
+        # function's caller at the "to_user" PM-delivery check) come
+        # back True for a user with no real local connection at all.
         out: Set[str] = set()
         u = _casefold(user)
         if not u:
             return out
-        for ws_id_str, sess in self.db.list_sessions().items():
+        for ws_id_str, sess in self._live_sessions().items():
             if self._session_matches_user(sess, user):
                 out.add(ws_id_str)
         return out
@@ -861,7 +872,7 @@ class BridgeApp:
     def _sessions_in_room(self, room: str) -> Set[str]:
         r   = MRCProtocol.norm_room(room)
         out: Set[str] = set()
-        for ws_id_str, sess in self.db.list_sessions().items():
+        for ws_id_str, sess in self._live_sessions().items():
             if not sess.get("in_room"):
                 continue
             if self._session_room(sess) == r:
@@ -936,7 +947,7 @@ class BridgeApp:
         # the mystic backend's file-IPC watcher never resumes polling
         # that room's directory, so every reply is silently dropped.
         await self._sync_mystic_rooms()
-        for _, sess in self.db.list_sessions().items():
+        for _, sess in self._live_sessions().items():
             if not sess.get("in_room"):
                 continue
             eff_nick = self._session_effective_nick(sess)
@@ -949,9 +960,35 @@ class BridgeApp:
             await self._sleep_delay()
             await self._send_userlist_control(room)
 
+    def _live_sessions(self) -> Dict[str, dict]:
+        """self.db.list_sessions(), filtered to sessions with a real,
+        currently-connected websocket backing them.
+
+        Real bug found live: db.py loads sessions.json straight off
+        disk at process start with no liveness check at all -- a
+        session mid-chat at the exact moment the bridge restarts
+        (deploy, crash, `systemctl restart`) survives in the file, and
+        every one of the 5 call sites below used to iterate
+        self.db.list_sessions() directly, re-announcing that now-dead
+        session to the hub forever (keepalive_loop's IAMHERE,
+        _rejoin_all_sessions' IAMHERE/NEWROOM/USERLIST, the periodic
+        userlist/stats refreshers) with nothing local behind it --
+        invisible to anyone on this BBS (_send_to_session silently
+        drops messages to a ws_id not in self.websockets) but
+        permanently "present" to every other BBS on the network. A
+        fresh process's own db.py now discards whatever it loaded from
+        a previous run's sessions.json before this ever runs (see
+        BridgeDB.__init__), so this check is defense in depth for any
+        other way a session's websocket could go away without its db
+        row being cleaned up in lockstep, not just the restart case.
+        """
+        live = self.websockets
+        return {sid: sess for sid, sess in self.db.list_sessions().items()
+                if sid.isdigit() and int(sid) in live}
+
     def _rooms_with_active_sessions(self) -> Set[str]:
         rooms: Set[str] = set()
-        for _, sess in self.db.list_sessions().items():
+        for _, sess in self._live_sessions().items():
             if sess.get("in_room"):
                 r = self._session_room(sess)
                 if r:
@@ -1945,7 +1982,7 @@ class BridgeApp:
             await asyncio.sleep(interval)
             if not self.mrc.connected:
                 continue
-            for _, sess in self.db.list_sessions().items():
+            for _, sess in self._live_sessions().items():
                 if not sess.get("in_room"):
                     continue
                 eff_nick = self._session_effective_nick(sess)
@@ -1959,7 +1996,7 @@ class BridgeApp:
             await asyncio.sleep(interval)
             if not self.mrc.connected:
                 continue
-            for _, sess in self.db.list_sessions().items():
+            for _, sess in self._live_sessions().items():
                 if not sess.get("in_room"):
                     continue
                 room = self._session_room(sess)
@@ -1977,7 +2014,7 @@ class BridgeApp:
             await asyncio.sleep(interval)
             if not self.mrc.connected:
                 continue
-            for _, sess in self.db.list_sessions().items():
+            for _, sess in self._live_sessions().items():
                 if not sess.get("in_room"):
                     continue
                 room = self._session_room(sess)

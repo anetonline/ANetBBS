@@ -12,7 +12,10 @@
         <input type="text" name="search" value="{{ search }}" placeholder="Search username or email..." class="form-control" style="width:300px">
         <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i></button>
     </form>
-    <a href="{{ url_for('admin.add_user') }}" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add User</a>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('control.index') }}#who-online" class="btn btn-outline-secondary"><i class="bi bi-people-fill"></i> Live Monitor</a>
+        <a href="{{ url_for('admin.add_user') }}" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add User</a>
+    </div>
 </div>
 
 <form method="post" action="{{ url_for('admin.bulk_users') }}">

@@ -1,3 +1,9 @@
+# ANetBBS v1.0.70 — MRC ghost-session fix, web session monitor (September 2026)
+
+Fixed a bug where an MRC chat session could keep showing as connected indefinitely after the MRC bridge process restarted, even though nobody was actually there — the bridge persists its session state to disk and was reloading it unconditionally on every startup, including sessions left over from a previous process life with no live connection behind them anymore. The bridge now discards any leftover session state right after starting, and every place that reports "who's here" to the upstream hub (the keepalive loop, periodic userlist/stat refreshes, room-membership checks) now cross-checks against actually-live connections rather than trusting the persisted list alone.
+
+Added a new admin monitor for web sessions, alongside the existing terminal node monitor: the "Web + terminal users" panel on Admin → Control now includes a Kick action for web sessions. Unlike a terminal session, a web session has no live server-side connection to close immediately — the kick takes effect on that session's next page request, with a message explaining that they were disconnected by the sysop. A "Live Monitor" shortcut was also added to Admin → Users for quick access to this panel.
+
 # ANetBBS v1.0.69 — Classic "scan for new messages?" login preference (September 2026)
 
 Added the classic BBS login-time new-message scan to the terminal (telnet/SSH/rlogin) client, as a new per-user preference:

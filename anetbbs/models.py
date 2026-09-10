@@ -499,6 +499,19 @@ class UserSession(db.Model):
     ip_address = db.Column(db.String(45))
     user_agent = db.Column(db.String(255))
     page = db.Column(db.String(255))
+    # Sysop kick flag for a web session -- mirrors NodeActivity's own
+    # kick_requested/kick_reason (see that model's comment). Web has no
+    # live socket a server process can proactively close the way a
+    # terminal session's asyncio task can, so this is enforced on the
+    # NEXT request instead of via a background poll: web_app.py's
+    # load_user()/track_user_session() check it on every request and
+    # force a logout when set. That means a genuinely idle tab (no more
+    # requests at all) stays logged in until it does something -- an
+    # inherent limit of cookie-based sessions, not something this flag
+    # can close on its own.
+    kick_requested = db.Column(db.Boolean, default=False, nullable=False,
+                                index=True)
+    kick_reason = db.Column(db.String(200))
 
     # Cascade-delete this user's session row(s) when the user is
     # deleted. Without this, SQLAlchemy defaults to "set FK to NULL" on

@@ -381,27 +381,17 @@
 </div>
 
 <!-- ====== Web + terminal users ====== -->
-<div class="card mb-3">
+<div class="card mb-3" id="who-online">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-people"></i> Online (web + terminal, last 5 min)</span>
         <small id="who-count" class="text-muted"></small>
     </div>
     <table class="table table-sm mb-0">
         <thead><tr>
-            <th>User</th><th>Page</th><th>IP</th><th>UA</th><th>Last seen</th>
+            <th>User</th><th>Page</th><th>IP</th><th>UA</th><th>Last seen</th><th></th>
         </tr></thead>
         <tbody id="who-body">
-        {% for s in web_sessions %}
-            <tr>
-                <td><strong>{% if s.user %}<a href="{{ url_for('profile.view_user', username=s.user.username) }}">{{ s.user.username }}</a>{% else %}?{% endif %}</strong></td>
-                <td><small><code>{{ s.page or '' }}</code></small></td>
-                <td><small><code>{{ s.ip_address or '' }}</code></small></td>
-                <td><small>{{ (s.user_agent or '')[:40] }}</small></td>
-                <td><small>{{ s.last_seen|eastern('%H:%M:%S', '') }}</small></td>
-            </tr>
-        {% else %}
-            <tr><td colspan="5" class="text-muted">Nobody online.</td></tr>
-        {% endfor %}
+            <tr><td colspan="6" class="text-muted">Loading…</td></tr>
         </tbody>
     </table>
 </div>
@@ -815,20 +805,41 @@ async function refreshWho() {
         if (count) count.textContent = data.length + ' online';
         if (!body) return;
         if (!data.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">Nobody online.</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="text-muted">Nobody online.</td></tr>';
             return;
         }
         body.innerHTML = data.map(d => `
             <tr>
-                <td><strong>${escapeHtml(d.username)}</strong></td>
+                <td><strong>${escapeHtml(d.username)}</strong> <span class="badge bg-secondary">${escapeHtml(d.protocol||'')}</span></td>
                 <td><small><code>${escapeHtml(d.page||'')}</code></small></td>
                 <td><small><code>${escapeHtml(d.ip||'')}</code></small></td>
                 <td><small>${escapeHtml(d.agent||'')}</small></td>
                 <td><small>${(d.last_seen||'').slice(11, 19)}</small></td>
+                <td>${d.kickable ? `<button class="btn btn-sm btn-outline-danger" data-id="${d.id}" data-username="${escapeHtml(d.username||'')}" onclick="kickWho(this)" title="Kick / log out"><i class="bi bi-box-arrow-right"></i></button>` : ''}</td>
             </tr>`).join('');
     } catch (e) {}
 }
 refreshWho();
 setInterval(refreshWho, 5000);
+
+async function kickWho(btn) {
+    const id = btn.dataset.id;
+    const username = btn.dataset.username;
+    const reason = prompt(`Log out ${username}'s web session?\n\nOptional reason (shown to user before logout):`, '');
+    if (reason === null) return;
+    try {
+        const fd = new FormData();
+        fd.append('reason', reason);
+        fd.append('csrf_token', '{{ csrf_token() }}');
+        const r = await fetch(`/admin/control/who/${id}/kick`, {
+            method: 'POST',
+            body: fd,
+            headers: {'X-Requested-With': 'XMLHttpRequest'},
+        });
+        const j = await r.json();
+        if (j.ok) refreshWho();
+        else alert(j.error || j.message || 'Kick failed');
+    } catch (e) { alert('Kick request failed: ' + e); }
+}
 </script>
 {% endblock %}
