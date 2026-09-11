@@ -23,6 +23,47 @@ from ..core.tz import fmt_eastern
 
 logger = logging.getLogger(__name__)
 
+# Real vulnerability found in a security audit, same shape as the one
+# already fixed in wall.py/mrc_chat.py: several list/detail views in
+# this module render short metadata fields (a FidoNet echomail
+# from_name/subject, an InterBBS MSP instant message's sender label)
+# straight into a lightbar row or a "From: .../Host: ..." header line
+# with no ANSI/control-byte stripping. Both fields are genuinely
+# remote-controlled -- from_name/subject come off the wire from ANY
+# FidoNet peer (anetbbs/echomail/poller.py's _import_message), and
+# sender_label is raw, unauthenticated text from a remote MSP peer
+# (anetbbs/msp/server.py's _deliver(), which even has its own comment
+# flagging these exact two fields as untrusted). A malicious/
+# compromised peer could embed a raw CSI/OSC escape sequence in either
+# field to repaint the lightbar, spoof a fake prompt, or hide/alter
+# surrounding menu chrome on the local caller's own terminal the
+# instant they open Echomail or their instant-message inbox --
+# they don't even need to open the specific message, just see it in
+# the list. Deliberately NOT applied to full message *bodies* read
+# through launch_aneview()'s ANSI-aware pager (echomail/PM bodies are
+# expected, decades-old BBS-precedent to carry real ANSI art -- see
+# _view_bulletin()'s own docstring on that distinction) -- only to
+# structural fields rendered inline in list/header chrome, where a raw
+# escape is never expected. Same regex as wall.py/mrc_chat.py's own
+# _strip_untrusted(), duplicated locally rather than imported across
+# modules -- matching this codebase's existing convention of not
+# reaching into another module's underscore-prefixed internals (see
+# file_quota.py's own docstring on that same convention).
+_INJECTED_ANSI_RE = re.compile(
+    r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _strip_untrusted(s):
+    """Strip well-formed CSI/OSC escape sequences, then the whole C0
+    control range (+ DEL) as a safety net for anything malformed that
+    doesn't match the tidy pattern. Safe to call on already-clean
+    locally-typed text -- it's a no-op there."""
+    if not s:
+        return ''
+    return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
+
+
 _cached_app = None
 _cached_app_key = None
 
@@ -647,8 +688,19 @@ class BBSMenuUI:
                    .filter_by(recipient_id=my_id)
                    .order_by(InstantMessage.received_at.desc())
                    .limit(50).all())
-            rows = [(m.id, m.sender_label or '?', m.sender_host or '?',
-                     m.received_at, m.is_read, m.body or '') for m in ims]
+            # sender_label and body are raw, unauthenticated text from a
+            # remote MSP peer (anetbbs/msp/server.py's _deliver() -- see
+            # its own comment flagging these exact fields as untrusted).
+            # Sanitized once here, at the point rows is built, so every
+            # downstream render (list preview, detail header, reply
+            # flow) gets the clean value -- same real gap and fix shape
+            # as wall.py's own InterBBS-synced WallPost line1/line2.
+            # sender_host is a raw socket peer IP from the OS (never
+            # attacker-supplied text), so it's left as-is.
+            rows = [(m.id, _strip_untrusted(m.sender_label) or '?', m.sender_host or '?',
+                     m.received_at, m.is_read,
+                     '\n'.join(_strip_untrusted(ln) for ln in (m.body or '').split('\n')))
+                    for m in ims]
 
         from .ansi_ui import banner as _bnr, FG as _F, RESET as _R, ui_width as _uw
         _w = _uw(self.session)
@@ -1451,9 +1503,15 @@ class BBSMenuUI:
             _, subj, who, _, when, _ = row
             ts = fmt_eastern(when, '%m-%d', '  ?  ')
             s_col = FG['wht'] if not selected else ''
+            # subj/who are remote-controlled (any FidoNet peer can forge
+            # an inbound message's subject/from_name) -- strip before
+            # they land in this lightbar row. See _strip_untrusted()'s
+            # module-level docstring for the finding.
+            safe_subj = _strip_untrusted(subj or '(no subject)')
+            safe_who = _strip_untrusted(who or '?')
             return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
-                    f"{s_col}{(subj or '(no subject)')[:COL_SUBJ]:<{COL_SUBJ}}{RESET} "
-                    f"{FG['grn']}{(who or '?')[:COL_FROM]:<{COL_FROM}}{RESET} "
+                    f"{s_col}{safe_subj[:COL_SUBJ]:<{COL_SUBJ}}{RESET} "
+                    f"{FG['grn']}{safe_who[:COL_FROM]:<{COL_FROM}}{RESET} "
                     f"{FG['cyan']}{ts:<5}{RESET}")
 
         def render_hint_msgs(sel, total):
@@ -2193,6 +2251,7 @@ class BBSMenuUI:
         from anetbbs.models import db, FileUpload
         from .xfer import recv_file
         import uuid, mimetypes, shutil as _shutil
+        from werkzeug.utils import secure_filename
         from ..features.archive_meta import extract_archive_description
 
         opts = []
@@ -2240,13 +2299,32 @@ class BBSMenuUI:
         uid = self.session.user.get('id')
         saved = []
 
-        for orig_name, tmp_path in received:
+        for raw_orig_name, tmp_path in received:
+            # Real gap found in a security/performance audit: unlike the
+            # web upload route (web/files.py's upload(), which runs
+            # every filename through secure_filename()), this ZMODEM/
+            # YMODEM/XMODEM path stored the filename the CLIENT'S sz/rz
+            # sent -- verbatim -- straight into FileUpload.
+            # original_filename (DB-fallback areas) or, for disk-backed
+            # areas, into the REAL on-disk filename (os.path.basename()
+            # only strips directory components, not arbitrary bytes). A
+            # filename with an embedded ANSI/CSI escape sequence, once
+            # uploaded, gets rendered unsanitized straight into every
+            # OTHER caller's terminal the moment they browse this file
+            # area (_file_area_browse()'s listing table below) --
+            # exactly the same chrome-injection shape as the echomail/
+            # InstantMessage findings above, but reachable by any
+            # regular user's own upload, not just a network peer.
+            # secure_filename() matches the web route's own precedent
+            # exactly, so a file uploaded via ZMODEM and one uploaded
+            # via the web end up with the same filename-safety guarantee.
+            orig_name = secure_filename(raw_orig_name) or 'upload.bin'
             try:
                 if use_disk_area:
                     safe_name = os.path.basename(orig_name)
                     if not safe_name or safe_name.startswith('.'):
                         await self.session.write(
-                            f"\r\nSkipped {orig_name!r}: invalid filename.\r\n")
+                            f"\r\nSkipped {raw_orig_name!r}: invalid filename.\r\n")
                         continue
                     dest = os.path.join(target_dir, safe_name)
                     _shutil.move(tmp_path, dest)
@@ -3263,9 +3341,38 @@ class BBSMenuUI:
             return f'\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\{trail}'
         return cls._URL_RE.sub(sub, line)
 
+    # Keeps '\n' (used to preserve paragraph breaks in multi-line RSS/
+    # ebook body text run through _sanitize_cp437 below) -- unlike
+    # module-level _CONTROL_RE, which strips the full C0 range and is
+    # only ever used on already-single-line fields.
+    _CP437_CONTROL_RE = re.compile(r'[\x00-\x09\x0b-\x1f\x7f]')
+
     @staticmethod
     def _sanitize_cp437(text):
-        """Replace common Unicode chars with CP437-safe equivalents."""
+        """Replace common Unicode chars with CP437-safe equivalents.
+
+        Real vulnerability found in a security audit, same shape as
+        module-level _strip_untrusted()'s own finding (see its
+        docstring): every one of this method's 16 call sites feeds it
+        genuinely remote/attacker-controlled text -- an RSS item's
+        title/author/feed-name/body (any subscribed feed's publisher
+        controls their own item content, per _rss_render_sixel()'s own
+        comment on that same trust boundary a few methods up) and an
+        ebook source's title/author/chapter titles. Because Python's
+        'cp437' codec maps the C0 control range (including ESC, 0x1B)
+        byte-for-byte rather than rejecting it, every character in a
+        raw ANSI/CSI escape sequence individually passes this
+        function's own per-character `c.encode('cp437')` check and
+        sailed through completely unfiltered -- a malicious RSS
+        item's title could repaint the lightbar the instant a
+        subscriber opened the feed list, no need to even open the
+        item. Strips well-formed CSI/OSC sequences plus the C0 control
+        range as a safety net (matching _strip_untrusted() exactly),
+        EXCEPT '\\n' -- several call sites here (RSS/ebook body text)
+        are genuinely multi-line and stripping '\\n' would collapse
+        paragraph structure, not just close a security gap."""
+        text = _INJECTED_ANSI_RE.sub('', text or '')
+        text = BBSMenuUI._CP437_CONTROL_RE.sub('', text)
         _sub = {
             '–': '-', '—': '-', '―': '-',
             '‘': "'", '’': "'", '‚': "'",
@@ -4871,34 +4978,57 @@ async def _sysop_edit_user(self, uid):
         choice = (await self.session.read_line(_p('Choice: ')) or '').strip().upper()
         if choice == 'Q' or not choice:
             return
+        # Real gap found in a security/performance audit: web/admin.py's
+        # edit_user()/delete_user()/toggle_ban() all refuse to let an
+        # admin demote/deactivate/delete their OWN account (self.id ==
+        # current_user.id), with the exact reasoning that a stray
+        # keypress could lock the whole panel out with no other admin
+        # necessarily around to undo it -- but this terminal
+        # counterpart, reachable by any sysop over telnet/SSH, had none
+        # of those three guards. Same self-check, same reasoning, just
+        # keyed off the terminal session's own user id instead of
+        # flask_login's current_user.
+        is_self = (uid == (self.session.user or {}).get('id'))
         with _app().app_context():
             u = User.query.get(uid)
             if not u:
                 return
             if choice == 'T':
-                u.is_active = not u.is_active
-                info = (u.username, u.email, u.is_active, u.is_admin)
-                await self.session.write(
-                    f"\r\n{FG['grn']}Active toggled to {u.is_active}.{RESET}\r\n")
+                if is_self:
+                    await self.session.write(
+                        f"\r\n{FG['red']}You cannot deactivate your own account.{RESET}\r\n")
+                else:
+                    u.is_active = not u.is_active
+                    info = (u.username, u.email, u.is_active, u.is_admin)
+                    await self.session.write(
+                        f"\r\n{FG['grn']}Active toggled to {u.is_active}.{RESET}\r\n")
             elif choice == 'A':
-                u.is_admin = not u.is_admin
-                info = (u.username, u.email, u.is_active, u.is_admin)
-                await self.session.write(
-                    f"\r\n{FG['grn']}Admin toggled to {u.is_admin}.{RESET}\r\n")
+                if is_self:
+                    await self.session.write(
+                        f"\r\n{FG['red']}You cannot change your own admin status.{RESET}\r\n")
+                else:
+                    u.is_admin = not u.is_admin
+                    info = (u.username, u.email, u.is_active, u.is_admin)
+                    await self.session.write(
+                        f"\r\n{FG['grn']}Admin toggled to {u.is_admin}.{RESET}\r\n")
             elif choice == 'P':
                 new = await self.session.read_line("New password: ")
                 if new:
                     u.password_hash = generate_password_hash(new)
                     await self.session.write(f"\r\n{FG['grn']}Password updated.{RESET}\r\n")
             elif choice == 'D':
-                confirm = await self.session.read_line(
-                    f"\r\n{FG['red']}Type DELETE to confirm: {RESET}")
-                if confirm == 'DELETE':
-                    db.session.delete(u)
-                    db.session.commit()
-                    await self.session.write(f"\r\n{FG['red']}User deleted.{RESET}\r\n")
-                    await self.session.read_line("Press Enter...")
-                    return
+                if is_self:
+                    await self.session.write(
+                        f"\r\n{FG['red']}You cannot delete your own account.{RESET}\r\n")
+                else:
+                    confirm = await self.session.read_line(
+                        f"\r\n{FG['red']}Type DELETE to confirm: {RESET}")
+                    if confirm == 'DELETE':
+                        db.session.delete(u)
+                        db.session.commit()
+                        await self.session.write(f"\r\n{FG['red']}User deleted.{RESET}\r\n")
+                        await self.session.read_line("Press Enter...")
+                        return
             db.session.commit()
 BBSMenuUI._sysop_edit_user = _sysop_edit_user
 
@@ -6495,36 +6625,67 @@ async def _show_main_v2(self):
             "Choice: "
         )
         choice = (await self.session.read_line(menu) or '').strip().upper()
-        if choice == 'Q':
-            return
-        elif choice == 'M':
-            await self.list_boards()
-        elif choice == 'B':
-            await self.list_bulletins()
-        elif choice == 'P':
-            await self.list_pm_inbox()
-        elif choice == 'N':
-            await self.send_pm()
-        elif choice == 'E':
-            await self.list_echo_areas()
-        elif choice == 'C':
-            await self.compose_echomail()
-        elif choice == 'F':
-            await self.list_files()
-        elif choice == 'A':
-            await self.list_file_bulletins()
-        elif choice == 'R':
-            await self.show_rss()
-        elif choice == 'K' and ebooks_terminal_on:
-            await self.show_ebooks()
-        elif choice == 'U':
-            await self.show_online()
-        elif choice == 'Y':
-            await self.show_profile()
-        elif choice == 'X':
-            await self.edit_profile()
-        elif choice == 'W':
-            await self.change_password()
-        elif choice == 'S' and is_sysop:
-            await self.sysop_menu()
+        # Real gap found in a security/performance audit, same shape as
+        # a bug already found and fixed in menu_engine.py's run_menu()
+        # (see its own comment on a broken `goto` target killing the
+        # whole session instead of failing just that one navigation,
+        # and the try/except wrapped around its own action() call right
+        # above that): this hardcoded fallback menu loop -- used
+        # whenever an install has no configured BbsMenu rows, per the
+        # comment at the top of this function -- had NO equivalent
+        # protection. Any unhandled exception from ANY of the ~15
+        # dispatch targets below (a DB hiccup in list_boards(), a bad
+        # RSS feed, a corrupt echomail row) propagated all the way out
+        # of this loop and killed the entire session instead of just
+        # failing that one menu choice. CarrierLost/CancelledError are
+        # deliberately re-raised, not swallowed -- those mean the
+        # connection is actually gone (or the task is being torn down),
+        # and catching them here would leave the session hung waiting
+        # on a dead socket instead of unwinding cleanly, same
+        # distinction menu_engine.py's own handler makes.
+        try:
+            if choice == 'Q':
+                return
+            elif choice == 'M':
+                await self.list_boards()
+            elif choice == 'B':
+                await self.list_bulletins()
+            elif choice == 'P':
+                await self.list_pm_inbox()
+            elif choice == 'N':
+                await self.send_pm()
+            elif choice == 'E':
+                await self.list_echo_areas()
+            elif choice == 'C':
+                await self.compose_echomail()
+            elif choice == 'F':
+                await self.list_files()
+            elif choice == 'A':
+                await self.list_file_bulletins()
+            elif choice == 'R':
+                await self.show_rss()
+            elif choice == 'K' and ebooks_terminal_on:
+                await self.show_ebooks()
+            elif choice == 'U':
+                await self.show_online()
+            elif choice == 'Y':
+                await self.show_profile()
+            elif choice == 'X':
+                await self.edit_profile()
+            elif choice == 'W':
+                await self.change_password()
+            elif choice == 'S' and is_sysop:
+                await self.sysop_menu()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            from ..core.session import CarrierLost
+            if isinstance(exc, CarrierLost):
+                raise
+            logger.exception('Main menu action %r failed', choice)
+            try:
+                await self.session.write(
+                    "\r\nMenu action failed (see server log).\r\n")
+            except Exception:
+                pass
 BBSMenuUI.show_main = _show_main_v2

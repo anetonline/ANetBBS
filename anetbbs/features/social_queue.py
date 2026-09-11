@@ -69,6 +69,21 @@ def _queue(dedupe_key, trigger_kind, trigger_label, text, png_bytes):
         # Most likely the unique constraint on dedupe_key, from a
         # concurrent request queuing the same event at the same time.
         db.session.rollback()
+        # Real leak found in a security/performance audit: the PNG at
+        # image_path was already written to data/social_posts/ above,
+        # before this commit ever ran. On this losing side of the race
+        # the row never gets created, so nothing else would ever
+        # reference or clean up that file -- it would sit on disk
+        # forever, one orphaned PNG per lost race, forever. Since this
+        # call never created a row, it's the only place that still knows
+        # this particular file has no owner.
+        if image_path:
+            try:
+                os.remove(image_path)
+            except OSError:
+                logger.exception(
+                    'failed to remove orphaned social-post image %r '
+                    'after a losing dedupe race', image_path)
         return None
     # Real gap Jerry hit live: nothing told a sysop a post was waiting --
     # the queue page was the only way to find out, and there was no

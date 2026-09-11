@@ -1440,7 +1440,10 @@ class BBSSession:
                     return False
                 if not raw:
                     return False
-                # Strip telnet IAC commands (which are bytes >= 0xFA).
+                # Strip telnet IAC commands (which are bytes >= 0xF0 --
+                # covers every telnet command byte, IAC/WILL/WONT/DO/
+                # DONT/SB/SE, not just IAC itself; the "0xFA" this
+                # comment used to say was stale/wrong -- SE is 0xF0).
                 # If we're seeing IAC, just keep waiting for a real key.
                 if raw and raw[0] >= 0xF0:
                     continue

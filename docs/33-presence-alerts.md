@@ -1,7 +1,7 @@
 # Presence Alerts
 
 Classic multi-node BBS behavior: when another user logs in or out,
-everyone else currently on the system sees it live — "*** Firehawke
+everyone else currently on the system sees it live — "*** Guest42
 just logged in ***" on a terminal, a toast notification in the web UI.
 This is cross-protocol and unconditional (not opt-in, not scoped to a
 chat room) — telnet, SSH, rlogin, PETSCII, and web users all see every

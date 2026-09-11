@@ -19,7 +19,13 @@ Shows:
   page + last action + idle time. Click the eye icon for a per-node
   detail screen with the last screen snapshot.
 - **Live who's-online** for both web and terminal users, refreshed
-  every 5 seconds.
+  every 5 seconds — the "Web + terminal users" panel. Web sessions get
+  a **Kick** action here too (alongside the terminal NodeSpy kick):
+  since a web session has no live server-side connection to close
+  immediately, the kick takes effect on that session's next page
+  request, with a message explaining they were disconnected by the
+  sysop. A **Live Monitor** shortcut on **Admin → Users** jumps
+  straight to this panel.
 
 For service start/stop/restart from the web to actually work, the
 account the `anetbbs-web` *service* runs as (its systemd unit's

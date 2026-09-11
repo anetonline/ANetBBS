@@ -32,6 +32,13 @@ from .session import BBSSession
 
 logger = logging.getLogger(__name__)
 
+# Wall-clock cap on completing the rlogin handshake (the 3 NUL-terminated
+# strings) -- see handle_connection()'s own comment on the slowloris-style
+# gap this closes. A real client sends its whole header in one flight
+# immediately on connect; 15s is generous slack for a slow/lossy link,
+# not a realistic legitimate wait.
+_HANDSHAKE_TIMEOUT_SEC = 15
+
 # Warning printed to stderr at startup when rlogin is enabled
 _RLOGIN_WARNING = (
     'WARNING: rlogin server is enabled. '
@@ -67,8 +74,22 @@ class RloginServer:
         handshake_ok = False
 
         try:
-            # rlogin handshake: read until three NUL-terminated strings
-            header = await _read_rlogin_header(reader)
+            # rlogin handshake: read until three NUL-terminated strings.
+            # Real gap found in a security/performance audit, sibling to
+            # the size cap right above in _read_rlogin_header(): that cap
+            # bounds total BYTES but not WALL-CLOCK TIME -- a client that
+            # opens the connection, sends the leading NUL, and then just
+            # never sends anything else (or trickles one byte every few
+            # minutes) parks this coroutine on `await reader.read(256)`
+            # forever. Each such connection holds a live socket fd + an
+            # entry in self.active_connections indefinitely, with no cap
+            # anywhere on how many an attacker can open at once -- a
+            # classic slowloris-style resource-exhaustion DoS against an
+            # unauthenticated, internet-facing listener. finger_server.py
+            # already wraps its own pre-auth read the same way; mirrored
+            # here.
+            header = await asyncio.wait_for(
+                _read_rlogin_header(reader), timeout=_HANDSHAKE_TIMEOUT_SEC)
             logger.debug('rlogin header from %s: %s', addr, header)
             handshake_ok = True
             logger.info('rlogin session started for %s (login as %r)',
@@ -91,6 +112,8 @@ class RloginServer:
             await session.start()
         except asyncio.IncompleteReadError:
             logger.debug('rlogin connection from %s closed during handshake', addr)
+        except asyncio.TimeoutError:
+            logger.debug('rlogin connection from %s timed out during handshake', addr)
         except Exception as exc:
             logger.error('rlogin session error from %s: %s', addr, exc)
         finally:

@@ -46,7 +46,7 @@ byte -- ascii backspace is the standard 0x7f/0x08, echoed as '\\b \\b',
 matching core/session.py's own read_line()/read_raw() convention for
 every non-PETSCII term_mode already.
 """
-from .mrc_chat import MRCChat, _word_wrap
+from .mrc_chat import MRCChat, _word_wrap, MAX_CHAT_INPUT_LEN
 
 
 class AsciiMRCChat(MRCChat):
@@ -117,7 +117,12 @@ class AsciiMRCChat(MRCChat):
                 continue
 
             c = ch.decode('ascii', errors='replace')
-            buf.append(c)
+            # Same cap/reasoning as MRCChat._read_chat_line() -- see
+            # mrc_chat.py's MAX_CHAT_INPUT_LEN comment. This override
+            # reads straight off the raw reader too, so it needs the
+            # same bound.
+            if len(buf) < MAX_CHAT_INPUT_LEN:
+                buf.append(c)
             echo = '*' if self._should_mask(''.join(buf)) else c
             async with self._input_lock:
                 await self.session.write(echo)

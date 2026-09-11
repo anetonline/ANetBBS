@@ -126,14 +126,14 @@ Approve / reject / edit / delete via the admin UI at
 {
   "version": 1,
   "updated": "2026-05-15T14:00:00Z",
-  "maintainer": "StingRay",
+  "maintainer": "ExampleSysop",
   "bbses": [
     {
       "host": "bbs.a-net.fyi",
       "msp_port": 18,
       "systat_port": 11,
       "name": "A-Net BBS",
-      "sysop": "StingRay",
+      "sysop": "ExampleSysop",
       "location": "Woodstock, GA",
       "software": "ANetBBS",
       "software_version": "v1.0a2.216",

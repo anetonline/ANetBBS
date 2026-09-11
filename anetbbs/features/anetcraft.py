@@ -23,6 +23,7 @@ import math
 import random
 import time
 from pathlib import Path
+from urllib.parse import quote as _urlquote
 
 # ─── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -870,8 +871,29 @@ def _safe_username(username: str) -> str:
     Shared by every save-path helper below -- a follow-up audit found
     the single-player _save_path() had been fixed but the two
     multiplayer-inventory paths (_mp_join/_mp_leave) still built their
-    filename from the raw username directly, bypassing this."""
-    return ''.join(c for c in username if c.isalnum() or c in '-_') or 'player'
+    filename from the raw username directly, bypassing this.
+
+    Second real bug found in a later audit (2026-09-10): the original
+    version here *stripped* every character outside [A-Za-z0-9_-]
+    instead of encoding it, so any two usernames that only differ by
+    the characters the web registration form otherwise allows (space,
+    '.', "'" -- see web/auth.py's RegisterForm.username Regexp) silently
+    collapsed onto the SAME save file: 'bob smith', 'bob.smith',
+    "bob'smith", and 'bobsmith' all used to sanitize to identical
+    string 'bobsmith'. Since username uniqueness at registration is
+    only checked case-insensitively on the exact string, all four could
+    be registered as distinct accounts, and a malicious second
+    registration could deliberately collide with an existing player's
+    save file to read or corrupt their world/inventory. Percent-encoding
+    (stdlib urllib.parse.quote, forcing '/' to be escaped too via
+    safe='') is injective over the username character set this BBS
+    allows, so distinct usernames can never collide -- while still
+    guaranteeing no literal '/' survives into the filename (the '..'
+    literal text that CAN survive is harmless on its own: every save
+    path here always appends a '.json'/uses a 'mp_' prefix, so the
+    sanitized value is never the exact string '.' or '..' that a
+    filesystem would treat specially)."""
+    return _urlquote(username, safe='') or 'player'
 
 
 def _shared_save_path() -> Path:

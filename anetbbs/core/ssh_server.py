@@ -43,17 +43,6 @@ class _SshStreamReader:
             data = data.encode('utf-8', errors='replace')
         return data
 
-    async def readline(self):
-        line = b''
-        while True:
-            ch = await self.read(1)
-            if not ch:
-                break
-            line += ch
-            if ch in (b'\n', b'\r'):
-                break
-        return line
-
     def at_eof(self):
         try:
             return self._r.at_eof()

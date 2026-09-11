@@ -17,8 +17,13 @@ import asyncio
 import json
 import logging
 import os
+import signal
 
 logger = logging.getLogger(__name__)
+
+# Module-level so tests can shrink it for fast runs -- same convention
+# as core/session.py's _SPIN_TICK_SECONDS / _AFK_TICK_SECONDS.
+_SHELL_MODULE_TIMEOUT_SECONDS = 30
 
 
 async def run_modules(session, event_type: str, fast_logon: bool = False) -> None:
@@ -108,18 +113,59 @@ async def _run_shell(session, params: dict) -> None:
            'BBS_USERNAME': user.get('username', ''),
            'BBS_NODE': str(getattr(getattr(session, '_node_entry', None), 'slot', 1))}
     try:
+        # start_new_session=True (== fork-time os.setsid()) puts the
+        # shell in its own process group, same convention as
+        # games/door_runner.py's launch_door_game()/close() -- see that
+        # module's own comment on why killpg (not kill) is required.
+        # Needed here specifically because this spawns via /bin/sh -c
+        # <cmd>: a sysop-configured command that backgrounds work
+        # (`long-thing &`) or is a pipeline (`a | b`) forks children
+        # that are NOT proc.pid -- killing just the shell leaves them
+        # as orphans the OS reparents to init, still running.
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
+            start_new_session=True,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stdout, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=_SHELL_MODULE_TIMEOUT_SECONDS)
         if stdout:
             session.writer.write(stdout.replace(b'\n', b'\r\n'))
             await session.writer.drain()
     except asyncio.TimeoutError:
         logger.warning('login module shell cmd timed out: %s', cmd)
+        # Real gap found in a security/performance audit: on timeout,
+        # `proc` was left completely unmanaged -- nothing ever killed
+        # or waited on it, so a hung/runaway sysop-configured shell
+        # command (a login module runs on every single login that
+        # doesn't use fast-logon) kept running indefinitely as a live
+        # child of the BBS process, unbounded by this function's own
+        # 30s timeout. Kill the whole process GROUP (see
+        # start_new_session above) so a backgrounded or piped child the
+        # shell itself spawned is reaped too, not just the shell -- a
+        # plain proc.kill() only signals /bin/sh, which verified live
+        # (via `sleep 50 & wait`) leaves the backgrounded child running
+        # as an orphan after the shell dies.
+        try:
+            pid = proc.pid
+            if pid is None:
+                raise OSError('no pid to kill a process group for')
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError, AttributeError):
+            # No process group (e.g. start_new_session unsupported on
+            # this platform), no pid available, or it's already gone --
+            # fall back to killing just the shell itself rather than
+            # doing nothing.
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        try:
+            await proc.wait()
+        except Exception:
+            pass
     except Exception as exc:
         logger.warning('login module shell error: %s', exc)
 

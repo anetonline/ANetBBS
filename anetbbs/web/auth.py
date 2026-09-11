@@ -701,7 +701,7 @@ def register():
                     sender_id=sysop.id,
                     recipient_id=user.id,
                     subject=f'Welcome to {bbs_name}!',
-                    content=content,
+                    body=content,
                     created_at=datetime.utcnow()))
                 db.session.commit()
         except Exception:

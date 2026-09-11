@@ -50,3 +50,31 @@ URLs that didn't match anything else.
 
 The serve code rejects any path that resolves outside its intended
 base directory. Safe to expose to the internet.
+
+## Same-origin content — a deliberate tradeoff, not a bug
+
+This feature is deliberately GeoCities-style: any user can publish
+arbitrary HTML/CSS/JS, and it's served same-origin under your BBS
+domain (`/~username/`), not from a separate sandboxed subdomain. That
+means a malicious user's page can run JavaScript in a visitor's
+browser under the same origin as the rest of the BBS. This is a known,
+accepted tradeoff of offering user-published static pages this way —
+not something a future patch is expected to "fix" — so treat
+`PERSONAL_PAGES_ENABLED` the same way you'd treat any other
+user-generated-content feature with no sysop review step: fine for a
+community that trusts its own userbase, worth thinking twice about on
+a fully open-registration public install.
+
+## Gemini capsules (related, separate feature)
+
+**Tools → Gemini Capsules** (`/gemini/`) is a related but separate
+per-user publishing feature: a gemtext (Gemini protocol) capsule
+editor and browser-friendly viewer, served over plain HTTP at
+`/gemini/<username>` rather than a real TLS Gemini listener. Gemtext
+`=> target label` link lines are checked against a scheme allowlist
+(`http`, `https`, `gemini`, `gopher`, `mailto`, or a bare relative
+path) before being rendered as a clickable link — a link with any
+other scheme (e.g. `javascript:`) has its `=> ` marker stripped so it
+renders as inert plain text instead, closing a stored-XSS gap found in
+a security audit where an unsafe scheme rendered as a real clickable
+link with no check at all.

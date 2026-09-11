@@ -533,6 +533,28 @@ def handle_start_game(data):
     _flush_pre_join_buffer()
 
 
+def _session_owned_by_this_socket(session_id):
+    """True only if THIS socket connection (request.sid) is the one that
+    started `session_id` -- see handle_start_game()'s own
+    _socket_to_session bookkeeping above.
+
+    CRITICAL gap found in a security/performance audit: game_input/
+    game_resize took an attacker-supplied session_id straight from the
+    client with NO ownership check at all. door_runner.send_input()/
+    resize_terminal() are themselves a raw session_id -> PTY lookup with
+    no authorization of their own (see their own docstrings in
+    games/door_runner.py) -- so any authenticated user could inject
+    keystrokes into, or resize, ANY other user's live door-game session
+    just by guessing/incrementing session_id (a small sequential integer,
+    GameSession.id -- trivially guessable). Reuses the same sid ->
+    session_id mapping handle_start_game() already maintains for
+    disconnect cleanup as the single source of truth for "which session
+    did THIS socket start", rather than adding a second, parallel one.
+    """
+    owned = _socket_to_session.get(request.sid)
+    return owned is not None and str(owned) == str(session_id)
+
+
 @socketio.on('game_input', namespace='/game')
 def handle_game_input(data):
     """Forward keystroke from browser to PTY."""
@@ -540,7 +562,7 @@ def handle_game_input(data):
         return
     session_id = data.get('session_id')
     user_input = data.get('input', '')
-    if session_id and user_input:
+    if session_id and user_input and _session_owned_by_this_socket(session_id):
         from ..games.door_runner import send_input
         send_input(session_id, user_input)
 
@@ -553,7 +575,7 @@ def handle_game_resize(data):
     session_id = data.get('session_id')
     rows = data.get('rows', 24)
     cols = data.get('cols', 80)
-    if session_id:
+    if session_id and _session_owned_by_this_socket(session_id):
         from ..games.door_runner import resize_terminal
         resize_terminal(session_id, rows, cols)
 

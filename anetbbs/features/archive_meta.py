@@ -43,6 +43,23 @@ DESCRIPTION_CANDIDATES = (
 # descriptions, they're docs. The BBS file gallery wants a short blurb.
 MAX_DESCRIPTION_BYTES = 4096
 
+# Real vulnerability found in a security/performance audit:
+# test_archive_integrity() below used to hand every member straight to
+# zf.testzip()/a full read-through loop with no size check at all --
+# exactly the operation a decompression bomb (a small compressed file
+# whose header declares/produces a wildly disproportionate amount of
+# decompressed output, e.g. classic 42.zip-style payloads) is built to
+# abuse. This runs on every uploaded file (web/files.py, web/
+# file_areas.py) before an upload is accepted, so any user with upload
+# access could hang/exhaust a request thread for minutes deflating a
+# bomb well within the existing 100MB UPLOAD_MAX_SIZE. A zip's central
+# directory declares each member's uncompressed size without needing to
+# decompress anything to read it, and a tar member's header size is what
+# actually bounds how many bytes extractfile().read() can ever produce
+# for that member -- so both are checked against this cap BEFORE paying
+# for (or, for zip, at all avoiding) the decompression.
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024  # 1GiB
+
 
 def extract_archive_description(path):
     """Return a description string pulled from the archive at *path*.
@@ -106,6 +123,16 @@ def test_archive_integrity(path):
 
 def _test_zip(path):
     with zipfile.ZipFile(path, 'r') as zf:
+        # Declared uncompressed size, straight from the central
+        # directory -- free to read, no decompression required. Check
+        # it BEFORE testzip() below ever touches the compressed data.
+        total = sum(info.file_size for info in zf.infolist())
+        if total > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            return ArchiveTestResult(
+                False,
+                f'archive declares {total:,} bytes uncompressed (over the '
+                f'{MAX_ARCHIVE_UNCOMPRESSED_BYTES:,}-byte test limit) -- '
+                f'refusing to test, possible decompression bomb')
         bad = zf.testzip()
     if bad is not None:
         return ArchiveTestResult(False, f'corrupt member: {bad}')
@@ -114,11 +141,27 @@ def _test_zip(path):
 
 def _test_tar(path):
     """tar has no CRC/testzip()-equivalent -- best-effort by reading
-    every regular-file member through to completion."""
+    every regular-file member through to completion.
+
+    Each member's declared header size is what actually bounds how many
+    bytes extractfile().read() can produce for it (tar has no separate
+    "claims one size, contains another" trick the way a hand-crafted zip
+    central directory could) -- so a running total against that same
+    declared size, checked before each member's read-through, is a
+    complete bound on the decompression-bomb risk in the loop below.
+    """
+    total = 0
     with tarfile.open(path, 'r:*') as tf:
         for member in tf.getmembers():
             if not member.isfile():
                 continue
+            total += member.size
+            if total > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                return ArchiveTestResult(
+                    False,
+                    f'archive declares over {MAX_ARCHIVE_UNCOMPRESSED_BYTES:,} '
+                    f'bytes uncompressed -- refusing to test, possible '
+                    f'decompression bomb')
             fh = tf.extractfile(member)
             if fh is None:
                 continue

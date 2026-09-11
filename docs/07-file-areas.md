@@ -91,7 +91,11 @@ Two checks run automatically on every upload, before it's accepted:
 
 - **Archive integrity test** — zip/tar/7z/rar archives are opened and
   verified; a corrupt archive is rejected outright instead of sitting
-  in the file base as a broken download.
+  in the file base as a broken download. Capped against decompression
+  bombs — an archive that claims a wildly disproportionate uncompressed
+  size for its compressed size is rejected during this same check
+  rather than being fully inflated first, closing a real
+  disk-exhaustion gap found in a security audit.
 - **Content-hash dedup check** — a SHA-256 hash of the file's content
   (not its filename) is compared against everything already in the
   file base. A near-identical re-upload under a different name gets

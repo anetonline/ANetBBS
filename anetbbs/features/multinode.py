@@ -20,6 +20,24 @@ logger = logging.getLogger(__name__)
 # Slot index -> NodeEntry. Slot 1..BBS_NODES.
 _NODES = {}
 
+# Real gap found in a security/performance audit: NodeEntry.queue below
+# used to be `asyncio.Queue()` with no maxsize -- i.e. genuinely
+# unbounded. broadcast()/whisper()/kick_node() all already wrap their
+# put_nowait() in `except asyncio.QueueFull: pass`, which only makes
+# sense against a BOUNDED queue -- that handling was dead code, since an
+# unbounded queue's put_nowait() can never raise QueueFull. Per this
+# module's own docstring ("broadcasts queue silently and the user sees
+# them when they enter chat"), a node that's connected but not currently
+# in chat (self.listening == False) can sit for the rest of its session
+# never draining this queue -- any other logged-in user (no special
+# privilege needed, just an account) chatting a lot during that window
+# grows this one node's queue without limit, tying memory growth to how
+# long the idle session stays connected. Capped so the already-written
+# QueueFull handling actually does something: oldest-first delivery
+# still works up to the cap, and a flood just drops the overflow instead
+# of growing forever.
+_MAX_QUEUED_MESSAGES = 500
+
 
 class NodeEntry:
     """One active terminal session: which user, which slot, message queue."""
@@ -31,7 +49,7 @@ class NodeEntry:
         self.protocol = protocol
         self.peer = peer
         self.connected_at = datetime.utcnow()
-        self.queue = asyncio.Queue()
+        self.queue = asyncio.Queue(maxsize=_MAX_QUEUED_MESSAGES)
         # Per-session "in chat" flag — when True we forward broadcasts
         # straight to this user's terminal. Otherwise, broadcasts queue
         # silently and the user sees them when they enter chat.
@@ -77,7 +95,9 @@ def list_nodes():
 
 def broadcast(sender_username, text, kind='msg', sender_slot=None):
     """Send a chat line to every node except the sender. Best-effort —
-    queue is unbounded so this never blocks.
+    put_nowait() never blocks, but each node's queue is bounded
+    (_MAX_QUEUED_MESSAGES) so a flood to an idle/non-listening node
+    silently drops the overflow instead of growing without limit.
 
     Pass `sender_slot` (the sending NodeEntry's own slot number) for
     'msg' broadcasts whenever it's available. Without it, self-

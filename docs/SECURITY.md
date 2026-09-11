@@ -112,6 +112,57 @@ Read this whole file before exposing the BBS to the internet.
   `min_access_level`) fell through to level 10 ("registered") for a
   logged-out visitor instead of 0, silently granting anonymous access to
   anything gated at the standard "registered users only" level.
+- **Admin `lock_user()` now refuses to lock the acting admin's own
+  account**, matching the self-lock guard `edit_user()`/`delete_user()`/
+  `toggle_ban()` already had — found missing specifically from `lock_user()`
+  in a security audit; an admin could otherwise lock themselves out with
+  no separate account to undo it from.
+- **Door-game session ownership is now checked, not just presence.**
+  An IDOR found in a security audit let a user interact with another
+  user's in-progress door-game session by guessing/supplying its id —
+  every session-scoped action now confirms the session actually belongs
+  to the requesting user first.
+- **Private netmail no longer leaks via the public echomail RSS feed.**
+  `/feed/echomail.xml` used to apply only an area's ordinary
+  `min_access_level` check, which a NETMAIL-tagged area (QWK-routed
+  1-on-1 private mail, not broadcast echomail) typically leaves
+  permissive — any visitor meeting that level could read any user's
+  private netmail subject/body/sender. NETMAIL-tagged areas are now
+  excluded from that feed entirely. See
+  [`16-rss-reader.md`](16-rss-reader.md#your-bbss-own-outbound-feeds-feedxml)
+  for the full writeup of ANetBBS's outbound feeds.
+- **Terminal-output escape-sequence sanitization, closed across ~8
+  surfaces in one audit pass.** User-supplied text that ends up echoed
+  into another user's or the sysop's terminal — oneliners, MRC chat
+  identity fields, wall posts, echomail/netmail sender fields shown in
+  the terminal UI, the RSS reader and ebook reader's CP437 rendering,
+  ZMODEM upload filenames, PETSCII fields, and IRC nick/channel fields
+  — is now stripped of raw ANSI/terminal control sequences before
+  display, closing a recurring terminal-escape-injection bug class
+  found independently in each of those surfaces (a malicious sender
+  field could otherwise rewrite another user's screen, hide/spoof
+  text, or manipulate their terminal's title/clipboard depending on the
+  client). A CRLF-based real IRC command-injection variant of the same
+  bug class was also closed in the MRC↔IRC bridge specifically (a
+  crafted MRC-side message could otherwise inject a second raw IRC
+  command via an embedded CRLF).
+- **Inbound rlogin handshake is now bounded.** The rlogin listener used
+  to read the handshake's variable-length fields with no upper bound —
+  a connection that never sent the expected terminator could hold a
+  slot indefinitely, an unauthenticated denial-of-service. Now capped
+  at a sane maximum with a hard timeout.
+- **Multinode chat's per-node message queue is now bounded.** Found in
+  the same audit pass: a node that stopped reading its own chat output
+  (a stalled/hung client) let its queue grow without bound, an
+  in-process memory-exhaustion path. Now capped, with the oldest
+  buffered lines dropped once a node falls behind rather than the
+  queue growing forever.
+- **BinkP echo-area subscriptions are isolated per downstream node**,
+  as [doc 6 — Echomail](06-echomail.md#areafix--subscription-requests-from-peers)
+  already describes — a cross-tenant leak found in a security audit
+  let one hub-hosted node's AreaFix subscription change affect another
+  node's subscriptions under some conditions. Fixed to match the
+  per-node isolation the feature was always meant to have.
 
 ## What you MUST do for production
 

@@ -47,7 +47,10 @@ class AnetcraftSavePathTraversalTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_safe_username_strips_traversal_characters(self):
-        self.assertEqual(_safe_username('../../etc/passwd'), 'etcpasswd')
+        # No literal '/' may survive into the sanitized value -- that's
+        # the actual traversal-relevant property (see the module docstring
+        # on _safe_username for why leftover '..' text alone is harmless).
+        self.assertNotIn('/', _safe_username('../../etc/passwd'))
         self.assertEqual(_safe_username('normal_user-123'), 'normal_user-123')
         self.assertEqual(_safe_username(''), 'player')
 

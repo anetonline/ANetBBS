@@ -382,6 +382,33 @@ def test_load_missing_save_returns_none(temp_username):
     assert df.load_game(temp_username) is None
 
 
+def test_save_path_has_no_literal_slash_for_traversal_attempt():
+    # Real bug class found and fixed in anetcraft.py's _safe_username()
+    # (2026-09-10 audit), confirmed present here too: _save_path() must
+    # never let a literal '/' from the username reach the filesystem
+    # path, or a username like '../../etc/passwd' could escape SAVE_DIR.
+    path = df._save_path('../../../../tmp/evil-darkforces')
+    assert '/' not in path.name
+    assert str(path.resolve()).startswith(str(df.SAVE_DIR.resolve()))
+
+
+def test_save_path_does_not_collide_for_punctuation_variant_usernames():
+    # Same audit: the old stripping-based sanitizer dropped space/'.'/"'"
+    # entirely, so 'bob smith', 'bob.smith', and 'bobsmith' -- all valid,
+    # independently registerable usernames per web/auth.py's RegisterForm
+    # regex -- collapsed onto the identical save file, letting one
+    # player's save silently read or overwrite another's.
+    variants = ['bob smith', 'bob.smith', "bob'smith", 'bobsmith']
+    paths = [df._save_path(v) for v in variants]
+    try:
+        assert len(set(paths)) == len(variants), \
+            f'expected all distinct save paths, got {paths}'
+    finally:
+        for p in paths:
+            if p.exists():
+                p.unlink()
+
+
 def test_deserialize_migrates_old_save_without_losing_new_fields():
     old_json = json.dumps({
         'level_index': 0,

@@ -198,6 +198,46 @@ class AdminSelfDemoteGuardTests(unittest.TestCase):
             u = User.query.get(admin_id)
             self.assertEqual(u.access_level, 75)
 
+    def test_lock_user_cannot_lock_own_account(self):
+        """Real gap found in a security/performance audit (2026-09-10):
+        lock_user() had no self-guard at all, unlike toggle_ban()/
+        delete_user()/edit_user()/manage_user() in the same file --
+        web_app.py's load_user() treats is_locked exactly like
+        is_active (returns None, deauthenticating the session on its
+        very next request), so this route was the one remaining way an
+        admin could lock themselves out of the whole admin panel with a
+        single POST and no other admin necessarily around to undo it."""
+        from anetbbs.models import User
+        with self.app.app_context():
+            admin_id = self._make_admin('selflockself')
+
+        client = self._client_as(admin_id)
+        resp = client.post(f'/admin/users/{admin_id}/lock',
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+        with self.app.app_context():
+            u = User.query.get(admin_id)
+            self.assertFalse(u.is_locked,
+                             'admin must not be able to lock their own '
+                             'account via lock_user()')
+
+    def test_lock_user_can_still_lock_a_different_user(self):
+        """The guard must be self-only -- locking SOMEONE ELSE must
+        still work normally."""
+        from anetbbs.models import User
+        with self.app.app_context():
+            admin_id = self._make_admin('selflockactor')
+            other_id = self._make_admin('selflockvictim')
+
+        client = self._client_as(admin_id)
+        client.post(f'/admin/users/{other_id}/lock', follow_redirects=True)
+
+        with self.app.app_context():
+            other = User.query.get(other_id)
+            self.assertTrue(other.is_locked,
+                            'locking a DIFFERENT user must still work')
+
 
 if __name__ == '__main__':
     unittest.main()

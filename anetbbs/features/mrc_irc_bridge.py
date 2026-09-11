@@ -39,6 +39,51 @@ def _strip_mirc(s):
     return _MIRC_COLOR_RE.sub('', s or '')
 
 
+# Real vulnerability found in a deep review of this audit round's scope:
+# _strip_mirc() above only ever strips mIRC formatting bytes -- it never
+# matched \x1b (ESC) or any other C0 control byte, including \r and \n.
+# This bridge relays text in BOTH directions with NO other sanitization
+# at all: IRC-side sender nicks/PRIVMSG text (server-supplied -- a user
+# picks whatever IRC server this bridge connects to) and MRC-side
+# handle/text fields (websocket JSON from the local MRC bridge, which
+# real BBS users chat through) are embedded directly into either a raw
+# `PRIVMSG <chan> :<text>` line sent to the real IRC server (_IrcLeg.say,
+# via _send(), which just appends "\r\n") or a JSON 'text' field relayed
+# on to the MRC side (rendered on a real BBS user's terminal elsewhere).
+#
+# Two real, distinct bugs from the same gap:
+#   1. ANSI/CSI escape injection -- a hostile IRC peer's message body or
+#      nick, or a hostile MRC-side chat message, could carry a raw ESC
+#      sequence straight through to whichever side renders it.
+#   2. IRC protocol/command injection -- if any MRC-side `text` or
+#      `user`/handle value ever contained a literal '\r' or '\n' (both
+#      C0 control bytes -- fully legal inside a JSON string value, so
+#      nothing about the websocket transport prevents this), embedding
+#      it unfiltered in `PRIVMSG {channel} :{text}` before _send() adds
+#      its own trailing "\r\n" lets that text terminate the current IRC
+#      protocol line and START A NEW ONE -- e.g. a chat message
+#      containing "...\r\nQUIT :pwned" would make the bridge's own IRC
+#      connection quit, or "...\r\nPRIVMSG #other :spam" would let a
+#      malicious/compromised MRC-side chatter issue arbitrary IRC
+#      commands through the bridge's connection.
+#
+# Fixed with a single combined stripper -- same layered approach (mIRC
+# codes, then well-formed ANSI/CSI sequences, then a blanket C0+DEL
+# safety net) as anetirc2.py's own _strip(), which already got this
+# exact fix in this same audit round. The blanket control-byte strip is
+# what actually guarantees \r/\n (and a bare/malformed ESC) can never
+# survive into a raw protocol line, closing bug 2 as a side effect of
+# closing bug 1.
+_ANSI_RE = re.compile(r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _strip(s):
+    if not s:
+        return ''
+    return _CONTROL_RE.sub('', _ANSI_RE.sub('', _MIRC_COLOR_RE.sub('', s)))
+
+
 class _IrcLeg:
     """Minimal asyncio IRC client for the bridge — speaks just enough to
     join one channel and pump messages."""
@@ -164,7 +209,7 @@ class _IrcLeg:
             return
         cmd = args[0].upper()
         params = args[1:]
-        sender = prefix.split('!', 1)[0]
+        sender = _strip(prefix.split('!', 1)[0])
 
         if cmd == 'CAP' and len(params) >= 2:
             sub = params[1].upper()
@@ -191,10 +236,10 @@ class _IrcLeg:
             text = trailing
             if text.startswith('\x01ACTION ') and text.endswith('\x01'):
                 if self.on_action:
-                    await self.on_action(sender, _strip_mirc(text[8:-1]))
+                    await self.on_action(sender, _strip(text[8:-1]))
             else:
                 if self.on_message:
-                    await self.on_message(sender, _strip_mirc(text))
+                    await self.on_message(sender, _strip(text))
         elif cmd == 'JOIN' and (params and params[0] == self.channel
                                 or trailing == self.channel):
             if self.on_join and sender != self.nick:
@@ -280,8 +325,14 @@ class _MrcLeg:
                 room = data.get('room') or data.get('channel')
                 if room and room != self.room:
                     continue
-                user = data.get('handle') or data.get('user') or data.get('nick') or ''
-                text = data.get('text') or data.get('message') or ''
+                # Sanitized here, at the point of ingestion, so every
+                # downstream callback (on_message/on_action/on_join/
+                # on_part -- and, in run_bridge(), the raw IRC PRIVMSG
+                # line those build) always gets a clean value. See the
+                # _strip() docstring above for the real CRLF-injection
+                # and ANSI-injection bugs this closes.
+                user = _strip(data.get('handle') or data.get('user') or data.get('nick') or '')
+                text = _strip(data.get('text') or data.get('message') or '')
                 if t in ('message', 'msg', 'chat'):
                     if user == self.handle:
                         continue   # don't echo ourselves

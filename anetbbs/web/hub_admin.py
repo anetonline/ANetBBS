@@ -624,6 +624,24 @@ def binkp_subscribe(node_id):
         abort(400)
     area = EchoArea.query.get_or_404(area_id)
 
+    # Cross-tenant guard: same check qwk_subscribe() already has, but was
+    # missing here -- a real gap found in a full InterBBS-admin audit.
+    # A node's hub_identity_id scopes its inbound BinkP auth and outbound
+    # sender-stamping (see BinkPNode.hub_identity_id's own comment), but
+    # nothing stopped an admin from subscribing it to an EchoArea whose
+    # network belongs to a DIFFERENT hub identity anyway -- and the
+    # tosser (toss_message/toss_area_messages) honors EchoAreaNode rows
+    # with no hub-identity filter at all, so the node would then actually
+    # receive that other identity's echomail on the next poll. Areas with
+    # no identity of their own (hub_identity_id NULL, pre-migration data)
+    # are identity-agnostic and always allowed, same as the QWK version.
+    if (action == 'subscribe' and node.hub_identity_id is not None
+            and area.network.hub_identity_id is not None
+            and area.network.hub_identity_id != node.hub_identity_id):
+        flash(f'{area.tag} belongs to a different hub identity than '
+              f'{node.ftn_address} -- refusing to cross-subscribe.', 'danger')
+        return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
+
     if action == 'subscribe':
         existing = EchoAreaNode.query.filter_by(
             node_id=node_id, echo_area_id=area_id).first()
@@ -657,13 +675,22 @@ def binkp_subscribe_all(node_id):
         return redirect(url_for('hub_admin.binkp_node_detail', node_id=node_id))
 
     already = {s.echo_area_id for s in node.subscriptions.all()}
-    areas = (EchoArea.query
+    area_q = (EchoArea.query
              .join(EchomailNetwork, EchoArea.network_id == EchomailNetwork.id)
              .filter(EchoArea.is_active == True,
                      EchomailNetwork.network_type == 'binkp',
-                     EchomailNetwork.id.in_(network_ids))
-             .order_by(EchoArea.tag)
-             .all())
+                     EchomailNetwork.id.in_(network_ids)))
+    if node.hub_identity_id is not None:
+        # Same-identity-only, matching binkp_subscribe()'s single-area
+        # guard and qwk_subscribe_all()'s own identical filter -- a node
+        # has no business bulk-receiving areas that belong to a
+        # different hub identity's network. Networks with no identity
+        # set (hub_identity_id NULL, a pre-migration edge case) are
+        # treated as identity-agnostic and always included.
+        area_q = area_q.filter(db.or_(
+            EchomailNetwork.hub_identity_id == node.hub_identity_id,
+            EchomailNetwork.hub_identity_id.is_(None)))
+    areas = area_q.order_by(EchoArea.tag).all()
     added = 0
     for area in areas:
         if area.id in already:

@@ -103,8 +103,44 @@ def _wall_dims(session) -> tuple[int, bool]:
     return inner, ascii_mode
 
 
+# Real vulnerability found in a security audit: unlike mrc_chat.py's own
+# _pipe_to_ansi()/_strip_pipe() (fixed in an earlier audit pass -- see
+# that module's own docstring on the finding), this file's pipe-code
+# renderer only ever rewrote |NN tokens -- it never stripped any raw
+# ESC byte already present in the post text. WallPost.line1/line2 are
+# not only ever locally-typed content: sync_wall_inbound()
+# (anetbbs/echomail/interbbs_sync.py, out of scope here) also
+# materializes WallPost rows straight from inbound echomail message
+# bodies relayed by OTHER BBSes on the ANET_WALL InterBBS network, with
+# only a 200-char truncation and a word-filter applied -- no ANSI/
+# control-byte stripping of its own. A malicious/compromised peer BBS
+# could post a wall message whose body contains a raw ANSI/CSI escape
+# sequence, synced in and rendered straight to every local caller's
+# real terminal that opens the wall. Same fix shape as mrc_chat.py's
+# own _pipe_to_ansi(): strip well-formed CSI/OSC sequences first (so no
+# leftover bracket/digit text is left visible), then the whole C0
+# control range (+ DEL) as the safety net for anything malformed that
+# doesn't match the tidy pattern. Local user-typed posts (_post_to_wall,
+# via session.read_line()) can never contain a raw ESC byte in the
+# first place -- read_line() only ever accepts printable ASCII -- so
+# this is purely a remote-content protection, not a behavior change for
+# anything typed locally.
+_INJECTED_ANSI_RE = re.compile(
+    r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _strip_untrusted(s: str) -> str:
+    if not s:
+        return ''
+    return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
+
+
 def _pipe_to_ansi(s: str) -> str:
-    if not s or '|' not in s:
+    if not s:
+        return s
+    s = _strip_untrusted(s)
+    if '|' not in s:
         return s
     def sub(m):
         c = m.group(1)
@@ -114,7 +150,7 @@ def _pipe_to_ansi(s: str) -> str:
 
 
 def _strip_pipes(s: str) -> str:
-    return _PIPE_STRIP_RE.sub('', s) if s else ''
+    return _PIPE_STRIP_RE.sub('', _strip_untrusted(s)) if s else ''
 
 
 def _visible_len(s: str) -> int:
@@ -205,7 +241,12 @@ def _footer(is_admin: bool, has_older: bool, has_newer: bool,
 def _render_post(post, is_admin: bool, user_c: str,
                  W: int, ascii_mode: bool) -> bytes:
     ts       = fmt_eastern(post.created_at, '%m/%d/%y %H:%M', '')
-    uname    = (post.display_name or post.username or '?')[:16]
+    # post.display_name/username is remote-controlled for InterBBS-synced
+    # posts (sync_wall_inbound() stores the sender's from_name almost
+    # verbatim -- word-filtered but not ANSI/control-byte stripped) and
+    # embedded raw into the header line below -- same vulnerability class
+    # as line1/line2 above, see _strip_untrusted()'s own comment.
+    uname    = _strip_untrusted((post.display_name or post.username or '?'))[:16]
     node_str = f'Node {post.node}' if post.node else ''
     del_tag  = f'  {_RD}[#{post.id}]{_RST}' if is_admin else ''
     sep_char = '-' if ascii_mode else '─'

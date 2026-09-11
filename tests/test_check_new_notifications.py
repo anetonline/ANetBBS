@@ -94,6 +94,38 @@ class CheckNewNotificationsTests(unittest.TestCase):
             asyncio.run(check_new_notifications(session))  # nothing new
             self.assertEqual(session.written, [])
 
+    def test_ansi_escape_in_title_and_body_is_stripped(self):
+        """Sibling gap found in a security/performance audit: title/body
+        can originate from a REMOTE FTN/QWK peer (echomail reply
+        notifications build title from an inbound message's raw
+        from_name) or another user's own @-mention text -- no local
+        account or special privilege required to reach this. session.py's
+        login-time _show_notification_summary() already strips this via
+        core.text_safety.strip_untrusted_escapes(); this "while already
+        online" half of the same feature never got the same treatment,
+        so a malicious sender could embed ANSI/CSI/OSC control sequences
+        to manipulate the viewing user's real terminal."""
+        from anetbbs.features.notify import notify, check_new_notifications
+        with self.app.app_context():
+            session = _FakeSession(self.user_id)
+            asyncio.run(check_new_notifications(session))  # baseline
+
+            evil = '\x1b[2J\x1b[H\x1b]0;pwned\x07Mallory wrote to you'
+            notify(self.user_id, 'echomail_reply', title=evil,
+                  body='in FidoNet\x1b[31m (spoofed)', target_url='/echomail/4/4')
+            asyncio.run(check_new_notifications(session))
+            joined = ''.join(session.written)
+            # The attacker-supplied escape sequences (screen-clear, OSC
+            # window-title spoof, a color switch buried in the body) must
+            # not survive -- this codebase's own UI styling around the
+            # text (the yellow "*** New:" tag, the cyan body parens) is
+            # expected and NOT what this test is checking for.
+            self.assertNotIn('\x1b[2J', joined)
+            self.assertNotIn('\x1b]0;', joined)
+            self.assertNotIn('\x1b[31m', joined)
+            self.assertIn('Mallory wrote to you', joined)
+            self.assertIn('in FidoNet', joined)
+
 
 if __name__ == '__main__':
     unittest.main()

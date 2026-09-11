@@ -51,6 +51,24 @@ from mrc.mystic_client.theme_layout import load_theme_layout, extract_art_segmen
 
 
 MAX_OUTGOING_CHARS = 140        # MRC hub hard limit
+# Real vulnerability found in a security audit: _read_chat_line() (and
+# its AsciiMRCChat/PetsciiMRCChat overrides) reads raw bytes straight
+# off self.session.reader one at a time, accumulating into a plain
+# list/buffer with NO length cap while waiting for '\r'/'\n' -- unlike
+# core/session.py's own read_line(), which was already fixed for this
+# exact bug class in a prior auth-security audit (see that method's own
+# docstring: "no cap existed on line length ... a client that never
+# sends \\r could hold this loop open indefinitely, growing the buffer
+# without bound"). _read_chat_line() bypasses read_line() entirely (see
+# mrc_chat_petscii.py's module docstring for why -- AFK avoidance), so
+# it never inherited that fix. A caller that just never sends a line
+# terminator could grow this buffer without bound, a per-connection
+# memory DoS identical in shape to the one read_line() already closed.
+# 2048 matches read_line()'s own cap; extra input beyond it is silently
+# dropped (still consumed from the stream, still echoed) rather than
+# raising, so the loop keeps making forward progress exactly like
+# read_line() does.
+MAX_CHAT_INPUT_LEN = 2048
 # Literal prefix the bridge's _normalize_server_cmd/_handle_server_cmd
 # path sends verbatim as Field7 for a broadcast ("BROADCAST {text}") --
 # fixed, not session-dependent, unlike handle/dm/action overhead which
@@ -1691,7 +1709,12 @@ class MRCChat(BaseChatSystem):
                 return
 
             if head.startswith('USERROOM:'):
-                room = body_raw.split(':', 1)[1].strip()
+                # Cleaned for the same reason as USERIN:'s nicks -- this
+                # room name is remote-hub-controlled and, once stored in
+                # self._room, gets re-embedded raw into the status bar on
+                # every redraw (see _draw_status_line), not just this
+                # one-shot announcement.
+                room = _strip_pipe(body_raw.split(':', 1)[1].strip())
                 if room and room.lower() != self._room.lower():
                     self._room = room
                     await self._emit(f'\x1b[1;36m*** Now in #{room}\x1b[0m')
@@ -1699,14 +1722,26 @@ class MRCChat(BaseChatSystem):
 
             if head.startswith('USERIN:'):
                 raw_nick = body_raw.split(':', 1)[1].strip()
-                nick = re.split(r'[\s@]', raw_nick, 1)[0]
+                # Real vulnerability found in the same audit as the
+                # user/bbs/room fix below: every nick that lands in
+                # _known_users eventually gets embedded raw into an
+                # f-string somewhere downstream (the nick-list sidebar,
+                # tab-complete insertion into the caller's own input
+                # line, /who, /mentions' 'from' field) -- none of which
+                # re-sanitize at render time. Cleaning nicks ONCE, right
+                # here at the single point they enter the set, protects
+                # every one of those call sites at once rather than
+                # needing each patched individually.
+                nick = _strip_pipe(re.split(r'[\s@]', raw_nick, 1)[0])
                 if nick:
                     self._known_users.add(nick)
                 return
 
             if head.startswith('USEROUT:'):
                 raw_nick = body_raw.split(':', 1)[1].strip()
-                nick = re.split(r'[\s@]', raw_nick, 1)[0]
+                # Cleaned the same way as USERIN: above so this discard
+                # actually matches what was stored.
+                nick = _strip_pipe(re.split(r'[\s@]', raw_nick, 1)[0])
                 if nick:
                     self._known_users.discard(nick)
                 return
@@ -1740,7 +1775,9 @@ class MRCChat(BaseChatSystem):
                 fresh_users = set()
                 for entry in raw_list.split(','):
                     entry = entry.strip()
-                    nick = re.split(r'[@]', entry, 1)[0]
+                    # See USERIN:'s comment above for why every nick is
+                    # cleaned right here, at the point it enters the set.
+                    nick = _strip_pipe(re.split(r'[@]', entry, 1)[0])
                     if nick:
                         fresh_users.add(nick)
                 self._known_users = fresh_users
@@ -1762,7 +1799,9 @@ class MRCChat(BaseChatSystem):
                 # known (USERLIST's periodic full-roster refresh already
                 # corrects any staleness this leaves behind).
                 raw = body_raw.split(':', 1)[1].strip()
-                nick = re.split(r'[\s@]', raw, 1)[0] if raw else ''
+                # See USERIN:'s comment above for why every nick is
+                # cleaned right here, at the point it enters the set.
+                nick = _strip_pipe(re.split(r'[\s@]', raw, 1)[0]) if raw else ''
                 if nick:
                     self._known_users.add(nick)
                 return
@@ -1837,11 +1876,15 @@ class MRCChat(BaseChatSystem):
             return
 
         if evt in ('chatters', 'rooms'):
-            items = data.get('items') or []
+            # Cleaned for the same reason as USERIN:'s nicks above --
+            # `items` here is raw nick/room-name text straight off the
+            # wire, joined directly into the line below with no
+            # stripping of its own.
+            items = [_strip_pipe(str(it)) for it in (data.get('items') or [])]
             label = 'Online' if evt == 'chatters' else 'Rooms'
             if evt == 'chatters':
                 for it in items:
-                    nick = re.split(r'[\s@]', str(it).strip(), 1)[0]
+                    nick = re.split(r'[\s@]', it.strip(), 1)[0]
                     if nick:
                         self._known_users.add(nick)
             await self._emit(
@@ -1853,8 +1896,11 @@ class MRCChat(BaseChatSystem):
                    'server_text', 'info'):
             body = (data.get('body') or data.get('message')
                     or data.get('text') or '')
-            # Track sender for tab-complete (bridge sends from_user, not user)
-            uname = data.get('from_user') or data.get('user') or ''
+            # Track sender for tab-complete (bridge sends from_user, not user).
+            # Cleaned for the same reason as USERIN:'s nicks above -- this
+            # value also lands in _mention_log's 'from' field below,
+            # rendered later by /mentions with no sanitization of its own.
+            uname = _strip_pipe(str(data.get('from_user') or data.get('user') or ''))
             if uname and uname not in ('?', 'SERVER', 'CLIENT', 'NOTME'):
                 self._known_users.add(uname)
 
@@ -1944,10 +1990,12 @@ class MRCChat(BaseChatSystem):
                     self._last_dm_from = uname
                 if mentioned:
                     self._mention_count += 1
+                    from_room = _strip_pipe(str(data.get('from_room') or ''))
+                    from_site = _strip_pipe(str(data.get('from_site') or ''))
                     self._mention_log.append({
                         'time': self._format_clock(self._local_now()),
-                        'room': f"#{data.get('from_room')}" if data.get('from_room') else '',
-                        'from': f"{uname}@{data.get('from_site', '')}" if uname else 'someone',
+                        'room': f"#{from_room}" if from_room else '',
+                        'from': f"{uname}@{from_site}" if uname else 'someone',
                         'body': ('[DM] ' if is_dm else '') + plain[:200],
                     })
                     await self._emit(
@@ -1957,10 +2005,27 @@ class MRCChat(BaseChatSystem):
             return
 
         # ── Typed events: chat / action / private ──
-        user      = data.get('user', '?')
-        bbs       = data.get('bbs', '?')
+        # Real vulnerability found in the same audit that found the
+        # _pipe_to_ansi() gap above: that fix only ever covered the
+        # `body` field. `user`/`bbs`/`room` come from this same
+        # untrusted wire (a remote peer's own handle/BBS-name/room-name,
+        # relayed by the bridge with no ANSI/control-byte stripping of
+        # its own -- see mrc/bridge/main.py's _sanitize_no_tilde(),
+        # which only strips '~' and truncates length) and were embedded
+        # straight into the f-strings below with zero sanitization --
+        # both in the immediate render AND in _mention_log (stored raw,
+        # rendered later by /mentions with the same lack of stripping).
+        # A malicious/compromised peer on the wider MRC network could
+        # set their handle or BBS name to a raw ANSI/CSI sequence and
+        # have it written straight to a local caller's real terminal.
+        # _strip_pipe() (not _pipe_to_ansi(), which is for the message
+        # body's LEGITIMATE color codes) is the right tool here -- a
+        # nick/bbs/room name has no legitimate use for embedded color
+        # or control bytes at all.
+        user      = _strip_pipe(str(data.get('user', '?')))
+        bbs       = _strip_pipe(str(data.get('bbs', '?')))
         body      = data.get('body', '') or data.get('message', '')
-        room      = data.get('room', '')
+        room      = _strip_pipe(str(data.get('room', '')))
         plain_body = _strip_pipe(body or '')
 
         if user and user not in ('?', 'SERVER', 'CLIENT', 'NOTME'):
@@ -2137,7 +2202,8 @@ class MRCChat(BaseChatSystem):
                     c = '?'
 
                 async with self._input_lock:
-                    self._input_buf.append(c)
+                    if len(self._input_buf) < MAX_CHAT_INPUT_LEN:
+                        self._input_buf.append(c)
                     await self._draw_input_line()
                     await self._draw_status_line()
 

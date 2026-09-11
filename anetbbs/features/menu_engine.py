@@ -208,6 +208,7 @@ async def _act_exec(ui, args):
     import json
     import asyncio
     import os as _os
+    from anetbbs.core.session import CarrierLost
 
     # Defense-in-depth backstop found in a full access-control audit:
     # the engine's dispatch has no per-action_type gate of its own --
@@ -353,6 +354,26 @@ async def _act_exec(ui, args):
                     break
         except asyncio.CancelledError:
             raise
+        except CarrierLost:
+            # Real gap found in a security/performance audit: the
+            # user's connection is gone, but nothing here ever told
+            # the CHILD PROCESS that -- `await proc.wait()` down in
+            # the caller has no idea this pump died, so a child that
+            # just sits reading its now-abandoned stdin (rather than
+            # itself noticing EOF) kept the whole exec action --and
+            # therefore the ENTIRE session, since run_menu()'s
+            # dispatch awaits this action synchronously -- blocked
+            # alive indefinitely after the user physically
+            # disconnected. Same v1.0.21-shaped "state persists past
+            # when the underlying connection is actually gone" leak
+            # this audit specifically looks for. Kill the child so
+            # proc.wait() actually unblocks and the session can tear
+            # down normally.
+            try:
+                if proc.returncode is None:
+                    proc.kill()
+            except Exception:
+                pass
         except Exception:
             logger.exception('exec stdin pump failed')
 
@@ -561,7 +582,6 @@ async def run_menu(session, start='main'):
         await ui.show_main()
         return
 
-    access = _user_access_level(session.user)
     current = start
     while True:
         # Drain any sysop replies into the user's terminal before drawing
@@ -589,6 +609,32 @@ async def run_menu(session, start='main'):
             pass
 
         with _app().app_context():
+            # Real gap found in a security/performance audit: `access`
+            # used to be computed ONCE from session.user before this
+            # while loop even started -- session.user is a plain dict
+            # snapshotted at login and never re-validated (see
+            # core/session.py's _start_kick_watchdog docstring for the
+            # identical is_active/is_locked gap already fixed there).
+            # An admin promoting/demoting a user's access_level (or
+            # flipping is_admin) mid-session had ZERO effect on an
+            # already-connected terminal session's menu-item gating
+            # until they reconnected -- unlike the web session path,
+            # where flask_login's user_loader re-fetches the User row
+            # fresh on every single request. Refreshed here, on the
+            # same per-iteration DB round-trip this loop already makes
+            # for the menu lookup itself, so a live access change takes
+            # effect on the user's very next menu action rather than
+            # requiring a reconnect.
+            try:
+                from anetbbs.models import User as _User, db as _db
+                _u = _db.session.get(_User, (session.user or {}).get('id'))
+                if _u is not None:
+                    session.user['access_level'] = _u.access_level or 10
+                    session.user['is_admin'] = bool(_u.is_admin)
+            except Exception:
+                pass
+            access = _user_access_level(session.user)
+
             menu = BbsMenu.query.filter_by(name=current).first()
             if not menu:
                 # Real High finding from a security/performance audit: a
@@ -972,9 +1018,16 @@ async def _act_oneliners(ui, args):
     await sess.write("\r\n\x1b[1;36m=== Recent One-Liners ===\x1b[0m\r\n")
     if not ol:
         await sess.write("  (none yet)\r\n")
+    # Real gap found in a security/performance audit: `txt` is free text
+    # any OTHER user typed (OneLiner.text, no ANSI filtering at write
+    # time), rendered here directly to THIS user's real terminal -- the
+    # exact untrusted cross-user display path text_safety.py exists for
+    # (see its own module docstring). A malicious one-liner could embed
+    # raw ANSI/CSI escapes to clear/spoof this viewer's screen.
+    from ..core.text_safety import strip_untrusted_escapes
     for u, txt, w in ol:
         await sess.write(
-            f"  \x1b[33m<{u}>\x1b[0m {txt}\r\n")
+            f"  \x1b[33m<{u}>\x1b[0m {strip_untrusted_escapes(txt)}\r\n")
     line = await sess.read_line(
         "\r\nLeave a one-liner (Enter to skip): ")
     if line and line.strip():

@@ -17,7 +17,7 @@ import asyncio
 import base64
 import datetime
 import os
-from ..core.tz import to_eastern
+from ..core.tz import fmt_eastern
 import re
 import ssl
 import time
@@ -29,6 +29,12 @@ from typing import Optional
 _VERSION      = "7.0"
 _MAX_LINES    = 2000
 _MAX_SCROLL   = 800
+_MAX_HIST     = 200   # command-history entries -- see _chat_key()'s ENTER
+                       # handler; real gap found in a deep review: this list
+                       # had no cap at all (unlike _lines/_MAX_LINES above),
+                       # so a long-running IRC session that just kept
+                       # chatting/issuing commands grew it without bound for
+                       # the life of the connection.
 _PING_SECS    = 90
 _USERS_W      = 22   # right panel width including its borders
 _READ_TIMEOUT = 30   # seconds for IRC socket read before considering stale
@@ -303,7 +309,24 @@ class _IRC:
 
         cmd, _, rest = raw.partition(' ')
         cmd = cmd.upper()
-        src = prefix.split('!')[0] if '!' in prefix else prefix
+        # Real vulnerability found in a deep review: _strip() (mIRC/ANSI/
+        # control stripping) was only ever applied to MESSAGE BODIES
+        # (trailing), never to `src` itself. `src` is the server-supplied
+        # nick/prefix -- attacker-controlled, since a user can point this
+        # client at any IRC server they choose (or a MITM on an unverified
+        # connection) -- and it's stored/displayed RAW in several places
+        # that bypass draw_chat()'s per-line _strip(ln.text) call: the
+        # PRIVMSG _Line's own `nick` field (rendered unstripped in
+        # draw_chat's `<{ln.nick}>` prefix), and self.users (rendered
+        # unstripped in draw_users' USERS panel). A rogue server could put
+        # a raw ANSI/CSI escape or control byte in a nick and have it
+        # render straight to a real BBS user's terminal -- screen clears,
+        # spoofed prompts, cursor tricks -- the same bug class already
+        # fixed for message bodies here and for identity fields elsewhere
+        # in this audit round. Stripped once, here, so every downstream
+        # use (chat nick, users panel, JOIN/PART/QUIT/NICK text lines)
+        # inherits a clean value.
+        src = _strip(prefix.split('!')[0] if '!' in prefix else prefix)
 
         trailing = ""
         if ':' in rest:
@@ -392,7 +415,10 @@ class _IRC:
             self.client._sys(f"{src}: {_strip(trailing)}")
 
         elif cmd == "JOIN":
-            chan = trailing or (params[0] if params else "")
+            # Same reasoning as `src` above -- server-supplied and stored
+            # into self.channel, which draw_status() renders unstripped
+            # in the status bar for a self-JOIN.
+            chan = _strip(trailing or (params[0] if params else ""))
             if src.lower() == self.nick.lower():
                 self.channel = chan
                 self.client.dirty_status = True
@@ -423,7 +449,11 @@ class _IRC:
                 self.client.dirty_users = True
 
         elif cmd == "NICK":
-            new_nick = trailing or params[0] if params else trailing
+            # Same reasoning as `src` above -- this can become our OWN
+            # self.nick (when src is us), rendered unstripped in the
+            # status bar, or another user's entry in self.users, rendered
+            # unstripped in the users panel.
+            new_nick = _strip(trailing or params[0] if params else trailing)
             if src.lower() == self.nick.lower():
                 self.nick = new_nick
                 self.client.dirty_status = True
@@ -438,8 +468,19 @@ class _IRC:
                 self.client._sys(f"{label}: {_strip(trailing)}")
 
         elif cmd == "353":                              # NAMES list
+            # Real gap found in an independent verification pass: NAMES-
+            # list nicks -- the PRIMARY way self.users gets populated
+            # (sent automatically right after joining any channel,
+            # unlike JOIN which only covers users who join afterward)
+            # were never run through _strip() before being appended to
+            # self.users, which draw_users() renders completely raw.
+            # A rogue/compromised server's NAMES reply could inject a
+            # raw ANSI/CSI escape or control byte straight into a real
+            # BBS user's terminal via the USERS panel -- the exact
+            # vulnerability class (and exact panel) this audit round's
+            # fix was supposed to close, just missed for this path.
             for n in trailing.split():
-                clean = n.lstrip('@+&~%')
+                clean = _strip(n.lstrip('@+&~%'))
                 if clean and clean not in self.users:
                     self.users.append(clean)
             self.client.dirty_users = True
@@ -631,7 +672,7 @@ class _Screen:
             # inconsistent with the rest of the app; go through UTC
             # explicitly first, then the shared Eastern converter.
             ts_utc = datetime.datetime.fromtimestamp(ln.ts, tz=datetime.timezone.utc)
-            ts  = to_eastern(ts_utc).strftime("%H:%M:%S")
+            ts  = fmt_eastern(ts_utc, '%H:%M:%S')
             pfx = f"[{ts}] * " if ln.status else f"[{ts}] <{ln.nick}> "
             pl  = len(pfx)
             avail = max(col_w - pl, 6)
@@ -1232,6 +1273,8 @@ class ANetIRC:
                     self._hist.append(text)
                 elif not self._hist:
                     self._hist.append(text)
+                if len(self._hist) > _MAX_HIST:
+                    self._hist = self._hist[-_MAX_HIST:]
                 self._hidx = -1
                 await self.irc.command(text)
             self._inp = ""; self._cur = 0

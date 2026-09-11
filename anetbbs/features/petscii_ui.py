@@ -70,7 +70,11 @@ async def _header(session, title, color=None):
     await session.clear_screen()
     w = _width(session)
     bar_color = color or petscii_theme.DEFAULT_HEADER_COLOR
-    await session.write(petscii_theme.header_bar(title, w, bar_color) + '\r\n\r\n')
+    # _safe_field(): most callers pass a hardcoded literal, but several
+    # build this from DB content (board/area/file names, a sysop's
+    # custom PetsciiMenu.title) -- see _safe_field()'s own docstring.
+    await session.write(
+        petscii_theme.header_bar(_safe_field(title), w, bar_color) + '\r\n\r\n')
 
 
 async def _paginate(session, lines, header_title=None):
@@ -142,6 +146,42 @@ def _strip_for_petscii(text):
     lines = (_MULTI_SPACE_RE.sub(' ', ln).strip()
             for ln in cleaned.replace('\r\n', '\n').split('\n'))
     return '\n'.join(lines)
+
+
+def _safe_field(text):
+    """Sanitize a short, single-line cross-user/remote-origin text field
+    (a subject, sender/from-to name, or header title) before it's
+    embedded in an f-string and written to the session.
+
+    Real vulnerability found in a deep review of this audit round's
+    scope: _strip_for_petscii()/_wrap_body() above already protect
+    multi-line BODY text, but several single-line renders across this
+    module -- echomail/board/PM listing rows, echomail From/To/Subject
+    headers, and _header()'s own title -- built these fields directly
+    into an f-string with NO sanitization at all. session.write()'s
+    PETSCII encoder (petscii_codec.encode()) passes any byte in the C0
+    (0x00-0x1F) or 0x80-0x9F range straight through UNCHANGED as a real
+    PETSCII control code (that's by design, for this module's own
+    deliberately-embedded control constants like CLR_HOME/REVERSE_ON)
+    -- so a raw control byte reaching encode() from unsanitized DB
+    content renders as a live screen-control code (clear screen,
+    reverse video, a C64 color change) on the viewing user's real
+    terminal. Most plausibly reachable via an inbound ECHOMAIL message's
+    from_name/subject -- genuinely untrusted remote data, tossed in from
+    an external FidoNet-style network -- but also from any user-typed
+    subject line on ANSI/web clients (which have no such character
+    restriction) later viewed by a PETSCII user. Same bug class as the
+    ANSI-injection fixes already made this round elsewhere (wall.py,
+    bbs_ui.py's _strip_untrusted()/_sanitize_cp437(), menu_engine.py);
+    this is the PETSCII-mode counterpart.
+
+    Collapses embedded \\r/\\n to a space first -- _strip_for_petscii()
+    deliberately LEAVES \\r/\\n alone (multi-line body text depends on
+    that), which would otherwise let an embedded newline in a
+    single-line field desync a listing row's layout.
+    """
+    text = (text or '').replace('\r\n', ' ').replace('\r', ' ').replace('\n', ' ')
+    return _strip_for_petscii(text).strip()
 
 
 def _wrap_body(text, width):
@@ -447,7 +487,7 @@ async def _board_threads(session, board_id, board_name):
         subj_w = max(10, w - 8 - reply_w)
         def _render(i, row):
             _pid, subj, nrep = row
-            return f'{i:>3}. {_truncate_words(subj, subj_w):<{subj_w}} ({nrep})'
+            return f'{i:>3}. {_truncate_words(_safe_field(subj), subj_w):<{subj_w}} ({nrep})'
 
         pick = await _paginated_pick(session, f'Board: {board_name}', rows,
                                      _render, 'read, N=new post')
@@ -471,7 +511,7 @@ async def _thread_read(session, post_id, board_id, board_name):
         if root is None or root.board_id != board_id:
             return
         root_author = User.query.get(root.author_id)
-        lines = [f'Subject: {root.subject}',
+        lines = [f'Subject: {_safe_field(root.subject)}',
                 f'From: {root_author.username if root_author else "?"}', '']
         lines.extend(_wrap_body(root.content, _width(session)))
         subject = root.subject
@@ -632,8 +672,11 @@ async def _echo_messages(session, area_id, area_name):
         subj_w = max(10, w - 8 - frm_w)
         def _render(i, row):
             _mid, frm, subj = row
-            subj_display = _truncate_words(subj, subj_w)
-            return f'{i:>3}. {subj_display:<{subj_w}} {frm[:frm_w]}'
+            # from_name/subject come straight off an inbound ECHOMAIL
+            # toss -- genuinely untrusted remote data from whatever
+            # network node sent it. See _safe_field()'s own docstring.
+            subj_display = _truncate_words(_safe_field(subj), subj_w)
+            return f'{i:>3}. {subj_display:<{subj_w}} {_safe_field(frm)[:frm_w]}'
 
         pick = await _paginated_pick(session, f'Area: {area_name}', rows,
                                      _render, 'read, N=new')
@@ -652,8 +695,10 @@ async def _echo_message_read(session, msg_id, area_id, area_name):
         msg = EchomailMessage.query.get(msg_id)
         if msg is None:
             return
-        lines = [f'From: {msg.from_name}', f'To: {msg.to_name}',
-                f'Subject: {msg.subject}', '']
+        # from_name/to_name/subject: same untrusted-remote-data reasoning
+        # as _echo_messages()'s listing render above.
+        lines = [f'From: {_safe_field(msg.from_name)}', f'To: {_safe_field(msg.to_name)}',
+                f'Subject: {_safe_field(msg.subject)}', '']
         lines.extend(_wrap_body(msg.body, _width(session)))
         from_name, subject = msg.from_name, msg.subject
 
@@ -760,7 +805,7 @@ async def _pm_menu(session):
         def _render(i, row):
             _mid, subj, sender, unread = row
             mark = '*' if unread else ' '
-            return (f'{mark}{i:>3}. {_truncate_words(subj, subj_w):<{subj_w}} '
+            return (f'{mark}{i:>3}. {_truncate_words(_safe_field(subj), subj_w):<{subj_w}} '
                     f'{sender[:sender_w]}')
 
         pick = await _paginated_pick(session, 'Private Messages', rows,
@@ -785,7 +830,7 @@ async def _pm_read(session, msg_id):
             return
         sender = User.query.get(msg.sender_id)
         sender_name = sender.username if sender else '?'
-        lines = [f'From: {sender_name}', f'Subject: {msg.subject}', '']
+        lines = [f'From: {sender_name}', f'Subject: {_safe_field(msg.subject)}', '']
         lines.extend(_wrap_body(msg.body, _width(session)))
         subject = msg.subject
         if msg.read_at is None:
@@ -913,6 +958,10 @@ async def _files_browse(session, area_id, area_name):
         name_w = max(10, w - 16)
         def _render(i, row):
             name, size, _desc, _path = row
+            # Uploaded filenames are user-supplied (FileUpload.original_
+            # filename) -- same untrusted-content reasoning as the
+            # message listings above.
+            name = _safe_field(name)
             size_kb = (size or 0) // 1024
             return f'{i:>3}. {name[:name_w]:<{name_w}} {size_kb:>6}K'
 
@@ -1022,7 +1071,7 @@ async def _whos_online(session):
     else:
         name_w = max(8, w - 20)
         for uname, page in rows:
-            await session.write(f'  {uname[:name_w]:<{name_w}} {page}\r\n')
+            await session.write(f'  {uname[:name_w]:<{name_w}} {_safe_field(page)}\r\n')
     await session.read_line('\r\nPress ENTER...')
 
 

@@ -140,7 +140,24 @@ def skip(post_id):
     if post.status == 'pending':
         post.status = 'skipped'
         db.session.commit()
+        _remove_post_image(post)
     return redirect(url_for('social_admin.index'))
+
+
+def _remove_post_image(post):
+    """Best-effort delete of the rendered PNG once a post reaches a
+    terminal state (skipped, posted, or failed) and will never be
+    approve()'d again -- image_path is left set on the row (the
+    /<id>/image route already 404s gracefully on a missing file), this
+    just stops the file itself from accumulating on disk forever.
+    Confirmed live: 25 orphaned PNGs found in data/social_posts/ with
+    no matching pending row before this fix existed."""
+    if not post.image_path:
+        return
+    try:
+        os.remove(post.image_path)
+    except OSError as exc:
+        logger.warning('social_admin: could not remove image %s: %s', post.image_path, exc)
 
 
 @social_admin_bp.route('/<int:post_id>/approve', methods=['POST'])
@@ -193,6 +210,7 @@ def approve(post_id):
     post.status = 'posted' if any_success else 'failed'
     post.posted_at = _dt.datetime.utcnow()
     db.session.commit()
+    _remove_post_image(post)
 
     if any_success:
         flash('Posted: ' + ', '.join(f'{k}: {v}' for k, v in results.items()), 'success')

@@ -115,9 +115,27 @@ def echomail_rss():
         rows = (EchomailMessage.query
                 .order_by(EchomailMessage.created_at.desc())
                 .limit(200).all())
-        rows = [e for e in rows if e.area and evaluate_access(
-            current_user, e.area.min_access_level,
-            is_sysop_only=e.area.is_sysop_only, bypass_admin=True)][:50]
+        # Real Critical gap found in a security/performance audit: a
+        # NETMAIL-tagged EchoArea carries QWK-routed 1-on-1 private mail,
+        # not broadcast echomail (see web/echomail.py's
+        # _owns_netmail_echomail() docstring for the full mechanism) --
+        # every other read path for these messages (area listing, thread
+        # view, read(), read_markdown(), netmail_inbox()) enforces
+        # per-user ownership on top of the area's own access level, but
+        # this anonymous-readable public XML feed only ever checked the
+        # area's min_access_level/is_sysop_only, which a NETMAIL area
+        # typically leaves at its permissive default. That meant ANY
+        # visitor able to pass that default level (any logged-in
+        # registered user, since NETMAIL areas aren't sysop-only) could
+        # read the subject/body/sender of every user's private netmail
+        # system-wide via /feed/echomail.xml, with no ownership check at
+        # all. NETMAIL-tagged messages are excluded from this broadcast
+        # feed entirely -- there is no authenticated-per-viewer concept
+        # for a public feed to scope them to their actual owner.
+        rows = [e for e in rows if e.area and e.area.tag != 'NETMAIL'
+                and evaluate_access(
+                    current_user, e.area.min_access_level,
+                    is_sysop_only=e.area.is_sysop_only, bypass_admin=True)][:50]
         for e in rows:
             items.append({
                 'title': f'[{(e.area.tag if e.area else "?")}] {e.subject or "(no subject)"}',

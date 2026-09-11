@@ -28,6 +28,35 @@ logger = logging.getLogger(__name__)
 ANET_GAMESERVER_URL = 'https://a-net-online.lol/gameserver/index.xjs'
 _FETCH_TIMEOUT = 15
 
+# Real vulnerability found in a security/performance audit: name/code/
+# category below come straight from a remote HTML page (Jerry's own
+# site today, but still remote, attacker-reachable content the same way
+# an InterBBS-synced wall.py post is -- see that module's own
+# _strip_untrusted() docstring for the same finding/fix shape there).
+# Unlike an ephemeral chat line, these values get persisted as
+# Game.name/Game.category/GameCategory.name and rendered UNESCAPED into
+# every telnet/SSH caller's real terminal every time anyone opens the
+# Door Games menu (features/games.py) -- a raw ANSI/CSI escape sequence
+# baked in here (a compromised remote page, or just a scraping bug that
+# grabs the wrong span) would inject escape codes into every future
+# caller's session, not just the sysop who ran the import. Stripped at
+# this ingestion boundary, before any of these values are ever returned
+# from scrape_games(), so nothing downstream (build_game_kwargs(),
+# GameCategory rows, the admin review page) has to remember to do it.
+_INJECTED_ANSI_RE = re.compile(
+    r'\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[A-Za-z0-9=><~])')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _strip_untrusted(s):
+    """Strip well-formed CSI/OSC escape sequences, then the whole C0
+    control range (+ DEL) as a safety net for anything malformed that
+    doesn't match the tidy pattern. Same two-pass shape as wall.py's own
+    _strip_untrusted()."""
+    if not s:
+        return s
+    return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
+
 
 class AnetGameImportError(Exception):
     """Raised when the game list can't be fetched or parsed at all."""
@@ -64,13 +93,13 @@ def scrape_games(url=ANET_GAMESERVER_URL, timeout=_FETCH_TIMEOUT):
         cat_header = category_div.find('h3')
         if not cat_header:
             continue
-        category = cat_header.get_text(strip=True)
+        category = _strip_untrusted(cat_header.get_text(strip=True))
 
         for li in category_div.select('ul.flex-list > li'):
             code_span = li.find('span', class_='door-code')
             if not code_span:
                 continue
-            code = code_span.text.strip()
+            code = _strip_untrusted(code_span.text.strip())
 
             game_text = li.get_text(separator='', strip=True)
             if code in game_text:
@@ -78,6 +107,7 @@ def scrape_games(url=ANET_GAMESERVER_URL, timeout=_FETCH_TIMEOUT):
                 name = before.rstrip('- ').strip()
             else:
                 name = game_text
+            name = _strip_untrusted(name)
 
             new_tag = li.find('span', class_='-tag')
             is_new = bool(new_tag and 'Added' in new_tag.text)

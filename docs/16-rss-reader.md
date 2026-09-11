@@ -86,6 +86,39 @@ removed.
 Auto-created on app startup via the lightweight migration sweep.
 No manual SQL needed.
 
+## Your BBS's own outbound feeds (`/feed/*.xml`)
+
+Separate from the feed *reader* covered above, ANetBBS also *publishes*
+a handful of its own RSS 2.0 feeds (`anetbbs/web/feeds.py`) so external
+aggregators (Slack RSS, Inoreader, etc.) can subscribe to BBS activity:
+
+| Feed | What it carries |
+|---|---|
+| `/feed/shouts.xml` | Recent public shoutbox posts |
+| `/feed/posts.xml` | Recent board posts (access-checked per board) |
+| `/feed/bulletins.xml` | Recent sysop bulletins |
+| `/feed/echomail.xml` | Recent echomail (access-checked per area) |
+
+All four are anonymous-readable by design — that's the whole point of
+an aggregator-friendly feed. Worth knowing before you assume otherwise:
+`/feed/shouts.xml` is readable with no login even though posting to
+(and browsing) the shoutbox itself requires an account — the feed
+exposes the same content a logged-in user already sees, just without
+the login step.
+
+**Netmail exclusion, found in a security audit:** `/feed/echomail.xml`
+now explicitly excludes any `NETMAIL`-tagged echo area. A NETMAIL area
+carries QWK-routed 1-on-1 private mail, not broadcast echomail, and
+every other read path for it (area listing, thread view, the inbox
+views) enforces per-user ownership on top of the area's own access
+level — this anonymous public feed only ever checked the area's
+`min_access_level`, which a NETMAIL area typically leaves permissive.
+That meant any visitor meeting that access level could read the
+subject/body/sender of every user's private netmail system-wide. There
+is no authenticated-per-viewer concept for a public feed to scope
+NETMAIL messages to their real owner, so they're left out of this feed
+entirely rather than partially exposed.
+
 ## Future / open questions
 
 - **Web autorefresh** — the user has to reload the page to see new

@@ -62,9 +62,9 @@ newer versions before installing.
    host=your-json-server-host
    port=10088
    ```
-   You're welcome to point this at StingRay's own live game server —
-   it hosts real, active cross-BBS game state for several of these
-   doors already:
+   You're welcome to point this at the ANetBBS project's own live game
+   server — it hosts real, active cross-BBS game state for several of
+   these doors already:
    ```ini
    host=game.a-net-online.lol
    port=10088

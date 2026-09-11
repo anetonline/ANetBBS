@@ -22,6 +22,7 @@ import os
 import re
 import time
 from typing import Optional
+from urllib.parse import quote as _urlquote
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
 _W      = 79          # terminal width
@@ -1731,6 +1732,25 @@ def _format_quote(raw: str, width: int = 74) -> list:
     return lines_out
 
 
+def _safe_username(username: str) -> str:
+    """Sanitize a username for use as a draft-filename component. Same
+    bug class found and fixed in features/anetcraft.py's
+    _safe_username() during a 2026-09-10 audit: this module used to
+    splice `username` straight into the draft path with NO sanitization
+    at all, relying entirely on upstream registration validation (web/
+    auth.py's RegisterForm regex) to keep '/' and '..' out. That
+    validation is real but not universal -- web/admin.py's own
+    AddUserForm (sysop "Add User") has no equivalent character
+    restriction, so an admin-created username could still carry a
+    literal '/' into this path. Percent-encoding (safe='' so '/' is
+    escaped too) is injective over the character set a normal
+    registration allows, so it also closes the quieter bug of two
+    different usernames that only differ by space/'.'/"'" colliding
+    onto the same draft file and reading/clobbering each other's
+    in-progress draft."""
+    return _urlquote(username, safe='') or 'guest'
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 async def launch_anedit(session, quote: str = "", subject: str = "",
                          username: str = "guest",
@@ -1767,7 +1787,7 @@ async def launch_anedit(session, quote: str = "", subject: str = "",
         here  = os.path.dirname(os.path.abspath(__file__))
         root  = os.path.abspath(os.path.join(here, '..', '..'))
         ddir  = os.path.join(root, 'data', 'anedit', 'drafts')
-        dpath = os.path.join(ddir, f"{username}.txt")
+        dpath = os.path.join(ddir, f"{_safe_username(username)}.txt")
     except Exception:
         dpath = ""
 

@@ -48,11 +48,11 @@ import copy
 import json
 import logging
 import math
-import os
 import random
 import textwrap
 import time
 from pathlib import Path
+from urllib.parse import quote as _urlquote
 
 logger = logging.getLogger(__name__)
 
@@ -1978,8 +1978,18 @@ SAVE_DIR = Path(__file__).parent.parent.parent / 'data' / 'doors' / 'darkforces'
 
 
 def _save_path(username):
+    """Same save-file-collision bug found and fixed in anetcraft.py's
+    _safe_username() during a 2026-09-10 audit, present here too:
+    stripping every character outside [A-Za-z0-9_-] instead of encoding
+    it means two DIFFERENT usernames that only differ by a space, '.',
+    or "'" (all allowed by web/auth.py's RegisterForm regex) silently
+    collapse onto the same save file -- 'bob smith' and 'bob.smith'
+    both used to sanitize to 'bobsmith'. Percent-encoding (safe='' so
+    '/' is escaped too) is injective over this BBS's username character
+    set, so distinct usernames can never collide onto the same file,
+    and no literal '/' can survive into the filename either."""
     SAVE_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = ''.join(c for c in username if c.isalnum() or c in '-_') or 'player'
+    safe_name = _urlquote(username, safe='') or 'player'
     return SAVE_DIR / f'{safe_name}.json'
 
 
@@ -2073,11 +2083,25 @@ async def detect_sixel_support(session):
     uid = (session.user or {}).get('id')
     if uid is not None:
         try:
-            from ..web_app import create_app
-            from ..models import User
-            app = create_app(os.environ.get('FLASK_ENV', 'production'))
-            with app.app_context():
-                u = User.query.get(uid)
+            # Real leak found in a 2026-09-10 audit: this used to call
+            # web_app.create_app() directly and push its app_context()
+            # without ever disposing the fresh SQLAlchemy engine that
+            # db.init_app() registers on every call -- the exact same
+            # per-call-fresh-app-and-engine shape as the real live
+            # incident bbs_ui.py's _app() docstring documents (RAM
+            # 14.5GB -> 19.8GB in ~12 minutes). Throttled here compared
+            # to that incident (detect_sixel_support() only runs once
+            # per session, cached via session._sixel_ok, not every 5s),
+            # but still one leaked engine per distinct login session
+            # that ever launches this door, unboundedly over server
+            # uptime. bbs_ui.py's own near-identical
+            # _detect_sixel_support() already gets this right by using
+            # its module-level cached _app() -- reuse that here too
+            # instead of building (and never disposing) a new one.
+            from .bbs_ui import _app
+            from ..models import User, db
+            with _app().app_context():
+                u = db.session.get(User, uid)
                 if u is not None:
                     mode = u.sixel_mode or 'auto'
         except Exception:

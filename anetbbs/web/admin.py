@@ -2442,7 +2442,7 @@ def pending_user_action(user_id, action):
                 sender_id=sysop.id,
                 recipient_id=user.id,
                 subject='Welcome — your account has been approved',
-                content='Your account has been approved. Welcome aboard!'))
+                body='Your account has been approved. Welcome aboard!'))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -2491,7 +2491,7 @@ def inactive_users():
                     sender_id=current_user.id,
                     recipient_id=uid,
                     subject=subject[:200],
-                    content=body))
+                    body=body))
                 n += 1
             db.session.commit()
             flash(f'Sent {n} PM(s).', 'success')
@@ -2557,6 +2557,15 @@ def newsletter():
 @admin_required
 def lock_user(user_id):
     user = User.query.get_or_404(user_id)
+    # Same self-guard already applied to toggle_ban()/delete_user()/
+    # edit_user()/manage_user() above -- web_app.py's load_user() treats
+    # is_locked exactly like is_active (returns None, deauthenticating
+    # the session on its very next request), so this button was the one
+    # remaining way an admin could lock themselves out of the panel with
+    # a single misclick and no other admin necessarily around to undo it.
+    if user.id == current_user.id:
+        flash('You cannot lock your own account.', 'danger')
+        return redirect(url_for('admin.users'))
     user.is_locked = not bool(user.is_locked)
     db.session.commit()
     flash('User ' + ('locked.' if user.is_locked else 'unlocked.'), 'success')
@@ -2928,8 +2937,10 @@ def connection_test():
 def virus_scan_admin():
     """Run a bulk virus scan across all FileArea storage paths.
 
-    Background task to avoid blocking the request — results stream into a
-    log table the sysop can refresh."""
+    Fully synchronous — runs inline in this POST request and returns the
+    results directly (no background task, no persisted log table; a page
+    refresh just re-scans from scratch). Stale docstring corrected in a
+    security/performance audit; no behavior change."""
     from ..models import FileArea
     from ..features.virus_scan import scan_path
     import os as _os
@@ -3571,7 +3582,17 @@ def console():
 def _run_sysop_command(cmd):
     """Allow-list of safe ops."""
     import subprocess as _sp
-    cmd_low = cmd.strip().lower()
+    # Real Low-severity gap found in a security/performance audit: the
+    # prefix checks below match against cmd_low (stripped+lowercased),
+    # but the fixed-offset slices (cmd[5:], cmd[len('journalctl '):])
+    # used to index into the ORIGINAL, un-stripped `cmd` -- 2+ leading
+    # whitespace characters (trivial to produce by pasting) shifted the
+    # parsed argument out of alignment with the offset, chopping the
+    # wrong characters off a syntactically valid, allow-listed command.
+    # Stripping cmd itself once, up front, keeps every downstream
+    # fixed-offset slice aligned with cmd_low.
+    cmd = cmd.strip()
+    cmd_low = cmd.lower()
     if cmd_low in ('whoison', 'who'):
         from ..models import UserSession as _US, User as _U
         from datetime import timedelta as _td

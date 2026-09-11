@@ -11,6 +11,21 @@ from ..models import db, Notification, User
 # underscores. Min 2 chars to avoid false positives.
 _MENTION_RE = re.compile(r'(?:^|[^a-zA-Z0-9_])@([a-zA-Z0-9_.-]{2,40})')
 
+# Anti-abuse cap found in a security/performance audit: notify_mentions()
+# had no limit on how many DISTINCT @names it would process from one
+# call -- a single post/PM/shout body with hundreds of distinct
+# @username tokens (trivial to type, e.g. every real registered
+# username enumerated once) fanned out into one Notification INSERT +
+# COMMIT + live socketio push PER name, all synchronously inside the
+# same request/session-loop turn that's composing/posting the message.
+# No rate limit anywhere else in the notify() call chain would have
+# caught this -- notify() itself is a plain best-effort insert with no
+# throttle of its own. Caps the blast radius of one message to a sane
+# number of real @-mentions; a legitimate post mentioning more than
+# this many people in one go is not a realistic use case this BBS's
+# UI supports anyway.
+_MAX_MENTIONS_PER_CALL = 50
+
 
 def notify(user_id, kind, title='', body='', target_url=''):
     """Insert a Notification row. Best-effort — never raises.
@@ -115,11 +130,21 @@ async def check_new_notifications(session):
         if not new_rows:
             return
         session._last_notif_id = new_rows[-1].id
+        # Sibling gap found in a security/performance audit: title/body
+        # can originate from a REMOTE FTN/QWK peer or another user's own
+        # post text (e.g. notify_mentions() builds body from an
+        # @-mentioned post's raw text) -- no special privilege required
+        # to reach this. session.py's own login-time notification
+        # summary (_show_notification_summary()) already strips this via
+        # core.text_safety.strip_untrusted_escapes(); this "while already
+        # online" half of the same feature never got the same treatment.
+        from ..core.text_safety import strip_untrusted_escapes
         await session.write('\r\n')
         for n in new_rows:
-            line = f'\x1b[1;33m*** New: \x1b[0m{n.title}'
+            title = strip_untrusted_escapes(n.title)
+            line = f'\x1b[1;33m*** New: \x1b[0m{title}'
             if n.body:
-                line += f' \x1b[36m({n.body})\x1b[0m'
+                line += f' \x1b[36m({strip_untrusted_escapes(n.body)})\x1b[0m'
             await session.write(line + '\r\n')
     except Exception:
         pass
@@ -161,6 +186,8 @@ def notify_mentions(text, sender_name, target_url='', min_access_level=None):
     found = set(m.lower() for m in _MENTION_RE.findall(text))
     if not found:
         return 0
+    if len(found) > _MAX_MENTIONS_PER_CALL:
+        found = set(sorted(found)[:_MAX_MENTIONS_PER_CALL])
 
     # Look up the sender once for block-list filtering.
     sender = None

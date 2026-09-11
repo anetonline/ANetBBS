@@ -29,10 +29,34 @@ def _engine():
     return create_engine(uri, future=True)
 
 
+def _rate_limited(user_id: int) -> bool:
+    """True if this user has already paged the sysop too many times
+    recently -- caller should refuse to record another page.
+
+    Anti-abuse gap found in a security/performance audit: page_sysop()
+    had NO rate limit of its own, and its only caller (menu_engine.py's
+    _act_page) has none either -- any logged-in user could spam the
+    "page the sysop" menu action with a scripted client, each call
+    writing a SysopPage row, firing a webhook POST in a background
+    thread (webhooks.py), and pushing a live socketio toast to every
+    connected sysop browser tab. Uses the same sliding-window bucket
+    primitive (features/rate_limit.py's _check()) called directly
+    instead of through its Flask-route decorator -- this function runs
+    from a plain terminal session with no Flask request context, same
+    reasoning as core/user_manager.py's own direct _check() call for
+    the terminal login path."""
+    from .rate_limit import _check as _rl_check
+    return not _rl_check(f'sysop_page:{user_id}', limit=3, window=300)
+
+
 def page_sysop(user_id: int, message: str, service: str = 'telnet') -> int:
     """Record a sysop page and push a toast to web sysop tabs.
 
-    Returns the new SysopPage row id, or 0 on failure."""
+    Returns the new SysopPage row id, or 0 on failure (including being
+    rate-limited -- see _rate_limited())."""
+    if user_id is not None and _rate_limited(user_id):
+        logger.warning('sysop page rate-limited for user_id=%s', user_id)
+        return 0
     eng = _engine()
     Session = sessionmaker(bind=eng, future=True, expire_on_commit=False)
     page_id = 0
