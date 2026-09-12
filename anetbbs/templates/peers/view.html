@@ -23,8 +23,17 @@
           <code>{{ peer.hostname }}{% if peer.telnet_port and peer.telnet_port != 23 %}:{{ peer.telnet_port }}{% endif %}</code>
         </dd>
         {% if peer.web_url %}
+        {# Security fix (templates audit): web_url is submitted by any
+           logged-in user via peers.submit (self-service directory
+           listing, pending sysop approval) with no scheme validation
+           on save (web/peers.py). A javascript: URI here would execute
+           in a viewer's session -- including the sysop's own session
+           while reviewing the pending submission for approval. Only
+           link-ify actual http(s) URLs. #}
+        {% set _web = peer.web_url.strip() %}
+        {% set _web_safe = _web.lower().startswith('http://') or _web.lower().startswith('https://') %}
         <dt class="col-sm-4">Web</dt>
-        <dd class="col-sm-8"><a href="{{ peer.web_url }}" target="_blank" rel="noopener">{{ peer.web_url }}</a></dd>
+        <dd class="col-sm-8">{% if _web_safe %}<a href="{{ _web }}" target="_blank" rel="noopener">{{ _web }}</a>{% else %}{{ _web }}{% endif %}</dd>
         {% endif %}
         {% if peer.software %}
         <dt class="col-sm-4">Software</dt>
@@ -41,8 +50,8 @@
            class="btn btn-primary">
           <i class="bi bi-terminal-fill"></i> Connect via Telnet
         </a>
-        {% if peer.web_url %}
-        <a href="{{ peer.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info">
+        {% if peer.web_url and _web_safe %}
+        <a href="{{ _web }}" target="_blank" rel="noopener" class="btn btn-outline-info">
           <i class="bi bi-box-arrow-up-right"></i> Visit Web
         </a>
         {% endif %}

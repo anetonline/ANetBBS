@@ -17,9 +17,24 @@
   {% if feed.description %}<p class="mb-1">{{ feed.description }}</p>{% endif %}
   <p class="small text-muted mb-0">
     {% if feed.site_url %}
-      <a href="{{ feed.site_url }}" target="_blank" rel="noopener">
-        <i class="bi bi-box-arrow-up-right"></i> {{ feed.site_url }}
+      {# Security fix (templates audit): feed.site_url can be
+         auto-populated from the external feed's own self-declared
+         <link> (rss/poller.py, "Pull site_url from the parsed feed")
+         with no scheme check -- unlike RssItem.link/image_url, which
+         are already run through poller.py's _is_safe_http_url() at
+         ingest time for exactly this reason (a malicious/compromised
+         feed publisher could set it to a javascript: URI, executed
+         same-origin when a viewer clicks the feed's homepage link).
+         Guarding here at render time since site_url itself wasn't
+         covered by that ingest-time check. #}
+      {% set _site = feed.site_url.strip() %}
+      {% if _site.lower().startswith('http://') or _site.lower().startswith('https://') %}
+      <a href="{{ _site }}" target="_blank" rel="noopener">
+        <i class="bi bi-box-arrow-up-right"></i> {{ _site }}
       </a>
+      {% else %}
+        {{ _site }}
+      {% endif %}
     {% else %}
       <code>{{ feed.url }}</code>
     {% endif %}

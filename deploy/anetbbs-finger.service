@@ -1,3 +1,13 @@
+# Reference template only -- install.sh and update.sh both generate the
+# real unit file inline (heredoc) with the actual $SERVICE_USER/
+# $INSTALL_DIR substituted for this install, and neither script ever
+# copies this file directly. Kept in sync by hand with install.sh's own
+# generated block (a real security/performance audit found this file had
+# drifted -- missing every systemd sandboxing directive install.sh
+# actually writes); install.sh remains the single source of truth if
+# these two ever disagree again. If you're installing manually on a
+# non-default user/path, replace every `anetbbs`/`/opt/anetbbs` below
+# with your own values before installing this.
 [Unit]
 Description=ANetBBS Finger Service (RFC 1288)
 After=network.target
@@ -12,6 +22,18 @@ EnvironmentFile=/opt/anetbbs/.env
 # systemd capability below so we don't need to run as root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=/opt/anetbbs/venv/bin/python -m anetbbs.core.finger_server
 Restart=always
 RestartSec=5

@@ -1,0 +1,39 @@
+# Reference template only -- install.sh generates the real unit file
+# inline (heredoc) with the actual $SERVICE_USER/$INSTALL_DIR
+# substituted for this install (only when the install wizard's
+# ENABLE_MRC prompt is answered yes), and never copies this file
+# directly. This file didn't previously exist at all despite the unit
+# being real and commonly enabled -- added during a security/
+# performance audit for documentation completeness, matching every
+# sibling unit's own reference-template convention. If you're
+# installing manually on a non-default user/path, replace every
+# `anetbbs`/`/opt/anetbbs` below with your own values before installing
+# this.
+[Unit]
+Description=ANetBBS MRC Bridge Service
+After=network.target
+
+[Service]
+Type=simple
+User=anetbbs
+Group=anetbbs
+WorkingDirectory=/opt/anetbbs
+Environment=MRC_BRIDGE_CONFIG=/opt/anetbbs/mrc/bridge/config.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+ExecStart=/opt/anetbbs/venv/bin/python -m mrc.bridge.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

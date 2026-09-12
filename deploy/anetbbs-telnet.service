@@ -1,5 +1,15 @@
+# DEPRECATED -- DO NOT USE. Kept only as a historical reference/
+# deprecation warning, found stale (missing every hardening directive
+# the current unit has) during a security/performance audit. Superseded
+# by anetbbs.service (a single combined process for telnet/ssh/rlogin,
+# gated by the *_ENABLED vars in .env). Using this alongside
+# anetbbs-ssh.service breaks: Ubuntu systemd applies EnvironmentFile
+# AFTER Environment= (the opposite of documented precedence), so the
+# Environment= overrides below never actually take effect, and both
+# units end up racing for the same ports. See anetbbs.service's own
+# comment for the full explanation.
 [Unit]
-Description=ANetBBS Telnet Server
+Description=ANetBBS Telnet Server (DEPRECATED, see header comment)
 After=network.target
 
 [Service]

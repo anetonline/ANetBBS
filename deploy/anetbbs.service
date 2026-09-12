@@ -1,3 +1,13 @@
+# Reference template only -- install.sh and update.sh both generate the
+# real unit file inline (heredoc) with the actual $SERVICE_USER/
+# $INSTALL_DIR substituted for this install, and neither script ever
+# copies this file directly. Kept in sync by hand with install.sh's own
+# generated block (a real security/performance audit found this file had
+# drifted -- missing every systemd sandboxing directive install.sh
+# actually writes); install.sh remains the single source of truth if
+# these two ever disagree again. If you're installing manually on a
+# non-default user/path, replace every `anetbbs`/`/opt/anetbbs` below
+# with your own values before installing this.
 [Unit]
 Description=ANetBBS terminal protocols (telnet / ssh / rlogin)
 After=network.target
@@ -13,9 +23,33 @@ EnvironmentFile=/opt/anetbbs/.env
 # RLOGIN_ENABLED in the .env file referenced above. This unit
 # intentionally has no Environment= overrides — Ubuntu systemd treats
 # EnvironmentFile as winning over Environment= (opposite of the
-# documented behavior), so the previous split-protocol units
-# (anetbbs-telnet.service + anetbbs-ssh.service) could not override
+# documented behavior), so the legacy split-protocol units
+# (anetbbs-telnet.service + anetbbs-ssh.service, kept in this directory
+# only as a deprecation warning -- do not use them) could not override
 # the .env values and ended up fighting each other for ports.
+#
+# FTP on port 21 needs CAP_NET_BIND_SERVICE since the unit doesn't run
+# as root. Without this, a sysop who later sets FTP_ENABLED=true in
+# .env gets a listener that silently fails to bind. Unlike
+# anetbbs-web.service, nothing in this unit's own process ever calls
+# sudo, so CapabilityBoundingSet can safely match the Ambient set here.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# This unit never calls sudo, so NoNewPrivileges=yes is safe here
+# (unlike anetbbs-web.service, which needs sudo for the Service
+# Control Center's restart/upgrade features).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=/opt/anetbbs/venv/bin/anetbbs
 Restart=always
 RestartSec=5

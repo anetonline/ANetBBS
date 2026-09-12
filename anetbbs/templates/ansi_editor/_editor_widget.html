@@ -161,7 +161,24 @@
 
 <script>
 (function() {
-    const initial = {{ grid_json | safe }};
+    {# Security fix (templates audit): grid_json is a json.dumps()'d string
+       built server-side from raw client POST data with no per-cell
+       validation (web/ansi_editor.py's save(), web/postcards.py's save())
+       -- a cell's "c" character field can be an arbitrary-length string, not
+       just one char, so a crafted save (a direct POST, not through the JS
+       UI) could plant a literal "</script>" in it. Piped through |safe
+       here, that closed the real <script> tag early and let injected
+       markup execute -- self-XSS on this editor's own reload for
+       ansi_editor.py's admin-only art library, but postcards.py reuses this
+       exact widget for ANY logged-in user's postcard, and postcards.py's
+       _require_owner_or_403() lets an admin open and edit someone else's
+       postcard too, so this could execute in a reviewing admin's session.
+       |tojson is Flask/Jinja's HTML-safe JSON encoder (escapes <, >, &, '
+       so none of that can break out of the script context); from_json
+       round-trips the already-serialized string back into a real object
+       first so tojson re-encodes it correctly instead of double-encoding
+       a string literal. #}
+    const initial = {{ grid_json | from_json | tojson }};
     const W = initial.width;
     const H = initial.height;
     let cells = initial.cells.map(c => ({c: c.c || ' ', fg: c.fg|0, bg: c.bg|0}));

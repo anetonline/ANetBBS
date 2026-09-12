@@ -69,6 +69,11 @@ function sfxForWeapon(kind) {
   else if (kind === 'meleeSwing') { playTone(320, 0, 0.05, 'square', 0.05, 180); }
 }
 function sfxDryFire() { playTone(150, 0, 0.06, 'square', 0.05); }
+// DEAD CODE (flagged, not removed -- security/performance audit pass):
+// neither of these two is called anywhere else in the codebase (enemy
+// death already plays via sfxExplosion/sfxDeath depending on kill type,
+// and no caller ever fires a bare "hit" cue). Left in place per this
+// project's mark-don't-delete convention rather than pruned outright.
 function sfxHit() { playTone(300, 0, 0.06, 'square', 0.08); }
 function sfxEnemyDeath() { playTone(200, 0, 0.14, 'sawtooth', 0.1, 50); playNoise(0.02, 0.1, 0.08, 900); }
 function sfxPickup() { playTone(660, 0, 0.08, 'sine', 0.12); playTone(880, 0.06, 0.1, 'sine', 0.1); }

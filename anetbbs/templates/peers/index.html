@@ -89,9 +89,15 @@
                 <i class="bi bi-terminal-fill"></i> Telnet
               </a>
               {% if p.web_url %}
-              <a href="{{ p.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
+              {# Security fix (templates audit): see peers/view.html --
+                 web_url is self-service, unvalidated on save; only
+                 link-ify actual http(s) URLs, never javascript:/etc. #}
+              {% set _pweb = p.web_url.strip() %}
+              {% if _pweb.lower().startswith('http://') or _pweb.lower().startswith('https://') %}
+              <a href="{{ _pweb }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
                 <i class="bi bi-box-arrow-up-right"></i> Web
               </a>
+              {% endif %}
               {% endif %}
               <a href="{{ url_for('peers.view', peer_id=p.id) }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-info-circle"></i> Details
@@ -170,9 +176,14 @@
                 </a>
                 {% endif %}
                 {% if e.web_url %}
-                <a href="{{ e.web_url }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
+                {# Same guard as the local-peer web_url above: external
+                   directory-source rows are third-party content too. #}
+                {% set _eweb = e.web_url.strip() %}
+                {% if _eweb.lower().startswith('http://') or _eweb.lower().startswith('https://') %}
+                <a href="{{ _eweb }}" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm">
                   <i class="bi bi-box-arrow-up-right"></i> Web
                 </a>
+                {% endif %}
                 {% endif %}
               </div>
             </div>

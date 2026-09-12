@@ -17,6 +17,18 @@
 # audit resolves it in its own isolated environment, no local install
 # needed at all.
 #
+# Real coverage gap found in a security/performance audit: this used
+# to audit ONLY requirements.txt. requirements-docker.txt's two extra
+# pins (`docker`, `pytest`) genuinely ship inside the real Docker
+# runtime image (see that file's own header comment -- not a dev-only
+# manifest), so a CVE in either one was invisible to this workflow
+# entirely. requirements-dev.txt is audited too for the same
+# completeness reason, even though it's local-dev-only. Dependabot
+# (.github/dependabot.yml) already auto-discovers every requirements*
+# file in this directory on its own -- this gap was specific to
+# pip-audit's own hardcoded single-file invocation, not a Dependabot
+# config problem.
+#
 # Runs weekly (catches a CVE published against an already-pinned
 # version, not just new PRs) and on any PR touching the dependency
 # manifest. Fails the job (visibly, in the Actions tab / PR checks) on
@@ -42,11 +54,15 @@ on:
     branches: [main]
     paths:
       - 'requirements.txt'
+      - 'requirements-docker.txt'
+      - 'requirements-dev.txt'
       - '.github/workflows/pip-audit.yml'
   pull_request:
     branches: [main]
     paths:
       - 'requirements.txt'
+      - 'requirements-docker.txt'
+      - 'requirements-dev.txt'
   workflow_dispatch: {}
 
 jobs:
@@ -65,5 +81,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install pip-audit
 
-      - name: Audit requirements.txt
-        run: pip-audit -r requirements.txt --strict
+      - name: Audit requirements.txt, requirements-docker.txt, requirements-dev.txt
+        run: pip-audit -r requirements.txt -r requirements-docker.txt -r requirements-dev.txt --strict

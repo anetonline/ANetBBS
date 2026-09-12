@@ -173,7 +173,20 @@
     const currentChannelLabel = document.getElementById('current_channel');
 
     let currentChannel = '(server)';
-    let myNick = '{{ default_nick }}';
+    // Security/correctness fix (templates audit): default_nick is
+    // current_user.username, interpolated straight into a JS string
+    // literal instead of |tojson. Registration allows apostrophes in
+    // usernames (auth.py's RegisterForm Regexp), and admin-side
+    // username edit forms have no character restriction at all
+    // (web/admin.py's AddUserForm/EditUserForm) -- Jinja's default
+    // autoescaping neutralizes the worst of it here (', ", <, > all
+    // become HTML entities, which don't decode inside <script>, so a
+    // literal quote/backslash pair needed to break out of the string
+    // can't actually form), but that just means the nick renders
+    // garbled instead of breaking anything -- and it's still the wrong
+    // pattern for a value going into a JS context. |tojson is the
+    // correct, established way (see MRC_WS_HOST_OVERRIDE below).
+    let myNick = {{ default_nick | tojson }};
     const channelLines = { '(server)': [] };
     const channelNames = { };   // channel -> Set of nicks for tab-complete
     const channelModes = { };   // channel -> { nick -> '@'/'+'/'' } for sidebar

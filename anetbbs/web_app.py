@@ -182,6 +182,22 @@ def create_app(config_name=None):
             return None
         if not user.is_active or user.is_locked:
             return None
+        # Same gap, same fix, one more sibling flag: is_verified (NUV /
+        # email-verify gate) was caught by the is_active/is_locked fix
+        # above's own audit pass, but that pass only ever touched
+        # is_active/is_locked -- is_verified is exactly as revocable
+        # after the fact (admin.py's edit_user() route can flip a
+        # user's is_verified back to False, and the sysop "un-approve"
+        # bulk action does the same) and was never rechecked here
+        # either, for the same reason: web/auth.py's login() route only
+        # ever consulted it at the MOMENT of a fresh login. An admin
+        # bypasses this check at login time (see auth.py's `not
+        # is_verified and not user.is_admin` gate) so mirror that here
+        # too -- otherwise a sysop account created with is_verified
+        # left False for some reason would lock itself out on its very
+        # next request.
+        if not user.is_verified and not user.is_admin:
+            return None
         return user
 
     @app.before_request
@@ -1165,6 +1181,19 @@ def _lightweight_migrate(app):
                   'caller_log_id')
     _ensure_index('echomail_poll_logs', 'ix_echomail_poll_logs_node_id',
                   'node_id')
+
+    # Real gap found in a security/performance audit: GameScore.game_id
+    # and GameSession's (game_id, status) pair are both filtered on in
+    # real hot paths (web/games.py's per-game and cross-game scoreboard
+    # pages, games/node_manager.py's per-launch node-allocation lookup)
+    # but neither column was indexed -- see the two columns' own model
+    # comments. index=True/db.Index() on the model only takes effect on
+    # a freshly-created table; an upgrading install's existing table
+    # needs this explicit backfill, same as every other retroactive
+    # index above.
+    _ensure_index('game_scores', 'ix_game_scores_game_id', 'game_id')
+    _ensure_index('game_sessions', 'ix_game_sessions_game_id_status',
+                  'game_id, status')
 
     # Real bug found live: UserSession.user_id used to be unique=True --
     # a hard one-row-per-user constraint, so a second simultaneous

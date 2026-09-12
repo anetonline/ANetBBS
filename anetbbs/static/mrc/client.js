@@ -15,6 +15,22 @@
  *   (that is done server-side by _truncate_wire_message).
  */
 
+// Defensive cap on an inbound WebSocket frame's raw size, checked BEFORE
+// JSON.parse() ever runs. Every real payload the bridge sends is small
+// (a wire chat body is already capped server-side at MRC_MAX_MESSAGE_LEN
+// = 140 chars by _truncate_wire_message, plus a handful of small fixed
+// fields / a room's userlist) -- nothing legitimate approaches this. The
+// bridge URL a page connects to is user-selectable (see getSelectedWsUrl()
+// in mrc/index.html), so this isn't purely "trust our own server": a
+// misbehaving/compromised endpoint (or a proxy/MITM on the wire) handing
+// back an arbitrarily large frame could otherwise make JSON.parse() try
+// to parse a multi-megabyte-or-larger string on every message, which is
+// exactly the "unbounded buffer from network I/O" pattern this project's
+// prior audit rounds already fixed server-side (see e.g. the BinkP
+// receive-frame cap) -- this is that same fix applied to the browser
+// client's own inbound path.
+const MAX_WS_FRAME_CHARS = 65536;
+
 function escapeHtml(s) {
     return String(s)
         .replaceAll('&', '&amp;')
@@ -136,6 +152,11 @@ class MRCClient {
             };
 
             ws.onmessage = (event) => {
+                // Drop oversized frames before ever handing them to
+                // JSON.parse() -- see MAX_WS_FRAME_CHARS above.
+                if (typeof event.data === 'string' && event.data.length > MAX_WS_FRAME_CHARS) {
+                    return;
+                }
                 try {
                     const data = JSON.parse(event.data);
                     this.handleMessage(data);

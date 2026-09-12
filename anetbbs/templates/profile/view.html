@@ -36,7 +36,23 @@
                     <p><i class="bi bi-geo-alt"></i> {{ user.location }}</p>
                 {% endif %}
                 {% if field_config.website and user.website %}
-                    <p><i class="bi bi-link-45deg"></i> <a href="{{ user.website }}" target="_blank" rel="noopener noreferrer">{{ user.website }}</a></p>
+                    {# Security fix (templates audit): user.website is a
+                       free-text profile field with no scheme validation
+                       on save (web/profile.py). Rendering it straight into
+                       href= let a user set it to a javascript: URI, which
+                       would execute in any other visitor's session when
+                       they clicked the "website" link on that profile page
+                       -- the same class of bug as the gemini/RSS
+                       javascript: URI fix elsewhere in this app. Only
+                       link-ify it when it's actually an http(s) URL. #}
+                    {% set _site = user.website.strip() %}
+                    <p><i class="bi bi-link-45deg"></i>
+                    {% if _site.lower().startswith('http://') or _site.lower().startswith('https://') %}
+                        <a href="{{ _site }}" target="_blank" rel="noopener noreferrer">{{ _site }}</a>
+                    {% else %}
+                        {{ _site }}
+                    {% endif %}
+                    </p>
                 {% endif %}
                 {% if field_config.show_email and user.show_email %}
                     <p><i class="bi bi-envelope"></i> {{ user.email }}</p>
@@ -50,8 +66,16 @@
                     {% if val %}
                         <p>
                         {% if cf.field_type == 'url' %}
+                            {# Same javascript: URI risk as user.website above --
+                               custom "url" fields are also free text with no
+                               scheme validation on save. #}
+                            {% set _val = (val|string).strip() %}
                             <i class="bi bi-link-45deg"></i> <strong>{{ cf.label }}:</strong>
-                            <a href="{{ val }}" target="_blank" rel="noopener noreferrer">{{ val }}</a>
+                            {% if _val.lower().startswith('http://') or _val.lower().startswith('https://') %}
+                                <a href="{{ _val }}" target="_blank" rel="noopener noreferrer">{{ _val }}</a>
+                            {% else %}
+                                {{ _val }}
+                            {% endif %}
                         {% else %}
                             <strong>{{ cf.label }}:</strong> {{ val }}
                         {% endif %}

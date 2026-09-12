@@ -1,3 +1,14 @@
+# ANetBBS v1.0.75 — Seventh audit pass: templates, models, deploy hardening, CI coverage (September 2026)
+
+A seventh audit pass, broader in scope than the two prior rounds: Jinja templates across the whole app, the core data model and app factory, the reference systemd deployment units, and CI's dependency vulnerability scanning coverage. Same severity-tiered approach as the six prior rounds (v1.0.38, v1.0.39, v1.0.48, v1.0.66, v1.0.71, v1.0.72); this entry again omits vulnerability specifics in the interest of responsible disclosure. Every finding has a dedicated regression test.
+
+- Hardened several sysop- or peer-suppliable URL fields rendered as clickable links across the profile, RSS, peer-directory, ANSI/postcard editor, and IRC web-client pages against `javascript:`-URI and script-injection payloads — one of these was reachable by any registered user against a reviewing sysop's own browser session.
+- Capped the size of an inbound message the MRC web chat client will parse, matching the same cap already applied server-side to the BinkP network listener.
+- Closed a gap where a revoked account's already-open web session kept access until its next login, instead of losing access immediately — matching the existing behavior already in place for a banned or locked account.
+- Fixed a missing foreign-key constraint on a message-tracking column, and added missing database indexes on two columns queried on every leaderboard view and door-game launch attempt, with an automatic backfill for existing installs.
+- Extended CI's dependency vulnerability scanning to cover every requirements file this project ships, not just the runtime one — closing a gap where the Docker-image and developer-tooling dependency sets were unaudited.
+- Brought the reference `deploy/*.service` systemd unit files (used as install documentation; the real install/update scripts always generate the actual units directly) back in sync with the sandboxing directives those scripts actually apply, and added the one previously undocumented unit that was missing entirely.
+
 # ANetBBS v1.0.74 — CI-only fix: Node-dependent test didn't skip without Node (September 2026)
 
 Fixed a genuine `Docker build` CI failure on v1.0.73: a new regression test added during the sixth audit pass (verifying a generated Synchronet-compat script is syntactically valid JavaScript) shelled out to `node --check` unconditionally, unlike every other Node-dependent test in the same file, which already skip gracefully when a real Node.js binary isn't present. The CI Docker image doesn't (and shouldn't need to) have Node.js installed, so the test failed there with a plain "no such file" error rather than skipping. Brought into line with the existing convention; the test's other half (a byte-level check that needs no external tool at all) already fully verifies the real fix and is unaffected. No runtime behavior change, no functional bug.

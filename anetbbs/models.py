@@ -398,6 +398,21 @@ class GameSession(db.Model):
 
     user = db.relationship('User', backref='game_sessions')
 
+    # Real gap found in a security/performance audit: (game_id, status)
+    # is queried together on the hottest path in this table --
+    # games/node_manager.py's get_occupied_nodes() runs
+    # `filter_by(game_id=..., status='active')` on EVERY door-game
+    # launch attempt (node allocation), and web/games.py's per-game
+    # detail page filters the same pair for its "active sessions" list
+    # -- with neither column indexed, both did a full-table scan of
+    # every game session this install has EVER recorded (this table has
+    # no pruning/archival; sessions accumulate forever). game_id first
+    # so a plain `filter_by(game_id=...)` (used elsewhere) still uses
+    # the index via its leftmost column.
+    __table_args__ = (
+        db.Index('ix_game_sessions_game_id_status', 'game_id', 'status'),
+    )
+
     def __repr__(self):
         return f'<GameSession {self.id} game={self.game_id} user={self.user_id}>'
 
@@ -407,7 +422,15 @@ class GameScore(db.Model):
     __tablename__ = 'game_scores'
 
     id = db.Column(db.Integer, primary_key=True)
-    game_id = db.Column(db.Integer, db.ForeignKey('games.id'), nullable=False)
+    # Real gap found in a security/performance audit: web/games.py's
+    # /games/scoreboard route (a cross-game leaderboard) loops over
+    # EVERY active game and runs `filter_by(game_id=g.id)
+    # .order_by(score.desc()).limit(10)` for each one, every request --
+    # an unindexed full-table scan of game_scores per game, on every
+    # page view. Same pattern also hit directly on the single-game
+    # detail page (web/games.py) and the InterBBS-score social-post
+    # picker (features/social_queue.py).
+    game_id = db.Column(db.Integer, db.ForeignKey('games.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     score = db.Column(db.Integer, default=0)
     details = db.Column(db.Text)  # JSON with extra score data
@@ -1984,7 +2007,14 @@ class EchomailLastRead(db.Model):
                         nullable=False, index=True)
     area_id = db.Column(db.Integer, db.ForeignKey('echo_areas.id'),
                         nullable=False, index=True)
-    last_message_id = db.Column(db.Integer)
+    # Real gap found in a security/performance audit: QWKNodeLastSent
+    # (below) has the exact same "highest EchomailMessage.id seen" shape
+    # in its own last_message_id column and correctly declares a real
+    # ForeignKey('echomail_messages.id') -- this sibling column never
+    # got the same FK, just a bare Integer. Nullable (unchanged): NULL
+    # still means "subscribed/tracked but nothing read yet".
+    last_message_id = db.Column(db.Integer, db.ForeignKey('echomail_messages.id'),
+                                nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow)
 

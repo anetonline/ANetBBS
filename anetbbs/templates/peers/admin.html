@@ -11,6 +11,13 @@
   </div>
 
   <!-- Pending submissions -->
+  <!-- Security fix (templates audit): p.web_url below is submitted by any
+       logged-in user via peers.submit with no scheme validation on save
+       (web/peers.py) and rendered here for the SYSOP to review before
+       approving. Without the scheme guard, a javascript: URI would have
+       executed in the reviewing admin's own session on click -- a
+       privilege-escalation path from any registered user straight into
+       an admin browser session. Only http(s) is link-ified. -->
   {% set pending = peers | selectattr('is_approved', 'equalto', False) | list %}
   {% if pending %}
   <div class="card border-warning mb-4 shadow-sm">
@@ -27,7 +34,7 @@
         <tr>
           <td><strong>{{ p.name }}</strong></td>
           <td><code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code></td>
-          <td>{% if p.web_url %}<a href="{{ p.web_url }}" target="_blank" rel="noopener">{{ p.web_url[:40] }}</a>{% endif %}</td>
+          <td>{% if p.web_url %}{% set _pw = p.web_url.strip() %}{% if _pw.lower().startswith('http://') or _pw.lower().startswith('https://') %}<a href="{{ _pw }}" target="_blank" rel="noopener">{{ _pw[:40] }}</a>{% else %}{{ _pw[:40] }}{% endif %}{% endif %}</td>
           <td><small>{{ p.location or '—' }}</small></td>
           <td><small>{{ p.software or '—' }}</small></td>
           <td><small class="text-muted">{{ (p.description or '')[:60] }}</small></td>
@@ -78,7 +85,7 @@
             {% if p.description %}<br><small class="text-muted">{{ p.description[:60] }}</small>{% endif %}
           </td>
           <td><code>{{ p.hostname }}{% if p.telnet_port and p.telnet_port != 23 %}:{{ p.telnet_port }}{% endif %}</code></td>
-          <td>{% if p.web_url %}<a href="{{ p.web_url }}" target="_blank" rel="noopener" class="small">link</a>{% endif %}</td>
+          <td>{% if p.web_url %}{% set _pw2 = p.web_url.strip() %}{% if _pw2.lower().startswith('http://') or _pw2.lower().startswith('https://') %}<a href="{{ _pw2 }}" target="_blank" rel="noopener" class="small">link</a>{% endif %}{% endif %}</td>
           <td><small>{{ p.location or '' }}</small></td>
           <td><small>{{ p.software or '' }}</small></td>
           <td><small class="text-muted">{{ p.ftn_address or '' }}</small></td>

@@ -219,6 +219,30 @@ Read this whole file before exposing the BBS to the internet.
   generated sudoers fragment briefly sat world-readable before its
   final permission lockdown, the same class of gap already fixed
   elsewhere in those same scripts for `.env` and the database file.
+- **Several unguarded, sysop- or peer-suppliable URL fields rendered as
+  clickable links have been hardened against `javascript:`-URI and
+  script-injection payloads** across the profile, RSS, peer-directory,
+  ANSI/postcard editor, and IRC web-client pages — found in a security
+  audit; one of these was reachable by any registered user against a
+  reviewing sysop's own browser session. Fixed at render time with the
+  same scheme-allowlist pattern already used elsewhere in the codebase.
+- **A revoked account's already-open web session now loses access
+  immediately**, matching the existing behavior for a banned or locked
+  account — previously only checked at the moment of login.
+- **Two data-integrity/performance gaps found in a security/performance
+  audit were closed**: a missing foreign-key constraint on one
+  message-tracking column, and missing database indexes on two
+  columns queried on every leaderboard view and door-game launch
+  attempt, with an automatic backfill for existing installs.
+- **Dependency vulnerability scanning now covers every requirements
+  file this project ships**, not just the runtime one — closing a gap
+  where the Docker-image and developer-tooling dependency sets were
+  unaudited by CI.
+- **The MRC web chat client now caps the size of an inbound message it
+  will parse**, matching the same cap already applied server-side to
+  the BinkP network listener — the browser-side half of the same
+  unbounded-network-buffer class this project's audits have
+  repeatedly closed elsewhere.
 
 ## What you MUST do for production
 
