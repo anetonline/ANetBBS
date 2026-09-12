@@ -65,6 +65,29 @@ MAX_INBOUND_FILE_SIZE = int(os.environ.get('BINKP_MAX_FILE_SIZE', 100 * 1024 * 1
 # unbounded total memory.
 MAX_CONCURRENT_SESSIONS = int(os.environ.get('BINKP_MAX_CONCURRENT_SESSIONS', 20))
 
+# Real gap found in a security/performance audit: MAX_INBOUND_FILE_SIZE
+# above bounds any ONE file offered in a session, but nothing bounded
+# the CUMULATIVE bytes accepted across a single session's whole receive
+# phase -- inbound_files (the list _receive_files()/_send_pkt_file()
+# accumulate every accepted file into, all held in memory until the
+# session ends and import runs -- see _handle_connection's own "7."/"8."
+# comments for why import is deliberately deferred until after the
+# socket closes) has no size cap of its own. Reachable with ZERO
+# authentication, same as MAX_INBOUND_FILE_SIZE's own gap: an
+# unrecognized peer is accepted as anonymous crashmail (see
+# _handle_connection) and still proceeds to file receive. A single
+# long-lived connection offering many just-under-the-per-file-cap files
+# back to back -- nothing stops that as long as the peer keeps talking
+# within the per-frame idle timeout -- could still exhaust this
+# process's memory one file at a time. The largest REAL historical
+# batch this daemon has actually seen (the 2026-08-30 hub-queue
+# incident writeup elsewhere in this file: 1359 files, 66MB total) is
+# nowhere close to this cap; it exists only to bound a genuinely
+# adversarial anonymous connection, not to constrain legitimate mail
+# flow.
+MAX_INBOUND_SESSION_BYTES = int(
+    os.environ.get('BINKP_MAX_SESSION_BYTES', 1024 * 1024 * 1024))
+
 
 # FidoNet hubs deliver mail in several wrappers:
 #
@@ -161,13 +184,34 @@ _FREQ_GLOBAL_LIMIT = 60
 _FREQ_GLOBAL_WINDOW = 60
 
 
-def _freq_rate_limited(remote_addr):
-    """Return True if an inbound WaZOO FREQ from `remote_addr` should
+def _freq_rate_limited(source_ip):
+    """Return True if an inbound WaZOO FREQ from `source_ip` should
     be dropped (per-IP or global sliding-window limit hit), False if
     it's OK to process. Extracted as its own function so it's testable
-    without needing a full BinkP session handshake."""
+    without needing a full BinkP session handshake.
+
+    `source_ip` MUST be the connection's real socket-level source
+    address (this module's own `peer[0]`, from
+    `writer.get_extra_info('peername')`) -- NOT the BinkP session's
+    claimed FTN address (`remote_addr`, sourced from the peer's own
+    M_ADR frame). Real gap found in a security/performance audit: the
+    call site originally passed `remote_addr` here. FREQ processing is
+    reachable from a fully anonymous, zero-password "crashmail"
+    session (see this module's own docstring for why unrecognized
+    peers are accepted at all) -- nothing validates M_ADR's contents
+    for such a peer, so an attacker can claim a brand-new address on
+    every single TCP connection at zero cost, making the "per-IP"
+    dimension of this limiter trivially bypassable and leaving only
+    the shared global cap as a backstop (which one such attacker could
+    then exhaust alone, denying the budget to every other real peer).
+    Keying on the real socket address closes that -- an attacker can
+    still open many TCP connections from many real source addresses,
+    but that's the actual per-IP behavior this limiter is meant to
+    bound, matching the SYSTAT UDP responder's own `addr[0]`-keyed
+    limiter (msp/systat.py) this was supposed to mirror from the start.
+    """
     from ..features.rate_limit import _check as _rate_limit_check
-    if not _rate_limit_check(f'binkp-freq:{remote_addr}',
+    if not _rate_limit_check(f'binkp-freq:{source_ip}',
                              _FREQ_PER_IP_LIMIT, _FREQ_PER_IP_WINDOW):
         return True
     if not _rate_limit_check('binkp-freq:global',
@@ -1243,10 +1287,20 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                         _debug_manifest(fname, payload)
                         from .freq import is_req_filename, process_inbound_req
                         if is_req_filename(fname):
-                            if _freq_rate_limited(remote_addr):
+                            # Real gap found in a security/performance
+                            # audit: this used to key the rate limit on
+                            # remote_addr (the peer's own, unvalidated,
+                            # self-claimed M_ADR) instead of the real
+                            # socket source address -- see
+                            # _freq_rate_limited()'s own docstring for
+                            # why that made the "per-IP" limit trivially
+                            # bypassable.
+                            _freq_source_ip = peer[0] if peer else remote_addr
+                            if _freq_rate_limited(_freq_source_ip):
                                 logger.debug(
-                                    'BinkP: FREQ rate limit hit for %s, '
-                                    'dropping %s', remote_addr, fname)
+                                    'BinkP: FREQ rate limit hit for %s '
+                                    '(claimed address %s), dropping %s',
+                                    _freq_source_ip, remote_addr, fname)
                                 continue
                             try:
                                 queued = process_inbound_req(payload, remote_addr)
@@ -1560,6 +1614,14 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
                     declared_size = int(parts[1])
                 except ValueError:
                     declared_size = -1
+                # Real gap found in a security/performance audit: the
+                # per-file check just below bounds any ONE file, but
+                # nothing bounded the CUMULATIVE bytes accepted across
+                # this session's whole receive phase -- see
+                # MAX_INBOUND_SESSION_BYTES's own comment for why that
+                # matters against an anonymous, zero-authentication
+                # peer that just keeps offering more files.
+                prospective_session_total = state.get('session_total', 0) + max(declared_size, 0)
                 if declared_size < 0 or declared_size > MAX_INBOUND_FILE_SIZE:
                     # Reject without ever allocating a buffer for it --
                     # see MAX_INBOUND_FILE_SIZE's own comment above for
@@ -1582,6 +1644,22 @@ async def _consume_inbound_file_frame(is_cmd, payload, peer, writer, state, file
                                     f"{parts[0]} {parts[1]} {state['mtime']}",
                                     transcript=transcript)
                     return True
+                if prospective_session_total > MAX_INBOUND_SESSION_BYTES:
+                    logger.warning(
+                        'BinkP %s: refusing file offer %r -- would push this '
+                        "session's cumulative received bytes to %d (max %d) "
+                        '-- sending SKIP', peer, parts[0],
+                        prospective_session_total, MAX_INBOUND_SESSION_BYTES)
+                    state['name'] = parts[0]
+                    state['size'] = declared_size
+                    state['mtime'] = parts[2] if len(parts) >= 3 else '0'
+                    state['skip'] = True
+                    state['skipped'] = 0
+                    await _send_cmd(writer, CMD_SKIP,
+                                    f"{parts[0]} {parts[1]} {state['mtime']}",
+                                    transcript=transcript)
+                    return True
+                state['session_total'] = prospective_session_total
                 state['name'] = parts[0]
                 state['size'] = declared_size
                 state['skip'] = False

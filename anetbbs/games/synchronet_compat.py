@@ -3930,5 +3930,23 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
 
 
 def _js_str(value):
-    """Escape a Python string for safe embedding in a JS string literal."""
-    return value.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
+    """Escape a Python string for safe embedding in a JS string literal.
+
+    Real gap found in a security/performance audit: a raw, unescaped
+    CR/LF is syntactically illegal inside a single-quoted JS string
+    literal (unlike inside quotes/backslashes, which this function
+    already escaped) -- write_compat_script() embeds user-controlled
+    fields (display_name, location, birthdate) through this function
+    into the generated compat script's `user.alias`/`user.location`/
+    etc. literals, and display_name/location have no charset
+    restriction at registration or in the admin user editor (unlike
+    `username`, which does). A display_name containing an embedded
+    newline produced a raw newline inside the quotes, breaking the
+    generated script with a JS SyntaxError and failing that user's own
+    Synchronet-compat door launches -- the same class of gap already
+    fixed for CR/LF in dropfile.py's and node_paths.py's own `_u()`
+    helpers, just not brought into line here. Escaping (not stripping,
+    unlike those two) preserves the field's actual content.
+    """
+    return (value.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
+                 .replace('\r', '\\r').replace('\n', '\\n'))

@@ -561,11 +561,28 @@ def ReadKey(timeout=None):
 
 
 def WriteXY(x, y, attr, text):
-    """Write text at absolute screen position (x, y) with Mystic colour attr."""
-    _compat.gotoxy(x, y)
-    _compat.textcolor(attr & 0x0F)
-    _compat.textbackground((attr >> 4) & 0x07)
-    _compat.rwrite(str(text))
+    """Write text at absolute screen position (x, y) with Mystic colour attr.
+
+    Real bug found in a security/performance audit: this called
+    `_compat.gotoxy/textcolor/textbackground/rwrite` directly instead of
+    going through the module-level helpers of the same names (every
+    other function in this file uses that `if _compat is not None: ...
+    else: <subprocess fallback>` pattern). `_init_compat()` is never
+    called and `MysticCompat(...)` is never instantiated anywhere in
+    the codebase -- door_runner.py's actual door_mystic launch path
+    (`_build_mystic_python_command`) always runs Mystic Python scripts
+    as a standalone subprocess, never in-process -- so `_compat` is
+    always None for every real invocation. Any door script calling
+    WriteXY (this module's own docstring names dopewars.mps and RDQ2 as
+    real callers) hit an immediate `AttributeError:
+    'NoneType' object has no attribute 'gotoxy'` and crashed. Routing
+    through the module-level helpers gives WriteXY the same subprocess-
+    mode ANSI fallback every sibling function already has.
+    """
+    gotoxy(x, y)
+    textcolor(attr & 0x0F)
+    textbackground((attr >> 4) & 0x07)
+    rwrite(str(text))
 
 
 def PadRt(s, width, pad_char=' '):

@@ -2250,6 +2250,16 @@ if [[ -f "$SUDOERS_SRC" ]]; then
         -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
         -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
         "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
+    # Real gap found in a security/performance audit: the plain `sed ...
+    # > file` redirection above creates $SUDOERS_DST.tmp at the ambient
+    # umask (typically 644, world-readable) -- it then sits under
+    # /etc/sudoers.d/ at that mode through the visudo validation AND the
+    # mv below, only getting locked to 0440 by the chmod that already
+    # runs after the mv. Same race-window class already fixed elsewhere
+    # in this script for .env/anetbbs.db (see their own "umask"
+    # comments) -- lock it down immediately at creation instead. visudo
+    # -cf only needs to read the file, which root can always do.
+    chmod 0440 "$SUDOERS_DST.tmp"
     if visudo -cf "$SUDOERS_DST.tmp" >/dev/null 2>&1; then
         mv "$SUDOERS_DST.tmp" "$SUDOERS_DST"
         chmod 0440 "$SUDOERS_DST"
@@ -2265,6 +2275,7 @@ if [[ -f "$SUDOERS_SRC" ]]; then
         # with just those 3 lines stripped before giving up entirely.
         sed '/^Defaults!ANETBBS_[A-Z]*  *!log_input, !log_output$/d' \
             "$SUDOERS_DST.tmp" > "$SUDOERS_DST.tmp2"
+        chmod 0440 "$SUDOERS_DST.tmp2"
         if visudo -cf "$SUDOERS_DST.tmp2" >/dev/null 2>&1; then
             mv "$SUDOERS_DST.tmp2" "$SUDOERS_DST"
             rm -f "$SUDOERS_DST.tmp"

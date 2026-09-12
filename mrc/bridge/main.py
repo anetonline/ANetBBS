@@ -232,6 +232,36 @@ def _truncate_wire_message(body: str, max_len: int = MRC_MAX_MESSAGE_LEN) -> str
     return b if len(b) <= max_len else b[:max_len]
 
 
+_MIN_BACKGROUND_LOOP_INTERVAL = 5.0
+
+
+def _safe_loop_interval(config: dict, key: str, default: float) -> float:
+    """Read a `while True: await asyncio.sleep(interval)` background
+    loop's interval out of config, clamped to a sane floor.
+
+    Real gap found in a security/performance audit: keepalive_loop(),
+    _periodic_userlist_refresh(), and _periodic_stats_refresh() below
+    all read their interval straight from config with no lower bound at
+    all -- an accidental "0" (or a negative value) in mrc/bridge/
+    config.json turns a `while True:` loop with an
+    `await asyncio.sleep(interval)` at the bottom into a busy loop with
+    no real delay, hammering the upstream MRC hub with IAMHERE/USERLIST/
+    STATS packets as fast as the event loop can cycle -- plausibly
+    exactly the kind of flood that gets an IP rate-limited by the hub's
+    own abuse protection, the same failure mode _reconnect_loop() above
+    goes to considerable lengths to avoid triggering via its own
+    exponential backoff. A misconfigured near-zero interval is a
+    realistic typo (e.g. a sysop copying a millisecond-scoped value like
+    join_packet_delay_ms's convention into a *_seconds field by
+    mistake), not just a theoretical input.
+    """
+    try:
+        interval = float(config.get(key, default))
+    except (TypeError, ValueError):
+        interval = default
+    return max(_MIN_BACKGROUND_LOOP_INTERVAL, interval)
+
+
 class MRCConnection:
     def __init__(self, config: dict, status_callback=None, latency_callback=None):
         self.config           = config
@@ -663,7 +693,12 @@ class BridgeApp:
         self.request_banners_on_join           = bool(self.config.get("request_banners_on_join", True))
         self.request_motd_on_join              = bool(self.config.get("request_motd_on_join", True))
         self.userlist_refresh_on_server_events = bool(self.config.get("userlist_refresh_on_server_events", True))
-        self.userlist_refresh_interval_seconds = float(self.config.get("userlist_refresh_interval_seconds", 0))
+        # Real gap found in a security/performance audit: dead attribute --
+        # set here from config but never read anywhere else in this file.
+        # keepalive_loop/_periodic_userlist_refresh/_periodic_stats_refresh
+        # below each re-read their own interval straight from self.config
+        # instead (correct place for a live-editable value), so this line
+        # only ever misled a reader into thinking IT was the live control.
 
         self.join_packet_delay_ms = int(self.config.get("join_packet_delay_ms", 80))
 
@@ -1977,7 +2012,7 @@ class BridgeApp:
     # ------------------------------------------------------------------
 
     async def keepalive_loop(self):
-        interval = float(self.config.get("iamhere_interval_seconds", 60))
+        interval = _safe_loop_interval(self.config, "iamhere_interval_seconds", 60)
         while True:
             await asyncio.sleep(interval)
             if not self.mrc.connected:
@@ -1991,7 +2026,7 @@ class BridgeApp:
                     await self.mrc.send_packet(MRCProtocol.create_iamhere(eff_nick, self.config["bridge_bbs"], room, "ACTIVE"))
 
     async def _periodic_userlist_refresh(self):
-        interval = float(self.config.get("userlist_refresh_interval_seconds", 30))
+        interval = _safe_loop_interval(self.config, "userlist_refresh_interval_seconds", 30)
         while True:
             await asyncio.sleep(interval)
             if not self.mrc.connected:
@@ -2009,7 +2044,7 @@ class BridgeApp:
         One request per room-with-active-sessions, same shape as
         _periodic_userlist_refresh, just a longer default interval --
         stats are far less time-sensitive than a room's user list."""
-        interval = float(self.config.get("stats_refresh_interval_seconds", 120))
+        interval = _safe_loop_interval(self.config, "stats_refresh_interval_seconds", 120)
         while True:
             await asyncio.sleep(interval)
             if not self.mrc.connected:

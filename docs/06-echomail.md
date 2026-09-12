@@ -70,6 +70,10 @@ File distribution here is otherwise TIC-push (see the TIC section
 below) — FREQ is an additional, opt-in pull mechanism on top of that,
 not a replacement for it.
 
+An inbound `.REQ` is capped at 500 lines and each matching file at 100
+per request — plenty for any real wildcard request, just a hard floor
+against a malformed or abusive one.
+
 ### Outbound spool directory — for external programs (v1.0.34+)
 
 Everything above is DB-queue-driven: outbound netmail/echomail lives
@@ -389,7 +393,10 @@ The `anetbbs-web` process spins up a background poller that:
 
 1. Reads `EchomailNetwork` rows.
 2. For BinkP: polls each uplink at interval, exchanges packets.
-3. For QWK: fetches new `.QWK` URLs on schedule.
+3. For QWK: fetches new `.QWK` URLs on schedule (capped at 100MB per
+   packet, over both HTTP and FTP transports — a safety floor against
+   a misbehaving or misconfigured hub, not a realistic size for a real
+   packet).
 
 Poll status/history is visible at **Admin → Echomail Networks →
 Poll Logs** (`/admin/echomail/logs`) — filterable by network, showing

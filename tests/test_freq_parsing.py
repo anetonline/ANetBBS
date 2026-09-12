@@ -100,6 +100,22 @@ class ParseReqLinesTests(unittest.TestCase):
         self.assertEqual(parse_req_lines(b''), [])
         self.assertEqual(parse_req_lines(b'\r\n\r\n'), [])
 
+    def test_huge_req_is_capped_at_max_req_lines(self):
+        # Real gap found in a security/performance audit: this parser had
+        # no cap at all on line count, unlike every other peer-suppliable
+        # command parser in this package -- a .REQ file (reachable from a
+        # fully anonymous, zero-password BinkP crashmail session) full of
+        # thousands of garbage filename lines drove unbounded downstream
+        # work in process_inbound_req(). A real WaZOO FREQ is normally a
+        # handful of lines; this only affects abuse.
+        from anetbbs.echomail.freq import MAX_REQ_LINES
+        content = ('\r\n'.join(f'file{i}.zip' for i in range(MAX_REQ_LINES * 3))
+                   + '\r\n').encode('ascii')
+        lines = parse_req_lines(content)
+        self.assertEqual(len(lines), MAX_REQ_LINES)
+        self.assertEqual(lines[0]['filename'], 'file0.zip')
+        self.assertEqual(lines[-1]['filename'], f'file{MAX_REQ_LINES - 1}.zip')
+
 
 class BuildReqContentTests(unittest.TestCase):
     def test_plain_filenames_round_trip_through_parse(self):

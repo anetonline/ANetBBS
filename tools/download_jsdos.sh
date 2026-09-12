@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Download the js-dos v6.22 runtime (DOSBox compiled to WebAssembly).
 #
-# Files are NOT included in the git repository because wdosbox.wasm is ~5 MB.
+# Files are NOT included in the git repository because wdosbox.wasm.js is ~5 MB.
 # Run this script once on each installation before using in-browser DOS games.
 #
-# Output: anetbbs/static/js-dos/{js-dos.js,wdosbox.js,wdosbox.wasm}
+# Output: anetbbs/static/js-dos/{js-dos.js,wdosbox.js,wdosbox.wasm.js}
 
 set -euo pipefail
 

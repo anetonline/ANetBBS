@@ -142,6 +142,47 @@ class ProcessInboundReqTests(unittest.TestCase):
         queued = process_inbound_req(b'from-a.zip\r\nfrom-b.zip\r\n', '1:12/2')
         self.assertEqual(len(queued), 2)
 
+    def test_upload_query_count_does_not_scale_with_req_line_count(self):
+        # Real gap found in a security/performance audit: process_inbound_req()
+        # used to re-run the FileUpload query for the SAME area once per
+        # req_line -- an N (lines) x M (areas) DB-query pattern. A .REQ full
+        # of names that never match anything (so MAX_FILES_PER_REQUEST's
+        # match-count cap never trips) could drive an unbounded number of
+        # queries. Fixed by caching each area's candidate uploads the first
+        # time it's needed, so the query count is capped at the number of
+        # freq-enabled areas regardless of how many lines the .REQ has.
+        from anetbbs.echomail.freq import process_inbound_req
+        from anetbbs.models import db
+        from sqlalchemy import event
+
+        area1 = self._make_area('FREQQC1')
+        area2 = self._make_area('FREQQC2')
+        self._make_upload(area1, 'real-file.zip')
+
+        # 50 garbage lines that will never match anything in either area,
+        # plus one real line -- none of these trip MAX_FILES_PER_REQUEST.
+        lines = [f'nomatch{i}.bin' for i in range(50)] + ['real-file.zip']
+        content = ('\r\n'.join(lines) + '\r\n').encode('ascii')
+
+        select_count = {'n': 0}
+
+        def _count_selects(conn, cursor, statement, *a, **kw):
+            if 'file_uploads' in statement and statement.strip().upper().startswith('SELECT'):
+                select_count['n'] += 1
+
+        engine = db.engine
+        event.listen(engine, 'before_cursor_execute', _count_selects)
+        try:
+            queued = process_inbound_req(content, '1:12/2')
+        finally:
+            event.remove(engine, 'before_cursor_execute', _count_selects)
+
+        self.assertEqual(len(queued), 1)
+        # At most one FileUpload SELECT per freq-enabled area (2 areas here)
+        # -- NOT once per (line x area) pair, which would be 51 * 2 = 102
+        # with the old N+1 behavior.
+        self.assertLessEqual(select_count['n'], 2)
+
 
 if __name__ == '__main__':
     unittest.main()

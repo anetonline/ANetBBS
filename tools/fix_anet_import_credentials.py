@@ -26,6 +26,30 @@ import argparse
 import sys
 
 
+def _describe_match(g, creds):
+    """Format one 'active game pointed at A-Net Online' audit line.
+
+    Real gap found in a security/performance audit: this used to print
+    the live A-Net Online door password in the clear (`password={p!r}`)
+    for every matched game, while the 'Correct config found' block just
+    below already masks the very same category of secret
+    (`"*" * len(password)`) -- an inconsistency within one script. This
+    tool is meant to be run and re-run freely as a dry-run audit (the
+    default, no --apply needed), and its stdout is exactly the kind of
+    thing that ends up piped to a file, a terminal scrollback log, or a
+    screen/tmux session log -- so the live door password shouldn't ever
+    land there just from listing which games reference it. Mirrors the
+    masking convention already used a few lines below instead of
+    inventing a new one."""
+    if creds is None:
+        return (f'  - id={g.id}  name={g.name!r}  slug={g.slug!r}  '
+                f'-- MISSING server address or password')
+    h, p, t = creds
+    masked = ('*' * len(p)) if p else ''
+    return (f'  - id={g.id}  name={g.name!r}  slug={g.slug!r}  '
+            f'host={h!r}  password={masked!r} ({len(p)} chars)  tag={t!r}')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -55,13 +79,7 @@ def main():
              f'(excluding already-imported anet-* rows): {len(matched)}')
         for g in matched:
             creds = _extract_credentials(g)
-            if creds is None:
-                print(f'  - id={g.id}  name={g.name!r}  slug={g.slug!r}  '
-                     f'-- MISSING server address or password')
-            else:
-                h, p, t = creds
-                print(f'  - id={g.id}  name={g.name!r}  slug={g.slug!r}  '
-                     f'host={h!r}  password={p!r}  tag={t!r}')
+            print(_describe_match(g, creds))
         print()
 
         try:

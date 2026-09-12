@@ -10,6 +10,7 @@ Supports:
 - Dove-Net style QWK networking
 """
 import io
+import os
 import re
 import struct
 import zipfile
@@ -26,6 +27,62 @@ logger = logging.getLogger(__name__)
 # QWK constants
 QWK_HEADER_SIZE = 128       # Each message header block is 128 bytes
 QWK_BLOCK_SIZE = 128        # Data is in 128-byte blocks
+
+# Real gap found in a security/performance audit: BinkP's own inbound
+# file receive has had a hard cap on declared/received size for a while
+# now (binkp.py/binkp_server.py's MAX_INBOUND_FILE_SIZE, closing an
+# unauthenticated-memory-exhaustion gap) -- QWK's own network download
+# (both the HTTP and FTP/QNET-FTP transports below) never got the
+# equivalent. A compromised, misconfigured, or simply misbehaving QWK
+# hub -- the host/URL is admin-configured, but its CONTENT at poll time
+# is still remote, foreign data, no different in kind from a BinkP
+# peer's own file offer -- could return an arbitrarily large response,
+# and both `_parse_qwk_packet`'s HTTP path and `_ftp_download` buffered
+# it fully into memory with no limit at all before this fix. Real QWK/
+# Dove-Net packets are routinely well under a few MB; this cap is
+# generous headroom while still bounding the worst case.
+MAX_QWK_PACKET_SIZE = int(os.environ.get('QWK_MAX_PACKET_SIZE', 100 * 1024 * 1024))
+
+
+def _read_capped(fileobj, max_size, source_desc):
+    """Read `fileobj` (anything with a `.read(n)` method, e.g. an
+    urlopen() response) in bounded chunks, raising ValueError the
+    moment more than `max_size` bytes have arrived -- rather than
+    calling a plain, unbounded `.read()` and only checking the size
+    after the whole response is already sitting in memory. See
+    MAX_QWK_PACKET_SIZE's own comment for why this matters."""
+    chunks = []
+    total = 0
+    while True:
+        chunk = fileobj.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size:
+            raise ValueError(
+                f'QWK packet from {source_desc} exceeds {max_size} bytes -- '
+                'refusing to buffer further (possible runaway/misbehaving hub)')
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
+def _capped_ftp_writer(buf, max_size, source_desc):
+    """Return a callback suitable for ftplib's retrbinary() that writes
+    into `buf` but raises ValueError once more than `max_size` bytes
+    have been written -- ftplib.FTP.retrbinary() has no size-limit
+    parameter of its own, so this is the only hook point available to
+    bound it. See MAX_QWK_PACKET_SIZE's own comment."""
+    state = {'total': 0}
+
+    def _write(chunk):
+        state['total'] += len(chunk)
+        if state['total'] > max_size:
+            raise ValueError(
+                f'QWK packet from {source_desc} exceeds {max_size} bytes -- '
+                'refusing to buffer further (possible runaway/misbehaving hub)')
+        buf.write(chunk)
+
+    return _write
 
 
 def _parse_control_dat(data: str):
@@ -514,7 +571,7 @@ class QWKClient:
             else:
                 req = self._add_basic_auth(urllib.request.Request(qwk_url))
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # nosec B310 -- admin-configured QWK hub URL, not user input
-                    qwk_data = resp.read()
+                    qwk_data = _read_capped(resp, MAX_QWK_PACKET_SIZE, qwk_url)
         except Exception as exc:
             # Some exceptions (e.g. a bare connection timeout) have an
             # empty str(exc) -- always include the exception type too,
@@ -600,7 +657,8 @@ class QWKClient:
             for cand in candidates:
                 buf = _io.BytesIO()
                 try:
-                    ftp.retrbinary(f'RETR {cand}', buf.write)
+                    ftp.retrbinary(f'RETR {cand}',
+                                   _capped_ftp_writer(buf, MAX_QWK_PACKET_SIZE, host))
                     logger.info('QWK FTP retrieved %s (%d bytes)',
                                 cand, buf.tell())
                     return buf.getvalue()

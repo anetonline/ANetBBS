@@ -17,12 +17,26 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_INTERVAL_SEC = 24 * 3600
+
+# Real gap found in a security/performance audit: every sibling
+# background-thread module in this package (probe.py, hub_self_register.py,
+# directory.py, anetbbs_directory.py, registry_client.py, server.py,
+# systat.py) guards its start_*() against being called more than once in
+# the same process with a module-level thread handle + `is_alive()`
+# check -- this module never had one. web_app.create_app() can
+# legitimately run more than once in a single process (a Flask app
+# factory invoked again, e.g. under a dev-server reload or by anything
+# else that re-imports/re-calls it) -- without the guard, each call
+# spawned an additional `while True` daemon thread that never exits and
+# never overlaps with any sibling's `_thread` global (it has its own),
+# so nothing would ever have noticed the duplicates piling up.
+_thread = None
+_stop = threading.Event()
 
 
 def _hub_log_path(app):
@@ -97,18 +111,31 @@ def _run_once(app):
 
 
 def start_hub_selftest_thread(app, interval_sec: int = _DEFAULT_INTERVAL_SEC):
-    """Background daily probe. First fire 10 min after boot."""
+    """Background daily probe. First fire 10 min after boot. Idempotent --
+    see the module-level `_thread` comment for why this guard matters."""
+    global _thread
+    if _thread is not None and _thread.is_alive():
+        logger.warning('Hub self-test thread already running')
+        return _thread
+    _stop.clear()
+
     def _loop():
-        time.sleep(600)
-        while True:
+        if _stop.wait(600):
+            return
+        while not _stop.is_set():
             try:
                 with app.app_context():
                     _run_once(app)
             except Exception:
                 logger.exception('hub selftest crashed; backing off')
-            time.sleep(interval_sec)
-    t = threading.Thread(target=_loop, name='anetbbs-hub-selftest',
-                         daemon=True)
-    t.start()
+            if _stop.wait(interval_sec):
+                return
+    _thread = threading.Thread(target=_loop, name='anetbbs-hub-selftest',
+                               daemon=True)
+    _thread.start()
     logger.info('Hub self-test thread started (interval=%ss)', interval_sec)
-    return t
+    return _thread
+
+
+def stop_hub_selftest_thread():
+    _stop.set()

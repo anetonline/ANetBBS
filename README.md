@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.71`, September 2026)
+**Status: stable** (`v1.0.72`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -22,11 +22,11 @@ public web pages working with HTTPS — modern browsers refuse plain-HTTP
 logins, so the wizard's **production** mode pulls a Let's Encrypt cert.
 Telnet, SSH, rlogin, BinkP, MRC, and MSP work fine without a domain;
 pick **test** mode at the prompt if you're behind NAT or just kicking
-the tires (web admin runs on `http://localhost:5000`).
+the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.0.71.tar.gz
-cd ANetBBS-v1.0.71
+tar xzf ANetBBS-v1.0.72.tar.gz
+cd ANetBBS-v1.0.72
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.71.tar.gz
-cd ANetBBS-v1.0.71
+tar xzf ANetBBS-v1.0.72.tar.gz
+cd ANetBBS-v1.0.72
 sudo bash update.sh
 ```
 

@@ -1,3 +1,18 @@
+# ANetBBS v1.0.72 — Sixth security/performance audit pass, network daemons and tooling (September 2026)
+
+A sixth audit pass covered ground the fifth round (web + terminal) didn't reach: the FidoNet-style echomail network daemons, the door-game session/process-management layer, the MRC chat bridge, MSP, FTP, the wiki, the sysop configuration tool, maintenance scripts, and the install/update/build scripts. Same severity-tiered approach as the five prior rounds (v1.0.38, v1.0.39, v1.0.48, v1.0.66, v1.0.71); this entry again omits vulnerability specifics in the interest of responsible disclosure. Around 17 real, independently-verified findings, every one with a dedicated regression test. In summary, this pass:
+
+- Closed a resource-exhaustion gap reachable by a fully anonymous, unauthenticated network peer, where inbound file receiving over one protocol had no overall cap across a whole session (only a per-file one), plus a related gap where an outbound network-polling download had no size cap at all.
+- Fixed a rate-limiter that was keyed on a self-reported, spoofable field instead of the real connection source, and an unbounded parsing loop in the same subsystem.
+- Fixed a case where disconnecting a caller's in-progress session could silently fail to actually terminate the underlying process while still reporting success and freeing its resources for immediate reuse — an internal process-management gap, not a user-facing feature change.
+- Closed a path-traversal gap in a per-session working-directory template, and a socket/resource leak in an optional external-program bridge when the external program never actually connects.
+- Fixed two real gaps in background daemon threads: one missing the same start/stop safeguard every sibling thread in its package already had, another that could turn into a tight busy-loop under a misconfigured setting.
+- Fixed an N+1 database query pattern in an unauthenticated, peer-reachable status responder.
+- Closed two credential-handling gaps in maintenance tooling: a diagnostic script printing a live secret to its own output, and a migration report (which intentionally contains one-time plaintext credentials, by design, for the sysop to relay) being created world-readable instead of locked down at birth — plus a matching fix in the install/update scripts, where a generated system configuration fragment briefly sat world-readable before its final permission lockdown.
+- Corrected several stale documentation pages and added two missing ones (a maintenance-tools section, and a dedicated wiki-feature page that never existed despite the feature being referenced elsewhere), and completed a real-name sweep of the historical beta changelog that a prior pass had deliberately deferred.
+
+New regression tests were added throughout — every fix in this pass has one, verified against the pre-fix code before being counted as done.
+
 # ANetBBS v1.0.71 — Fifth security/performance audit pass, web and terminal (September 2026)
 
 A fifth audit pass was carried out, focused specifically on the web interface and the terminal (telnet/SSH/rlogin) client this time, using the same severity-tiered approach as the four prior rounds (v1.0.38, v1.0.39, v1.0.48, v1.0.66). As with those rounds, this entry intentionally omits vulnerability specifics in the interest of responsible disclosure; sysops running an older release should update at their earliest convenience. This was the broadest single pass yet — around 27 real, independently-verified findings, every one with a dedicated regression test, including a second independent verification pass over the highest-stakes fixes after the main sweep. In summary, this pass:

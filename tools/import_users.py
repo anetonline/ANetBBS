@@ -599,7 +599,19 @@ def run_import(users: Iterator[ImportedUser], *,
 
     # Write report CSV
     if report_rows:
-        with open(report_path, 'w', newline='') as f:
+        # Real gap found in a security/performance audit: this report
+        # holds every migrated user's TEMPORARY PASSWORD in the clear
+        # (that's the report's whole purpose per this module's own
+        # docstring -- so the sysop can notify each user) but used to
+        # be created with plain open()'s default mode, i.e. 0o666 &
+        # umask -- world-readable (0644) on a typical Linux install for
+        # as long as the file exists, not just during a brief race
+        # window. Pre-create it owner-only (0600) via os.open()'s
+        # explicit mode rather than writing then chmod'ing afterward,
+        # so there is no window where the plaintext-password CSV is
+        # readable by anyone else on the box at all.
+        fd = os.open(report_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=[
                 'handle', 'email', 'temp_password', 'real_name',
                 'location', 'access_level', 'source'])

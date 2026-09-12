@@ -16,7 +16,7 @@ Usage from launch_door_game's parent process:
     port = bridge.start()                    # picks a free port, listens
     # Generate DOSBox conf with serial1=nullmodem server:127.0.0.1 port:<port>
     # Start DOSBox subprocess
-    bridge.bind_pty(master_fd)              # ferry between TCP <-> PTY
+    bridge.bind_emit(emit_fn)               # ferry bytes to a callback
     # On door exit, bridge.stop()
 """
 import os
@@ -125,7 +125,30 @@ class DosBridge:
                     break
                 self._stop_event.wait(0.5)
             if not self._dos_sock:
+                # Real leak found in a security/performance audit: this
+                # used to `return` here with no self.stop() and no
+                # on_close() call -- skipping BOTH the cleanup the
+                # `finally:` block below does for every other exit path.
+                # door_runner._on_bridge_close() (which SIGTERMs the
+                # door's process group and runs the session's real DB/
+                # node teardown) only ever fires via on_close -- so a
+                # DOSBox that never dials in (broken binary, xvfb-run
+                # failure, snap-confine issue that slipped past the
+                # earlier detection, etc.) left this bridge's listening
+                # socket open forever (leaking one of the fixed
+                # BASE_PORT..MAX_PORT = 5000..5100 port slots every
+                # DosBridge draws from) and left GameSession/node/
+                # process-group cleanup stuck until node_manager's
+                # 1-hour stale-session backstop, instead of firing
+                # immediately like every other door_dos failure path.
                 logger.warning('DOSBox never connected; closing bridge')
+                self.stop()
+                if on_close is not None:
+                    try:
+                        on_close()
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.warning(
+                            'DosBridge on_close callback raised: %s', exc)
                 return
             sock = self._dos_sock
             connect_time = time.monotonic()
@@ -223,54 +246,6 @@ class DosBridge:
             logger.warning('DosBridge write failed: %s', exc)
             self.stop()
 
-    def bind_pty(self, master_fd: int):
-        """Legacy: pump bytes between a PTY's master fd and the TCP socket.
-        Prefer :meth:`bind_emit` + :meth:`write` for new code — they don't
-        require a PTY at all, which is cleaner because dosbox-with-nullmodem
-        doesn't need stdio plumbing."""
-        self._pty_fd = master_fd
-
-        def _pump():
-            for _ in range(120):
-                if self._dos_sock or self._stop_event.is_set():
-                    break
-                self._stop_event.wait(0.5)
-            if not self._dos_sock:
-                logger.warning('DOSBox never connected; closing bridge')
-                return
-            sock = self._dos_sock
-            try:
-                while not self._stop_event.is_set():
-                    rlist, _, _ = select.select([sock, master_fd], [], [], 1.0)
-                    if sock in rlist:
-                        try:
-                            data = sock.recv(4096)
-                        except OSError:
-                            break
-                        if not data:
-                            break
-                        try:
-                            os.write(master_fd, data)
-                        except OSError:
-                            break
-                    if master_fd in rlist:
-                        try:
-                            data = os.read(master_fd, 4096)
-                        except OSError:
-                            break
-                        if not data:
-                            break
-                        try:
-                            sock.sendall(data)
-                        except OSError:
-                            break
-            finally:
-                self.stop()
-
-        t = threading.Thread(target=_pump, daemon=True, name='dosbridge-pump-pty')
-        t.start()
-        self._threads.append(t)
-
     def stop(self):
         """Close everything."""
         self._stop_event.set()
@@ -281,103 +256,18 @@ class DosBridge:
         self._dos_sock = None
         self.listener = None
 
-
-class DosEmuBridge:
-    """Bridge between dosemu2's COM1 PTY master fd and the BBS session.
-
-    dosemu2 is configured with ``$_com1 = "/dev/pts/N"`` pointing to the slave
-    end of a PTY pair we create before forking. The FOSSIL driver (BNU) sees
-    that device as COM1. All door serial I/O flows through the PTY to/from this
-    bridge — completely separate from dosemu2's keyboard stdin — no competition,
-    no dropped keystrokes.
-
-    ``com_slave_fd`` (optional): the slave end of the same PTY pair.  Keeping it
-    open in the bridge prevents a race where the parent closes the slave before
-    dosemu2 opens ``/dev/pts/N``, which would cause an immediate EIO on the
-    master and kill the pump before dosemu2 starts.  The bridge closes it in
-    ``stop()`` so the master sees EIO only after real cleanup is triggered.
-
-    Interface is intentionally identical to :class:`DosBridge` so callers can
-    treat both interchangeably.
-    """
-
-    def __init__(self, com_master_fd: int, com_slave_fd: int = None):
-        self._fd = com_master_fd
-        self._slave_fd = com_slave_fd
-        self._stop_event = threading.Event()
-        self._threads = []
-        import time
-        self._last_active = time.monotonic()
-
-    def bind_emit(self, emit_fn, on_close=None, idle_timeout=300):
-        """Start a thread that reads from the COM1 PTY master and calls
-        ``emit_fn(bytes)`` for each chunk. Stops when dosemu2 exits (EIO on
-        the PTY master). ``on_close`` is called once when the pump exits."""
-        import time
-        self._last_active = time.monotonic()
-
-        def _pump():
-            fd = self._fd
-            total_bytes = 0
-            chunks = 0
-            try:
-                # Use the same blocking-read pattern as _pty_reader.
-                # select.select() on a PTY fd under eventlet/epoll can
-                # silently miss readability events; blocking os.read() goes
-                # through eventlet's hub correctly (same as socket.recv).
-                while not self._stop_event.is_set():
-                    try:
-                        data = os.read(fd, 4096)
-                    except OSError:
-                        break
-                    if not data:
-                        break
-                    self._last_active = time.monotonic()
-                    chunks += 1
-                    total_bytes += len(data)
-                    if chunks <= 5:
-                        preview = data[:60].decode('cp437', errors='replace')
-                        logger.info(
-                            'DosEmuBridge: chunk #%d, %d bytes — %r',
-                            chunks, len(data), preview)
-                    elif chunks == 6:
-                        logger.info(
-                            'DosEmuBridge: data flowing (>5 chunks); '
-                            'further logging suppressed.')
-                    try:
-                        emit_fn(data)
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.warning('DosEmuBridge emit_fn raised: %s', exc)
-            finally:
-                logger.info('DosEmuBridge: closing — total %d chunks, %d bytes',
-                            chunks, total_bytes)
-                self.stop()
-                if on_close is not None:
-                    try:
-                        on_close()
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.warning('DosEmuBridge on_close raised: %s', exc)
-
-        t = threading.Thread(target=_pump, daemon=True, name='dosemu-bridge-pump')
-        t.start()
-        self._threads.append(t)
-
-    def write(self, data: bytes) -> None:
-        """Forward user keystrokes to dosemu2's COM1."""
-        try:
-            os.write(self._fd, data)
-            import time
-            self._last_active = time.monotonic()
-        except OSError as exc:
-            logger.warning('DosEmuBridge write failed: %s', exc)
-            self.stop()
-
-    def stop(self):
-        self._stop_event.set()
-        for fd in (self._fd, self._slave_fd):
-            if fd is not None:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
-        self._slave_fd = None
+    # Real dead code found in a security/performance audit and removed
+    # here: `bind_pty()` (pump bytes between a PTY master fd and the TCP
+    # socket) and the entire `DosEmuBridge` class (a COM1-PTY-master
+    # bridge for dosemu2) both had zero callers anywhere in the repo
+    # (confirmed via `grep -rn "bind_pty\|DosEmuBridge\b"` across all
+    # .py files, tests/, and docs/ before removing) -- door_runner.py's
+    # real door_dos path uses this class's `bind_emit()`/`write()` pair
+    # exclusively (see its own `dos_bridge is not None` branch), and its
+    # real door_dosemu path talks to the pts COM1 slave fd directly via
+    # `_pty_reader()`'s own `com1_inject_fd` parameter, never through
+    # this module at all. Both were superseded designs left behind after
+    # door_runner.py settled on those two actually-wired-up approaches.
+    # `bind_pty()` also carried the identical "DOSBox never connected"
+    # leak just fixed in `bind_emit()`'s `_pump()` above, so it wasn't
+    # even safe dead code to leave as a template for future use.

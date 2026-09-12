@@ -79,11 +79,11 @@ sudo ufw enable
 
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.70.tar.gz
+wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.71.tar.gz
 # or check /downloads/ on bbs.a-net.fyi for the latest tarball
 
-tar xzf ANetBBS-v1.0.70.tar.gz
-cd ANetBBS-v1.0.70
+tar xzf ANetBBS-v1.0.71.tar.gz
+cd ANetBBS-v1.0.71
 ```
 
 ---
@@ -337,9 +337,9 @@ rm -rf "$INSTALL_DIR/data.bak"
 
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.70.tar.gz
-tar xzf ANetBBS-v1.0.70.tar.gz
-sudo bash ANetBBS-v1.0.70/update.sh
+wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.71.tar.gz
+tar xzf ANetBBS-v1.0.71.tar.gz
+sudo bash ANetBBS-v1.0.71/update.sh
 ```
 
 `update.sh` auto-detects the running install, backs up your data, syncs the

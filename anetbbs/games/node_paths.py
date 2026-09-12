@@ -153,6 +153,27 @@ def build_token_context(*, user, node_number: int, drop_file_path: str = '',
         # DOS/DOSBox commands into that boot sequence. Stripping CR/LF
         # here, at the one place all of them funnel through, closes it
         # for every %-token that carries user data, not just username.
+        #
+        # Real path-traversal gap found in a security/performance
+        # audit, same shape as the already-fixed ANetCraft save-path
+        # bug: these SAME values also get expand_tokens()'d into
+        # Game.working_directory / executable_path / command_line_args
+        # / drop_file_path when a sysop's template uses %r/%R
+        # (display_name) or %L (location) -- door_runner._resolve_path()
+        # runs the result through os.path.normpath() with no boundary
+        # check, so a value containing "../" collapses out of the
+        # per-node scratch dir the token was meant to stay inside (e.g.
+        # working_directory=%P%R/ with display_name="../../../../tmp/x"
+        # escapes temp/nodeN/ entirely). Registration already restricts
+        # `username` to a safe charset (web/auth.py's RegisterForm), but
+        # display_name/location/email have no such restriction, and an
+        # admin-edited username (web/admin.py's UserForm) doesn't get
+        # the RegisterForm regex either -- so username isn't provably
+        # safe here either. None of these fields have any legitimate
+        # reason to contain a path separator, so stripping '/' and '\'
+        # (on top of the existing CR/LF strip) closes the traversal for
+        # every field that funnels through here, the same single choke
+        # point already used for the CR/LF fix above.
         if user is None:
             return default
         if isinstance(user, dict):
@@ -161,6 +182,7 @@ def build_token_context(*, user, node_number: int, drop_file_path: str = '',
             val = getattr(user, field, default)
         if isinstance(val, str):
             val = val.replace('\r', '').replace('\n', '')
+            val = val.replace('/', '').replace('\\', '')
         return val
 
     nd = node_dir(node_number)

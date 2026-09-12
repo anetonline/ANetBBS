@@ -1592,7 +1592,7 @@ designated hub for more than one real echomail/QWK network at once.
 
 ## v1.0b2.109 — MRC bridge: real root cause found — pipe color codes broke identify detection (July 2026)
 
-- FIX (significant): the v1.0b2.108 diagnostic logging paid off immediately — live capture on the production server showed the hub's actual identify-success reply is `"...Successfully identified, welcome back |10StingRay|07"`. `_extract_identified_handle` (pre-dating this session, never previously verified against a real hub reply) never stripped the `|10`/`|07` pipe-color codes wrapped around the handle, so it returned the literal string `"|10StingRay|07"` instead of `"StingRay"` — which then never matched any real session's plain-text handle. This silently broke *both* the pre-existing strict-mode auto-join-after-identify and the newer v1.0b2.106 default-mode self-heal, on every install, the entire time — it just never surfaced before because every prior test (including the ones written for the v1.0b2.106 self-heal fix) used a fabricated clean message with no pipe codes at all. Added `_strip_pipe_codes()` and applied it in `_extract_identified_handle` before searching.
+- FIX (significant): the v1.0b2.108 diagnostic logging paid off immediately — live capture on the production server showed the hub's actual identify-success reply is `"...Successfully identified, welcome back |10ExampleUser|07"`. `_extract_identified_handle` (pre-dating this session, never previously verified against a real hub reply) never stripped the `|10`/`|07` pipe-color codes wrapped around the handle, so it returned the literal string `"|10ExampleUser|07"` instead of `"ExampleUser"` — which then never matched any real session's plain-text handle. This silently broke *both* the pre-existing strict-mode auto-join-after-identify and the newer v1.0b2.106 default-mode self-heal, on every install, the entire time — it just never surfaced before because every prior test (including the ones written for the v1.0b2.106 self-heal fix) used a fabricated clean message with no pipe codes at all. Added `_strip_pipe_codes()` and applied it in `_extract_identified_handle` before searching.
 - FIX: applied the same stripping defensively to `send_info_fields()` (v1.0b2.107) — a sysop's `bbs_telnet`/`bbs_ssh`/`bbs_website`/`bbs_sysop` config values copy-pasted from a colorized source (e.g. `"|15bbs.example.com:2233"`, a pipe-colored sysop name) now get sent as clean plain text, matching what the reference client actually sends (no color codes at all, sourced straight from `MRCBBS.DAT`) and avoiding the same class of hub-side parsing risk just confirmed for the identify reply. (Note: this specific behavior was reverted in v1.0b2.112 — see above — once it turned out pipe colors in these fields are actually expected/supported, contrary to the assumption made here.)
 - 7 new tests (734 passed total), including two that reproduce the exact real captured wire text end-to-end and confirm the self-heal now actually fires against it.
 
@@ -1607,7 +1607,7 @@ designated hub for more than one real echomail/QWK network at once.
 
 ## v1.0b2.106 — MRC bridge: registered handles now self-heal after /identify (July 2026)
 
-- FIX (significant): found live on the Pi immediately after deploying v1.0b2.105 (a registered handle, "StingRay") — the v1.0b2.103 default-join fix optimistically marks a session `in_room=True` the moment it connects, but for a handle that's actually *registered and not yet identified*, the real hub silently rejects that join ("Cannot join ROOM, please IDENTIFY to use this handle"). The bridge kept believing it was joined and went on forwarding chat sends anyway, which the hub then bounced back with "No route to a room from your user, /join a room first." — the caller looked joined locally but couldn't actually chat, with no way out except realizing they had to `/identify` *and separately* `/join` again by hand. Fixed: a successful `/identify` now always re-sends the room join (previously this only happened in the opt-in strict `identify_required_mode=True` path), so registered handles self-heal automatically the moment they identify — no follow-up `/join` needed. Unregistered/casual handles are unaffected (their optimistic join already succeeds at the hub and was never broken).
+- FIX (significant): found live on the Pi immediately after deploying v1.0b2.105 (a registered handle, "ExampleUser") — the v1.0b2.103 default-join fix optimistically marks a session `in_room=True` the moment it connects, but for a handle that's actually *registered and not yet identified*, the real hub silently rejects that join ("Cannot join ROOM, please IDENTIFY to use this handle"). The bridge kept believing it was joined and went on forwarding chat sends anyway, which the hub then bounced back with "No route to a room from your user, /join a room first." — the caller looked joined locally but couldn't actually chat, with no way out except realizing they had to `/identify` *and separately* `/join` again by hand. Fixed: a successful `/identify` now always re-sends the room join (previously this only happened in the opt-in strict `identify_required_mode=True` path), so registered handles self-heal automatically the moment they identify — no follow-up `/join` needed. Unregistered/casual handles are unaffected (their optimistic join already succeeds at the hub and was never broken).
 - 2 new tests, including one that captures the exact reported sequence (join → hub-side rejection scenario → identify → confirms the join packets actually get re-sent, not just a local flag flip).
 
 ## v1.0b2.105 — MRC Phase G: full regression + cross-client parity audit (July 2026)
@@ -1921,7 +1921,7 @@ Follow-up to the competitive gap analysis against Synchronet and Mystic BBS (see
 
 ## v1.0b2.48 — Sixel capability preference + door-game output queue fix (July 2026)
 
-- FEATURE: scoped the highest-priority piece of a Firehawke feature request ("Fuller CTerm support and Display Codes") — sixel detection. Found sixel auto-detection (DA1 device-attributes query) already existed but was dead code in practice: the RSS reader's entry point unconditionally asked a manual "Does your terminal support sixel? [Y/N]" prompt on every session, pre-populating the same cache flag the DA1 detector checks first, so the DA1 logic never actually ran in production. It was also RSS-specific and per-session only, with no way to force it on for a client that supports sixel but doesn't self-report via DA1 (e.g. Windows Terminal over SSH), or force it off. Added a new `sixel_mode` profile preference (`auto`/`forced_on`/`forced_off`, default `auto`, editable at `/profile/edit`), promoted the detector to a general-purpose `_detect_sixel_support()` usable by any feature, and fixed the RSS reader to actually call it instead of the old always-on manual prompt.
+- FEATURE: scoped the highest-priority piece of a user feature request ("Fuller CTerm support and Display Codes") — sixel detection. Found sixel auto-detection (DA1 device-attributes query) already existed but was dead code in practice: the RSS reader's entry point unconditionally asked a manual "Does your terminal support sixel? [Y/N]" prompt on every session, pre-populating the same cache flag the DA1 detector checks first, so the DA1 logic never actually ran in production. It was also RSS-specific and per-session only, with no way to force it on for a client that supports sixel but doesn't self-report via DA1 (e.g. Windows Terminal over SSH), or force it off. Added a new `sixel_mode` profile preference (`auto`/`forced_on`/`forced_off`, default `auto`, editable at `/profile/edit`), promoted the detector to a general-purpose `_detect_sixel_support()` usable by any feature, and fixed the RSS reader to actually call it instead of the old always-on manual prompt.
 - FIX: door-game output (`anetbbs/web/games.py`) previously called `socketio.emit()` directly from the PTY-reader thread; now marshaled through a proper thread-safe queue drained by a `socketio.start_background_task()`, matching documented Flask-SocketIO practice — purely additive, same order and content for the text output that already works. Added alongside a DEBUG-level diagnostic that logs sixel/DCS-shaped output chunks, to help confirm (on a real DSR test session, not reproducible in a sandbox) whether 8-bit C1 control-code framing is getting silently corrupted by the `cp437` decode — a known, already-documented dead end where sixel image rendering has never worked through the gunicorn-spawned PTY chain for Synchronet-compatible doors, despite the frontend already having working sixel rendering capability (`xterm-addon-image`). 9 new tests across `tests/test_sixel_detection.py` and `tests/test_door_output_queue.py`.
 
 ## v1.0b2.47 — Full BinkP session transcripts for failed polls (July 2026)
@@ -2069,7 +2069,7 @@ A ground-up re-audit of every doc file and all 43 wiki pages (5 parallel review 
 
 ## v1.0b2.24 — Configurable login auto-ban (July 2026)
 
-- FEATURE: the login auto-ban is now sysop-configurable from **Admin → IP Bans** instead of a hardcoded permanent-only trigger. Reported by Firehawke (feature request 2026-07-03): 10 failed logins in 5 minutes triggered a permanent IP ban with no way to configure the threshold, duration, or disable it — caught one of their test users off guard. Now configurable: attempt limit, time window, ban duration in hours (0 = permanent, still available), and an enable/disable switch. Default ban duration changed from permanent to 1 hour, matching the proposed resolution; the 10-attempts/5-minute trigger threshold is unchanged by default but now editable. New `AutoBanConfig` singleton model, settings card added to the existing IP Bans admin page. 8 new tests in `tests/test_auto_ban.py`.
+- FEATURE: the login auto-ban is now sysop-configurable from **Admin → IP Bans** instead of a hardcoded permanent-only trigger. Reported by a user (feature request 2026-07-03): 10 failed logins in 5 minutes triggered a permanent IP ban with no way to configure the threshold, duration, or disable it — caught one of their test users off guard. Now configurable: attempt limit, time window, ban duration in hours (0 = permanent, still available), and an enable/disable switch. Default ban duration changed from permanent to 1 hour, matching the proposed resolution; the 10-attempts/5-minute trigger threshold is unchanged by default but now editable. New `AutoBanConfig` singleton model, settings card added to the existing IP Bans admin page. 8 new tests in `tests/test_auto_ban.py`.
 
 ## v1.0b2.23 — Multi-screen welcome/goodbye/newuser sequences (July 2026)
 
@@ -2291,7 +2291,7 @@ Includes all features and fixes through v1.0a2.232:
   on `body` so the VGA pixels stay crisp rather than blurry.
 - Orbitron headings (`h1–h6`, `.navbar-brand`, `.bbs-header h1/h2`) are exempted from
   the no-smoothing rule so the vector heading font still anti-aliases correctly.
-- Font requested by Firehawke. Font file from the Ultimate Oldschool PC Font Pack
+- Font requested by a user. Font file from the Ultimate Oldschool PC Font Pack
   (int10h.org).
 
 ## v1.0a2.227 — install.sh: libsixel-bin optional package (June 2026)
@@ -3052,8 +3052,8 @@ Full audit and repair of the QWK subsystem.
   with a clear message instead of crashing. `create_user()` now returns a result
   code string and catches `IntegrityError` as defense-in-depth.
 - **Case-insensitive usernames** — all username lookups (registration, login,
-  `get_user`, web form validation) now use `func.lower()` so `StingRay` and
-  `stingray` are treated as the same account. Existing usernames unchanged.
+  `get_user`, web form validation) now use `func.lower()` so `ExampleUser` and
+  `exampleuser` are treated as the same account. Existing usernames unchanged.
 
 ## v1.0a2.134 — MRC terminal fixes; Custom User Fields; User ID # (June 2026)
 
@@ -3721,7 +3721,7 @@ line at 78 characters.
 
 **Sysop name as admin username default**: the installer now defaults the admin
 login username to the sysop display name entered earlier, so sysops who type
-"Firehawke" as their sysop name get "Firehawke" as the default admin account
+"ExampleSysop" as their sysop name get "ExampleSysop" as the default admin account
 name instead of "admin". `install.sh` also now writes `SYSOP_NAME` to `.env`
 and asks for a sysop display name separately.
 
@@ -4482,7 +4482,7 @@ Mystic hubs deliver bundled mail to nodes using FTS-5003 day-of-week
 extensions: `.mo[0-z]` (Monday), `.tu[0-z]` (Tuesday), … `.fr[0-z]`
 (Friday), `.sa[0-z]`, `.su[0-z]`. Our acceptor regex only covered
 Wednesday (`.we[0-9a-f]`) — every other day's mail got silently
-filed to the inbound dir and ignored by the TIC scanner. StingRay's
+filed to the inbound dir and ignored by the TIC scanner. A sysop's
 %RESCAN of 26,909 messages dropped on the floor as `.frk` through
 `.fro` (Friday bundles k-o).
 

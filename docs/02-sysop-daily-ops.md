@@ -165,3 +165,29 @@ timers.
 Every `anetbbs-*` service writes to systemd journal. From the
 control panel each service has a "list" icon showing the last 200
 lines. Faster than `journalctl` alt-tab.
+
+## Command-line maintenance tools
+
+A few one-off tasks live in `tools/` as standalone scripts rather than
+admin-UI buttons, run from the install directory:
+
+- **`python -m tools.delete_user_and_related_data <username>`** —
+  hard-deletes a user account and every row in every table that
+  references it, discovered by introspecting the real schema (not a
+  hardcoded table list, so it stays correct as new tables get added).
+  For when you genuinely want an account and all its data gone (a
+  test/duplicate account, say) rather than just banned or deactivated
+  — the admin panel's own delete-user button intentionally refuses
+  this for an account with real activity and points you here instead.
+  Defaults to a dry run; add `--apply` to actually delete.
+- **`bash tools/download_jsdos.sh`** — downloads the js-dos/DOSBox-in-
+  WebAssembly runtime files into `anetbbs/static/js-dos/`. Not stored
+  in git (one file alone is several MB); run this once per install
+  before using any in-browser DOS door game (see
+  [14 — Door games](14-door-games.md)).
+
+Two further one-shot scripts (`fix_anet_import_credentials.py`,
+`align_anet_password.py`) exist only as historical repairs for a
+specific real credential-drift incident already fixed and applied —
+kept in the tree for reference, not something a new install needs to
+run.

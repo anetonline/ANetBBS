@@ -66,6 +66,24 @@ _REQ_LINE_RE = re.compile(
 # inbound .REQ can create in total, across every line in the file.
 MAX_FILES_PER_REQUEST = 100
 
+# Real gap found in a security/performance audit: parse_req_lines() had
+# no cap at all on how many action lines it would return, unlike every
+# other peer-suppliable command-line parser in this package (compare
+# areafix.py's _MAX_PARSED_COMMANDS). A .REQ file is an ordinary inbound
+# file -- capped only by MAX_INBOUND_FILE_SIZE (100MB by default,
+# binkp.py/binkp_server.py) -- and process_inbound_req() below does real
+# work (a password comparison plus, before this fix, a full DB query)
+# per (line, freq-enabled area) pair. MAX_FILES_PER_REQUEST only stops
+# once 100 files have actually MATCHED; a .REQ full of filenames that
+# never match anything (garbage, or names chosen specifically to never
+# hit) never trips it at all, so a huge/garbage .REQ could still drive
+# an unbounded amount of work. Reachable from a fully anonymous,
+# zero-password BinkP crashmail session (see this module's own
+# docstring) -- no authentication is needed to reach this parser at
+# all. A real WaZOO FREQ is normally a handful of lines; this only
+# affects abuse.
+MAX_REQ_LINES = 500
+
 
 def req_filename_for_address(ftn_address):
     """Build the NNNNnnnn.REQ filename addressed to `ftn_address` (the
@@ -94,6 +112,8 @@ def parse_req_lines(content):
     text = content.decode('latin-1', errors='replace') if isinstance(content, bytes) else content
     out = []
     for line in text.splitlines():
+        if len(out) >= MAX_REQ_LINES:
+            break
         line = line.strip()
         if not line:
             continue
@@ -173,6 +193,18 @@ def process_inbound_req(content, requester_address, our_address=''):
     areas = FileArea.query.filter_by(freq_enabled=True, is_active=True).all()
     queued_rows = []
     seen_upload_ids = set()
+    # Real gap found in a security/performance audit: this used to
+    # re-run the FileUpload query for the SAME area on every single
+    # req_line -- an N (lines) x M (areas) DB-query pattern, with no
+    # cap on line count either (see MAX_REQ_LINES's own comment above
+    # for why that combination matters: MAX_FILES_PER_REQUEST only
+    # stops once 100 files have actually MATCHED, so a .REQ full of
+    # names that never match anything never trips it). Caching each
+    # area's candidate uploads the FIRST time it's actually needed
+    # (i.e. after the password check passes for at least one line)
+    # turns the worst case into a fixed, at-most-once-per-area query
+    # count, regardless of how many lines the .REQ contains.
+    uploads_by_area = {}
     for req_line in req_lines:
         if len(queued_rows) >= MAX_FILES_PER_REQUEST:
             break
@@ -189,11 +221,13 @@ def process_inbound_req(content, requester_address, our_address=''):
             if area.freq_password and not _passwords_match(
                     area.freq_password, req_line['password'] or ''):
                 continue
-            uploads = (FileUpload.query
-                      .filter_by(file_area_id=area.id)
-                      .order_by(FileUpload.created_at.desc())
-                      .limit(500).all())
-            for upload in uploads:
+            if area.id not in uploads_by_area:
+                uploads_by_area[area.id] = (
+                    FileUpload.query
+                    .filter_by(file_area_id=area.id)
+                    .order_by(FileUpload.created_at.desc())
+                    .limit(500).all())
+            for upload in uploads_by_area[area.id]:
                 if len(queued_rows) >= MAX_FILES_PER_REQUEST:
                     break
                 if upload.id in seen_upload_ids:

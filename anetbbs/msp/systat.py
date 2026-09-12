@@ -148,7 +148,7 @@ def _build_response(app) -> str:
     rows = []  # list of (sort_key, slot_str, user, action, last_seen)
     seen_users = set()
     with app.app_context():
-        from ..models import NodeActivity, UserSession
+        from ..models import db, NodeActivity, UserSession
         # Terminal sessions first — they have a real slot number.
         for r in (NodeActivity.query
                   .filter(NodeActivity.last_seen >= threshold)
@@ -162,8 +162,20 @@ def _build_response(app) -> str:
         # Web sessions — no slot, so synthesize 'w<N>' identifiers
         # starting after the highest terminal slot. Dedupe against
         # users already counted via NodeActivity.
+        #
+        # Real gap found in a security/performance audit: `s.user` below
+        # is a lazy=True relationship (models.py's UserSession.user) --
+        # iterating without eager-loading it means one extra SELECT
+        # against `users` PER active web session row, on every SYSTAT
+        # query this UDP responder answers (see the rate-limit comment
+        # above -- this responder is deliberately reachable by any
+        # unauthenticated peer that can hit the socket, so its per-request
+        # cost matters). joinedload() folds that into the single UserSession
+        # query via a JOIN, so cost no longer scales with the number of
+        # concurrently-online web users.
         w_index = 1
         for s in (UserSession.query
+                  .options(db.joinedload(UserSession.user))
                   .filter(UserSession.last_seen >= threshold)
                   .order_by(UserSession.last_seen.desc())
                   .all()):

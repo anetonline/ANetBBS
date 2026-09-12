@@ -103,8 +103,8 @@
 <section class="slide">
     <span class="step">4 / 10</span>
     <h2>First install — three commands</h2>
-    <pre>tar xzf ANetBBS-v1.0.70.tar.gz
-cd ANetBBS-v1.0.70
+    <pre>tar xzf ANetBBS-v1.0.71.tar.gz
+cd ANetBBS-v1.0.71
 sudo bash install.sh</pre>
     <p>The wizard handles:</p>
     <ul>
@@ -231,10 +231,11 @@ sudo bash update.sh</pre>
     <p>The script:</p>
     <ul>
         <li>Backs up <code>.env</code>, the SQLite database, and your
-            systemd units to <code>/tmp/anetbbs-backup-*</code>
-            (<code>data/</code> and <code>logs/</code> are never
-            touched by an update at all, so there's nothing to back up
-            there)</li>
+            systemd units to a timestamped directory under
+            <code>data/backups/</code> inside your install dir
+            (<code>data/</code> and <code>logs/</code> themselves are
+            never touched by an update at all, so there's nothing to
+            back up there)</li>
         <li>Stops services</li>
         <li>Rsync's the new code (preserves your data + config)</li>
         <li><code>pip install -e</code> picks up new modules</li>

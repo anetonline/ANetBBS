@@ -2065,12 +2065,94 @@ def resize_terminal(session_id, rows, cols):
 
 
 def terminate_session(session_id):
-    """Forcibly terminate a door game session."""
+    """Forcibly terminate a door game session.
+
+    Real gap found in a security/performance audit: this only ever
+    checked THIS PROCESS's own in-memory `_sessions` dict. ANetBBS runs
+    the web (SocketIO), telnet, and SSH surfaces as separate OS
+    processes (see node_manager.py's own cross-process docstring for
+    the identical split that already bit node counting) -- each with
+    its own independent copy of `_sessions`, since it's a plain
+    module-level dict, not anything shared across processes. A door
+    launched over telnet is invisible to `_sessions` in the web or SSH
+    process, and vice versa. Every caller of this function (the web
+    admin "Disconnect" button in web/games_admin.py, the sysop cfg
+    tool's games section, and the terminal sysop-games menu in
+    bbs_ui.py) lists sessions from the SHARED GameSession table, so a
+    sysop routinely sees -- and can click "disconnect" on -- a session
+    that isn't running in their own process. Before this fix, that
+    silently no-opped the actual kill (door_session came back None)
+    while _cleanup_session() below STILL flipped GameSession.status to
+    'completed' and released the node -- lying to the sysop that the
+    session was gone, while the real subprocess/PTY kept running
+    untracked in the other process, AND freeing the node number for
+    immediate reuse by a new session while the orphaned old one was
+    still alive on it (two sessions claiming the same node number at
+    once).
+
+    Fixed by falling back to a direct, PID-targeted os.killpg() using
+    GameSession.pid (recorded at launch by launch_door_game()) when the
+    session isn't owned by this process. Unix signals target a process
+    by PID regardless of which process sends them (same-user
+    permissions apply), so this reaches the door's process group even
+    though we never forked it ourselves. We deliberately do NOT flip
+    GameSession.status or release_node() here in that fallback case --
+    the OWNING process's own waitpid watcher / PTY reader (see
+    _waitpid_watcher / _pty_reader above) observes the SIGTERM'd child
+    exit exactly as it would for any other disconnect, and runs the
+    real local cleanup (fds, dos_bridge, temp files) plus the DB status
+    flip itself. Doing both here too would race a real cleanup against
+    a premature, resource-blind one.
+
+    External rlogin/telnet bridge sessions (play_rlogin_telnet,
+    play_telnet_terminal) have no subprocess at all -- GameSession.pid
+    stays NULL for them -- so there's genuinely nothing a foreign
+    process can do to stop them; the sysop is told exactly that instead
+    of being given a false "terminated" result. Those sessions only end
+    via their own owning coroutine (idle timeout or the user's own
+    Ctrl+]q).
+    """
     with _sessions_lock:
-        door_session = _sessions.get(session_id)
-    if door_session:
-        door_session.close()
-    _cleanup_session(session_id)
+        found_locally = session_id in _sessions
+    if found_locally:
+        # Owned by this process -- the existing local-cleanup path
+        # already closes the DoorSession (fds/process/bridge/temp
+        # files) and flips GameSession status. Only one of these two
+        # branches should ever run for a given call: this function
+        # used to call door_session.close() here AND THEN
+        # _cleanup_session() (which closes the same DoorSession again),
+        # double-closing it and spawning a redundant force-kill thread
+        # every time an in-process session was terminated.
+        _cleanup_session(session_id)
+        return
+
+    try:
+        gs = GameSession.query.get(session_id)
+    except Exception:
+        logger.exception('terminate_session: GameSession lookup failed for %d',
+                         session_id)
+        return
+    if gs is None or gs.status != 'active':
+        return  # already gone, or never existed -- nothing to do
+    if gs.pid:
+        try:
+            os.killpg(gs.pid, signal.SIGTERM)
+            logger.info(
+                "terminate_session: session %d not owned by this process -- "
+                "sent SIGTERM directly to pid %d (its owning process's own "
+                "watcher will finish cleanup)", session_id, gs.pid)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            logger.warning('terminate_session: cross-process kill of pid %d '
+                           'for session %d failed: %s', gs.pid, session_id, exc)
+    else:
+        logger.warning(
+            'terminate_session: session %d is not owned by this process and '
+            'has no recorded pid (external rlogin/telnet bridge sessions '
+            'have none) -- cannot be force-terminated from here; it will '
+            'end via its own idle timeout or when the user disconnects',
+            session_id)
 
 
 async def _drain_stale_session_input(session, timeout=0.05):

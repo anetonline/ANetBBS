@@ -163,6 +163,62 @@ Read this whole file before exposing the BBS to the internet.
   let one hub-hosted node's AreaFix subscription change affect another
   node's subscriptions under some conditions. Fixed to match the
   per-node isolation the feature was always meant to have.
+- **BinkP inbound file receiving is now bounded per session, not just
+  per file.** A single anonymous, unauthenticated peer connection could
+  previously offer an unlimited number of files each just under the
+  existing per-file size cap, accumulating without any overall limit
+  for that session — an in-process memory-exhaustion path reachable
+  with zero authentication (an unrecognized peer is accepted as
+  ordinary anonymous crash-mail, per real FTN convention, before this
+  point is ever reached). Now capped by total session bytes as well.
+- **FREQ (file request) rate-limiting is now keyed on the real
+  connecting IP**, not a self-reported address field an anonymous peer
+  controls — closing a gap where the per-IP throttle could be trivially
+  bypassed by claiming a different address on every connection. FREQ
+  request parsing is also now bounded by request-line count, matching
+  every other peer-suppliable command parser in this codebase.
+- **QWK network packet downloads are now size-capped**, matching the
+  cap BinkP's own inbound file receiving already had — an admin-
+  configured QWK hub's *response* at poll time is still remote,
+  foreign data, and was previously buffered fully into memory with no
+  limit.
+- **Disconnecting a door-game session now works correctly even when it's
+  running in a different ANetBBS process than the one you're viewing
+  it from.** ANetBBS runs web, telnet, and SSH as separate systemd
+  services, each tracking its own live sessions in memory; every admin
+  surface that lists sessions to disconnect reads the shared database
+  instead, so a sysop routinely disconnects a session actually owned by
+  a *different* process. This used to silently fail to kill the real
+  subprocess while still marking the session finished and freeing its
+  node number for immediate reuse by a new session — found and fixed in
+  a security/performance audit; disconnecting now signals the real
+  process directly regardless of which service owns it.
+- **Door-game per-node working-directory paths are now sanitized**
+  against the same class of path-traversal issue found and fixed in
+  ANetCraft's own save-path handling — a sysop-templated per-node path
+  could otherwise be walked outside its intended directory via
+  unsanitized characters in a player's display name.
+- **A background network-health thread now has the same start/stop
+  guard every sibling background thread in that package already had** —
+  found missing from one specific module in a security/performance
+  audit; without it, re-initializing the app in one process could spawn
+  an extra, un-stoppable daemon thread with no way to tell the
+  duplicates apart.
+- **Background polling loops (MRC bridge, SYSTAT responder) are now
+  protected against a misconfigured near-zero interval** turning them
+  into a busy loop that hammers an upstream service, and a real N+1
+  query pattern in the SYSTAT responder (reachable by any
+  unauthenticated UDP peer) was closed so its per-request cost no
+  longer scales with the number of online users.
+- **A maintenance tool no longer prints a live door password to its own
+  output**, and a user-migration tool's report file (which intentionally
+  contains plaintext temporary passwords, by design, for the sysop to
+  relay to migrated users) is now created already-locked-down rather
+  than world-readable at birth — both found in a security/performance
+  audit. `install.sh`/`update.sh` also close a race window where the
+  generated sudoers fragment briefly sat world-readable before its
+  final permission lockdown, the same class of gap already fixed
+  elsewhere in those same scripts for `.env` and the database file.
 
 ## What you MUST do for production
 
