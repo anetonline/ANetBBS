@@ -1,3 +1,7 @@
+# ANetBBS v1.0.73 — CI-only fix: unused import (September 2026)
+
+Fixed a genuine `code-scan` CI failure on v1.0.72: dead-code removal in `anetbbs/games/dos_bridge.py` during the sixth audit pass deleted the code that used its `os` import but left the import itself behind. Caught by pyflakes in CI, not by the local test suite (pyflakes/bandit aren't part of the local pytest-based verification loop) — no runtime behavior change, no functional bug.
+
 # ANetBBS v1.0.72 — Sixth security/performance audit pass, network daemons and tooling (September 2026)
 
 A sixth audit pass covered ground the fifth round (web + terminal) didn't reach: the FidoNet-style echomail network daemons, the door-game session/process-management layer, the MRC chat bridge, MSP, FTP, the wiki, the sysop configuration tool, maintenance scripts, and the install/update/build scripts. Same severity-tiered approach as the five prior rounds (v1.0.38, v1.0.39, v1.0.48, v1.0.66, v1.0.71); this entry again omits vulnerability specifics in the interest of responsible disclosure. Around 17 real, independently-verified findings, every one with a dedicated regression test. In summary, this pass:

@@ -1,11 +1,20 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.72`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.73`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.73 — CI-only fix: unused import (September 2026)
+
+Fixed a genuine `code-scan` CI failure on v1.0.72: dead-code removal in
+`anetbbs/games/dos_bridge.py` during the sixth audit pass deleted the
+code that used its `os` import but left the import itself behind.
+Caught by pyflakes in CI, not by the local test suite (pyflakes/bandit
+aren't part of the local pytest-based verification loop) — no runtime
+behavior change, no functional bug.
 
 ## v1.0.72 — Sixth security/performance audit pass, network daemons and tooling (September 2026)
 

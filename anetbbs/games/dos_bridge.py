@@ -19,7 +19,6 @@ Usage from launch_door_game's parent process:
     bridge.bind_emit(emit_fn)               # ferry bytes to a callback
     # On door exit, bridge.stop()
 """
-import os
 import socket
 import select
 import threading
