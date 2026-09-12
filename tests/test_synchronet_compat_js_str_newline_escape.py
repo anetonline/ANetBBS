@@ -26,6 +26,18 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Same optional-external-tool convention as
+# test_synchronet_compat_missing_globals.py's own _HAVE_NODE guard --
+# node isn't (and shouldn't need to be) a dependency of this Python
+# project; the CI Docker image in particular doesn't have it, so the
+# node --check test below must skip rather than fail there, matching
+# every other node-dependent test in this file's own package. The
+# other test in this file (test_no_raw_newline_lands_inside_the_alias_literal)
+# needs no such guard -- it verifies the real fix at the byte level with
+# no external tool at all, and always runs.
+_NODE_PATH = os.environ.get('NODEJS_PATH', '/usr/bin/node')
+_HAVE_NODE = os.path.isfile(_NODE_PATH)
+
 
 class JsStrNewlineEscapeTests(unittest.TestCase):
     def _write_script(self, display_name):
@@ -40,9 +52,10 @@ class JsStrNewlineEscapeTests(unittest.TestCase):
         self.addCleanup(lambda: os.path.isfile(compat_path) and os.unlink(compat_path))
         return compat_path
 
+    @unittest.skipUnless(_HAVE_NODE, 'requires a real Node.js binary')
     def test_display_name_with_embedded_newline_produces_valid_js(self):
         compat_path = self._write_script('Line1\nLine2')
-        result = subprocess.run(['node', '--check', compat_path],
+        result = subprocess.run([_NODE_PATH, '--check', compat_path],
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(
             result.returncode, 0,

@@ -1,3 +1,7 @@
+# ANetBBS v1.0.74 — CI-only fix: Node-dependent test didn't skip without Node (September 2026)
+
+Fixed a genuine `Docker build` CI failure on v1.0.73: a new regression test added during the sixth audit pass (verifying a generated Synchronet-compat script is syntactically valid JavaScript) shelled out to `node --check` unconditionally, unlike every other Node-dependent test in the same file, which already skip gracefully when a real Node.js binary isn't present. The CI Docker image doesn't (and shouldn't need to) have Node.js installed, so the test failed there with a plain "no such file" error rather than skipping. Brought into line with the existing convention; the test's other half (a byte-level check that needs no external tool at all) already fully verifies the real fix and is unaffected. No runtime behavior change, no functional bug.
+
 # ANetBBS v1.0.73 — CI-only fix: unused import (September 2026)
 
 Fixed a genuine `code-scan` CI failure on v1.0.72: dead-code removal in `anetbbs/games/dos_bridge.py` during the sixth audit pass deleted the code that used its `os` import but left the import itself behind. Caught by pyflakes in CI, not by the local test suite (pyflakes/bandit aren't part of the local pytest-based verification loop) — no runtime behavior change, no functional bug.
