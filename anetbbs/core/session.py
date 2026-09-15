@@ -303,6 +303,7 @@ class BBSSession:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  config: Dict[str, Any], prefill_username: Optional[str] = None,
                  prefill_password: Optional[str] = None,
+                 prefill_authenticated_user: Optional[Dict[str, Any]] = None,
                  forced_term_mode: Optional[str] = None,
                  forced_width: Optional[int] = None,
                  direct_door_slug: Optional[str] = None):
@@ -312,6 +313,21 @@ class BBSSession:
         prefill_password: when also set (SSH client sent a password) the login
             flow attempts authentication silently and only falls back to the
             interactive prompt if it fails.
+        prefill_authenticated_user: set by ssh_server.py when the connection
+            authenticated via a registered SSH public key rather than a
+            password (anetbbs/core/user_manager.py's
+            authenticate_by_public_key(), called from validate_public_key()
+            during the SSH handshake itself -- by the time a session object
+            exists, asyncssh has already cryptographically verified the
+            client holds the matching private key). The user dict this
+            resolved to. When set, login_screen() logs straight in with NO
+            password prompt at all, not even the one-shot "Password for
+            X:" prompt prefill_username alone would still show -- the key
+            already proved identity; asking for a password on top of that
+            would just be a second, weaker check of the same thing.
+            Takes priority over prefill_username/prefill_password if
+            somehow both are set (shouldn't happen -- the SSH server only
+            ever sets one path or the other per connection).
         forced_term_mode: set by anetbbs/core/petscii_server.py's dedicated
             PETSCII listener(s) -- every connection on those ports IS
             PETSCII unconditionally (real C64 telnet clients mostly don't
@@ -357,6 +373,7 @@ class BBSSession:
         self._games_manager = None
         self._prefill_username = (prefill_username or '').strip() or None
         self._prefill_password = prefill_password or None
+        self._prefill_authenticated_user = prefill_authenticated_user or None
         self.buffer = bytearray()
         self.telnet_command_buffer = bytearray()
         self._echo_on = True
@@ -1789,6 +1806,20 @@ class BBSSession:
 
     async def login_screen(self) -> bool:
         """Display login screen and handle user authentication"""
+        # SSH public-key auth: identity already cryptographically proven
+        # during the handshake (see prefill_authenticated_user's own
+        # docstring on __init__) -- log straight in, no password prompt
+        # of any kind, not even the one-shot fallback prefill_username
+        # alone would still show below.
+        if self._prefill_authenticated_user:
+            self.user = self._prefill_authenticated_user
+            username = self.user.get('username', '?')
+            await self.clear_screen()
+            await self.write(f"\r\n=== Login as {username} (SSH key) ===\r\n")
+            await self.write(f"\r\nWelcome back, {username}!\r\n")
+            await asyncio.sleep(1)
+            return True
+
         # Auto-login path: SSH/rlogin pre-filled the username. Skip the welcome
         # menu and go straight to "Password for <user>: ". One try only — on
         # failure fall through to the normal interactive flow so the user can
@@ -2725,8 +2756,12 @@ class BBSSession:
 
             # Bot defense — auto-scanners just connect and dump bytes.
             # Real users press a key. Skip when an SSH/rlogin client has
-            # already sent valid auth (those went through real protocols).
-            if not self._prefill_username:
+            # already sent valid auth (those went through real protocols)
+            # -- an SSH public-key login (_prefill_authenticated_user) is
+            # the same case, just without _prefill_username also being
+            # set (the SSH server resolves straight to a user dict for
+            # that path rather than a bare username to re-authenticate).
+            if not self._prefill_username and not self._prefill_authenticated_user:
                 if not await self._bot_gate():
                     return
 

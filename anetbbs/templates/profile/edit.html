@@ -123,9 +123,13 @@
                     <a href="{{ url_for('profile.change_password') }}" class="btn btn-outline-secondary btn-sm w-100 mb-2">
                         <i class="bi bi-key"></i> Change Password
                     </a>
-                    <a href="{{ url_for('profile.security_questions') }}" class="btn btn-outline-secondary btn-sm w-100">
+                    <a href="{{ url_for('profile.security_questions') }}" class="btn btn-outline-secondary btn-sm w-100 mb-2">
                         <i class="bi bi-question-circle"></i> Security Questions
                         <span class="text-muted">(for password recovery)</span>
+                    </a>
+                    <a href="{{ url_for('profile.ssh_keys') }}" class="btn btn-outline-secondary btn-sm w-100">
+                        <i class="bi bi-terminal"></i> SSH Keys
+                        <span class="text-muted">(password-free SSH login)</span>
                     </a>
                 </div>
             </div>

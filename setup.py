@@ -37,7 +37,7 @@ def _read_requirements():
 
 setup(
     name="anetbbs",
-    version="1.0.77",
+    version="1.0.78",
     packages=find_packages(),
     install_requires=_read_requirements(),
     entry_points={
@@ -51,6 +51,8 @@ setup(
             'anetbbs-symlinks=anetbbs.installer.symlinks:main',
             'anetbbs-cleanup=anetbbs.installer.cleanup:main',
             'anetbbs-import-users=tools.import_users:main',
+            'anetbbs-export-users=tools.export_users:main',
+            'anetbbs-scaffold-door=tools.scaffold_builtin_door:main',
             'anetbbs-prepare-dos=tools.prepare_dos_games:main',
         ],
     },

@@ -35,10 +35,48 @@ def _resolve_db_uri() -> str:
         return 'sqlite:///data/anetbbs.db'
 
 
-# Module-level engine — one connection pool shared across all sessions
-_DB_URI = _resolve_db_uri()
-_engine = create_engine(_DB_URI, future=True)
-_Session = sessionmaker(bind=_engine, future=True, expire_on_commit=False)
+# Engine/sessionmaker, cached and rebuilt only when the resolved DB URI
+# actually changes -- NOT a plain module-level `_engine = create_engine
+# (_resolve_db_uri())` built once at import time. Real bug found live
+# while writing Phase D's SSH public-key-auth tests: a process that
+# builds more than one app/database in sequence (a test suite running
+# multiple test files in one pytest process is the common real case;
+# a single production process building one app at startup never hits
+# this) silently kept using whichever database was resolved FIRST, for
+# the rest of the process's lifetime -- the exact same "frozen at
+# import" bug class already found and fixed in anetbbs/config.py's
+# SQLALCHEMY_DATABASE_URI descriptor. Cached (not rebuilt on every
+# single call) matching anetbbs/features/bbs_ui.py's _app() caching
+# pattern -- a fresh engine per DB query would be wasteful; only
+# rebuild when the URI actually changes.
+_cached_engine = None
+_cached_sessionmaker = None
+_cached_engine_uri = None
+
+
+def _get_sessionmaker():
+    global _cached_engine, _cached_sessionmaker, _cached_engine_uri
+    uri = _resolve_db_uri()
+    if _cached_sessionmaker is None or uri != _cached_engine_uri:
+        if _cached_engine is not None:
+            try:
+                _cached_engine.dispose()
+            except Exception:
+                pass
+        _cached_engine = create_engine(uri, future=True)
+        _cached_sessionmaker = sessionmaker(
+            bind=_cached_engine, future=True, expire_on_commit=False)
+        _cached_engine_uri = uri
+    return _cached_sessionmaker
+
+
+def _Session():
+    """Session factory -- every call site below uses this exactly like
+    a bare sessionmaker instance (`with _Session() as s:`); this thin
+    wrapper is what makes sure the underlying engine always matches
+    the CURRENT DATABASE_URL rather than whatever it was at first
+    import (see _get_sessionmaker() above)."""
+    return _get_sessionmaker()()
 
 # Real gap found in a security/performance audit: authenticate() below
 # used to `return None` for a nonexistent username BEFORE ever calling
@@ -325,6 +363,56 @@ class UserManager:
             if not getattr(user, 'is_verified', True) and not user.is_admin:
                 return None
             # Update login bookkeeping (same fields the web app maintains)
+            user.last_login = datetime.utcnow()
+            user.login_count = (user.login_count or 0) + 1
+            s.commit()
+            return self._user_to_dict(user)
+
+    def authenticate_by_public_key(self, username: str, fingerprint: str,
+                                    ip: Optional[str] = None) -> Optional[Dict]:
+        """Return user dict on success, None on failure -- the SSH
+        public-key-auth counterpart to authenticate() above.
+
+        The fingerprint IS the credential here, not a password: by the
+        time this runs, asyncssh has already verified the connecting
+        client actually possesses the private key matching whatever
+        public key `fingerprint` was computed from (a real signature
+        challenge over the SSH wire protocol, not something this
+        function does or needs to redo). What this checks is narrower
+        and different: is that specific fingerprint registered to
+        `username` at all (UserSSHKey.fingerprint is globally unique,
+        so a match here can only ever belong to one account), and does
+        that account pass the same non-password gates authenticate()
+        already applies -- active, not locked, verified. A banned/
+        locked account's key must not grant access just because the
+        key itself is genuine.
+        """
+        from anetbbs.models import User, UserSSHKey
+
+        if ip:
+            blocked = self._check_ip_and_rate_limit(ip)
+            if blocked:
+                return None
+
+        with _Session() as s:
+            user = s.execute(
+                select(User).where(func.lower(User.username) == username.lower())
+            ).scalar_one_or_none()
+            if user is None:
+                return None
+            key_row = s.execute(
+                select(UserSSHKey).where(
+                    UserSSHKey.fingerprint == fingerprint,
+                    UserSSHKey.user_id == user.id)
+            ).scalar_one_or_none()
+            if key_row is None:
+                return None
+            if not user.is_active:
+                return None
+            if getattr(user, 'is_locked', False):
+                return None
+            if not getattr(user, 'is_verified', True) and not user.is_admin:
+                return None
             user.last_login = datetime.utcnow()
             user.login_count = (user.login_count or 0) + 1
             s.commit()

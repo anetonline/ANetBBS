@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Translations{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-translate"></i> Translations</h1>
+    <p>Text overrides by (language, key) — read by both the terminal
+    menu engine and the web UI's <code>t()</code> helper. English
+    ('en') is the built-in fallback and never needs a row here. See
+    <a href="https://github.com/anetonline/ANetBBS/blob/main/docs/17-development.md#translating-a-web-template-string">docs/17-development.md</a>
+    for the key-naming convention and current template coverage.</p>
+</div>
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">Language code</label>
+                <input type="text" name="lang" class="form-control" placeholder="es" maxlength="8" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Key</label>
+                <input type="text" name="key" class="form-control" placeholder="nav.home" maxlength="200" required>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Translated text</label>
+                <input type="text" name="text" class="form-control" required>
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-primary w-100">Add</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+    {% if rows %}
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Lang</th><th>Key</th><th>Text</th><th>Updated</th><th></th></tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td><span class="badge bg-secondary">{{ r.lang }}</span></td>
+                    <td><code>{{ r.key }}</code></td>
+                    <td>
+                        <form method="post" class="d-flex gap-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="edit">
+                            <input type="hidden" name="row_id" value="{{ r.id }}">
+                            <input type="text" name="text" class="form-control form-control-sm" value="{{ r.text }}">
+                            <button class="btn btn-outline-secondary btn-sm">Save</button>
+                        </form>
+                    </td>
+                    <td><small>{{ r.updated_at|eastern('%Y-%m-%d') if r.updated_at else '' }}</small></td>
+                    <td>
+                        <form method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="row_id" value="{{ r.id }}">
+                            <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}<div class="p-3 text-muted">No translation overrides yet — add one above.</div>{% endif %}
+    </div>
+</div>
+{% endblock %}

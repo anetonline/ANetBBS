@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.77`, September 2026)
+**Status: stable** (`v1.0.78`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.0.77.tar.gz
-cd ANetBBS-v1.0.77
+tar xzf ANetBBS-v1.0.78.tar.gz
+cd ANetBBS-v1.0.78
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.77.tar.gz
-cd ANetBBS-v1.0.77
+tar xzf ANetBBS-v1.0.78.tar.gz
+cd ANetBBS-v1.0.78
 sudo bash update.sh
 ```
 
@@ -235,6 +235,16 @@ buildx` once there's a registry to publish to.
   gets a public share link and a downloadable PNG for sharing off
   platform. See [docs/30-postcards.md](docs/30-postcards.md).
 
+### Achievements
+- 10 built-in badges (First Login, 30-Day Caller, First Post, Frequent
+  Poster, Centurion Poster, PM Sent, Echomail Hatchling, Netmail
+  Pioneer, Town Crier, Veteran) — checked and awarded automatically on
+  login, with a flash notice on new unlocks
+- Shown on each user's Profile page and rolled up into a site-wide
+  count on the public Stats page
+- Sysop-extensible — new rules are plain Python functions in
+  `anetbbs/features/achievements.py`
+
 ### Sysop tools
 - **ANetBBS Pulse** — read-only, mobile-first status dashboard at
   `/admin/pulse/`, installable to a phone's home screen (Android +
@@ -259,8 +269,9 @@ buildx` once there's a registry to publish to.
   word filters, login auto-ban, registration log), games (door games,
   categories, active sessions), image galleries, BBS/PETSCII menu
   editors, scheduled events, graffiti wall moderation, login modules,
-  last-callers log, backup browsing, and `.env` system settings — no
-  browser required. `python -m anetbbs.cfg` from a checkout, or
+  last-callers log, backup browsing, translations, and `.env` system
+  settings — no browser required. `python -m anetbbs.cfg` from a
+  checkout, or
   `anetbbs-cfg` once installed.
 - `anetbbs-monitor` — live, auto-refreshing node monitor (uMonitor /
   nodespy style): who's connected, on what protocol, from where, doing
@@ -273,6 +284,7 @@ buildx` once there's a registry to publish to.
 - [`docs/00-overview.md`](docs/00-overview.md) — architecture + table of contents
 - [`docs/INSTALL.md`](docs/INSTALL.md) — full install
 - [`docs/INSTALL-PI.md`](docs/INSTALL-PI.md) — Raspberry Pi install guide (hardware, DDNS, SSD, troubleshooting)
+- [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) — Windows install guide (WSL2, Docker Desktop)
 - [`docs/PORTS.md`](docs/PORTS.md) — every port the BBS uses
 - [`docs/SECURITY.md`](docs/SECURITY.md) — security defaults + production hardening
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — version history

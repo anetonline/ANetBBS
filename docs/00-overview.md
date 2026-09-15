@@ -70,6 +70,10 @@ once.
   cross-links, per-page revision history/diff/revert, full-text
   search, 52 seeded reference pages. See the [README's Wiki
   section](../README.md#wiki) for the full feature list.
+- **Achievements** — 10 built-in badges awarded automatically on
+  login, shown on the Profile page and rolled up on the public Stats
+  page. See the [README's Achievements
+  section](../README.md#achievements).
 
 ## Where to go next
 
@@ -111,6 +115,7 @@ once.
 
 - [Installing (general)](INSTALL.md)
 - [Installing on a Raspberry Pi](INSTALL-PI.md)
+- [Installing on Windows (WSL2 / Docker Desktop)](INSTALL-WINDOWS.md)
 - [Ports reference](PORTS.md)
 - [Security notes](SECURITY.md)
 - [Changelog](CHANGELOG.md) / [beta build-number history](CHANGELOG-beta.md)

@@ -35,6 +35,9 @@ Read this whole file before exposing the BBS to the internet.
     `is_locked`/`is_verified` (unlike every other login surface) — a
     locked-out or not-yet-approved account could still fully
     authenticate over FTP. Both fixed.
+  - **SSH public-key login attempts** — same IP-ban/auto-ban check as
+    every other login path above, applied before a candidate key is
+    even evaluated against the database.
   - `/auth/forgot` and `/auth/forgot/verify` (10 / 5 min / IP each) —
     the security-question recovery flow. Also found and fixed in the
     same audit: a wrong guess no longer lets the same question be

@@ -110,22 +110,34 @@ def _make_process_handler(bbs_config):
         # doesn't honor set_extra_info.
         ssh_user = process.get_extra_info('username')
         ssh_pass = None
+        pubkey_user = None
         try:
             conn = process.get_extra_info('connection')
             if conn is not None:
-                ssh_pass = conn.get_extra_info('bbs_password')
-                if not ssh_pass:
-                    # Fallback: look up by connection id in the server-side cache.
-                    ssh_pass = _PASSWORD_CACHE.get(id(conn))
+                # Public-key auth (see validate_public_key()) already
+                # resolved a full user dict -- if that's how this
+                # connection authenticated, it takes priority and no
+                # password is needed at all.
+                pubkey_user = _PUBKEY_USER_CACHE.get(id(conn))
+                if pubkey_user is None:
+                    ssh_pass = conn.get_extra_info('bbs_password')
+                    if not ssh_pass:
+                        # Fallback: look up by connection id in the server-side cache.
+                        ssh_pass = _PASSWORD_CACHE.get(id(conn))
         except Exception:
             pass
-        logger.info('SSH session opened from %s as %s (pw_captured=%s)',
-                    peer, ssh_user, bool(ssh_pass))
+        logger.info('SSH session opened from %s as %s (auth=%s)',
+                    peer, ssh_user,
+                    'pubkey' if pubkey_user else ('password' if ssh_pass else 'none'))
         reader = _SshStreamReader(process.stdin)
         writer = _SshStreamWriter(process.stdout, peer)
-        session = BBSSession(reader, writer, bbs_config,
-                             prefill_username=ssh_user,
-                             prefill_password=ssh_pass)
+        if pubkey_user is not None:
+            session = BBSSession(reader, writer, bbs_config,
+                                 prefill_authenticated_user=pubkey_user)
+        else:
+            session = BBSSession(reader, writer, bbs_config,
+                                 prefill_username=ssh_user,
+                                 prefill_password=ssh_pass)
         # Populate terminal info from the SSH PTY request so term_mode works.
         # SSH uses its own pty-req channel; telnet NAWS/TTYPE don't apply here.
         try:
@@ -158,12 +170,24 @@ def _make_process_handler(bbs_config):
 # set_extra_info is a no-op in some versions.
 _PASSWORD_CACHE = {}
 
+# Connection-id -> resolved user dict, set only when a connection
+# authenticated via a registered SSH public key (validate_public_key()
+# below) rather than a password. Cleared on connection_lost, same as
+# _PASSWORD_CACHE.
+_PUBKEY_USER_CACHE = {}
+
 
 class _BBSSshServer(asyncssh.SSHServer):
     """Accepts all connections. We capture both the SSH username AND the
     SSH password the client sent and stash them on the connection object
     so the spawned process_factory can forward them to the BBS session.
-    That way SSH's own username/password is enough — no BBS re-prompt."""
+    That way SSH's own username/password is enough — no BBS re-prompt.
+
+    Public-key auth (validate_public_key() below) is a second, parallel
+    path to the same goal: a registered key logs straight in with no
+    password at all. Both stay enabled side by side — password_auth_
+    supported() is unconditionally True throughout, so a user who never
+    registers a key sees no change in behavior whatsoever."""
 
     def connection_made(self, conn):
         self._conn = conn
@@ -175,21 +199,44 @@ class _BBSSshServer(asyncssh.SSHServer):
             logger.debug('SSH connection lost: %s', exc)
         try:
             _PASSWORD_CACHE.pop(id(self._conn), None)
+            _PUBKEY_USER_CACHE.pop(id(self._conn), None)
         except Exception:
             pass
 
     def begin_auth(self, username):
-        # Require auth so the client actually sends its password.
+        # Require auth so the client actually sends its password/key.
         return True
 
     def password_auth_supported(self):
         return True
 
     def public_key_auth_supported(self):
-        # Disable public-key auth so clients fall back to password auth —
-        # without that, validate_password is never called and the BBS has
-        # no captured password to auto-login with.
-        return False
+        return True
+
+    def validate_public_key(self, username, key):
+        # asyncssh calls this to decide whether a CANDIDATE key is even
+        # worth challenging the client to prove possession of -- the
+        # actual cryptographic proof (a real signature over the SSH
+        # wire protocol) happens inside asyncssh itself, independently
+        # of this method, only after it returns True. This only checks
+        # "is this specific fingerprint registered to this username,
+        # and is the account otherwise allowed to log in" -- the same
+        # active/locked/verified gates validate_password's downstream
+        # authenticate() call applies, just without a password.
+        try:
+            from .user_manager import UserManager
+            fingerprint = key.get_fingerprint()
+            peer = self._conn.get_extra_info('peername')
+            ip = peer[0] if peer else None
+            user = UserManager().authenticate_by_public_key(
+                username, fingerprint, ip=ip)
+        except Exception:
+            logger.exception('SSH public-key validation error for %s', username)
+            return False
+        if user is None:
+            return False
+        _PUBKEY_USER_CACHE[id(self._conn)] = user
+        return True
 
     def validate_password(self, username, password):
         # Capture the client-supplied password — both via set_extra_info

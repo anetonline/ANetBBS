@@ -362,6 +362,46 @@ def create_app(config_name=None):
         return {'online_count': count}
 
     @app.context_processor
+    def _inject_translate_helper():
+        """Expose {{ t('some.key', 'Default text') }} to every template
+        -- the web-UI counterpart to menu_engine.py's terminal-side
+        MenuTranslation lookup, sharing the same features/i18n.py
+        helpers rather than a second copy of the lookup-with-fallback
+        logic. Falls back to `default` (or `key` if no default given)
+        whenever the viewer's language is English/unset or no override
+        row exists for `key` -- the common case does zero queries.
+
+        Deliberately NOT batched across a whole page render the way
+        the terminal menu engine batches one menu's title + items --
+        web template call sites are scattered, not naturally grouped.
+        Memoized per-request (flask.g) so the same key called twice on
+        one page render only queries once. See docs/17-development.md
+        for the full pattern and rollout status."""
+        from flask import g
+        from flask_login import current_user
+
+        def t(key, default=''):
+            lang = None
+            try:
+                if current_user.is_authenticated:
+                    lang = current_user.language
+            except Exception:
+                lang = None
+            if not lang or lang == 'en':
+                return default or key
+            cache = g.setdefault('_i18n_cache', {})
+            cache_key = (lang, key)
+            if cache_key not in cache:
+                from .features.i18n import get_translation
+                try:
+                    cache[cache_key] = get_translation(lang, key, default or key)
+                except Exception:
+                    cache[cache_key] = default or key
+            return cache[cache_key]
+
+        return {'t': t}
+
+    @app.context_processor
     def _inject_qotd():
         """Pick one MOTD per request and expose as {{ qotd }} in templates."""
         qotd = ''
@@ -1472,7 +1512,13 @@ def _create_default_data():
         if not Board.query.filter_by(name=board_data['name']).first():
             board = Board(**board_data)
             db.session.add(board)
-    
+
+    # Seed the first three community-requested MenuTranslation language
+    # packs (Spanish, German, Portuguese) -- idempotent, never touches a
+    # sysop's own edit at Admin -> Translations. See features/i18n.py.
+    from .features.i18n import seed_default_translations
+    seed_default_translations()
+
     # Create a fallback admin user only if NO admin account exists at all.
     # Real gap found in a full install/update re-verify audit: this used
     # to check specifically for a user named literally 'admin' -- but

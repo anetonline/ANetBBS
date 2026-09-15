@@ -42,7 +42,7 @@ from anetbbs.cfg.db_bootstrap import create_minimal_app
 from anetbbs.cfg.sections import (
     boards, echomail, files, users, system, games, hub, file_bulletins,
     gallery, menu, petscii_menu, events, wall, login_modules, lastcallers,
-    backups,
+    backups, i18n,
 )
 
 
@@ -62,6 +62,7 @@ SECTIONS = [
     ("login_modules", "Login Modules", login_modules.run),
     ("lastcallers", "Last Callers", lastcallers.run),
     ("backups", "Backups", backups.run),
+    ("i18n", "Translations", i18n.run),
     ("system", "System / Network Settings", system.run),
 ]
 

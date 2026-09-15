@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}SSH Keys - {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="bi bi-key"></i> SSH Keys
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    A registered public key lets you log in over SSH
+                    with no password prompt at all — the key itself
+                    proves your identity during the SSH handshake.
+                    Password login keeps working exactly as before,
+                    with or without a registered key.
+                </p>
+                <form method="POST" action="{{ url_for('profile.ssh_keys') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="add">
+                    <div class="mb-3">
+                        <label class="form-label">Public key</label>
+                        <textarea name="public_key" class="form-control" rows="3"
+                                 placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@yourmachine"
+                                 required></textarea>
+                        <div class="form-text">
+                            Paste the contents of your public key file
+                            (e.g. <code>~/.ssh/id_ed25519.pub</code>) —
+                            never the private key.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Label (optional)</label>
+                        <input type="text" name="label" class="form-control"
+                              placeholder="e.g. laptop, phone" maxlength="100">
+                    </div>
+                    <button class="btn btn-primary">Add Key</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Registered Keys ({{ keys|length }})</div>
+            <div class="card-body p-0">
+            {% if keys %}
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Label</th><th>Fingerprint</th><th>Added</th><th></th></tr></thead>
+                    <tbody>
+                    {% for k in keys %}
+                        <tr>
+                            <td>{{ k.label or '(none)' }}</td>
+                            <td><code>{{ k.fingerprint }}</code></td>
+                            <td><small>{{ k.created_at|eastern('%Y-%m-%d') }}</small></td>
+                            <td>
+                                <form method="POST" action="{{ url_for('profile.ssh_keys') }}"
+                                     onsubmit="return confirm('Remove this SSH key?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="key_id" value="{{ k.id }}">
+                                    <button class="btn btn-link btn-sm text-danger p-0">remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}<div class="p-3 text-muted">No SSH keys registered yet — add one above.</div>{% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

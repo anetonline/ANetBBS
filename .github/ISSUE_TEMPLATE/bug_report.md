@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in ANetBBS (beta)
+about: Report a bug in ANetBBS
 title: "[BUG] "
 labels: bug
 assignees: ''
@@ -38,7 +38,7 @@ assignees: ''
 
 
 ## Relevant Log Output
-<!-- /var/log/anetbbs/gunicorn.log or journalctl -u anetbbs -->
+<!-- journalctl -u anetbbs-web -f  (or -u anetbbs for telnet/SSH/rlogin/FTP) -->
 ```
 paste logs here
 ```

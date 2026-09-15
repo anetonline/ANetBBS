@@ -352,6 +352,7 @@ ADMIN_HUB_SECTIONS = {
             ('admin.settings', 'Settings', 'bi-gear', 'Core BBS configuration'),
             ('admin.smtp_settings', 'SMTP / Email', 'bi-envelope-at', 'Outgoing mail server'),
             ('admin.webhooks_admin', 'Webhooks', 'bi-link-45deg', 'Outbound event webhooks'),
+            ('admin.translations', 'Translations', 'bi-translate', 'Menu/web-UI text overrides by language'),
         ],
     },
 }
@@ -3055,6 +3056,47 @@ def motd_admin():
         return redirect(url_for('admin.motd_admin'))
     motds = MotdEntry.query.order_by(MotdEntry.created_at.desc()).all()
     return render_template('admin/motd.html', motds=motds)
+
+
+@admin_bp.route('/translations', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def translations():
+    """Manage MenuTranslation rows -- text overrides by (language, key),
+    read by both the terminal menu engine and the web UI's t() Jinja
+    global (see anetbbs/features/i18n.py and docs/17-development.md's
+    "Translating a web template string" section for the full picture).
+    Same web-admin-CRUD-over-a-small-table pattern as motd_admin()
+    above; also reachable from anetbbs-cfg for console/SSH sysops."""
+    from ..models import MenuTranslation
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'add':
+            lang = (request.form.get('lang') or '').strip().lower()
+            key = (request.form.get('key') or '').strip()
+            text = (request.form.get('text') or '').strip()
+            if lang and key and text:
+                if MenuTranslation.query.filter_by(lang=lang, key=key).first():
+                    flash(f'A translation for {lang}/{key} already exists.', 'danger')
+                else:
+                    db.session.add(MenuTranslation(lang=lang, key=key, text=text))
+                    db.session.commit()
+                    flash('Translation added.', 'success')
+        elif action == 'edit':
+            row = MenuTranslation.query.get_or_404(request.form.get('row_id', type=int))
+            new_text = (request.form.get('text') or '').strip()
+            if new_text:
+                row.text = new_text
+                db.session.commit()
+                flash('Translation updated.', 'success')
+        elif action == 'delete':
+            row = MenuTranslation.query.get_or_404(request.form.get('row_id', type=int))
+            db.session.delete(row)
+            db.session.commit()
+        return redirect(url_for('admin.translations'))
+    rows = (MenuTranslation.query
+           .order_by(MenuTranslation.lang, MenuTranslation.key).all())
+    return render_template('admin/translations.html', rows=rows)
 
 
 @admin_bp.route('/taglines', methods=['GET', 'POST'])

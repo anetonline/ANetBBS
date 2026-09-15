@@ -13,6 +13,7 @@ and is a blocking call that returns once the user backs out or confirms --
 callers just chain these together, no separate event loop to manage.
 """
 import curses
+import textwrap
 from curses.textpad import Textbox
 
 APP_TITLE = "ANetBBS Terminal Configuration"
@@ -133,6 +134,28 @@ def confirm(stdscr, text, default_no=True):
             return False
 
 
+def _wrap_help_line(line, width):
+    """Word-wrap one help_lines entry to `width` columns instead of
+    letting _safe_addstr hard-truncate it at the terminal edge.
+
+    Real bug found live (2026-09-15, reported by a screen-reader user
+    on an 80-col SSH client): a single long HELP string -- e.g.
+    cfg/sections/login_modules.py's "Params by type: ..." line, one
+    unbroken string well over 200 characters -- got clipped dead at
+    column 79 with no indication anything was cut off, since
+    _safe_addstr silently truncates rather than wrapping. Widening the
+    terminal isn't a workable fix for a screen-reader user, per the
+    report -- the content itself needs to actually fit. Splits on
+    embedded newlines first so a caller can still force an explicit
+    line break between logically separate tips, matching the general
+    word-wrap convention used for real terminal output elsewhere in
+    this codebase."""
+    out = []
+    for segment in line.split('\n'):
+        out.extend(textwrap.wrap(segment, width=max(10, width)) or [''])
+    return out
+
+
 def run_menu(stdscr, title, items, footer="[Up/Down] Move  [Enter] Select  [Esc] Back"):
     """items: list of (key, label) tuples. Returns the selected key, or
     None if the user backed out."""
@@ -187,8 +210,14 @@ def _edit_line(stdscr, y, x, width, initial=""):
     return box.gather().strip()
 
 
+# Sentinel "kind" for run_form()'s two on-screen action rows -- see
+# their docstring note below for why these exist alongside F2/Esc.
+_ACTION_SAVE = {"key": "__save__", "label": "[ Save ]", "kind": "action"}
+_ACTION_CANCEL = {"key": "__cancel__", "label": "[ Cancel (discard changes) ]", "kind": "action"}
+
+
 def run_form(stdscr, title, fields, values, help_lines=None,
-             footer="[Up/Down] Field  [Enter] Edit  [Space] Toggle  "
+             footer="[Up/Down] Field  [Enter] Edit/Activate  [Space] Toggle  "
                     "[Left/Right] Cycle  [F2] Save  [Esc] Cancel"):
     """fields: list of dicts, each with at minimum:
         {'key': 'name', 'label': 'Name', 'kind': 'text'}
@@ -198,9 +227,29 @@ def run_form(stdscr, title, fields, values, help_lines=None,
     values: dict of key -> current value.
 
     Returns the edited dict on save, or None if the user cancelled the
-    whole form (Esc while not editing a field).
+    whole form (Esc, or selecting Cancel, while not editing a field).
+
+    F2 (save) and Esc (cancel) remain the fast path for terminals where
+    they work, but they're both control/function-key sequences whose
+    exact wire encoding varies by client and isn't always what this
+    tool's terminfo expects -- real bug found live (2026-09-15,
+    reported by a screen-reader user on an SSH client where F2
+    apparently sent a bare ESC instead of a recognized F2 sequence,
+    silently discarding ~3 hours of edits with no save and no warning).
+    A keyboard-shortcut-only fix (e.g. adding Ctrl-Z) has the same
+    fundamental problem -- it still depends on the terminal correctly
+    delivering a specific byte, and Ctrl-Z specifically also collides
+    with the terminal driver's own job-control SUSPEND character
+    (confirmed live: it never reaches curses as a literal keystroke in
+    this tool's current input mode at all, it triggers job-control
+    processing instead). Explicit, always-focusable [Save]/[Cancel]
+    rows at the end of every form sidestep the whole class of problem
+    -- they only need the arrow keys + Enter, which every terminal
+    already reliably sends and which this tool already depends on for
+    every other kind of navigation.
     """
     data = dict(values)
+    nav_items = list(fields) + [_ACTION_SAVE, _ACTION_CANCEL]
     idx = 0
     safe_curs_set(0)
     label_w = max(len(f["label"]) for f in fields) + 2
@@ -220,23 +269,36 @@ def run_form(stdscr, title, fields, values, help_lines=None,
             _safe_addstr(stdscr, y, 2, f["label"].ljust(label_w) + ": ", attr)
             _safe_addstr(stdscr, y, 2 + label_w + 2, shown, attr)
             y += 1
+        y += 1
+        for action_i, action in enumerate((_ACTION_SAVE, _ACTION_CANCEL)):
+            i = len(fields) + action_i
+            attr = _attr(2, curses.A_REVERSE) if i == idx else _attr(3, curses.A_BOLD)
+            _safe_addstr(stdscr, y, 2, action["label"], attr)
+            y += 1
         if help_lines:
             y += 1
+            _h, _w = stdscr.getmaxyx()
+            help_width = max(10, _w - 4)
             for line in help_lines:
-                _safe_addstr(stdscr, y, 2, line, _attr(3, curses.A_DIM))
-                y += 1
+                for wrapped_line in _wrap_help_line(line, help_width):
+                    _safe_addstr(stdscr, y, 2, wrapped_line, _attr(3, curses.A_DIM))
+                    y += 1
         draw_footer(stdscr, footer)
         stdscr.refresh()
 
         ch = stdscr.getch()
         if ch in (curses.KEY_UP,):
-            idx = (idx - 1) % len(fields)
+            idx = (idx - 1) % len(nav_items)
         elif ch in (curses.KEY_DOWN,):
-            idx = (idx + 1) % len(fields)
+            idx = (idx + 1) % len(nav_items)
         elif ch == 27:
             return None
         elif ch == curses.KEY_F2:
             return data
+        elif idx >= len(fields):
+            # On the [Save]/[Cancel] rows -- only Enter/Space activates.
+            if ch in (ord(" "), 10, 13, curses.KEY_ENTER):
+                return data if idx == len(fields) else None
         else:
             f = fields[idx]
             key, kind = f["key"], f["kind"]

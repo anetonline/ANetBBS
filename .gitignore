@@ -142,3 +142,4 @@ tests/.*.db-shm
 .DS_Store
 .idea/
 .vscode/
+ANETBBS-AD.txt

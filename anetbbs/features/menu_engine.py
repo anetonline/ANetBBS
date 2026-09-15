@@ -508,15 +508,11 @@ def _apply_menu_translations(menu_name, title, item_list, lang):
     if not lang or lang == 'en':
         return title, item_list
 
-    from anetbbs.models import MenuTranslation
+    from anetbbs.features.i18n import get_translations
 
     title_key = f'menu.{menu_name}.title'
     item_keys = [f'menu.{menu_name}.item.{hk}' for hk, _l, _a, _ar in item_list]
-    rows = (MenuTranslation.query
-           .filter_by(lang=lang)
-           .filter(MenuTranslation.key.in_([title_key] + item_keys))
-           .all())
-    translations = {r.key: r.text for r in rows}
+    translations = get_translations(lang, [title_key] + item_keys)
 
     new_title = translations.get(title_key, title)
     new_item_list = [

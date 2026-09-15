@@ -1,11 +1,56 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.77`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.78`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.78 — SSH key login, translations, achievements, door-dev tooling, TUI accessibility (September 2026)
+
+A feature round following up the ninth audit's competitive gap
+analysis, plus two live accessibility bugs reported and fixed during
+the same window.
+
+- **SSH public-key login.** Register a public key at Profile →
+  Security → SSH Keys and log in over SSH with no password prompt at
+  all. Purely additive — password login is completely unchanged for
+  every account that doesn't register a key.
+- **Web UI translations.** The terminal menu system's existing
+  translation mechanism now also covers the web UI (a new `t()`
+  template helper), with an admin page (and a matching `anetbbs-cfg`
+  section) to manage overrides. Spanish, German, and Portuguese are
+  seeded by default for the navigation bar and a few other high-
+  traffic labels; more template coverage can be added incrementally.
+- **Achievements documented and expanded.** The existing badge system
+  (previously undocumented) now has a README section, and grew from
+  10 to 18 rules — new ones tied to Game Center high scores, wiki
+  edits, file uploads, and door-game variety.
+- **`anetbbs-export-users`** — the export-direction counterpart to
+  `anetbbs-import-users`, for getting user account data (never
+  passwords) out to a portable CSV/JSON file.
+- **Windows install guide** (`docs/INSTALL-WINDOWS.md`) covering the
+  WSL2 and Docker Desktop paths.
+- **`builtin_python` door-writing tutorial** and a new scaffolding
+  script (`anetbbs-scaffold-door`) that generates a starter door
+  module plus a draft (inactive-until-reviewed) catalog entry.
+- **`anetbbs-cfg` accessibility fixes**, both from a live report by a
+  screen-reader user: long help text in edit forms was being silently
+  cut off at the terminal width instead of wrapping (affected several
+  sections, not just the one reported); and every edit form now has
+  explicit on-screen `[ Save ]`/`[ Cancel ]` rows navigable with the
+  same arrow keys as everything else, alongside the existing F2/Esc
+  shortcuts, since a function-key sequence not matching what a given
+  terminal actually sends could silently discard unsaved edits with no
+  warning.
+- Fixed a stale "(beta)" label and an outdated log-path reference in
+  the GitHub bug-report issue template.
+- Closed a real correctness gap in the terminal/SSH login layer's
+  database-connection handling, in the same class as a similar fix
+  earlier this release cycle — dormant in normal production use (a
+  deployed process only ever opens one database connection at
+  startup), surfaced while testing the SSH key-login feature above.
 
 ## v1.0.77 — Ninth audit pass: every script, full docs sweep, cfg/monitor hardening review (September 2026)
 

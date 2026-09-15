@@ -2233,6 +2233,38 @@ class UserAchievement(db.Model):
                                            name='uq_user_achievement'),)
 
 
+class UserSSHKey(db.Model):
+    """A registered OpenSSH public key that can log a user straight in
+    over SSH with no password prompt at all -- see
+    anetbbs/core/ssh_server.py's validate_public_key() and
+    anetbbs/core/user_manager.py's authenticate_by_public_key().
+
+    The fingerprint (not the raw key text) is what auth actually
+    checks against on every connection -- computed the same way both
+    at registration time (Profile -> Security) and at connection time
+    (asyncssh's own key.get_fingerprint()), so the two can never drift
+    out of sync with each other. globally unique: a key can only ever
+    be registered to one account, so a leaked/reused key can't grant
+    access to a second account behind a sysop's back.
+    """
+    __tablename__ = 'user_ssh_keys'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    public_key = db.Column(db.Text, nullable=False)
+    fingerprint = db.Column(db.String(100), nullable=False,
+                            unique=True, index=True)
+    label = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           nullable=False)
+
+    user = db.relationship('User', backref='ssh_keys')
+
+    def __repr__(self):
+        return f'<UserSSHKey {self.fingerprint} user={self.user_id}>'
+
+
 class MotdEntry(db.Model):
     """Random message-of-the-day pool. Login screens show one at random."""
     __tablename__ = 'motd_entries'

@@ -362,14 +362,14 @@
                     <!-- Home -->
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('main.index') }}">
-                            <i class="bi bi-house"></i> Home
+                            <i class="bi bi-house"></i> {{ t('nav.home', 'Home') }}
                         </a>
                     </li>
 
                     <!-- Messaging dropdown — Boards / PMs / Netmail / Contacts -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-envelope"></i> Messaging
+                            <i class="bi bi-envelope"></i> {{ t('nav.messaging', 'Messaging') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
                             <li><a class="dropdown-item" href="{{ url_for('boards.list_boards') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-left-text"></i> Local Boards</a></li>
@@ -393,7 +393,7 @@
                     <!-- Chat dropdown — MRC / IRC -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-broadcast"></i> Chat
+                            <i class="bi bi-broadcast"></i> {{ t('nav.chat', 'Chat') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
                             {% if config.MRC_BRIDGE_ENABLED %}
@@ -406,7 +406,7 @@
                     <!-- Games -->
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('games.lobby') }}">
-                            <i class="bi bi-controller"></i> Games
+                            <i class="bi bi-controller"></i> {{ t('nav.games', 'Games') }}
                         </a>
                     </li>
                     {% endif %}
@@ -414,7 +414,7 @@
                     <!-- Files dropdown -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-folder"></i> Files
+                            <i class="bi bi-folder"></i> {{ t('nav.files', 'Files') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
                             <li><a class="dropdown-item" href="{{ url_for('files.list_files') }}" style="color:var(--theme-primary);"><i class="bi bi-folder"></i> File Gallery</a></li>
@@ -435,7 +435,7 @@
                          main.py's TOOLS_HUB_SECTIONS / tools_hub()). -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-tools"></i> Tools
+                            <i class="bi bi-tools"></i> {{ t('nav.tools', 'Tools') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
                             <li><a class="dropdown-item" href="{{ url_for('main.tools_hub', section='community') }}" style="color:var(--theme-primary);"><i class="bi bi-people"></i> Community</a></li>

@@ -14,7 +14,9 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 
 from .validators import PermissiveEmail as Email
-from ..models import db, User, Post, Theme, UserSession, UserSecurityAnswer, SECURITY_QUESTIONS, UserField, UserFieldValue, get_builtin_field_config
+from ..models import (db, User, Post, Theme, UserSession, UserSecurityAnswer,
+                      SECURITY_QUESTIONS, UserField, UserFieldValue,
+                      get_builtin_field_config, UserSSHKey)
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
 
@@ -424,6 +426,67 @@ def change_password():
         return redirect(url_for('profile.view_user', username=current_user.username))
 
     return render_template('profile/change_password.html', form=form)
+
+
+@profile_bp.route('/ssh-keys', methods=['GET', 'POST'])
+@login_required
+def ssh_keys():
+    """Register/revoke SSH public keys for password-free SSH login
+    (anetbbs/core/ssh_server.py's validate_public_key(), anetbbs/core/
+    user_manager.py's authenticate_by_public_key()). A registered key
+    logs straight in over SSH with no password prompt at all -- the
+    key itself is the credential, verified by a real signature
+    challenge during the SSH handshake, not anything checked here.
+    """
+    import asyncssh
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'add':
+            raw_key = (request.form.get('public_key') or '').strip()
+            label = (request.form.get('label') or '').strip() or None
+            if not raw_key:
+                flash('Paste a public key first.', 'danger')
+                return redirect(url_for('profile.ssh_keys'))
+            try:
+                parsed = asyncssh.import_public_key(raw_key)
+                fingerprint = parsed.get_fingerprint()
+            except asyncssh.KeyImportError:
+                flash('That doesn\'t look like a valid OpenSSH public key '
+                     '(the kind starting with "ssh-ed25519 AAAA..." or '
+                     '"ssh-rsa AAAA...").', 'danger')
+                return redirect(url_for('profile.ssh_keys'))
+            existing = UserSSHKey.query.filter_by(fingerprint=fingerprint).first()
+            if existing:
+                if existing.user_id == current_user.id:
+                    flash('That key is already registered to your account.', 'warning')
+                else:
+                    # Deliberately vague -- confirming a specific key
+                    # belongs to another named account would leak
+                    # account-existence/key-ownership info to anyone
+                    # who can paste a public key (they're public by
+                    # design, easy to have gotten from anywhere).
+                    flash('That key is already registered to an account.', 'danger')
+                return redirect(url_for('profile.ssh_keys'))
+            db.session.add(UserSSHKey(user_id=current_user.id,
+                                      public_key=raw_key,
+                                      fingerprint=fingerprint,
+                                      label=label))
+            db.session.commit()
+            flash(f'SSH key added ({fingerprint}).', 'success')
+        elif action == 'delete':
+            key_id = request.form.get('key_id', type=int)
+            key_row = UserSSHKey.query.filter_by(
+                id=key_id, user_id=current_user.id).first()
+            if key_row:
+                db.session.delete(key_row)
+                db.session.commit()
+                flash('SSH key removed.', 'success')
+        return redirect(url_for('profile.ssh_keys'))
+
+    keys = (UserSSHKey.query.filter_by(user_id=current_user.id)
+           .order_by(UserSSHKey.created_at.desc()).all())
+    return render_template('profile/ssh_keys.html', keys=keys)
 
 
 @profile_bp.route('/themes')

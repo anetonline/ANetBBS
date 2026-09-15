@@ -157,6 +157,93 @@ For a Mystic-API Python door:
   `from mystic_bbs import *` and you're a few function calls from a
   working door.
 
+### Writing a `builtin_python` door
+
+The most powerful door type — no subprocess, no drop file, no
+external runtime, just a plain async Python function called directly.
+This is what ANetCRAFT (`anetbbs/features/anetcraft.py`) is built as
+— the one real reference implementation today, worth reading directly
+for a full-sized example once the minimal one below makes sense.
+
+**Entry point contract:** a `builtin_python` door is one async
+function taking `(session, username)`:
+
+```python
+async def launch_mydoor(session, username: str):
+    ...
+```
+
+`session` gives you two calls, and that's the entire required
+surface:
+- `await session.write(text)` — send text to the player. Use `\r\n`
+  line endings, same as everywhere else in this codebase (a bare `\n`
+  won't reliably render on a real terminal — see the CRLF note in
+  every other door-writing section on this page).
+- `await session.read_line(prompt='')` — write `prompt`, then block
+  until the player sends a line (Enter-terminated), returning it with
+  backspace/delete already handled.
+
+`session.user` is a dict with at least `username`/`display_name`/
+`access_level` — same shape regardless of how the door was reached.
+
+**Why the contract is this narrow:** a `builtin_python` door actually
+runs behind *two different* session implementations depending on how
+the player connects — the real BBS session object for telnet/SSH/
+rlogin (`core/session.py`), or a stdin/stdout PTY shim
+(`anetbbs/games/builtin_runner.py`'s `_StdioSession`) for the web
+terminal sandbox. Both implement exactly `write()`/`read_line()`/
+`user`, so any door written against only those three works unchanged
+in both places — reach for anything session-object-specific beyond
+that (`read_raw()`, low-level PTY details) and you've likely coupled
+to one runner and broken the other.
+
+**Minimal working example** (`anetbbs/features/hello_door.py`):
+
+```python
+async def launch_hello(session, username: str):
+    await session.write(f'\r\nHello, {username}!\r\n\r\n')
+    name = await session.read_line('What should I call your character? ')
+    name = name.strip() or username
+    await session.write(f'\r\nWelcome to the adventure, {name}.\r\n')
+    await session.write('(This is the whole door. Add more turns here.)\r\n')
+    await session.read_line('\r\nPress Enter to return to the menu...')
+```
+
+Register it as a `Game` row via `/admin/games/`:
+
+| Field | Value |
+|---|---|
+| `game_type` | `builtin_python` |
+| `web_game_module` | `anetbbs.features.hello_door:launch_hello` |
+
+(`must_exist`, seen on ANetCRAFT's own entry in `web_app.py`, is a
+seed-list-only guard — not a real `Game` column — that keeps the
+*bundled* catalog from listing a door whose file got removed; it has
+no equivalent for a sysop-created row and isn't something `/admin/
+games/` exposes.)
+
+`web_game_module` is `module.path:function_name` — omit the
+`:function_name` and it defaults to a function literally named
+`launch`. No `drop_file_type`, `executable_path`, or
+`command_line_args` — none of those fields apply to this door type at
+all, the same way they don't for `door_synchronet`.
+
+**Persistent state, if your door needs it:** ANetCRAFT keeps
+per-player save data as JSON files under a per-user-scoped directory
+(see `_shared_save_path()`/`_safe_username()` in
+`anetbbs/features/anetcraft.py`) rather than a new database table —
+usually the simpler choice for a door's own game state, with the same
+username-to-filesystem-path sanitization any user-controlled path
+component needs (see `tests/test_anetcraft_safe_username_collision.py`
+and `tests/test_anetcraft_multiplayer_save_path_traversal.py` for the
+two real bugs that shape already caught in this exact door).
+
+A generator script can produce this minimal skeleton plus a draft
+(`is_active=False`) `Game` row for you — `anetbbs-scaffold-door
+mydoor "My Door"` once installed, or `python tools/
+scaffold_builtin_door.py mydoor "My Door"` from a checkout. See its
+`--help` for the rest of the options.
+
 ### rlogin out-dial doors
 
 Connect to a remote BBS's game server without re-authenticating:
@@ -272,6 +359,47 @@ call in `_lightweight_migrate()` too, or the index silently never gets
 backfilled onto it. Search that function for `_ensure_index(` for
 several real examples (added across multiple security/performance
 audit rounds) of the exact pattern to follow.
+
+### Translating a web template string
+
+`{{ t('some.key', 'Default text') }}` in any template translates
+`'Default text'` for the current viewer's language, falling back to
+the default (or the key itself, if no default is given) whenever the
+viewer is logged out, has no `language` preference set, is set to
+`'en'`, or no `MenuTranslation` row exists for that key. The common
+case (English, the default for every account) does zero database
+queries.
+
+This is the web-UI counterpart to the terminal menu engine's own
+`MenuTranslation` lookup (added in v1.0b2.68, `menu_engine.py`'s
+`_apply_menu_translations()`) — both share the same
+`(lang, key) -> text` lookup helpers in `anetbbs/features/i18n.py`
+rather than maintaining two copies of the fallback logic. Manage
+translation rows at **Admin → Settings → Translations**
+(`/admin/translations`) — add/edit/delete `(language, key, text)`
+rows directly, no SQL needed. The same CRUD is also available from
+`anetbbs-cfg` (SSH/console)'s own **Translations** section.
+
+**Current coverage**: the top-level nav bar (`base.html`) and the
+Message Boards page heading — a first pass, not full coverage.
+Extending this to more templates is just adding `t()` calls with a
+new key + English default; nothing else to wire up per template.
+
+**Known limitation**: logged-out visitors have no way to select a
+language before logging in — `current_user.language` only exists
+once an account exists and is signed in, and there's no cookie/
+session-based language picker for anonymous traffic today. A
+pre-login page (the login form itself, the public landing page)
+can't be localized under the current design; this only covers what
+an authenticated user sees after signing in. Worth solving properly
+in a future round (a language-select control on the login/landing
+page, stored in a session cookie) rather than working around it here.
+
+Pick translation keys namespaced by area, matching the terminal side's
+own `menu.<name>.title`/`menu.<name>.item.<hotkey>` convention — e.g.
+`nav.<item>` for nav bar entries, `boards.heading` for the board list.
+Keeps two different areas from ever colliding on the same key by
+accident.
 
 ### Adding a sysop admin page
 
