@@ -218,7 +218,22 @@ class Config:
     # Web Server
     WEB_HOST = os.environ.get('WEB_HOST', '0.0.0.0')
     WEB_PORT = int(os.environ.get('WEB_PORT', '5000'))
-    
+
+    # Static asset caching -- real gap found in a security/performance
+    # audit: Flask's own default (no SEND_FILE_MAX_AGE_DEFAULT set) sends
+    # NO Cache-Control header at all on /static/* responses. The
+    # documented "production" install topology fronts the app with
+    # nginx, whose own reference template (deploy/anetbbs-nginx.conf.
+    # template) already serves /static/ directly with a 1-day cache --
+    # this is purely a fallback for a sysop running the Flask app's own
+    # static serving directly (dev, or a non-nginx-fronted "behind"
+    # install). Same 1-day lifetime and the same reasoning as the nginx
+    # template's own comment: intentionally NOT a long-lived/immutable
+    # cache, since asset filenames here carry no version hash -- a
+    # sysop's browser must still be able to pick up new JS/CSS after an
+    # upgrade with an ordinary hard refresh.
+    SEND_FILE_MAX_AGE_DEFAULT = 86400
+
     # Session
     PERMANENT_SESSION_LIFETIME = 3600 * 24 * 7  # 7 days
     # Set SESSION_COOKIE_SECURE=true in .env only when serving over HTTPS.

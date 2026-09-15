@@ -264,6 +264,15 @@ table appears. Only reach for a hand-written `_ensure_column()` call in
 constraint the generic permissive sweep doesn't give you (see that
 function's own comments for examples).
 
+The same applies to indexes: `index=True` on a column (or a
+`db.Index(...)` in `__table_args__`) only takes effect when
+`create_all()` creates the table for the FIRST time — an upgrading
+install's already-existing table needs an explicit `_ensure_index()`
+call in `_lightweight_migrate()` too, or the index silently never gets
+backfilled onto it. Search that function for `_ensure_index(` for
+several real examples (added across multiple security/performance
+audit rounds) of the exact pattern to follow.
+
 ### Adding a sysop admin page
 
 Admin pages live behind `admin.dashboard` and require `current_user.is_admin`.

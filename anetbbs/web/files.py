@@ -68,7 +68,16 @@ def list_files():
     # this mirrors file_areas.py's own established approach for a
     # post-filtered list: fetch, filter, then paginate the already-
     # filtered in-memory list with the same ListPagination helper.
-    uploads = [u for u in FileUpload.query.order_by(FileUpload.created_at.desc()).all()
+    #
+    # Real N+1 found in a security/performance audit: iterating without
+    # eager-loading meant one extra SELECT against `users` per row (for
+    # f.uploader in list.html) plus one against `file_areas` per row
+    # (for u.file_area in _visible_to() above) -- both many-to-one, so
+    # joinedload() folds each into the single FileUpload query via a JOIN.
+    uploads = [u for u in FileUpload.query
+              .options(db.joinedload(FileUpload.uploader),
+                       db.joinedload(FileUpload.file_area))
+              .order_by(FileUpload.created_at.desc()).all()
               if _visible_to(current_user, u.file_area)]
     page = request.args.get('page', 1, type=int)
     pagination = ListPagination(page, FILES_PER_PAGE, len(uploads))

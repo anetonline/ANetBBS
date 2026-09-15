@@ -243,6 +243,32 @@ Read this whole file before exposing the BBS to the internet.
   the BinkP network listener — the browser-side half of the same
   unbounded-network-buffer class this project's audits have
   repeatedly closed elsewhere.
+- **The web app now sends standard hardening response headers on every
+  page** — `Content-Security-Policy`, `X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy`
+  — found missing entirely in a security/performance audit. The public
+  "Watch It Live" embed page (`/watch`) is deliberately exempted from
+  the framing restriction, since its whole purpose is to be embeddable
+  off-site. `Strict-Transport-Security` is sent only when a request
+  actually arrives over HTTPS, so it never locks out an install that
+  hasn't set up TLS yet. The CSP currently allows inline
+  scripts/styles (`'unsafe-inline'`) rather than fully blocking them —
+  a real sweep found this in wide, legitimate use across the template
+  tree, and migrating every one of those to a nonce scheme is a much
+  larger, separate undertaking. Even with that allowance, the policy
+  still blocks a future XSS payload from pulling in a remote script or
+  exfiltrating to an unexpected origin, and restricts framing/object
+  embedding — real defense-in-depth over having no CSP at all, with
+  room to tighten further in a future round.
+- **A few more real database/query gaps found in a systematic FK/index
+  audit were closed**: one more missing index on a column filtered on
+  a routine per-user page view, plus an eager-loading fix for a file
+  gallery listing that was issuing one extra query per row instead of
+  a single joined query.
+- **Response compression and static-asset cache headers were added**
+  where they were missing — nginx-level gzip for the reference deploy
+  template, and a Flask-level `Cache-Control` fallback for installs
+  running the app's own static file serving directly.
 
 ## What you MUST do for production
 
@@ -285,6 +311,11 @@ Read this whole file before exposing the BBS to the internet.
   `/auth/register`, which is already DB-backed and correctly shared
   across restarts (see above).
 - **No 2FA.** Single password for both web and terminal logins.
+- **The site-wide Content-Security-Policy allows inline scripts and
+  styles** (`'unsafe-inline'`) rather than fully blocking them, since a
+  real sweep found both in wide, legitimate use across the template
+  tree. Migrating to a nonce-based CSP that blocks inline script/style
+  entirely is real future work, not done in this pass.
 - **No per-account lockout** — the auto-ban above works on the source
   IP, not the targeted username, so a distributed brute-force attempt
   from many IPs against one account isn't slowed by this mechanism.

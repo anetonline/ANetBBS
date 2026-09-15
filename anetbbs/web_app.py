@@ -880,6 +880,90 @@ def create_app(config_name=None):
         except Exception:
             app.logger.exception('Presence alert relay failed to start')
 
+    # Site-wide security response headers -- real gap found in a
+    # security/performance audit: this app set NO CSP, X-Frame-Options,
+    # X-Content-Type-Options, Referrer-Policy, or Permissions-Policy
+    # anywhere, on any response. anetbbs/web/watch.py's own docstring
+    # already flagged this explicitly ("If site-wide clickjacking
+    # protection is ever added later, this route needs an explicit
+    # carve-out to stay embeddable") -- that carve-out is the
+    # `watch.` endpoint check below.
+    #
+    # CSP specifically ships with 'unsafe-inline' for script-src/
+    # style-src: a real inline-script/inline-handler/inline-style sweep
+    # across the template tree found dozens of files using each pattern
+    # (many page-specific <script> blocks, onclick= handlers, style=
+    # attributes) -- eliminating all of that via a nonce scheme is a
+    # much larger, separate undertaking, and shipping a CSP that
+    # actually breaks the web UI is worse than no CSP. Even with
+    # 'unsafe-inline', this still provides real value: it blocks a
+    # future XSS payload from pulling in a REMOTE <script src="...">
+    # or exfiltrating via an unexpected origin, restricts framing and
+    # object/embed, and is a real, documented starting point to tighten
+    # from later (see docs/SECURITY.md).
+    _CSP_DEFAULT = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' "
+        "https://cdn.jsdelivr.net https://cdn.socket.io; "
+        "style-src 'self' 'unsafe-inline' "
+        "https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' ws: wss:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'self'"
+    )
+    # games.dos_frame is a standalone, isolated page (its own COOP/COEP
+    # headers already carve it out from the main app above) that loads
+    # EmulatorJS from its CDN -- a WASM-based in-browser emulator that
+    # genuinely needs eval/worker/blob permissions the rest of the app
+    # has no legitimate use for. Scoped to just this one route rather
+    # than loosening the site-wide policy for everyone else.
+    _CSP_DOS_FRAME = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' "
+        "https://cdn.emulatorjs.org; "
+        "style-src 'self' 'unsafe-inline'; "
+        "worker-src 'self' blob: https://cdn.emulatorjs.org; "
+        "connect-src 'self' https://cdn.emulatorjs.org; "
+        "img-src 'self' data: blob: https://cdn.emulatorjs.org; "
+        "font-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'self'"
+    )
+
+    @app.after_request
+    def _set_security_headers(response):
+        from flask import request as _req
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Permissions-Policy'] = (
+            'geolocation=(), camera=(), microphone=(), payment=(), usb=()')
+        endpoint = _req.endpoint or ''
+        if endpoint == 'games.dos_frame':
+            response.headers['Content-Security-Policy'] = _CSP_DOS_FRAME
+            response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        elif endpoint.startswith('watch.'):
+            # The public "Watch It Live" embed page must stay
+            # embeddable from ANY origin -- explicitly no
+            # X-Frame-Options / frame-ancestors restriction here, per
+            # watch.py's own docstring.
+            pass
+        else:
+            response.headers['Content-Security-Policy'] = _CSP_DEFAULT
+            response.headers['X-Frame-Options'] = 'DENY'
+        # HSTS only when the request actually arrived over HTTPS (or,
+        # behind a trusted reverse proxy, when it forwarded that scheme
+        # via ProxyFix above) -- sending it on a plain HTTP deployment
+        # would tell browsers to refuse ALL future HTTP access to this
+        # domain, actively harmful for a sysop who hasn't set up TLS yet.
+        if _req.is_secure:
+            response.headers['Strict-Transport-Security'] = (
+                'max-age=31536000; includeSubDomains')
+        return response
+
     return app
 
 
@@ -1194,6 +1278,13 @@ def _lightweight_migrate(app):
     _ensure_index('game_scores', 'ix_game_scores_game_id', 'game_id')
     _ensure_index('game_sessions', 'ix_game_sessions_game_id_status',
                   'game_id, status')
+
+    # Postcard.created_by_id -- real gap found in a systematic FK/index
+    # audit: web/postcards.py's "my postcards" listing filters directly
+    # on this column (visited routinely by any logged-in user), but it
+    # was unindexed like every other FK on this model except slug. See
+    # the column's own model comment.
+    _ensure_index('postcards', 'ix_postcards_created_by_id', 'created_by_id')
 
     # Real bug found live: UserSession.user_id used to be unique=True --
     # a hard one-row-per-user constraint, so a second simultaneous

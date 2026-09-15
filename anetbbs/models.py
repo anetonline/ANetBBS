@@ -2478,7 +2478,14 @@ class Postcard(db.Model):
     height = db.Column(db.Integer, default=20)
     grid_json = db.Column(db.Text)
     ansi_text = db.Column(db.Text)
-    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # index=True -- real gap found in a security/performance audit:
+    # web/postcards.py's "my postcards" listing (any logged-in user's
+    # own postcards page, visited routinely) filters on this column
+    # directly (`Postcard.query.filter_by(created_by_id=...)`), and it
+    # was previously unindexed like every other FK column here except
+    # slug.
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                              nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow)

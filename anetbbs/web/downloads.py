@@ -67,6 +67,29 @@ def _matches_extension(name: str, exts) -> bool:
     return any(n.endswith(ext) for ext in exts)
 
 
+# Checksum/signature sidecar extensions -- these describe another file
+# in the listing, they aren't release artifacts of their own. Real bug
+# found live: DOWNLOADS_EXTENSIONS' default whitelist includes these
+# (so a generated .sha256 file is itself servable/downloadable, which
+# is correct), but the directory scan below used to list them as their
+# own top-level row too, WITH their own "generate SHA-256" shield
+# button. Clicking that button on an already-generated
+# `release.tar.gz.sha256` row hashed the sidecar file's own bytes and
+# wrote `release.tar.gz.sha256.sha256` -- which then got listed as ITS
+# OWN row with ITS OWN shield button, letting repeated clicks pile up
+# an unbounded `.sha256.sha256.sha256...` chain (confirmed live: a real
+# install accumulated 10 of these). Excluding sidecar extensions from
+# the listing removes the row/button that starts the chain; see
+# sha256_for()'s own matching guard below for defense in depth against
+# a direct/typed URL doing the same thing.
+_SIDECAR_EXTENSIONS = ('.sha256', '.md5', '.sig', '.asc')
+
+
+def _is_sidecar_file(name: str) -> bool:
+    n = name.lower()
+    return any(n.endswith(ext) for ext in _SIDECAR_EXTENSIONS)
+
+
 def _safe_filename(name: str) -> bool:
     return bool(_NAME_RE.match(name)) and '..' not in name
 
@@ -98,6 +121,8 @@ def _scan(cfg):
             if not _safe_filename(name):
                 continue
             if not _matches_extension(name, exts):
+                continue
+            if _is_sidecar_file(name):
                 continue
             full = os.path.join(base, name)
             if not os.path.isfile(full):
@@ -216,6 +241,13 @@ def sha256_for(filename):
         abort(404)
     if not _safe_filename(filename) or not _matches_extension(
             filename, _allowed_extensions(cfg)):
+        abort(404)
+    # Defense in depth against the sidecar-chaining bug fixed in
+    # _scan() above (see _SIDECAR_EXTENSIONS' own comment) -- refuse to
+    # generate a checksum of a checksum/signature file, regardless of
+    # how this URL was reached (a stale bookmark, a typed URL), not
+    # just when reached by clicking a listing row's own button.
+    if _is_sidecar_file(filename):
         abort(404)
     base = _resolve_dir(cfg)
     if not base:

@@ -1,11 +1,54 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.75`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.76`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.76 — Eighth audit pass: security infrastructure, performance, docs (September 2026)
+
+An eighth audit pass, this time focused less on finding one-off code
+bugs (the last several rounds already covered a lot of that ground) and
+more on infrastructure-level questions: were there whole categories of
+security or performance hardening genuinely missing, not just individual
+bugs in the code that's there. Same severity-tiered approach as the
+seven prior rounds; this entry again omits vulnerability specifics in
+the interest of responsible disclosure. Every finding has a dedicated
+regression test.
+
+- Added site-wide security response headers (Content-Security-Policy,
+  X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+  Permissions-Policy) — previously absent entirely. The public embed
+  page is deliberately exempted from the framing restriction, and HSTS
+  is only sent over an actual HTTPS connection so it can never lock out
+  an install that hasn't set up TLS yet.
+- Reviewed session cookie hardening, rate-limiting, and auto-ban
+  coverage end to end — confirmed already correctly configured, no
+  changes needed.
+- Closed a couple more real database/query gaps found in a systematic
+  audit of every foreign-key column in the schema: one more missing
+  index on a routinely-queried per-user column, and an eager-loading
+  fix for a file listing that was issuing one extra query per row.
+- Added response compression and static-asset cache headers where they
+  were missing, at both the reference reverse-proxy layer and as an
+  application-level fallback.
+- Reviewed the deliberate choice to auto-apply schema changes on every
+  app start rather than use a manual migration-command workflow, and
+  confirmed it's the right fit for this project's self-hosted-sysop
+  deployment model; documented the pattern more completely for future
+  contributors.
+- Reviewed whether to add persistent (Redis/DB-backed) rate limiting or
+  two-factor authentication — decided against both for now, for
+  documented reasons, with the existing limitations already accurately
+  described in `docs/SECURITY.md`.
+- Fixed a real, live bug on the Release Downloads page: clicking the
+  checksum button on an already-generated checksum sidecar file hashed
+  the sidecar itself instead of refusing, letting repeated clicks pile
+  up an unbounded chain of nested checksum files. Checksum/signature
+  sidecars no longer appear as their own downloadable entry, and the
+  checksum endpoint now refuses to checksum a checksum file outright.
 
 ## v1.0.75 — Seventh audit pass: templates, models, deploy hardening, CI coverage (September 2026)
 

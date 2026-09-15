@@ -45,6 +45,21 @@ server {
     # Default nginx limit (1m) 413s avatar uploads and file-base posts.
     client_max_body_size 110m;
 
+    # Compression -- real gap found in a security/performance audit: no
+    # response compression was configured anywhere. Text-shaped
+    # responses (HTML pages, the app's own JS/CSS under /static/, JSON
+    # API responses) compress well; already-compressed binary formats
+    # (images, downloads under /files//downloads/) are deliberately
+    # left off this list since re-compressing them wastes CPU for
+    # little to no size win. gzip_min_length avoids compressing tiny
+    # responses where the overhead isn't worth it.
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 512;
+    gzip_types text/plain text/css text/xml application/json
+               application/javascript application/xml+rss
+               application/atom+xml image/svg+xml;
+
     # Main Flask app
     location / {
         proxy_pass http://127.0.0.1:5000;
