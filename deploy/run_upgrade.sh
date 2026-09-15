@@ -156,9 +156,9 @@ log "extracted to $INNER"
 
 # ── Run update.sh ─────────────────────────────────────────────────────────
 # update.sh expects to be run as root with bash, and it operates on the
-# already-installed tree at INSTALL_DIR. update.sh restarts gunicorn,
-# which will kill the HTTP request that triggered us — but we run
-# detached via the caller's nohup/setsid so we keep going.
+# already-installed tree at INSTALL_DIR. update.sh restarts the web
+# service, which will kill the HTTP request that triggered us — but we
+# run detached via the caller's nohup/setsid so we keep going.
 log "running update.sh"
 cd "$INNER"
 # Real gap found in a full install/update re-verify audit: update.sh's

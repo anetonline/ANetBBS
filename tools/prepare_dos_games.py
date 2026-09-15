@@ -28,7 +28,6 @@ Admin:  game_type=door_dos_browser
         web_game_url=/games/dos-data/<output>.zip
 """
 import argparse
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -198,8 +197,8 @@ def main():
 
     size_mb = zip_path.stat().st_size / 1_048_576
     print(f'\nDone: {zip_path} ({size_mb:.1f} MB)')
-    print(f'\nAdmin panel settings:')
-    print(f'  Game Type   : In-Browser DOS Game (js-dos)')
+    print('\nAdmin panel settings:')
+    print('  Game Type   : In-Browser DOS Game (js-dos)')
     print(f'  Web Game URL: /games/dos-data/{args.output}.zip')
 
 

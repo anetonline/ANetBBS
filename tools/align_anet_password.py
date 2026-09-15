@@ -13,20 +13,42 @@ FIRST so base_server_credentials() has an unambiguous value to read.
 
 Usage:
     cd /opt/anetbbs   # (or wherever anetbbs-rebuilt is installed)
-    python -m tools.align_anet_password 'Zkzl49@ceRP1'              # dry-run
-    python -m tools.align_anet_password 'Zkzl49@ceRP1' --apply       # actually fix
+    python -m tools.align_anet_password               # dry-run, prompts for the password
+    python -m tools.align_anet_password --apply        # actually fix, prompts for the password
+    python -m tools.align_anet_password --password 'x' # non-interactive (CI/scripted use only --
+                                                        # visible in `ps`/shell history while it runs)
 """
 import argparse
+import getpass
 import sys
 
 
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('password', help='The one confirmed-correct password.')
+    # Real gap found in a security/performance audit: this used to be a
+    # required positional argument, meaning the actual door-network
+    # password had to be typed on the command line -- visible to any
+    # other local user via `ps aux`/`/proc/<pid>/cmdline` for as long as
+    # the process runs, and landing in plaintext in shell history.
+    # fix_anet_import_credentials.py (this script's sibling, handling
+    # the same category of secret) already takes care not to let it
+    # land in logs/scrollback -- this brings the same care to how the
+    # value is INPUT, not just how it's printed. Prompting via getpass
+    # (no echo, never touches argv or history) is now the default;
+    # --password remains for scripted/CI use where that tradeoff is
+    # accepted deliberately.
+    parser.add_argument('--password',
+                        help='The one confirmed-correct password. If omitted, '
+                             'prompted for securely (recommended).')
     parser.add_argument('--apply', action='store_true',
                         help='Actually update the rows (default is dry-run).')
     args = parser.parse_args()
+    password = args.password or getpass.getpass(
+        'A-Net Game Server password (confirmed-correct value): ')
+    if not password:
+        print('No password entered -- aborting.')
+        return 1
 
     from anetbbs.web_app import create_app
     from anetbbs.models import db, Game
@@ -51,7 +73,7 @@ def main():
             parts = cur_args.split(None, 2)
             template = parts[0] if parts else '@USER@'
             xtrn_part = parts[2] if len(parts) > 2 else ''
-            new_args = f'{template} {args.password} {xtrn_part}'.strip()
+            new_args = f'{template} {password} {xtrn_part}'.strip()
             if cur_args != new_args:
                 to_fix.append((g, new_args))
 

@@ -107,9 +107,12 @@ Restart the web service. New endpoints become live:
 - `GET  /registry/api/v1/list` — same content, machine-readable URL
 
 A SYSTAT prober runs hourly against every listed peer (UDP/11). After
-3 consecutive failures (`REGISTRY_PROBE_FAILURE_THRESHOLD`), the peer
-is dropped from the public list — it re-lists automatically on
-recovery. Threshold + interval are configurable in `.env`.
+72 consecutive failures (`REGISTRY_PROBE_FAILURE_THRESHOLD`, ~3 days
+at the default 1-hour interval — raised from an earlier, too-aggressive
+default of 3 after transient UDP packet loss was delisting genuinely
+healthy peers), the peer is dropped from the public list — it re-lists
+automatically on recovery. Threshold + interval are configurable in
+`.env`, or from Admin → Federation Registry without a restart.
 
 Approve / reject / edit / delete via the admin UI at
 `/admin/registry/`. Entries flow through these states:
@@ -147,7 +150,7 @@ Approve / reject / edit / delete via the admin UI at
 
 The `bbses` array is empty until the hub has at least one verified +
 approved + active peer. Stale entries (no heartbeat for
-`REGISTRY_HEARTBEAT_STALE_HOURS`, default 48) are filtered out
+`REGISTRY_HEARTBEAT_STALE_HOURS`, default 72) are filtered out
 automatically.
 
 ## Rate limits
@@ -176,9 +179,9 @@ All env vars are read at service start. Defaults are sensible for the
 | `SYSOP_NAME` | `(empty)` | friendly display |
 | `BBS_LOCATION` | `(empty)` | friendly display |
 | `REGISTRY_HEARTBEAT_INTERVAL_SEC` | `86400` | client heartbeat cadence (1 day) |
-| `REGISTRY_HEARTBEAT_STALE_HOURS` | `48` | hub: drop entries quiet this long |
+| `REGISTRY_HEARTBEAT_STALE_HOURS` | `72` | hub: drop entries quiet this long |
 | `REGISTRY_PROBE_INTERVAL_SEC` | `3600` | hub: SYSTAT probe cadence (1 hour) |
-| `REGISTRY_PROBE_FAILURE_THRESHOLD` | `3` | hub: probe-fails before delist |
+| `REGISTRY_PROBE_FAILURE_THRESHOLD` | `72` | hub: probe-fails before delist (~3 days at the default interval) |
 | `ANETBBS_DIRECTORY_REFRESH_SEC` | `86400` | peer pull cadence (1 day) |
 
 ## ANotherNetwork

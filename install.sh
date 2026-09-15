@@ -409,11 +409,11 @@ echo "                ANetBBS is the only web server on this box."
 echo ""
 echo "  behind      = You already run another BBS / web server that owns"
 echo "                ports 80/443 (Synchronet, Mystic, etc.). ANetBBS"
-echo "                gunicorn binds 0.0.0.0:8080 — reverse-proxy to it"
+echo "                ANetBBS binds 0.0.0.0:8080 — reverse-proxy to it"
 echo "                from your existing nginx/apache. We don't touch"
 echo "                your web-server config."
 echo ""
-echo "  test        = Local sandbox. gunicorn binds 127.0.0.1:8080 — only"
+echo "  test        = Local sandbox. ANetBBS binds 127.0.0.1:8080 — only"
 echo "                reachable from this box itself (or via SSH tunnel)."
 echo "                No port exposed to the LAN, no public web at all."
 echo "                Telnet/SSH/MRC still work normally for trying"
@@ -506,7 +506,7 @@ echo ""
 
 # MRC bridge default port is derived from WEB_PORT+1, not a fixed 8080 --
 # test/behind modes default WEB_PORT itself to 8080, so a fixed MRC
-# default would collide with gunicorn (both trying to bind the same
+# default would collide with the web service (both trying to bind the same
 # port) whenever the sysop leaves both at their defaults. Computed here
 # (unconditionally, right after WEB_PORT is finalized) rather than
 # inside the .env-generation block below, since that block is skipped
@@ -1377,7 +1377,7 @@ if [[ -f "$ENV_FILE" ]] && ! $FORCE_OVERWRITE; then
     info ".env already exists — skipping (use --force to overwrite)"
     skip ".env preserved"
 else
-# ★ FIX 4: Use ABSOLUTE path for DATABASE_URL so gunicorn can always find
+# ★ FIX 4: Use ABSOLUTE path for DATABASE_URL so the web service can always find
 # the SQLite file regardless of its WorkingDirectory.
 # Also set DATA_DIR explicitly so config.py resolves correctly.
 # Real gap found in a security/performance audit: the file used to be
@@ -1435,10 +1435,10 @@ PETSCII80_PORT=6401
 
 # Web Server
 WEB_HOST=0.0.0.0
-# WEB_BIND is what deploy/serve.py actually binds the socketio/gunicorn
+# WEB_BIND is what deploy/serve.py actually binds its eventlet/socketio
 # listener to (WEB_HOST above is read by a different, unrelated code
 # path) -- real bug found live: test mode's whole security promise
-# ("gunicorn binds 127.0.0.1 -- no port exposed to the LAN") was silently
+# ("web service binds 127.0.0.1 -- no port exposed to the LAN") was silently
 # false because this line never existed, so serve.py always fell back to
 # its own 0.0.0.0 default regardless of install mode.
 WEB_BIND=$WEB_BIND
@@ -2163,7 +2163,7 @@ for svc in "${SERVICES_TO_START[@]}"; do
     systemctl restart "$svc" 2>/dev/null || true
 done
 
-# ★ FIX 10: Give services more time to start (especially gunicorn which loads
+# ★ FIX 10: Give services more time to start (especially the web service, which loads
 # Flask + SQLAlchemy + creates tables on first boot)
 sleep 5
 
@@ -2698,7 +2698,7 @@ show_status "required_pkgs"   "System packages"
 show_status "files"           "Application files"
 show_status "python"          "Python environment"
 show_status "config"          "Configuration (.env)"
-show_status "anetbbs-web"       "Web server (gunicorn)"
+show_status "anetbbs-web"       "Web server (eventlet)"
 if [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]]; then
     proto_label=""
     [[ "$ENABLE_TELNET" == "y" ]] && proto_label+="telnet "
@@ -2720,7 +2720,7 @@ fi
 if [[ "$INSTALL_MODE" == "test" ]]; then
     echo ""
     echo -e "${BOLD}${YELLOW}  Note: This is a TEST install (localhost-only web).${NC}"
-    echo -e "  ${DIM}- gunicorn binds 127.0.0.1:${WEB_PORT} — not reachable from your LAN${NC}"
+    echo -e "  ${DIM}- Web service binds 127.0.0.1:${WEB_PORT} — not reachable from your LAN${NC}"
     echo -e "  ${DIM}- Access from another machine via SSH tunnel:${NC}"
     echo -e "  ${DIM}    ssh -L ${WEB_PORT}:localhost:${WEB_PORT} ${SERVICE_USER}@<this-box>${NC}"
     echo -e "  ${DIM}    then open http://localhost:${WEB_PORT}/ in your local browser${NC}"
@@ -2737,7 +2737,7 @@ if [[ "$INSTALL_MODE" == "test" ]]; then
 elif [[ "$INSTALL_MODE" == "behind" ]]; then
     echo ""
     echo -e "${BOLD}${YELLOW}  Note: Behind-another-server install.${NC}"
-    echo -e "  ${DIM}- gunicorn binds 0.0.0.0:${WEB_PORT} — reachable from this box's IP${NC}"
+    echo -e "  ${DIM}- Web service binds 0.0.0.0:${WEB_PORT} — reachable from this box's IP${NC}"
     echo -e "  ${DIM}- Add a server block to your EXISTING nginx (or apache) pointing${NC}"
     echo -e "  ${DIM}  bbs.<your-domain> at http://127.0.0.1:${WEB_PORT}/ . Example nginx:${NC}"
     echo -e "  ${DIM}    server { server_name bbs.example.com; listen 80;${NC}"

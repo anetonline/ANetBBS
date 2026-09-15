@@ -20,9 +20,11 @@
 ## Fresh install
 
 ```bash
-# extract the release tarball
-tar xzf ANetBBS-v1.0.71.tar.gz
-cd ANetBBS-v1.0.71
+# extract the release tarball (replace X.Y.Z with whatever version
+# you actually downloaded from the BBS's /downloads/ page or GitHub
+# Releases -- the exact filename below is illustrative, not literal)
+tar xzf ANetBBS-vX.Y.Z.tar.gz
+cd ANetBBS-vX.Y.Z
 
 # run the installer
 sudo bash install.sh
@@ -134,7 +136,7 @@ path:
 - No nginx or Let's Encrypt/SSL prompts — TLS termination is entirely
   on you afterward.
 - No Finger or BinkP prompts — neither gets set up; do that by hand
-  afterward (`docs/INSTALL.md` §8, §9). MSP/SYSTAT are explicitly
+  afterward (`docs/INSTALL.md` §5 for Finger, §8 for BinkP). MSP/SYSTAT are explicitly
   written as *disabled* (`MSP_ENABLED=false`/`SYSTAT_ENABLED=false`) —
   both bind privileged ports (18/11) this wizard has no way to grant
   capability for, so leaving them at `config.py`'s own default of

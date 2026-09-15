@@ -1,11 +1,59 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.76`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.77`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.77 — Ninth audit pass: every script, full docs sweep, cfg/monitor hardening review (September 2026)
+
+A ninth audit pass, widening scope to ground not systematically covered
+by the eight prior rounds: every standalone maintenance script in
+`tools/`, the shell/Docker deployment layer, a complete accuracy sweep
+of every file in `docs/`, and a closing vulnerability-class review of
+the two standalone in-package tools (the terminal config editor and
+node monitor) that had seen comparatively less direct attention than
+the web blueprints. Same severity-tiered approach as the eight prior
+rounds; this entry again omits vulnerability specifics in the interest
+of responsible disclosure. Every code fix has a dedicated regression
+test.
+
+- Added integrity verification (checksum compare against known-good
+  values, with automatic deletion on mismatch) to the DOS-game-support
+  asset downloader, which previously wrote whatever a remote host
+  served with no verification at all.
+- Extended the automated code-scan gate (bandit + pyflakes) to cover
+  `tools/`, which had been silently out of scope since the scanning
+  step was first added — closing a real, previously unnoticed coverage
+  gap rather than just fixing what the wider scan happened to find.
+- Hardened a credential-rotation maintenance script to prompt for its
+  password interactively instead of accepting it as a command-line
+  argument, and removed a real credential that had been sitting in the
+  script's own usage example.
+- Corrected numerous stale references across `docs/` and `deploy/` to
+  the project's pre-v1.0a2.67 process-management approach, which was
+  deliberately replaced for Python 3.12 compatibility; a standalone
+  entry-point file left over from that era is now clearly marked
+  deprecated rather than silently unreferenced.
+- Closed a real correctness bug in a database-configuration class
+  affecting any process that constructs more than one app instance
+  with a different database in sequence — the second and later
+  instances silently reused the first instance's database. Dormant in
+  normal production use (a deployed process only ever constructs one
+  app instance), but real, and the direct cause of a diagnostic script
+  failing outright.
+- Reviewed the terminal config-editor and node-monitor tools against
+  the established recurring-vulnerability checklist (privilege
+  escalation via a shared launch chokepoint, credential handling, path
+  safety, injection) — confirmed already correctly hardened from a
+  prior round's fix, no new issues found.
+- Corrected a documentation/code mismatch in a rate-limit docstring, a
+  stale feature-count in the themes documentation, and a broken
+  version-pinned download URL in the Raspberry Pi install guide, among
+  numerous smaller documentation accuracy fixes found in the full
+  `docs/` sweep.
 
 ## v1.0.76 — Eighth audit pass: security infrastructure, performance, docs (September 2026)
 

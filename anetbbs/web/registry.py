@@ -85,7 +85,7 @@ def _ratelimit_check(host, source_ip, kind='register'):
     is a misconfig).
 
     kind='register' → 5 sec/host floor + 60/hour/IP cap
-    kind='heartbeat' → 60 sec/host floor + 100/hour/IP cap
+    kind='heartbeat' → 10 sec/host floor + 100/hour/IP cap
     """
     now = datetime.utcnow()
     if kind == 'heartbeat':

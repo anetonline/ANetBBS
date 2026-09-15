@@ -308,8 +308,8 @@ MEOF
 # Backup dir + everything inside is owned by root at this point (we
 # ran via sudo). The /admin/backups/ UI runs as the service user and
 # needs to be able to delete these without invoking a helper. Chown
-# the whole tree so plain os.unlink() / shutil.rmtree() from gunicorn
-# works.
+# the whole tree so plain os.unlink() / shutil.rmtree() from the web
+# service works.
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$BACKUP_DIR" 2>/dev/null || true
 chmod 0700 "$BACKUP_DIR" 2>/dev/null || true
 
@@ -1074,9 +1074,9 @@ MRC_BRIDGE_CONFIG="$INSTALL_DIR/mrc/bridge/config.json"
 # 1. If .env already sets WEB_PORT, use that (sysop has made an
 #    explicit choice; respect it even if it conflicts with something).
 # 2. Otherwise, probe what's currently bound. If the sysop was running
-#    gunicorn manually on, say, :8080 and we wrote a fresh unit
+#    the web app manually on, say, :8080 and we wrote a fresh unit
 #    hard-coded to :5000, their bookmarked URL would land on the MRC
-#    bridge instead. Look for a running gunicorn / python pointing at
+#    bridge instead. Look for a running web process pointing at
 #    the install dir and inherit its bind port.
 # 3. If step 2 finds nothing, default to 5000 — but FIRST verify that
 #    port isn't already held by another anetbbs service (mrc-bridge
@@ -1093,21 +1093,42 @@ if [[ ! -f /etc/systemd/system/anetbbs-web.service ]]; then
         info "  WEB_PORT=$WEB_PORT_VAL (from .env)"
     fi
 
-    # Step 2: discover existing gunicorn binding for the install.
+    # Step 2: discover an existing web-service binding for the install.
+    #
+    # Real bug found in a security/performance audit: this used to
+    # grep `ss -tlnp` output for the literal string "gunicorn" --
+    # stale from before the switch to eventlet's own native WSGI
+    # server (see deploy/serve.py's own comment on why gunicorn isn't
+    # used at all). The real process shows up as plain "python"/
+    # "python3", never "gunicorn", so that branch never matched a real
+    # install. The `$INSTALL_DIR` OR-branch never worked either --
+    # `ss -tlnp` only ever prints the owning process's NAME + pid
+    # (e.g. `users:(("python3",pid=1234,fd=6))`), never a path, so
+    # that branch could never match anything real either. Net effect:
+    # this whole detection step was silently a no-op for every actual
+    # ANetBBS install, always falling through to the Step 3 default.
+    #
+    # Fixed by cross-referencing each listening socket's owning PID
+    # against its real command line via /proc/<pid>/cmdline, which
+    # DOES contain the full path -- this is what the original code was
+    # actually trying to check.
     if [[ -z "$WEB_PORT_VAL" ]] && command -v ss >/dev/null 2>&1; then
-        # Walk every listening TCP port, look for one whose owning
-        # process is a gunicorn from this install's venv. ss output:
-        #   LISTEN 0 50 0.0.0.0:8080 0.0.0.0:* users:(("gunicorn",pid=...))
-        DISCOVERED=$(ss -tlnp 2>/dev/null \
-            | grep -E "gunicorn|$INSTALL_DIR" \
-            | grep -oE '0\.0\.0\.0:[0-9]+|127\.0\.0\.1:[0-9]+|\*:[0-9]+|\[::\]:[0-9]+' \
-            | grep -oE '[0-9]+$' \
-            | sort -u | head -1)
-        if [[ -n "$DISCOVERED" ]]; then
-            WEB_PORT_VAL="$DISCOVERED"
-            warn "  WEB_PORT auto-detected from running gunicorn: $WEB_PORT_VAL"
-            warn "  (a manual install was running here; preserving its choice)"
-        fi
+        while IFS= read -r line; do
+            pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+            [[ -z "$pid" ]] && continue
+            if [[ -r "/proc/$pid/cmdline" ]] \
+                    && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF "$INSTALL_DIR"; then
+                port=$(echo "$line" \
+                    | grep -oE '0\.0\.0\.0:[0-9]+|127\.0\.0\.1:[0-9]+|\*:[0-9]+|\[::\]:[0-9]+' \
+                    | grep -oE '[0-9]+$')
+                if [[ -n "$port" ]]; then
+                    WEB_PORT_VAL="$port"
+                    warn "  WEB_PORT auto-detected from a running web process: $WEB_PORT_VAL"
+                    warn "  (a manual install was running here; preserving its choice)"
+                    break
+                fi
+            fi
+        done < <(ss -tlnp 2>/dev/null)
     fi
 
     # Step 3: fall back to 5000, walking up if taken by something else.
@@ -1846,8 +1867,8 @@ if idx != -1:
     fi
 
     # Fix: Add /mrcws and /mrc-auth-check locations if entirely absent.
-    # Without them requests fall through to gunicorn (404) instead of the
-    # MRC bridge.  Sysops who installed before MRC web was added
+    # Without them requests fall through to the web service (404)
+    # instead of the MRC bridge.  Sysops who installed before MRC web was added
     # (pre-v1.0a2.76) or whose config was generated from an old template never
     # got these blocks. Read the real web/bridge ports from .env instead of
     # hardcoding 5000/8080 -- those were stale literals that caused the
@@ -2019,8 +2040,8 @@ else
 
     # HTTP-level health check: systemctl is-active only says the process
     # is up, not that the web app can serve requests. A bad migration or
-    # bad import would still leave gunicorn alive but every request
-    # 500s. Poll /healthz until it returns 200 OR we time out, then
+    # bad import would still leave the web service alive but every
+    # request 500s. Poll /healthz until it returns 200 OR we time out, then
     # flag as a critical failure so the rollback block below kicks in.
     if [[ " ${SERVICES_TO_START[*]} " == *" anetbbs-web "* ]]; then
         WEB_PORT_PROBE="${EXISTING_ENV[WEB_PORT]:-5000}"

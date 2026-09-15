@@ -23,8 +23,12 @@
 # redefinitions) with zero configuration and zero false-positive-prone
 # type annotations to retrofit.
 #
-# Both run against anetbbs/ only -- doors/ and anetbbs/games/sbbs_doors/
-# are vendored third-party door-game source, not ours to lint.
+# Both run against anetbbs/ and tools/ -- doors/ and
+# anetbbs/games/sbbs_doors/ are vendored third-party door-game source,
+# not ours to lint. tools/ (standalone sysop maintenance scripts) was a
+# real, previously-unnoticed gap in this scan's own scope -- found and
+# closed in a security/performance audit -- despite being project-owned
+# code just like anetbbs/ itself.
 
 name: code-scan
 
@@ -52,7 +56,7 @@ jobs:
           pip install bandit
 
       - name: Run bandit (medium+ severity)
-        run: bandit -r anetbbs/ -ll -c .bandit
+        run: bandit -r anetbbs/ tools/ -ll -c .bandit
 
   pyflakes:
     runs-on: ubuntu-latest
@@ -70,4 +74,4 @@ jobs:
           pip install pyflakes
 
       - name: Run pyflakes
-        run: pyflakes anetbbs/
+        run: pyflakes anetbbs/ tools/

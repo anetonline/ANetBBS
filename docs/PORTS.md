@@ -45,7 +45,7 @@ of the BBS keeps running.
 For the FTP server specifically, the cleanest fix is a systemd drop-in
 — note this is `anetbbs.service`, not `anetbbs-web.service`: FTP runs
 as a background thread inside the unified telnet/SSH/rlogin process
-(`anetbbs/main.py`), not inside the Flask/gunicorn process:
+(`anetbbs/main.py`), not inside the Flask web process:
 ```bash
 sudo systemctl edit anetbbs.service
 # Add:

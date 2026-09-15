@@ -39,11 +39,14 @@ A locked (`is_locked`) account is always excluded automatically.
 
 ## Embedding
 
-No extra configuration needed — ANetBBS doesn't set `X-Frame-Options`
-or a Content-Security-Policy anywhere today, so `/watch` embeds in an
-`<iframe>` on another site with no special handling. If you later add
-site-wide clickjacking protection, this route is the one place that
-needs an explicit carve-out to keep working as an embed.
+No extra configuration needed. ANetBBS sends site-wide security
+response headers on every other route — including `X-Frame-Options:
+DENY` and a `Content-Security-Policy` with `frame-ancestors 'self'` —
+but `/watch` is explicitly carved out of both (see
+`web_app.py`'s `_set_security_headers()`), specifically so it keeps
+working as an `<iframe>` embed on another site. See
+[`docs/SECURITY.md`](SECURITY.md) for the full response-headers
+writeup.
 
 ## What it doesn't do yet
 

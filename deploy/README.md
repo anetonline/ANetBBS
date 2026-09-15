@@ -90,6 +90,11 @@ override `.env` and ended up fighting each other for ports. If you're
 upgrading an install that still has the old split units, stop/disable/
 remove them and switch to `anetbbs.service` instead.
 
+**Optional services** (BinkP inbound FidoNet mail, the MRC chat
+bridge) aren't covered by the commands above — see `docs/INSTALL.md`
+§8/§10 for the full setup of each, including the extra config each
+one needs beyond just copying its `.service` file.
+
 ### 7. Configure nginx
 
 ```bash
@@ -106,15 +111,21 @@ sudo certbot --nginx -d yourdomain.com
 
 ---
 
-## Production gunicorn command
+## Production web server
 
-The web service uses gunicorn with the eventlet worker for full WebSocket support:
+The web service does **not** use gunicorn — `gunicorn --worker-class
+eventlet` is broken on Python 3.12 (a real fork()+greenlet crash; see
+`deploy/serve.py`'s own comment for the full story). It runs as a
+single plain Python process using eventlet's own native WSGI server
+instead, which is what `anetbbs-web.service` above actually starts:
 
 ```bash
-gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:5000 deploy.wsgi_wrapper:app
+venv/bin/python deploy/serve.py
 ```
 
-**Important:** Always use `-w 1` (single worker) with eventlet for correct Socket.IO behaviour.
+`deploy/wsgi_wrapper.py` in this directory is a deprecated leftover
+from before that switch — not used by anything current, kept only for
+reference.
 
 ---
 
@@ -122,11 +133,12 @@ gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:5000 deploy.wsgi_wrapper:app
 
 | Service              | Port          | Description                                |
 |----------------------|---------------|---------------------------------------------|
-| anetbbs-web          | 5000          | Flask web app (via gunicorn+eventlet)        |
+| anetbbs-web          | 5000          | Flask web app (eventlet's native WSGI server) |
 | anetbbs              | 2233/2234/513/6400/6401 | Telnet, SSH, rlogin, PETSCII (40/80-col) -- one process, each protocol individually enabled in `.env` |
 | anetbbs-finger       | 79            | RFC 1288 Finger (privileged port)            |
+| anetbbs-mrc-bridge (optional) | 5001 (`WEB_PORT+1`) | MRC chat bridge -- see `docs/INSTALL.md` §10 |
+| anetbbs-binkp (optional) | 24554     | FidoNet BinkP inbound mail listener         |
 | nginx                | 80/443        | Reverse proxy + SSL termination              |
-| MRC bridge (optional)| 8080          | MRC chat bridge                              |
 
 ---
 

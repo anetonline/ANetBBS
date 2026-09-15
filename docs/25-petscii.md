@@ -28,7 +28,7 @@ Every connection on a PETSCII port *is* PETSCII, at that port's fixed
 width, unconditionally — there's no telnet TTYPE auto-detection,
 because real C64 clients mostly don't announce themselves usefully
 that way. Users just pick the port matching their screen/emulator
-setting. See `docs/INSTALL.md` §10 and `docs/PORTS.md` for the
+setting. See `docs/INSTALL.md` §11 and `docs/PORTS.md` for the
 enable/firewall steps.
 
 Both listeners run inside the same unified `anetbbs.service` process
@@ -142,7 +142,7 @@ would get wrong:
 ## See also
 
 - `docs/PORTS.md` — port table
-- `docs/INSTALL.md` §10 — enabling PETSCII40/PETSCII80
+- `docs/INSTALL.md` §11 — enabling PETSCII40/PETSCII80
 - `docs/03-menus.md` — the ANSI custom-menu system this deliberately
   does *not* share a tree with
 - `docs/24-game-center.md` — the wider game catalog (Number Guessing

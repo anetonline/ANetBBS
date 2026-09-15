@@ -480,12 +480,44 @@ class Config:
     GAMES_INTERBBS_NETWORK_ID = os.environ.get('GAMES_INTERBBS_NETWORK_ID') or None
 
 
+class _EnvDatabaseURI:
+    """Class-attribute descriptor: re-reads DATABASE_URL from the
+    environment on every access instead of freezing it at class-
+    definition (module-import) time.
+
+    A plain `SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or
+    ...` class-body assignment is evaluated exactly once -- the first
+    time this module is imported in a process. Any code that builds more
+    than one app in the same process with a different DATABASE_URL per
+    call (e.g. tests/msp_loopback_check.py, which simulates two separate
+    BBS instances for a loopback test) silently gets the first call's
+    database for every app built after the first -- confirmed live via a
+    real reproduction: the second app's own SQLALCHEMY_DATABASE_URI
+    stayed pointed at the first app's temp dir, and the second app's
+    data dir never got a database file at all.
+
+    A descriptor's __get__ runs on every class-level attribute access
+    (both `ProductionConfig.SQLALCHEMY_DATABASE_URI` and the
+    `getattr(cfg, ...)` pattern used by get_config() callers and Flask's
+    own `config.from_object()`), so this re-reads the live environment
+    every time rather than caching a stale value. A plain @property
+    would NOT work here -- get_config() returns the class itself, never
+    an instance, and property.__get__ only triggers through instance
+    attribute access, not class attribute access.
+    """
+    def __init__(self, default_filename):
+        self._default_filename = default_filename
+
+    def __get__(self, obj, objtype=None):
+        return os.environ.get('DATABASE_URL') or \
+            f'sqlite:///{os.path.join(Config.DATA_DIR, self._default_filename)}'
+
+
 class DevelopmentConfig(Config):
     """Development configuration"""
     DEBUG = True
     TESTING = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        f'sqlite:///{os.path.join(Config.DATA_DIR, "anetbbs_dev.db")}'
+    SQLALCHEMY_DATABASE_URI = _EnvDatabaseURI('anetbbs_dev.db')
     SQLALCHEMY_ECHO = False
 
 
@@ -495,9 +527,8 @@ class ProductionConfig(Config):
     TESTING = False
 
     # Use PostgreSQL in production or fallback to SQLite
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        f'sqlite:///{os.path.join(Config.DATA_DIR, "anetbbs.db")}'
-    
+    SQLALCHEMY_DATABASE_URI = _EnvDatabaseURI('anetbbs.db')
+
     # SECRET_KEY validation happens at runtime, not import
     #@property
     #def SECRET_KEY(self):

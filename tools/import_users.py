@@ -39,7 +39,7 @@ import os
 import secrets
 import struct
 import sys
-from datetime import datetime, date
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -291,7 +291,7 @@ def import_synchronet(path: Path) -> Iterator[ImportedUser]:
         rec_size = SBBS_REC_V3
     elif size % SBBS_REC_V2 == 0:
         rec_size = SBBS_REC_V2
-        warn(f'Detected older 512-byte SBBS records; numeric fields may be less accurate.')
+        warn('Detected older 512-byte SBBS records; numeric fields may be less accurate.')
     else:
         # Guess v3 and proceed anyway
         rec_size = SBBS_REC_V3

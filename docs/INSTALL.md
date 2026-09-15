@@ -336,6 +336,18 @@ User=anetbbs
 Group=anetbbs
 WorkingDirectory=/opt/anetbbs
 Environment=MRC_BRIDGE_CONFIG=/opt/anetbbs/mrc/bridge/config.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=/opt/anetbbs/venv/bin/python -m mrc.bridge.main
 Restart=always
 RestartSec=10
@@ -437,10 +449,12 @@ restart anetbbs`.
   install dir. `install.sh` `chown`s on every run; if you re-pointed the
   unit file at a different install dir, mirror the perms there.
 - **Web service stuck in restart loop with `EADDRINUSE` on :5000** →
-  an old gunicorn worker is leaking past the master. Our systemd unit
-  ships with `KillMode=mixed` to prevent this, but if you adopted an
-  older unit file, add `KillMode=mixed` and `RestartSec=10` to
-  `[Service]` and `daemon-reload`.
+  a previous instance (or a subprocess it spawned, e.g. a door game)
+  is still holding the port when systemd tries to restart it. Our
+  systemd unit ships with `KillMode=mixed` (kills the whole cgroup, not
+  just the main process) to prevent this, but if you adopted an older
+  unit file, add `KillMode=mixed` and `RestartSec=10` to `[Service]`
+  and `daemon-reload`.
 - **MRC `<no name>` in Synchronet's IM display** → Synchronet IDENTs
   (RFC 1413) the sender to look up "real name". ANetBBS doesn't ship
   an identd; this is a known cosmetic-only limitation.

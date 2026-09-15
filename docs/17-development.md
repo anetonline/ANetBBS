@@ -442,6 +442,20 @@ at a scratch file or `tempfile.TemporaryDirectory()`, and restore any
 shared state in `tearDownClass`). Add tests for new features under
 `tests/`.
 
+Python code gets linted by `pyflakes`/`bandit` as part of every
+release (see `feedback_ci_verification_gate`-equivalent discipline in
+the `anetbbs-release`/`security-performance-audit` skills). The shell
+scripts (`install.sh`, `update.sh`, `build-release.sh`, `docker/*.sh`,
+`tools/*.sh`) have no equivalent automated linting today — a security/
+performance audit found this gap but couldn't close it in-sandbox (no
+`shellcheck` binary, no passwordless package-install access). If
+you're working on any of these scripts locally, run
+[shellcheck](https://www.shellcheck.net/) over them first
+(`apt install shellcheck` / `brew install shellcheck`, then
+`shellcheck install.sh update.sh build-release.sh docker/*.sh`) —
+cheap, catches real classes of bugs (unquoted expansions, wrong
+`[[`/`[` usage, etc.) that a manual read can miss.
+
 ---
 
 ## Where to ask questions

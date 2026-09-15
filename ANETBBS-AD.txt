@@ -1,0 +1,118 @@
+╔═════════════════════════════════════════════════════════════════════════╗
+║   █████╗ ███╗   ██╗███████╗████████╗██████╗ ██████╗ ███████╗           ║
+║  ██╔══██╗████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██╔════╝           ║
+║  ███████║██╔██╗ ██║█████╗     ██║   ██████╔╝██████╔╝███████╗           ║
+║  ██╔══██║██║╚██╗██║██╔══╝     ██║   ██╔══██╗██╔══██╗╚════██║           ║
+║  ██║  ██║██║ ╚████║███████╗   ██║   ██████╔╝██████╔╝███████║           ║
+║  ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═════╝ ╚═════╝ ╚══════╝           ║
+╚═════════════════════════════════════════════════════════════════════════╝
+        a modern BBS for the classic FidoNet world -- v1.0.77
+              telnet * ssh * rlogin * ftp * petscii * web
+
+Remember dialing up a board and getting lost for three hours?  ANetBBS
+brings that feeling back -- and wires it into 2026.  Free, open source,
+self-hosted, one install script, running on a Raspberry Pi or a VPS.
+
+═[ MESSAGING ]══════════════════════════════════════════════════════════════
+ » Local message boards -- threading, quote-reply, search, voting,
+   sticky/lock, moderators, last-read tracking
+ » FidoNet netmail via BinkP -- full kludge support (MSGID, REPLY, INTL,
+   CHRS, FMPT/TOPT, PID, TZUTC), per-user AKAs
+ » FidoNet echomail -- AreaFix robot, hub mode w/ per-node subscriptions,
+   SEEN-BY aware fan-out tosser
+ » ANotherNetwork (Zone 1200) -- ANetBBS's own network, seeded free on
+   every install: 26 message areas + 9 TIC file-echo areas
+ » DOVE-Net QWK -- fetch/upload REP packets, CONTROL.DAT auto conf-mapping
+ » QWK hub mode -- HTTP download/upload endpoints, per-node subscriptions
+ » Private messages between local users
+ » Inter-BBS Instant Messaging (MSP/RFC1312) + SYSTAT active-user responder
+ » CP437 + full 16-color ANSI rendering in every message body
+
+═[ DOORS & GAMES ]═════════════════════════════════════════════════════════
+ » Game Center -- 21 built-in browser games, zero setup, zero telnet
+   client required:
+     Hangman * Trivia * Number Guesser * Snake * Tic-Tac-Toe
+     Memory Match * Typing Speed Test * Minesweeper * 2048
+     a text adventure * Klondike Solitaire * Video Poker
+     Texas Hold'em * Blackjack * Slot Machines * Galaga
+     Tetris * Breakout * ANetDarkForces (10-sector raycaster FPS)
+     an Ebook Reader (Project Gutenberg)
+     Meadowlark Valley -- an original co-op farm/town builder sim
+   13 of them play with NO account at all
+ » DOSBox bridge (DOSBox-staging / dosbox-x / vanilla) for real DOS games
+ » Synchronet .js doors -- LORD ships pre-installed, plays out of the box
+ » Mystic Pascal Script (.mps) and Mystic Python (.mpy) doors
+ » Native binary doors -- DOOR.SYS, DOOR32.SYS, DORINFO, CHAIN.TXT,
+   SFDOORS.DAT drop files, plus generic exec for anything else
+ » rlogin door bridge -- connect straight out to a remote BBS's own game
+   server; A-Net Online's game server ships pre-installed and active
+ » Web terminal pinned to 80x25 w/ the full CGA palette -- doors look
+   exactly like they did on a real VGA terminal
+
+═[ WIKI ]═══════════════════════════════════════════════════════════════════
+ » Full collaborative wiki at /wiki/ -- markdown bodies, [[Page]] cross-
+   links, per-page revision history, unified-diff compare, revert
+ » Full-text search, recent changes, wanted/orphan page tracking
+ » 52 seeded reference pages -- connecting, every messaging subsystem,
+   doors, echomail/BinkP setup, NodeSpy, backup, architecture, sysop
+   guide, glossary, FAQ
+ » Anyone can read; logged-in users can edit (configurable gate);
+   admins can lock/delete/rename
+
+═[ RSS READER ]═════════════════════════════════════════════════════════════
+ » Built-in feed aggregator for BBS-scene news and anything else
+ » Web at /rss/ (river or per-feed view), terminal main-menu hotkey
+ » Sanitized HTML, per-user unread state, X-News seeded by default
+
+═[ FILE AREAS ]═════════════════════════════════════════════════════════════
+ » Per-area file bases -- users/sysop/none upload permissions
+ » TIC ingest from FTN peers + outbound TIC hatching to downstream nodes
+ » Auto-extracted descriptions from FILE_ID.DIZ, README, DESCRIPT.ION
+   inside zip / tar.gz / tar.bz2 / tar.xz / 7z / rar / lha archives
+ » Optional ClamAV virus scan on upload, shareable expiring links
+
+═[ IMAGE GALLERIES ]════════════════════════════════════════════════════════
+ » Web gallery at /gallery/ -- paginated thumbnails, full-screen viewer
+ » Terminal viewer via chafa (any terminal) or img2sixel (sixel-capable
+   terminals like SyncTERM)
+
+═[ CHAT ]═══════════════════════════════════════════════════════════════════
+ » MRC bridge -- one shared connection to the global inter-BBS chat
+   network (mrc.bottomlessabyss.net); web and terminal users share
+   rooms and a single trust identity
+ » Full slash-command set (/identify /msg /me /join /who /trust ...),
+   tab-completion, @mention highlighting with bell
+ » Multinode terminal chat between connected sessions + in-page shoutbox
+
+═[ FRONT-ENDS ]═════════════════════════════════════════════════════════════
+ » Web (Flask+SocketIO), Telnet, SSH, rlogin, FTP -- one shared user base
+ » PETSCII (C64/128) -- dedicated 40-col/80-col ports for real Commodore
+   hardware and PETSCII terminal emulators; boards, echomail, PMs, files
+   w/ XMODEM download, who's-online, profile, sysop-buildable menus
+ » Live "X just logged in/out" presence alerts across every protocol
+ » Watch It Live -- public no-login activity page, embeddable off-site
+ » Postcards -- compose + share retro CP437 art, get a PNG for socials
+ » 12 built-in themes, or build your own
+
+═[ SYSOP TOOLS ]════════════════════════════════════════════════════════════
+ » ANetBBS Pulse -- mobile-first status dashboard, installs to a phone's
+   home screen, live callers + service health + 24hr activity
+ » anetbbs-cfg -- full-screen terminal admin tool (SCFG/mystic -cfg
+   style), no browser required
+ » anetbbs-monitor -- live auto-refreshing node monitor w/ kick action,
+   no browser required
+ » Auto-social-posting queue -- draft Bluesky/Mastodon posts on new
+   high scores or BBS milestones, sysop reviews before anything posts
+ » Scheduled events -- built-in cron replacement w/ admin UI, no crontab
+ » Everything is data-driven -- menus, hotkeys, ANSI screens, external
+   programs, board categories -- no code changes needed to customize
+
+═════════════════════════════════════════════════════════════════════════════
+  Free and open source.  One install script.  Runs great on a Pi.
+
+  Source ..... github.com/anetonline
+  Try it live  bbs.a-net.fyi  (telnet 2233 / ssh 2234 / web)
+  Chat ....... irc.a-net.online:6667 (SSL 6697), #ANetBBS
+
+              -- come dial back in.  the boards are open again. --
+═════════════════════════════════════════════════════════════════════════════

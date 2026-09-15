@@ -32,14 +32,16 @@ ANSI art, FidoNet echomail, door games).
 
 Each *service* (not each protocol) runs separately — telnet, SSH,
 rlogin, and FTP all live inside ONE process (`anetbbs.service`), while
-the web app, the BinkP listener, and the MRC↔IRC bridge each run as
-their own separate systemd unit. Run `systemctl list-units --type=service
-| grep anet` to see exactly which unit owns what before reading a
-journal — `journalctl -u anetbbs` covers telnet/SSH/rlogin/FTP but
-never BinkP or the web app, a real mix-up worth avoiding. All units
-read the same `.env`, use the same SQLite DB, and the BBS terminal
-services sync their live presence into the same `UserSession` table
-the web app uses, so the "who's online" widget shows everyone at once.
+the web app, the BinkP listener, the Finger responder (RFC 1288), the
+MRC bridge, and (if you've opted into it) the MRC↔IRC bridge each run
+as their own separate systemd unit. Run `systemctl list-units
+--type=service | grep anet` to see exactly which unit owns what before
+reading a journal — `journalctl -u anetbbs` covers telnet/SSH/rlogin/
+FTP but never BinkP or the web app, a real mix-up worth avoiding. All
+units read the same `.env`, use the same SQLite DB, and the BBS
+terminal services sync their live presence into the same `UserSession`
+table the web app uses, so the "who's online" widget shows everyone at
+once.
 
 ## What it can do
 
@@ -57,7 +59,7 @@ the web app uses, so the "who's online" widget shows everyone at once.
   IRC bridge, MRC bridge for inter-BBS chat, in-page shoutbox.
 - **Real-time sysop control panel** — service start/stop/restart
   from the web, NodeSpy showing what every terminal user is doing.
-- **Themes** — pick from 9 built-in or sysop builds custom.
+- **Themes** — pick from 12 built-in or sysop builds custom.
 - **Customizable everything** — every menu, hotkey, ANSI screen,
   external program, board category is data-driven.
 - **PETSCII terminal support** — dedicated plain-text rendering path

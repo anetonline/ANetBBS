@@ -54,6 +54,10 @@ produce.
 | `db_vacuum` | SQLite VACUUM | none | Reclaims free pages, defragments, refreshes planner stats. Skips (returns ok) on non-SQLite backends — Postgres autovacuums itself. |
 | `log_rotate` | Rotate large logs | `max_mb` (default 50) | Any `logs/*.log` over the threshold is renamed to `.1` and a fresh empty file is created in its place. |
 | `security_check` | Security update check | none | Scans `apt list --upgradable` and the venv's `pip list --outdated`, tags Ubuntu `-security` rows, writes `logs/security-report.json` consumed by **Admin → Security**. Always returns ok=True even on a non-Ubuntu box, so a missing `apt` doesn't permanently red-flag the row. |
+| `cleanup_stale_sessions` | Clean up stale online-presence rows | `stale_days` (default 1) | Deletes `UserSession` rows untouched for `stale_days` — catches connections that never got a clean disconnect (dropped carrier, killed process). |
+| `cleanup_stale_game_sessions` | Clean up stale game-center node slots | `timeout_seconds` (default 3600) | Closes `GameSession` rows stuck at `status='active'` and releases their node slot, for a door-game process that crashed/was killed without a clean exit. |
+| `cleanup_stale_registry_entries` | Federation registry: clean up unverified entries | `stale_days` (default 3) | Deletes `RegistryEntry` rows that never completed email verification within `stale_days`. A fast no-op on any install that isn't `REGISTRY_MODE_ENABLED`. |
+| `cleanup_stale_presence_events` | Clean up old login/logout alert events | `stale_minutes` (default 60) | Deletes `PresenceEvent` rows (the real-time "X just logged in/out" delivery queue — see [33 — Presence alerts](33-presence-alerts.md)) older than `stale_minutes`. This table is meant to stay small and short-lived, unlike the other cleanup handlers above. |
 | `hub_generate_nodelist` | ANotherNetwork: generate nodelist | none | Publishes the ANotherNetwork nodelist into the `ANN.FILES.NODELIST` file area via `anetbbs.echomail.nodelist.write_nodelist_to_area()`, replacing the prior copy so peers can pull it like any other file-echo entry. Only meaningful on the install designated as the ANotherNetwork hub (`REGISTRY_MODE_ENABLED`) — on any other install it still runs harmlessly, just publishing a nodelist with only the hub entry and no downstream nodes. See [`20-federation.md`](20-federation.md) for the hub role this supports. |
 | `sync_wall_inbound` | InterBBS Wall: import inbound posts | none | Materializes new `ANET_WALL` echomail into local Wall posts. You won't add this by hand — it's auto-created when InterBBS Wall is enabled. |
 | `sync_lastcallers_inbound` | InterBBS Last Callers: import inbound entries | none | Materializes new `ANET_LASTCALLERS` echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled. |
@@ -98,12 +102,20 @@ that already have a row):
 | Name | Schedule | Handler |
 |---|---|---|
 | TW2 daily maintenance | Daily 03:30 UTC | `tw2_maint` |
+| Daily security update check | Daily 04:00 UTC | `security_check` |
 | Weekly SQLite VACUUM | Weekly, Sunday 04:15 UTC | `db_vacuum` |
 | Rotate oversize logs | Daily 04:45 UTC | `log_rotate` (`max_mb: 50`) |
-| Daily security update check | Daily 04:00 UTC | `security_check` |
+| Clean up stale online-presence rows | Daily 05:00 UTC | `cleanup_stale_sessions` (`stale_days: 1`) |
+| Clean up stale game-center node slots | Daily 05:15 UTC | `cleanup_stale_game_sessions` (`timeout_seconds: 3600`) |
+| Federation registry: clean up unverified entries | Daily 05:30 UTC | `cleanup_stale_registry_entries` (`stale_days: 3`) |
+| Clean up old login/logout alert events | Every 15 min | `cleanup_stale_presence_events` (`stale_minutes: 60`) |
 
 Any of these can be disabled, deleted, or have their schedule
-changed — they're normal rows, not special-cased.
+changed — they're normal rows, not special-cased. The four
+`cleanup_stale_*` events are auto-seeded on **every** install, not
+just fresh ones — each one only inserts if its own handler key isn't
+already present, so an existing install picks up any newly-added
+cleanup job on its next app start without needing a fresh install.
 
 On installs with `REGISTRY_MODE_ENABLED=true` (the designated
 ANotherNetwork hub), a fifth event is also seeded:

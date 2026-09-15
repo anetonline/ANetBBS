@@ -91,7 +91,7 @@ skipped.
 
 ## Permissions on disk
 
-Whatever Linux user the gunicorn web service runs as needs read/write
+Whatever Linux user the web service runs as needs read/write
 access to the gallery path (read for browsing, write for upload/delete).
 On the reference setup the web service runs as `anetbbs`, so:
 

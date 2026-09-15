@@ -225,7 +225,7 @@ The same codes also work inside Synchronet door files served via
 | `@DATE@`                          | local `YYYY-MM-DD`              |
 | `@DAY@`                           | weekday, e.g. `Tuesday`         |
 | `@VER@` / `@VERSION@`             | ANetBBS build version           |
-| `@TIMELEFT@`                      | always blank — not modelled yet |
+| `@TIMELEFT@` / `@AGE@` / `@SEX@` / `@POSTS@` / `@LASTON@` | recognized but always blank — not modelled yet (resolves silently empty, unlike a genuinely unknown code — see below) |
 | `@CLS@`                           | clear screen + home cursor      |
 | `@BPS:NNNN@`                      | simulate an NNNN-baud modem for the rest of the screen (300–56000, clamped); throttles the remaining output with real delays instead of just decorating text |
 
@@ -241,6 +241,7 @@ The same codes also work inside Synchronet door files served via
 | `\|VL`      | ANetBBS build version                                 |
 | `\|ND`      | active node slot number                               |
 | `\|LF`      | CRLF                                                  |
+| `\|LO`      | recognized but always blank — not modelled yet        |
 
 Color pipe-codes like `|07` (Synchronet/Mystic light-grey) continue
 to be handled by the existing pipe-to-ANSI translator and are

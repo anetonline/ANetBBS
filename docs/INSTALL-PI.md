@@ -77,13 +77,21 @@ sudo ufw enable
 
 ## Download ANetBBS
 
+Open `https://bbs.a-net.fyi/downloads/` in a browser and click Download
+on the top (newest) entry -- that page always lists the current
+release first, so there's no version number to get wrong. GitHub
+Releases (`https://github.com/anetonline/ANetBBS/releases/latest`)
+also has it; open that page and copy the real asset link rather than
+guessing the filename for a direct `wget` -- a hardcoded version
+number in this doc has gone stale before and will again.
+
+Then, on the Pi, with the real filename you downloaded:
+
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.71.tar.gz
-# or check /downloads/ on bbs.a-net.fyi for the latest tarball
-
-tar xzf ANetBBS-v1.0.71.tar.gz
-cd ANetBBS-v1.0.71
+# scp or wget it here, then:
+tar xzf ANetBBS-vX.Y.Z.tar.gz   # replace X.Y.Z with whatever you downloaded
+cd ANetBBS-vX.Y.Z
 ```
 
 ---
@@ -335,11 +343,14 @@ rm -rf "$INSTALL_DIR/data.bak"
 
 ## Updating ANetBBS on Pi
 
+Grab the current tarball the same way as the initial download above
+(`/downloads/` or GitHub Releases -- open the page, don't guess the
+filename), then:
+
 ```bash
 cd ~
-wget https://github.com/anetonline/ANetBBS/releases/latest/download/ANetBBS-v1.0.71.tar.gz
-tar xzf ANetBBS-v1.0.71.tar.gz
-sudo bash ANetBBS-v1.0.71/update.sh
+tar xzf ANetBBS-vX.Y.Z.tar.gz   # replace X.Y.Z with whatever you downloaded
+sudo bash ANetBBS-vX.Y.Z/update.sh
 ```
 
 `update.sh` auto-detects the running install, backs up your data, syncs the

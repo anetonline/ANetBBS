@@ -87,4 +87,4 @@ python3 tools/bbs-files-tool.py -bd \
 python3 tools/bbs-files-tool.py --help
 ```
 
-Requests: neo67@linuxmintusers.de
+Issues and feature requests: <https://github.com/anetonline/ANetBBS/issues>

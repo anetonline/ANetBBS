@@ -1,6 +1,6 @@
 # Themes
 
-ANetBBS ships nine hand-picked themes, all WCAG-AA-readable on
+ANetBBS ships twelve hand-picked themes, all WCAG-AA-readable on
 body text:
 
 - **Modern Dark** (default) — high-contrast Catppuccin-style palette
@@ -14,6 +14,12 @@ body text:
   with scanlines, brand glitch, and animated card borders
 - **HACKERS (1995)** — neon violet + lime + cyan rave cyberpunk, an
   homage to the 1995 film
+- **Graphite Teal** — neutral graphite dark theme with a single refined
+  teal accent and Manrope headings, built for long reading sessions
+- **Ivory Editorial** — warm cream daytime theme with a deep
+  forest-teal accent and serif headlines
+- **Retro Web '99** — tiled pinstripe background, beveled Windows-95
+  chrome, underlined blue/purple links, Times New Roman
 
 ## Per-user
 

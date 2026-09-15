@@ -1,9 +1,11 @@
 # /etc/sudoers.d/anetbbs
 #
-# NOPASSWD entries that let the gunicorn worker user run the
+# NOPASSWD entries that let the anetbbs-web service account run the
 # state-changing systemctl verbs (start / stop / restart) against the
 # anetbbs-* units — no full root shell. Read-only ops (status, show,
 # journalctl) do NOT need sudo and the panel calls them directly.
+# (anetbbs-web runs under eventlet's native WSGI server, not gunicorn
+# -- see deploy/serve.py's own comment on why.)
 #
 # Replace `__SERVICE_USER__` with whatever User= the anetbbs-web.service
 # unit runs as. The installer / update.sh re-writes this file on every
@@ -23,7 +25,7 @@
 # /bin/systemctl. Listing both makes the rule match regardless.
 #
 # Service tree (must match anetbbs/web/control.py::KNOWN_UNITS):
-#   anetbbs-web         gunicorn web + MSP + SYSTAT + federation
+#   anetbbs-web         web (eventlet) + MSP + SYSTAT + federation
 #   anetbbs             unified terminal protocols (telnet/SSH/rlogin/FTP/LMTP)
 #   anetbbs-mrc-bridge  MRC chat bridge
 #   anetbbs-finger      RFC 1288 finger daemon

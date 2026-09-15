@@ -65,8 +65,14 @@ def main():
         total = 0
         found = []
         for table_name, col in to_clean:
+            # table_name/col come only from sa.inspect(db.engine) a few
+            # lines above -- real schema introspection, never user/CLI
+            # input -- so this is the standard, correct way to build a
+            # dynamic-schema query: SQL has no parameter-binding syntax
+            # for identifiers (table/column names), only for values,
+            # and the actual value (uid) below IS properly bound.
             count = db.session.execute(
-                sa.text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col}" = :uid'),
+                sa.text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col}" = :uid'),  # nosec B608
                 {'uid': uid}
             ).scalar()
             if count:
@@ -87,8 +93,10 @@ def main():
             return 0
 
         for table_name, col, _count in found:
+            # Same schema-derived-identifier reasoning as the SELECT
+            # above -- table_name/col are never user input.
             db.session.execute(
-                sa.text(f'DELETE FROM "{table_name}" WHERE "{col}" = :uid'),
+                sa.text(f'DELETE FROM "{table_name}" WHERE "{col}" = :uid'),  # nosec B608
                 {'uid': uid})
         db.session.delete(user)
         db.session.commit()

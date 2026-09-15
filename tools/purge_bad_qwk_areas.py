@@ -85,7 +85,7 @@ def main():
                 valid_areas.append((area, num, msgs))
 
         if args.bogus_areas:
-            print(f"\n=== Bogus QWK areas (conf# not in valid set) ===")
+            print("\n=== Bogus QWK areas (conf# not in valid set) ===")
             if not bogus:
                 print("  none")
             for area, num, msgs in bogus:
@@ -93,7 +93,7 @@ def main():
                       f"name={area.name!r:<32}  messages={msgs}")
 
         if args.reset_msgs:
-            print(f"\n=== Valid QWK areas (messages will be wiped) ===")
+            print("\n=== Valid QWK areas (messages will be wiped) ===")
             if not valid_areas:
                 print("  none")
             for area, num, msgs in valid_areas:
