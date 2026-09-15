@@ -59,7 +59,7 @@ greenlet>=3.0.0
 # upgrades against modern gevent. Pinned to eventlet until flask-socketio
 # offers a maintained gevent path.
 python-socketio>=5.10.0
-python-engineio>=4.10.0
+python-engineio>=4.13.3
 simple-websocket>=1.0.0
 # 0.40.3 floor: CVE-2025-58068, HTTP request smuggling via malformed
 # chunked-encoding trailers in eventlet's WSGI parser -- this is the
