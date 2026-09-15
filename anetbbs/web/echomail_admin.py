@@ -138,6 +138,15 @@ class EchoAreaForm(FlaskForm):
             "name set in their Profile are blocked from posting here "
             "(with a message telling them to set one), not silently "
             "allowed to post under a handle anyway."))
+    jam_export_enabled = BooleanField(
+        'Export to JAM message base format', default=False,
+        description=(
+            "Regenerates a real .jhr/.jdt/.jdx JAM message base for this "
+            "area on a schedule (Admin -> Scheduled Events -> "
+            "export_jam_message_bases), so classic JAM-API door games can "
+            "read it directly. Read-only -- this database stays the real "
+            "source of truth; nothing a door writes into the JAM files "
+            "feeds back in."))
     submit = SubmitField('Save Area')
 
     def validate_tag(self, field):
@@ -582,6 +591,7 @@ def new_area():
             is_sysop_only=form.is_sysop_only.data,
             min_access_level=form.min_access_level.data if form.min_access_level.data is not None else 10,
             require_real_name=form.require_real_name.data,
+            jam_export_enabled=form.jam_export_enabled.data,
         )
         db.session.add(area)
         db.session.commit()

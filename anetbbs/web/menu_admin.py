@@ -8,44 +8,10 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required
 
 from ..models import db, BbsMenu, BbsMenuItem, BbsAnsiScreen
+from ..features.menu_engine import ACTION_TYPE_CHOICES as ACTION_TYPES
 from .access_control import require_admin as _admin_required
 
 menu_admin_bp = Blueprint('menu_admin', __name__, url_prefix='/admin/bbs-menus')
-
-
-# Action types known to the menu engine — keep in sync with menu_engine._ACTIONS
-ACTION_TYPES = [
-    ('goto', 'Go to another menu (action_args = menu name)'),
-    ('door', 'Launch a door game (action_args = Game id)'),
-    ('exec', 'Run external program — args is JSON or simple cmdline'),
-    ('ansi', 'Show an ANSI screen (action_args = slot name)'),
-    ('boards', 'Open message boards'),
-    ('pm', 'PM inbox'),
-    ('pm_send', 'Compose new PM'),
-    ('imsg', 'InterBBS IM inbox (MSP)'),
-    ('imsg_send', 'Send InterBBS IM (MSP)'),
-    ('bulletins', 'Bulletins'),
-    ('wall', 'Graffiti wall'),
-    ('echo', 'Echomail areas'),
-    ('echo_post', 'Compose echomail'),
-    ('files', 'File library'),
-    ('games', 'Game center'),
-    ('ebooks', 'Ebook reader'),
-    ('rss', 'RSS news reader'),
-    ('guru', 'Ask Anet (help guru search)'),
-    ('chat', 'Chat menu'),
-    ('multinode', 'Multinode chat (between connected terminal nodes)'),
-    ('oneliners', 'Show one-liners + last 10 callers'),
-    ('lastcallers', 'Last callers list (full, paginated)'),
-    ('who', "Who's online"),
-    ('profile', 'View own profile'),
-    ('edit_prof', 'Edit profile'),
-    ('passwd', 'Change password'),
-    ('sysop', 'Sysop tools (admin only)'),
-    ('page', 'Page sysop'),
-    ('dialout', 'Dial-out menu'),
-    ('logoff', 'End session'),
-]
 
 
 # Standard slot names rendered automatically by the session lifecycle.

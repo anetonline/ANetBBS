@@ -16,6 +16,21 @@ class GameManager:
         self.session = session
 
     async def show_menu(self):
+        """Game Center top-level picker (Door Games / Number Guessing).
+
+        A sysop can drop a full replacement at
+        data/mods/core/game_center.py (defining an async
+        show_game_center_menu(session, game_manager)) to override this
+        entirely -- same mechanism and same `chat_manager`-style access
+        to this live GameManager instance as data/mods/core/chat_menu.py.
+        See core/mods_override.py and docs/35-mods-directory.md.
+        """
+        from ..core.mods_override import call_core_override
+        await call_core_override(
+            'game_center', 'show_game_center_menu', self._stock_show_menu,
+            self.session, self)
+
+    async def _stock_show_menu(self):
         from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
             _w = ui_width(self.session)

@@ -77,6 +77,13 @@
                             </label>
                             <div class="form-text" style="font-size:.7rem;">{{ form.require_real_name.description }}</div>
                         </div>
+                        <div class="form-check">
+                            {{ form.jam_export_enabled(class="form-check-input") }}
+                            <label class="form-check-label" for="jam_export_enabled" style="color:#66ccff;">
+                                <i class="bi bi-file-earmark-binary"></i> Export to JAM Message Base
+                            </label>
+                            <div class="form-text" style="font-size:.7rem;">{{ form.jam_export_enabled.description }}</div>
+                        </div>
                     </div>
                 </div>
                 <div class="col-md-4">

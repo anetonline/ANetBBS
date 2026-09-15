@@ -4,6 +4,12 @@ ANSI screens are raw CP437 + ANSI escape code art shown at lifecycle
 events: pre-login welcome, post-logoff goodbye, after registration,
 or on demand from any menu item.
 
+> This page covers both the database-driven screens and the
+> file-based `data/mods/text/` override that beats them. See
+> [35 — The mods directory](35-mods-directory.md) for how this fits
+> together with ANetBBS's other customization points (menus, door
+> scripts, login logic).
+
 ## Where they live
 
 **Admin → BBS Menus → ANSI screens** (`/admin/bbs-menus/screens`).

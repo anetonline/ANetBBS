@@ -30,6 +30,28 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _override_path(mod_name: str) -> str:
+    from ..features.bbs_ui import _app
+    data_dir = _app().config.get('DATA_DIR', '')
+    return os.path.join(data_dir, 'mods', 'core', f'{mod_name}.py')
+
+
+def has_core_override(mod_name: str) -> bool:
+    """True if data/mods/core/<mod_name>.py exists on disk right now --
+    a cheap, side-effect-free check a caller can use to decide ROUTING
+    (e.g. menu_engine.py's picker action types deciding whether to
+    prefer a full mods/core override over an admin-editable BbsMenu)
+    without importing or running anything. call_core_override() below
+    does its own equivalent check internally, so calling both is
+    redundant but harmless -- this just exposes the same check as its
+    own function for a caller that needs the answer before deciding
+    whether to call call_core_override() at all."""
+    try:
+        return os.path.isfile(_override_path(mod_name))
+    except Exception:
+        return False
+
+
 async def call_core_override(mod_name: str, func_name: str, stock_fn, *args):
     """Try data/mods/core/<mod_name>.py's <func_name>(*args) first --
     fall back to stock_fn() (a zero-arg async callable, so the caller
@@ -46,9 +68,7 @@ async def call_core_override(mod_name: str, func_name: str, stock_fn, *args):
     overrides already behave.
     """
     try:
-        from ..features.bbs_ui import _app
-        data_dir = _app().config.get('DATA_DIR', '')
-        override_path = os.path.join(data_dir, 'mods', 'core', f'{mod_name}.py')
+        override_path = _override_path(mod_name)
         if os.path.isfile(override_path):
             spec = importlib.util.spec_from_file_location(
                 f'anetbbs_mods_core_{mod_name}', override_path)

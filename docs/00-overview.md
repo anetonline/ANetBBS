@@ -61,7 +61,11 @@ once.
   from the web, NodeSpy showing what every terminal user is doing.
 - **Themes** — pick from 12 built-in or sysop builds custom.
 - **Customizable everything** — every menu, hotkey, ANSI screen,
-  external program, board category is data-driven.
+  external program, board category is data-driven, and the
+  `data/mods/` tree covers what isn't (bundled door scripts, a
+  handful of built-in menu screens, even the pre-login menu's own
+  logic) with changes that survive every future update. See
+  [35 — The mods directory](35-mods-directory.md).
 - **PETSCII terminal support** — dedicated plain-text rendering path
   for real Commodore 64/128 hardware and PETSCII emulators, on its
   own opt-in ports. Boards, echomail, PMs, files (incl. XMODEM
@@ -110,6 +114,8 @@ once.
 - [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)
 - [32 — `anetbbs-monitor` (live node monitor, SSH/console)](32-node-monitor.md)
 - [33 — Presence alerts (real-time "X just logged in/out")](33-presence-alerts.md)
+- [34 — JAM message base export (for classic door games)](34-jam-export.md)
+- [35 — The mods directory (customization that survives updates)](35-mods-directory.md)
 
 ### Reference
 

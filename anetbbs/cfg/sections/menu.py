@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from anetbbs.cfg import ui
 from anetbbs.models import db, BbsMenu, BbsMenuItem
+from anetbbs.features.menu_engine import ACTION_TYPE_CHOICES as _ACTION_TYPE_CHOICES_WITH_LABELS
 
 MENU_FIELDS = [
     {"key": "name", "label": "Name (internal key)", "kind": "text"},
@@ -29,11 +30,16 @@ MENU_COLUMNS = [
     ("MinAccess", 10, lambda m: m.min_access),
 ]
 
-ACTION_TYPE_CHOICES = [
-    "goto", "door", "boards", "pm", "pm_send", "bulletins", "echo",
-    "echo_post", "files", "who", "profile", "edit_prof", "passwd",
-    "sysop", "chat", "rss", "ebooks", "logoff",
-]
+# Derived from the same canonical (value, label) list the web admin
+# uses (anetbbs/features/menu_engine.py's ACTION_TYPE_CHOICES) rather
+# than a separately hand-maintained copy -- this cfg section's own
+# list had already drifted, missing several action types (exec, ansi,
+# wall, games, guru, multinode, oneliners, lastcallers, dialout, page,
+# imsg, imsg_send) the web UI already offered. cfg's "choice" field
+# kind only supports a flat list of values (cycled with Left/Right,
+# no separate label shown), unlike the web dropdown's (value, label)
+# pairs, hence the comprehension.
+ACTION_TYPE_CHOICES = [value for value, _label in _ACTION_TYPE_CHOICES_WITH_LABELS]
 
 ITEM_FIELDS = [
     {"key": "hotkey", "label": "Hotkey", "kind": "text"},

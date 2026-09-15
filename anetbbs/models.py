@@ -740,6 +740,14 @@ class EchoArea(db.Model):
     # directing them to set one in Profile, not silently allowed to
     # post under a handle anyway.
     require_real_name = db.Column(db.Boolean, default=False)
+    # Off by default -- a sysop opts an area in specifically. See
+    # anetbbs/echomail/jam_export.py: when on, this area's messages get
+    # regenerated into a real JAM message base file triple on a schedule
+    # (events/handlers.py's export_jam_message_bases), readable by any
+    # classic JAM-API door game. Read-only/one-way -- SQL stays the
+    # source of truth, nothing a door writes into the JAM files feeds
+    # back in.
+    jam_export_enabled = db.Column(db.Boolean, default=False, nullable=False)
 
     messages = db.relationship('EchomailMessage', backref='area', lazy='dynamic', cascade='all, delete-orphan')
 

@@ -1,11 +1,48 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.78`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.80`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.80 — Fixed the new picker menus not backfilling on an upgraded install (September 2026)
+
+A real live bug, confirmed on an upgraded Pi install right after
+v1.0.79: the new `chat_systems`/`game_center`/`sysop_tools` menus (see
+v1.0.79 below) never appeared in Admin → BBS Menus or `anetbbs-cfg`.
+Root cause: the default-menu seeding function's upgrade path was only
+ever designed to add new *items* to an already-existing menu (e.g. a
+new hotkey added to `main` in a later release) — it had never needed
+to handle a whole *new* top-level menu appearing in a release before,
+so it silently skipped creating one on any install that already had
+`main` seeded. A fresh install was unaffected (a different code path
+always creates every default menu from scratch). Fixed so an upgrading
+install creates any default menu that's missing entirely, not just new
+items on ones that already exist.
+
+## v1.0.79 — Admin/anetbbs-cfg-editable Chat/Game Center/Sysop Tools menus, JAM message base export (September 2026)
+
+- **Chat Systems, Game Center, and Sysop Tools are now admin-editable
+  menus**, the same way the main menu already was — add, remove,
+  reorder, and relabel options from Admin → BBS Menus or
+  `anetbbs-cfg`'s BBS Menus section, with no code required, including
+  adding a genuinely new option (any existing action type — `exec`,
+  `ansi`, `door`, and so on) rather than just the bundled defaults.
+  The list of available action types is now defined once and shared by
+  both the web admin and `anetbbs-cfg`, closing a gap where the cfg
+  tool's own list had already drifted and was missing several action
+  types the web UI offered. `data/mods/core/` remains available
+  underneath for genuinely custom control flow a menu item can't
+  express — see [`docs/35-mods-directory.md`](35-mods-directory.md)
+  and [`docs/03-menus.md`](03-menus.md).
+- **JAM message base export.** A per-echo-area opt-in toggle
+  regenerates a real `.jhr`/`.jdt`/`.jdx` JAM message base on a
+  schedule, so classic JAM-API door games can read ANetBBS's echomail
+  directly. Read-only and one-way — the SQL database stays the sole
+  source of truth; nothing a door writes into the exported files feeds
+  back in. See [`docs/34-jam-export.md`](34-jam-export.md).
 
 ## v1.0.78 — SSH key login, translations, achievements, door-dev tooling, TUI accessibility (September 2026)
 

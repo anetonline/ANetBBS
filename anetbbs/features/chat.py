@@ -55,7 +55,25 @@ class ChatManager:
         }
 
     async def show_menu(self):
-        """Chat system selection — local, IRC (ANetIRC door), MRC."""
+        """Chat system selection — local, IRC (ANetIRC door), MRC.
+
+        A sysop can drop a full replacement at
+        data/mods/core/chat_menu.py (defining an async
+        show_chat_menu(session, chat_manager)) to override this
+        entirely -- not just re-skin the art, but add a genuinely new
+        menu option, change dispatch behavior, anything. `chat_manager`
+        is this live ChatManager instance, so the override can still
+        reuse the stock building blocks (chat_manager.local_chat(),
+        chat_manager.chat_systems['mrc'], etc.) rather than
+        reimplementing them from scratch. See core/mods_override.py
+        and docs/35-mods-directory.md.
+        """
+        from ..core.mods_override import call_core_override
+        await call_core_override(
+            'chat_menu', 'show_chat_menu', self._stock_show_menu,
+            self.session, self)
+
+    async def _stock_show_menu(self):
         from .ansi_ui import banner, menu_item, footer, prompt as _p, write_menu_art, ui_width
         while True:
             flags = _chat_flags(self.session)

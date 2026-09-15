@@ -119,8 +119,182 @@ async def _act_who(ui, args):     await ui.session.write(_CLR); await ui.show_on
 async def _act_profile(ui, args): await ui.session.write(_CLR); await ui.show_profile();     return None
 async def _act_edit_prof(ui, args): await ui.session.write(_CLR); await ui.edit_profile();   return None
 async def _act_passwd(ui, args):  await ui.session.write(_CLR); await ui.change_password();  return None
-async def _act_sysop(ui, args):   await ui.session.write(_CLR); await ui.sysop_menu();       return None
-async def _act_chat(ui, args):    await ui.session.write(_CLR); await ui.session.chat.show_menu(); return None
+async def _picker_goto_or_stock(mod_name, menu_name, stock_coro):
+    """Shared 3-tier routing for the Chat/Game Center/Sysop Tools
+    top-level picker action types: (1) a data/mods/core/<mod_name>.py
+    override always wins -- checked cheaply here just to decide
+    routing; the override itself, if present, actually runs later
+    inside stock_coro()'s own call_core_override() call, not here, so
+    checking twice is redundant but harmless; (2) otherwise, if an
+    admin/anetbbs-cfg-editable BbsMenu named menu_name exists, hand
+    off to it via the engine's own goto mechanism -- from there it's
+    an ordinary sub-menu, no different from one a sysop built by hand;
+    (3) otherwise fall through to stock_coro() (today's exact
+    hardcoded picker, unchanged) -- covers an old/unmigrated install
+    where the row doesn't exist yet. See docs/35-mods-directory.md."""
+    from ..core.mods_override import has_core_override
+    if not has_core_override(mod_name):
+        with _app().app_context():
+            from anetbbs.models import BbsMenu
+            if BbsMenu.query.filter_by(name=menu_name).first() is not None:
+                return ('goto', menu_name)
+    await stock_coro()
+    return None
+
+
+async def _act_sysop(ui, args):
+    await ui.session.write(_CLR)
+    return await _picker_goto_or_stock('sysop_tools', 'sysop_tools', ui.sysop_menu)
+
+
+async def _require_sysop(ui) -> bool:
+    """Shared is_admin gate for the sysop_* leaf action types below --
+    mirrors bbs_ui.py's _stock_sysop_menu()'s own check exactly (same
+    message/flow), re-checked here too rather than trusted solely to
+    that entry point's gate or to a sysop-editable BbsMenuItem's
+    min_access, since an admin-editable sysop_tools menu means a
+    sysop_users/sysop_boards/etc. item is now reachable via a plain
+    'goto' from ANYWHERE (a custom sub-menu, a typo'd min_access on
+    the item itself) -- not just through _stock_sysop_menu()'s own
+    picker. Same double-gate reasoning as _sysop_cfg_tool()'s existing
+    SSH-only check."""
+    if not ui.session.user.get('is_admin'):
+        await ui.session.write("\r\nSysop access required.\r\n")
+        await ui.session.read_line("Press Enter...")
+        return False
+    return True
+
+
+async def _act_sysop_users(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_users(); return None
+
+async def _act_sysop_boards(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_boards(); return None
+
+async def _act_sysop_echomail(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_echomail(); return None
+
+async def _act_sysop_games(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_games(); return None
+
+async def _act_sysop_wall(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_wall(); return None
+
+async def _act_sysop_file_queue(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_file_queue(); return None
+
+async def _act_sysop_events(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_events(); return None
+
+async def _act_sysop_rss_admin(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_rss_admin(); return None
+
+async def _act_sysop_login_modules(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_login_modules(); return None
+
+async def _act_sysop_notifications(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_notifications(); return None
+
+async def _act_sysop_registry(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_registry(); return None
+
+async def _act_sysop_callers(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_callers(); return None
+
+async def _act_sysop_node_monitor(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_node_monitor(); return None
+
+async def _act_sysop_status(ui, args):
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_status(); return None
+
+async def _act_sysop_cfg_tool(ui, args):
+    """No SSH-only check here -- ui.sysop_cfg_tool() (bbs_ui.py's
+    _sysop_cfg_tool()) already re-checks that itself and refuses on
+    telnet, exactly the double-gate precedent this whole
+    _require_sysop() pattern is modeled on."""
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_cfg_tool(); return None
+
+
+async def _act_chat(ui, args):
+    await ui.session.write(_CLR)
+    return await _picker_goto_or_stock('chat_menu', 'chat_systems', ui.session.chat.show_menu)
+
+
+async def _act_chat_local(ui, args):
+    """Leaf action for an admin-editable chat_systems menu item --
+    launches local multinode chat directly, same as picking '1' on the
+    stock Chat Systems menu."""
+    await ui.session.write(_CLR)
+    await ui.session.chat.local_chat()
+    return None
+
+
+async def _act_chat_irc(ui, args):
+    """Leaf action for an admin-editable chat_systems menu item --
+    launches IRC (A-Net IRC door), same as picking '2' on the stock
+    Chat Systems menu, including the same no_irc suspension check."""
+    f = _get_flags(ui.session)
+    if f and f.no_irc:
+        return await _suspended(ui.session, 'IRC')
+    from .anetirc2 import launch_anetirc_telnet
+    await ui.session.write(_CLR)
+    await launch_anetirc_telnet(ui.session.user, ui.session)
+    return None
+
+
+async def _act_chat_mrc(ui, args):
+    """Leaf action for an admin-editable chat_systems menu item --
+    launches MRC (Inter-BBS chat), same as picking '3' on the stock
+    Chat Systems menu, including the same no_mrc suspension check and
+    the MRC_BRIDGE_ENABLED sysop-wide toggle (an admin-added item is
+    independent of whether the stock menu would have shown option 3
+    at all, so this degrades with a clear message rather than
+    silently failing)."""
+    from .chat import _mrc_enabled
+    if not _mrc_enabled():
+        await ui.session.write(
+            '\r\n\x1b[1;31mMRC chat is currently disabled.\x1b[0m\r\n')
+        await ui.session.read_key('\r\n\x1b[33m[Press any key]\x1b[0m')
+        return None
+    f = _get_flags(ui.session)
+    if f and f.no_mrc:
+        return await _suspended(ui.session, 'MRC')
+    await ui.session.write(_CLR)
+    ui.session.chat.current_chat = ui.session.chat.chat_systems['mrc']
+    await ui.session.chat.current_chat.show_menu()
+    return None
+
+
 async def _act_rss(ui, args):     await ui.session.write(_CLR); await ui.show_rss();           return None
 async def _act_guru(ui, args):    await ui.session.write(_CLR); await ui.show_guru();          return None
 
@@ -149,7 +323,38 @@ async def _act_games(ui, args):
     f = _get_flags(ui.session)
     if f and f.no_games:
         return await _suspended(ui.session, 'games')
-    await ui.session.write(_CLR); await ui.session.games.show_menu(); return None
+    await ui.session.write(_CLR)
+    return await _picker_goto_or_stock('game_center', 'game_center', ui.session.games.show_menu)
+
+
+async def _act_game_door_list(ui, args):
+    """Leaf action for an admin-editable game_center menu item -- the
+    Door Games list, same as picking '1' on the stock Game Center
+    menu. Re-checks no_games directly (not just relying on _act_games'
+    own gate above) since an admin-added menu item elsewhere could
+    reach game_center via a plain 'goto' action_args, bypassing
+    _act_games entirely -- same defense-in-depth reasoning as
+    _sysop_cfg_tool's own double SSH-only gate."""
+    f = _get_flags(ui.session)
+    if f and f.no_games:
+        return await _suspended(ui.session, 'games')
+    await ui.session.write(_CLR)
+    await ui.session.games.show_door_menu()
+    return None
+
+
+async def _act_game_number_guess(ui, args):
+    """Leaf action for an admin-editable game_center menu item -- the
+    built-in Number Guessing game, same as picking '2' on the stock
+    Game Center menu. See _act_game_door_list's docstring for why
+    no_games is re-checked here too."""
+    f = _get_flags(ui.session)
+    if f and f.no_games:
+        return await _suspended(ui.session, 'games')
+    await ui.session.write(_CLR)
+    await ui.session.games.play_number_guess()
+    return None
+
 
 async def _act_dialout(ui, args):
     """Open the dial-out / BBS travel menu — telnet/SSH OUT to other BBSes."""
@@ -476,6 +681,26 @@ _ACTIONS = {
     'lastcallers': _act_lastcallers,
     'exec': _act_exec,
     'multinode': _act_multinode,
+    'chat_local': _act_chat_local,
+    'chat_irc': _act_chat_irc,
+    'chat_mrc': _act_chat_mrc,
+    'game_door_list': _act_game_door_list,
+    'game_number_guess': _act_game_number_guess,
+    'sysop_users': _act_sysop_users,
+    'sysop_boards': _act_sysop_boards,
+    'sysop_echomail': _act_sysop_echomail,
+    'sysop_games': _act_sysop_games,
+    'sysop_wall': _act_sysop_wall,
+    'sysop_file_queue': _act_sysop_file_queue,
+    'sysop_events': _act_sysop_events,
+    'sysop_rss_admin': _act_sysop_rss_admin,
+    'sysop_login_modules': _act_sysop_login_modules,
+    'sysop_notifications': _act_sysop_notifications,
+    'sysop_registry': _act_sysop_registry,
+    'sysop_callers': _act_sysop_callers,
+    'sysop_node_monitor': _act_sysop_node_monitor,
+    'sysop_status': _act_sysop_status,
+    'sysop_cfg_tool': _act_sysop_cfg_tool,
 }
 
 
@@ -911,21 +1136,131 @@ DEFAULT_MENUS = [
             {'hotkey': 'Q', 'label': 'Logoff', 'action_type': 'logoff', 'sort_order': 999},
         ],
     },
+    # The three picker screens below are seeded (and top-up-backfilled
+    # on upgrade, same as 'main' above) so they're admin/anetbbs-cfg
+    # editable by default, matching today's exact stock hotkeys/order --
+    # a sysop can freely add/remove/reorder/relabel items from here,
+    # or delete the whole menu to fall back to the hardcoded picker
+    # (_picker_goto_or_stock()'s tier-3 fallback). Not entry points
+    # themselves (is_default left False) -- only reached via the
+    # 'chat'/'games'/'sysop' actions on 'main' (or any other menu),
+    # exactly like a sysop-built custom sub-menu already works. See
+    # docs/35-mods-directory.md.
+    {
+        'name': 'chat_systems', 'title': 'Chat Systems',
+        'items': [
+            {'hotkey': '1', 'label': 'Local Chat', 'action_type': 'chat_local', 'sort_order': 10},
+            {'hotkey': '2', 'label': 'IRC Chat (A-Net IRC)', 'action_type': 'chat_irc', 'sort_order': 20},
+            {'hotkey': '3', 'label': 'MRC Chat (Inter-BBS)', 'action_type': 'chat_mrc', 'sort_order': 30},
+            {'hotkey': 'Q', 'label': 'Return to Main Menu', 'action_type': 'goto', 'action_args': 'main', 'sort_order': 999},
+        ],
+    },
+    {
+        'name': 'game_center', 'title': 'Game Center',
+        'items': [
+            {'hotkey': '1', 'label': 'Door Games (LORD, TradeWars, etc.)', 'action_type': 'game_door_list', 'sort_order': 10},
+            {'hotkey': '2', 'label': 'Number Guessing (built-in)', 'action_type': 'game_number_guess', 'sort_order': 20},
+            {'hotkey': 'Q', 'label': 'Return to Main Menu', 'action_type': 'goto', 'action_args': 'main', 'sort_order': 999},
+        ],
+    },
+    {
+        'name': 'sysop_tools', 'title': 'Sysop Tools', 'min_access': 100,
+        'items': [
+            {'hotkey': 'U', 'label': 'Users', 'action_type': 'sysop_users', 'min_access': 100, 'sort_order': 10},
+            {'hotkey': 'B', 'label': 'Boards/Bulletins', 'action_type': 'sysop_boards', 'min_access': 100, 'sort_order': 20},
+            {'hotkey': 'E', 'label': 'Echomail/Hub', 'action_type': 'sysop_echomail', 'min_access': 100, 'sort_order': 30},
+            {'hotkey': 'G', 'label': 'Games', 'action_type': 'sysop_games', 'min_access': 100, 'sort_order': 40},
+            {'hotkey': 'W', 'label': 'Wall', 'action_type': 'sysop_wall', 'min_access': 100, 'sort_order': 50},
+            {'hotkey': 'F', 'label': 'File Queue', 'action_type': 'sysop_file_queue', 'min_access': 100, 'sort_order': 60},
+            {'hotkey': 'V', 'label': 'Events', 'action_type': 'sysop_events', 'min_access': 100, 'sort_order': 70},
+            {'hotkey': 'R', 'label': 'RSS Feeds', 'action_type': 'sysop_rss_admin', 'min_access': 100, 'sort_order': 80},
+            {'hotkey': 'L', 'label': 'Login Modules', 'action_type': 'sysop_login_modules', 'min_access': 100, 'sort_order': 90},
+            {'hotkey': 'N', 'label': 'Notifications', 'action_type': 'sysop_notifications', 'min_access': 100, 'sort_order': 100},
+            {'hotkey': 'P', 'label': 'Registry/Peers', 'action_type': 'sysop_registry', 'min_access': 100, 'sort_order': 110},
+            {'hotkey': 'C', 'label': 'Caller Log', 'action_type': 'sysop_callers', 'min_access': 100, 'sort_order': 120},
+            {'hotkey': 'M', 'label': 'Node Monitor', 'action_type': 'sysop_node_monitor', 'min_access': 100, 'sort_order': 130},
+            {'hotkey': 'S', 'label': 'Server Status', 'action_type': 'sysop_status', 'min_access': 100, 'sort_order': 140},
+            # Unlike the hardcoded stock picker (which only ADDS this
+            # item for an SSH session), this default item is always
+            # present -- ui.sysop_cfg_tool() (bbs_ui.py's
+            # _sysop_cfg_tool()) already refuses gracefully with an
+            # on-screen message when reached over telnet, so showing
+            # it and letting the action's own existing check handle
+            # the refusal is consistent with every other admin-
+            # editable item here relying on its action's own gating.
+            {'hotkey': 'X', 'label': 'Config Tool (SSH)', 'action_type': 'sysop_cfg_tool', 'min_access': 100, 'sort_order': 150},
+            {'hotkey': 'Q', 'label': 'Return to Main Menu', 'action_type': 'goto', 'action_args': 'main', 'min_access': 100, 'sort_order': 999},
+        ],
+    },
 ]
+
+
+def _create_menu_from_def(mdef):
+    """Insert one DEFAULT_MENUS entry (the menu row + all its items)
+    from scratch. Shared by both branches of seed_default_menus() below
+    -- a brand-new install creating the whole tree, and an upgrading
+    install whose DB predates this particular menu (see that function's
+    own docstring for the real incident that exposed this gap: a
+    whole NEW top-level menu shipping in a release, not just a new item
+    on an existing one, went entirely unseeded on any already-installed
+    DB, silently, since DEFAULT_MENUS had only ever contained one entry
+    ('main') until chat_systems/game_center/sysop_tools were added)."""
+    from anetbbs.models import db, BbsMenu, BbsMenuItem
+    m = BbsMenu(
+        name=mdef['name'],
+        title=mdef['title'],
+        is_default=mdef.get('is_default', False),
+        ansi_screen=mdef.get('ansi_screen', ''),
+        prompt=mdef.get('prompt', 'Choice: '),
+        min_access=mdef.get('min_access', 0),
+    )
+    db.session.add(m)
+    db.session.flush()
+    added = 0
+    for idef in mdef['items']:
+        db.session.add(BbsMenuItem(
+            menu_id=m.id,
+            hotkey=idef['hotkey'],
+            label=idef['label'],
+            action_type=idef['action_type'],
+            action_args=idef.get('action_args'),
+            min_access=idef.get('min_access', 0),
+            sort_order=idef.get('sort_order', 0),
+            is_visible=True,
+        ))
+        added += 1
+    return added
 
 
 def seed_default_menus():
     """Create default menu rows + backfill missing default items on existing
-    installs. Idempotent — safe to call on every startup."""
+    installs. Idempotent — safe to call on every startup.
+
+    Real gap found live (2026-09): the "existing install" branch below
+    was only ever designed to top up new ITEMS on an already-existing
+    menu (e.g. a new hotkey added to 'main' in a later release) --
+    when a whole NEW top-level menu name showed up in DEFAULT_MENUS
+    for the first time (chat_systems/game_center/sysop_tools), an
+    upgrading install (which already has 'main', so takes this branch)
+    looked it up by name, found nothing, and silently skipped creating
+    it entirely, `if not m: continue`. A fresh install was unaffected
+    (it takes the other branch below, which always creates every
+    DEFAULT_MENUS entry) -- confirmed live on a real upgraded Pi
+    install: main showed up in Admin -> BBS Menus / anetbbs-cfg as
+    expected, the three new picker menus never did.
+    """
     from anetbbs.models import db, BbsMenu, BbsMenuItem
     with _app().app_context():
-        # Existing install: only top up newly-added default items
+        # Existing install: create any whole menu that's missing
+        # entirely (see this function's own docstring above), then top
+        # up newly-added default items on menus that DO already exist
         # (e.g. when a new release ships an extra hotkey).
         if BbsMenu.query.count() > 0:
             backfilled = 0
             for mdef in DEFAULT_MENUS:
                 m = BbsMenu.query.filter_by(name=mdef['name']).first()
                 if not m:
+                    backfilled += _create_menu_from_def(mdef)
                     continue
                 existing_items = BbsMenuItem.query.filter_by(menu_id=m.id).all()
                 # Check by (action_type, action_args) — not by hotkey — so sysops
@@ -963,28 +1298,7 @@ def seed_default_menus():
             return backfilled
         added = 0
         for mdef in DEFAULT_MENUS:
-            m = BbsMenu(
-                name=mdef['name'],
-                title=mdef['title'],
-                is_default=mdef.get('is_default', False),
-                ansi_screen=mdef.get('ansi_screen', ''),
-                prompt=mdef.get('prompt', 'Choice: '),
-                min_access=mdef.get('min_access', 0),
-            )
-            db.session.add(m)
-            db.session.flush()
-            for idef in mdef['items']:
-                db.session.add(BbsMenuItem(
-                    menu_id=m.id,
-                    hotkey=idef['hotkey'],
-                    label=idef['label'],
-                    action_type=idef['action_type'],
-                    action_args=idef.get('action_args'),
-                    min_access=idef.get('min_access', 0),
-                    sort_order=idef.get('sort_order', 0),
-                    is_visible=True,
-                ))
-                added += 1
+            added += _create_menu_from_def(mdef)
         db.session.commit()
         return added
 
@@ -1042,4 +1356,70 @@ async def _act_oneliners(ui, args):
 
 # Late-bound action registrations — for actions defined below the dict.
 _ACTIONS['oneliners'] = _act_oneliners
+
+
+# Canonical (value, label) list of every action_type _ACTIONS knows how
+# to dispatch -- the SINGLE shared source for both admin surfaces that
+# let a sysop pick an action_type from a dropdown/choice field:
+# anetbbs/web/menu_admin.py's ACTION_TYPES and
+# anetbbs/cfg/sections/menu.py's ACTION_TYPE_CHOICES both import this
+# rather than keeping their own copy. Previously all three lists were
+# maintained by hand (a code comment in menu_admin.py literally said
+# "keep in sync with menu_engine._ACTIONS") and had already drifted --
+# the cfg copy was missing 12 action types the web UI had. Keep this
+# list and the _ACTIONS dict above in sync by construction: every key
+# in _ACTIONS should have an entry here, and vice versa (see
+# tests/test_action_type_choices_consolidation.py).
+ACTION_TYPE_CHOICES = [
+    ('goto', 'Go to another menu (action_args = menu name)'),
+    ('door', 'Launch a door game (action_args = Game id)'),
+    ('exec', 'Run external program — args is JSON or simple cmdline'),
+    ('ansi', 'Show an ANSI screen (action_args = slot name)'),
+    ('boards', 'Open message boards'),
+    ('pm', 'PM inbox'),
+    ('pm_send', 'Compose new PM'),
+    ('imsg', 'InterBBS IM inbox (MSP)'),
+    ('imsg_send', 'Send InterBBS IM (MSP)'),
+    ('bulletins', 'Bulletins'),
+    ('wall', 'Graffiti wall'),
+    ('echo', 'Echomail areas'),
+    ('echo_post', 'Compose echomail'),
+    ('files', 'File library'),
+    ('games', 'Game center'),
+    ('game_door_list', 'Game Center: Door Games list (for an admin-editable game_center sub-menu)'),
+    ('game_number_guess', 'Game Center: built-in Number Guessing (for an admin-editable game_center sub-menu)'),
+    ('ebooks', 'Ebook reader'),
+    ('rss', 'RSS news reader'),
+    ('guru', 'Ask Anet (help guru search)'),
+    ('chat', 'Chat menu'),
+    ('chat_local', 'Chat: Local multinode chat (for an admin-editable chat_systems sub-menu)'),
+    ('chat_irc', 'Chat: IRC — A-Net IRC door (for an admin-editable chat_systems sub-menu)'),
+    ('chat_mrc', 'Chat: MRC — Inter-BBS chat (for an admin-editable chat_systems sub-menu)'),
+    ('multinode', 'Multinode chat (between connected terminal nodes)'),
+    ('oneliners', 'Show one-liners + last 10 callers'),
+    ('lastcallers', 'Last callers list (full, paginated)'),
+    ('who', "Who's online"),
+    ('profile', 'View own profile'),
+    ('edit_prof', 'Edit profile'),
+    ('passwd', 'Change password'),
+    ('sysop', 'Sysop tools (admin only)'),
+    ('sysop_users', 'Sysop: Manage Users (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_boards', 'Sysop: Manage Boards/Bulletins (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_echomail', 'Sysop: Echomail/Hub (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_games', 'Sysop: Games admin (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_wall', 'Sysop: Wall admin (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_file_queue', 'Sysop: File Queue (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_events', 'Sysop: Scheduled Events (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_rss_admin', 'Sysop: RSS Feeds admin (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_login_modules', 'Sysop: Login Modules (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_notifications', 'Sysop: Notifications (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_registry', 'Sysop: Registry/Peers (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_callers', 'Sysop: Caller Log (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_node_monitor', 'Sysop: Node Monitor (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_status', 'Sysop: Server Status (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_cfg_tool', 'Sysop: anetbbs-cfg tool, SSH only (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('page', 'Page sysop'),
+    ('dialout', 'Dial-out menu'),
+    ('logoff', 'End session'),
+]
 

@@ -4785,9 +4785,26 @@ def _session_is_ssh(session):
 
 
 async def _sysop_menu(self):
-    """Top-level sysop menu — only shown to is_admin users.
+    """Top-level sysop menu entry point.
 
-    Scrollable category picker (each category is its own sub-screen
+    A sysop can drop a full replacement at
+    data/mods/core/sysop_tools.py (defining an async
+    show_sysop_tools_menu(session, bbs_ui)) to override the category
+    picker below entirely -- same mechanism as
+    data/mods/core/chat_menu.py / game_center.py, with `bbs_ui` being
+    this live BBSMenuUI instance so the override can still call its
+    existing sysop_users()/sysop_boards()/etc. methods rather than
+    reimplementing them. See core/mods_override.py and
+    docs/35-mods-directory.md.
+    """
+    from ..core.mods_override import call_core_override
+    await call_core_override(
+        'sysop_tools', 'show_sysop_tools_menu', self._stock_sysop_menu,
+        self.session, self)
+
+
+async def _stock_sysop_menu(self):
+    """Scrollable category picker (each category is its own sub-screen
     built on _sysop_record_list) covering most of the terminal-feasible
     slice of the web admin surface. Deliberately does not attempt: the
     ANSI art editor/theme builder (rich canvas UI), file/avatar upload,
@@ -4851,6 +4868,7 @@ async def _sysop_menu(self):
             if match:
                 await match[2]()
 BBSMenuUI.sysop_menu = _sysop_menu
+BBSMenuUI._stock_sysop_menu = _stock_sysop_menu
 
 
 async def _sysop_cfg_tool(self):

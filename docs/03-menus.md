@@ -11,6 +11,21 @@ most ANSI actions (art, sixel, chat, most doors) have no PETSCII
 equivalent, so the two trees are deliberately not shared. See
 [25 — PETSCII](25-petscii.md).
 
+Three built-in picker screens — **Chat Systems**, **Game Center**, and
+**Sysop Tools** — are *also* real, pre-seeded menus in this same tree
+(`chat_systems`, `game_center`, `sysop_tools`), editable exactly like
+`main`: add/remove/reorder/relabel items from here or from
+`anetbbs-cfg`'s BBS Menus section, with no code required. See "Editing
+the Chat/Game Center/Sysop Tools pickers" below. The Door Games list
+and Dial-Out directory are different — they're always populated live
+from the `Game`/`PeerBbs` tables (Admin → Games / Admin → Dial-out),
+not a fixed option list, so there's nothing to reorder in a menu
+editor; only their *art* is file-overridable, via
+`data/mods/text/menus/`. See
+[35 — The mods directory](35-mods-directory.md) for the full picture
+of what's Admin-editable versus file-based versus `data/mods/core/`
+Python-logic-overridable.
+
 ## Where to edit
 
 **Admin → BBS Menus** (`/admin/bbs-menus/`).
@@ -65,18 +80,24 @@ Each item has:
 | `multinode` | —                                                 | interactive multinode chat                    |
 | `oneliners` | —                                                 | last 10 callers + recent one-liners           |
 | `lastcallers` | —                                               | full, paginated Last Callers list             |
-| `chat`      | —                                                 | chat menu (IRC / shoutbox)                    |
+| `chat`      | —                                                 | Chat Systems picker (goes to the `chat_systems` menu if it exists, else the built-in picker) |
+| `chat_local`| —                                                 | local multinode chat directly (for a `chat_systems` item) |
+| `chat_irc`  | —                                                 | IRC (A-Net IRC door) directly (for a `chat_systems` item) |
+| `chat_mrc`  | —                                                 | MRC (Inter-BBS chat) directly (for a `chat_systems` item) |
 | `rss`       | —                                                 | RSS reader                                    |
 | `guru`      | —                                                 | Ask Anet — searches the wiki (FTS5, not an LLM) |
 | `ebooks`    | —                                                 | ebook reader (Gutenberg)                      |
 | `wall`      | —                                                 | graffiti wall                                 |
-| `games`     | —                                                 | game center                                   |
+| `games`     | —                                                 | Game Center picker (goes to the `game_center` menu if it exists, else the built-in picker) |
+| `game_door_list` | —                                            | Door Games list directly (for a `game_center` item) |
+| `game_number_guess` | —                                         | built-in Number Guessing directly (for a `game_center` item) |
 | `dialout`   | —                                                 | dial out to other BBSes                       |
 | `page`      | —                                                 | page sysop                                    |
 | `profile`   | —                                                 | view profile                                  |
 | `edit_prof` | —                                                 | edit profile                                  |
 | `passwd`    | —                                                 | change password                               |
-| `sysop`     | —                                                 | sysop tools (admin only)                      |
+| `sysop`     | —                                                 | Sysop Tools picker, admin only (goes to the `sysop_tools` menu if it exists, else the built-in picker) |
+| `sysop_users`, `sysop_boards`, `sysop_echomail`, `sysop_games`, `sysop_wall`, `sysop_file_queue`, `sysop_events`, `sysop_rss_admin`, `sysop_login_modules`, `sysop_notifications`, `sysop_registry`, `sysop_callers`, `sysop_node_monitor`, `sysop_status`, `sysop_cfg_tool` | — | one specific Sysop Tools category directly, admin only (for a `sysop_tools` item — see below) |
 | `logoff`    | —                                                 | end session                                   |
 
 ## A couple of action types in more detail
@@ -122,6 +143,50 @@ Fill in:
 It creates the child menu, auto-adds a `Q` key on the child to come
 back, and links from the parent. You can deep-nest as far as you
 like.
+
+## Editing the Chat/Game Center/Sysop Tools pickers
+
+`chat_systems`, `game_center`, and `sysop_tools` are seeded on every
+install (fresh or upgraded) with items matching today's exact stock
+behavior — they show up in **Admin → BBS Menus** and `anetbbs-cfg`'s
+BBS Menus section like any other menu, right away, no setup step.
+Concretely, this means a sysop can:
+
+- **Add a genuinely new option** — e.g. a 4th Chat Systems item
+  pointing at a local shoutbox door (`action_type = door`), an `exec`
+  script, or a custom `ansi` screen. This is the case that used to
+  require editing Python source; now it's the same one-click "Add
+  item" flow as any other menu.
+- **Remove or reorder existing options** — drop IRC from the Chat menu
+  entirely, or put MRC before Local Chat, by deleting/reordering
+  items, same as any other menu.
+- **Relabel or rebind hotkeys** — call the Users category something
+  else, or move it off `U`, on the `sysop_tools` menu.
+- **Delete the whole menu** to fall back to the original hardcoded
+  picker (mostly useful for troubleshooting — there's rarely a reason
+  to do this over just editing items back to their defaults).
+
+Each of the leaf action types listed in the table above
+(`chat_local`/`chat_irc`/`chat_mrc`, `game_door_list`/
+`game_number_guess`, the fifteen `sysop_*` ones) is exactly what the
+corresponding stock option already did — they exist so a sysop's
+*edited* version of these three menus can still reach the same
+underlying functionality piece by piece, not just the bundled
+all-three/all-fifteen defaults.
+
+`sysop_tools`'s items (and the menu itself) are seeded at
+`min_access = 100` and every `sysop_*` action independently re-checks
+`is_admin` at dispatch time, regardless of what a menu item's own
+`min_access` says — the same defense-in-depth precedent as the
+Config Tool item's existing SSH-only check (see
+[28 — anetbbs-cfg](28-anetbbs-cfg.md)), so a misconfigured `min_access`
+on one item can't accidentally expose sysop functionality.
+
+If a `data/mods/core/` override exists for one of these three screens
+(`chat_menu.py`, `game_center.py`, `sysop_tools.py`), it takes priority
+over the admin-editable menu entirely — see
+[35 — The mods directory](35-mods-directory.md) for when you'd reach
+for that instead of editing the menu here.
 
 ## Tips
 

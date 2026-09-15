@@ -429,6 +429,11 @@ trust as much as you'd trust a sysop with a shell account.
 
 ### `data/mods/` — the sysop override tree (v1.0.36+)
 
+> See [35 — The mods directory](35-mods-directory.md) for a
+> consolidated overview of everything `data/mods/` covers, including
+> the ANSI-art overrides documented separately in
+> [doc 4](04-ansi-screens.md).
+
 `data/mods/` is ANetBBS's answer to real Synchronet's own `/sbbs/mods/`
 directory (wiki.synchro.net/dir:mods) — **one central place** for a
 sysop to drop a customized replacement for anything the BBS ships,

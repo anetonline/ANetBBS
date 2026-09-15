@@ -374,6 +374,34 @@ def cleanup_stale_presence_events(app, params):
         return False, f'cleanup_stale_presence_events failed: {exc!r}'
 
 
+def export_jam_message_bases(app, params):
+    """Regenerate a real JAM message base (.jhr/.jdt/.jdx file triple)
+    for every EchoArea with jam_export_enabled=True, so a classic
+    JAM-API door game can read ANetBBS's echomail directly. See
+    anetbbs/echomail/jam_export.py for the byte-format implementation
+    and why it's read-only (SQL stays the sole source of truth; this
+    is a from-scratch snapshot on every run, never live-synced).
+
+    Params:
+        ``output_dir``  optional; defaults to DATA_DIR/jam_export
+    """
+    try:
+        from ..models import EchoArea
+        from ..echomail.jam_export import export_echo_area
+        output_dir = (params or {}).get('output_dir') or os.path.join(
+            app.config.get('DATA_DIR', 'data'), 'jam_export')
+        areas = EchoArea.query.filter_by(jam_export_enabled=True).all()
+        if not areas:
+            return True, 'No echo areas have JAM export enabled -- nothing to do'
+        results = []
+        for area in areas:
+            summary = export_echo_area(area, output_dir)
+            results.append(f'{area.tag}: {summary["message_count"]} msg(s)')
+        return True, f'Exported {len(areas)} area(s) to {output_dir}: ' + ', '.join(results)
+    except Exception as exc:  # noqa: BLE001
+        return False, f'export_jam_message_bases failed: {exc!r}'
+
+
 def hub_generate_nodelist(app, params):
     """Generate the ANotherNetwork nodelist and publish it into the
     ANN.FILES.NODELIST file area, replacing the prior copy, so peers can
@@ -458,6 +486,7 @@ REGISTRY: Dict[str, HandlerFn] = {
     'cleanup_stale_game_sessions': cleanup_stale_game_sessions,
     'cleanup_stale_registry_entries': cleanup_stale_registry_entries,
     'cleanup_stale_presence_events': cleanup_stale_presence_events,
+    'export_jam_message_bases': export_jam_message_bases,
     'hub_generate_nodelist': hub_generate_nodelist,
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
@@ -476,6 +505,7 @@ HANDLER_META = {
     'cleanup_stale_game_sessions': ('Clean up stale game-center node slots', "Close GameSession rows stuck at status='active' and release their node slot, for doors whose process crashed/was killed without a clean exit. Params: timeout_seconds (default 3600)."),
     'cleanup_stale_registry_entries': ('Federation registry: clean up unverified entries', 'Delete RegistryEntry rows that never completed email verification within stale_days (default 3). No-op on non-hub installs. Params: stale_days.'),
     'cleanup_stale_presence_events': ('Clean up old login/logout alert events', 'Delete PresenceEvent rows (the real-time "X just logged in/out" delivery queue) older than stale_minutes (default 60).'),
+    'export_jam_message_bases': ('Export echo areas to JAM message base format', 'Regenerate a real .jhr/.jdt/.jdx JAM message base for every echo area with JAM export enabled (Admin -> Echomail -> area settings), so classic JAM-API door games can read it. Read-only snapshot, regenerated from scratch every run. Params: output_dir (default DATA_DIR/jam_export).'),
     'hub_generate_nodelist': ('ANotherNetwork: generate nodelist', 'Publish the ANotherNetwork nodelist into ANN.FILES.NODELIST. Only meaningful on the hub install.'),
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),

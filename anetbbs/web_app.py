@@ -1236,6 +1236,13 @@ def _lightweight_migrate(app):
     # explicit boolean default like the other flags above -- the
     # generic nullable-column auto-sweep below only synthesizes
     # permissive, no-default DDL).
+    # Echo areas: opt-in JAM message-base export toggle (see
+    # anetbbs/echomail/jam_export.py). NOT NULL DEFAULT 0 needed
+    # explicitly -- the generic auto-sweep below synthesizes a
+    # permissive (nullable, no default) DDL, which would leave
+    # existing rows NULL instead of the intended off-by-default.
+    _ensure_column('echo_areas', 'jam_export_enabled',
+                   'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('games', 'share_scores_interbbs',
                    'BOOLEAN NOT NULL DEFAULT 1')
     # See _ensure_index's own docstring above -- create_all() does not

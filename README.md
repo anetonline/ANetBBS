@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.0.78`, September 2026)
+**Status: stable** (`v1.0.80`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -25,8 +25,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.0.78.tar.gz
-cd ANetBBS-v1.0.78
+tar xzf ANetBBS-v1.0.80.tar.gz
+cd ANetBBS-v1.0.80
 sudo bash install.sh
 ```
 
@@ -46,8 +46,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.0.78.tar.gz
-cd ANetBBS-v1.0.78
+tar xzf ANetBBS-v1.0.80.tar.gz
+cd ANetBBS-v1.0.80
 sudo bash update.sh
 ```
 
@@ -296,6 +296,8 @@ buildx` once there's a registry to publish to.
 - [`docs/26-synchronet-json-rpc-doors.md`](docs/26-synchronet-json-rpc-doors.md) — 17 confirmed-working Synchronet door games (download/setup)
 - [`docs/28-anetbbs-cfg.md`](docs/28-anetbbs-cfg.md) — `anetbbs-cfg`, the SSH/console terminal config tool
 - [`docs/32-node-monitor.md`](docs/32-node-monitor.md) — `anetbbs-monitor`, the SSH/console live node monitor
+- [`docs/34-jam-export.md`](docs/34-jam-export.md) — JAM message base export for classic door games
+- [`docs/35-mods-directory.md`](docs/35-mods-directory.md) — customizing art/scripts/login logic so changes survive updates
 
 ## License
 
