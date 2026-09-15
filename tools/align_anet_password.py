@@ -13,8 +13,8 @@ FIRST so base_server_credentials() has an unambiguous value to read.
 
 Usage:
     cd /opt/anetbbs   # (or wherever anetbbs-rebuilt is installed)
-    python -m tools.align_anet_password 'Zkzl49@ceRP1'              # dry-run
-    python -m tools.align_anet_password 'Zkzl49@ceRP1' --apply       # actually fix
+    python -m tools.align_anet_password 'PASSWORD'              # dry-run
+    python -m tools.align_anet_password 'PASSWORD' --apply       # actually fix
 """
 import argparse
 import sys
