@@ -311,6 +311,14 @@ class Game(db.Model):
     drop_file_path = db.Column(db.String(500))
     use_dosbox = db.Column(db.Boolean, default=False)
     needs_fossil_driver = db.Column(db.Boolean, default=False)
+    # On by default -- most doors legitimately should be auto-aborted
+    # after a stretch of zero activity (an abandoned/hung session
+    # tying up a node forever otherwise). A sysop opts specific games
+    # OUT of it -- chat-type doors (MRC clients, IRC bridges, etc.)
+    # where sitting idle reading/waiting for other people is the
+    # entire point, not a hang. See games/door_runner.py's
+    # play_door_game_telnet() for the actual enforcement this gates.
+    idle_timeout_enabled = db.Column(db.Boolean, default=True, nullable=False)
 
     # door_rlogin only: Synchronet-style BBS tag (e.g. "ANET") the remote
     # game server uses to namespace inbound users by source BBS. Kept as

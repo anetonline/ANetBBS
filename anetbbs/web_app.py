@@ -1245,6 +1245,12 @@ def _lightweight_migrate(app):
                    'BOOLEAN NOT NULL DEFAULT 0')
     _ensure_column('games', 'share_scores_interbbs',
                    'BOOLEAN NOT NULL DEFAULT 1')
+    # On by default -- most doors should still be auto-aborted after a
+    # stretch of zero activity; a sysop opts specific (chat-type) games
+    # out. See models.py's Game.idle_timeout_enabled and
+    # games/door_runner.py's play_door_game_telnet().
+    _ensure_column('games', 'idle_timeout_enabled',
+                   'BOOLEAN NOT NULL DEFAULT 1')
     # See _ensure_index's own docstring above -- create_all() does not
     # retroactively add a newly-declared index to an already-existing
     # table on an upgraded install.

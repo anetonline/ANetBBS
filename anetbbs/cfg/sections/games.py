@@ -19,7 +19,12 @@ GAME_TYPE_CHOICES = [
     "door_rlogin", "door_telnet",
 ]
 
-DROP_FILE_CHOICES = ["none", "door.sys", "dorinfo", "door32.sys", "bbsdev.drp"]
+# Pre-existing drift found and closed while adding idle_timeout_enabled
+# below: this list was missing 'chain.txt' and 'sfdoors.dat' entirely,
+# even though the web admin's own drop_file_type dropdown
+# (web/games_admin.py's GameForm) already offered both.
+DROP_FILE_CHOICES = ["none", "door.sys", "door.sys.gap", "dorinfo",
+                     "door32.sys", "chain.txt", "sfdoors.dat", "bbsdev.drp"]
 
 GAME_FIELDS = [
     {"key": "name", "label": "Name", "kind": "text"},
@@ -44,6 +49,7 @@ GAME_FIELDS = [
     {"key": "drop_file_path", "label": "Drop File Path", "kind": "text_nullable"},
     {"key": "use_dosbox", "label": "Use DOSBox/dosemu2", "kind": "bool"},
     {"key": "needs_fossil_driver", "label": "Needs FOSSIL Driver", "kind": "bool"},
+    {"key": "idle_timeout_enabled", "label": "Auto-abort on Inactivity", "kind": "bool"},
     {"key": "mystic_script_path", "label": "Mystic Script Path (.mpy)", "kind": "text_nullable"},
     {"key": "synchronet_script_path", "label": "Synchronet Script Path (.js)", "kind": "text_nullable"},
     {"key": "synchronet_exec_dir", "label": "Synchronet Exec Dir", "kind": "text_nullable"},
@@ -54,6 +60,8 @@ GAME_FIELDS = [
 
 GAME_HELP = [
     "InterBBS Score-Sharing Area ID: raw EchoArea id (see Echomail section); blank = off.",
+    "Auto-abort on Inactivity: ON by default. Turn OFF for chat-type doors "
+    "(MRC clients, IRC bridges) where sitting idle is normal, not a hang.",
 ]
 
 GAME_NEW_DEFAULTS = {
@@ -63,7 +71,8 @@ GAME_NEW_DEFAULTS = {
     "web_enabled": True, "terminal_enabled": True, "share_scores_interbbs": True,
     "executable_path": None, "working_directory": None, "command_line_args": None,
     "rlogin_bbs_tag": None, "drop_file_type": "none", "drop_file_path": None,
-    "use_dosbox": False, "needs_fossil_driver": False, "mystic_script_path": None,
+    "use_dosbox": False, "needs_fossil_driver": False, "idle_timeout_enabled": True,
+    "mystic_script_path": None,
     "synchronet_script_path": None, "synchronet_exec_dir": None,
     "msgbase_area_id": None, "web_game_module": None, "web_game_url": None,
 }

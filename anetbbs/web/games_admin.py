@@ -147,6 +147,14 @@ class GameForm(FlaskForm):
     drop_file_path = StringField('Drop File Path', validators=[Optional(), Length(max=500)])
     use_dosbox = BooleanField('Use DOSBox/dosemu2', default=False)
     needs_fossil_driver = BooleanField('Requires FOSSIL Driver (BNU.COM / X00.COM)', default=False)
+    idle_timeout_enabled = BooleanField(
+        'Auto-abort on inactivity', default=True,
+        description=(
+            "On by default -- most doors should be auto-aborted after "
+            "a stretch of zero activity, so an abandoned session doesn't "
+            "tie up a node forever. Turn OFF for chat-type doors (MRC "
+            "clients, IRC bridges, etc.) where sitting idle reading is "
+            "the entire point, not a hang."))
 
     # Mystic Python
     mystic_script_path = StringField('Mystic Script Path (.mpy)', validators=[Optional(), Length(max=500)])
@@ -451,6 +459,7 @@ def _populate_game(game, form):
     game.drop_file_path = _strip_or_none(form.drop_file_path.data)
     game.use_dosbox = form.use_dosbox.data
     game.needs_fossil_driver = form.needs_fossil_driver.data
+    game.idle_timeout_enabled = form.idle_timeout_enabled.data
     game.mystic_script_path = _strip_or_none(form.mystic_script_path.data)
     game.synchronet_script_path = _strip_or_none(form.synchronet_script_path.data)
     game.synchronet_exec_dir = _strip_or_none(form.synchronet_exec_dir.data)

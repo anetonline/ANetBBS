@@ -1,11 +1,27 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.83`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.84`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.84 — Per-door opt-out for the idle-timeout auto-abort (September 2026)
+
+A real live report: a sysop sitting idle in a chat-type door (an MRC
+client) got auto-kicked for inactivity — exactly the behavior every
+OTHER door legitimately wants (an abandoned session shouldn't tie up a
+node forever), but wrong for a door whose entire point is sitting
+there reading/waiting without typing anything.
+
+- **New "Auto-abort on Inactivity" toggle per door** (Admin → Games,
+  and `anetbbs-cfg`'s Games section), on by default so every existing
+  door keeps today's exact behavior. Turn it off for chat-type doors
+  (MRC clients, IRC bridges, and similar) where idle time is normal.
+- Closed a pre-existing drift while touching this: `anetbbs-cfg`'s
+  drop-file-type choices were missing `chain.txt`, `sfdoors.dat`, and
+  the new GAP-style DOOR.SYS option the web admin already offered.
 
 ## v1.0.83 — Door dropfiles report real time budgets, plus a GAP-style DOOR.SYS option (September 2026)
 

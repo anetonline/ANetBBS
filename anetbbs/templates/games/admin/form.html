@@ -204,6 +204,15 @@
         </div>
         <div class="row g-3 mb-2">
             <div class="col-12">
+                <div class="form-check">
+                    {{ form.idle_timeout_enabled(class="form-check-input") }}
+                    {{ form.idle_timeout_enabled.label(class="form-check-label") }}
+                    <small class="text-muted d-block">{{ form.idle_timeout_enabled.description }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-2">
+            <div class="col-12">
                 <small class="text-muted">
                     Drives inside DOS: <strong>G:</strong> = FOSSIL bundle,
                     <strong>H:</strong> = game dir, <strong>I:</strong> = per-node temp (drop files).

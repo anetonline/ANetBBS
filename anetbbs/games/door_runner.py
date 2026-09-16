@@ -2321,14 +2321,26 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
             await session.read_line("\r\nPress Enter...")
             return False
 
-    try:
-        _idle_t = int(os.environ.get('DOOR_IDLE_TIMEOUT', '60'))
-    except ValueError:
-        _idle_t = 60
+    # Games.idle_timeout_enabled (default True): a sysop opts specific
+    # games OUT of idle auto-abort -- chat-type doors (MRC clients, IRC
+    # bridges, etc.) where sitting idle reading/waiting for other
+    # people is the entire point, not a hung session. Real live report:
+    # a sysop got auto-kicked out of an MRC-style door for being idle,
+    # exactly the behavior most OTHER doors legitimately want but this
+    # class of door never should. _idle_t = None means "disabled" for
+    # the rest of this function.
+    if getattr(game, 'idle_timeout_enabled', True):
+        try:
+            _idle_t = int(os.environ.get('DOOR_IDLE_TIMEOUT', '60'))
+        except ValueError:
+            _idle_t = 60
+    else:
+        _idle_t = None
     await session.write(
         f"\r\nLaunching {game.name}...\r\n"
         f"  - Press Ctrl+] then 'q' to abort\r\n"
-        f"  - {_idle_t}s of zero activity will auto-abort the door\r\n\r\n")
+        + (f"  - {_idle_t}s of zero activity will auto-abort the door\r\n\r\n"
+           if _idle_t is not None else "\r\n"))
 
     # See _drain_stale_session_input()'s own docstring -- real bug found
     # live bundling Minesweeper (intermittent instant-quit race).
@@ -2444,7 +2456,10 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
             # See last_activity's own comment above _output_pump() --
             # this is the enforcement the door-launch message promises
             # but, before this fix, only door_dos actually had.
-            if asyncio.get_event_loop().time() - last_activity >= _idle_t:
+            # _idle_t is None when Game.idle_timeout_enabled is off
+            # (chat-type doors, see above) -- never auto-abort those.
+            if _idle_t is not None and (
+                    asyncio.get_event_loop().time() - last_activity >= _idle_t):
                 logger.info('Door %s session %d auto-aborted: %ds idle',
                            game.slug, sid, _idle_t)
                 idle_timeout_hit = True
