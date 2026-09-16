@@ -1,11 +1,20 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.81`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.82`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.82 — `door` menu items now accept a Game slug, not just its id (September 2026)
+
+A sysop building a custom Chat Systems menu item flagged that a
+`door` action's `action_args` needed a numeric `Game.id`, which isn't
+shown anywhere in either admin UI — only buried in the edit-page URL.
+The slug, by contrast, is a labeled field right on that same page.
+`door` items now accept either an id (existing menu items keep working
+unchanged) or a slug — see [`docs/03-menus.md`](03-menus.md).
 
 ## v1.0.81 — Fixed data/mods/text/menus/ art overrides for database-driven menus (September 2026)
 

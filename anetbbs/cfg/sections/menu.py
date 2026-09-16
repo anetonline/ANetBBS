@@ -52,7 +52,7 @@ ITEM_FIELDS = [
 ]
 
 ITEM_HELP = [
-    "action_args meaning depends on action_type: 'goto'=menu name, 'door'=Game id, etc.",
+    "action_args meaning depends on action_type: 'goto'=menu name, 'door'=Game slug or id, etc.",
 ]
 
 ITEM_NEW_DEFAULTS = {

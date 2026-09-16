@@ -1,3 +1,7 @@
+# ANetBBS v1.0.82 — `door` menu items now accept a Game slug, not just its id (September 2026)
+
+A sysop building a custom Chat Systems menu item flagged that a `door` action's `action_args` needed a numeric `Game.id`, which isn't shown anywhere in either admin UI — only buried in the edit-page URL. The slug, by contrast, is a labeled field right on that same page. `door` items now accept either an id (existing menu items keep working unchanged) or a slug — see `docs/03-menus.md`.
+
 # ANetBBS v1.0.81 — Fixed data/mods/text/menus/ art overrides for database-driven menus (September 2026)
 
 A second real live bug, found right after v1.0.80: a sysop's existing `data/mods/text/menus/chat.ans` custom art (and its 132-column widescreen variant) stopped rendering once `chat_systems` became a real, admin-editable menu. Root cause: the menu-engine's file-based art lookup for database-driven menus only ever checked the older `data/text/menus/` location — `data/mods/text/menus/`, the documented, update-safe location every other override in the project uses, was never checked there at all. Fixed so it's checked first, same precedence as everywhere else. Note the filename now matches the menu's own name (`chat_systems.ans`/`chat_systems132.ans`), not the old `chat.ans` — see `docs/35-mods-directory.md`.

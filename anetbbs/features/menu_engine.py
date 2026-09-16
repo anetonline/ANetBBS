@@ -52,19 +52,30 @@ async def _act_logoff(ui, args):
     return None
 
 async def _act_door(ui, args):
-    """Launch a specific Game by id."""
+    """Launch a specific Game by id or slug.
+
+    Slug preferred -- it's a labeled, visible field right on the
+    game's own edit page (Admin -> Games -> edit); the numeric id
+    isn't shown anywhere in either admin UI, only buried in the edit
+    URL, which a sysop flagged as a real usability gap. Still accepts
+    a raw numeric id too, for menu items already configured that way
+    before slug support existed here -- tried first since a slug could
+    theoretically be all-digits (Game.slug has no format restriction).
+    """
     f = _get_flags(ui.session)
     if f and f.no_games:
         return await _suspended(ui.session, 'games')
     from anetbbs.models import Game
     from anetbbs.games.door_runner import play_door_game_telnet
-    try:
-        game_id = int(args or 0)
-    except ValueError:
-        await ui.session.write("\r\nMenu config error: door action_args must be a Game id.\r\n")
-        return None
+    args = (args or '').strip()
     with _app().app_context():
-        g = Game.query.get(game_id)
+        g = None
+        try:
+            g = Game.query.get(int(args))
+        except ValueError:
+            pass
+        if g is None:
+            g = Game.query.filter_by(slug=args).first()
         if not g:
             await ui.session.write("\r\nGame not found.\r\n")
             return None
@@ -1385,7 +1396,7 @@ _ACTIONS['oneliners'] = _act_oneliners
 # tests/test_action_type_choices_consolidation.py).
 ACTION_TYPE_CHOICES = [
     ('goto', 'Go to another menu (action_args = menu name)'),
-    ('door', 'Launch a door game (action_args = Game id)'),
+    ('door', 'Launch a door game (action_args = Game slug or id — slug is on the game\'s own edit page)'),
     ('exec', 'Run external program — args is JSON or simple cmdline'),
     ('ansi', 'Show an ANSI screen (action_args = slot name)'),
     ('boards', 'Open message boards'),

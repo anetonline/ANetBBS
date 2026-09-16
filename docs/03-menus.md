@@ -66,7 +66,7 @@ Each item has:
 | action      | args                                              | what it does                                  |
 | ----------- | ------------------------------------------------- | --------------------------------------------- |
 | `goto`      | name of another menu                              | jump to another menu                          |
-| `door`      | Game.id                                           | launch a registered door game                 |
+| `door`      | Game slug (preferred) or id                       | launch a registered door game                 |
 | `exec`      | shell cmd or JSON                                 | run an external program (see [doc 5](05-external-programs.md)) |
 | `ansi`      | slot name (welcome / weather_intro / ...)         | display a sysop-defined ANSI screen           |
 | `boards`    | —                                                 | message boards UI                             |
