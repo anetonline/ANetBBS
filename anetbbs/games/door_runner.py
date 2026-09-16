@@ -2129,45 +2129,78 @@ def terminate_session(session_id):
     """
     with _sessions_lock:
         found_locally = session_id in _sessions
-    if found_locally:
-        # Owned by this process -- the existing local-cleanup path
-        # already closes the DoorSession (fds/process/bridge/temp
-        # files) and flips GameSession status. Only one of these two
-        # branches should ever run for a given call: this function
-        # used to call door_session.close() here AND THEN
-        # _cleanup_session() (which closes the same DoorSession again),
-        # double-closing it and spawning a redundant force-kill thread
-        # every time an in-process session was terminated.
-        _cleanup_session(session_id)
-        return
 
-    try:
-        gs = GameSession.query.get(session_id)
-    except Exception:
-        logger.exception('terminate_session: GameSession lookup failed for %d',
-                         session_id)
-        return
-    if gs is None or gs.status != 'active':
-        return  # already gone, or never existed -- nothing to do
-    if gs.pid:
+    def _do_terminate():
+        if found_locally:
+            # Owned by this process -- the existing local-cleanup path
+            # already closes the DoorSession (fds/process/bridge/temp
+            # files) and flips GameSession status. Only one of these two
+            # branches should ever run for a given call: this function
+            # used to call door_session.close() here AND THEN
+            # _cleanup_session() (which closes the same DoorSession again),
+            # double-closing it and spawning a redundant force-kill thread
+            # every time an in-process session was terminated.
+            _cleanup_session(session_id)
+            return
+
         try:
-            os.killpg(gs.pid, signal.SIGTERM)
-            logger.info(
-                "terminate_session: session %d not owned by this process -- "
-                "sent SIGTERM directly to pid %d (its owning process's own "
-                "watcher will finish cleanup)", session_id, gs.pid)
-        except ProcessLookupError:
-            pass
-        except OSError as exc:
-            logger.warning('terminate_session: cross-process kill of pid %d '
-                           'for session %d failed: %s', gs.pid, session_id, exc)
+            gs = GameSession.query.get(session_id)
+        except Exception:
+            logger.exception('terminate_session: GameSession lookup failed for %d',
+                             session_id)
+            return
+        if gs is None or gs.status != 'active':
+            return  # already gone, or never existed -- nothing to do
+        if gs.pid:
+            try:
+                os.killpg(gs.pid, signal.SIGTERM)
+                logger.info(
+                    "terminate_session: session %d not owned by this process -- "
+                    "sent SIGTERM directly to pid %d (its owning process's own "
+                    "watcher will finish cleanup)", session_id, gs.pid)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                logger.warning('terminate_session: cross-process kill of pid %d '
+                               'for session %d failed: %s', gs.pid, session_id, exc)
+        else:
+            logger.warning(
+                'terminate_session: session %d is not owned by this process and '
+                'has no recorded pid (external rlogin/telnet bridge sessions '
+                'have none) -- cannot be force-terminated from here; it will '
+                'end via its own idle timeout or when the user disconnects',
+                session_id)
+
+    # Real bug found live: this function's own DB access (both
+    # branches of _do_terminate above) assumes SOME Flask app context
+    # is already pushed -- true for its web-admin-route caller, but
+    # NOT for play_door_game_telnet()'s idle-timeout/abort `finally:`
+    # block, which calls terminate_session(sid) well after that
+    # function's own `with transient_app_context(app):` (scoped only
+    # around the earlier launch/validation section) has already
+    # exited. Confirmed live via a real operator's captured traceback:
+    # "RuntimeError: Working outside of application context" on every
+    # single idle-timeout auto-abort, logged and swallowed by
+    # _cleanup_session's own broad except -- meaning the GameSession
+    # row was silently NEVER marked completed and the node NEVER
+    # released for any door whose idle-timeout fired. Same
+    # has_app_context()-gated pattern this file already uses in
+    # _write_msgbase_area_modopts() above: reuse a real ambient
+    # context when one exists (the common web-route case, avoiding a
+    # wasted throwaway Flask app + engine on every call), build one
+    # only when genuinely needed.
+    from flask import has_app_context
+    if has_app_context():
+        _do_terminate()
     else:
-        logger.warning(
-            'terminate_session: session %d is not owned by this process and '
-            'has no recorded pid (external rlogin/telnet bridge sessions '
-            'have none) -- cannot be force-terminated from here; it will '
-            'end via its own idle timeout or when the user disconnects',
-            session_id)
+        from flask import Flask
+        from anetbbs.config import get_config
+        from ..features.db_scope import transient_app_context
+        _app = Flask(__name__)
+        _app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+        db.init_app(_app)
+        with transient_app_context(_app):
+            _do_terminate()
 
 
 async def _drain_stale_session_input(session, timeout=0.05):

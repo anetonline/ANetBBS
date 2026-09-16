@@ -96,7 +96,17 @@ class AsciiMRCChat(MRCChat):
         while True:
             ch = await reader.read(1)
             if not ch:
-                return ''
+                # None, not '' -- same fix as the base class's own
+                # _read_chat_line() (mrc_chat.py), same busy-loop bug:
+                # _chat_loop() (inherited from MRCChat, shared by this
+                # ascii-terminal override) treats None as "connection
+                # gone, stop reading" but '' as "blank line submitted,
+                # keep looping" -- and reader.read(1) on an already-EOF
+                # stream returns b'' immediately rather than blocking,
+                # so returning '' here spun the event loop at 100% CPU
+                # with the node never released. See mrc_chat.py's own
+                # _read_chat_line() docstring for the full incident.
+                return None
 
             if ch in (b'\r', b'\n'):
                 async with self._input_lock:

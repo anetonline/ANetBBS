@@ -40,6 +40,7 @@ import re
 import time
 from collections import deque
 from datetime import datetime, timedelta
+from typing import Optional
 
 from .base_chat import BaseChatSystem
 from ..core.protocols import SessionProtocol
@@ -2138,7 +2139,26 @@ class MRCChat(BaseChatSystem):
                         'message': chunk,
                     })
 
-    async def _read_chat_line(self) -> str:
+    async def _read_chat_line(self) -> Optional[str]:
+        """Returns the submitted line, or None specifically to mean
+        "the connection is gone, stop reading" (end-of-stream on
+        reader.read(1), or a ConnectionError/OSError) -- _chat_loop()'s
+        own `if line is None: break` is the exit signal it already
+        expects for exactly this. Never '' for that case: an empty
+        STRING there used to be indistinguishable from a user just
+        pressing blank Enter, which _chat_loop() correctly treats as
+        "nothing submitted, keep looping" -- so a genuinely dead
+        connection kept re-entering this same read loop, and
+        reader.read(1) on an already-closed stream returns b'' (EOF)
+        immediately rather than blocking, producing an unthrottled
+        busy loop pinning the event-loop thread at 100% CPU with the
+        node never released. Confirmed live via a real py-spy stack
+        trace (idle SSH+MRC session, hours later): the process was
+        parked exactly in this read() call in a tight loop, and a
+        local test reproduction (kill the client mid-MRC-session
+        without /quit) hung the node exactly as reported until this
+        fix, clearing it immediately afterward.
+        """
         reader = getattr(self.session, 'reader', None)
         if reader is None or not hasattr(reader, 'read'):
             self._split_screen = False
@@ -2151,7 +2171,7 @@ class MRCChat(BaseChatSystem):
             while True:
                 ch = await reader.read(1)
                 if not ch:
-                    return ''
+                    return None
 
                 if ch == b'\x1b':
                     seq = await self._read_escape_seq(reader)
@@ -2208,7 +2228,7 @@ class MRCChat(BaseChatSystem):
                     await self._draw_status_line()
 
         except (ConnectionError, OSError):
-            return ''
+            return None
 
     async def _read_escape_seq(self, reader, timeout=0.1) -> bytes:
         """Read the bytes after ESC.  Returns the sequence without the leading ESC.

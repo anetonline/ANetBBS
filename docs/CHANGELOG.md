@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.85`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.86`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.86 — MRC chat disconnect / door-cleanup fixes (September 2026)
+
+Fixed a bug where a dropped MRC chat connection could spike CPU usage,
+plus a related door-cleanup error when running multiple multiplexors
+/ bridges.
 
 ## v1.0.85 — Fixed the new "Auto-abort on Inactivity" checkbox being invisible for most door types (September 2026)
 
