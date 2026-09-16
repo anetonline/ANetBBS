@@ -13,14 +13,12 @@ BBS, and it's easy to only ever discover one of them:
    reshape *what the BBS says and does*, including adding a genuinely
    new option to one of those three pickers with no code at all. See
    [03 — Menus](03-menus.md) and [04 — ANSI screens](04-ansi-screens.md).
-2. **The file-based `data/mods/` tree.** For the things that genuinely
-   aren't database rows — bundled door-game scripts, the compat-shim
-   library files those scripts load, a handful of remaining ANSI menu
-   screens still rendered by *code* rather than the menu engine (Door
-   Games list, Dial-Out — both always populated live from a database
-   table, not a fixed option list), and actual Python screen logic for
-   the four screens that support it. This page covers this second
-   system end to end, since it's easy to miss entirely.
+2. **The file-based `data/mods/` tree.** For art overrides on *any*
+   menu (database-driven or not — including width-variant 80/132-col
+   art), bundled door-game scripts, the compat-shim library files
+   those scripts load, and actual Python screen logic for the four
+   screens that support it. This page covers this second system end
+   to end, since it's easy to miss entirely.
 
 The one idea that ties all of `data/mods/` together: **`update.sh`
 never touches it.** The update process rsyncs a fresh copy of the
@@ -45,7 +43,7 @@ immediately with **no service restart**.
 | Location | Overrides | Effect | Docs |
 | -------- | --------- | ------ | ---- |
 | `data/mods/text/<slot>.ans` | Lifecycle ANSI screens (`welcome`, `goodbye`, `newuser`, any custom slot) | Your art shown instead of the database screen | [04](04-ansi-screens.md) |
-| `data/mods/text/menus/<slot>.ans` | The remaining built-in screens that aren't admin-editable menus (Door Games list, Dial-Out — full list below) | Your art shown above the live prompt, instead of the generated menu | [04](04-ansi-screens.md) |
+| `data/mods/text/menus/<name>.ans` | Any menu's header art — `main`, any admin-editable picker, a custom sub-menu, or the remaining code-driven screens (Door Games list, Dial-Out) | Your art shown above the live prompt, instead of the generated menu | [04](04-ansi-screens.md) |
 | `data/mods/core/<name>.py` | The pre-login menu, or the Chat Systems / Game Center / Sysop Tools pickers' actual **logic** — add a genuinely new option, not just reorder/re-skin the existing ones | Your Python function runs instead of the admin-editable menu (or the built-in fallback if that menu row is missing) | This page, below |
 | `data/mods/<name>.js` / `data/mods/<relative/path>.js` | A bundled Synchronet-compat door script, or any file it `load()`s at runtime | Your JS file runs instead of the bundled copy | [14](14-door-games.md) |
 
@@ -88,46 +86,52 @@ Next connection shows it. Delete the file and the next connection
 falls straight back to the database screen — nothing was overwritten,
 nothing to undo in Admin.
 
-## 2. Built-in menu art — `data/mods/text/menus/`
+## 2. Menu header art — `data/mods/text/menus/`
 
-Full detail in [doc 4](04-ansi-screens.md); short version here.
+Full detail in [doc 4](04-ansi-screens.md); short version here. This
+covers **every** menu header — the main menu, `chat_systems`,
+`game_center`, `sysop_tools`, any custom sub-menu a sysop builds, and
+the handful of screens that still aren't real `BbsMenu` rows at all
+(Door Games list, Dial-Out — always populated live from a database
+table, not a fixed option list).
 
-A handful of screens in ANetBBS still aren't part of the
-database-driven `BbsMenu`/`BbsMenuItem` tree — they're always
-populated live from a database table (the Door Games list from
-`Game`, the Dial-Out directory from `PeerBbs`), not a fixed option
-list, so there's nothing to add/reorder in a menu editor. This is
-exactly the gap `data/mods/text/menus/` fills for these: drop
-`<slot>.ans` and it's shown above the live prompt instead of the
-generated plain-text header.
+Drop `<name>.ans` in `data/mods/text/menus/` and it's shown above the
+live prompt instead of the generated header — checked before the
+older `data/text/menus/` location and before any database-stored art
+(a `BbsMenu.ansi_screen` field for a real menu, or the built-in
+generated layout otherwise), same mods-beats-everything precedence as
+every other override on this page. Also supports `<name>132.ans` for
+132-column/widescreen terminals and `<name>.asc` for plain-ASCII —
+same convention as the lifecycle screens in section 1.
 
-| Slot name | Menu | Notes |
-| --------- | ---- | ----- |
-| `door_games` | Door Games list | |
+| `<name>` | Menu | Notes |
+| -------- | ---- | ----- |
+| `main`, `chat_systems`, `game_center`, `sysop_tools`, or any custom menu name | That menu's own header, whatever its name is | `<name>` is the menu's own `name` field (Admin → BBS Menus), not a fixed slot — a sysop-renamed or newly-created menu just uses its own name |
+| `door_games` | Door Games list | Not a `BbsMenu` row — see above |
 | `door_games_<category-slug>` | A game category's own submenu (only categories flagged "Show as a submenu section") | `<category-slug>` is the category's own Slug field, e.g. `door_games_synchronet-doors.ans` |
-| `dialout` | Dial-Out Directory | |
+| `dialout` | Dial-Out Directory | Not a `BbsMenu` row — see above |
 
-**Worked example** — a sysop wants their own art on the Door Games
-list:
+**Worked example** — custom art on the Chat Systems menu, including a
+widescreen variant:
 
 ```
 mkdir -p ~/anetbbs/data/mods/text/menus
-nano ~/anetbbs/data/mods/text/menus/door_games.ans
+nano ~/anetbbs/data/mods/text/menus/chat_systems.ans      # 80-col
+nano ~/anetbbs/data/mods/text/menus/chat_systems132.ans   # 132-col
 ```
 
-Save, reconnect, open Door Games from the Game Center — the custom art
-shows, followed by the normal list. No restart, no Admin step.
+Save, reconnect, pick Chat from the main menu — the right variant
+shows automatically based on the caller's actual terminal width, then
+the live item list renders below it exactly as before. No restart, no
+Admin step.
 
-**Chat Systems / Game Center / Sysop Tools headers work differently
-now**: those three are real `BbsMenu` rows (see section 1 above and
-[doc 3](03-menus.md)), each with its own `ansi_screen` field for
-exactly this purpose — edit it from Admin → BBS Menus (or
-`anetbbs-cfg`) instead of a file drop. A `chat`/`sysop_users`/
-`sysop_boards`/`sysop_status`/`game_center` slot file under
-`data/mods/text/menus/` from before this menu-editing capability
-existed is no longer reached (the admin-editable menu renders first) —
-move that art into the corresponding menu's `ansi_screen` field to
-keep using it.
+If you're customizing a *database-driven* menu (`main`, `chat_systems`,
+`game_center`, `sysop_tools`, or a custom one) and only need a single
+fixed-width screen with no separate wide variant, `BbsMenu.ansi_screen`
+(editable from Admin → BBS Menus, web-only — not exposed in
+`anetbbs-cfg`) is a database-backed alternative to a file drop for that
+one case; the file-based route above is the only one that supports
+`132.ans` wide/narrow variants.
 
 ## 3. Core Python screen logic — `data/mods/core/`
 
@@ -284,10 +288,9 @@ shell account on this box."
 
 | You want to change... | Where |
 | ---------------------- | ----- |
-| Main menu hotkeys/labels, adding a sub-menu | Admin → BBS Menus ([doc 3](03-menus.md)) — not `mods/` at all |
-| Chat Systems / Game Center / Sysop Tools options (add/remove/reorder), or their header art | Admin → BBS Menus (or `anetbbs-cfg`) — edit the `chat_systems`/`game_center`/`sysop_tools` menu directly, same as `main` |
+| Main / Chat Systems / Game Center / Sysop Tools options (add/remove/reorder) | Admin → BBS Menus (or `anetbbs-cfg`) — edit the menu directly |
+| Any menu's header art, including width-variant (80 vs. 132-col) | `data/mods/text/menus/<menu-name>.ans` (+`132.ans`) — works for every menu, database-driven or not |
 | The `welcome`/`goodbye`/`newuser` screen, or a custom `ansi`-action slot | `data/mods/text/<slot>.ans`, or Admin → BBS Menus → ANSI screens |
-| The Door Games list / Dial-Out directory header art | `data/mods/text/menus/<slot>.ans` (these two stay code-driven — no Admin equivalent) |
 | The pre-login menu's, or Chat/Game Center/Sysop Tools' actual **logic**, beyond what a menu item can express | `data/mods/core/<name>.py` |
 | A bundled Synchronet-compat door's behavior | `data/mods/<name>.js` |
 | Site theme / colors | Admin → Themes ([doc 8](08-themes.md)) — not `mods/` |

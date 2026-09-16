@@ -894,15 +894,28 @@ async def run_menu(session, start='main'):
             # defined in the schema but never read anywhere.
             lang = (session.user.get('language') or 'en') if isinstance(session.user, dict) else 'en'
             title, item_list = _apply_menu_translations(menu.name, title, item_list, lang)
-            # Mode-aware screen content lookup.
-            # wide : data/text/menus/{name}132.ans → {name}.ans → DB ANSI field
-            # ansi : data/text/menus/{name}.ans → DB ANSI field
-            # ascii: data/text/menus/{name}.asc  → (no DB — it has ANSI content)
+            # Mode-aware screen content lookup, mods-first (same
+            # precedence every other data/mods/ override in this
+            # project already uses -- see ansi_ui.py's load_menu_ansi()
+            # and docs/35-mods-directory.md). Real gap found live:
+            # data/mods/text/menus/ was never checked here at all, only
+            # the older data/text/menus/, so a sysop dropping a file in
+            # the documented, update-safe mods/ location for a
+            # database-driven menu (including chat_systems/game_center/
+            # sysop_tools, all of which render through this exact path)
+            # silently had no effect.
+            # wide : {name}132.ans → {name}.ans, checked in mods/ then data/text/menus/, then DB ANSI field
+            # ansi : {name}.ans, checked in mods/ then data/text/menus/, then DB ANSI field
+            # ascii: {name}.asc, checked in mods/ then data/text/menus/ (no DB -- it has ANSI content)
             import os as _os
             from flask import current_app as _ca
             _mode = getattr(session, 'term_mode', 'ansi')
-            _menus_dir = _os.path.join(_ca.config.get('DATA_DIR', ''), 'text', 'menus')
-            screen, is_plain_text = _load_menu_art_from_disk(_menus_dir, menu.name, _mode)
+            _data_dir = _ca.config.get('DATA_DIR', '')
+            _mods_menus_dir = _os.path.join(_data_dir, 'mods', 'text', 'menus')
+            _menus_dir = _os.path.join(_data_dir, 'text', 'menus')
+            screen, is_plain_text = _load_menu_art_from_disk(_mods_menus_dir, menu.name, _mode)
+            if not screen:
+                screen, is_plain_text = _load_menu_art_from_disk(_menus_dir, menu.name, _mode)
             if _mode != 'ascii' and not screen:
                 screen = menu.ansi_screen or ''
 

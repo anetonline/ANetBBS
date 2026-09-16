@@ -16,12 +16,14 @@ Three built-in picker screens — **Chat Systems**, **Game Center**, and
 (`chat_systems`, `game_center`, `sysop_tools`), editable exactly like
 `main`: add/remove/reorder/relabel items from here or from
 `anetbbs-cfg`'s BBS Menus section, with no code required. See "Editing
-the Chat/Game Center/Sysop Tools pickers" below. The Door Games list
-and Dial-Out directory are different — they're always populated live
-from the `Game`/`PeerBbs` tables (Admin → Games / Admin → Dial-out),
-not a fixed option list, so there's nothing to reorder in a menu
-editor; only their *art* is file-overridable, via
-`data/mods/text/menus/`. See
+the Chat/Game Center/Sysop Tools pickers" below. Every menu's header
+art — `main` included — is separately file-overridable via
+`data/mods/text/menus/<menu-name>.ans` (plus a `132.ans` widescreen
+variant), the same as any other menu here. The Door Games list and
+Dial-Out directory are different — they're always populated live from
+the `Game`/`PeerBbs` tables (Admin → Games / Admin → Dial-out), not a
+fixed option list, so there's nothing to reorder in a menu editor, but
+their art is file-overridable the same way. See
 [35 — The mods directory](35-mods-directory.md) for the full picture
 of what's Admin-editable versus file-based versus `data/mods/core/`
 Python-logic-overridable.

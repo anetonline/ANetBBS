@@ -1,11 +1,26 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.80`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.81`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.81 — Fixed data/mods/text/menus/ art overrides for database-driven menus (September 2026)
+
+A second real live bug, found right after v1.0.80: a sysop's existing
+`data/mods/text/menus/chat.ans` custom art (and its 132-column
+widescreen variant) stopped rendering once `chat_systems` became a
+real, admin-editable menu. Root cause: the menu-engine's file-based art
+lookup for database-driven menus only ever checked the older
+`data/text/menus/` location — `data/mods/text/menus/`, the documented,
+update-safe location every other override in the project uses, was
+never checked there at all. Fixed so it's checked first, same
+precedence as everywhere else. Note the filename now matches the
+menu's own name (`chat_systems.ans`/`chat_systems132.ans`), not the
+old `chat.ans` — see
+[`docs/35-mods-directory.md`](35-mods-directory.md).
 
 ## v1.0.80 — Fixed the new picker menus not backfilling on an upgraded install (September 2026)
 
