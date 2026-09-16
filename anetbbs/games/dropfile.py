@@ -7,7 +7,7 @@ CHAIN.TXT, SFDOORS.DAT, BBSDEV.DRP) from a user session so that classic
 BBS door games can be launched.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import __version__ as _ANETBBS_VERSION
@@ -144,6 +144,106 @@ def generate_door_sys(user, node_number, minutes_remaining=60, bbs_name='ANetBBS
         'N',                       # Line 51:
         '0',                       # Line 52:
     ]
+
+    content = '\r\n'.join(lines) + '\r\n'
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as f:
+            f.write(content)
+
+    return content
+
+
+def generate_door_sys_gap(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
+                          output_path=None):
+    """
+    Generate a DOOR.SYS drop file using the "GAP-style" field layout --
+    a real, different, and incompatible DOOR.SYS dialect from the one
+    generate_door_sys() above produces.
+
+    Why a second DOOR.SYS generator exists at all: DOOR.SYS was never
+    a single standardized format -- multiple real BBS door-kit
+    conventions assign its ~52 lines to different fields in a
+    different order. generate_door_sys() above was built and verified
+    against TW2002's own validation warnings (confirmed live: LORD and
+    TradeWars both work correctly against it) -- but a sysop's real
+    report (a door reading DOOR.SYS immediately said "no time left" on
+    launch) traced to that door expecting the OTHER real convention,
+    which OpenDoors' own dropfile auto-detector calls "GAP" internally
+    (third_party/OpenDoors/ODInEx1.c, DOORSYS_GAP branch -- fetched
+    and hand-counted directly from the real upstream source at
+    github.com/RealDeuce/OpenDoors, not guessed). Confirmed root
+    cause: generate_door_sys()'s line 19 is the literal string 'GR'
+    (a graphics-type marker in ITS convention) -- but GAP-style
+    DOOR.SYS reads user_timelimit from line 19, and atoi("GR") is 0.
+    Rather than rewrite the existing, working, TW2002-verified
+    generator (breaking LORD/TradeWars to fix a different door), this
+    is a second, independently-selectable generator implementing the
+    real GAP-style field order instead, verified the same way:
+    fields 1-31 are hand-counted directly against ODInEx1.c's own
+    "/* Read line N. */" source comments, field by field. Fields
+    32-52 involve OpenDoors internally reusing earlier read buffers in
+    a way that doesn't cleanly map to "write field X to get value Y
+    back" -- those are conservative blank placeholders (matching how
+    every OTHER dropfile generator in this module already treats
+    genuinely obscure trailing fields), not independently verified
+    the same way 1-31 are.
+
+    Args:
+        user: User model instance
+        node_number: Integer node number
+        minutes_remaining: Session time remaining in MINUTES (GAP-style
+            reads this field directly with no seconds/minutes conversion,
+            unlike CHAIN.TXT)
+        bbs_name: Name of the BBS (unused by this format directly, kept
+            for signature consistency with the other generators)
+        output_path: Full path to write the file (optional)
+
+    Returns:
+        String content of the drop file
+    """
+    del bbs_name  # not part of GAP-style DOOR.SYS's own field set
+    last_login = _u(user, 'last_login')
+    last_call = last_login.strftime('%m/%d/%Y') if last_login else '01/01/2000'
+    security_level = 200 if _u(user, 'is_admin') else 50
+    login_count = min(_u(user, 'login_count') or 1, 255)
+
+    lines = [
+        '',                              # 1: unused by GAP-style
+        '38400',                        # 2: Connect speed
+        '8N1',                          # 3: Framing (8-bit detection string)
+        str(node_number),               # 4: Node number
+        '38400',                        # 5: Lock string / baud fallback
+        '',                             # 6: unused
+        '',                             # 7: unused
+        '',                             # 8: unused
+        '',                             # 9: unused
+        _u(user, 'username') or 'User', # 10: User name
+        'Unknown',                      # 11: User location
+        '000-000-0000',                 # 12: Home phone
+        '000-000-0000',                 # 13: Data phone
+        '',                             # 14: Password (never echo a real one)
+        str(security_level),            # 15: Security level
+        str(login_count),               # 16: Times called
+        last_call,                      # 17: Last date on
+        '',                             # 18: unused
+        str(minutes_remaining),         # 19: Time remaining, in MINUTES
+        'GR',                           # 20: Graphics type (GR -> ANSI on, RIP off)
+        '24',                           # 21: Screen length
+        '',                             # 22: unused
+        '',                             # 23: unused
+        '',                             # 24: unused (must not contain a comma)
+        last_call,                      # 25: Sub-board last-read date
+        str(_u(user, 'id') or 0),       # 26: User record number
+        '',                             # 27: unused
+        '0',                            # 28: Total uploads
+        '0',                            # 29: Total downloads
+        '0',                            # 30: Daily download total (KB)
+        '',                             # 31: unused
+    ]
+    # 32-52: conservative blank placeholders -- see docstring above.
+    lines += [''] * 21
 
     content = '\r\n'.join(lines) + '\r\n'
 
@@ -465,7 +565,11 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
     Args:
         user: User model instance
         node_number: Integer node number
-        minutes_remaining: Session time remaining in minutes
+        minutes_remaining: Session time remaining in minutes; converted
+            to line 11's real RFC 3339 UTC deadline timestamp (now +
+            this many minutes). Values at or above
+            core.time_budget.UNLIMITED_MINUTES leave line 11 blank
+            ("no forced deadline") instead of writing a deadline.
         bbs_name: Name of the BBS (used for both line 14's software
             name and line 15's board name -- ANetBBS doesn't track
             those as two separate concepts the way the spec allows)
@@ -482,6 +586,27 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
     username = _u(user, 'username') or 'User'
     security_level = 100 if _u(user, 'is_admin') else 50
 
+    # Line 11 (time of logoff) is a real deadline TIMESTAMP per spec
+    # (RFC 3339 UTC), not a relative minute/second count like every
+    # other format here -- confirmed against the real OpenDoors reader
+    # (ODInitReadBBSDevDropFile() in ODInEx1.c). Previously this
+    # accepted minutes_remaining as a parameter but never actually
+    # used it anywhere, always leaving line 11 blank ("no forced
+    # deadline") regardless of the caller's real value -- not broken
+    # (an empty deadline is a valid, spec-legal "no limit"), but it
+    # meant this format never benefited from the real per-user time
+    # budget the other formats now report (see core/time_budget.py).
+    # UNLIMITED_MINUTES is the shared "don't enforce anything" sentinel
+    # every other caller already uses for that same case -- treated
+    # the same way here, by genuinely leaving no deadline rather than
+    # writing some enormous, meaningless future timestamp.
+    from ..core.time_budget import UNLIMITED_MINUTES
+    if minutes_remaining is not None and minutes_remaining < UNLIMITED_MINUTES:
+        deadline = (datetime.now(timezone.utc) + timedelta(minutes=minutes_remaining))
+        deadline_str = deadline.strftime('%Y-%m-%dT%H:%M:%SZ')
+    else:
+        deadline_str = ''
+
     lines = [
         '1.0',                          # 1: Format version
         'stdio',                        # 2: Communications type
@@ -493,7 +618,7 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
         'Y',                            # 8: ANSI
         'N',                            # 9: RIP
         '',                             # 10: CTerm version (not detected)
-        '',                             # 11: Time of logoff (no forced deadline)
+        deadline_str,                   # 11: Time of logoff (RFC 3339 UTC deadline)
         'IBM437',                       # 12: Encoding
         'en-US',                        # 13: Language
         f'ANetBBS {_ANETBBS_VERSION}',  # 14: BBS software name and version
@@ -575,6 +700,7 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
     if output_path.endswith('/') or os.path.isdir(output_path):
         filename_for_type = {
             'door.sys': 'DOOR.SYS',
+            'door.sys.gap': 'DOOR.SYS',
             'dorinfo': 'DORINFO1.DEF',
             'door32.sys': 'DOOR32.SYS',
             'chain.txt': 'CHAIN.TXT',
@@ -593,6 +719,8 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
 
     if drop_type == 'door.sys':
         generate_door_sys(user, node_number, minutes_remaining, bbs_name, output_path)
+    elif drop_type == 'door.sys.gap':
+        generate_door_sys_gap(user, node_number, minutes_remaining, bbs_name, output_path)
     elif drop_type == 'dorinfo':
         generate_dorinfo(user, node_number, minutes_remaining, bbs_name, output_path)
     elif drop_type == 'door32.sys':

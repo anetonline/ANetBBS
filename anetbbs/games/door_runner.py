@@ -1362,7 +1362,7 @@ def _build_mystic_python_command(game, cwd, temp_files_out=None):
 
 
 def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
-                     minutes_remaining=60):
+                     minutes_remaining=None):
     """
     Allocate a node, write drop file, fork PTY child, and start reader thread.
 
@@ -1371,7 +1371,17 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         user: User model instance
         socketio_emit_fn: Callable(output_bytes) that emits to the client
         bbs_name: BBS name string
-        minutes_remaining: Session time budget
+        minutes_remaining: Session time budget to report in the dropfile.
+            None (the default, and what every real caller passes today)
+            computes the user's REAL remaining time via
+            core/time_budget.py's compute_remaining_minutes() -- the
+            same UserTimeBudget-based calculation core/session.py's own
+            hard-kick enforcement uses. Previously this was a flat
+            hardcoded 60 for every door launch regardless of the
+            user's real access (or complete absence of any configured
+            limit) -- a real gap flagged directly by a sysop testing
+            as an admin account (unlimited by definition) and still
+            seeing every door report exactly one hour left, every time.
 
     Returns:
         GameSession.id on success, or None on failure (e.g., all nodes full)
@@ -1383,6 +1393,11 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
 
     # Create DB session record. user can be a model (web) or dict (telnet/SSH).
     _uid = (user.get('id') if isinstance(user, dict) else getattr(user, 'id', None)) or 0
+    if minutes_remaining is None:
+        _is_admin = bool(user.get('is_admin') if isinstance(user, dict)
+                        else getattr(user, 'is_admin', False))
+        from ..core.time_budget import compute_remaining_minutes
+        minutes_remaining = compute_remaining_minutes(_uid, _is_admin)
     gs = GameSession(
         game_id=game.id,
         user_id=_uid,
@@ -2200,9 +2215,13 @@ async def _drain_stale_session_input(session, timeout=0.05):
 # ---------------------------------------------------------------------------
 
 async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
-                                minutes_remaining=60):
+                                minutes_remaining=None):
     """
     Launch a door game and bridge its PTY to a BBSSession (telnet/SSH/rlogin).
+
+    minutes_remaining: None (default) passes through to
+        launch_door_game(), which computes the user's real remaining
+        time -- see that function's own docstring.
 
     Returns True if the game ran to completion, False if it failed to start.
     """

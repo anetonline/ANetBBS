@@ -67,13 +67,34 @@ class BbsdevDrpTests(unittest.TestCase):
         self.assertEqual(lines[7], 'Y')   # Line 8: ANSI
         self.assertEqual(lines[8], 'N')   # Line 9: RIP
 
-    def test_ctermm_and_logoff_deadline_are_empty(self):
-        # ANetBBS doesn't detect CTerm or compute an absolute forced-
-        # logoff deadline -- both fields are spec-legal to leave empty.
+    def test_cterm_is_always_empty(self):
+        # ANetBBS doesn't detect CTerm -- spec-legal to leave empty.
         from anetbbs.games.dropfile import generate_bbsdev_drp
         content = generate_bbsdev_drp(self._user(), node_number=1)
         lines = content.split('\r\n')
         self.assertEqual(lines[9], '')   # Line 10: CTerm version
+
+    def test_logoff_deadline_is_a_real_rfc3339_timestamp_when_time_limited(self):
+        # Line 11 is a real deadline TIMESTAMP per spec (confirmed
+        # against OpenDoors' own ODInitReadBBSDevDropFile() reader),
+        # not a relative minute count -- minutes_remaining is now
+        # actually converted into one instead of always being dropped.
+        from anetbbs.games.dropfile import generate_bbsdev_drp
+        content = generate_bbsdev_drp(self._user(), node_number=1,
+                                      minutes_remaining=90)
+        lines = content.split('\r\n')
+        self.assertRegex(lines[10], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+
+    def test_logoff_deadline_is_empty_when_effectively_unlimited(self):
+        # UNLIMITED_MINUTES is the shared "don't enforce anything"
+        # sentinel every other dropfile format's caller also uses --
+        # writing a real deadline for it would be a meaningless
+        # 24-hours-from-now timestamp, not genuinely "unlimited".
+        from anetbbs.core.time_budget import UNLIMITED_MINUTES
+        from anetbbs.games.dropfile import generate_bbsdev_drp
+        content = generate_bbsdev_drp(self._user(), node_number=1,
+                                      minutes_remaining=UNLIMITED_MINUTES)
+        lines = content.split('\r\n')
         self.assertEqual(lines[10], '')  # Line 11: time of logoff
 
     def test_encoding_and_language(self):

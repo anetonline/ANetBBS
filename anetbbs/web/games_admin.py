@@ -136,7 +136,8 @@ class GameForm(FlaskForm):
     rlogin_bbs_tag = StringField('BBS Tag', validators=[Optional(), Length(max=20)])
     drop_file_type = SelectField('Drop File Type', choices=[
         ('none', 'None'),
-        ('door.sys', 'DOOR.SYS'),
+        ('door.sys', 'DOOR.SYS (TW2002/LORD convention)'),
+        ('door.sys.gap', 'DOOR.SYS (GAP convention -- try this if a door says "no time left")'),
         ('dorinfo', 'DORINFO1.DEF'),
         ('door32.sys', 'DOOR32.SYS'),
         ('chain.txt', 'CHAIN.TXT'),

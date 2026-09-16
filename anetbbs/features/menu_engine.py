@@ -492,14 +492,20 @@ async def _act_exec(ui, args):
             output_path = _os.path.join(drop_dir.rstrip('/'), filename)
             with _app().app_context():
                 bbs_name = _os.environ.get('BBS_NAME', 'ANetBBS')
+                # Real remaining time, not a flat hardcoded 60 -- same
+                # fix and same reasoning as games/door_runner.py's
+                # launch_door_game(); see core/time_budget.py.
+                from ..core.time_budget import compute_remaining_minutes
+                _minutes = compute_remaining_minutes(
+                    user.get('id') or 0, bool(user.get('is_admin')))
                 if dropfile == 'door.sys':
-                    generate_door_sys(user, node_number, bbs_name=bbs_name,
+                    generate_door_sys(user, node_number, _minutes, bbs_name,
                                       output_path=output_path)
                 elif dropfile == 'dorinfo':
-                    generate_dorinfo(user, node_number, bbs_name=bbs_name,
+                    generate_dorinfo(user, node_number, _minutes, bbs_name,
                                      output_path=output_path)
                 elif dropfile == 'door32.sys':
-                    generate_door32(user, node_number, bbs_name=bbs_name,
+                    generate_door32(user, node_number, _minutes, bbs_name,
                                     output_path=output_path)
         except Exception:
             logger.exception('dropfile write failed; running without one')

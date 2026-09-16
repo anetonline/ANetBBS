@@ -1,11 +1,50 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.82`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.83`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.83 — Door dropfiles report real time budgets, plus a GAP-style DOOR.SYS option (September 2026)
+
+A full, field-by-field audit of every dropfile format ANetBBS
+generates, verified directly against the real OpenDoors source
+(github.com/RealDeuce/OpenDoors), prompted by a live report of a door
+saying "no time left" immediately on launch.
+
+- **Every door dropfile now reports a real, per-user remaining-time
+  value** instead of a flat, hardcoded 60 minutes. Admins and accounts
+  with no configured time budget get an effectively-unlimited value;
+  accounts with a real `UserTimeBudget` get their actual remaining
+  session/daily time, mirroring the same calculation the terminal
+  session's own time-limit enforcement already uses. Previously every
+  door launch reported exactly one hour left, regardless of the
+  account's real access — confirmed live by a sysop testing as an
+  admin account (which has no time limit at all) and still seeing
+  every door report exactly 60 minutes, every time.
+- **New GAP-style DOOR.SYS option** (`Admin → Games`, Drop File Type).
+  DOOR.SYS was never a single standardized format — the existing
+  DOOR.SYS generator was built and verified against real TW2002
+  validation warnings (confirmed live: LORD and TradeWars both launch
+  correctly against it), but a different door reading DOOR.SYS via the
+  other real convention read the existing generator's line 19 — the
+  literal string `"GR"` in that convention — as its time-remaining
+  field, and refused to launch with "no time left". Rather than rewrite
+  the existing, working generator and risk breaking LORD/TradeWars, a
+  second, independently-selectable DOOR.SYS generator now implements
+  that other real convention, verified line-by-line against the actual
+  OpenDoors source.
+- **BBSDEV.DRP now reports a real logoff deadline.** Its time-remaining
+  field is a timestamp, not a relative minute count — this format
+  accepted a `minutes_remaining` value but never actually used it,
+  always leaving that field blank (a valid "no time limit" per spec,
+  but not connected to the user's real access). It's now converted to
+  a real deadline.
+- CHAIN.TXT, DORINFO1.DEF, DOOR32.SYS, and SFDOORS.DAT were all
+  re-verified field-by-field against the real OpenDoors source during
+  this audit and confirmed already correct — no changes needed.
 
 ## v1.0.82 — `door` menu items now accept a Game slug, not just its id (September 2026)
 
