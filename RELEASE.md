@@ -1,3 +1,7 @@
+# ANetBBS v1.0.85 — Fixed the new "Auto-abort on Inactivity" checkbox being invisible for most door types (September 2026)
+
+A real live bug, found right after v1.0.84 shipped: the new checkbox was placed in the Admin → Games edit form right next to the (genuinely dosemu2-only) FOSSIL driver setting — inside a per-game-type section that the page's own JavaScript hides *and disables* for every game type except dosemu2. A `door_native` game (confirmed live: a real uMRC door) never showed the checkbox at all, and even checked, a disabled input never submits with the form. Moved it into the form's common section every game type shares, and added a regression test that specifically checks the field's position in the rendered page relative to the per-game-type sections — the value-round-trip tests added in v1.0.84 POST form data directly and never would have caught this, since the hide/disable behavior only matters to a real browser.
+
 # ANetBBS v1.0.84 — Per-door opt-out for the idle-timeout auto-abort (September 2026)
 
 A real live report: a sysop sitting idle in a chat-type door (an MRC client) got auto-kicked for inactivity — exactly the behavior every OTHER door legitimately wants (an abandoned session shouldn't tie up a node forever), but wrong for a door whose entire point is sitting there reading/waiting without typing anything.

@@ -1,11 +1,26 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.84`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.85`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.85 — Fixed the new "Auto-abort on Inactivity" checkbox being invisible for most door types (September 2026)
+
+A real live bug, found right after v1.0.84 shipped: the new checkbox
+was placed in the Admin → Games edit form right next to the (genuinely
+dosemu2-only) FOSSIL driver setting — inside a per-game-type section
+that the page's own JavaScript hides *and disables* for every game
+type except dosemu2. A `door_native` game (confirmed live: a real
+uMRC door) never showed the checkbox at all, and even checked, a
+disabled input never submits with the form. Moved it into the form's
+common section every game type shares, and added a regression test
+that specifically checks the field's position in the rendered page
+relative to the per-game-type sections — the value-round-trip tests
+added in v1.0.84 POST form data directly and never would have caught
+this, since the hide/disable behavior only matters to a real browser.
 
 ## v1.0.84 — Per-door opt-out for the idle-timeout auto-abort (September 2026)
 

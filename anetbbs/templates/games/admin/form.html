@@ -125,6 +125,20 @@
             <small class="text-muted">{{ form.guest_playable.description }}</small>
         </div>
     </div>
+    <!-- Applies to every game type, not just DOS/dosemu2 doors -- kept
+         outside the per-game-type sections below (those get hidden AND
+         their inputs disabled by the game_type-switching JS at the
+         bottom of this page, so a field placed inside one is invisible
+         and non-submitting for every OTHER game type). -->
+    <div class="row g-3 mb-2">
+        <div class="col-md-12">
+            <div class="form-check">
+                {{ form.idle_timeout_enabled(class="form-check-input") }}
+                {{ form.idle_timeout_enabled.label(class="form-check-label") }}
+                <small class="text-muted d-block">{{ form.idle_timeout_enabled.description }}</small>
+            </div>
+        </div>
+    </div>
     <div class="row g-3 mb-3">
         <div class="col-md-12">
             <small style="color:#007700;">
@@ -199,15 +213,6 @@
                     {{ form.needs_fossil_driver(class="form-check-input") }}
                     {{ form.needs_fossil_driver.label(class="form-check-label") }}
                     <small class="text-muted d-block">Only enable if this game requires a FOSSIL serial driver loaded before launch. Do NOT enable for TW2002 — dosemu2 virtual COM1 conflicts with FOSSIL drivers.</small>
-                </div>
-            </div>
-        </div>
-        <div class="row g-3 mb-2">
-            <div class="col-12">
-                <div class="form-check">
-                    {{ form.idle_timeout_enabled(class="form-check-input") }}
-                    {{ form.idle_timeout_enabled.label(class="form-check-label") }}
-                    <small class="text-muted d-block">{{ form.idle_timeout_enabled.description }}</small>
                 </div>
             </div>
         </div>
