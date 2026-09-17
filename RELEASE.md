@@ -1,3 +1,7 @@
+# ANetBBS v1.0.87 — Session-hang fix / Game Center prompt fix (September 2026)
+
+Fixed a bug where a stalled client connection could leave a session frozen indefinitely with no recovery. Also fixed the Game Center's page-picker prompt showing page-navigation options on game lists that only have one page.
+
 # ANetBBS v1.0.86 — MRC chat disconnect / door-cleanup fixes (September 2026)
 
 Fixed a bug where a dropped MRC chat connection could spike CPU usage, plus a related door-cleanup error when running multiple multiplexors / bridges.

@@ -99,6 +99,18 @@ class _SshStreamWriter:
         except Exception:
             pass
 
+    def get_write_buffer_size(self):
+        """Bytes still queued in the SSH channel's own send buffer,
+        waiting on channel-level flow control (SSH_MSG_CHANNEL_WINDOW_
+        ADJUST from the peer) -- distinct from, and invisible to, the OS
+        TCP send buffer. Real asyncssh API: SSHChannel.get_write_buffer_
+        size() (see asyncssh/channel.py), reached via SSHWriter.channel.
+        Used only for stuck-write diagnostics in session.py's write()."""
+        try:
+            return self._w.channel.get_write_buffer_size()
+        except Exception:
+            return None
+
 
 def _make_process_handler(bbs_config):
     """Returns an async coroutine asyncssh will spawn per shell connection."""

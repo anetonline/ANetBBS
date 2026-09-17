@@ -145,6 +145,28 @@ class CategoryPaginationTests(unittest.TestCase):
         txt = _strip_ansi(session.transcript())
         self.assertIn('Invalid choice', txt)
 
+    def test_single_page_category_prompt_omits_np(self):
+        """Real live UI bug (screenshot: X-League InterBBS, 13 games,
+        one page) -- the nav line above already correctly hides N/P for
+        a single-page category, but the prompt text still said 'number,
+        N/P, or B' regardless, which makes no sense when there's no
+        second page to navigate to."""
+        from anetbbs.features.games import GameManager
+        games = _make_games(13)
+        session = _FakeSession(['B'])
+        asyncio.run(GameManager(session)._show_category_submenu('t', 'Test', games))
+        txt = _strip_ansi(session.transcript())
+        self.assertIn('Pick a game (number or B): ', txt)
+        self.assertNotIn('N/P', txt)
+
+    def test_multi_page_category_prompt_still_mentions_np(self):
+        from anetbbs.features.games import GameManager
+        games = _make_games(50)
+        session = _FakeSession(['B'])
+        asyncio.run(GameManager(session)._show_category_submenu('t', 'Test', games))
+        txt = _strip_ansi(session.transcript())
+        self.assertIn('Pick a game (number, N/P, or B): ', txt)
+
     def test_shorter_terminal_yields_a_smaller_page_size(self):
         """A 20-row terminal has less room than the default 24 --
         rows_per_page = max(3, 20-8) = 12, page_size = 24. Confirms the

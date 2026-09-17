@@ -329,7 +329,15 @@ class GameManager:
                 await self.session.write(f"  {YEL}B{DIM}. {GRN}Back{RESET}\r\n")
                 await self.session.write(f"{BOLD}{CYAN}{hbar}{RESET}\r\n\r\n")
 
-            choice = (await self.session.read_line("Pick a game (number, N/P, or B): ") or '').strip()
+            # Real live UI bug: this used to always say "number, N/P, or
+            # B" even on a single-page category (e.g. a 13-game InterBBS
+            # network list) where there's no N/P navigation to speak of
+            # -- the "-- page X/Y --" line and Prev/Next hints above are
+            # already correctly hidden for total_pages == 1 (see above),
+            # the prompt text just never matched.
+            prompt = ("Pick a game (number, N/P, or B): " if total_pages > 1
+                      else "Pick a game (number or B): ")
+            choice = (await self.session.read_line(prompt) or '').strip()
             if not choice or choice.lower() in ('b', 'q'):
                 return
             low = choice.lower()

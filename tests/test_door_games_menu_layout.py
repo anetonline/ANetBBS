@@ -383,8 +383,12 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
         self.assertIn('CUSTOM_SUBMENU_ART_MARKER', txt, msg=txt)
         # The generated layout's own prompt still has to appear (art
         # doesn't replace input handling), but the generated HEADER/
-        # hbar block must not, since art took over.
-        self.assertIn('Pick a game (number, N/P, or B)', txt, msg=txt)
+        # hbar block must not, since art took over. This category has
+        # only 1 game (1 page), so the prompt omits N/P -- see
+        # tests/test_door_games_category_pagination.py's
+        # test_single_page_category_prompt_omits_np for the dedicated
+        # coverage of that behavior itself.
+        self.assertIn('Pick a game (number or B)', txt, msg=txt)
 
 
 if __name__ == '__main__':

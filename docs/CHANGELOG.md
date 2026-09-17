@@ -1,11 +1,18 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.86`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.87`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.87 — Session-hang fix / Game Center prompt fix (September 2026)
+
+Fixed a bug where a stalled client connection could leave a session
+frozen indefinitely with no recovery. Also fixed the Game Center's
+page-picker prompt showing page-navigation options on game lists that
+only have one page.
 
 ## v1.0.86 — MRC chat disconnect / door-cleanup fixes (September 2026)
 

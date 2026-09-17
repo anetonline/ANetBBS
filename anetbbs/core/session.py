@@ -55,6 +55,25 @@ _AFK_WARNING_COUNTDOWN_SECONDS = 20   # mirrors the rcsafk.mps reference script'
 _AFK_TICK_SECONDS = 1.0
 _AFK_FRAME_INTERVAL_SECONDS = 0.09
 
+# Real live incident: a bare `await self.writer.drain()` has no timeout on
+# either asyncio's StreamWriter or asyncssh's SSHWriter -- both simply await
+# a Future that only resolves once the peer relieves flow-control backpressure
+# (a TCP zero-window reopening, or the client sending SSH_MSG_CHANNEL_WINDOW_
+# ADJUST on the SSH channel). If a client stops doing that for any reason
+# (client bug, client-side hang, a stalled terminal renderer under heavy
+# output), that write -- and the whole session task, since virtually
+# everything funnels through write() below -- hangs forever with zero
+# recovery: no exception, no timeout, idle CPU (blocked on a Future, not
+# spinning), and nothing queued at the OS socket level to show up in ss/
+# netstat, since the bytes never left the SSH channel's own userspace buffer.
+# Module-level (not a hardcoded literal) so a test can shrink it, matching
+# _SPIN_TICK_SECONDS/_AFK_TICK_SECONDS's own convention above. 30s is
+# generous enough that a legitimate slow/laggy connection (including a
+# genuinely slow real modem -- @BPS: only paces how OFTEN small writes
+# happen, not how long a single drain() takes to clear its low-water mark)
+# should never trip it under normal conditions.
+WRITE_DRAIN_TIMEOUT_SECONDS = 30
+
 
 class _AFKInterrupted(Exception):
     """Internal-only signal: an AFK warning/screensaver sequence just
@@ -2293,12 +2312,52 @@ class BBSSession:
             elif self.term_mode == 'ascii':
                 text = _ANSI_ESC_RE_B.sub(b'', text)
             self.writer.write(text)
-            await self.writer.drain()
         except (BrokenPipeError, ConnectionResetError,
                 ConnectionAbortedError):
-            pass
+            return
         except Exception as e:
             logger.debug("write failed: %s", e)
+            return
+        try:
+            await asyncio.wait_for(self.writer.drain(),
+                                    timeout=WRITE_DRAIN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            # The client stopped relieving write backpressure (TCP zero
+            # window never reopening, or -- on SSH -- no
+            # SSH_MSG_CHANNEL_WINDOW_ADJUST arriving) and drain() would
+            # otherwise hang forever with no way out. Log everything a
+            # real diagnosis needs, force the transport closed, and raise
+            # CarrierLost so this ONE session unwinds cleanly (same path
+            # every other disconnect already takes) instead of wedging.
+            peer = None
+            try:
+                peer = self.writer.get_extra_info('peername')
+            except Exception:
+                pass
+            buf_size = None
+            get_buf = getattr(self.writer, 'get_write_buffer_size', None)
+            if get_buf is not None:
+                try:
+                    buf_size = get_buf()
+                except Exception:
+                    pass
+            logger.error(
+                'write() drain() timed out after %ss for peer=%s '
+                'user=%s term=%s -- client stopped acknowledging output. '
+                'queued_write_buffer_bytes=%s. Closing this session.',
+                WRITE_DRAIN_TIMEOUT_SECONDS, peer,
+                getattr(self, 'username', None),
+                getattr(self, 'terminal_type', None), buf_size)
+            try:
+                self.writer.close()
+            except Exception:
+                pass
+            raise CarrierLost('write drain timed out') from None
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError):
+            return
+        except Exception as e:
+            logger.debug("write drain failed: %s", e)
 
     async def read_line(self, prompt: str = "", max_len: int = 2048,
                         on_afk_redraw=None) -> str:
