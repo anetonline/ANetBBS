@@ -304,6 +304,28 @@ async def start_ssh_server(host, port, key_file, bbs_config):
         encoding=None,
         x11_forwarding=False,
         agent_forwarding=False,
+        # Real live report: a session idle for 30+ minutes over a mobile
+        # SSH client (iPad, switching between two different SSH apps)
+        # would go permanently silent -- no writes happening (so
+        # session.write()'s own drain() timeout, added for a separate
+        # bug, never engages), and the read() side has no timeout at
+        # all, so a network path that silently dies (carrier NAT/
+        # firewall dropping an idle mapping, the client's own OS
+        # suspending it) is never detected -- the session just sits
+        # there forever consuming a who's-online slot. asyncssh's own
+        # keepalive is the standard fix: if no data arrives from the
+        # client for keepalive_interval seconds, ping it; after
+        # keepalive_count_max unanswered pings, asyncssh itself calls
+        # connection_lost(ConnectionLost(...)) (verified in asyncssh's
+        # own source, connection.py's _keepalive_timer_callback()) --
+        # _SshStreamReader.read() already catches asyncssh.
+        # ConnectionLost and returns EOF, which read_line()/read_raw()
+        # already turn into a clean CarrierLost disconnect. A live,
+        # legitimately-idle user (just not typing) is unaffected --
+        # keepalive requests/responses are answered by the SSH client
+        # library itself, with no user interaction needed.
+        keepalive_interval=60,
+        keepalive_count_max=3,
     )
     logger.info('SSH server started on %s:%d', host, port)
     return server

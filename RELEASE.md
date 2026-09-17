@@ -1,3 +1,7 @@
+# ANetBBS v1.0.88 — SSH idle-session detection fix (September 2026)
+
+Fixed a bug where a session idle for an extended period over SSH could go permanently unresponsive if the underlying network connection silently dropped, with no way to recover except a server restart.
+
 # ANetBBS v1.0.87 — Session-hang fix / Game Center prompt fix (September 2026)
 
 Fixed a bug where a stalled client connection could leave a session frozen indefinitely with no recovery. Also fixed the Game Center's page-picker prompt showing page-navigation options on game lists that only have one page.
