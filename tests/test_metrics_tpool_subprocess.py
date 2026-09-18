@@ -83,5 +83,70 @@ class GetMainPidTpoolTests(unittest.TestCase):
         self.assertIsNone(pid)
 
 
+class EnsureProcSkipsSystemctlWhenCachedTests(unittest.TestCase):
+    """Regression test for a real live incident: _ensure_proc() used to
+    call _get_main_pid() (a real `systemctl show` subprocess spawn)
+    unconditionally on every sample tick, for every known unit, even
+    when the cached psutil.Process handle was still perfectly valid --
+    ~2.5 subprocess spawns/second, forever, regardless of host load.
+    Confirmed live: repeated "systemctl show ... timed out after 5
+    seconds" errors across a full day, correlated with a period of
+    degrading server responsiveness. Fixed by checking the cached
+    handle's cheap is_running() (no subprocess) first."""
+
+    def setUp(self):
+        self._orig_handles = dict(metrics._proc_handles)
+        self._orig_pids = dict(metrics._pid_cache)
+        metrics._proc_handles.clear()
+        metrics._pid_cache.clear()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        metrics._proc_handles.clear()
+        metrics._proc_handles.update(self._orig_handles)
+        metrics._pid_cache.clear()
+        metrics._pid_cache.update(self._orig_pids)
+
+    def test_does_not_call_get_main_pid_when_cached_process_still_running(self):
+        fake_proc = MagicMock()
+        fake_proc.is_running.return_value = True
+        metrics._proc_handles['anetbbs-web'] = fake_proc
+        metrics._pid_cache['anetbbs-web'] = 111
+
+        with patch.object(metrics, '_get_main_pid') as fake_get_pid, \
+             patch.object(metrics, '_PSUTIL_AVAILABLE', True):
+            result = metrics._ensure_proc('anetbbs-web')
+
+        fake_get_pid.assert_not_called()
+        self.assertIs(result, fake_proc)
+
+    def test_falls_through_to_get_main_pid_when_cached_process_is_gone(self):
+        fake_proc = MagicMock()
+        fake_proc.is_running.return_value = False
+        metrics._proc_handles['anetbbs-web'] = fake_proc
+        metrics._pid_cache['anetbbs-web'] = 111
+
+        with patch.object(metrics, '_get_main_pid', return_value=222) as fake_get_pid, \
+             patch.object(metrics, '_PSUTIL_AVAILABLE', True), \
+             patch.object(metrics, 'psutil') as fake_psutil_mod:
+            new_proc = MagicMock()
+            fake_psutil_mod.Process.return_value = new_proc
+            result = metrics._ensure_proc('anetbbs-web')
+
+        fake_get_pid.assert_called_once_with('anetbbs-web')
+        self.assertIs(result, new_proc)
+
+    def test_no_cached_handle_at_all_still_resolves_via_get_main_pid(self):
+        with patch.object(metrics, '_get_main_pid', return_value=333) as fake_get_pid, \
+             patch.object(metrics, '_PSUTIL_AVAILABLE', True), \
+             patch.object(metrics, 'psutil') as fake_psutil_mod:
+            new_proc = MagicMock()
+            fake_psutil_mod.Process.return_value = new_proc
+            result = metrics._ensure_proc('anetbbs-finger')
+
+        fake_get_pid.assert_called_once_with('anetbbs-finger')
+        self.assertIs(result, new_proc)
+
+
 if __name__ == '__main__':
     unittest.main()

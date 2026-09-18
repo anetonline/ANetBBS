@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.88`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.89`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.89 — Reduced background monitoring overhead / quieter disconnect logging (September 2026)
+
+Reduced how often the sysop dashboard's per-service monitoring spawns
+external processes to check service status, cutting continuous system
+overhead that could compound under load. Also quieted some redundant
+error logging when a client disconnects at specific points during
+session teardown.
 
 ## v1.0.88 — SSH idle-session detection fix (September 2026)
 

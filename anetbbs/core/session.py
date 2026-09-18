@@ -3211,4 +3211,16 @@ class BBSSession:
                 except Exception:
                     pass
             if not self._direct_door_launched:
-                await self.write("\r\nGoodbye!\r\n")
+                # write() now raises CarrierLost on a genuinely stuck
+                # drain() (see WRITE_DRAIN_TIMEOUT_SECONDS above) instead
+                # of always swallowing -- this final farewell write is
+                # the one place in start() that sits after every other
+                # CarrierLost-aware try/except in this method, so a
+                # client that's already gone by the time we get here
+                # would otherwise escape as a noisy top-level "Unhandled
+                # exception" traceback instead of the quiet unwind every
+                # other disconnect already gets.
+                try:
+                    await self.write("\r\nGoodbye!\r\n")
+                except CarrierLost:
+                    pass

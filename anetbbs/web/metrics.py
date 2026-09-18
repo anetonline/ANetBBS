@@ -129,22 +129,42 @@ def _get_main_pid(unit: str) -> Optional[int]:
 def _ensure_proc(unit: str):
     """Return a fresh-or-cached psutil.Process for the unit's MainPID.
     Rebuilds the handle when the PID changes so cpu_percent baselines
-    reset cleanly across restarts."""
+    reset cleanly across restarts.
+
+    Real live incident: this used to call _get_main_pid(unit) -- a real
+    `systemctl show` subprocess spawn, involving a D-Bus round-trip --
+    unconditionally on every single tick, for every known unit, even
+    when the already-cached psutil.Process handle was still perfectly
+    valid. At SAMPLE_INTERVAL_SEC=2 and 5 known units, that's ~2.5
+    subprocess spawns/second, forever, regardless of host load -- and
+    `systemctl show` itself isn't free (D-Bus IPC to systemd). Under
+    any host-level load spike this queues up and start showing as the
+    "systemctl show ... timed out after 5 seconds" errors already seen
+    live, repeatedly, across a full day. Checking the cached handle's
+    is_running() FIRST (a cheap /proc/<pid> stat, no subprocess) and
+    only falling through to the expensive systemctl lookup when it's
+    actually gone cuts this from "every tick, forever" down to
+    "roughly once per unit, plus once again whenever that unit
+    actually restarts" -- correctness is unchanged (psutil.Process
+    tracks pid+create_time internally, so a dead PID getting reused by
+    an unrelated process is still detected safely by is_running()/
+    the next cpu_percent() call raising psutil.Error)."""
     if not _PSUTIL_AVAILABLE:
-        return None
-    pid = _get_main_pid(unit)
-    if pid is None:
-        _proc_handles.pop(unit, None)
-        _pid_cache.pop(unit, None)
         return None
 
     cached = _proc_handles.get(unit)
-    if cached is not None and _pid_cache.get(unit) == pid:
+    if cached is not None:
         try:
             if cached.is_running():
                 return cached
         except psutil.Error:
             pass
+
+    pid = _get_main_pid(unit)
+    if pid is None:
+        _proc_handles.pop(unit, None)
+        _pid_cache.pop(unit, None)
+        return None
 
     try:
         p = psutil.Process(pid)

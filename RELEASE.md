@@ -1,3 +1,7 @@
+# ANetBBS v1.0.89 — Reduced background monitoring overhead / quieter disconnect logging (September 2026)
+
+Reduced how often the sysop dashboard's per-service monitoring spawns external processes to check service status, cutting continuous system overhead that could compound under load. Also quieted some redundant error logging when a client disconnects at specific points during session teardown.
+
 # ANetBBS v1.0.88 — SSH idle-session detection fix (September 2026)
 
 Fixed a bug where a session idle for an extended period over SSH could go permanently unresponsive if the underlying network connection silently dropped, with no way to recover except a server restart.

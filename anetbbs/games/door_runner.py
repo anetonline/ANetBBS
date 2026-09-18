@@ -2541,11 +2541,24 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
         # `_sessions`).
         terminate_session(sid)
 
+    # These two teardown writes sit after the connection-drop check
+    # above already gave up on the loop -- a session.write() that's
+    # already been sitting on a dead connection could now (see
+    # WRITE_DRAIN_TIMEOUT_SECONDS in core/session.py) raise CarrierLost
+    # here instead of silently swallowing, so treat it the same way the
+    # third branch below already does: quietly move on, the caller's
+    # own top-level handler ends the session either way.
     if abort_event.is_set():
-        await session.write("\r\n\r\n[Door aborted by user — Ctrl+]q]\r\n")
+        try:
+            await session.write("\r\n\r\n[Door aborted by user — Ctrl+]q]\r\n")
+        except Exception:
+            pass
     elif idle_timeout_hit:
-        await session.write(
-            f"\r\n\r\n[Door auto-aborted — {_idle_t}s of zero activity]\r\n")
+        try:
+            await session.write(
+                f"\r\n\r\n[Door auto-aborted — {_idle_t}s of zero activity]\r\n")
+        except Exception:
+            pass
     else:
         # Use the wrapped read_line so telnet IAC bytes left in the buffer
         # by the door get stripped and either \r or \n terminates the prompt.
