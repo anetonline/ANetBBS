@@ -158,5 +158,42 @@ class LaunchDoorGameUsesRealBudgetTests(unittest.TestCase):
         self.assertEqual(mock_write.call_args.args[3], 123)
 
 
+class LaunchDoorGamePassesWindowSizeTests(unittest.TestCase):
+    """Real live bug: launch_door_game() had no window_size parameter
+    at all, so chain.txt/bbsdev.drp always reported a flat 80x24
+    regardless of the caller's real terminal size -- see
+    tests/test_dropfile_chain_and_sfdoors.py's own equivalent test for
+    the generator-level fix this wiring feeds into."""
+
+    def test_launch_door_game_forwards_window_size_to_write_drop_file(self):
+        from anetbbs.games import door_runner
+
+        fake_game = type('FakeGame', (), {
+            'id': 1, 'slug': 'faketestgame', 'max_nodes': 1,
+        })()
+        user = {'id': 42, 'is_admin': False}
+
+        with patch('anetbbs.games.door_runner.allocate_node', return_value=1), \
+             patch('anetbbs.games.door_runner.db') as mock_db, \
+             patch('anetbbs.games.door_runner.GameSession'), \
+             patch('anetbbs.core.time_budget.compute_remaining_minutes',
+                  return_value=123), \
+             patch('anetbbs.games.door_runner.build_token_context',
+                  return_value={}), \
+             patch('anetbbs.games.door_runner.write_drop_file',
+                  return_value=None) as mock_write:
+            mock_db.session.add = lambda *a, **kw: None
+            mock_db.session.commit = lambda: None
+            try:
+                door_runner.launch_door_game(
+                    fake_game, user, lambda data: None,
+                    window_size=(132, 37))
+            except Exception:
+                pass  # real launch internals not under test here
+
+        self.assertTrue(mock_write.called)
+        self.assertEqual(mock_write.call_args.kwargs.get('window_size'), (132, 37))
+
+
 if __name__ == '__main__':
     unittest.main()

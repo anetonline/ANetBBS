@@ -372,7 +372,7 @@ def generate_door32(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
 
 
 def generate_chain_txt(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
-                       output_path=None):
+                       output_path=None, window_size=None):
     """
     Generate a CHAIN.TXT drop file (WWIV-style, 30-line format).
 
@@ -394,11 +394,26 @@ def generate_chain_txt(user, node_number, minutes_remaining=60, bbs_name='ANetBB
         bbs_name: Name of the BBS (unused by this format directly,
             kept for signature consistency with the other generators)
         output_path: Full path to write the file (optional)
+        window_size: (cols, rows) tuple for the real terminal size.
+            Real live bug: lines 9/10 (screen width/length) used to be
+            hardcoded '80'/'24' literals regardless of the session's
+            actual size -- a sysop connected at 132x37 (confirmed
+            working correctly for the built-in MRC client's own
+            width/height detection) still had every door reading this
+            format's dropfile see a flat 80x24. Falls back to (80, 24)
+            when not supplied or malformed, matching every other
+            dropfile generator's own safe-default convention.
 
     Returns:
         String content of the drop file
     """
     del bbs_name  # not part of CHAIN.TXT's own field set
+    try:
+        cols, rows = int(window_size[0]), int(window_size[1])
+        if cols <= 0 or rows <= 0:
+            raise ValueError
+    except (TypeError, ValueError, IndexError):
+        cols, rows = 80, 24
     parts = (_u(user, 'username') or 'User').split(None, 1)
     first_name = parts[0]
     last_name = parts[1] if len(parts) > 1 else ''
@@ -415,8 +430,8 @@ def generate_chain_txt(user, node_number, minutes_remaining=60, bbs_name='ANetBB
         'U',                           # 6: Sex (unknown)
         '',                            # 7: unused
         '01/01/00',                    # 8: Last date on
-        '80',                          # 9: Screen width
-        '24',                          # 10: Screen length
+        str(cols),                     # 9: Screen width
+        str(rows),                     # 10: Screen length
         str(security_level),           # 11: Security level
         '1' if _u(user, 'is_admin') else '0',  # 12: Is sysop
         '0',                           # 13: Is co-sysop
@@ -529,7 +544,7 @@ def generate_sfdoors_dat(user, node_number, minutes_remaining=60, bbs_name='ANet
 
 
 def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetBBS',
-                        output_path=None, sysop_name=None):
+                        output_path=None, sysop_name=None, window_size=None):
     """
     Generate a BBSDEV.DRP drop file (RealDeuce's bbsdev.drp spec,
     https://github.com/RealDeuce/bbsdev.drp) -- a newer, UTF-8/CRLF-
@@ -578,10 +593,21 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
             matching generate_dorinfo()'s own hardcoded fallback, when
             the caller (write_drop_file(), via door_runner.py) doesn't
             have a real configured value to pass.
+        window_size: (cols, rows) tuple for the real terminal size --
+            see generate_chain_txt()'s own docstring for the real live
+            bug this fixes (screen width/height lines hardcoded to
+            80x24 regardless of the session's actual size). Falls back
+            to (80, 24) when not supplied or malformed.
 
     Returns:
         String content of the drop file
     """
+    try:
+        cols, rows = int(window_size[0]), int(window_size[1])
+        if cols <= 0 or rows <= 0:
+            raise ValueError
+    except (TypeError, ValueError, IndexError):
+        cols, rows = 80, 24
     user_id = _u(user, 'id') or 0
     username = _u(user, 'username') or 'User'
     security_level = 100 if _u(user, 'is_admin') else 50
@@ -613,8 +639,8 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
         '',                             # 3: Communications parameters (empty for stdio)
         username,                       # 4: User alias
         str(user_id),                   # 5: Unique user key (opaque; the DB user id)
-        '80',                           # 6: Screen width
-        '24',                           # 7: Screen height
+        str(cols),                      # 6: Screen width
+        str(rows),                      # 7: Screen height
         'Y',                            # 8: ANSI
         'N',                            # 9: RIP
         '',                             # 10: CTerm version (not detected)
@@ -644,7 +670,8 @@ def generate_bbsdev_drp(user, node_number, minutes_remaining=60, bbs_name='ANetB
 
 
 def write_drop_file(user, game, node_number, minutes_remaining=60,
-                    bbs_name='ANetBBS', token_ctx=None, sysop_name=None):
+                    bbs_name='ANetBBS', token_ctx=None, sysop_name=None,
+                    window_size=None):
     """
     Write the appropriate drop file for a game.
 
@@ -659,6 +686,12 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
                    `%Pdoor32.sys` instead of `data/temp/node{node}/door32.sys`.
         sysop_name: Sysop alias, used only by the bbsdev.drp generator
                    (the only format here with a dedicated field for it).
+        window_size: (cols, rows) tuple for the real terminal size,
+                   used only by the two formats with a dedicated
+                   screen-width/height field (chain.txt, bbsdev.drp --
+                   see generate_chain_txt()'s docstring for the real
+                   live bug this fixes). Falls back to (80, 24) when
+                   not supplied.
 
     Returns:
         Path to the written drop file, or None if drop_file_type is 'none'
@@ -731,11 +764,12 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
         generate_door32(user, node_number, minutes_remaining, bbs_name, output_path,
                         comm_handle=ch)
     elif drop_type == 'chain.txt':
-        generate_chain_txt(user, node_number, minutes_remaining, bbs_name, output_path)
+        generate_chain_txt(user, node_number, minutes_remaining, bbs_name, output_path,
+                           window_size=window_size)
     elif drop_type == 'sfdoors.dat':
         generate_sfdoors_dat(user, node_number, minutes_remaining, bbs_name, output_path)
     elif drop_type == 'bbsdev.drp':
         generate_bbsdev_drp(user, node_number, minutes_remaining, bbs_name, output_path,
-                            sysop_name=sysop_name)
+                            sysop_name=sysop_name, window_size=window_size)
 
     return output_path

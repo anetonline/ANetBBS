@@ -104,7 +104,7 @@ class DoorIdleTimeoutEnforcementTests(unittest.TestCase):
         fake_sid = 999002
 
         def _fake_launch(game, user, emit_fn, bbs_name='ANetBBS',
-                         minutes_remaining=60):
+                         minutes_remaining=60, window_size=None):
             # A door that forked successfully, produces no more output,
             # and never exits on its own -- exactly the "hung door"
             # scenario the idle-timeout message is supposed to cover.

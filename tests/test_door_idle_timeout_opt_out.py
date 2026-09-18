@@ -108,7 +108,7 @@ class DoorIdleTimeoutOptOutTests(unittest.TestCase):
         fake_sid = 999101
 
         def _fake_launch(game, user, emit_fn, bbs_name='ANetBBS',
-                         minutes_remaining=None):
+                         minutes_remaining=None, window_size=None):
             ds = DoorSession(fake_sid, master_fd=-1, pid=999999901)
             with _sessions_lock:
                 _sessions[fake_sid] = ds
@@ -154,7 +154,7 @@ class DoorIdleTimeoutOptOutTests(unittest.TestCase):
         fake_sid = 999102
 
         def _fake_launch(game, user, emit_fn, bbs_name='ANetBBS',
-                         minutes_remaining=None):
+                         minutes_remaining=None, window_size=None):
             ds = DoorSession(fake_sid, master_fd=-1, pid=999999902)
             with _sessions_lock:
                 _sessions[fake_sid] = ds

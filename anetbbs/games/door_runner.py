@@ -1362,7 +1362,7 @@ def _build_mystic_python_command(game, cwd, temp_files_out=None):
 
 
 def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
-                     minutes_remaining=None):
+                     minutes_remaining=None, window_size=None):
     """
     Allocate a node, write drop file, fork PTY child, and start reader thread.
 
@@ -1371,6 +1371,17 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         user: User model instance
         socketio_emit_fn: Callable(output_bytes) that emits to the client
         bbs_name: BBS name string
+        window_size: (cols, rows) tuple for the caller's real terminal
+            size, passed straight through to write_drop_file() for the
+            dropfile formats that carry a screen-width/height field.
+            Real live bug: this used to not exist as a parameter at
+            all, so chain.txt/bbsdev.drp always reported a flat 80x24
+            regardless of the session's actual size (confirmed live --
+            a sysop connected at 132x37, with the built-in MRC client
+            correctly detecting/using the wide terminal, still saw
+            uMRC's own chain.txt report 80x24). None (telnet/SSH
+            callers that don't pass a real session, and the web UI
+            path) falls back to (80, 24) in write_drop_file() itself.
         minutes_remaining: Session time budget to report in the dropfile.
             None (the default, and what every real caller passes today)
             computes the user's REAL remaining time via
@@ -1442,7 +1453,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
     try:
         drop_path = write_drop_file(user, game, node, minutes_remaining,
                                      bbs_name, token_ctx=token_ctx,
-                                     sysop_name=sysop)
+                                     sysop_name=sysop, window_size=window_size)
     except Exception as exc:  # pylint: disable=broad-except
         logger.warning('Drop file error for game %s: %s', game.slug, exc)
 
@@ -2346,7 +2357,8 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
 
         sid = launch_door_game(live_game, live_user, _emit_to_queue,
                                bbs_name=bbs_name,
-                               minutes_remaining=minutes_remaining)
+                               minutes_remaining=minutes_remaining,
+                               window_size=getattr(session, 'window_size', None))
         if sid is None:
             await session.write("\r\nCould not start the game — no free nodes "
                                 "(check Game.max_nodes in /admin/games/) or "

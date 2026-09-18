@@ -141,6 +141,32 @@ class BbsdevDrpTests(unittest.TestCase):
         self.assertEqual(lines[17], '5')  # Line 18: node number
         self.assertEqual(lines[18], 'N')  # Line 19: show local display
 
+    def test_screen_width_and_height_default_to_80x24(self):
+        from anetbbs.games.dropfile import generate_bbsdev_drp
+        content = generate_bbsdev_drp(self._user(), node_number=1)
+        lines = content.split('\r\n')
+        self.assertEqual(lines[5], '80')  # Line 6: screen width
+        self.assertEqual(lines[6], '24')  # Line 7: screen height
+
+    def test_screen_width_and_height_report_the_real_window_size(self):
+        """Same real live bug as CHAIN.TXT's own equivalent test --
+        see tests/test_dropfile_chain_and_sfdoors.py."""
+        from anetbbs.games.dropfile import generate_bbsdev_drp
+        content = generate_bbsdev_drp(self._user(), node_number=1,
+                                      window_size=(132, 37))
+        lines = content.split('\r\n')
+        self.assertEqual(lines[5], '132')  # Line 6: screen width
+        self.assertEqual(lines[6], '37')   # Line 7: screen height
+
+    def test_malformed_window_size_falls_back_to_80x24(self):
+        from anetbbs.games.dropfile import generate_bbsdev_drp
+        for bad in (None, (), (80,), ('x', 'y'), (0, 24), (80, -1)):
+            content = generate_bbsdev_drp(self._user(), node_number=1,
+                                          window_size=bad)
+            lines = content.split('\r\n')
+            self.assertEqual(lines[5], '80', f'window_size={bad!r}')
+            self.assertEqual(lines[6], '24', f'window_size={bad!r}')
+
     def test_cr_lf_injection_in_username_cannot_shift_fields(self):
         # Same field-injection class dropfile.py's own _u() helper was
         # built to close for every other format (see its docstring) --

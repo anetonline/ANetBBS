@@ -53,6 +53,35 @@ class ChainTxtTests(unittest.TestCase):
         self.assertEqual(lines[10], '200')  # Line 11: security level
         self.assertEqual(lines[11], '1')    # Line 12: is sysop
 
+    def test_screen_width_and_height_default_to_80x24(self):
+        from anetbbs.games.dropfile import generate_chain_txt
+        content = generate_chain_txt(self._user(), node_number=1)
+        lines = content.split('\r\n')
+        self.assertEqual(lines[8], '80')  # Line 9: screen width
+        self.assertEqual(lines[9], '24')  # Line 10: screen length
+
+    def test_screen_width_and_height_report_the_real_window_size(self):
+        """Real live bug: these two lines used to be hardcoded '80'/'24'
+        literals regardless of the caller's actual terminal size -- a
+        sysop connected at 132x37 (with the built-in MRC client
+        correctly detecting/using the wide terminal) still had uMRC's
+        own chain.txt report a flat 80x24."""
+        from anetbbs.games.dropfile import generate_chain_txt
+        content = generate_chain_txt(self._user(), node_number=1,
+                                     window_size=(132, 37))
+        lines = content.split('\r\n')
+        self.assertEqual(lines[8], '132')  # Line 9: screen width
+        self.assertEqual(lines[9], '37')   # Line 10: screen length
+
+    def test_malformed_window_size_falls_back_to_80x24(self):
+        from anetbbs.games.dropfile import generate_chain_txt
+        for bad in (None, (), (80,), ('x', 'y'), (0, 24), (80, -1)):
+            content = generate_chain_txt(self._user(), node_number=1,
+                                         window_size=bad)
+            lines = content.split('\r\n')
+            self.assertEqual(lines[8], '80', f'window_size={bad!r}')
+            self.assertEqual(lines[9], '24', f'window_size={bad!r}')
+
 
 class SfdoorsDatTests(unittest.TestCase):
     def _user(self, **overrides):
@@ -126,6 +155,31 @@ class WriteDropFileDispatchTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(path))
             with open(path) as f:
                 self.assertIn('Test', f.read())
+
+    def test_chain_txt_dispatch_passes_window_size_through(self):
+        import tempfile
+        import os
+        from anetbbs.games.dropfile import write_drop_file
+
+        class FakeGame:
+            drop_file_type = 'chain.txt'
+            game_type = 'door_native'
+
+            def __init__(self, path):
+                self.drop_file_path = path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'CHAIN.TXT')
+            user = {'id': 1, 'username': 'Test', 'is_admin': False}
+            write_drop_file(user, FakeGame(path), node_number=1,
+                            window_size=(132, 37))
+            # newline='' preserves the real CRLF line endings -- plain
+            # open() does universal-newline translation on read,
+            # collapsing '\r\n' to '\n' and breaking a split('\r\n').
+            with open(path, newline='') as f:
+                lines = f.read().split('\r\n')
+            self.assertEqual(lines[8], '132')  # Line 9: screen width
+            self.assertEqual(lines[9], '37')   # Line 10: screen length
 
     def test_sfdoors_dat_dispatches_and_writes_a_file(self):
         import tempfile

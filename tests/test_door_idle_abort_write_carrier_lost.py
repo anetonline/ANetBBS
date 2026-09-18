@@ -103,7 +103,7 @@ class DoorIdleAbortWriteCarrierLostTests(unittest.TestCase):
         fake_sid = 999003
 
         def _fake_launch(game, user, emit_fn, bbs_name='ANetBBS',
-                         minutes_remaining=60):
+                         minutes_remaining=60, window_size=None):
             ds = DoorSession(fake_sid, master_fd=-1, pid=999999997)
             with _sessions_lock:
                 _sessions[fake_sid] = ds

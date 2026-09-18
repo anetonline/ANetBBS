@@ -1,3 +1,7 @@
+# ANetBBS v1.0.91 — Door dropfiles now report the real terminal size (September 2026)
+
+Fixed a bug where CHAIN.TXT and BBSDEV.DRP dropfiles always reported an 80x24 screen size regardless of the actual session's terminal dimensions, so doors reading those formats never saw a wider/taller terminal even when the rest of the session correctly used it.
+
 # ANetBBS v1.0.90 — IRC disconnect CPU/memory fix, SSH keepalive tuning (September 2026)
 
 Fixed a bug where a dropped connection to the built-in IRC client could spike CPU usage and grow memory indefinitely instead of ending the session cleanly. Also loosened SSH keepalive timing to tolerate a client that's intermittently unresponsive rather than fully gone, and added clearer logging for why an SSH connection actually ended.

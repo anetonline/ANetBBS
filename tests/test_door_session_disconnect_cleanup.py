@@ -114,7 +114,7 @@ class DoorSessionDisconnectCleanupTests(unittest.TestCase):
         fake_sid = 999001
 
         def _fake_launch(game, user, emit_fn, bbs_name='ANetBBS',
-                         minutes_remaining=60):
+                         minutes_remaining=60, window_size=None):
             # Stands in for a door process that forked successfully and is
             # still running -- kept in `_sessions` exactly like the real
             # launch path does, with the leaking temp file attached.

@@ -1,11 +1,18 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.90`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.91`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.91 — Door dropfiles now report the real terminal size (September 2026)
+
+Fixed a bug where CHAIN.TXT and BBSDEV.DRP dropfiles always reported an
+80x24 screen size regardless of the actual session's terminal
+dimensions, so doors reading those formats never saw a wider/taller
+terminal even when the rest of the session correctly used it.
 
 ## v1.0.90 — IRC disconnect CPU/memory fix, SSH keepalive tuning (September 2026)
 
