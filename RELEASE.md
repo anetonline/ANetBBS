@@ -1,3 +1,7 @@
+# ANetBBS v1.0.93 — Who's Online showed a raw game id/slug instead of the door's name (September 2026)
+
+Fixed a bug where launching a door directly from a numbered/slug menu item (rather than through the Game Center's category browser) showed its raw id or slug in Who's Online instead of the door's actual name, for the entire session.
+
 # ANetBBS v1.0.92 — Single-container Docker quick start was missing the MRC bridge config mount (September 2026)
 
 Fixed the single-container Docker "quick start" instructions, which never mounted the MRC chat bridge's own config file — it silently fell back to placeholder BBS/sysop name values regardless of what was set in .env. Also added a startup warning in that container if the file still isn't mounted.

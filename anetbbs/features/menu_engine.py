@@ -95,6 +95,22 @@ async def _act_door(ui, args):
         if not g.is_active:
             await ui.session.write("\r\nGame not found.\r\n")
             return None
+    # Real live bug: run_menu()'s own generic pre-dispatch heartbeat
+    # (see its 'action=f"{action_type}({action_args or ""})"' call)
+    # fires BEFORE this function even resolves which game "580" (the
+    # raw menu args -- an id or slug) actually refers to, and neither
+    # this function nor play_door_game_telnet() ever corrected it
+    # afterward -- so Who's Online showed "door 580" for the entire
+    # session instead of the door's real name. GameManager._launch()
+    # (features/games.py, the Game Center browse-and-pick path) already
+    # does this correctly; this direct-by-id/slug launch path (a main-
+    # menu hotkey going straight to one door) just never got the same
+    # treatment.
+    if hasattr(ui.session, '_heartbeat_node'):
+        try:
+            ui.session._heartbeat_node(action=f'door: {g.name}')
+        except Exception:
+            pass
     await play_door_game_telnet(g, ui.session.user, ui.session)
     return None
 

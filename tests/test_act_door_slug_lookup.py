@@ -130,6 +130,45 @@ class ActDoorSlugLookupTests(unittest.TestCase):
         launch.assert_not_awaited()
         self.assertIn('Game not found', session.transcript())
 
+    def test_heartbeat_gets_the_real_door_name_not_the_raw_id(self):
+        """Real live bug: Who's Online showed "door 580" (run_menu()'s
+        own generic pre-dispatch heartbeat, action_type + raw args)
+        for the entire session of a door launched directly by id/slug
+        -- neither _act_door() nor play_door_game_telnet() ever
+        corrected it with the resolved game's real name, unlike the
+        Game Center browse-and-pick path (GameManager._launch() in
+        features/games.py), which already does this correctly."""
+        from unittest.mock import MagicMock
+        from anetbbs.features.menu_engine import _act_door
+        ui, session = self._fake_ui()
+        session._heartbeat_node = MagicMock()
+        with self._patch_launch() as launch:
+            asyncio.run(_act_door(ui, str(self.active_id)))
+        launch.assert_awaited_once()
+        session._heartbeat_node.assert_called_once_with(
+            action='door: Test MRC Door')
+
+    def test_heartbeat_uses_the_real_name_via_slug_too(self):
+        from unittest.mock import MagicMock
+        from anetbbs.features.menu_engine import _act_door
+        ui, session = self._fake_ui()
+        session._heartbeat_node = MagicMock()
+        with self._patch_launch() as launch:
+            asyncio.run(_act_door(ui, 'test-mrc-door'))
+        launch.assert_awaited_once()
+        session._heartbeat_node.assert_called_once_with(
+            action='door: Test MRC Door')
+
+    def test_no_heartbeat_call_when_game_not_found(self):
+        from unittest.mock import MagicMock
+        from anetbbs.features.menu_engine import _act_door
+        ui, session = self._fake_ui()
+        session._heartbeat_node = MagicMock()
+        with self._patch_launch() as launch:
+            asyncio.run(_act_door(ui, 'no-such-slug'))
+        launch.assert_not_awaited()
+        session._heartbeat_node.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
