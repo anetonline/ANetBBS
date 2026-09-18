@@ -1010,14 +1010,31 @@ class ANetIRC:
         k = self._keys.next()
         if k is not None:
             return k
+        # Real live incident: session.read_raw() raises CarrierLost (a
+        # ConnectionError subclass) -- never returns an ambiguous empty
+        # value -- the instant the transport hits real EOF (see its own
+        # docstring). A blanket `except Exception: pass` here swallowed
+        # that right along with the legitimate "no key yet" TimeoutError
+        # case, so once the underlying connection actually died (a
+        # remote IRC server closing its end, confirmed live via a
+        # lingering CLOSE-WAIT socket), read_raw() on the now-EOF'd
+        # transport returns near-instantly on every call instead of
+        # blocking -- _read_key() kept returning None as if merely idle,
+        # and _ui_loop()'s `while not self._back` kept calling it right
+        # back, spinning as fast as the interpreter could go: one CPU
+        # core pegged, memory climbing, confirmed live via an automatic
+        # py-spy-style capture. TimeoutError (this call's own poll
+        # timeout expiring with nothing typed) is the only thing that
+        # legitimately means "keep looping" -- CarrierLost and anything
+        # else must propagate so _ui_loop()/_chat_session()/run() unwind
+        # this IRC session the same clean way every other disconnect
+        # already does elsewhere in this codebase.
         try:
             data = await asyncio.wait_for(
                 self.session.read_raw(64), timeout=timeout)
             if data:
                 self._keys.feed(data)
         except asyncio.TimeoutError:
-            pass
-        except Exception:
             pass
 
         k = self._keys.next()
@@ -1033,9 +1050,11 @@ class ANetIRC:
                 if data:
                     self._keys.feed(data)
             except asyncio.TimeoutError:
-                self._keys._buf = b''
-                return "ESC"
-            except Exception:
+                # No follow-up bytes arrived in time -- a real lone
+                # Escape keypress, not a disconnect. A genuine
+                # CarrierLost here must NOT be reinterpreted as "ESC"
+                # (see the longer comment on the first read_raw() call
+                # above) -- it's left to propagate.
                 self._keys._buf = b''
                 return "ESC"
 

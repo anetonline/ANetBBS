@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.89`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.90`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.90 — IRC disconnect CPU/memory fix, SSH keepalive tuning (September 2026)
+
+Fixed a bug where a dropped connection to the built-in IRC client could
+spike CPU usage and grow memory indefinitely instead of ending the
+session cleanly. Also loosened SSH keepalive timing to tolerate a
+client that's intermittently unresponsive rather than fully gone, and
+added clearer logging for why an SSH connection actually ended.
 
 ## v1.0.89 — Reduced background monitoring overhead / quieter disconnect logging (September 2026)
 

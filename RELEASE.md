@@ -1,3 +1,7 @@
+# ANetBBS v1.0.90 — IRC disconnect CPU/memory fix, SSH keepalive tuning (September 2026)
+
+Fixed a bug where a dropped connection to the built-in IRC client could spike CPU usage and grow memory indefinitely instead of ending the session cleanly. Also loosened SSH keepalive timing to tolerate a client that's intermittently unresponsive rather than fully gone, and added clearer logging for why an SSH connection actually ended.
+
 # ANetBBS v1.0.89 — Reduced background monitoring overhead / quieter disconnect logging (September 2026)
 
 Reduced how often the sysop dashboard's per-service monitoring spawns external processes to check service status, cutting continuous system overhead that could compound under load. Also quieted some redundant error logging when a client disconnects at specific points during session teardown.

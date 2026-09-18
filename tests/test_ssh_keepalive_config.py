@@ -58,5 +58,54 @@ class SshKeepaliveConfigTests(unittest.TestCase):
         self.assertGreater(kwargs['keepalive_count_max'], 0)
 
 
+class ConnectionLostDiagnosticLoggingTests(unittest.TestCase):
+    """Regression test for a real live diagnostic gap: connection_lost()
+    used to log at DEBUG only, so the actual reason an SSH connection
+    ended was invisible in normal production logs. An operator doing
+    careful independent diagnosis of repeated ~5-minute SSH drops had
+    nothing to go on beyond a bare "SSH session closed for (peer)" line
+    -- no way to tell a keepalive-triggered close (the client never
+    acknowledging asyncssh's own keepalive probes) apart from any other
+    disconnect. Fixed by logging the real exception reason, and calling
+    out the keepalive-specific case explicitly since asyncssh's own
+    source (connection.py's _keepalive_timer_callback()) raises exactly
+    that message text."""
+
+    def _make_server(self, peer=('203.0.113.5', 51234)):
+        server = ssh_server._BBSSshServer()
+        conn = mock.Mock()
+        conn.get_extra_info.return_value = peer
+        server._conn = conn
+        return server
+
+    def test_keepalive_timeout_logs_at_warning_with_reason(self):
+        server = self._make_server()
+        with self.assertLogs(ssh_server.logger, level='WARNING') as cm:
+            server.connection_lost(
+                ssh_server.asyncssh.ConnectionLost(
+                    'Client not responding to keepalive'))
+        joined = '\n'.join(cm.output)
+        self.assertIn('keepalive', joined)
+        self.assertIn('203.0.113.5', joined)
+
+    def test_ordinary_disconnect_logs_at_info_not_warning(self):
+        server = self._make_server()
+        with self.assertLogs(ssh_server.logger, level='INFO') as cm:
+            server.connection_lost(ConnectionResetError('connection reset'))
+        joined = '\n'.join(cm.output)
+        self.assertIn('connection reset', joined)
+        self.assertNotIn('WARNING', joined)
+
+    def test_no_exception_logs_nothing(self):
+        server = self._make_server()
+        with self.assertRaises(AssertionError):
+            # assertNoLogs isn't available on every supported Python
+            # version here -- assertLogs itself raises AssertionError
+            # when nothing was logged, which is exactly what a clean
+            # (exc=None) connection_lost() call must do.
+            with self.assertLogs(ssh_server.logger, level='INFO'):
+                server.connection_lost(None)
+
+
 if __name__ == '__main__':
     unittest.main()

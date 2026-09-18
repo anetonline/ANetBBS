@@ -26,6 +26,34 @@ logger = logging.getLogger(__name__)
 # we keep visible.
 logging.getLogger('asyncssh').setLevel(logging.ERROR)
 
+# See start_ssh_server()'s own comment for the full rationale. Module-
+# level (not inlined at each use) so the connection_lost() diagnostic
+# log message below can never drift out of sync with the actual
+# configured values.
+#
+# v1.0.88 originally shipped this at 60s/3 (~3-4 minutes to give up on
+# a silent client). A real operator then saw a specific SSH client
+# start disconnecting every ~4-5 minutes -- initially looked like a
+# regression this keepalive introduced, but it turned out that same
+# client had its own update a few days earlier and that's when the
+# operator's problems actually started, both the ORIGINAL permanent-
+# freeze reports (this mechanism didn't exist yet) and these new
+# frequent disconnects (once it did). That's consistent with the
+# client itself intermittently failing to acknowledge server traffic
+# rather than a keepalive bug -- before this existed, that showed up
+# as an unrecoverable hang; now it shows up as a disconnect, which is
+# strictly better (the user can just reconnect) but was firing far too
+# eagerly for a client that's flaky rather than genuinely gone.
+# Loosened to match the ORIGINAL problem's own reported timescale (a
+# session going bad after 30+ minutes idle) instead of an arbitrarily
+# tight window: 5 minutes between checks, 5 consecutive misses (~25-30
+# minutes of total silence) before concluding the client is actually
+# gone -- still catches a truly dead connection in a bounded time, but
+# gives a merely-flaky client a lot more room to recover on its own
+# before being disconnected.
+SSH_KEEPALIVE_INTERVAL_SECONDS = 300
+SSH_KEEPALIVE_COUNT_MAX = 5
+
 
 class _SshStreamReader:
     """Adapts an asyncssh SSHReader to the asyncio StreamReader interface
@@ -207,8 +235,35 @@ class _BBSSshServer(asyncssh.SSHServer):
         logger.info('SSH connection from %s', peer)
 
     def connection_lost(self, exc):
+        # Real live gap: this used to log at DEBUG only, so the actual
+        # reason a connection ended (a clean client-initiated close vs.
+        # asyncssh's own keepalive giving up on an unresponsive client)
+        # was invisible in normal production logs -- an operator's own
+        # careful diagnosis of repeated ~5-minute SSH drops had nothing
+        # to go on beyond a bare "SSH session closed for (peer)" line.
+        # asyncssh's own source (connection.py's _keepalive_timer_
+        # callback()) raises exactly this message text when
+        # keepalive_count_max unanswered keepalive requests are
+        # reached, so matching on it gives a direct, unambiguous answer
+        # to "did the client ever respond to a keepalive probe" without
+        # needing to patch/re-deploy a diagnostic build to find out.
+        peer = None
+        try:
+            peer = self._conn.get_extra_info('peername')
+        except Exception:
+            pass
         if exc:
-            logger.debug('SSH connection lost: %s', exc)
+            reason = str(exc)
+            if 'not responding to keepalive' in reason:
+                logger.warning(
+                    'SSH connection from %s lost: client stopped '
+                    'answering keepalive requests (keepalive_interval=%s, '
+                    'keepalive_count_max=%s) -- the client never '
+                    'acknowledged the SSH-protocol keepalive, not a '
+                    'matter of user inactivity.',
+                    peer, SSH_KEEPALIVE_INTERVAL_SECONDS, SSH_KEEPALIVE_COUNT_MAX)
+            else:
+                logger.info('SSH connection from %s lost: %s', peer, reason)
         try:
             _PASSWORD_CACHE.pop(id(self._conn), None)
             _PUBKEY_USER_CACHE.pop(id(self._conn), None)
@@ -324,8 +379,8 @@ async def start_ssh_server(host, port, key_file, bbs_config):
         # legitimately-idle user (just not typing) is unaffected --
         # keepalive requests/responses are answered by the SSH client
         # library itself, with no user interaction needed.
-        keepalive_interval=60,
-        keepalive_count_max=3,
+        keepalive_interval=SSH_KEEPALIVE_INTERVAL_SECONDS,
+        keepalive_count_max=SSH_KEEPALIVE_COUNT_MAX,
     )
     logger.info('SSH server started on %s:%d', host, port)
     return server
