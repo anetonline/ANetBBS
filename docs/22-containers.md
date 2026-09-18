@@ -96,6 +96,23 @@ cp .env.docker.example .env
 Edit `.env` in a text editor and fill in at least `SECRET_KEY` (any
 random string), `BBS_NAME`, `SYSOP_NAME`, `BBS_EMAIL`.
 
+Real gap found live (single-container mode on Windows/Docker Desktop):
+unlike the `data/` volume above, the MRC chat bridge's own config file
+has no equivalent mount here at all, so it silently falls back to
+`mrc/bridge/config.example.json`'s placeholder values (`"My BBS"`, a
+blank sysop name) no matter what you put in `.env` — `BBS_NAME`/
+`SYSOP_NAME` only drive the rest of the BBS, not the MRC bridge, which
+reads its own separate file. Prepare one now, same as the
+docker-compose setup in Step 3 does:
+
+```bash
+cp /path/to/anetbbs-source/docker/compose/mrc-bridge-config.json.example mrc-bridge-config.json
+```
+
+Edit `mrc-bridge-config.json` and set at least `bridge_bbs` and
+`bbs_sysop` to your real BBS name/sysop alias — these are what MRC
+chat actually advertises to other bridges, independent of `.env`.
+
 ```bash
 docker run -d --name anetbbs \
     --env-file .env \
@@ -106,6 +123,7 @@ docker run -d --name anetbbs \
     -p 5000:5000 -p 2233:2233 -p 2234:2234 \
     -p 18:18 -p 11:11/udp -p 79:79 -p 8080:8080 -p 24554:24554 \
     -v anetbbs_data:/app/data \
+    -v "$(pwd)/mrc-bridge-config.json:/app/mrc/bridge/config.json:ro" \
     anetbbs:local \
     /usr/local/bin/entrypoint-single.sh
 ```

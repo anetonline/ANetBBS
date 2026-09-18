@@ -1,3 +1,7 @@
+# ANetBBS v1.0.92 — Single-container Docker quick start was missing the MRC bridge config mount (September 2026)
+
+Fixed the single-container Docker "quick start" instructions, which never mounted the MRC chat bridge's own config file — it silently fell back to placeholder BBS/sysop name values regardless of what was set in .env. Also added a startup warning in that container if the file still isn't mounted.
+
 # ANetBBS v1.0.91 — Door dropfiles now report the real terminal size (September 2026)
 
 Fixed a bug where CHAIN.TXT and BBSDEV.DRP dropfiles always reported an 80x24 screen size regardless of the actual session's terminal dimensions, so doors reading those formats never saw a wider/taller terminal even when the rest of the session correctly used it.

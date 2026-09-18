@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.91`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.92`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.92 — Single-container Docker quick start was missing the MRC bridge config mount (September 2026)
+
+Fixed the single-container Docker "quick start" instructions, which
+never mounted the MRC chat bridge's own config file — it silently fell
+back to placeholder BBS/sysop name values regardless of what was set
+in .env. Also added a startup warning in that container if the file
+still isn't mounted.
 
 ## v1.0.91 — Door dropfiles now report the real terminal size (September 2026)
 
