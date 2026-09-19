@@ -155,7 +155,7 @@ pyftpdlib>=2.0.0
 # it FTPS is silently disabled and AUTH TLS clients get refused on the
 # control channel. Required for the FTPS path that update.sh wires up
 # when FTP_TLS_CERTFILE is configured.
-pyopenssl>=24.0.0
+pyopenssl>=26.3.0
 
 # Internet email — LMTP listener that takes mail handed off from the
 # sysop's local Postfix/Exim/OpenSMTPD, and an outbound submitter that
