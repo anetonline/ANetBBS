@@ -1,11 +1,40 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.93`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.95`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.95 — New-account password-confirmation fix over telnet/PuTTY; Docker admin-account docs (September 2026)
+
+Fixed a bug where creating a new account (or changing a password) over
+telnet with a client that sends `\r\n` for Enter — PuTTY, plain
+`telnet`, most terminal emulators — always failed at the "Confirm
+password" step with "Passwords don't match," even when typed
+identically both times. SyncTERM and similar clients that send a bare
+`\r` were unaffected, which is why this depended on which client was
+used to connect.
+
+Also documented how to find/log in with the auto-created initial admin
+account on the Docker install paths (`docs/22-containers.md`) — it was
+never obvious from a container that one gets created at all, or where
+to find its password.
+
+## v1.0.94 — Native uMRC (umrc-client) support on the MRC bridge (September 2026)
+
+Added the option for ANetBBS's own MRC chat bridge to also accept
+direct connections from uMRC's `umrc-client` door, so a sysop running
+both no longer needs a separate `umrc-bridge` process alongside it —
+one shared bridge now serves ANetBBS's own terminal/web MRC clients and
+uMRC callers together, with correct private messaging between all of
+them, and no changes required to uMRC itself. Off by default; opt in
+via `mrc_tcp_enabled`/`mrc_tcp_listen_host`/`mrc_tcp_listen_port` in
+`mrc/bridge/config.json`. See `docs/27-mrc-chat.md` for setup.
+
+**Not yet tested against a real `umrc-client`/fresh install — held back
+from the normal release train until that verification happens.**
 
 ## v1.0.93 — Who's Online showed a raw game id/slug instead of the door's name (September 2026)
 

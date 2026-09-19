@@ -992,10 +992,24 @@ class BBSSession:
                 # return here, empty or not, means the connection is
                 # still alive; just loop and read the next byte.
                 continue
-            # Most telnet/SSH clients send \r when Enter is pressed; some send \r\n
-            if ch in (b'\r', b'\n'):
-                # consume any paired \n so it doesn't dirty the next read
-                # (cheap-and-cheerful — not strictly needed for asyncio reader)
+            # Real live bug: a client that sends \r\n for Enter (PuTTY,
+            # plain `telnet`, confirmed -- SyncTERM apparently sends a
+            # bare \r, which is why this only showed up for some
+            # clients) left the paired \n unread here. This function
+            # used to treat EITHER \r or \n as the terminator -- so
+            # that leftover \n became an instant, empty "Enter" the
+            # very next time read_password() was called (e.g. the
+            # "Confirm password:" prompt right after "Choose
+            # password:"), which could never match the real password
+            # just entered. Reported live as new-user registration's
+            # confirm step always failing with "Passwords don't
+            # match" over telnet/PuTTY, but working fine over SyncTERM.
+            # Fixed by matching read_line()'s own convention exactly:
+            # only \r ends input. A stray \n (0x0A) then falls through
+            # to the `ch < b' '` control-byte filter below and is
+            # silently ignored, precisely how read_line() already
+            # tolerates the same leftover byte between prompts.
+            if ch == b'\r':
                 await self.write('\r\n')
                 break
             # A real C64 keyboard's DEL/INST key sends PETSCII 0x14, not

@@ -163,6 +163,41 @@ Now actually use it:
 - **Telnet**: `telnet localhost 2233`
 - **SSH**: `ssh -p 2234 anyuser@localhost`
 
+### Logging in as admin for the first time
+
+Not obvious from a container, so worth calling out explicitly: nothing
+above created an admin account for you interactively. The first time
+`web` boots against an empty database, ANetBBS bootstraps a fallback
+account (`username: admin`, a random password) exactly like a bare
+`install.sh` install does when nothing else has created one first — it
+gets logged as a `WARNING` on that very first boot, and the password is
+also written to `admin_password.txt` inside the `data/` volume.
+
+Find it either way:
+
+```bash
+docker logs anetbbs 2>&1 | grep -A3 "INITIAL ADMIN ACCOUNT CREATED"
+```
+
+or, if you missed that first-boot log line (it only prints once, the
+moment the account is created):
+
+```bash
+docker exec anetbbs cat /app/data/admin_password.txt
+```
+
+Log in at `http://localhost:5000` (or over telnet/SSH) as `admin` with
+that password, then **change it immediately** — Admin → My Account
+(web) or the account-settings menu (terminal). This fallback account
+only ever gets created once, the first time the database has zero
+admin accounts at all — there's no interactive wizard prompt in a
+container boot the way `install.sh` has, so it's unavoidable on a
+truly fresh install. If you'd rather use your own chosen username day
+to day, register that account through the normal new-user signup, log
+back in as `admin` and promote it to admin from the web admin's Users
+page (or `anetbbs-cfg`'s Users section over SSH), then optionally
+demote or delete the original fallback `admin` account.
+
 ### Cleaning up
 
 ```bash
@@ -209,6 +244,16 @@ docker compose logs -f web       # tail one service's logs
 docker compose logs -f           # tail all of them
 docker compose restart web       # restart one service
 docker compose down              # stop + remove containers (data volume survives)
+```
+
+Same fallback admin account as the single-container path (see
+"Logging in as admin for the first time" above) — just `compose`-style
+commands to find the password:
+
+```bash
+docker compose logs web | grep -A3 "INITIAL ADMIN ACCOUNT CREATED"
+# or:
+docker compose exec web cat /app/data/admin_password.txt
 ```
 
 ### Enabling rlogin / FTP
