@@ -47,6 +47,48 @@ identify-gating, CTCP, DM routing, join/leave announcements, userlist --
 is the exact same `BridgeApp` code and behaves identically. Switching
 backends only changes how the raw bytes get to the hub.
 
+## Native `umrc-client` support (one shared bridge, no separate `umrc-bridge`)
+
+[uMRC](https://github.com/codefenix-dev/uMRC) is a separate,
+OpenDoors-based MRC door (`umrc-client`) that normally needs its own
+`umrc-bridge` multiplexer daemon running alongside it. `mrc/bridge/
+main.py` can act as a **drop-in replacement for `umrc-bridge`**, so a
+sysop running both ANetBBS's own MRC client (terminal/web) and uMRC
+can point `umrc-client`'s bridge-host/bridge-port config at ANetBBS's
+own bridge instead -- one shared process serves both, with **zero
+changes to uMRC itself**. Session state, room/DM routing, and every
+real wire packet are fully shared with ANetBBS's own terminal/web
+clients -- a `umrc-client` caller and an ANetBBS caller in the same
+room see each other and can send each other private messages
+correctly, on either side.
+
+Off by default (a second open listener is extra attack surface a
+sysop who doesn't run uMRC doesn't need). To enable, add to
+`mrc/bridge/config.json`:
+
+```json
+"mrc_tcp_enabled": true,
+"mrc_tcp_listen_host": "127.0.0.1",
+"mrc_tcp_listen_port": 5010
+```
+
+then restart `anetbbs-mrc-bridge`, and point `umrc-client`'s own
+config at `127.0.0.1:5010` (or whatever host/port you chose) in place
+of a separately-run `umrc-bridge`. Loopback-only by default, same
+reasoning as `web_listen_host`'s own default -- open it to `0.0.0.0`
+(or a LAN address) only if `umrc-client` needs to reach it from a
+different host than the one running ANetBBS.
+
+A few uMRC-specific behaviors are intentionally simplified rather than
+faithfully replicated: `umrc-client`'s own join/exit announcement text
+(`/quit`'s exit message, the connect-time join message) isn't
+forwarded -- the bridge's own configured `join_message`/`exit_message`
+templates apply uniformly to every session regardless of transport,
+same as they already do for ANetBBS's own clients. `/b` (uMRC's
+network-wide broadcast, addressed to no particular room) is treated as
+an ordinary current-room broadcast, since the rest of the bridge has
+no broader concept of "everywhere" to route it to.
+
 ### Why the `mystic` backend exists
 
 MRC's wire protocol (tilde-delimited packets, `IMALIVE`/`CAPABILITIES`/

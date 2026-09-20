@@ -130,6 +130,7 @@ class LiveSessionsFilterTests(unittest.TestCase):
         self.app.config = {"bridge_bbs": "TestBBS"}
         self.app.db = BridgeDB(self._tmp.name)
         self.app.websockets = {}
+        self.app.mrc_tcp_clients = {}
         self.app.mrc = AsyncMock()
         self.app.mrc.connected = True
         self.app.join_packet_delay_ms = 0

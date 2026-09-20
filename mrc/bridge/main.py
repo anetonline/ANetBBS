@@ -673,6 +673,19 @@ class BridgeApp:
         # join with no way around it.
         self._ws_remote_ip: Dict[int, str] = {}
 
+        # Raw-TCP counterpart of self.websockets/_ws_remote_ip above --
+        # lets a real umrc-client (github.com/codefenix-dev/uMRC) connect
+        # directly to THIS bridge instead of the separate umrc-bridge
+        # daemon, with zero changes to uMRC itself. Same id()-keyed,
+        # str(id())-as-db-key convention as the WebSocket path; see
+        # handle_mrc_tcp_connection.
+        self.mrc_tcp_clients:    Dict[int, asyncio.StreamWriter] = {}
+        self._mrc_tcp_remote_ip: Dict[int, str] = {}
+        self.mrc_tcp_enabled     = bool(self.config.get("mrc_tcp_enabled", False))
+        self.mrc_tcp_listen_host = self.config.get("mrc_tcp_listen_host", "127.0.0.1")
+        self.mrc_tcp_listen_port = int(self.config.get("mrc_tcp_listen_port", 5010))
+        self._mrc_tcp_server = None
+
         # Default False: verified against the real reference client
         # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
         # joins the room unconditionally right after the handshake,
@@ -935,15 +948,42 @@ class BridgeApp:
         except Exception:
             pass
 
+    async def _send_mrc_tcp_payload(self, writer: asyncio.StreamWriter, payload: dict):
+        """The raw-TCP counterpart of _safe_send(). Most bridge->client
+        payload shapes (userlist, room_changed, bridge_status, ...) are
+        synthetic conveniences invented for the WS/JSON clients with no
+        real-wire-protocol meaning -- a raw MRC client (umrc-client)
+        already gets the same information from the underlying wire
+        packets themselves (USERLIST:/USERROOM: server text, delivered
+        as an ordinary "mrc_message" below), so only that one payload
+        type needs translating; everything else is correctly a no-op
+        here. msg_ext is dropped -- the "mrc_message" payload never
+        carried it either (see _on_upstream_packet), and it's unused
+        for ordinary chat/DM/userlist traffic."""
+        if payload.get("type") != "mrc_message":
+            return
+        pkt = MRCProtocol.create_packet(
+            payload.get("from_user", ""), payload.get("from_site", ""),
+            payload.get("from_room", ""), payload.get("to_user", ""),
+            "", payload.get("to_room", ""), payload.get("message", ""))
+        try:
+            writer.write(pkt.encode())
+            await writer.drain()
+        except Exception:
+            pass
+
     async def _send_to_session(self, ws_id_str: str, payload: dict):
         try:
             ws_id = int(ws_id_str)
         except Exception:
             return
         ws = self.websockets.get(ws_id)
-        if not ws:
+        if ws:
+            await self._safe_send(ws, payload)
             return
-        await self._safe_send(ws, payload)
+        writer = self.mrc_tcp_clients.get(ws_id)
+        if writer:
+            await self._send_mrc_tcp_payload(writer, payload)
 
     async def _send_to_sessions(self, ws_ids: Set[str], payload: dict):
         for ws_id_str in ws_ids:
@@ -995,9 +1035,23 @@ class BridgeApp:
             await self._sleep_delay()
             await self._send_userlist_control(room)
 
+    def _session_id_is_live(self, session_id: str) -> bool:
+        """True if `session_id` (a BridgeDB session key -- str(id()) of
+        either a WebSocketResponse or a raw-TCP StreamWriter) is
+        currently backed by a real, connected client on EITHER
+        transport. Shared by _live_sessions() below and the identify-
+        replay guard in _on_upstream_packet, which both used to check
+        `int(sid) in self.websockets` directly -- WebSocket-only, so a
+        umrc-client session would have been silently treated as dead
+        everywhere this was used."""
+        if not session_id.isdigit():
+            return False
+        n = int(session_id)
+        return n in self.websockets or n in self.mrc_tcp_clients
+
     def _live_sessions(self) -> Dict[str, dict]:
         """self.db.list_sessions(), filtered to sessions with a real,
-        currently-connected websocket backing them.
+        currently-connected client (WebSocket or raw-TCP) backing them.
 
         Real bug found live: db.py loads sessions.json straight off
         disk at process start with no liveness check at all -- a
@@ -1014,12 +1068,11 @@ class BridgeApp:
         fresh process's own db.py now discards whatever it loaded from
         a previous run's sessions.json before this ever runs (see
         BridgeDB.__init__), so this check is defense in depth for any
-        other way a session's websocket could go away without its db
+        other way a session's connection could go away without its db
         row being cleaned up in lockstep, not just the restart case.
         """
-        live = self.websockets
         return {sid: sess for sid, sess in self.db.list_sessions().items()
-                if sid.isdigit() and int(sid) in live}
+                if self._session_id_is_live(sid)}
 
     def _rooms_with_active_sessions(self) -> Set[str]:
         rooms: Set[str] = set()
@@ -1265,7 +1318,7 @@ class BridgeApp:
                         # /identify replayed the join for every stale
                         # record too -- reported live as MOTD/CHATTERS
                         # showing up 4 times after a single /identify.
-                        if int(ws_id_str) not in self.websockets:
+                        if not self._session_id_is_live(ws_id_str):
                             continue
                         if sess.get("waiting_for_identify"):
                             # Strict mode (identify_required_mode=True):
@@ -1539,17 +1592,26 @@ class BridgeApp:
     # join_room
     # ------------------------------------------------------------------
 
-    async def _handle_join_room(self, ws_id: int, data: dict):
-        ws     = self.websockets.get(ws_id)
-        handle = (data.get("handle") or "").strip()
-        room   = MRCProtocol.norm_room(data.get("room") or "lobby")
+    async def _register_session_and_join(self, session_id: str, handle: str,
+                                          room: str, remote_ip: str = "") -> dict:
+        """Shared core of _handle_join_room (WebSocket) and the raw-TCP
+        IAMHERE handler (_mrc_tcp_join) -- everything that's identical
+        between the two transports: cancelling any pending disconnect
+        grace, handle validation, profile-backed style/prefs lookup,
+        building and persisting the session row, and (in the default
+        non-strict identify mode) completing the room join via
+        _complete_join_after_identify, which sends every real wire
+        packet a client needs regardless of transport (join announce,
+        NEWROOM, BANNERS, MOTD, USERLIST, CHATTERS). Raises ValueError
+        with a human-readable message on an invalid handle -- callers
+        decide how (or whether) that's surfaced on their own transport.
+        Returns the final session dict."""
+        handle = (handle or "").strip()
+        room   = MRCProtocol.norm_room(room or "lobby")
         self._cancel_pending_disconnect(handle)
 
-        if not ws:
-            return
         if not MRCProtocol.validate_handle(handle):
-            await self._safe_send(ws, {"type": "error", "message": "Invalid handle."})
-            return
+            raise ValueError("Invalid handle.")
 
         prof = self.db.get_profile(handle) or {}
 
@@ -1581,22 +1643,16 @@ class BridgeApp:
         # strongly suggests it's load-bearing for that), never sending
         # it would force a fresh /identify on literally every join with
         # no way around it, regardless of how recently the same handle
-        # last identified. An explicit "ip" field in the join_room
-        # message (the terminal client's own real caller IP -- the
-        # bridge can't observe it itself, since that connection always
-        # originates from localhost) takes priority over the
-        # server-observed WebSocket peer IP (the web client's real
-        # path, via handle_websocket's X-Forwarded-For handling).
-        remote_ip = (data.get("ip") or "").strip()[:64] or self._ws_remote_ip.get(ws_id, "")
-        # Matches the reference client's own guard (helper_protocol.c:
-        # only sends USERIP if it's non-empty AND not "127.0.0.1") --
-        # loopback is never a meaningful caller identity, and for the
-        # web path specifically it's also the tell-tale sign that
-        # X-Forwarded-For isn't being forwarded correctly (nginx's own
-        # proxy connection, not the real browser's address) -- sending
-        # it anyway would be actively misleading, not just unhelpful,
-        # since every caller behind that misconfiguration would appear
-        # to share one identical IP.
+        # last identified. Matches the reference client's own guard
+        # (helper_protocol.c: only sends USERIP if it's non-empty AND
+        # not "127.0.0.1") -- loopback is never a meaningful caller
+        # identity, and for the web path specifically it's also the
+        # tell-tale sign that X-Forwarded-For isn't being forwarded
+        # correctly (nginx's own proxy connection, not the real
+        # browser's address) -- sending it anyway would be actively
+        # misleading, not just unhelpful, since every caller behind
+        # that misconfiguration would appear to share one identical IP.
+        remote_ip = (remote_ip or "").strip()[:64]
         if remote_ip == "127.0.0.1":
             remote_ip = ""
 
@@ -1627,7 +1683,7 @@ class BridgeApp:
             "tz_offset":            _clamp_tz_offset(prof.get("tz_offset", 0)),
             "palette":              _sanitize_no_tilde(prof.get("palette") or "", 20),
         }
-        await self.db.save_session_async(str(ws_id), sess)
+        await self.db.save_session_async(session_id, sess)
 
         # Normal case (identify_required_mode=False, the default): join
         # immediately, same as the reference client -- no reason to make
@@ -1638,8 +1694,27 @@ class BridgeApp:
         # /join (see _on_upstream_packet's "successfully identified"
         # handler).
         if not self.identify_required_mode:
-            await self._complete_join_after_identify(str(ws_id), sess)
-            sess = self.db.get_session(str(ws_id)) or sess
+            await self._complete_join_after_identify(session_id, sess)
+            sess = self.db.get_session(session_id) or sess
+
+        return sess
+
+    async def _handle_join_room(self, ws_id: int, data: dict):
+        ws     = self.websockets.get(ws_id)
+        handle = (data.get("handle") or "").strip()
+        room   = MRCProtocol.norm_room(data.get("room") or "lobby")
+
+        if not ws:
+            self._cancel_pending_disconnect(handle)
+            return
+
+        remote_ip = (data.get("ip") or "").strip()[:64] or self._ws_remote_ip.get(ws_id, "")
+
+        try:
+            sess = await self._register_session_and_join(str(ws_id), handle, room, remote_ip)
+        except ValueError as e:
+            await self._safe_send(ws, {"type": "error", "message": str(e)})
+            return
 
         await self._safe_send(ws, {
             "type":            "joined",
@@ -1934,32 +2009,45 @@ class BridgeApp:
             await self._send_userlist_control(room)
 
         if normalized.upper().startswith("NEWROOM:") and new_room:
-            sess["waiting_for_identify"] = False
-            sess["in_room"]              = True
-            sess["room"]                 = new_room
-            await self.db.save_session_async(str(ws_id), sess)
-            # Real bug found live: this room-CHANGE path (a caller
-            # already connected doing /join <room>) is entirely separate
-            # from _complete_join_after_identify's initial-join path --
-            # missing this call meant the mystic backend's file-IPC
-            # watcher never started polling temp/<new_room>/ for the new
-            # room, so the hub's own join confirmation/MOTD/userlist
-            # arrived and was silently dropped with nothing listening
-            # for it. Reported live as "/join ... does not appear to be
-            # joining" even though the outbound packets went out fine.
-            await self._sync_mystic_rooms()
+            await self._apply_room_change(str(ws_id), sess, new_room)
 
-            # Only the initiator gets room_changed
-            await self._send_to_session(str(ws_id), {"type": "room_changed", "room": new_room})
+    async def _apply_room_change(self, session_id: str, sess: dict, new_room: str):
+        """Local bookkeeping half of a mid-chat room change (a caller
+        already connected doing /join <room>) -- shared by the
+        WebSocket NEWROOM server_cmd branch above and the raw-TCP
+        room-change handler (_mrc_tcp_change_room). Callers are
+        responsible for forwarding the actual NEWROOM command to the
+        hub themselves first (the two transports build that outer
+        packet slightly differently -- see _handle_server_cmd's own
+        unconditional forward above vs. _handle_mrc_tcp_packet's)."""
+        eff_nick = self._session_effective_nick(sess)
+        sess["waiting_for_identify"] = False
+        sess["in_room"]              = True
+        sess["room"]                 = new_room
+        await self.db.save_session_async(session_id, sess)
+        # Real bug found live: this room-CHANGE path is entirely
+        # separate from _complete_join_after_identify's initial-join
+        # path -- missing this call meant the mystic backend's file-IPC
+        # watcher never started polling temp/<new_room>/ for the new
+        # room, so the hub's own join confirmation/MOTD/userlist
+        # arrived and was silently dropped with nothing listening
+        # for it. Reported live as "/join ... does not appear to be
+        # joining" even though the outbound packets went out fine.
+        await self._sync_mystic_rooms()
+
+        # Only the initiator gets room_changed -- a no-op for a raw-TCP
+        # session (see _send_mrc_tcp_payload), the real wire traffic
+        # below already tells a umrc-client everything it needs.
+        await self._send_to_session(session_id, {"type": "room_changed", "room": new_room})
+        await self._sleep_delay()
+
+        if self.announce_join_part:
+            join_msg = _truncate_wire_message(_format_template(self.join_message_tpl, handle=eff_nick))
+            await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], new_room, "NOTME", "", join_msg))
             await self._sleep_delay()
 
-            if self.announce_join_part:
-                join_msg = _truncate_wire_message(_format_template(self.join_message_tpl, handle=eff_nick))
-                await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], new_room, "NOTME", "", join_msg))
-                await self._sleep_delay()
-
-            await self._send_join_payloads(eff_nick, new_room, sess.get("remote_ip", ""))
-            await self._send_userlist_control(new_room)
+        await self._send_join_payloads(eff_nick, new_room, sess.get("remote_ip", ""))
+        await self._send_userlist_control(new_room)
 
     # ------------------------------------------------------------------
     # leave_room
@@ -1972,9 +2060,6 @@ class BridgeApp:
         if not ws or not sess:
             return
 
-        eff_nick = self._session_effective_nick(sess)
-        room     = self._session_room(sess)
-
         # Explicit per-quit message (client's /quit <message>) takes
         # priority over the saved default quit_msg pref, which in turn
         # only applies to a deliberate leave -- never the abrupt-
@@ -1982,30 +2067,231 @@ class BridgeApp:
         quit_override = _sanitize_no_tilde((data.get("message") or "").strip(), 100) \
                        or (sess.get("quit_msg") or "").strip()
 
+        await self._leave_room_and_cleanup(str(ws_id), sess, quit_override)
+        await self._safe_send(ws, {"type": "left", "message": "Left the room"})
+
+    async def _leave_room_and_cleanup(self, session_id: str, sess: dict, quit_override: str = ""):
+        """Shared core of _handle_leave_room (WebSocket /quit) and the
+        raw-TCP LOGOFF handler (_handle_mrc_tcp_packet -- umrc-client's
+        own /quit sequence). Sends the bridge's own exit announcement,
+        never the client's (umrc-client sends its own NOTME exit-
+        message packet first, which is intentionally not forwarded --
+        see _handle_mrc_tcp_packet -- so every session gets one
+        consistent, uniformly-styled announcement regardless of
+        transport), then drops the session."""
+        eff_nick = self._session_effective_nick(sess)
+        room     = self._session_room(sess)
+
         if self.announce_join_part and eff_nick and room and sess.get("in_room"):
             exit_msg = _resolve_message_template(
                 sess, "leave_msg_tpl", self.exit_message_tpl, eff_nick, extra=quit_override)
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
             await self._sleep_delay()
 
-        # LOGOFF is deliberately NOT sent on an individual caller leaving
-        # a room. Real live evidence (a captured full packet transcript,
-        # MRC_BRIDGE_LOG_LEVEL=DEBUG): sending LOGOFF ends the hub's MRC
-        # Trust state for this handle immediately -- the very next join
-        # got "Cannot join ROOM, please IDENTIFY to use this handle"
-        # despite the bridge's own connection to the hub never having
-        # dropped in between. This bridge holds ONE persistent shared
-        # connection to the hub per BBS install across every local
-        # caller's join/leave, so there's no need to tell the hub this
-        # handle is "logging off" the way a single-session client would
-        # -- NOTME's "has left chat" already covers the visible room-
-        # presence announcement other users see. The one real cost:
-        # the hub's own /who or CHATTERS listing may show this handle
-        # lingering until the next reconnect's fresh join, or the hub's
-        # own idle timeout, cleans it up.
-        await self.db.delete_session_async(str(ws_id))
+        # LOGOFF is deliberately NOT sent to the hub on an individual
+        # caller leaving a room. Real live evidence (a captured full
+        # packet transcript, MRC_BRIDGE_LOG_LEVEL=DEBUG): sending
+        # LOGOFF ends the hub's MRC Trust state for this handle
+        # immediately -- the very next join got "Cannot join ROOM,
+        # please IDENTIFY to use this handle" despite the bridge's own
+        # connection to the hub never having dropped in between. This
+        # bridge holds ONE persistent shared connection to the hub per
+        # BBS install across every local caller's join/leave, so
+        # there's no need to tell the hub this handle is "logging off"
+        # the way a single-session client would -- NOTME's "has left
+        # chat" already covers the visible room-presence announcement
+        # other users see. The one real cost: the hub's own /who or
+        # CHATTERS listing may show this handle lingering until the
+        # next reconnect's fresh join, or the hub's own idle timeout,
+        # cleans it up.
+        await self.db.delete_session_async(session_id)
         await self._sync_mystic_rooms()
-        await self._safe_send(ws, {"type": "left", "message": "Left the room"})
+
+    # ------------------------------------------------------------------
+    # Raw-TCP handler -- umrc-client (github.com/codefenix-dev/uMRC)
+    # connecting directly to this bridge, in place of the separate
+    # umrc-bridge daemon. See handle_mrc_tcp_connection's own docstring.
+    # ------------------------------------------------------------------
+
+    async def _mrc_tcp_join(self, conn_id: int, handle: str, room: str):
+        session_id = str(conn_id)
+        try:
+            await self._register_session_and_join(
+                session_id, handle, room, self._mrc_tcp_remote_ip.get(conn_id, ""))
+        except ValueError:
+            # No wire-native way to reject a handle the way a WebSocket
+            # client's {"type": "error"} reply does -- simply don't
+            # create a session. Every subsequent packet from this
+            # connection falls through _handle_mrc_tcp_packet's
+            # "sess is None" branch and is silently ignored, exactly as
+            # a WebSocket client that never sent a valid join_room
+            # would be.
+            logger.warning(f"MRC TCP client {conn_id} sent an invalid handle: {handle!r}")
+
+    async def _mrc_tcp_change_room(self, conn_id: int, sess: dict, new_room: str):
+        eff_nick = self._session_effective_nick(sess)
+        old_room = self._session_room(sess)
+        await self.mrc.send_packet(MRCProtocol.create_server_command(
+            eff_nick, self.config["bridge_bbs"], old_room, f"NEWROOM:{old_room}:{new_room}"))
+        await self._apply_room_change(str(conn_id), sess, new_room)
+
+    async def _handle_mrc_tcp_packet(self, conn_id: int, parsed: dict):
+        session_id = str(conn_id)
+        from_user  = (parsed.get("from_user") or "").strip()
+        from_room  = (parsed.get("from_room") or "").strip()
+        to_user    = (parsed.get("to_user")   or "").strip()
+        to_room    = (parsed.get("to_room")   or "").strip()
+        message    = (parsed.get("message")   or "").strip()
+
+        sess = self.db.get_session(session_id)
+
+        if sess is None:
+            # The only packet a fresh umrc-client connection sends
+            # before a session exists is its own IAMHERE handshake
+            # (main.c's enterChat()) -- anything else this early is
+            # ignored.
+            if message.upper().startswith("IAMHERE"):
+                await self._mrc_tcp_join(conn_id, from_user, from_room)
+            return
+
+        up = message.upper()
+
+        if to_user.upper() == "SERVER":
+            # Client-to-bridge command packet (sendCmdPacket in
+            # main.c). IAMHERE here is the periodic 59s keepalive on an
+            # already-joined session -- just a liveness signal, no
+            # rejoin needed (the initial IAMHERE was already consumed
+            # above, before a session existed). LOGOFF (sent right
+            # before an explicit /quit closes the socket) triggers the
+            # same cleanup _handle_leave_room uses for a WebSocket
+            # client's deliberate leave. NEWROOM:<old>:<new> is a real
+            # room change -- forward it to the hub first (matching
+            # _handle_server_cmd's own unconditional forward), then
+            # apply the same local bookkeeping the WebSocket path uses.
+            # Everything else (motd, TERMSIZE:, BBSMETA:, USERIP:, ...)
+            # is forwarded to the hub verbatim, same as any server_cmd
+            # _handle_server_cmd doesn't specifically rewrite.
+            if up.startswith("IAMHERE"):
+                return
+            if up == "LOGOFF":
+                await self._leave_room_and_cleanup(session_id, sess)
+                return
+            eff_nick = self._session_effective_nick(sess)
+            room     = self._session_room(sess)
+            if up.startswith("NEWROOM:"):
+                try:
+                    _, _old, new_room = message.split(":", 2)
+                except ValueError:
+                    return
+                new_room = MRCProtocol.norm_room(new_room)
+                await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, message))
+                if new_room and new_room != room:
+                    await self._apply_room_change(session_id, sess, new_room)
+                return
+            await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, message))
+            return
+
+        # Ordinary chat / DM. umrc-client's own join/exit announcement
+        # packets (to_user="NOTME", empty to_room -- see sendMsgPacket's
+        # 3 call sites in main.c) are intentionally not forwarded: the
+        # bridge already generates its own join/leave announcements
+        # uniformly on every transport (_apply_room_change /
+        # _leave_room_and_cleanup); forwarding the client's own copy
+        # too would double up on every join/part.
+        if to_user.upper() == "NOTME" and not to_room:
+            return
+        if not message:
+            return
+
+        nick = self._session_effective_nick(sess)
+        room = self._session_room(sess)
+        message = _truncate_wire_message(message)
+
+        if not to_user:
+            # Room broadcast -- umrc-client's default plain chat line
+            # already embeds its own styled display name into
+            # `message` itself (main.c's gDisplayChatterName prefix),
+            # so unlike _handle_send_message's WebSocket path (whose
+            # clients send plain unstyled text) this is forwarded
+            # as-is, not re-wrapped.
+            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, "", room, message)
+        else:
+            # Directed message (/t, /r) -- same reasoning, umrc-client
+            # already wrapped it with its own DirectMsg prefix.
+            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, to_user, "", message)
+        await self.mrc.send_packet(pkt)
+
+    async def handle_mrc_tcp_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        """Raw-TCP counterpart of handle_websocket(), for a directly-
+        connecting umrc-client (github.com/codefenix-dev/uMRC) -- lets
+        a sysop point umrc-client's own bridge-host/bridge-port config
+        at THIS process instead of running the separate umrc-bridge
+        daemon, with zero changes to uMRC itself. Session state
+        (self.db), room/DM routing (_sessions_in_room/_sessions_for_user
+        via _on_upstream_packet), and every real wire packet umrc-client
+        expects are all fully shared with the WebSocket path above --
+        only the framing (newline-delimited raw packets, same shape as
+        MRCConnection.receive_loop's own upstream-hub read loop) and
+        the outbound encoding (_send_mrc_tcp_payload, not
+        ws.send_json) differ. Only started at all if mrc_tcp_enabled is
+        set in config.json -- see start_background_tasks."""
+        conn_id = id(writer)
+        self.mrc_tcp_clients[conn_id] = writer
+        peer = writer.get_extra_info("peername")
+        self._mrc_tcp_remote_ip[conn_id] = (peer[0] if peer else "")
+        logger.info(f"MRC TCP client connected: {conn_id} ({self._mrc_tcp_remote_ip[conn_id]})")
+
+        buf = b""
+        try:
+            while True:
+                chunk = await reader.read(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    line = raw.decode(errors="ignore").strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed = MRCProtocol.parse_packet(line)
+                    except Exception as e:
+                        logger.warning(f"MRC TCP client {conn_id} sent an unparsable packet: {e}")
+                        continue
+                    try:
+                        await self._handle_mrc_tcp_packet(conn_id, parsed)
+                    except Exception:
+                        logger.exception(f"Error handling MRC TCP packet from {conn_id}")
+        except (asyncio.CancelledError, ConnectionResetError):
+            pass
+        except Exception as e:
+            logger.warning(f"MRC TCP client {conn_id} read error: {e}")
+        finally:
+            self.mrc_tcp_clients.pop(conn_id, None)
+            self._mrc_tcp_remote_ip.pop(conn_id, None)
+            session_id = str(conn_id)
+            sess = self.db.get_session(session_id)
+            if sess:
+                eff_nick = self._session_effective_nick(sess)
+                room     = self._session_room(sess)
+                if eff_nick and room and sess.get("in_room") and self.ws_disconnect_grace_seconds > 0:
+                    key = self._pending_disconnect_key(eff_nick)
+                    old = self.pending_disconnects.get(key)
+                    if old and not old.done():
+                        old.cancel()
+                    self.pending_disconnects[key] = asyncio.create_task(
+                        self._delayed_session_logoff(conn_id, eff_nick, room))
+                    logger.info(f"MRC TCP client disconnected: {conn_id} (grace {self.ws_disconnect_grace_seconds:.1f}s for handle={eff_nick} room={room})")
+                else:
+                    await self.db.delete_session_async(session_id)
+                    await self._sync_mystic_rooms()
+                    logger.info(f"MRC TCP client disconnected: {conn_id}")
+            else:
+                logger.info(f"MRC TCP client disconnected: {conn_id}")
+            try:
+                writer.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Background tasks
@@ -2061,11 +2347,20 @@ class BridgeApp:
         self.tasks.append(asyncio.create_task(self.keepalive_loop()))
         self.tasks.append(asyncio.create_task(self._periodic_userlist_refresh()))
         self.tasks.append(asyncio.create_task(self._periodic_stats_refresh()))
+        if self.mrc_tcp_enabled:
+            self._mrc_tcp_server = await asyncio.start_server(
+                self.handle_mrc_tcp_connection, self.mrc_tcp_listen_host, self.mrc_tcp_listen_port)
+            logger.info(
+                f"MRC TCP listener (umrc-client compatible) on "
+                f"{self.mrc_tcp_listen_host}:{self.mrc_tcp_listen_port}")
 
     async def cleanup_background_tasks(self, app):
         for t in self.tasks:
             t.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        if self._mrc_tcp_server:
+            self._mrc_tcp_server.close()
+            await self._mrc_tcp_server.wait_closed()
         await self.mrc.stop()
 
 
