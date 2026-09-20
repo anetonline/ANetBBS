@@ -48,7 +48,6 @@ def _make_bridge(tmp_dir):
     app.config = {"bridge_bbs": "TestBBS"}
     app.db = BridgeDB(tmp_dir)
     app.websockets = {}
-    app.mrc_tcp_clients = {}
     app.mrc = AsyncMock()
     app.join_packet_delay_ms = 0
     app.announce_join_part = False
