@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.95`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.96`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.96 — Critical: a dead connection inside ANEView could freeze the whole BBS (September 2026)
+
+Fixed a critical bug where a client connection that died without a clean close (a network drop, a client left open and unreachable overnight) while inside ANEView, the read-only echomail message viewer, could spin the server's main thread at effectively 100% CPU indefinitely — starving every other session, growing memory usage without bound, and flooding the system log, until the service was manually restarted. Traced to two issues: a broad exception handler that treated a dead connection the same as "no key pressed yet" and kept retrying instead of ending the session, and a related gap that made it hard to tell a genuinely expired wait apart from a connection that had already failed with a real error, causing the retry to also repeatedly attempt (and fail) a write on every pass. Both are fixed, with regression coverage proving the affected code path now ends the session immediately and cleanly instead of looping.
 
 ## v1.0.95 — New-account password-confirmation fix over telnet/PuTTY; Docker admin-account docs (September 2026)
 

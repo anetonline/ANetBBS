@@ -30,11 +30,12 @@ quick start has now been run end-to-end against a real Docker daemon
 + terminal + MRC web + MRC terminal all confirmed working) — that real
 test caught and fixed three bugs the mocked unit tests couldn't have
 (wrong entrypoint path, a broken terminal-service Python import, and
-MRC web chat's WebSocket URL construction). The multi-container
-docker-compose path is still unit-tested with mocked Docker/subprocess
-calls only, not yet run end-to-end against a real Docker daemon — if
-you hit something there that doesn't match what's documented, please
-report it.
+MRC web chat's WebSocket URL construction). Also confirmed working on
+Windows via Docker Desktop, including a full fresh install and the
+initial admin login. The multi-container docker-compose path is still
+unit-tested with mocked Docker/subprocess calls only, not yet run
+end-to-end against a real Docker daemon — if you hit something there
+that doesn't match what's documented, please report it.
 
 ## If you're new to Docker — a few concepts first
 

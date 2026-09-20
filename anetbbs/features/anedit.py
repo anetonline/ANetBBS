@@ -593,13 +593,33 @@ class ANEdit:
         k = self._keys.next()
         if k is not None:
             return k
+        # Real live incident (2026-09-20, an operator's py-spy capture):
+        # session.read_raw() raises CarrierLost (a ConnectionError
+        # subclass) -- never returns an ambiguous empty value -- the
+        # instant the transport dies (see its own docstring). A blanket
+        # `except Exception: pass` here swallowed that right along with
+        # the legitimate "no key yet" TimeoutError case, so once a
+        # client's connection died without a clean close (confirmed
+        # live: a dead-but-not-closed telnet peer inside ANEView),
+        # every read_raw() call on that now-permanently-erroring
+        # transport raised and got silently swallowed instead of
+        # ending the session -- run()'s loop just called _read_key()
+        # right back, spinning as fast as the interpreter could go:
+        # ~2,600 iterations/second, RSS growing to 8.4GB, ~1GB of log
+        # data, the whole BBS starved for ~16 minutes until the sysop
+        # restarted the service. Exact same bug class already fixed
+        # once in anetirc2.py's own _read_key() (v1.0.90) -- mirrored
+        # here. TimeoutError (this call's own 0.08s poll timeout
+        # expiring with nothing typed) is the only thing that
+        # legitimately means "keep looping"; CarrierLost and anything
+        # else must propagate so run()/launch_aneview()/session.start()
+        # unwind this session the same clean way every other disconnect
+        # already does elsewhere in this codebase.
         try:
             data = await asyncio.wait_for(self.session.read_raw(64), timeout=0.08)
             if data:
                 self._keys.feed(data)
         except asyncio.TimeoutError:
-            pass
-        except Exception:
             pass
         k = self._keys.next()
         if k is not None:
@@ -611,9 +631,11 @@ class ANEdit:
                 if data:
                     self._keys.feed(data)
             except asyncio.TimeoutError:
-                self._keys._buf = b''
-                return 'ESC'
-            except Exception:
+                # No follow-up bytes arrived in time -- a real lone
+                # Escape keypress, not a disconnect. A genuine
+                # CarrierLost here must NOT be reinterpreted as "ESC"
+                # (see the longer comment above) -- it's left to
+                # propagate.
                 self._keys._buf = b''
                 return 'ESC'
         return self._keys.next()

@@ -600,6 +600,22 @@ class BBSSession:
                 data = await asyncio.wait_for(self.reader.read(n),
                                               timeout=tick)
             except asyncio.TimeoutError:
+                # Real, related latent gap (see _reader_stored_exception's
+                # docstring for the confirmed incident this same check
+                # closes in read_raw()/write()): self.reader.read(n)
+                # re-raises an already-stored connection exception
+                # immediately on every call, forever, once the
+                # connection has died with a real error. Without this
+                # check, a session with the 'spinning' cursor preference
+                # and no idle_timeout configured (overall_timeout=None)
+                # would never hit the `elapsed >= overall_timeout` exit
+                # below at all -- it would spin-tick on a dead
+                # connection forever. Not observed live (this incident
+                # was a plain n=64 read with no spinning involved), but
+                # the exact same mechanism, so fixed the same way.
+                stored = self._reader_stored_exception()
+                if stored is not None:
+                    raise CarrierLost(str(stored)) from stored
                 elapsed += tick
                 if overall_timeout is not None and elapsed >= overall_timeout:
                     raise
@@ -2257,6 +2273,47 @@ class BBSSession:
 
         return bytes(result)
 
+    def _reader_stored_exception(self):
+        """Real live incident (2026-09-20, an operator's py-spy capture +
+        independently confirmed against the real CPython 3.12 asyncio
+        source): asyncio.StreamReader.read() and StreamWriter.drain()
+        BOTH check for an exception already stored on the reader (via
+        set_exception(), called by the transport's own connection_lost()
+        with a real error -- e.g. a genuine OS-level ETIMEDOUT on a peer
+        that went unresponsive without closing cleanly) and, if present,
+        raise it IMMEDIATELY -- before any `await`/yield point at all
+        (streams.py: StreamReader.read()'s `if self._exception is not
+        None: raise self._exception` is its very first line;
+        StreamWriter.drain()'s `exc = self._reader.exception(); if exc
+        is not None: raise exc` runs before its own `await sleep(0)`).
+        Once this happens, EVERY subsequent read()/drain() call on that
+        same reader/writer pair re-raises the SAME exception object
+        forever, synchronously -- not a fresh timeout each time.
+
+        Since Python 3.11, asyncio.TimeoutError IS the builtin
+        TimeoutError (the same type a real ETIMEDOUT socket error
+        raises) -- so read_raw()/write()'s own `except
+        asyncio.TimeoutError:` handlers have no way to tell "my own
+        wait_for actually waited out its timeout" apart from "the
+        connection already died and this is just that same stored
+        error being replayed" by exception type alone. Treating the
+        latter as the former is what let one dead connection spin an
+        entire session (confirmed: ANEView/anedit.py's _read_key())
+        into a 100%-CPU, ~2,600-iterations/second retry loop that ran
+        for ~16 minutes, grew RSS to 8.4GB, wrote ~1GB of log data
+        (each iteration's write()->drain() re-raise got logged as a
+        fresh "timed out after 30s" ERROR, even though no real 30
+        second wait ever happened), and starved every other session on
+        the BBS. This helper is the one place that tells the two
+        apart; read_raw()/write()/_read_byte_maybe_spinning() all use
+        it inside their `except asyncio.TimeoutError:` handlers to
+        raise CarrierLost immediately instead of proceeding as if a
+        real idle timeout just legitimately fired."""
+        try:
+            return self.reader.exception()
+        except Exception:
+            return None
+
     async def read_raw(self, n=1, allow_afk=False):
         """Read raw bytes from the connection. Honors `self.idle_timeout`
         if set — disconnects sessions that sit idle waiting for a keystroke.
@@ -2284,7 +2341,21 @@ class BBSSession:
             if not data:
                 raise CarrierLost('client disconnected')
             return await self.handle_telnet_command(data)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
+            stored = self._reader_stored_exception()
+            if stored is not None:
+                # Not a real idle timeout -- the connection already
+                # died with a real error (see _reader_stored_exception's
+                # docstring for the full incident). There is no live
+                # client to show an idle-timeout banner to, and trying
+                # would just re-raise this exact same stored exception
+                # out of write()'s own drain() call -- skip straight to
+                # ending the session.
+                try:
+                    self.writer.close()
+                except Exception:
+                    pass
+                raise CarrierLost(str(stored)) from stored
             try:
                 await self.write(
                     "\r\n\x1b[1;31m[Idle timeout — "
@@ -2295,7 +2366,7 @@ class BBSSession:
                 self.writer.close()
             except Exception:
                 pass
-            raise CarrierLost('idle timeout')
+            raise CarrierLost('idle timeout') from e
         except CarrierLost:
             raise
         except (ConnectionError, BrokenPipeError, EOFError) as e:
@@ -2335,7 +2406,35 @@ class BBSSession:
         try:
             await asyncio.wait_for(self.writer.drain(),
                                     timeout=WRITE_DRAIN_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
+            peer = None
+            try:
+                peer = self.writer.get_extra_info('peername')
+            except Exception:
+                pass
+            stored = self._reader_stored_exception()
+            if stored is not None:
+                # Not a real 30-second wait_for timeout -- drain()
+                # checks self._reader.exception() and re-raises it
+                # immediately, before it ever actually waits on
+                # anything (see _reader_stored_exception's docstring
+                # for the full incident this closes: logging the fixed
+                # "timed out after 30s" text here, unconditionally, is
+                # exactly what turned one dead connection into a ~1GB
+                # log flood -- this branch never really waited 30s at
+                # all, so say what actually happened instead).
+                logger.error(
+                    'write() drain() found a stored connection error '
+                    'for peer=%s user=%s term=%s: %r -- closing this '
+                    'session (not a real %ss drain timeout).',
+                    peer, getattr(self, 'username', None),
+                    getattr(self, 'terminal_type', None), stored,
+                    WRITE_DRAIN_TIMEOUT_SECONDS)
+                try:
+                    self.writer.close()
+                except Exception:
+                    pass
+                raise CarrierLost(str(stored)) from stored
             # The client stopped relieving write backpressure (TCP zero
             # window never reopening, or -- on SSH -- no
             # SSH_MSG_CHANNEL_WINDOW_ADJUST arriving) and drain() would
@@ -2343,11 +2442,6 @@ class BBSSession:
             # real diagnosis needs, force the transport closed, and raise
             # CarrierLost so this ONE session unwinds cleanly (same path
             # every other disconnect already takes) instead of wedging.
-            peer = None
-            try:
-                peer = self.writer.get_extra_info('peername')
-            except Exception:
-                pass
             buf_size = None
             get_buf = getattr(self.writer, 'get_write_buffer_size', None)
             if get_buf is not None:
@@ -2366,7 +2460,7 @@ class BBSSession:
                 self.writer.close()
             except Exception:
                 pass
-            raise CarrierLost('write drain timed out') from None
+            raise CarrierLost('write drain timed out') from e
         except (BrokenPipeError, ConnectionResetError,
                 ConnectionAbortedError):
             return
