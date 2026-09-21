@@ -1636,6 +1636,12 @@ config = {
     "mrc_tcp_enabled": False,
     "mrc_tcp_listen_host": "127.0.0.1",
     "mrc_tcp_listen_port": 5010,
+    # Blank/disabled by default -- this is a per-install filesystem
+    # path (wherever a sysop's own umrc-client door happens to live),
+    # not something this installer has any way to know or manage; see
+    # docs/27-mrc-chat.md's "Native umrc-client support" section for
+    # exactly how to find the right value and turn this on.
+    "mrc_stats_file_path": "",
     "message_rate_seconds": 0.5,
     "iamhere_interval_seconds": 60,
     "log_level": "INFO",

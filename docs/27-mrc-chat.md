@@ -49,6 +49,13 @@ backends only changes how the raw bytes get to the hub.
 
 ## Native `umrc-client` support (one shared bridge, no separate `umrc-bridge`)
 
+**Status: working, verified live against a real `umrc-client` build
+(2026-09-21) -- but still on the `umrc-bridge-wip` branch, not yet
+merged to `main` or shipped in a numbered release.** Everything below
+reflects what was actually confirmed working during that testing
+session, including several real bugs found and fixed along the way --
+not a design document written in advance.
+
 [uMRC](https://github.com/codefenix-dev/uMRC) is a separate,
 OpenDoors-based MRC door (`umrc-client`) that normally needs its own
 `umrc-bridge` multiplexer daemon running alongside it. `mrc/bridge/
@@ -62,9 +69,16 @@ clients -- a `umrc-client` caller and an ANetBBS caller in the same
 room see each other and can send each other private messages
 correctly, on either side.
 
-Off by default (a second open listener is extra attack surface a
-sysop who doesn't run uMRC doesn't need). To enable, add to
-`mrc/bridge/config.json`:
+### Setup, step by step
+
+This has more moving parts than most ANetBBS features, because two
+completely separate pieces of software (ANetBBS's own bridge and
+uMRC's own binary, each with their own config) both need to agree on
+the same host/port. Follow this in order.
+
+**1. Enable the listener in `mrc/bridge/config.json`** (off by
+default -- a second open listener is extra attack surface a sysop who
+doesn't run uMRC doesn't need):
 
 ```json
 "mrc_tcp_enabled": true,
@@ -72,12 +86,165 @@ sysop who doesn't run uMRC doesn't need). To enable, add to
 "mrc_tcp_listen_port": 5010
 ```
 
-then restart `anetbbs-mrc-bridge`, and point `umrc-client`'s own
-config at `127.0.0.1:5010` (or whatever host/port you chose) in place
-of a separately-run `umrc-bridge`. Loopback-only by default, same
-reasoning as `web_listen_host`'s own default -- open it to `0.0.0.0`
-(or a LAN address) only if `umrc-client` needs to reach it from a
-different host than the one running ANetBBS.
+**Leave `mrc_tcp_listen_host` as `127.0.0.1`.** This is the single
+most common way to break this feature, confirmed live: it's tempting
+to set it to the box's real LAN IP the same way you might set
+`web_listen_host` for the browser-based MRC client to be reachable
+from other machines. **Don't** -- `umrc-client`'s own connect call is
+hardcoded in its C source to the literal string `"localhost"` (its
+own "bridge host" config field is display-only, never actually used
+to connect). A listener bound only to a LAN IP will never accept a
+connection arriving on the loopback interface, and `umrc-client` will
+just report "Unable to connect to bridge" with no further detail.
+Only change this to `0.0.0.0` (which still includes loopback) if
+`umrc-client` runs on a *different* machine than ANetBBS itself --
+uncommon, since it's normally a door running locally under the same
+BBS process. The bridge itself now warns in its log at startup if
+this is set to anything that can't include loopback, specifically
+because this mistake is so easy to make.
+
+**2. Point `umrc-client`'s own setup at that port.** In the uMRC door's
+own directory (wherever it's installed -- e.g. `/opt/anetbbs/doors/umrc/`
+on a Linux install), run its setup utility directly (not through the
+BBS):
+
+```
+cd /opt/anetbbs/doors/umrc
+./setup
+```
+
+Find the local bridge port setting and set it to **5010** (or
+whatever you chose for `mrc_tcp_listen_port` above) -- this is
+`cfg.port` in uMRC's own source, a completely separate value from
+anything in ANetBBS's config, and the two must match by hand. The
+"bridge host" field in the same setup can be left at whatever default
+it has -- as covered above, it's cosmetic only.
+
+**3. Restart the bridge:**
+
+```
+sudo systemctl restart anetbbs-mrc-bridge
+```
+
+**4. Verify the listener actually started:**
+
+```
+sudo journalctl -u anetbbs-mrc-bridge -n 50 --no-pager | grep -i "tcp listener"
+sudo ss -tlnp | grep 5010
+```
+
+You should see a log line like `MRC TCP listener (umrc-client
+compatible) on 127.0.0.1:5010` and a `LISTEN` entry on that port. If
+neither shows up, `mrc_tcp_enabled` likely isn't actually `true` in
+the config the running service loaded, or the service didn't restart
+cleanly -- check `sudo systemctl status anetbbs-mrc-bridge`.
+
+At this point, launching `umrc-client` and choosing "Enter chat"
+should work -- chat, DMs, and room changes are all fully live and
+routed correctly against both ANetBBS's own clients and other real
+BBSes on the network.
+
+### Stats file (`mrcstats.dat`) -- optional, cosmetic only
+
+`umrc-client`'s own main-menu screen reads a small local file at
+startup to show BBSes/Rooms/Users/Activity counts and an
+ONLINE/OFFLINE indicator, normally written by the standalone
+`umrc-bridge` daemon this feature replaces. Without it, chat still
+works completely normally -- this only affects that one cosmetic
+display. To enable it:
+
+**1. Find the exact filename `umrc-client` expects** -- this varies by
+uMRC version and matters exactly on a Linux filesystem (unlike
+DOS/Windows, case is significant):
+
+```
+strings /opt/anetbbs/doors/umrc/umrc-client | grep -i stats
+```
+
+(On the build tested 2026-09-21, this was lowercase `mrcstats.dat`.)
+
+**2. Add the full path to `mrc/bridge/config.json`**, pointing at that
+exact filename inside uMRC's own directory:
+
+```json
+"mrc_stats_file_path": "/opt/anetbbs/doors/umrc/mrcstats.dat"
+```
+
+**3. Restart the bridge** (`sudo systemctl restart anetbbs-mrc-bridge`)
+and give it a couple of minutes.
+
+**How the numbers get populated:** the bridge relays the real MRC
+hub's own `STATS:` reply -- a genuine network-wide count (BBSes,
+rooms, users, activity across the *whole* MRC network, not just this
+BBS), the same data source the real reference `umrc-bridge` daemon
+uses. This is requested automatically (`stats_refresh_interval_seconds`,
+120s by default) **but only while at least one session is actually
+joined to a room on THIS bridge** -- a quiet BBS with nobody
+currently in MRC chat won't trigger it, and the file will just show
+`0 0 0 0` until someone is. This tripped up testing more than once:
+the MRC network itself always has activity somewhere, but that's
+irrelevant if nobody's connected through *this specific* bridge right
+now. Have someone (or yourself) actually join a chat room, wait ~2
+minutes, then check:
+
+```
+cat /opt/anetbbs/doors/umrc/mrcstats.dat
+```
+
+A real, working file looks like `176 14 51 2` -- BBSes, rooms, users,
+activity (0-3: none/low/medium/high), in that order. `umrc-client`
+also treats the file as "bridge ONLINE" purely based on its own
+modification time being under 60 seconds old, which is why this needs
+to keep getting rewritten periodically rather than written once.
+
+### Debug logging (wire-level troubleshooting)
+
+If chat isn't connecting or the stats file stays empty and the steps
+above don't explain why, a full raw-packet trace (every outbound send
+and every inbound line, tagged `MRC RAW OUT`/`MRC RAW IN`) is the
+fastest way to see exactly what's actually happening on the wire.
+**This logs full chat content in plaintext** -- deliberately off by
+default, meant to be temporary.
+
+Set `"log_level": "DEBUG"` in `mrc/bridge/config.json` and restart --
+this now actually works (a real, separate bug: this config key
+existed and was documented for a long time but silently did nothing
+at all, fixed alongside this feature). Alternatively, for a one-off
+trace without touching the config file, use a systemd override:
+
+```
+sudo mkdir -p /etc/systemd/system/anetbbs-mrc-bridge.service.d
+printf '[Service]\nEnvironment=MRC_BRIDGE_LOG_LEVEL=DEBUG\n' | sudo tee /etc/systemd/system/anetbbs-mrc-bridge.service.d/debug.conf
+sudo systemctl daemon-reload
+sudo systemctl restart anetbbs-mrc-bridge
+```
+
+Then: `sudo journalctl -u anetbbs-mrc-bridge --since "5 minutes ago" | grep -i "RAW OUT\|RAW IN"`.
+
+**Always turn this back off once done** -- it stays on across restarts
+otherwise, permanently logging every private message on the BBS:
+
+```
+# if you used the config.json key:
+# set "log_level" back to "INFO" and restart
+
+# if you used the systemd override:
+sudo rm -rf /etc/systemd/system/anetbbs-mrc-bridge.service.d
+sudo systemctl daemon-reload
+sudo systemctl restart anetbbs-mrc-bridge
+```
+
+### Troubleshooting checklist
+
+| Symptom | Likely cause |
+| ------- | ------------ |
+| `umrc-client` says "Unable to connect to bridge" | `mrc_tcp_enabled` isn't `true`, or the service wasn't restarted after enabling it -- check step 4 above. |
+| Same, even with the listener confirmed running | `umrc-client`'s own `cfg.port` (set via its `./setup`) doesn't match `mrc_tcp_listen_port` -- these are two independent settings in two different pieces of software. |
+| Chat connects, then immediately drops back to the main menu | `mrc_tcp_listen_host` is set to a LAN IP instead of `127.0.0.1`/`0.0.0.0` -- see step 1. |
+| Stats screen shows blank/zero and never updates | `mrc_stats_file_path` isn't set, or no one is currently joined to a room on *this* bridge (see the stats section above) -- not necessarily a bug. |
+| Stats show real-looking but oddly small/zero numbers (e.g. 0 BBSes) | Running an older build from before this feature was reworked to relay the hub's real `STATS:` reply -- redeploy the current code. |
+
+### Known simplifications
 
 A few uMRC-specific behaviors are intentionally simplified rather than
 faithfully replicated: `umrc-client`'s own join/exit announcement text
@@ -178,9 +345,13 @@ as a static frame and positions every dynamic element (chat text, nick
 strip, room/topic, latency, clock, input line, chatters count, char-
 count-remaining buffer) at the theme's own declared coordinates
 instead of ANetBBS's own generated layout. Elements the theme doesn't
-define (BBSES/ROOMS/ACTIVITY/HEARTBEAT -- genuine hub-wide/session
-stats ANetBBS's bridge doesn't track structurally) are skipped rather
-than faked. Falls back to ANetBBS's own generated
+define (BBSES/ROOMS/ACTIVITY/HEARTBEAT -- genuine hub-wide stats) are
+skipped rather than faked, still true as of this writing though no
+longer for lack of data: the bridge now parses the hub's real `STATS:`
+reply for the umrc-client stats-file feature above
+(`BridgeApp._last_umrc_stats`) -- wiring that same value into this
+theme rendering path instead of skipping these elements would be a
+reasonable small follow-up, just not done yet. Falls back to ANetBBS's own generated
 layout if a theme file is missing or malformed. The other 5 palettes
 (`default`/`green`/`amber`/`cyan`/`mono`) keep the original light
 chrome-color-only behavior -- `_TERM_PALETTES` in
