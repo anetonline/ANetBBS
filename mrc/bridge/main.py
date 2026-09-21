@@ -2364,6 +2364,29 @@ class BridgeApp:
         self.tasks.append(asyncio.create_task(self._periodic_userlist_refresh()))
         self.tasks.append(asyncio.create_task(self._periodic_stats_refresh()))
         if self.mrc_tcp_enabled:
+            # Real live misconfiguration this catches: unlike
+            # web_listen_host (which legitimately wants a real
+            # reachable IP for browser clients possibly on other
+            # machines), umrc-client's own connect() call
+            # (main.c's enterChat()) is hardcoded to the literal
+            # string "localhost" -- its cfg.host config field is
+            # display-only, never used for the actual connection. A
+            # listener bound to anything other than a loopback address
+            # (or 0.0.0.0, which includes loopback) can NEVER accept
+            # that connection no matter how reachable it otherwise is
+            # -- umrc-client will report "cannot connect to the
+            # bridge" with no indication why. Confirmed live: a sysop
+            # who (reasonably) mirrored the web_listen_host pattern by
+            # setting this to the box's real LAN IP hit exactly this.
+            if self.mrc_tcp_listen_host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::"):
+                logger.warning(
+                    f"mrc_tcp_listen_host is {self.mrc_tcp_listen_host!r} -- "
+                    f"umrc-client always connects to literal 'localhost' "
+                    f"(its own bridge-host setting is display-only), so a "
+                    f"listener not bound to a loopback address (or "
+                    f"0.0.0.0) will NEVER accept its connection. Use "
+                    f"127.0.0.1 (or 0.0.0.0 to also allow non-local "
+                    f"clients) unless you have a specific reason not to.")
             self._mrc_tcp_server = await asyncio.start_server(
                 self.handle_mrc_tcp_connection, self.mrc_tcp_listen_host, self.mrc_tcp_listen_port)
             logger.info(
