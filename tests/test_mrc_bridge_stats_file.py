@@ -1,5 +1,5 @@
 """Regression tests for the umrc-client stats-file feature
-(BridgeApp._compute_umrc_stats/_write_mrc_stats_file/
+(BridgeApp._parse_umrc_stats_reply/_write_mrc_stats_file/
 _periodic_mrc_stats_file_refresh, mrc/bridge/main.py).
 
 Real gap this closes: umrc-client's own main-menu screen (main.c)
@@ -8,9 +8,22 @@ Activity" and an ONLINE/OFFLINE state derived from the file's own
 mtime -- normally written by the separate umrc-bridge daemon this
 bridge replaces. Since nothing wrote it, a sysop running umrc-client
 against this bridge saw a correctly-working chat connection but a
-permanently blank/offline-looking stats display. Confirmed live
-against a real umrc-client build (2026-09-21) once mrc_stats_file_path
-was wired up.
+permanently blank/offline-looking stats display.
+
+First attempt at this feature tried to compute these 4 numbers
+locally from USERLIST reply data this bridge already receives --
+wrong approach, disproven live: the real hub's USERLIST replies on
+this network never carry the optional "@site" suffix, so a
+locally-computed BBS count always read 0, and even a working per-user
+tally would only ever cover users in rooms this specific BBS's own
+sessions have joined -- nowhere close to network-wide. The real fix
+(2026-09-21): the hub's own `STATS:` server-command reply already
+carries these exact numbers, network-wide, confirmed against a real
+wire capture: `SERVER~~~CLIENT~A-Net_Online_ANetBBS~~STATS:176 14 50
+2 172 34.4~`. _periodic_stats_refresh() already requests this
+periodically (pre-existing code, unrelated to this feature); this
+feature only adds parsing/caching its reply and writing it to a file
+in the format umrc-client itself reads.
 
 Format confirmed directly against umrc-client's own source (main.c):
 one line, space-separated "bbses rooms users activity", read via
@@ -18,7 +31,6 @@ one line, space-separated "bbses rooms users activity", read via
 (main.c indexes stat[3] unconditionally) and stay well under the
 30-byte read buffer.
 """
-import asyncio
 import json
 import sys
 import tempfile
@@ -27,7 +39,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mrc.bridge.main import BridgeApp  # noqa: E402
+from mrc.bridge.main import (  # noqa: E402
+    BridgeApp, _parse_umrc_stats_reply,
+)
 from mrc.bridge.mrc_protocol import MRCProtocol  # noqa: E402
 
 
@@ -56,69 +70,44 @@ async def _make_bridge(tmp_path, **overrides) -> BridgeApp:
     return app
 
 
-def _userlist_packet(room: str, entries: str) -> dict:
+def _stats_packet(body: str) -> dict:
+    # Real shape captured live: from_user=SERVER, from_site/from_room
+    # empty, to_user=CLIENT, msg_ext=<our own bbs name>, to_room
+    # empty, message="STATS:...".
     raw = MRCProtocol.create_packet(
-        "SERVER", "", room, "CLIENT", "", room, f"USERLIST:{entries}")
+        "SERVER", "", "", "CLIENT", "TestBBS", "", body)
     return MRCProtocol.parse_packet(raw)
 
 
-class ComputeUmrcStatsTests(unittest.TestCase):
-    """Unit tests against _compute_umrc_stats() directly, bypassing
-    the wire-packet pipeline entirely -- just _room_userlist_cache in,
-    (bbses, rooms, users, activity) out."""
+class ParseUmrcStatsReplyTests(unittest.TestCase):
+    """Unit tests against the parser directly."""
 
-    def _app(self):
-        return object.__new__(BridgeApp)
+    def test_parses_real_captured_reply(self):
+        # Verbatim from a live wire capture, 2026-09-21.
+        self.assertEqual(
+            _parse_umrc_stats_reply("STATS:176 14 50 2 172 34.4"),
+            (176, 14, 50, 2))
 
-    def test_empty_cache_is_all_zero(self):
-        app = self._app()
-        app._room_userlist_cache = {}
-        self.assertEqual(app._compute_umrc_stats(), (0, 0, 0, 0))
+    def test_ignores_trailing_fields_beyond_the_first_4(self):
+        # umrc-client's own main.c only ever reads stat[0..3] --
+        # confirm extra fields don't break parsing either way.
+        self.assertEqual(
+            _parse_umrc_stats_reply("STATS:1 2 3 4 5 6 7 8"),
+            (1, 2, 3, 4))
 
-    def test_single_room_counts_bbses_rooms_users(self):
-        app = self._app()
-        app._room_userlist_cache = {
-            "lobby": [("alice", "BBS1"), ("bob", "BBS2"), ("carol", "BBS1")],
-        }
-        bbses, rooms, users, activity = app._compute_umrc_stats()
-        self.assertEqual(bbses, 2)   # BBS1, BBS2
-        self.assertEqual(rooms, 1)
-        self.assertEqual(users, 3)
-        self.assertEqual(activity, 1)  # 3 users -> LOW
+    def test_fewer_than_4_fields_returns_none(self):
+        self.assertIsNone(_parse_umrc_stats_reply("STATS:1 2 3"))
 
-    def test_same_user_in_two_rooms_counted_once(self):
-        app = self._app()
-        app._room_userlist_cache = {
-            "lobby": [("alice", "BBS1")],
-            "help":  [("alice", "BBS1"), ("bob", "BBS2")],
-        }
-        bbses, rooms, users, activity = app._compute_umrc_stats()
-        self.assertEqual(rooms, 2)
-        self.assertEqual(users, 2)   # alice counted once despite 2 rooms
-        self.assertEqual(bbses, 2)
+    def test_no_colon_returns_none(self):
+        self.assertIsNone(_parse_umrc_stats_reply("garbage"))
 
-    def test_user_with_no_site_counts_as_user_not_bbs(self):
-        app = self._app()
-        app._room_userlist_cache = {"lobby": [("alice", "")]}
-        bbses, rooms, users, activity = app._compute_umrc_stats()
-        self.assertEqual(users, 1)
-        self.assertEqual(bbses, 0)
-
-    def test_activity_thresholds(self):
-        app = self._app()
-
-        def stats_for(n):
-            app._room_userlist_cache = {
-                "lobby": [(f"user{i}", "BBS1") for i in range(n)]
-            }
-            return app._compute_umrc_stats()[3]
-
-        self.assertEqual(stats_for(0), 0)    # NUL
-        self.assertEqual(stats_for(1), 1)    # LOW
-        self.assertEqual(stats_for(5), 1)    # LOW (boundary)
-        self.assertEqual(stats_for(6), 2)    # MED (boundary)
-        self.assertEqual(stats_for(20), 2)   # MED (boundary)
-        self.assertEqual(stats_for(21), 3)   # HI (boundary)
+    def test_non_numeric_field_becomes_zero_matching_atoi(self):
+        # umrc-client parses these with atoi(), which returns 0 for
+        # anything that doesn't start with a digit -- match that
+        # tolerance rather than raising.
+        self.assertEqual(
+            _parse_umrc_stats_reply("STATS:1 oops 3 4"),
+            (1, 0, 3, 4))
 
 
 class WriteStatsFileSyncTests(unittest.TestCase):
@@ -127,9 +116,9 @@ class WriteStatsFileSyncTests(unittest.TestCase):
     def test_writes_expected_single_line_format(self):
         with tempfile.TemporaryDirectory() as td:
             path = str(Path(td) / "mrcstats.dat")
-            BridgeApp._write_mrc_stats_file_sync(path, 2, 3, 17, 2)
+            BridgeApp._write_mrc_stats_file_sync(path, 176, 14, 50, 2)
             content = Path(path).read_text()
-            self.assertEqual(content, "2 3 17 2\n")
+            self.assertEqual(content, "176 14 50 2\n")
             self.assertLess(len(content), 30,
                             "must stay under umrc-client's fgets(stats, 30, ...) buffer")
 
@@ -149,25 +138,22 @@ class WriteStatsFileSyncTests(unittest.TestCase):
             self.assertEqual(Path(path).read_text(), "9 9 99 3\n")
 
 
-class UserlistCacheEndToEndTests(unittest.IsolatedAsyncioTestCase):
-    """The real proof: drive an actual wire USERLIST reply through
-    _on_upstream_packet() (not just call _compute_umrc_stats()
-    directly) and confirm the cache -- and therefore the file this
-    bridge would write -- reflects it."""
+class StatsReplyEndToEndTests(unittest.IsolatedAsyncioTestCase):
+    """The real proof: drive an actual wire STATS reply through
+    _on_upstream_packet() (not just call the parser directly) and
+    confirm the cached value -- and therefore the file this bridge
+    would write -- reflects it."""
 
-    async def test_userlist_reply_populates_cache_and_stats(self):
+    async def test_stats_reply_updates_last_umrc_stats(self):
         with tempfile.TemporaryDirectory() as td:
             tmp_path = Path(td)
             app = await _make_bridge(tmp_path)
+            self.assertEqual(app._last_umrc_stats, (0, 0, 0, 0))
 
-            parsed = _userlist_packet("lobby", "alice@BBS1,bob@BBS2")
+            parsed = _stats_packet("STATS:176 14 50 2 172 34.4")
             await app._on_upstream_packet(parsed)
 
-            self.assertEqual(
-                app._room_userlist_cache.get("lobby"),
-                [("alice", "BBS1"), ("bob", "BBS2")])
-            bbses, rooms, users, activity = app._compute_umrc_stats()
-            self.assertEqual((bbses, rooms, users), (2, 1, 2))
+            self.assertEqual(app._last_umrc_stats, (176, 14, 50, 2))
 
     async def test_write_mrc_stats_file_end_to_end(self):
         with tempfile.TemporaryDirectory() as td:
@@ -176,11 +162,11 @@ class UserlistCacheEndToEndTests(unittest.IsolatedAsyncioTestCase):
             app = await _make_bridge(
                 tmp_path, mrc_stats_file_path=str(stats_path))
 
-            parsed = _userlist_packet("lobby", "alice@BBS1,bob@BBS2,carol@BBS1")
+            parsed = _stats_packet("STATS:176 14 50 2 172 34.4")
             await app._on_upstream_packet(parsed)
             await app._write_mrc_stats_file()
 
-            self.assertEqual(stats_path.read_text(), "2 1 3 1\n")
+            self.assertEqual(stats_path.read_text(), "176 14 50 2\n")
 
     async def test_write_mrc_stats_file_is_noop_when_unconfigured(self):
         """mrc_stats_file_path empty (the default) -- no file, no
@@ -190,6 +176,16 @@ class UserlistCacheEndToEndTests(unittest.IsolatedAsyncioTestCase):
             app = await _make_bridge(tmp_path)  # no mrc_stats_file_path
             await app._write_mrc_stats_file()
             self.assertEqual(list(tmp_path.glob("*.dat")), [])
+
+    async def test_second_stats_reply_replaces_first(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            app = await _make_bridge(tmp_path)
+
+            await app._on_upstream_packet(_stats_packet("STATS:1 2 3 0"))
+            self.assertEqual(app._last_umrc_stats, (1, 2, 3, 0))
+            await app._on_upstream_packet(_stats_packet("STATS:176 14 50 2 172 34.4"))
+            self.assertEqual(app._last_umrc_stats, (176, 14, 50, 2))
 
 
 if __name__ == '__main__':

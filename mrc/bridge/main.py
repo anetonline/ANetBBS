@@ -156,30 +156,47 @@ def _parse_userlist_text(msg: str) -> list:
     return users
 
 
-def _parse_userlist_text_with_site(msg: str) -> list:
-    """Same wire format as _parse_userlist_text, but keeps the
-    "@site" suffix instead of discarding it -- used only for the
-    umrc-client stats-file feature (_compute_umrc_stats()), which
-    needs the originating BBS per user, not just a deduplicated nick
-    list. A deliberate separate function rather than changing
-    _parse_userlist_text's own return shape, to avoid touching its
-    existing callers/tests."""
+def _parse_umrc_stats_reply(msg: str):
+    """Parse a hub `STATS:` reply for the umrc-client stats-file
+    feature (BridgeApp._write_mrc_stats_file()). Confirmed directly
+    against a real hub reply captured live (2026-09-21, debug wire
+    trace): `STATS:176 14 50 2 172 34.4` -- space-separated, and
+    umrc-client's own source (main.c) only ever reads the first 4
+    fields (`gBBSes = atoi(stat[0])`, then rooms/users/activity),
+    same order as its file-based read. The trailing 2 fields (a
+    latency-looking float, an unidentified integer) are read by
+    nothing in umrc-client's own source -- ignored here too, same as
+    the client itself ignores them.
+
+    An initial attempt at this feature tried to approximate these
+    numbers locally from USERLIST reply data this bridge already
+    receives -- wrong approach, confirmed wrong live: the real hub's
+    USERLIST replies on this network never include the optional
+    "@site" suffix _parse_userlist_text's own docstring describes, so
+    a locally-computed "distinct BBS" count would always read 0
+    regardless of the real number connected, and even a fully-working
+    per-user site tally would only ever cover users in rooms this
+    specific BBS's own sessions have joined -- nowhere close to a
+    network-wide count (confirmed live: an actual STATS reply showed
+    176 BBSes against roughly 17 users visible in this bridge's own
+    single joined room). The hub already knows the real network-wide
+    figures; relaying its own reply is both simpler and correct where
+    local computation structurally could not be.
+    """
     if ":" not in msg:
-        return []
+        return None
     raw = msg.split(":", 1)[1].strip()
-    pairs = []
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        if "@" in entry:
-            nick, site = entry.split("@", 1)
-        else:
-            nick, site = entry, ""
-        nick = nick.strip()
-        if nick:
-            pairs.append((nick, site.strip()))
-    return pairs
+    parts = raw.split()
+    if len(parts) < 4:
+        return None
+
+    def _to_int(s):
+        try:
+            return int(float(s))
+        except (TypeError, ValueError):
+            return 0
+
+    return tuple(_to_int(p) for p in parts[:4])
 
 
 def _norm_pipe_color(code: str) -> str:
@@ -739,15 +756,18 @@ class BridgeApp:
         # case matters on a Linux filesystem even though DOS/Windows
         # never cared). Empty (default) disables this entirely -- no
         # file is written, matching mrc_tcp_enabled's own opt-in
-        # stance. See _compute_umrc_stats()/_write_mrc_stats_file()
-        # for the format and what these 4 numbers mean.
+        # stance. See _parse_umrc_stats_reply()/_write_mrc_stats_file()
+        # for the format and where these 4 numbers actually come from.
         self.mrc_stats_file_path = (self.config.get("mrc_stats_file_path") or "").strip()
-        # room -> [(nick, site), ...] from the most recent USERLIST
-        # reply this bridge has seen for that room (only rooms at
-        # least one of our OWN locally-connected sessions is
-        # currently in -- see _compute_umrc_stats()'s docstring for
-        # why that's the honest scope for these numbers).
-        self._room_userlist_cache: Dict[str, list] = {}
+        # (bbses, rooms, users, activity) from the most recent hub
+        # STATS: reply this bridge has seen -- see
+        # _parse_umrc_stats_reply()'s docstring for why this is
+        # relayed from the hub directly rather than computed locally.
+        # (0, 0, 0, 0) until the first reply arrives (requested
+        # periodically by _periodic_stats_refresh(), already existing
+        # code -- this feature only adds the parsing/caching of its
+        # reply, not the request itself).
+        self._last_umrc_stats = (0, 0, 0, 0)
 
         # Default False: verified against the real reference client
         # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
@@ -1146,46 +1166,6 @@ class BridgeApp:
                     rooms.add(r)
         return rooms
 
-    def _compute_umrc_stats(self):
-        """The 4 numbers umrc-client's own main-menu screen shows
-        (main.c: BBSes/Rooms/Users/Activity), derived from this
-        bridge's own _room_userlist_cache -- USERLIST replies for
-        every room at least one of our OWN locally-connected sessions
-        is currently in. This is NOT a network-wide count (the real
-        MRC hub never tells us about rooms nobody local has joined),
-        which is the honest scope for a per-BBS bridge to report
-        anyway: it's "what's active in the rooms this BBS's own users
-        are in right now", not a global census.
-
-        Users/BBSes are counted as distinct (nick, site) pairs / sites
-        across every cached room, not summed per-room, so a user (or
-        BBS) present in more than one room is counted once. Activity
-        has no reference definition anywhere (unlike the other 3, no
-        known client or bridge implementation documents what it
-        means) -- this is a simple, clearly-labeled heuristic off the
-        same user count, not a parsed/authoritative value: 0 users =
-        NUL, 1-5 = LOW, 6-20 = MED, 21+ = HI, matching umrc-client's
-        own 4-entry ACTIVITY[] index range (0-3).
-        """
-        users = set()
-        sites = set()
-        for pairs in self._room_userlist_cache.values():
-            for nick, site in pairs:
-                users.add((nick, site))
-                if site:
-                    sites.add(site)
-        rooms = len(self._room_userlist_cache)
-        user_count = len(users)
-        if user_count == 0:
-            activity = 0
-        elif user_count <= 5:
-            activity = 1
-        elif user_count <= 20:
-            activity = 2
-        else:
-            activity = 3
-        return len(sites), rooms, user_count, activity
-
     @staticmethod
     def _write_mrc_stats_file_sync(path: str, bbses: int, rooms: int, users: int, activity: int):
         """Blocking file write -- always called via run_in_executor,
@@ -1215,7 +1195,7 @@ class BridgeApp:
     async def _write_mrc_stats_file(self):
         if not self.mrc_stats_file_path:
             return
-        bbses, rooms, users, activity = self._compute_umrc_stats()
+        bbses, rooms, users, activity = self._last_umrc_stats
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
@@ -1268,12 +1248,16 @@ class BridgeApp:
     async def _send_stats_control(self, room: str):
         """Request server STATS -- mirrors _send_userlist_control's
         "as CLIENT" addressing exactly (proven to route/broadcast
-        correctly for USERLIST; unlike USERLIST, the STATS reply text
-        is NOT parsed into fields -- see the note on the ticker/banner
-        text-feed plan for why: no reference implementation (the C
-        client, the Mystic multiplexer's OWN upstream requests) parses
-        a STATS reply into structured fields, it's opaque display text
-        same as MOTD/BANNERS/CHANGELOG/ROUTING."""
+        correctly for USERLIST). The reply is still relayed to
+        WS/TCP clients as opaque ticker/banner text (same as MOTD/
+        BANNERS/CHANGELOG/ROUTING) -- but IS also now parsed into
+        structured fields for one specific purpose: umrc-client's own
+        stats file (_parse_umrc_stats_reply(), added after capturing
+        a real reply live: `STATS:176 14 50 2 172 34.4`). An earlier
+        version of this docstring claimed no implementation parses a
+        STATS reply into fields -- wrong, corrected here; a sysop
+        report and live wire capture proved it's a real, stable,
+        space-separated 6-field reply."""
         pkt = MRCProtocol.create_control_command(
             "STATS",
             user="CLIENT",
@@ -1543,8 +1527,6 @@ class BridgeApp:
             # parity rework), it's purely additive. See
             # _parse_userlist_text for the wire-format justification.
             if from_user == "SERVER" and msg.upper().startswith("USERLIST:"):
-                if room:
-                    self._room_userlist_cache[room] = _parse_userlist_text_with_site(msg)
                 users = _parse_userlist_text(msg)
                 if users:
                     await self._send_to_sessions(targets, {
@@ -1552,6 +1534,13 @@ class BridgeApp:
                         "room":  room,
                         "users": users,
                     })
+            elif from_user == "SERVER" and msg.upper().startswith("STATS:"):
+                # See _parse_umrc_stats_reply()'s docstring -- this is
+                # the umrc-client stats-file feature's real data
+                # source, captured live off a real hub.
+                parsed_stats = _parse_umrc_stats_reply(msg)
+                if parsed_stats is not None:
+                    self._last_umrc_stats = parsed_stats
             return
 
         if special == "NOTME":
@@ -2479,9 +2468,10 @@ class BridgeApp:
                     await self._send_userlist_control(room)
 
     async def _periodic_stats_refresh(self):
-        """Feeds the ticker/banner text pool (see _send_stats_control's
-        docstring for why this isn't parsed into structured fields).
-        One request per room-with-active-sessions, same shape as
+        """Feeds the ticker/banner text pool AND (see
+        _send_stats_control's docstring) the umrc-client stats-file
+        feature's real data source. One request per
+        room-with-active-sessions, same shape as
         _periodic_userlist_refresh, just a longer default interval --
         stats are far less time-sensitive than a room's user list."""
         interval = _safe_loop_interval(self.config, "stats_refresh_interval_seconds", 120)
