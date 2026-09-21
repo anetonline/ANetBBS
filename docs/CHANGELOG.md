@@ -1,11 +1,52 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.93`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.98`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.98 — Codebase-wide audit for the dead-connection freeze/hang bug class (September 2026)
+
+Following the previous two releases' fixes for a dead-connection freeze/spin bug, did a full audit pass across the rest of the codebase (door games, echomail/BinkP, MRC chat, IRC, finger, rlogin/SSH/telnet) for the same underlying shape. Found and fixed a handful of places where output could still hang indefinitely on a connection that stopped responding without actually closing: several screen/animation-drawing paths and the telnet protocol-negotiation reply in the terminal session layer, the finger service's reply, and the MRC bridge's connection to its upstream chat server (the last of these is a single connection shared by every locally connected chat user, so a hang there could have silently affected more than one person at a time). Everything else checked came back clean. Each fix has dedicated regression coverage proving the affected code now recovers with a bounded timeout instead of hanging.
+
+## v1.0.97 — 3 more dead-connection freeze/spin gaps closed (September 2026)
+
+Continuing v1.0.96's fix: a dead connection (network drop, a client left open and unreachable) could still cause a freeze or a silent, indefinite CPU/resource drain in three other places that share the same underlying cause. A menu-navigation keystroke read could raise an uncaught low-level error instead of ending the session cleanly. The idle-warning/screensaver sequence could loop forever once a session reached it on a connection that had already died, since neither its write attempts nor its own keystroke-poll recognized the connection was gone. And the built-in IRC client's connection to the remote IRC server could get stuck retrying a keepalive against a server connection that had already failed, instead of ending that connection. All three are fixed, each with regression coverage proving the affected code now ends cleanly instead of looping or raising an unexpected error.
+
+## v1.0.96 — Critical: a dead connection inside ANEView could freeze the whole BBS (September 2026)
+
+Fixed a critical bug where a client connection that died without a clean close (a network drop, a client left open and unreachable overnight) while inside ANEView, the read-only echomail message viewer, could spin the server's main thread at effectively 100% CPU indefinitely — starving every other session, growing memory usage without bound, and flooding the system log, until the service was manually restarted. Traced to two issues: a broad exception handler that treated a dead connection the same as "no key pressed yet" and kept retrying instead of ending the session, and a related gap that made it hard to tell a genuinely expired wait apart from a connection that had already failed with a real error, causing the retry to also repeatedly attempt (and fail) a write on every pass. Both are fixed, with regression coverage proving the affected code path now ends the session immediately and cleanly instead of looping.
+
+## v1.0.95 — New-account password-confirmation fix over telnet/PuTTY; Docker admin-account docs (September 2026)
+
+Fixed a bug where creating a new account (or changing a password) over
+telnet with a client that sends `\r\n` for Enter — PuTTY, plain
+`telnet`, most terminal emulators — always failed at the "Confirm
+password" step with "Passwords don't match," even when typed
+identically both times. SyncTERM and similar clients that send a bare
+`\r` were unaffected, which is why this depended on which client was
+used to connect.
+
+Also documented how to find/log in with the auto-created initial admin
+account on the Docker install paths (`docs/22-containers.md`) — it was
+never obvious from a container that one gets created at all, or where
+to find its password.
+
+## v1.0.94 — Native uMRC (umrc-client) support on the MRC bridge (September 2026)
+
+Added the option for ANetBBS's own MRC chat bridge to also accept
+direct connections from uMRC's `umrc-client` door, so a sysop running
+both no longer needs a separate `umrc-bridge` process alongside it —
+one shared bridge now serves ANetBBS's own terminal/web MRC clients and
+uMRC callers together, with correct private messaging between all of
+them, and no changes required to uMRC itself. Off by default; opt in
+via `mrc_tcp_enabled`/`mrc_tcp_listen_host`/`mrc_tcp_listen_port` in
+`mrc/bridge/config.json`. See `docs/27-mrc-chat.md` for setup.
+
+**Not yet tested against a real `umrc-client`/fresh install — held back
+from the normal release train until that verification happens.**
 
 ## v1.0.93 — Who's Online showed a raw game id/slug instead of the door's name (September 2026)
 

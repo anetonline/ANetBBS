@@ -172,6 +172,78 @@ class _FakeSSHWriter:
         pass
 
 
+class DrainProtectedSharedHelperTests(unittest.TestCase):
+    """Regression tests for _drain_protected() -- the exact same
+    write()-drain-timeout protection above, factored out so a handful
+    of call sites that must bypass write()'s own content-transformation
+    (raw telnet protocol bytes; pre-rendered CP437/ANSI screen bytes
+    written for exact byte fidelity) still get it.
+
+    Found via a no-network dead-connection regression harness (an
+    operator's own tooling) auditing every write()-adjacent call site in
+    session.py: send_telnet_command()/init_session()'s TTYPE reply, and
+    _show_ansi_screen()/_play_screen_animation() (the latter two run on
+    essentially every login and menu art screen) all called
+    `await self.writer.drain()` directly -- unprotected, exactly the
+    hang WRITE_DRAIN_TIMEOUT_SECONDS's own docstring documents. Not a
+    live incident report this time -- broad exposure found and closed
+    proactively while auditing the codebase for the same bug shape as
+    v1.0.96/v1.0.97's real incidents.
+    """
+
+    def test_drain_protected_directly_times_out_and_raises_carrier_lost(self):
+        async def _stuck_drain():
+            await asyncio.Event().wait()
+
+        writer = _FakeWriter(drain_coro=_stuck_drain)
+        session = _make_session(writer)
+        with mock.patch.object(session_mod, 'WRITE_DRAIN_TIMEOUT_SECONDS', 0.05):
+            with self.assertRaises(CarrierLost):
+                asyncio.run(session._drain_protected())
+        self.assertTrue(writer.closed)
+
+    def test_play_screen_animation_stuck_drain_raises_not_hangs(self):
+        """A real caller of _drain_protected(), not just the helper in
+        isolation: _play_screen_animation() writes pre-rendered CP437
+        bytes directly (bypassing write()'s own content-transformation
+        on purpose) and used to call self.writer.drain() with no
+        protection at all."""
+        async def _stuck_drain():
+            await asyncio.Event().wait()
+
+        writer = _FakeWriter(drain_coro=_stuck_drain)
+        session = _make_session(writer)
+        marker = '@ANIMSTART@AAA\r\n@FRAME@BBB\r\n@ANIMEND@'
+        with mock.patch.object(session_mod, 'WRITE_DRAIN_TIMEOUT_SECONDS', 0.05):
+            # The very first frame's drain() hangs, so asyncio.sleep()
+            # between frames is never even reached. _play_screen_
+            # animation() itself swallows everything via a
+            # blanket `except Exception: pass` (best-effort animation --
+            # matches every other caller's "ends early, leaves whatever
+            # was last drawn" philosophy) -- the real proof the fix
+            # works is that this call returns PROMPTLY instead of hanging
+            # forever, not that an exception escapes this specific call.
+            asyncio.run(asyncio.wait_for(
+                session._play_screen_animation(marker), timeout=2))
+        self.assertTrue(writer.closed)
+
+    def test_send_telnet_command_stuck_drain_raises_carrier_lost(self):
+        """The other real caller: send_telnet_command() writes raw
+        telnet IAC bytes directly (must never go through write()'s
+        petscii/ascii content-transformation -- they aren't display
+        text) and used to call self.writer.drain() with no protection.
+        """
+        async def _stuck_drain():
+            await asyncio.Event().wait()
+
+        writer = _FakeWriter(drain_coro=_stuck_drain)
+        session = _make_session(writer)
+        with mock.patch.object(session_mod, 'WRITE_DRAIN_TIMEOUT_SECONDS', 0.05):
+            with self.assertRaises(CarrierLost):
+                asyncio.run(session.send_telnet_command(b'\xfb\x01'))
+        self.assertTrue(writer.closed)
+
+
 class SshWriterBufferSizeTests(unittest.TestCase):
     """Confirms _SshStreamWriter.get_write_buffer_size() actually reaches
     the real asyncssh API (SSHChannel.get_write_buffer_size(), verified

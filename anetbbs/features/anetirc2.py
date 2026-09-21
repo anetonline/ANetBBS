@@ -246,6 +246,29 @@ class _IRC:
                 data = await asyncio.wait_for(
                     self.reader.read(4096), timeout=_READ_TIMEOUT)
             except asyncio.TimeoutError:
+                # Real gap found via a no-network regression harness (an
+                # operator's own tooling): asyncio.StreamReader.read()
+                # re-raises an exception already stored on the reader
+                # (set by the transport's own connection_lost(), e.g. a
+                # genuine OS-level ETIMEDOUT on an upstream IRC server
+                # that went unresponsive without a clean close)
+                # IMMEDIATELY on every call, forever -- and since Python
+                # 3.11 asyncio.TimeoutError IS the builtin TimeoutError,
+                # this except clause had no way to tell that apart from
+                # _READ_TIMEOUT's own genuine "nothing arrived, send a
+                # keepalive PING" case. Without this check, every pass
+                # tried (and silently failed, via _tx's own blanket
+                # except) to PING a connection that was already dead,
+                # then came straight back here and got the same stored
+                # exception again -- a tight, un-yielding retry storm
+                # (same root cause, same fix shape, as the identical
+                # bug already found and fixed in anetbbs/core/session.py
+                # -- see BBSSession._reader_stored_exception's docstring
+                # for the fuller mechanism, confirmed against the real
+                # CPython asyncio source).
+                stored = self.reader.exception() if self.reader else None
+                if stored is not None:
+                    break
                 if self.connected:
                     await self._tx(f"PING :{self.server}")
                 continue

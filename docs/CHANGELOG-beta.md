@@ -74,7 +74,7 @@ Fixed: the zip's own `stat()` (mtime + size) now drives an ETag and Last-Modifie
 
 ## v1.0b2.230 — Terminal cursor style: steady/spinning options for accessibility (July 2026)
 
-Feature request from Winzlo: a blinking cursor makes iOS/macOS zoom's "follow keyboard focus" repeatedly recenter the screen on it, fighting anyone trying to look elsewhere (e.g. a menu) while connected — confirmed reproducible across four separate SSH clients (Terminator, PuTTY, WebSSH, ShellFish). ANetBBS never sent any cursor-blink control codes itself; the blinking is entirely client-rendered, so the fix is a new opt-in per-user preference (`Profile → Cursor style`, editable in both the terminal profile editor and the web Profile page):
+Feature request from a real operator: a blinking cursor makes iOS/macOS zoom's "follow keyboard focus" repeatedly recenter the screen on it, fighting anyone trying to look elsewhere (e.g. a menu) while connected — confirmed reproducible across four separate SSH clients (Terminator, PuTTY, WebSSH, ShellFish). ANetBBS never sent any cursor-blink control codes itself; the blinking is entirely client-rendered, so the fix is a new opt-in per-user preference (`Profile → Cursor style`, editable in both the terminal profile editor and the web Profile page):
 
 - **Default** — unchanged behavior.
 - **Steady** — sends a one-time DECSCUSR (`ESC[4 q`) at login asking for a non-blinking underline cursor. No ongoing work needed once sent; a client that doesn't understand DECSCUSR harmlessly ignores it.

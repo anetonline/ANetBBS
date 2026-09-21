@@ -67,7 +67,7 @@ class WireChunkDelayTests(unittest.TestCase):
         body = 'x' * 80  # cap = max(10, 140-100) = 40 -> must split
 
         with patch('anetbbs.features.mrc_chat.asyncio.sleep', new=AsyncMock()) as mock_sleep:
-            _run(chat._send_dm('Winzlo', body))
+            _run(chat._send_dm('NightOwl', body))
 
         self.assertGreater(len(chat.sent), 1,
                            'test setup must actually force a multi-chunk send')
@@ -79,7 +79,7 @@ class WireChunkDelayTests(unittest.TestCase):
     def test_single_chunk_dm_never_sleeps(self):
         chat = _make_chat()
         with patch('anetbbs.features.mrc_chat.asyncio.sleep', new=AsyncMock()) as mock_sleep:
-            _run(chat._send_dm('Winzlo', 'short message, no split needed'))
+            _run(chat._send_dm('NightOwl', 'short message, no split needed'))
         self.assertEqual(len(chat.sent), 1)
         mock_sleep.assert_not_called()
 

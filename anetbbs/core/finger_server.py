@@ -167,8 +167,14 @@ async def _handle(reader, writer):
         payload = ('\r\n'.join(out_lines) + '\r\n').encode('utf-8', errors='replace')
         try:
             writer.write(payload)
-            await writer.drain()
-        except (OSError, ConnectionError):
+            # Real gap found in a security/performance audit (same
+            # mechanism as ANetBBS's own v1.0.87 session write-hang fix):
+            # a bare drain() has no timeout on asyncio's StreamWriter, and
+            # this payload is unbounded (a user's own tagline/bio can be
+            # arbitrarily long) -- a client that opens the connection and
+            # then never reads its response parks this coroutine forever.
+            await asyncio.wait_for(writer.drain(), timeout=10)
+        except (OSError, ConnectionError, asyncio.TimeoutError):
             pass
     finally:
         try:

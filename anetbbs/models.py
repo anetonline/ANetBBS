@@ -105,7 +105,7 @@ class User(UserMixin, db.Model):
     sixel_mode = db.Column(db.String(10), default='auto')
     # Terminal cursor style: 'default' (unchanged client behavior),
     # 'steady' (DECSCUSR non-blinking cursor -- accessibility request,
-    # FR from Winzlo: a blinking cursor makes iOS/macOS zoom's "follow
+    # real operator report: a blinking cursor makes iOS/macOS zoom's "follow
     # keyboard focus" repeatedly recenter the screen, fighting anyone
     # trying to look elsewhere), or 'spinning' (Synchronet-style
     # rotating |/-\ glyph while genuinely idle waiting for input --
