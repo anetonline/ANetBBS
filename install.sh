@@ -1619,6 +1619,23 @@ config = {
     "capabilities": ["MCI", "MSGEXT", "CTCP"],
     "web_listen_host": "127.0.0.1",
     "web_listen_port": int(os.environ['MRC_BRIDGE_PORT']),
+    # Real gap this closes: these 3 keys only ever existed in
+    # config.example.json, the reference file nothing actually reads at
+    # runtime -- this wizard-generated config.json is what the running
+    # bridge reads, and mrc/bridge/main.py's own
+    # self.config.get("mrc_tcp_enabled", False) silently defaults to
+    # off when a key is simply absent (not an error, no log line), so
+    # a sysop who wants to point umrc-client at this bridge had no way
+    # to discover the setting even existed short of reading source or
+    # the example file directly -- confirmed live: a fresh install's
+    # umrc-client got ECONNREFUSED connecting to localhost:5010 with
+    # nothing in the running config explaining why. Off by default,
+    # matching config.example.json's own opt-in stance -- a sysop who
+    # wants native umrc-client support just flips this to true and
+    # restarts the mrc-bridge service.
+    "mrc_tcp_enabled": False,
+    "mrc_tcp_listen_host": "127.0.0.1",
+    "mrc_tcp_listen_port": 5010,
     "message_rate_seconds": 0.5,
     "iamhere_interval_seconds": 60,
     "log_level": "INFO",
