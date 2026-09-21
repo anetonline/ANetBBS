@@ -1,3 +1,11 @@
+# ANetBBS v1.0.99 — Native uMRC (umrc-client) support on the MRC bridge (September 2026)
+
+Added the option for ANetBBS's own MRC chat bridge to also accept direct connections from uMRC's `umrc-client` door, so a sysop running both no longer needs a separate `umrc-bridge` process alongside it — one shared bridge now serves ANetBBS's own terminal/web MRC clients and uMRC callers together, with correct private messaging between all of them, and no changes required to uMRC itself. Also adds optional support for the small local stats file `umrc-client`'s own menu reads, populated from the real MRC network's own live BBS/room/user counts. Off by default; see `docs/27-mrc-chat.md` for full setup, including a couple of easy-to-hit misconfigurations (now with a startup warning for one of them) worked out during testing.
+
+Also fixed, found along the way: `mrc/bridge/config.json`'s `log_level` setting never actually had any effect, on any install — editing it and restarting silently did nothing.
+
+**Testing in progress on real hardware (Pi + production ANetBBS) — held back from the normal release train until that's complete.**
+
 # ANetBBS v1.0.98 — Codebase-wide audit for the dead-connection freeze/hang bug class (September 2026)
 
 Following the previous two releases' fixes for a dead-connection freeze/spin bug, did a full audit pass across the rest of the codebase (door games, echomail/BinkP, MRC chat, IRC, finger, rlogin/SSH/telnet) for the same underlying shape. Found and fixed a handful of places where output could still hang indefinitely on a connection that stopped responding without actually closing: several screen/animation-drawing paths and the telnet protocol-negotiation reply in the terminal session layer, the finger service's reply, and the MRC bridge's connection to its upstream chat server (the last of these is a single connection shared by every locally connected chat user, so a hang there could have silently affected more than one person at a time). Everything else checked came back clean. Each fix has dedicated regression coverage proving the affected code now recovers with a bounded timeout instead of hanging.

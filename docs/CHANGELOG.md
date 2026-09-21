@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.98`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.99`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.99 — Native uMRC (umrc-client) support on the MRC bridge (September 2026)
+
+Added the option for ANetBBS's own MRC chat bridge to also accept direct connections from uMRC's `umrc-client` door, so a sysop running both no longer needs a separate `umrc-bridge` process alongside it — one shared bridge now serves ANetBBS's own terminal/web MRC clients and uMRC callers together, with correct private messaging between all of them, and no changes required to uMRC itself. Also adds optional support for the small local stats file `umrc-client`'s own menu reads, populated from the real MRC network's own live BBS/room/user counts. Off by default; see `docs/27-mrc-chat.md` for full setup, including a couple of easy-to-hit misconfigurations (now with a startup warning for one of them) worked out during testing.
+
+Also fixed, found along the way: `mrc/bridge/config.json`'s `log_level` setting never actually had any effect, on any install — editing it and restarting silently did nothing.
 
 ## v1.0.98 — Codebase-wide audit for the dead-connection freeze/hang bug class (September 2026)
 
