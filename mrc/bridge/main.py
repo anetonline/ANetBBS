@@ -702,6 +702,29 @@ class BridgeApp:
         self.config_path = config_path
         self.config      = _load_config(config_path)
 
+        # Real gap found live (2026-09-21): config.json has always
+        # accepted a "log_level" key (install.sh's wizard writes it,
+        # config.example.json documents it) but NOTHING ever read it
+        # -- the module-level logger above is set once, at import
+        # time, purely from the MRC_BRIDGE_LOG_LEVEL environment
+        # variable. A sysop editing "log_level" in config.json (the
+        # only place this setting is documented/visible) and
+        # restarting saw zero effect, with no error or indication why
+        # -- confirmed live trying to capture a debug wire trace. The
+        # env var remains available for a one-off override with no
+        # file edit (its own docstring above already covers that
+        # use case) and takes precedence if explicitly set; otherwise
+        # config.json's own value now actually applies.
+        if "MRC_BRIDGE_LOG_LEVEL" not in os.environ:
+            configured_level = str(self.config.get("log_level") or "").strip().upper()
+            valid_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+            if configured_level in valid_levels:
+                logger.setLevel(configured_level)
+            elif configured_level:
+                logger.warning(
+                    f"config.json log_level {configured_level!r} is not "
+                    f"one of {valid_levels} -- ignoring, level unchanged.")
+
         data_dir = self.config.get("data_dir", str(_BRIDGE_DIR / "data"))
         self.db  = BridgeDB(data_dir)
         # See BridgeDB.discard_stale_sessions()'s own docstring -- a
