@@ -237,13 +237,13 @@ class MrcTcpChatTests(_TcpBridgeHarness):
         reader, writer, _sid = await self._joined_client("StingRay")
         self.app.mrc.sent.clear()
 
-        await self._send(writer, "StingRay", "site", "lobby", "Winzlo", "", "",
+        await self._send(writer, "StingRay", "site", "lobby", "NightOwl", "", "",
                           "hey there, private note")
 
         ok = await self._wait_until(lambda: any(
-            m["to_user"] == "Winzlo" for m in self.app.mrc.sent_messages()))
+            m["to_user"] == "NightOwl" for m in self.app.mrc.sent_messages()))
         self.assertTrue(ok)
-        msg = next(m for m in self.app.mrc.sent_messages() if m["to_user"] == "Winzlo")
+        msg = next(m for m in self.app.mrc.sent_messages() if m["to_user"] == "NightOwl")
         self.assertEqual(msg["to_room"], "")
         self.assertEqual(msg["message"], "hey there, private note")
 
