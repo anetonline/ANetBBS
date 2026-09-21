@@ -767,6 +767,18 @@ class BridgeApp:
         self.mrc_tcp_listen_host = self.config.get("mrc_tcp_listen_host", "127.0.0.1")
         self.mrc_tcp_listen_port = int(self.config.get("mrc_tcp_listen_port", 5010))
         self._mrc_tcp_server = None
+        # Same reasoning/default as MRCConnection's own
+        # _drain_timeout_seconds (the upstream hub connection) --
+        # found missing here during the same live testing session
+        # that found the upstream gap: _send_mrc_tcp_payload()'s
+        # writer.drain() had no timeout either, on a *downstream*
+        # write to a directly-connected umrc-client. Same underlying
+        # mechanism as ANetBBS core's own v1.0.87 session write-hang
+        # fix -- a umrc-client that stopped reading without actually
+        # closing its socket would hang whichever coroutine tried to
+        # send it something next, with no timeout and no recovery.
+        self._mrc_tcp_write_timeout_seconds = float(
+            self.config.get("mrc_drain_timeout_seconds", 30))
 
         # umrc-client's own main-menu screen (main.c) reads a small
         # stats file at startup -- normally written by the separate
@@ -1061,20 +1073,52 @@ class BridgeApp:
         real-wire-protocol meaning -- a raw MRC client (umrc-client)
         already gets the same information from the underlying wire
         packets themselves (USERLIST:/USERROOM: server text, delivered
-        as an ordinary "mrc_message" below), so only that one payload
-        type needs translating; everything else is correctly a no-op
-        here. msg_ext is dropped -- the "mrc_message" payload never
-        carried it either (see _on_upstream_packet), and it's unused
-        for ordinary chat/DM/userlist traffic."""
-        if payload.get("type") != "mrc_message":
+        as an ordinary "mrc_message" below), so those are correctly a
+        no-op here.
+
+        "latency" is the one payload this docstring used to claim (
+        wrongly -- corrected here) needed no translation: found live
+        (2026-09-21) that a real umrc-client's in-chat status bar
+        showed every stat except latency, which stayed at "--"
+        forever. Root cause: _broadcast_latency() only ever pushed to
+        WebSocket sessions (ws.send_json), and this method silently
+        dropped anything but "mrc_message" -- a raw-TCP client was
+        simply never sent anything for it. umrc-client's own source
+        (main.c's processPacket) parses a real `LATENCY:<ms>` server
+        command into gLatency; that real wire shape is what's built
+        and sent below instead of the synthetic JSON payload.
+        """
+        if payload.get("type") == "mrc_message":
+            pkt = MRCProtocol.create_packet(
+                payload.get("from_user", ""), payload.get("from_site", ""),
+                payload.get("from_room", ""), payload.get("to_user", ""),
+                "", payload.get("to_room", ""), payload.get("message", ""))
+        elif payload.get("type") == "latency":
+            pkt = MRCProtocol.create_packet(
+                "SERVER", "", "", "CLIENT", "", "",
+                f"LATENCY:{payload.get('ms', 0)}")
+        else:
             return
-        pkt = MRCProtocol.create_packet(
-            payload.get("from_user", ""), payload.get("from_site", ""),
-            payload.get("from_room", ""), payload.get("to_user", ""),
-            "", payload.get("to_room", ""), payload.get("message", ""))
         try:
             writer.write(pkt.encode())
-            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        except Exception:
+            return
+        # Same drain-hang mechanism/fix as ANetBBS core's own
+        # _drain_protected() (session.py) and MRCConnection's own
+        # upstream-hub sends above -- see
+        # _mrc_tcp_write_timeout_seconds's docstring at __init__.
+        try:
+            await asyncio.wait_for(writer.drain(),
+                                    timeout=self._mrc_tcp_write_timeout_seconds)
+        except asyncio.TimeoutError:
+            try:
+                writer.close()
+            except Exception:
+                pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except Exception:
             pass
 
@@ -1110,10 +1154,15 @@ class BridgeApp:
         """Real round-trip measurement from either connection backend's
         LatencyTracker (see latency.py) -- pushed to every connected
         session so the terminal status bar and web topic bar can show a
-        live number instead of the clock they used to show."""
+        live number instead of the clock they used to show. Also
+        reaches raw-TCP (umrc-client) sessions -- see
+        _send_mrc_tcp_payload's docstring for the real gap this
+        closes; that WAS previously WS-only."""
         payload = {"type": "latency", "ms": round(latency_ms)}
         for ws in list(self.websockets.values()):
             await self._safe_send(ws, payload)
+        for writer in list(self.mrc_tcp_clients.values()):
+            await self._send_mrc_tcp_payload(writer, payload)
 
     async def _rejoin_all_sessions(self):
         # Third real gap in the same class as the other two
