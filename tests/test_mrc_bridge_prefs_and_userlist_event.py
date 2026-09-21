@@ -42,6 +42,7 @@ def _make_bridge(tmp_dir):
     app.websockets = {}
     app.mrc_tcp_clients = {}
     app._ws_remote_ip = {}
+    app._room_userlist_cache = {}
     app.mrc = AsyncMock()
     app.mrc.connected = True
     app.join_packet_delay_ms = 0

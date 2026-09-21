@@ -156,6 +156,32 @@ def _parse_userlist_text(msg: str) -> list:
     return users
 
 
+def _parse_userlist_text_with_site(msg: str) -> list:
+    """Same wire format as _parse_userlist_text, but keeps the
+    "@site" suffix instead of discarding it -- used only for the
+    umrc-client stats-file feature (_compute_umrc_stats()), which
+    needs the originating BBS per user, not just a deduplicated nick
+    list. A deliberate separate function rather than changing
+    _parse_userlist_text's own return shape, to avoid touching its
+    existing callers/tests."""
+    if ":" not in msg:
+        return []
+    raw = msg.split(":", 1)[1].strip()
+    pairs = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "@" in entry:
+            nick, site = entry.split("@", 1)
+        else:
+            nick, site = entry, ""
+        nick = nick.strip()
+        if nick:
+            pairs.append((nick, site.strip()))
+    return pairs
+
+
 def _norm_pipe_color(code: str) -> str:
     c = (code or "").strip()
     if len(c) == 1 and c.isdigit():
@@ -702,6 +728,27 @@ class BridgeApp:
         self.mrc_tcp_listen_port = int(self.config.get("mrc_tcp_listen_port", 5010))
         self._mrc_tcp_server = None
 
+        # umrc-client's own main-menu screen (main.c) reads a small
+        # stats file at startup -- normally written by the separate
+        # umrc-bridge daemon this bridge replaces, in ITS OWN install
+        # directory, so there's no single predictable path to default
+        # to here; a sysop running umrc-client sets this to that
+        # door's own directory + whatever filename its binary expects
+        # (confirm the exact name/case with e.g. `strings
+        # umrc-client | grep -i stats` -- it's an OpenDoors-era door,
+        # case matters on a Linux filesystem even though DOS/Windows
+        # never cared). Empty (default) disables this entirely -- no
+        # file is written, matching mrc_tcp_enabled's own opt-in
+        # stance. See _compute_umrc_stats()/_write_mrc_stats_file()
+        # for the format and what these 4 numbers mean.
+        self.mrc_stats_file_path = (self.config.get("mrc_stats_file_path") or "").strip()
+        # room -> [(nick, site), ...] from the most recent USERLIST
+        # reply this bridge has seen for that room (only rooms at
+        # least one of our OWN locally-connected sessions is
+        # currently in -- see _compute_umrc_stats()'s docstring for
+        # why that's the honest scope for these numbers).
+        self._room_userlist_cache: Dict[str, list] = {}
+
         # Default False: verified against the real reference client
         # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
         # joins the room unconditionally right after the handshake,
@@ -1099,6 +1146,95 @@ class BridgeApp:
                     rooms.add(r)
         return rooms
 
+    def _compute_umrc_stats(self):
+        """The 4 numbers umrc-client's own main-menu screen shows
+        (main.c: BBSes/Rooms/Users/Activity), derived from this
+        bridge's own _room_userlist_cache -- USERLIST replies for
+        every room at least one of our OWN locally-connected sessions
+        is currently in. This is NOT a network-wide count (the real
+        MRC hub never tells us about rooms nobody local has joined),
+        which is the honest scope for a per-BBS bridge to report
+        anyway: it's "what's active in the rooms this BBS's own users
+        are in right now", not a global census.
+
+        Users/BBSes are counted as distinct (nick, site) pairs / sites
+        across every cached room, not summed per-room, so a user (or
+        BBS) present in more than one room is counted once. Activity
+        has no reference definition anywhere (unlike the other 3, no
+        known client or bridge implementation documents what it
+        means) -- this is a simple, clearly-labeled heuristic off the
+        same user count, not a parsed/authoritative value: 0 users =
+        NUL, 1-5 = LOW, 6-20 = MED, 21+ = HI, matching umrc-client's
+        own 4-entry ACTIVITY[] index range (0-3).
+        """
+        users = set()
+        sites = set()
+        for pairs in self._room_userlist_cache.values():
+            for nick, site in pairs:
+                users.add((nick, site))
+                if site:
+                    sites.add(site)
+        rooms = len(self._room_userlist_cache)
+        user_count = len(users)
+        if user_count == 0:
+            activity = 0
+        elif user_count <= 5:
+            activity = 1
+        elif user_count <= 20:
+            activity = 2
+        else:
+            activity = 3
+        return len(sites), rooms, user_count, activity
+
+    @staticmethod
+    def _write_mrc_stats_file_sync(path: str, bbses: int, rooms: int, users: int, activity: int):
+        """Blocking file write -- always called via run_in_executor,
+        matching this project's own async-write convention (see
+        BridgeDB.save_profile_async's docstring). Same atomic
+        temp-file + os.replace() pattern as BridgeDB._save_json, for
+        the same reason: umrc-client reads this file on a timer
+        (_periodic_mrc_stats_file_refresh) and must never observe a
+        torn/partial write.
+
+        Format confirmed directly against umrc-client's own source
+        (main.c): one line, space-separated "bbses rooms users
+        activity", read via `fgets(stats, 30, file)` then split on
+        ' ' -- MUST stay well under that 30-byte buffer (realistic
+        counts always will) and MUST always include all 4 fields --
+        main.c indexes stat[3] unconditionally once it sees >= 3
+        fields, so omitting the 4th would read past the end of its
+        own split() result.
+        """
+        line = f"{bbses} {rooms} {users} {activity}\n"
+        p = Path(path)
+        tmp_path = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp_path, "w") as f:
+            f.write(line)
+        os.replace(tmp_path, p)
+
+    async def _write_mrc_stats_file(self):
+        if not self.mrc_stats_file_path:
+            return
+        bbses, rooms, users, activity = self._compute_umrc_stats()
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None, self._write_mrc_stats_file_sync,
+                self.mrc_stats_file_path, bbses, rooms, users, activity)
+        except OSError as e:
+            logger.warning(f"Failed to write MRC stats file {self.mrc_stats_file_path!r}: {e}")
+
+    async def _periodic_mrc_stats_file_refresh(self):
+        # 20s default -- comfortably under umrc-client's own 60s
+        # file-mtime staleness check (main.c: file older than 60s from
+        # "now" reads as bridge OFFLINE regardless of what's in it),
+        # with headroom for scheduling jitter.
+        interval = _safe_loop_interval(
+            self.config, "mrc_stats_file_interval_seconds", 20)
+        while True:
+            await self._write_mrc_stats_file()
+            await asyncio.sleep(interval)
+
     async def _sync_mystic_rooms(self):
         """No-op for the native MRCConnection backend (it has no such
         method). Only the mystic_backend's file-IPC needs to know which
@@ -1407,6 +1543,8 @@ class BridgeApp:
             # parity rework), it's purely additive. See
             # _parse_userlist_text for the wire-format justification.
             if from_user == "SERVER" and msg.upper().startswith("USERLIST:"):
+                if room:
+                    self._room_userlist_cache[room] = _parse_userlist_text_with_site(msg)
                 users = _parse_userlist_text(msg)
                 if users:
                     await self._send_to_sessions(targets, {
@@ -2392,6 +2530,9 @@ class BridgeApp:
             logger.info(
                 f"MRC TCP listener (umrc-client compatible) on "
                 f"{self.mrc_tcp_listen_host}:{self.mrc_tcp_listen_port}")
+        if self.mrc_stats_file_path:
+            self.tasks.append(asyncio.create_task(self._periodic_mrc_stats_file_refresh()))
+            logger.info(f"MRC stats file enabled: {self.mrc_stats_file_path}")
 
     async def cleanup_background_tasks(self, app):
         for t in self.tasks:
