@@ -1,8 +1,9 @@
-"""Regression tests for the terminal cursor-style feature (FR from
-Winzlo, 2026-07-28): a blinking cursor makes iOS/macOS zoom's "follow
-keyboard focus" repeatedly recenter the screen, fighting anyone trying
-to look elsewhere while connected -- confirmed reproducible across four
-separate SSH clients (Terminator, PuTTY, WebSSH, ShellFish).
+"""Regression tests for the terminal cursor-style feature (a real
+accessibility report, 2026-07-28): a blinking cursor makes iOS/macOS
+zoom's "follow keyboard focus" repeatedly recenter the screen, fighting
+anyone trying to look elsewhere while connected -- confirmed
+reproducible across four separate SSH clients (Terminator, PuTTY,
+WebSSH, ShellFish).
 
 Two new User.cursor_style values, both implemented in
 anetbbs/core/session.py's _read_byte_maybe_spinning():

@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.96`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.97`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.97 — 3 more dead-connection freeze/spin gaps closed (September 2026)
+
+Continuing v1.0.96's fix: a dead connection (network drop, a client left open and unreachable) could still cause a freeze or a silent, indefinite CPU/resource drain in three other places that share the same underlying cause. A menu-navigation keystroke read could raise an uncaught low-level error instead of ending the session cleanly. The idle-warning/screensaver sequence could loop forever once a session reached it on a connection that had already died, since neither its write attempts nor its own keystroke-poll recognized the connection was gone. And the built-in IRC client's connection to the remote IRC server could get stuck retrying a keepalive against a server connection that had already failed, instead of ending that connection. All three are fixed, each with regression coverage proving the affected code now ends cleanly instead of looping or raising an unexpected error.
 
 ## v1.0.96 — Critical: a dead connection inside ANEView could freeze the whole BBS (September 2026)
 

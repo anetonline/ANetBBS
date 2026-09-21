@@ -646,11 +646,31 @@ class BBSSession:
         those would restart AFK detection recursively with its own
         fresh elapsed=0, since that state lives in the caller's stack
         frame, not on self. Returns the byte(s) read, or None on
-        timeout (no key pressed yet)."""
+        timeout (no key pressed yet). Raises CarrierLost if the
+        connection is actually gone.
+
+        Real gap found via a no-network regression harness (an
+        operator's own tooling): this used to treat BOTH a real "no key
+        yet" timeout AND a stored connection exception (see
+        _reader_stored_exception's docstring) as the same "return None,
+        keep looping" outcome, and never even looked at plain EOF
+        (self.reader.read(1) returning b'' -- no exception at all, just
+        empty bytes) -- so _run_afk_sequence's screensaver stage (a
+        `while True:` with no other exit condition when the outer
+        idle_timeout is off) could loop forever against a connection
+        that had actually already died, in either shape."""
         try:
-            return await asyncio.wait_for(self.reader.read(1), timeout=timeout)
+            data = await asyncio.wait_for(self.reader.read(1), timeout=timeout)
         except asyncio.TimeoutError:
+            stored = self._reader_stored_exception()
+            if stored is not None:
+                raise CarrierLost(str(stored)) from stored
             return None
+        except (ConnectionError, BrokenPipeError, EOFError) as e:
+            raise CarrierLost(str(e)) from e
+        if not data:
+            raise CarrierLost('client disconnected')
+        return data
 
     async def _run_afk_sequence(self, remaining_timeout):
         """Idle-detected: warn with a live countdown, then (if nobody
@@ -681,17 +701,34 @@ class BBSSession:
                 return None
             return deadline - loop.time()
 
+        async def _afk_write(text):
+            # Real gap found via a no-network regression harness (an
+            # operator's own tooling): every write() in this sequence
+            # used to sit behind a blanket `except Exception: pass` --
+            # harmless for a genuine cosmetic write hiccup, but it also
+            # swallowed CarrierLost (write()'s own already-fixed
+            # response to a dead connection, see _reader_stored_exception),
+            # so the screensaver stage's `while True:` (no other exit
+            # condition when the outer idle_timeout is off) looped
+            # forever against a connection that had already died,
+            # repeating this same discard every frame. CarrierLost is
+            # let through here; anything else stays a silent best-effort
+            # cosmetic write, unchanged.
+            try:
+                await self.write(text)
+            except CarrierLost:
+                raise
+            except Exception:
+                pass
+
         async def _afk_return():
             try:
                 self._heartbeat_node(action='Returned from AFK')
             except Exception:
                 pass
-            try:
-                await self.write(
-                    '\x1b[2J\x1b[H'
-                    f"{FG['grn']}{BOLD}Welcome back!{RESET}\r\n\r\n")
-            except Exception:
-                pass
+            await _afk_write(
+                '\x1b[2J\x1b[H'
+                f"{FG['grn']}{BOLD}Welcome back!{RESET}\r\n\r\n")
 
         try:
             self._heartbeat_node(action='Possibly AFK')
@@ -699,14 +736,11 @@ class BBSSession:
             pass
 
         # ---- Warning stage ----
-        try:
-            await self.write(
-                '\x1b[r'                                          # reset any leftover scroll region
-                '\x1b[2J\x1b[H'
-                f"{FG['yel']}{BOLD}You've been idle a while...{RESET}\r\n\r\n"
-                f"{FG['wht']}Press any key to stay connected.{RESET}\r\n")
-        except Exception:
-            pass
+        await _afk_write(
+            '\x1b[r'                                          # reset any leftover scroll region
+            '\x1b[2J\x1b[H'
+            f"{FG['yel']}{BOLD}You've been idle a while...{RESET}\r\n\r\n"
+            f"{FG['wht']}Press any key to stay connected.{RESET}\r\n")
 
         remain = _AFK_WARNING_COUNTDOWN_SECONDS
         while remain > 0:
@@ -714,11 +748,8 @@ class BBSSession:
             if left is not None and left <= 0:
                 raise asyncio.TimeoutError()
             tick = _AFK_TICK_SECONDS if left is None else min(_AFK_TICK_SECONDS, left)
-            try:
-                await self.write(
-                    f'\r{FG["cyan"]}Screensaver in {remain:>2}s...{RESET} ')
-            except Exception:
-                pass
+            await _afk_write(
+                f'\r{FG["cyan"]}Screensaver in {remain:>2}s...{RESET} ')
             data = await self._afk_peek(tick)
             if data:
                 await _afk_return()
@@ -734,10 +765,7 @@ class BBSSession:
         cols = max(1, int(ws[0]) - 2)
         rows = max(1, int(ws[1]) - 2)
         rain = MatrixRain(cols, rows)
-        try:
-            await self.write('\x1b[2J\x1b[H')
-        except Exception:
-            pass
+        await _afk_write('\x1b[2J\x1b[H')
 
         while True:
             left = _time_left()
@@ -745,10 +773,7 @@ class BBSSession:
                 raise asyncio.TimeoutError()
             frame_start = loop.time()
             rain.step()
-            try:
-                await self.write(''.join(rain.frame_lines()))
-            except Exception:
-                pass
+            await _afk_write(''.join(rain.frame_lines()))
             frame_elapsed = loop.time() - frame_start
             wait = max(0.0, _AFK_FRAME_INTERVAL_SECONDS - frame_elapsed)
             if left is not None:
@@ -759,7 +784,7 @@ class BBSSession:
                 raise _AFKInterrupted()
 
     async def _maybe_send_steady_cursor(self):
-        """FR from Winzlo (accessibility): a blinking cursor makes
+        """Real accessibility report: a blinking cursor makes
         iOS/macOS zoom's "follow keyboard focus" repeatedly recenter
         the screen on it, fighting anyone trying to look elsewhere
         (e.g. a menu) while connected -- confirmed reproducible across
@@ -825,6 +850,22 @@ class BBSSession:
                 continue
             except (ConnectionError, BrokenPipeError, EOFError) as e:
                 raise CarrierLost(str(e)) from e
+            except TimeoutError as e:
+                # Real gap found via a no-network regression harness (an
+                # operator's own tooling): read_key() calls
+                # _read_byte_maybe_spinning() directly rather than going
+                # through read_raw() -- so it never got read_raw()'s own
+                # stored-reader-exception handling. With AFK disabled
+                # (the common case), _read_byte_maybe_spinning() takes a
+                # fast path with no wait_for wrapper at all, so a stored
+                # connection exception (see _reader_stored_exception's
+                # docstring) came straight out of self.reader.read() as
+                # a raw TimeoutError, uncaught here -- not a spin by
+                # itself, but inconsistent with every other disconnect
+                # path in this codebase (always CarrierLost), and one
+                # bad caller-side except clause away from being swallowed
+                # into the same busy-loop shape already fixed elsewhere.
+                raise CarrierLost(str(e)) from e
             if not ch:
                 raise CarrierLost('client disconnected')
             # Bare Enter: no-op (lets menus redraw without selecting).
@@ -885,6 +926,10 @@ class BBSSession:
                         pass
                 continue
             except (ConnectionError, BrokenPipeError, EOFError) as e:
+                raise CarrierLost(str(e)) from e
+            except TimeoutError as e:
+                # Same gap as read_key()'s identical handler -- see its
+                # comment for the full reasoning.
                 raise CarrierLost(str(e)) from e
             if not ch:
                 raise CarrierLost('client disconnected')

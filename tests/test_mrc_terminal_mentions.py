@@ -466,7 +466,7 @@ class TypingColorPersistenceTests(unittest.TestCase):
 
 
 _ROOM_USERS = ['<bby', 'Rixter', 'phigan', 'johnny5', 'Sulf', 'Firehawke',
-              'drmad', 'StingRay', 'Winzlo', 'SyntaxError']
+              'drmad', 'StingRay', 'NightOwl', 'SyntaxError']
 
 
 class TabCompleteTests(unittest.TestCase):
