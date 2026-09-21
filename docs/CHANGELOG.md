@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.97`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.0.98`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.0.98 — Codebase-wide audit for the dead-connection freeze/hang bug class (September 2026)
+
+Following the previous two releases' fixes for a dead-connection freeze/spin bug, did a full audit pass across the rest of the codebase (door games, echomail/BinkP, MRC chat, IRC, finger, rlogin/SSH/telnet) for the same underlying shape. Found and fixed a handful of places where output could still hang indefinitely on a connection that stopped responding without actually closing: several screen/animation-drawing paths and the telnet protocol-negotiation reply in the terminal session layer, the finger service's reply, and the MRC bridge's connection to its upstream chat server (the last of these is a single connection shared by every locally connected chat user, so a hang there could have silently affected more than one person at a time). Everything else checked came back clean. Each fix has dedicated regression coverage proving the affected code now recovers with a bounded timeout instead of hanging.
 
 ## v1.0.97 — 3 more dead-connection freeze/spin gaps closed (September 2026)
 

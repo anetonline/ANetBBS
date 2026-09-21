@@ -276,6 +276,18 @@ class MRCConnection:
         self._rx_buf            = b""
         self._send_queue: Deque[str] = deque()
         self._send_queue_max    = int(self.config.get("mrc_send_queue_max", 500))
+        # Real gap found in a security/performance audit (same mechanism as
+        # ANetBBS's own v1.0.87 session write-hang fix): a bare drain() on
+        # this single shared upstream hub connection has no timeout on
+        # asyncio's StreamWriter, so a hub that stops reading (network
+        # stall, hub-side bug) without actually closing the socket parks
+        # whichever coroutine is sending -- and every packet from every
+        # locally connected user funnels through this one connection.
+        # Every drain() below is already inside an `except Exception:`
+        # that requeues the packet and reconnects, so bounding the wait is
+        # the entire fix -- no new control flow needed.
+        self._drain_timeout_seconds = float(
+            self.config.get("mrc_drain_timeout_seconds", 30))
 
         self._reconnector_task: Optional[asyncio.Task] = None
         self._io_task:          Optional[asyncio.Task] = None
@@ -308,7 +320,8 @@ class MRCConnection:
                 pkt = MRCProtocol.create_control_command(
                     "SHUTDOWN", bbs=self.config.get("bridge_bbs", ""))
                 self.writer.write(pkt.encode())
-                await self.writer.drain()
+                await asyncio.wait_for(self.writer.drain(),
+                                        timeout=self._drain_timeout_seconds)
             except Exception:
                 pass
         await self.disconnect()
@@ -340,7 +353,8 @@ class MRCConnection:
 
             hs = MRCProtocol.create_handshake(self.config["bridge_bbs"], self.config.get("platform_info", ""))
             self.writer.write(hs.encode())
-            await self.writer.drain()
+            await asyncio.wait_for(self.writer.drain(),
+                                    timeout=self._drain_timeout_seconds)
 
             await self._set_connected(True)
             logger.info("Connected to MRC server")
@@ -495,7 +509,8 @@ class MRCConnection:
             try:
                 self._latency.note_sent(pkt)
                 self.writer.write(pkt.encode())
-                await self.writer.drain()
+                await asyncio.wait_for(self.writer.drain(),
+                                        timeout=self._drain_timeout_seconds)
             except Exception:
                 self._send_queue.appendleft(pkt)
                 await self._set_connected(False)
@@ -516,7 +531,8 @@ class MRCConnection:
             # real measurement with its queue-wait time.
             self._latency.note_sent(packet)
             self.writer.write(packet.encode())
-            await self.writer.drain()
+            await asyncio.wait_for(self.writer.drain(),
+                                    timeout=self._drain_timeout_seconds)
         except Exception:
             await self._set_connected(False)
             await self.disconnect()

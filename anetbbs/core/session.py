@@ -1598,7 +1598,7 @@ class BBSSession:
             for frame in frames:
                 self.writer.write(up)
                 self.writer.write(frame.encode('latin-1'))
-                await self.writer.drain()
+                await self._drain_protected()
                 await asyncio.sleep(_ANIM_FRAME_DELAY)
         except Exception:
             pass
@@ -1757,12 +1757,12 @@ class BBSSession:
                         _delay = _chunk / _bps_sec
                         for _i in range(0, len(data), _chunk):
                             self.writer.write(data[_i:_i + _chunk])
-                            await self.writer.drain()
+                            await self._drain_protected()
                             if _i + _chunk < len(data):
                                 await asyncio.sleep(_delay)
                     else:
                         self.writer.write(data)
-                        await self.writer.drain()
+                        await self._drain_protected()
                 except UnicodeEncodeError:
                     await self.write(text)
 
@@ -1775,14 +1775,14 @@ class BBSSession:
                     marker = markers[i]
                     if marker == '@PAUSE@':
                         self.writer.write(_PAUSE_PROMPT)
-                        await self.writer.drain()
+                        await self._drain_protected()
                         await self.read_key('')
                     else:
                         await self._play_screen_animation(marker)
 
             if force_pause or db_pause:
                 self.writer.write(_PAUSE_PROMPT)
-                await self.writer.drain()
+                await self._drain_protected()
                 await self.read_key('')
         except Exception:
             pass
@@ -2191,7 +2191,7 @@ class BBSSession:
                 # If client agreed to TTYPE, request the actual type string
                 if IAC + WILL + TTYPE in pending:
                     self.writer.write(IAC + SB + TTYPE + bytes([1]) + IAC + SE)
-                    await self.writer.drain()
+                    await self._drain_protected()
                     await asyncio.sleep(0.1)
                     try:
                         pending2 = await asyncio.wait_for(
@@ -2210,10 +2210,16 @@ class BBSSession:
         any *unexpected* error still hits the logger so real bugs surface."""
         try:
             self.writer.write(IAC + command)
-            await self.writer.drain()
         except (BrokenPipeError, ConnectionResetError,
                 ConnectionAbortedError):
-            pass
+            return
+        except Exception as e:
+            logger.debug("send_telnet_command failed: %s", e)
+            return
+        try:
+            await self._drain_protected()
+        except CarrierLost:
+            raise
         except Exception as e:
             logger.debug("send_telnet_command failed: %s", e)
 
@@ -2448,6 +2454,34 @@ class BBSSession:
         except Exception as e:
             logger.debug("write failed: %s", e)
             return
+        await self._drain_protected()
+
+    async def _drain_protected(self):
+        """Timeout-protected drain() -- the exact same protection every
+        write() call already got, factored out so a handful of call
+        sites that must bypass write()'s own content-transformation can
+        still get it after their own self.writer.write(...): raw telnet
+        protocol bytes (send_telnet_command()/init_session()'s TTYPE
+        reply) must never be run through the petscii/ascii translation
+        meant for display text -- they aren't ANSI escapes or display
+        content at all -- and _show_ansi_screen()/_play_screen_
+        animation() intentionally write already-CP437-encoded bytes
+        raw, for exact byte fidelity (see _show_ansi_screen's own
+        _send_part() docstring). All of them used to call
+        `await self.writer.drain()` directly -- unprotected, exactly
+        the hang WRITE_DRAIN_TIMEOUT_SECONDS's own docstring documents
+        (a client that stops relieving write backpressure hangs that
+        drain(), and the whole session task, forever) -- found via a
+        no-network dead-connection regression harness (an operator's
+        own tooling) auditing every write()-adjacent call site in this
+        file, not from a live report. _show_ansi_screen() in particular
+        runs on essentially every login (welcome screen) and menu
+        art screen, so this was real, broad exposure, not a corner case.
+
+        Raises CarrierLost on a real drain timeout or a stored
+        connection error; returns normally on a cosmetic write hiccup
+        -- identical behavior to write()'s own drain handling, just
+        under a name that doesn't imply write() was the caller."""
         try:
             await asyncio.wait_for(self.writer.drain(),
                                     timeout=WRITE_DRAIN_TIMEOUT_SECONDS)
@@ -2469,8 +2503,8 @@ class BBSSession:
                 # log flood -- this branch never really waited 30s at
                 # all, so say what actually happened instead).
                 logger.error(
-                    'write() drain() found a stored connection error '
-                    'for peer=%s user=%s term=%s: %r -- closing this '
+                    'drain() found a stored connection error for '
+                    'peer=%s user=%s term=%s: %r -- closing this '
                     'session (not a real %ss drain timeout).',
                     peer, getattr(self, 'username', None),
                     getattr(self, 'terminal_type', None), stored,
@@ -2495,7 +2529,7 @@ class BBSSession:
                 except Exception:
                     pass
             logger.error(
-                'write() drain() timed out after %ss for peer=%s '
+                'drain() timed out after %ss for peer=%s '
                 'user=%s term=%s -- client stopped acknowledging output. '
                 'queued_write_buffer_bytes=%s. Closing this session.',
                 WRITE_DRAIN_TIMEOUT_SECONDS, peer,

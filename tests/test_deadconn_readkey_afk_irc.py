@@ -51,79 +51,17 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from anetbbs.core.session import BBSSession, CarrierLost  # noqa: E402
-from anetbbs.features import anetirc2                      # noqa: E402
-
-
-class _FakeWriter:
-    def __init__(self, peer=('1.2.3.4', 1234)):
-        self._peer = peer
-        self.written = bytearray()
-        self._closing = False
-
-    def get_extra_info(self, key, default=None):
-        return self._peer if key == 'peername' else default
-
-    def write(self, data):
-        self.written += data
-
-    async def drain(self):
-        pass
-
-    def is_closing(self):
-        return self._closing
-
-    def close(self):
-        self._closing = True
-
-    def get_write_buffer_size(self):
-        return 0
-
-    async def wait_closed(self):
-        pass
-
-
-class _DeadReader:
-    """A StreamReader-alike that already has a real connection-level
-    exception stored on it -- read() re-raises it immediately, on every
-    call, forever, exactly like the real asyncio.StreamReader does
-    (confirmed against CPython 3.12's asyncio/streams.py)."""
-
-    def __init__(self, exc):
-        self._exc = exc
-
-    def exception(self):
-        return self._exc
-
-    async def read(self, n=1):
-        raise self._exc
-
-
-class _EofReader:
-    """A StreamReader-alike at plain EOF -- read() returns b'' forever,
-    no exception at all (real asyncio behavior for a cleanly-closed-but-
-    unobserved transport)."""
-
-    def exception(self):
-        return None
-
-    async def read(self, n=1):
-        return b''
-
-
-def _make_session(reader, afk_warning_seconds=0):
-    writer = _FakeWriter()
-    session = BBSSession(reader, writer, config={})
-    session.user = {'id': 1}
-    session.afk_warning_seconds = afk_warning_seconds
-    session.idle_timeout = 0
-    session.window_size = (80, 24)
-    return session, writer
-
-
-def _run(coro, timeout=5):
-    return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
+from anetbbs.core.session import CarrierLost  # noqa: E402
+from anetbbs.features import anetirc2          # noqa: E402
+from _deadconn_fixtures import (  # noqa: E402
+    DeadReader as _DeadReader,
+    EofReader as _EofReader,
+    FakeWriter as _FakeWriter,
+    make_session as _make_session,
+    run as _run,
+)
 
 
 class ReadKeyStoredExceptionTests(unittest.TestCase):

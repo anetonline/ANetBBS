@@ -33,59 +33,20 @@ poll TimeoutError) propagate out of _read_key() instead of being
 silently discarded, so _ui_loop()/_chat_session()/run() unwind this
 IRC session the same clean way every other disconnect already does.
 """
-import asyncio
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from anetbbs.core.session import CarrierLost
 from anetbbs.features.anetirc2 import ANetIRC, _Screen
-
-
-class _RaisingSession:
-    """Fake BBSSession whose read_raw() always raises, simulating a
-    transport that's already at permanent EOF (matches the real
-    incident: the remote IRC server's peer already closed, confirmed
-    live via a lingering CLOSE-WAIT socket)."""
-
-    def __init__(self, exc):
-        self._exc = exc
-        self.window_size = (80, 24)
-
-    async def read_raw(self, n=1, allow_afk=False):
-        raise self._exc
-
-    async def write(self, text):
-        pass
-
-
-class _TimingOutThenRaisingSession:
-    """First call times out (a normal idle poll tick), second call
-    raises CarrierLost -- confirms the fix doesn't just get lucky by
-    never legitimately timing out first."""
-
-    def __init__(self):
-        self._calls = 0
-        self.window_size = (80, 24)
-
-    async def read_raw(self, n=1, allow_afk=False):
-        self._calls += 1
-        if self._calls == 1:
-            await asyncio.sleep(10)  # never returns in time -- forces the caller's own wait_for to time out
-        raise CarrierLost('client disconnected')
-
-    async def write(self, text):
-        pass
-
-
-def _run(coro, timeout=5):
-    """A real bounded timeout so a regression (the loop hanging/
-    spinning forever) FAILS the test instead of hanging the whole
-    test run -- same discipline as
-    tests/test_mrc_chat_disconnect_busy_loop.py's own _run()."""
-    return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
+from _deadconn_fixtures import (  # noqa: E402
+    RaisingSession as _RaisingSession,
+    TimingOutThenRaisingSession as _TimingOutThenRaisingSession,
+    run as _run,
+)
 
 
 class ReadKeyPropagatesCarrierLostTests(unittest.TestCase):
