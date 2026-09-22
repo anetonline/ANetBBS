@@ -261,16 +261,16 @@ class DefaultRoomTwitFilterClockFormatPrefsTests(unittest.TestCase):
         })
 
     def test_default_room_normalized_and_persisted(self):
-        # MRCProtocol.norm_room() strips a leading '#' and swaps spaces
-        # for underscores -- it does NOT lowercase (matches how `room`
-        # itself is handled everywhere else in this file, e.g.
-        # _handle_join_room). The terminal client lowercases client-side
-        # before ever sending /set defaultroom, same as it does for
-        # /join -- this test exercises the bridge layer alone.
+        # MRCProtocol.norm_room() strips a leading '#', swaps spaces for
+        # underscores, and (as of the 2026-09-22 case-insensitivity fix
+        # -- see mrc_protocol.py's norm_room docstring) lowercases, so
+        # `default_room` gets the exact same normalization every other
+        # room reference does everywhere else in this file (e.g.
+        # _handle_join_room, _sessions_in_room).
         _run(self.app._handle_set_prefs(self.ws_id, {"default_room": "#My Room"}))
-        self.assertEqual(self.ws.sent[0]["prefs"]["default_room"], "My_Room")
+        self.assertEqual(self.ws.sent[0]["prefs"]["default_room"], "my_room")
         prof = self.app.db.get_profile("Alice")
-        self.assertEqual(prof["default_room"], "My_Room")
+        self.assertEqual(prof["default_room"], "my_room")
 
     def test_default_room_loaded_on_next_join(self):
         _run(self.app._handle_set_prefs(self.ws_id, {"default_room": "sysops"}))
