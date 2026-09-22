@@ -88,7 +88,30 @@ class MRCProtocol:
 
     @classmethod
     def norm_room(cls, room: str) -> str:
-        r = (room or '').strip()
+        # Real live bug found 2026-09-22: MRC room names are
+        # case-insensitive on the wire -- confirmed directly, every
+        # incoming room-scoped packet from the real hub uses lowercase
+        # ("lobby"), regardless of the case a NEWROOM command asked to
+        # join with (the hub accepts "Lobby" from us and echoes back
+        # "lobby" in its own broadcasts, treating them as the exact
+        # same room throughout). This function is the single
+        # normalization chokepoint used both for STORING a session's
+        # room and for MATCHING an incoming packet's room field against
+        # it (_sessions_in_room, _session_room, the same-room /join
+        # no-op guard, ...) -- without case-folding here, a session
+        # that joined via any path using a different case than the
+        # hub's own (the web UI's own default room value is "Lobby",
+        # capital L) silently never matched a single incoming room
+        # broadcast again: no chat from other users, no ROOMTOPIC, no
+        # join/leave notices for anyone else -- while still receiving
+        # its own personally-addressed replies (MOTD, CHATTERS, /who)
+        # completely normally, since those are addressed by nick, not
+        # room. Reported live as "it showed motd and chatters and I
+        # was still not in lobby" -- the join itself had fully
+        # succeeded, hub-side and bridge-side alike; every subsequent
+        # room broadcast was just being silently filtered out by this
+        # exact mismatch.
+        r = (room or '').strip().lower()
         if r.startswith('#'):
             r = r[1:]
         r = r.replace(' ', '_')
