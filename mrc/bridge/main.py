@@ -804,6 +804,16 @@ class BridgeApp:
         # reply, not the request itself).
         self._last_umrc_stats = (0, 0, 0, 0)
 
+        # See _send_join_payloads' own comment at the BANNERS request
+        # for the real gap this closes -- BANNER: replies carry no
+        # room/session scoping from the hub at all, so this tracks
+        # who's actually expecting one right now (nick + a short
+        # deadline) so _on_upstream_packet can route it to just them
+        # instead of broadcasting every join's banners to everyone
+        # already in chat.
+        self._pending_banner_nick  = None
+        self._pending_banner_until = 0.0
+
         # Default False: verified against the real reference client
         # (anetmrc_v1.3.9/src/helper_protocol.c) -- it sends NEWROOM and
         # joins the room unconditionally right after the handshake,
@@ -1351,6 +1361,20 @@ class BridgeApp:
             await self.mrc.send_packet(pkt)
             await self._sleep_delay()
         if self.request_banners_on_join:
+            # Real gap found live (2026-09-21) testing 2 simultaneous
+            # local sessions: the hub's BANNER: reply carries NO room
+            # or session scoping at all (to_user=CLIENT, from_room
+            # and to_room both empty -- confirmed against a real wire
+            # capture), so _on_upstream_packet's normal fallback for
+            # an unscoped CLIENT reply (broadcast to every locally
+            # in-room session) sent every join's own banner burst to
+            # EVERYONE already in chat, not just the session that
+            # asked -- with N simultaneous users, everyone saw N
+            # duplicate banner bursts. Tracking who's actually
+            # expecting one right now lets that reply route to just
+            # them; see the read side in _on_upstream_packet.
+            self._pending_banner_nick  = eff_nick
+            self._pending_banner_until = time.monotonic() + 5.0
             await self.mrc.send_packet(MRCProtocol.create_server_command(eff_nick, self.config["bridge_bbs"], room, "BANNERS"))
             await self._sleep_delay()
         if self.request_motd_on_join:
@@ -1589,6 +1613,18 @@ class BridgeApp:
             room = MRCProtocol.norm_room(to_room or from_room)
             if room:
                 targets = self._sessions_in_room(room)
+            elif (from_user == "SERVER" and msg.upper().startswith("BANNER:")
+                  and self._pending_banner_nick
+                  and time.monotonic() < self._pending_banner_until):
+                # See _send_join_payloads' own comment at the BANNERS
+                # request -- route to just the session that's actually
+                # expecting this reply right now instead of every
+                # locally in-room session. Falls through to the
+                # broadcast-everyone default below once no join is
+                # pending (a genuine unscoped server-wide announcement
+                # with nobody currently awaiting banners should still
+                # reach everyone, same as before this fix).
+                targets = self._sessions_for_user(self._pending_banner_nick)
             else:
                 targets = {sid for sid, s in self.db.list_sessions().items() if s.get("in_room")}
             await self._send_to_sessions(targets, payload)
