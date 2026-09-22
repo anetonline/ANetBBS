@@ -1894,6 +1894,10 @@ if idx != -1:
         auth_request /mrc-auth-check;
         proxy_pass         http://127.0.0.1:${REAL_MRC_PORT}/ws;
         proxy_http_version 1.1;
+        proxy_set_header   Host              \$host;
+        proxy_set_header   X-Real-IP         \$remote_addr;
+        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
         proxy_set_header   Upgrade    \$http_upgrade;
         proxy_set_header   Connection \"upgrade\";
         proxy_read_timeout 86400s;
@@ -1910,6 +1914,47 @@ if idx != -1:
 " 2>/dev/null && { NGINX_CHANGED=true; ok "nginx: /mrcws location added"; } || \
         warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
     fi
+
+    # Fix: /mrcws and /socket.io/ set their OWN proxy_set_header lines
+    # (Upgrade/Connection, needed for the WebSocket handshake) without
+    # re-declaring the server-level Host/X-Real-IP/X-Forwarded-For/
+    # X-Forwarded-Proto block above them. That's not a per-header
+    # override in nginx -- ANY proxy_set_header at a location level
+    # drops ALL inherited ones from the server level, all-or-nothing.
+    # Every install.sh-generated config before this fix has this bug in
+    # both locations. For /mrcws specifically this meant the bridge
+    # never learned a web caller's real IP (X-Forwarded-For silently
+    # empty), which it correctly treats the same as no trusted USERIP
+    # -- forcing an extra /identify on the web MRC client that the
+    # terminal client (which sends its own real IP explicitly, not
+    # relying on nginx) never hit. Self-heals an existing block in
+    # place rather than requiring a fresh reinstall.
+    for NGINX_WS_LOC in "/mrcws" "/socket.io/"; do
+        NGINX_WS_LOC_ESCAPED="$(printf '%s' "$NGINX_WS_LOC" | sed 's/[.[\*^$/]/\\&/g')"
+        if grep -q "location ${NGINX_WS_LOC_ESCAPED} {" "$NGINX_AVAIL" 2>/dev/null; then
+            python3 -c "
+import re
+loc = '''$NGINX_WS_LOC'''
+path = '$NGINX_AVAIL'
+txt = open(path).read()
+pat = re.compile(r'(location ' + re.escape(loc) + r' \{)(.*?)(\n    \})', re.DOTALL)
+m = pat.search(txt)
+if m and 'X-Forwarded-For' not in m.group(2):
+    insert = ('\n        proxy_set_header   Host              \$host;'
+              '\n        proxy_set_header   X-Real-IP         \$remote_addr;'
+              '\n        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;'
+              '\n        proxy_set_header   X-Forwarded-Proto \$scheme;')
+    new_body = m.group(2) + insert
+    txt = txt[:m.start()] + m.group(1) + new_body + m.group(3) + txt[m.end():]
+    open(path, 'w').write(txt)
+    print('patched')
+" 2>/dev/null | grep -q patched && {
+                info "Patching nginx: $NGINX_WS_LOC missing X-Forwarded-For (web caller IPs were silently dropped)"
+                NGINX_CHANGED=true
+                ok "nginx: $NGINX_WS_LOC forwarded-headers fixed"
+            }
+        fi
+    done
 
     # SELinux (Fedora/RHEL/CentOS default): nginx's proxy_pass to backend
     # ports is blocked by policy unless httpd_can_network_connect is on --
