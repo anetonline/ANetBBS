@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.0.99`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.0`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.0 — Web MRC multi-line sending; uMRC live-testing fixes (September 2026)
+
+The web MRC chat client can now send messages longer than the old ~140-character single-line limit. Instead of silently blocking the Enter key or refusing to send ("Message too long"), a long message is now automatically split into multiple word-boundary "(1/3) ..." chunks and sent in sequence, matching how the terminal MRC client and uMRC itself have always handled this. Covers both web MRC clients that ship with ANetBBS. Join-rejection and similar chat errors also now show a brief on-screen notice instead of failing silently.
+
+Fixed a bug where joining chat through the web client could show a duplicate "has arrived" line for the same caller and appear to join a room, immediately demand /identify, then silently rejoin — all from one connection. Root cause was a packet-ordering mismatch against real uMRC client behavior: the bridge was requesting room data before telling the network the caller's IP, instead of after. Also fixed a related case where the room's message-of-the-day and current-user list could be shown twice (or three times) for a single join, and made a manual `/join` naming the room you're already in a true no-op instead of silently leaving and rejoining it. Installs running their own separately-managed nginx reverse proxy (uncommon, but the original ANetBBS install itself is set up this way) could also show a falsely-optimistic "joined" state before the network actually confirmed it; fixed.
+
+Confirmed room names on the real MRC network are case-sensitive — a sysop's custom rooms that differ only by capitalization ("Lobby" vs. "lobby") are genuinely separate rooms, same as they've always been. The one real related bug: the web client's own default room selection didn't match the network's own lowercase name for that specific well-known default room, so joining with nothing typed could land in the wrong room; fixed at that one narrow spot.
 
 ## v1.0.99 — Native uMRC (umrc-client) support on the MRC bridge (September 2026)
 
