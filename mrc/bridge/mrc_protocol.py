@@ -88,30 +88,23 @@ class MRCProtocol:
 
     @classmethod
     def norm_room(cls, room: str) -> str:
-        # Real live bug found 2026-09-22: MRC room names are
-        # case-insensitive on the wire -- confirmed directly, every
-        # incoming room-scoped packet from the real hub uses lowercase
-        # ("lobby"), regardless of the case a NEWROOM command asked to
-        # join with (the hub accepts "Lobby" from us and echoes back
-        # "lobby" in its own broadcasts, treating them as the exact
-        # same room throughout). This function is the single
-        # normalization chokepoint used both for STORING a session's
-        # room and for MATCHING an incoming packet's room field against
-        # it (_sessions_in_room, _session_room, the same-room /join
-        # no-op guard, ...) -- without case-folding here, a session
-        # that joined via any path using a different case than the
-        # hub's own (the web UI's own default room value is "Lobby",
-        # capital L) silently never matched a single incoming room
-        # broadcast again: no chat from other users, no ROOMTOPIC, no
-        # join/leave notices for anyone else -- while still receiving
-        # its own personally-addressed replies (MOTD, CHATTERS, /who)
-        # completely normally, since those are addressed by nick, not
-        # room. Reported live as "it showed motd and chatters and I
-        # was still not in lobby" -- the join itself had fully
-        # succeeded, hub-side and bridge-side alike; every subsequent
-        # room broadcast was just being silently filtered out by this
-        # exact mismatch.
-        r = (room or '').strip().lower()
+        # Real live correction 2026-09-22: a same-day fix here briefly
+        # added .lower() based on limited evidence -- every test that
+        # day only ever compared "Lobby" against "lobby" (the default
+        # room), which the hub happens to treat case-insensitively as
+        # its own well-known default. That was wrongly generalized into
+        # "MRC room names are case-insensitive" -- confirmed wrong: real
+        # custom rooms ARE case-sensitive on the network ("/join Lobby"
+        # and "/join lobby" can be, and for some sysops' communities
+        # are, two genuinely different rooms). Lowercasing here would
+        # have silently merged people's separate custom rooms together.
+        # Reverted -- room identity stays exactly as typed. The actual
+        # bug that prompted the .lower() attempt (a session joined via
+        # the web UI's own "Lobby" default never receiving room
+        # broadcasts, since the hub's own canonical name for that
+        # specific well-known room is lowercase "lobby") is fixed at
+        # its real source instead: the web UI's own default room value.
+        r = (room or '').strip()
         if r.startswith('#'):
             r = r[1:]
         r = r.replace(' ', '_')
