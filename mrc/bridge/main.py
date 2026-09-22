@@ -1437,6 +1437,7 @@ class BridgeApp:
         self._cancel_pending_disconnect(eff_nick)
         if not eff_nick or not room:
             return
+        join_started_at = time.monotonic()
 
         # Real live bug found 2026-09-22: a fresh join from ANetBBS's
         # own clients (web/terminal/raw-TCP alike, since they all share
@@ -1485,6 +1486,28 @@ class BridgeApp:
         # actually joined from the hub's own perspective, instead of
         # after this entire followup sequence completes, means none of
         # these early replies get lost.
+        #
+        # Real live UX complaint found 2026-09-22: BANNERS/MOTD/CHATTERS
+        # used to be requested unconditionally right here, every single
+        # time this function ran -- so a join the hub went on to reject
+        # ("Cannot join ROOM, please IDENTIFY") still showed a full
+        # MOTD/chatter-list scroll, and then showed it AGAIN when the
+        # eventual successful re-join (after /identify) ran this same
+        # function a second time -- two or three complete MOTD/CHATTERS
+        # scrolls for one join, with the actual "please identify" notice
+        # buried in between them. Re-fetch the session (the copy this
+        # function was called with can be stale by now) and check
+        # whether the rejection handler above already flagged THIS
+        # attempt as rejected while we were sending the packets above --
+        # if so, stop here: don't claim the room, don't request the
+        # payloads. The rejection handler already corrected in_room and
+        # told the caller what's going on; the identify-triggered re-run
+        # of this same function is what actually shows MOTD/CHATTERS,
+        # exactly once, for the join that really succeeded.
+        fresh = self.db.get_session(ws_id_str) or sess
+        if fresh.get("last_join_rejected_at", 0) > join_started_at:
+            return
+
         sess["waiting_for_identify"] = False
         sess["in_room"]              = True
         await self.db.save_session_async(ws_id_str, sess)
@@ -1633,9 +1656,25 @@ class BridgeApp:
                     if int(ws_id_str) not in self.websockets:
                         continue
                     room = self._session_room(sess)
+                    # Real live UX complaint found 2026-09-22: even with
+                    # in_room corrected above, _complete_join_after_
+                    # identify's own optimistic call had already fired
+                    # off BANNERS/MOTD/CHATTERS before this rejection
+                    # arrived -- and the eventual successful re-join
+                    # (after /identify) requests them again, so the
+                    # caller watched the same MOTD/chatter list scroll
+                    # by two or three times in a row for one join. This
+                    # timestamp lets _complete_join_after_identify check,
+                    # right before it would otherwise request them, "did
+                    # THIS join attempt get rejected while I was
+                    # waiting?" and skip the request entirely if so --
+                    # a timestamp rather than a bare bool so an OLDER
+                    # rejection can never suppress a genuinely later,
+                    # successful attempt's payloads.
+                    sess["last_join_rejected_at"] = time.monotonic()
                     if sess.get("in_room"):
                         sess["in_room"] = False
-                        await self.db.save_session_async(ws_id_str, sess)
+                    await self.db.save_session_async(ws_id_str, sess)
                     ws = self.websockets.get(int(ws_id_str))
                     if ws:
                         await self._safe_send(ws, {
