@@ -4,6 +4,8 @@ Added the option for ANetBBS's own MRC chat bridge to also accept direct connect
 
 Also fixed, found along the way: `mrc/bridge/config.json`'s `log_level` setting never actually had any effect, on any install — editing it and restarting silently did nothing. In-chat latency now reaches `umrc-client` sessions too, not just the web/terminal clients (it was silently never sent to them at all). A join-time server banner could get sent to every other locally connected chat session instead of just the person joining, most noticeable with two or more people in chat at once — not specific to uMRC, an existing gap this testing happened to surface. The terminal MRC client's bell also used to keep ringing every time a mentioned/DM line got redrawn (a resize, a scroll, another new message) instead of only once when it arrived; fixed, and a new `/sound on|off` preference lets a caller turn the bell off entirely, mirroring uMRC's own "Use sound" setting.
 
+Bigger fix from the same round of testing: callers could need to re-`/identify` far more often than expected, even though MRC Trust is meant to last weeks. Root cause was a reconnect-ordering bug — the bridge announced itself ready to the rest of the app (which re-announces every previously-active caller to the room) before it had actually told the upstream MRC network which BBS it even was, so those re-announcements arrived before the network had anything to recognize the caller's trust against. Fixed by finishing the bridge's own handshake first.
+
 **Testing in progress on real hardware (Pi + production ANetBBS) — held back from the normal release train until that's complete.**
 
 # ANetBBS v1.0.98 — Codebase-wide audit for the dead-connection freeze/hang bug class (September 2026)

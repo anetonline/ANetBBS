@@ -249,31 +249,45 @@ sudo systemctl restart anetbbs-mrc-bridge
 | Chat connects, then immediately drops back to the main menu | `mrc_tcp_listen_host` is set to a LAN IP instead of `127.0.0.1`/`0.0.0.0` -- see step 1. |
 | Stats screen shows blank/zero and never updates | `mrc_stats_file_path` isn't set, or no one is currently joined to a room on *this* bridge (see the stats section above) -- not necessarily a bug. |
 | Stats show real-looking but oddly small/zero numbers (e.g. 0 BBSes) | Running an older build from before this feature was reworked to relay the hub's real `STATS:` reply -- redeploy the current code. |
-| A departed caller's handle shows as stuck/timed-out on the hub's own side for a few minutes after leaving | Expected, current behavior -- see "Needing to `/identify` repeatedly" below. |
+| A departed caller's handle shows as stuck/timed-out on the hub's own side for a few minutes after leaving | Expected, current behavior -- `LOGOFF` is deliberately not sent on an individual leave; see `mrc_send_logoff_on_leave` below. |
 
-### Needing to `/identify` repeatedly (unresolved, actively being investigated)
+### Needing to `/identify` repeatedly (root-caused and fixed, 2026-09-22)
 
-A live report: an ANetBBS caller (web or terminal) can need to
+A live report: an ANetBBS caller (web or terminal) could need to
 `/identify` again far more often than a `umrc-client` caller on the
 same bridge, even though MRC Trust is documented as lasting 30 days.
-Not yet root-caused. A real, live-evidence-backed regression already
-ruled out one theory: `mrc/bridge/main.py` used to send `LOGOFF` to
-the hub on every individual caller leaving a room, and a captured
-full packet trace showed that ended the hub's MRC Trust for that
-handle immediately -- so `LOGOFF` is not sent by default (an
-individual leave never needs to end the underlying hub connection;
-this bridge holds one shared connection for every local caller). The
-one accepted cost of staying silent is the "stuck on the hub's side"
-symptom noted in the table above.
+Root-caused with a byte-for-byte wire comparison: the exact same
+`NEWROOM` packet got rejected on one join and accepted on another,
+with the only difference being whether the handle had recently
+identified -- and confirmed against a real, separate reference
+`umrc-bridge` install that survives its own restarts without ever
+demanding a fresh `/identify` (real MRC Trust genuinely does last the
+documented ~30 days there).
 
-The `LOGOFF` wire format used in that original test already matched
-the documented spec exactly, so simply "fixing the format" is not
-expected to resolve it on its own -- an opt-in `mrc_send_logoff_on_leave`
-config key (default `false`) exists so this can be re-verified against
-a real hub without committing to the behavior change: enable it,
-leave a room, then immediately try rejoining with the same handle, and
-check whether a fresh `/identify` is now required. Report back whether
-this changes anything either way.
+The actual bug: `MRCConnection.connect()` announced "upstream
+connected" -- which auto-rejoins every handle that was in a room
+before the reconnect, sending a real `IAMHERE`+`NEWROOM` for each --
+**before** sending this bridge's own `CAPABILITIES`/`BBSMETA`/`INFO*`
+handshake, and before it was even listening for the hub's reply. Every
+rejoin raced the hub's own per-connection setup of which BBS this
+connection even is, arriving before the hub had anything to resolve
+"Handle + BBS Name + BBS IP Address" (the documented MRC Trust key)
+against -- so it fell back to demanding a fresh identify on close to
+every reconnect, not because Trust had actually expired. Fixed by
+sending the handshake (and starting the receive loop) before
+announcing the connection as ready, so the hub always has full BBS
+context before any per-handle rejoin traffic goes out.
+
+This was investigated alongside a separate, narrower question that's
+still open: an individual caller's own `LOGOFF` was previously found
+(via live testing) to end that handle's Trust immediately, so it's not
+sent by default -- one caller leaving a room doesn't need to end the
+underlying shared hub connection anyway. An opt-in
+`mrc_send_logoff_on_leave` config key (default `false`) exists to
+re-verify that specific question against a real hub now that the
+reconnect-ordering bug above is fixed, in case it changes the
+picture -- not expected to be needed for the `/identify`-frequency
+issue itself, which the fix above should already resolve on its own.
 
 ### Known simplifications
 
