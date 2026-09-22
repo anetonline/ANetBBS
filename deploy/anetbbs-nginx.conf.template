@@ -70,6 +70,12 @@ server {
     location /socket.io/ {
         proxy_pass         http://127.0.0.1:5000/socket.io/;
         proxy_http_version 1.1;
+        # Same non-inheritance gotcha as /mrcws below -- re-declare the
+        # server-level headers since this location sets its own.
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_read_timeout 86400s;
@@ -95,6 +101,23 @@ server {
         # — that's the port the bridge process actually binds to.
         proxy_pass         http://127.0.0.1:5001/ws;
         proxy_http_version 1.1;
+        # Real live bug found 2026-09-22: nginx does NOT inherit the
+        # server-level proxy_set_header block (above) into a location
+        # that sets ANY proxy_set_header of its own -- it's all-or-
+        # nothing per level, not a per-header override. Since this
+        # location already needed Upgrade/Connection for the WebSocket
+        # handshake, Host/X-Real-IP/X-Forwarded-For/X-Forwarded-Proto
+        # were silently dropped for every /mrcws connection. The bridge
+        # relies on X-Forwarded-For to learn a web caller's real IP
+        # (mrc/bridge/main.py's _handle_join_room, USERIP: on join) --
+        # without it every web MRC session looked IP-less, which the
+        # bridge correctly treats the same as never having a trusted
+        # USERIP, forcing an extra /identify that the terminal client
+        # (which sends its own real IP explicitly) never hit.
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_read_timeout 86400s;

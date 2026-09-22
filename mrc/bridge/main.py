@@ -1265,6 +1265,55 @@ class BridgeApp:
             # than assumed. Safe to remove once confirmed correct.
             if any(kw in low for kw in ("identif", "cannot join", "no route")):
                 logger.info("MRC identify/join-related SERVER text: %r", msg)
+            if "cannot join" in low and "identif" in low and to_user:
+                # Real live symptom found 2026-09-22: a session's initial
+                # optimistic join (_handle_join_room -> _complete_join_
+                # after_identify, called immediately in default/non-strict
+                # mode) can be rejected by the hub for a REGISTERED-but-
+                # not-yet-identified handle -- but _complete_join_after_
+                # identify already flipped in_room=True and requested
+                # BANNERS/MOTD/CHATTERS before this rejection ever arrives,
+                # so the caller sees what looks like a normal join (their
+                # own "has arrived" echo, MOTD) with no indication anything
+                # is wrong -- until they try to chat and the hub bounces it
+                # ("No route to a room from your user, /join a room
+                # first."), or until a second, genuinely-successful join
+                # fires automatically after they /identify, producing a
+                # visibly duplicated "has arrived" and a confusing "why do
+                # I have to join twice" experience. Correct in_room back to
+                # False (this join did NOT actually succeed) and tell the
+                # affected session directly what's going on, instead of
+                # silently leaving them in a believed-joined-but-actually-
+                # not state. Only default-mode sessions can ever see this
+                # rejection at all -- strict mode never optimistically
+                # joins before identify succeeds -- but guard on
+                # waiting_for_identify anyway (skip it, don't touch it)
+                # so this can never interfere with strict mode's own
+                # already-correct post-identify auto-join logic above.
+                rejected_handle = to_user.strip().lower()
+                for ws_id_str, sess in self.db.list_sessions().items():
+                    if (sess.get("handle") or "").strip().lower() != rejected_handle:
+                        continue
+                    if sess.get("waiting_for_identify"):
+                        continue
+                    if int(ws_id_str) not in self.websockets:
+                        continue
+                    room = self._session_room(sess)
+                    if sess.get("in_room"):
+                        sess["in_room"] = False
+                        await self.db.save_session_async(ws_id_str, sess)
+                    ws = self.websockets.get(int(ws_id_str))
+                    if ws:
+                        await self._safe_send(ws, {
+                            "type": "error",
+                            "message": (
+                                f"MRC Trust required for this handle -- "
+                                f"use /identify <password> to finish "
+                                f"joining #{room}." if room else
+                                "MRC Trust required for this handle -- "
+                                "use /identify <password> to finish joining."
+                            ),
+                        })
             if "successfully identified" in low:
                 identified_handle = self._extract_identified_handle(msg)
                 if identified_handle:

@@ -237,6 +237,115 @@ class DefaultModeIdentifySelfHealTests(unittest.TestCase):
         self.assertEqual(calls_after, calls_before)
 
 
+class RejectedJoinFeedbackTests(unittest.TestCase):
+    """Regression test for a real live report (2026-09-22, web MRC
+    client): a caller saw a duplicated "has arrived" line and a
+    confusing "auto-joins, then you have to identify, then re-join"
+    sequence. Root-caused against a real captured wire trace: this is
+    the exact DefaultModeIdentifySelfHealTests scenario above, but from
+    the REJECTED session's own point of view -- _handle_join_room's
+    optimistic join already set in_room=True and showed MOTD/CHATTERS
+    before the hub's "Cannot join ROOM, please IDENTIFY to use this
+    handle" rejection ever arrives, so the caller saw what looked like
+    a normal join with no indication anything was wrong, until a second
+    join (either a manual retry or the automatic post-identify re-join)
+    produced a second, visibly duplicated "has arrived". Fix: correct
+    in_room back to False and tell the affected session directly what
+    happened, right when the rejection arrives."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_bridge(self._tmp.name, identify_required_mode=False)
+        self.ws_id = 601
+        self.ws = _FakeWs()
+        self.app.websockets[self.ws_id] = self.ws
+
+    def _reject(self, handle):
+        return self.app._on_upstream_packet({
+            "from_user": "SERVER", "to_user": handle,
+            "message": ('|16|15*|00.|15(|14Notice|15) Cannot join ROOM, '
+                        'please IDENTIFY to use this handle'),
+        })
+
+    def test_rejection_corrects_in_room_back_to_false(self):
+        _run(self.app._handle_join_room(self.ws_id, {"handle": "StingRay-2", "room": "lobby"}))
+        sess_before = self.app.db.get_session(str(self.ws_id))
+        self.assertTrue(sess_before["in_room"])  # optimistic join already happened
+
+        _run(self._reject("StingRay-2"))
+
+        sess_after = self.app.db.get_session(str(self.ws_id))
+        self.assertFalse(sess_after["in_room"])
+
+    def test_rejection_sends_a_clear_identify_message_to_that_session(self):
+        _run(self.app._handle_join_room(self.ws_id, {"handle": "StingRay-2", "room": "lobby"}))
+        self.ws.sent.clear()
+
+        _run(self._reject("StingRay-2"))
+
+        errors = [m for m in self.ws.sent if m.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("/identify", errors[0]["message"])
+
+    def test_rejection_for_a_different_handle_does_not_touch_this_session(self):
+        _run(self.app._handle_join_room(self.ws_id, {"handle": "StingRay-2", "room": "lobby"}))
+        self.ws.sent.clear()
+
+        _run(self._reject("SomeoneElse"))
+
+        sess = self.app.db.get_session(str(self.ws_id))
+        self.assertTrue(sess["in_room"])
+        self.assertEqual(self.ws.sent, [])
+
+    def test_successful_identify_after_a_rejection_still_auto_rejoins(self):
+        # Confirms the fix above doesn't regress the already-working
+        # self-heal from DefaultModeIdentifySelfHealTests: a rejection
+        # followed by a successful /identify must still end with the
+        # caller actually in the room.
+        _run(self.app._handle_join_room(self.ws_id, {"handle": "StingRay-2", "room": "lobby"}))
+        _run(self._reject("StingRay-2"))
+        sess_mid = self.app.db.get_session(str(self.ws_id))
+        self.assertFalse(sess_mid["in_room"])
+
+        _run(self.app._on_upstream_packet({
+            "from_user": "SERVER", "to_user": "CLIENT",
+            "message": "You have successfully identified. Welcome back StingRay-2",
+        }))
+
+        sess_after = self.app.db.get_session(str(self.ws_id))
+        self.assertTrue(sess_after["in_room"])
+
+    def test_strict_mode_waiting_session_is_not_touched(self):
+        # Strict mode never optimistically joins before identify
+        # succeeds, so it can never see this rejection for real -- but
+        # confirm the guard actually skips a waiting_for_identify
+        # session rather than relying on that being merely unlikely.
+        strict_app = _make_bridge(self._tmp.name, identify_required_mode=True,
+                                   post_identify_auto_join=True)
+        ws_id = 602
+        ws = _FakeWs()
+        strict_app.websockets[ws_id] = ws
+        _run(strict_app._handle_join_room(ws_id, {"handle": "Bob", "room": "lobby"}))
+        ws.sent.clear()
+
+        _run(strict_app._on_upstream_packet({
+            "from_user": "SERVER", "to_user": "Bob",
+            "message": ('|16|15*|00.|15(|14Notice|15) Cannot join ROOM, '
+                        'please IDENTIFY to use this handle'),
+        }))
+
+        sess = strict_app.db.get_session(str(ws_id))
+        self.assertFalse(sess["in_room"])
+        self.assertTrue(sess["waiting_for_identify"])
+        # The raw SERVER text still gets forwarded as an ordinary
+        # mrc_message (pre-existing, unrelated behavior) -- what matters
+        # here is that the NEW rejection-feedback block didn't also fire
+        # an "error" message for a session it's supposed to skip.
+        errors = [m for m in ws.sent if m.get("type") == "error"]
+        self.assertEqual(errors, [])
+
+
 class StripPipeCodesTests(unittest.TestCase):
     def test_strips_pipe_color_codes(self):
         self.assertEqual(_strip_pipe_codes('|10StingRay|07'), 'StingRay')
