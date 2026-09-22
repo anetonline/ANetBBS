@@ -2443,7 +2443,21 @@ class BridgeApp:
         # by definition -- skip the announce+payload cascade below
         # entirely (still confirm room_changed so the client's own UI
         # doesn't look like the command did nothing).
-        if sess.get("in_room") and MRCProtocol.norm_room(sess.get("room", "")) == new_room:
+        # Real live bug found 2026-09-22 testing the fix right above:
+        # MRC room names are case-insensitive on the wire (confirmed
+        # live -- the hub treats "Lobby" and "lobby" as the exact same
+        # room throughout this whole session's captures), but
+        # norm_room() only strips a leading '#' and swaps spaces for
+        # underscores -- it never case-folds. The web UI's own default
+        # room value is "Lobby" (capital L), so a session that joined
+        # via that default and then typed a lowercase "/join lobby"
+        # had its room compared as "Lobby" != "lobby" here and the
+        # no-op guard silently never fired -- .lower() on both sides
+        # closes that without touching norm_room() itself, which other
+        # callers may rely on preserving case for a real (not
+        # same-room) comparison or display purposes.
+        if (sess.get("in_room")
+                and MRCProtocol.norm_room(sess.get("room", "")).lower() == new_room.lower()):
             await self._send_to_session(session_id, {"type": "room_changed", "room": new_room})
             return
 
