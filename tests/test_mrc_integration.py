@@ -138,6 +138,24 @@ def test_mrc_page_has_websocket_config(authenticated_client):
     assert b'ws://localhost:18080/ws' in response.data or b'WS_URL' in response.data
 
 
+def test_mrc_page_has_flash_notice_bar(authenticated_client):
+    """Regression test for a real live report (2026-09-22): a server
+    'error' message (e.g. "MRC Trust required -- use /identify to
+    finish joining") landed correctly in the scrolling chat log, but
+    the caller's own words were "you miss the identify message unless
+    you scroll up" -- the immediately-following optimistic MOTD/
+    CHATTERS flood buried it below the fold before it could be read.
+    Fixed with a fixed-position notice bar (same shape as the existing
+    ticker-bar) that any 'error'-type WS message also flashes into, so
+    it can't be scrolled past. This just confirms the bar's markup
+    actually renders -- the auto-hide/fade timing is plain JS with no
+    server-side test harness in this repo."""
+    response = authenticated_client.get('/mrc/')
+    assert response.status_code == 200
+    assert b'id="flash-notice"' in response.data
+    assert b'id="flash-notice-text"' in response.data
+
+
 def test_bridge_websocket_endpoint(bridge_service):
     """Test that bridge WebSocket endpoint is available"""
     try:

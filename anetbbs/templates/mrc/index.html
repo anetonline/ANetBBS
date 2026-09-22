@@ -210,8 +210,26 @@
       transition: opacity 0.4s ease;
     }
     .ticker-bar #ticker-text.ticker-fade { opacity: 0; }
-    
-    .main-container { 
+
+    /* Real live report (2026-09-22): an 'error' message (e.g. "MRC
+       Trust required -- use /identify to finish joining") landed
+       correctly in the scrolling chat log, but the immediately-
+       following optimistic MOTD/CHATTERS flood buried it below the
+       fold before it could be read -- same fixed position as the
+       ticker-bar above so it can't be scrolled past, auto-hides after
+       a few seconds rather than needing a dismiss click. */
+    .flash-notice {
+      padding: 6px 20px;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--error);
+      flex-shrink: 0;
+      transition: opacity 0.4s ease;
+    }
+    .flash-notice.flash-fade { opacity: 0; }
+
+    .main-container {
       display: flex; 
       flex: 1; 
       overflow: hidden; 
@@ -642,6 +660,10 @@
 
   <div class="ticker-bar" id="ticker-bar" style="display:none;">
     <span id="ticker-text">-</span>
+  </div>
+
+  <div class="flash-notice" id="flash-notice" style="display:none;">
+    <span id="flash-notice-text"></span>
   </div>
 
   <div class="main-container">
@@ -1184,6 +1206,8 @@
     const topicText        = document.getElementById('topic-text');
     const tickerBar        = document.getElementById('ticker-bar');
     const tickerTextEl     = document.getElementById('ticker-text');
+    const flashNoticeBar   = document.getElementById('flash-notice');
+    const flashNoticeText  = document.getElementById('flash-notice-text');
     const latencyInfoEl    = document.getElementById('latency-info');
     const statusLatencyWrap = document.getElementById('status-latency-wrap');
     const statusLatencyText = document.getElementById('status-latency-text');
@@ -1441,6 +1465,29 @@
       messagesDiv.appendChild(msgDiv);
       messageNodes.push(msgDiv);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Fixed-position notice (see .flash-notice CSS) for an error the
+    // caller must not miss even if chat scrolls past it immediately --
+    // an optimistic MOTD/CHATTERS flood right after a join rejection is
+    // the real case this was added for. Token-guarded so a second call
+    // while one is still fading/visible doesn't get hidden early by the
+    // first call's own timers.
+    let _flashNoticeToken = 0;
+    function flashNotice(text, durationMs = 7000) {
+      if (!flashNoticeBar || !flashNoticeText) return;
+      const token = ++_flashNoticeToken;
+      flashNoticeText.textContent = text;
+      flashNoticeBar.classList.remove('flash-fade');
+      flashNoticeBar.style.display = '';
+      setTimeout(() => {
+        if (token !== _flashNoticeToken) return;
+        flashNoticeBar.classList.add('flash-fade');
+        setTimeout(() => {
+          if (token !== _flashNoticeToken) return;
+          flashNoticeBar.style.display = 'none';
+        }, 400);
+      }, durationMs);
     }
 
     function downloadChatLog() {
@@ -2469,6 +2516,7 @@
 
         case 'error':
           addMessage('✗ Error: ' + data.message, 'error');
+          flashNotice('✗ ' + data.message);
           break;
 
         case 'disconnected':
