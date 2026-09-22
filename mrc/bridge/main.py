@@ -831,6 +831,20 @@ class BridgeApp:
         self.post_identify_auto_join = bool(self.config.get("post_identify_auto_join", False))
 
         self.announce_join_part                = bool(self.config.get("announce_join_part", True))
+        # Default False, pending real-hub re-verification -- see
+        # _leave_room_and_cleanup's own comment for the full history.
+        # Short version: an earlier LOGOFF send caused a real live
+        # "please IDENTIFY" regression on the very next join, but used
+        # a wire format that has since been found and fixed to not
+        # match the documented spec (MRCProtocol.create_logoff() now
+        # sends the correct "user~bbs~room~SERVER~msgext~room~LOGOFF~"
+        # shape, with dedicated wire-format tests) -- that fix was
+        # never reconnected to this call site to confirm it actually
+        # resolves the original regression. This flag exists so that
+        # can be verified against a real hub (leave, then immediately
+        # try rejoining the same handle) without committing to the
+        # behavior change until confirmed.
+        self.send_logoff_on_leave              = bool(self.config.get("mrc_send_logoff_on_leave", False))
         self.request_banners_on_join           = bool(self.config.get("request_banners_on_join", True))
         self.request_motd_on_join              = bool(self.config.get("request_motd_on_join", True))
         self.userlist_refresh_on_server_events = bool(self.config.get("userlist_refresh_on_server_events", True))
@@ -2344,22 +2358,41 @@ class BridgeApp:
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], room, "NOTME", "", exit_msg))
             await self._sleep_delay()
 
-        # LOGOFF is deliberately NOT sent to the hub on an individual
-        # caller leaving a room. Real live evidence (a captured full
-        # packet transcript, MRC_BRIDGE_LOG_LEVEL=DEBUG): sending
-        # LOGOFF ends the hub's MRC Trust state for this handle
-        # immediately -- the very next join got "Cannot join ROOM,
+        # LOGOFF is NOT sent to the hub by default on an individual
+        # caller leaving a room -- real live evidence (a captured full
+        # packet transcript, MRC_BRIDGE_LOG_LEVEL=DEBUG): sending it
+        # once ended the hub's MRC Trust state for this handle
+        # immediately, so the very next join got "Cannot join ROOM,
         # please IDENTIFY to use this handle" despite the bridge's own
         # connection to the hub never having dropped in between. This
         # bridge holds ONE persistent shared connection to the hub per
         # BBS install across every local caller's join/leave, so
-        # there's no need to tell the hub this handle is "logging off"
-        # the way a single-session client would -- NOTME's "has left
-        # chat" already covers the visible room-presence announcement
-        # other users see. The one real cost: the hub's own /who or
-        # CHATTERS listing may show this handle lingering until the
-        # next reconnect's fresh join, or the hub's own idle timeout,
-        # cleans it up.
+        # there's no protocol requirement to tell the hub this handle
+        # is "logging off" the way a single-session client would --
+        # NOTME's "has left chat" already covers the visible
+        # room-presence announcement other users see. The one real
+        # cost of staying silent: the hub's own /who or CHATTERS
+        # listing, and any other locally connected session's status
+        # bar, may show this handle lingering until the next
+        # reconnect's fresh join, or the hub's own idle timeout,
+        # cleans it up -- visible live as a delayed "(Timeout)"
+        # message.
+        #
+        # That LOGOFF attempt used a wire format later found not to
+        # match the documented spec -- MRCProtocol.create_logoff() has
+        # since been corrected (see its own docstring) and has
+        # dedicated wire-format tests confirming it now matches the
+        # spec exactly, but the fix was never reconnected here to
+        # confirm it actually resolves the original regression. Gated
+        # behind mrc_send_logoff_on_leave (default off) specifically
+        # so that can be verified against a real hub -- leave, then
+        # immediately try rejoining the same handle -- without
+        # committing to the behavior change until confirmed.
+        if self.send_logoff_on_leave and eff_nick and room:
+            await self.mrc.send_packet(
+                MRCProtocol.create_logoff(eff_nick, self.config["bridge_bbs"], room))
+            await self._sleep_delay()
+
         await self.db.delete_session_async(session_id)
         await self._sync_mystic_rooms()
 

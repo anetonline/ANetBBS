@@ -73,6 +73,7 @@ def _make_bridge(tmp_dir):
     app.rate_limiter = {}
     app.pending_disconnects = {}
     app.ws_disconnect_grace_seconds = 0.01
+    app.send_logoff_on_leave = False
     return app
 
 

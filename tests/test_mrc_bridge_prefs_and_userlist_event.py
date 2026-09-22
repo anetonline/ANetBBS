@@ -60,6 +60,7 @@ def _make_bridge(tmp_dir):
     app.default_style_color = "07"
     app.rate_limiter = {}
     app.pending_disconnects = {}
+    app.send_logoff_on_leave = False
     return app
 
 

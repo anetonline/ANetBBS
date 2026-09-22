@@ -13,6 +13,7 @@
   "mrc_tcp_listen_host": "127.0.0.1",
   "mrc_tcp_listen_port": 5010,
   "mrc_stats_file_path": "",
+  "mrc_send_logoff_on_leave": false,
   "message_rate_seconds": 0.5,
   "iamhere_interval_seconds": 60,
   "mrc_reconnect_initial_delay": 1,
