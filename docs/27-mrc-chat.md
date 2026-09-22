@@ -29,6 +29,11 @@ SSH on 2222), released 2024-09-01 under **Phenom Productions**
 Cyberia BBS**. See `mrc/mystic_client/vendor/PROVENANCE.md` for the
 full unmodified-vendoring details.
 
+Native `umrc-client` support (below) interoperates with
+[uMRC](https://github.com/codefenix-dev/uMRC), developed by
+**Codefenix** of **ConChaos BBS** -- see that section for download
+and setup details.
+
 ## Connection backends
 
 The actual upstream connection to the MRC hub is handled by
@@ -56,18 +61,19 @@ reflects what was actually confirmed working during that testing
 session, including several real bugs found and fixed along the way --
 not a design document written in advance.
 
-[uMRC](https://github.com/codefenix-dev/uMRC) is a separate,
-OpenDoors-based MRC door (`umrc-client`) that normally needs its own
-`umrc-bridge` multiplexer daemon running alongside it. `mrc/bridge/
-main.py` can act as a **drop-in replacement for `umrc-bridge`**, so a
-sysop running both ANetBBS's own MRC client (terminal/web) and uMRC
-can point `umrc-client`'s bridge-host/bridge-port config at ANetBBS's
-own bridge instead -- one shared process serves both, with **zero
-changes to uMRC itself**. Session state, room/DM routing, and every
-real wire packet are fully shared with ANetBBS's own terminal/web
-clients -- a `umrc-client` caller and an ANetBBS caller in the same
-room see each other and can send each other private messages
-correctly, on either side.
+[uMRC](https://github.com/codefenix-dev/uMRC) -- **download and full
+source at that link** -- is a separate, OpenDoors-based MRC door
+(`umrc-client`), developed by **Codefenix** of **ConChaos BBS**, that
+normally needs its own `umrc-bridge` multiplexer daemon running
+alongside it. `mrc/bridge/main.py` can act as a **drop-in replacement
+for `umrc-bridge`**, so a sysop running both ANetBBS's own MRC client
+(terminal/web) and uMRC can point `umrc-client`'s bridge-host/
+bridge-port config at ANetBBS's own bridge instead -- one shared
+process serves both, with **zero changes to uMRC itself**. Session
+state, room/DM routing, and every real wire packet are fully shared
+with ANetBBS's own terminal/web clients -- a `umrc-client` caller and
+an ANetBBS caller in the same room see each other and can send each
+other private messages correctly, on either side.
 
 ### Setup, step by step
 
