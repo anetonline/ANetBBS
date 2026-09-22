@@ -142,8 +142,26 @@
     .status-right { display: flex; align-items: center; gap: 14px; overflow: hidden; min-width: 0; }
     .topic-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 60vw; overflow: hidden; }
     .topic-text { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 55vw; }
-    
-    .main-container { 
+
+    /* Ported from the Flask-hosted MRC template's own fix
+       (2026-09-22): an 'error' message (e.g. "MRC Trust required --
+       use /identify to finish joining") landed correctly in the
+       scrolling chat log, but an immediately-following optimistic
+       MOTD/CHATTERS flood buried it below the fold before it could be
+       read -- fixed position so it can't be scrolled past, auto-hides
+       after a few seconds. */
+    .flash-notice {
+      padding: 6px 20px;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--error);
+      flex-shrink: 0;
+      transition: opacity 0.4s ease;
+    }
+    .flash-notice.flash-fade { opacity: 0; }
+
+    .main-container {
       display: flex; 
       flex: 1; 
       overflow: hidden; 
@@ -553,6 +571,10 @@
     </div>
   </div>
 
+  <div class="flash-notice" id="flash-notice" style="display:none;">
+    <span id="flash-notice-text"></span>
+  </div>
+
   <div class="main-container">
     <div class="chat-area">
       <div class="messages" id="messages"></div>
@@ -956,9 +978,80 @@
     function _chatTypedLimit() { return Math.max(10, MRC_MAX_LEN - _handleOverheadChars); }
     function _dmTypedLimit()   { return Math.max(10, MRC_MAX_LEN - _dmOverheadChars); }
 
+    // Ported from the Flask-hosted MRC template's own fix (2026-09-22):
+    // the terminal MRC client (and uMRC itself) silently auto-splits an
+    // over-limit line into multiple "(1/3) ..." chunks on word
+    // boundaries -- this client instead just refused to send anything
+    // over the limit at all. Exact port of mrc_chat.py's real
+    // _split_for_wire(): same word-boundary splitting, same 8-char
+    // "(NN/NN) " budget reservation, same hard-cut for a single word
+    // longer than the whole budget, same repeat_prefix-on-every-chunk
+    // convention.
+    function splitForWire(text, cap, repeatPrefix) {
+      repeatPrefix = repeatPrefix || '';
+      text = String(text || '').replace(/[\r\n]+$/, '');
+      if (!text) return [];
+      const budget = Math.max(1, cap - repeatPrefix.length);
+      if (text.length <= budget) return [repeatPrefix + text];
+      const inner = Math.max(1, budget - 8); // reserve "(99/99) " tag
+      const words = text.split(' ');
+      const chunks = [];
+      let cur = '';
+      for (let w of words) {
+        while (w.length > inner) {
+          if (cur) { chunks.push(cur); cur = ''; }
+          chunks.push(w.slice(0, inner));
+          w = w.slice(inner);
+        }
+        if (!cur) {
+          cur = w;
+        } else if (cur.length + 1 + w.length <= inner) {
+          cur += ' ' + w;
+        } else {
+          chunks.push(cur);
+          cur = w;
+        }
+      }
+      if (cur) chunks.push(cur);
+      if (chunks.length <= 1) return chunks.map(c => repeatPrefix + c);
+      const total = chunks.length;
+      return chunks.map((c, i) => `${repeatPrefix}(${i + 1}/${total}) ${c}`);
+    }
+
+    // Matches the terminal client's own WIRE_CHUNK_DELAY (mrc_chat.py)
+    // -- spaced out so a multi-chunk send doesn't trip the bridge's own
+    // per-session rate limiter (message_rate_seconds, default 0.5s).
+    const WIRE_CHUNK_DELAY_MS = 600;
+
+    async function sendChunksSequentially(chunks, sendFn) {
+      for (let i = 0; i < chunks.length; i++) {
+        if (i) await new Promise(r => setTimeout(r, WIRE_CHUNK_DELAY_MS));
+        sendFn(chunks[i]);
+      }
+    }
+
+    function flashNotice(text, durationMs = 7000) {
+      if (!flashNoticeBar || !flashNoticeText) return;
+      flashNotice._token = (flashNotice._token || 0) + 1;
+      const token = flashNotice._token;
+      flashNoticeText.textContent = text;
+      flashNoticeBar.classList.remove('flash-fade');
+      flashNoticeBar.style.display = '';
+      setTimeout(() => {
+        if (token !== flashNotice._token) return;
+        flashNoticeBar.classList.add('flash-fade');
+        setTimeout(() => {
+          if (token !== flashNotice._token) return;
+          flashNoticeBar.style.display = 'none';
+        }, 400);
+      }, durationMs);
+    }
+
     // DOM refs
     const messagesDiv      = document.getElementById('messages');
     const statusText       = document.getElementById('status-text');
+    const flashNoticeBar   = document.getElementById('flash-notice');
+    const flashNoticeText  = document.getElementById('flash-notice-text');
     const topicText        = document.getElementById('topic-text');
     const joinPanel        = document.getElementById('join-panel');
     const chatPanel        = document.getElementById('chat-panel');
@@ -1037,92 +1130,16 @@
     // -----------------------------------------------------------------------
     // Message-length helpers
     // -----------------------------------------------------------------------
-    function _typedPortionForLimit(rawLine) {
-      const t = String(rawLine || '').trim();
-      if (!t) return { kind: 'none', text: '' };
-
-      if (t.startsWith('!')) return { kind: 'chat', text: t };
-
-      if (t.startsWith('/')) {
-        const raw   = t.slice(1).trim();
-        const parts = raw.split(/\s+/);
-        const verb  = (parts[0] || '').toUpperCase();
-        const rest  = raw.slice((parts[0] || '').length).trim();
-
-        if (verb === 'T' || verb === 'DM' || verb === 'MSG') {
-          if (!rest) return { kind: 'dm', text: '' };
-          const sp        = rest.split(/\s+/);
-          const toUserRaw = sp[0] || '';
-          const dmText    = rest.slice(toUserRaw.length).trim();
-          return { kind: 'dm', text: dmText };
-        }
-        if (verb === 'ME' || verb === 'ACTION') return { kind: 'action', text: rest };
-        return { kind: 'cmd', text: '' };
-      }
-
-      if (t.startsWith('* ')) return { kind: 'action', text: t.slice(2) };
-      return { kind: 'chat', text: t };
-    }
-
-    function _limitForLine(rawLine) {
-      const { kind } = _typedPortionForLimit(rawLine);
-      if (kind === 'chat') return _chatTypedLimit();
-      if (kind === 'dm')   return _dmTypedLimit();
-      return MRC_MAX_LEN;
-    }
-
-    function _isOverLimit(rawLine) {
-      const { kind, text } = _typedPortionForLimit(rawLine);
-      if (kind === 'cmd' || kind === 'none') return false;
-      return stripPipeCodes(text || '').length > _limitForLine(rawLine);
-    }
-
-    function tooLongError(limit) {
-      addMessage('✗ Message too long (max ' + (limit || MRC_MAX_LEN) + ' chars for this message type).', 'error');
-    }
-
-    function _trimVisibleToLimit(text, limit) {
-      const src = String(text || '');
-      let out = '', i = 0, visible = 0;
-      while (i < src.length) {
-        const ch = src[i];
-        if (ch === '|' && i + 2 < src.length) {
-          const a = src[i + 1], b = src[i + 2];
-          if (/\d/.test(a) && /\d/.test(b)) { out += src.slice(i, i + 3); i += 3; continue; }
-        }
-        if (visible >= limit) break;
-        out += ch; visible++; i++;
-      }
-      return out;
-    }
-
     function enforceTypingLimitInInput() {
-      const v    = messageInput.value || '';
-      const info = _typedPortionForLimit(v);
-      if (!(info.kind === 'chat' || info.kind === 'dm' || info.kind === 'action')) return;
-
-      const limit = _limitForLine(v);
-      if (stripPipeCodes(info.text || '').length <= limit) return;
-
-      const trimmed = _trimVisibleToLimit(info.text || '', limit);
-      const t = String(v || '').trim();
-
-      if (t.startsWith('/')) {
-        const raw   = t.slice(1).trim();
-        const parts = raw.split(/\s+/);
-        const verb  = (parts[0] || '').toUpperCase();
-        const rest  = raw.slice((parts[0] || '').length).trim();
-        if (verb === 'ME' || verb === 'ACTION') {
-          messageInput.value = '/' + parts[0] + ' ' + trimmed; return;
-        }
-        if (verb === 'T' || verb === 'DM' || verb === 'MSG') {
-          const toUserRaw = rest.split(/\s+/)[0] || '';
-          messageInput.value = '/' + parts[0] + ' ' + toUserRaw + ' ' + trimmed; return;
-        }
-        return;
-      }
-      if (t.startsWith('* ')) { messageInput.value = '* ' + trimmed; return; }
-      messageInput.value = trimmed;
+      // Deliberately a no-op now that doSend() auto-splits an
+      // over-limit line into multiple wire chunks (matching the
+      // terminal client and uMRC itself) instead of refusing to send
+      // it -- ported from the Flask-hosted MRC template's own fix
+      // (2026-09-22). This used to hard-truncate whatever the caller
+      // typed the moment it crossed the single-message wire limit,
+      // which would have made the split-on-send feature unreachable
+      // (nothing to split if typing past the limit was already
+      // blocked).
     }
 
     // -----------------------------------------------------------------------
@@ -1565,12 +1582,10 @@
     }
 
     // -----------------------------------------------------------------------
-    // Outgoing colour wrap
+    // Outgoing colour prefix (for splitForWire's repeatPrefix -- see above)
     // -----------------------------------------------------------------------
-    function wrapOutgoingChatText(text) {
-      if (!outgoingColorToggle.checked) return text;
-      const c = selTypingColor.value || '10';
-      return '|' + c + text + '|07';
+    function outgoingColorPrefix() {
+      return outgoingColorToggle.checked ? ('|' + (selTypingColor.value || '10')) : '';
     }
 
     // -----------------------------------------------------------------------
@@ -1592,15 +1607,18 @@
       pushSentHistory(rawLine);
 
       if (parsed.kind === 'direct_message') {
-        if (_isOverLimit('/t x ' + parsed.message)) { tooLongError(_dmTypedLimit()); secureMode = null; return; }
         addMessage('(DM → ' + parsed.to_user + ') ' + parsed.message, 'dm', false);
-        client.sendDirectMessage(parsed.to_user, parsed.message);
+        const toUser = parsed.to_user;
+        sendChunksSequentially(
+          splitForWire(parsed.message, _dmTypedLimit(), ''),
+          c => client.sendDirectMessage(toUser, c));
         messageInput.value = ''; secureMode = null; return;
       }
 
       if (parsed.kind === 'action') {
-        if (_isOverLimit('/me ' + parsed.value)) { tooLongError(MRC_MAX_LEN); secureMode = null; return; }
-        client.sendMessage('* ' + parsed.value);
+        sendChunksSequentially(
+          splitForWire(parsed.value, MRC_MAX_LEN, ''),
+          c => client.sendMessage('* ' + c));
         messageInput.value = ''; secureMode = null; return;
       }
 
@@ -1613,13 +1631,16 @@
       if (parsed.kind === 'chat') {
         if (!parsed.value) return;
         if (stickyDmUser) {
-          if (_isOverLimit('/t x ' + parsed.value)) { tooLongError(_dmTypedLimit()); secureMode = null; return; }
           addMessage('(DM → ' + stickyDmUser + ') ' + parsed.value, 'dm', false);
-          client.sendDirectMessage(stickyDmUser, parsed.value);
+          const toUser = stickyDmUser;
+          sendChunksSequentially(
+            splitForWire(parsed.value, _dmTypedLimit(), ''),
+            c => client.sendDirectMessage(toUser, c));
           messageInput.value = ''; secureMode = null; return;
         }
-        if (_isOverLimit(parsed.value)) { tooLongError(_chatTypedLimit()); secureMode = null; return; }
-        client.sendMessage(wrapOutgoingChatText(parsed.value));
+        sendChunksSequentially(
+          splitForWire(parsed.value, _chatTypedLimit(), outgoingColorPrefix()),
+          c => client.sendMessage(c));
         messageInput.value = ''; secureMode = null;
       }
     }
@@ -1914,6 +1935,7 @@
 
         case 'error':
           addMessage('✗ Error: ' + data.message, 'error');
+          flashNotice('✗ ' + data.message);
           break;
 
         case 'disconnected':

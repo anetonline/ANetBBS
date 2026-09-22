@@ -1,19 +1,29 @@
 """Regression test for a real feature-parity gap (2026-09-22, Jerry's
 own ask): the terminal MRC client (and uMRC itself) silently
 auto-splits an over-limit line into multiple word-boundary "(1/3) ..."
-chunks; the web client -- designed years ago, most recently touched
-last year -- instead just refused to send anything over the limit at
-all ("Message too long").
+chunks; the web client instead just refused to send anything over the
+limit at all ("Message too long").
 
-Ported mrc_chat.py's real _split_for_wire() to JS (anetbbs/templates/
-mrc/index.html's splitForWire()), matching it exactly: same
-word-boundary splitting, same 8-char "(NN/NN) " budget reservation,
-same hard-cut for a single word longer than the whole budget, same
-repeat_prefix-on-every-chunk convention.
+Covers BOTH real web MRC clients that exist in this repo -- discovered
+the same day, the hard way, when the fix landed in one but Jerry's own
+browser kept showing the old behavior:
+  - anetbbs/templates/mrc/index.html -- served by the main Flask app
+    at /mrc/.
+  - mrc/web/index.html -- bundled with the MRC bridge itself, served
+    by its own embedded web server (what Jerry's nginx actually proxies
+    /mrcweb/ to, bypassing Flask entirely -- this is the one he was
+    really using this whole time).
+These are two independently-maintained, already-drifted copies (no
+shared template, no build step keeping them in sync), so a fix ported
+into only one is a silent no-op for anyone using the other. Ported
+mrc_chat.py's real _split_for_wire() to JS (splitForWire()) in both,
+matching it exactly: same word-boundary splitting, same 8-char
+"(NN/NN) " budget reservation, same hard-cut for a single word longer
+than the whole budget, same repeat_prefix-on-every-chunk convention.
 
-This test proves the port didn't drift from the original by running
+This test proves each port didn't drift from the original by running
 BOTH implementations -- the real Python one (imported directly, not
-reimplemented) and the real JS one (extracted from the actual template
+reimplemented) and each real JS one (extracted from the actual file
 and run under Node, not reimplemented either) -- against the same
 inputs and asserting byte-identical output. Requires `node` on PATH;
 skips (not fails) if it's unavailable, matching this repo's existing
@@ -33,23 +43,27 @@ import anetbbs.core  # noqa: F401  (resolves a circular import if mrc_chat is im
 from anetbbs.features.mrc_chat import _split_for_wire
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_PATH = REPO_ROOT / "anetbbs" / "templates" / "mrc" / "index.html"
 
 
-def _extract_split_for_wire_js() -> str:
-    html = TEMPLATE_PATH.read_text()
+def _extract_split_for_wire_js(path: Path) -> str:
+    html = path.read_text()
     m = re.search(
         r"function splitForWire\(text, cap, repeatPrefix\) \{.*?\n    \}\n",
         html, re.DOTALL)
-    assert m is not None, "couldn't find splitForWire() in the MRC web template"
+    assert m is not None, f"couldn't find splitForWire() in {path}"
     return m.group(0)
 
 
 @unittest.skipUnless(shutil.which("node"), "node not available")
-class SplitForWireJsPythonParityTests(unittest.TestCase):
+class _SplitForWireJsPythonParityBase(unittest.TestCase):
+    """Set TEMPLATE_PATH in a concrete subclass -- see the two below."""
+    TEMPLATE_PATH = None
+
     @classmethod
     def setUpClass(cls):
-        cls.js_fn = _extract_split_for_wire_js()
+        if cls is _SplitForWireJsPythonParityBase:
+            raise unittest.SkipTest("base class, not a real test")
+        cls.js_fn = _extract_split_for_wire_js(cls.TEMPLATE_PATH)
 
     def _split_js(self, text, cap, repeat_prefix=""):
         script = (
@@ -67,8 +81,9 @@ class SplitForWireJsPythonParityTests(unittest.TestCase):
         js_result = self._split_js(text, cap, repeat_prefix)
         self.assertEqual(
             py_result, js_result,
-            f"JS/Python split_for_wire diverged for text={text!r} cap={cap} "
-            f"prefix={repeat_prefix!r}:\n  python: {py_result!r}\n  js:     {js_result!r}")
+            f"[{self.TEMPLATE_PATH}] JS/Python split_for_wire diverged for "
+            f"text={text!r} cap={cap} prefix={repeat_prefix!r}:\n"
+            f"  python: {py_result!r}\n  js:     {js_result!r}")
 
     def test_short_message_single_chunk_no_tag(self):
         self._assert_parity("hello world", 140)
@@ -103,6 +118,14 @@ class SplitForWireJsPythonParityTests(unittest.TestCase):
 
     def test_trailing_newline_is_stripped(self):
         self._assert_parity("hello world\n", 140)
+
+
+class FlaskTemplateSplitForWireParityTests(_SplitForWireJsPythonParityBase):
+    TEMPLATE_PATH = REPO_ROOT / "anetbbs" / "templates" / "mrc" / "index.html"
+
+
+class BridgeBundledSplitForWireParityTests(_SplitForWireJsPythonParityBase):
+    TEMPLATE_PATH = REPO_ROOT / "mrc" / "web" / "index.html"
 
 
 if __name__ == '__main__':
