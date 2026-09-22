@@ -399,7 +399,33 @@ class MRCConnection:
             await asyncio.wait_for(self.writer.drain(),
                                     timeout=self._drain_timeout_seconds)
 
-            await self._set_connected(True)
+            # Real gap found live (2026-09-22): the "upstream_connected"
+            # notification -- which triggers _rejoin_all_sessions(),
+            # sending a real IAMHERE+NEWROOM for every handle that was
+            # previously in a room -- used to fire here, BEFORE our own
+            # CAPABILITIES/BBSMETA/INFO* handshake below and before
+            # receive_loop() even started listening. Confirmed live: a
+            # real reference umrc-bridge on a different install
+            # survives its own restarts without ever needing a fresh
+            # /identify (real MRC Trust genuinely does last the
+            # documented ~30 days there), while this bridge demanded
+            # /identify on close to every reconnect. The rejoin's own
+            # NEWROOM for a given handle was racing the hub's own
+            # per-connection setup of which BBS this connection even
+            # is -- sent before the hub had any CAPABILITIES/BBSMETA/
+            # INFO* from us to resolve "Handle + BBS Name + BBS IP
+            # Address" (the documented MRC Trust key) against, so it
+            # fell back to demanding a fresh identify essentially every
+            # time, not because Trust had actually expired.
+            #
+            # self.connected is set directly (not via _set_connected())
+            # so send_packet() below writes the handshake packets
+            # immediately instead of queuing them (it gates on this
+            # flag) -- the "upstream_connected" notification itself is
+            # deferred to the very end, once the hub has had every
+            # chance to know who we are and we're actually listening
+            # for its replies.
+            self.connected = True
             logger.info("Connected to MRC server")
 
             await self.send_capabilities()
@@ -408,6 +434,9 @@ class MRCConnection:
 
             if not self._io_task or self._io_task.done():
                 self._io_task = asyncio.create_task(self.receive_loop())
+
+            if self.status_callback:
+                await self.status_callback("upstream_connected")
 
             await self._flush_queue()
             return True
