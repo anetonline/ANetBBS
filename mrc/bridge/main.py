@@ -1392,18 +1392,21 @@ class BridgeApp:
         )
         await self.mrc.send_packet(pkt)
 
-    async def _send_join_payloads(self, eff_nick: str, room: str, remote_ip: str = ""):
-        if remote_ip:
-            # Per the official MRC protocol spec, USERIP's documented
-            # template is "user~bbs~~SERVER~msgext~~USERIP:ipaddress~"
-            # -- fromRoom empty, unlike the generic command path
-            # (create_server_command) which populates it. Built
-            # directly rather than through that helper for this reason.
-            pkt = MRCProtocol.create_packet(
-                eff_nick, self.config["bridge_bbs"], '', 'SERVER', '', '',
-                f"USERIP:{remote_ip}")
-            await self.mrc.send_packet(pkt)
-            await self._sleep_delay()
+    async def _send_userip(self, eff_nick: str, remote_ip: str):
+        if not remote_ip:
+            return
+        # Per the official MRC protocol spec, USERIP's documented
+        # template is "user~bbs~~SERVER~msgext~~USERIP:ipaddress~" --
+        # fromRoom empty, unlike the generic command path
+        # (create_server_command) which populates it. Built directly
+        # rather than through that helper for this reason.
+        pkt = MRCProtocol.create_packet(
+            eff_nick, self.config["bridge_bbs"], '', 'SERVER', '', '',
+            f"USERIP:{remote_ip}")
+        await self.mrc.send_packet(pkt)
+        await self._sleep_delay()
+
+    async def _send_join_payloads(self, eff_nick: str, room: str):
         if self.request_banners_on_join:
             # Real gap found live (2026-09-21) testing 2 simultaneous
             # local sessions: the hub's BANNER: reply carries NO room
@@ -1434,6 +1437,25 @@ class BridgeApp:
         self._cancel_pending_disconnect(eff_nick)
         if not eff_nick or not room:
             return
+
+        # Real live bug found 2026-09-22: a fresh join from ANetBBS's
+        # own clients (web/terminal/raw-TCP alike, since they all share
+        # this one function) could get rejected by the hub for a
+        # REGISTERED-but-not-yet-recognized handle ("Cannot join ROOM,
+        # please IDENTIFY"), even for a handle with recent, genuinely
+        # valid Trust -- while a real umrc-client, on the very same
+        # handle through the very same bridge, joined clean with no
+        # prompt at all. Root-caused directly against uMRC's own C
+        # source (main.c, ~line 2573-2622): the reference client sends
+        # USERIP: *before* its own join announcement and NEWROOM, as
+        # one of its initial post-connect packets -- our code sent it
+        # only afterward, inside _send_join_payloads, by which point
+        # the hub had already evaluated (and rejected) the join without
+        # knowing the caller's IP to match against Trust. Sending
+        # USERIP first, matching the reference client's own order
+        # exactly, lets the hub recognize Trust at the moment it
+        # actually matters.
+        await self._send_userip(eff_nick, sess.get("remote_ip", ""))
 
         if self.announce_join_part:
             join_msg = _resolve_message_template(sess, "enter_msg_tpl", self.join_message_tpl, eff_nick)
@@ -1468,7 +1490,7 @@ class BridgeApp:
         await self.db.save_session_async(ws_id_str, sess)
         await self._sync_mystic_rooms()
 
-        await self._send_join_payloads(eff_nick, room, sess.get("remote_ip", ""))
+        await self._send_join_payloads(eff_nick, room)
 
     async def _broadcast_info(self, message: str):
         payload = {"type": "info", "message": message}
@@ -2389,12 +2411,16 @@ class BridgeApp:
         await self._send_to_session(session_id, {"type": "room_changed", "room": new_room})
         await self._sleep_delay()
 
+        # Same ordering fix as _complete_join_after_identify -- USERIP
+        # before the join announcement/NEWROOM, not after.
+        await self._send_userip(eff_nick, sess.get("remote_ip", ""))
+
         if self.announce_join_part:
             join_msg = _truncate_wire_message(_format_template(self.join_message_tpl, handle=eff_nick))
             await self.mrc.send_packet(MRCProtocol.create_message(eff_nick, self.config["bridge_bbs"], new_room, "NOTME", "", join_msg))
             await self._sleep_delay()
 
-        await self._send_join_payloads(eff_nick, new_room, sess.get("remote_ip", ""))
+        await self._send_join_payloads(eff_nick, new_room)
         await self._send_userlist_control(new_room)
 
     # ------------------------------------------------------------------
