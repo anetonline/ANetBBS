@@ -509,6 +509,18 @@ class MRCChat(BaseChatSystem):
         self._broadcast_shield      = False
         self._twit_blocked_count    = 0
         self._shield_blocked_count  = 0
+        # Real bug found live: the bell byte used to be baked directly
+        # into the string handed to _emit(), which stores it in
+        # _scrollback/_display_lines -- _redraw_chat_area() repaints the
+        # last N stored lines on every new message, resize, /scroll,
+        # sidebar toggle, etc, so a caller heard a bell every single
+        # time a mentioned/DM/CTCP-reply line was still on screen, not
+        # just once when it arrived. Fixed by never storing the bell:
+        # every call site below rings it as a separate, non-stored
+        # write right after _emit() returns, gated on this new
+        # preference (uMRC has a "Use sound" setting; this mirrors it)
+        # -- same set_prefs/_apply_prefs round-trip as twit/shield above.
+        self._use_sound              = True
         # Room a fresh connect should land in, and clock rendering format --
         # both purely-local rendering hints synced from the bridge profile
         # (see mrc/bridge/main.py's _session_prefs), same pattern as
@@ -1597,6 +1609,9 @@ class MRCChat(BaseChatSystem):
         shield = prefs.get('broadcast_shield')
         if isinstance(shield, bool):
             self._broadcast_shield = shield
+        use_sound = prefs.get('use_sound')
+        if isinstance(use_sound, bool):
+            self._use_sound = use_sound
         for key, attr in (('enter_msg_tpl', '_enter_msg_tpl'),
                           ('leave_msg_tpl', '_leave_msg_tpl'),
                           ('quit_msg', '_quit_msg')):
@@ -1941,8 +1956,10 @@ class MRCChat(BaseChatSystem):
             if plain.startswith('[CTCP-REPLY] '):
                 rest = plain[13:]
                 await self._emit(
-                    f'\x07\x1b[1;30m[\x1b[1;33mCTCP-REPLY\x1b[1;30m]\x1b[0m '
+                    f'\x1b[1;30m[\x1b[1;33mCTCP-REPLY\x1b[1;30m]\x1b[0m '
                     f'\x1b[1;96m{rest}\x1b[0m')
+                if self._use_sound:
+                    await self.session.write('\x07')
                 return
             if body:
                 # NOTE: this used to also try to "fish a nick out of the
@@ -2000,7 +2017,9 @@ class MRCChat(BaseChatSystem):
                         'body': ('[DM] ' if is_dm else '') + plain[:200],
                     })
                     await self._emit(
-                        '\x07' + self._highlight_mentions(_pipe_to_ansi(body)))
+                        self._highlight_mentions(_pipe_to_ansi(body)))
+                    if self._use_sound:
+                        await self.session.write('\x07')
                 else:
                     await self._emit(_pipe_to_ansi(body))
             return
@@ -2042,8 +2061,10 @@ class MRCChat(BaseChatSystem):
             })
             rendered = self._highlight_mentions(_pipe_to_ansi(body))
             await self._emit(
-                f'\x07\x1b[1;30m[\x1b[1;33mPM\x1b[1;30m]\x1b[0m '
+                f'\x1b[1;30m[\x1b[1;33mPM\x1b[1;30m]\x1b[0m '
                 f'\x1b[1;93m{user}@{bbs}\x1b[0m: {rendered}')
+            if self._use_sound:
+                await self.session.write('\x07')
             return
 
         if evt == 'action':
@@ -2056,10 +2077,11 @@ class MRCChat(BaseChatSystem):
                     'from': f'{user}@{bbs}',
                     'body': f'* {plain_body[:200]}',
                 })
-            bell = '\x07' if mentioned else ''
             await self._emit(
-                f'{bell}\x1b[35m* \x1b[1m{user}\x1b[22m@\x1b[2m{bbs}\x1b[0m '
+                f'\x1b[35m* \x1b[1m{user}\x1b[22m@\x1b[2m{bbs}\x1b[0m '
                 f'\x1b[35m{self._highlight_mentions(_pipe_to_ansi(body))}\x1b[0m')
+            if mentioned and self._use_sound:
+                await self.session.write('\x07')
             return
 
         if evt == 'chat':
@@ -2072,13 +2094,13 @@ class MRCChat(BaseChatSystem):
                     'from': f'{user}@{bbs}',
                     'body': plain_body[:200],
                 })
-            bell = '\x07' if mentioned else ''
             rendered = self._highlight_mentions(_pipe_to_ansi(body))
             # Format: |08[|11Nick|08]|07@bbs text  (anetmrc style with bbs suffix)
             await self._emit(
-                f'{bell}'
                 f'\x1b[1;30m[\x1b[1;36m{user}\x1b[1;30m]\x1b[2;37m@{bbs}\x1b[0m '
                 f'{rendered}')
+            if mentioned and self._use_sound:
+                await self.session.write('\x07')
             return
 
         # Unknown event with body — show it
@@ -2687,6 +2709,7 @@ class MRCChat(BaseChatSystem):
                 '  /clear              clear chat area (alias /cls)',
                 '  /twit add|del|list|clear [user]   ignore-list management',
                 '  /shield [on|off]    broadcast shield (blocks /broadcast)',
+                '  /sound [on|off]     terminal bell on mention/DM (saved)',
                 '  /set [field value]  nick style, enter/leave/quit msgs, ticker, clockformat, tz',
                 '  /set list           show current /set values',
                 '  /dlchatlog          download this session\'s scrollback as text',
@@ -2810,6 +2833,18 @@ class MRCChat(BaseChatSystem):
                     f'\x1b[1;36mBroadcast shield:\x1b[0m {state}  '
                     f'\x1b[2m[{self._shield_blocked_count} blocked this session]\x1b[0m'
                     '  (usage: /shield on|off)')
+            return True
+
+        if cmd == 'sound':
+            arg = (rest or '').strip().lower()
+            if arg in ('on', 'off'):
+                await self._send_json({
+                    'type': 'set_prefs', 'use_sound': arg == 'on'})
+            else:
+                state = 'on' if self._use_sound else 'off'
+                await self._emit(
+                    f'\x1b[1;36mSound:\x1b[0m {state}'
+                    '  (usage: /sound on|off)')
             return True
 
         if cmd == 'set':
@@ -3210,9 +3245,10 @@ class MRCChat(BaseChatSystem):
             else:
                 twit_state = 'on (empty list)'
             shield_state = 'on' if self._broadcast_shield else 'off'
+            sound_state  = 'on' if self._use_sound else 'off'
             await self._emit(
                 f'\x1b[2mTwit filter: {twit_state}   Broadcast shield: {shield_state}   '
-                f'Terminal: {self._chat_width} cols\x1b[0m')
+                f'Sound: {sound_state}   Terminal: {self._chat_width} cols\x1b[0m')
             return True
 
         if cmd == 'changes':
@@ -3227,6 +3263,9 @@ class MRCChat(BaseChatSystem):
                 '  - Scrolling ticker/banner fed by hub BANNER:/STATS: text',
                 '  - /set (prefix/suffix/color/entermsg/leavemsg/quitmsg/ticker/tz/palette)',
                 '  - /twit and /shield ignore/broadcast-shield lists',
+                '  - /sound on|off -- terminal bell on mention/DM (saved);',
+                '    also fixed the bell re-ringing on every redraw while',
+                '    a mentioned line stayed on screen, not just once',
                 '  - /bbses and /info <n> BBS directory lookup',
                 '  - Tab-complete on usernames seen in chat or via /who',
                 '',
