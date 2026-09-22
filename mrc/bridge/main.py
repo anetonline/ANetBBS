@@ -787,6 +787,7 @@ class BridgeApp:
             "twit_list":          list(sess.get("twit_list") or []),
             "twit_filter_enabled": bool(sess.get("twit_filter_enabled", True)),
             "broadcast_shield":   bool(sess.get("broadcast_shield", False)),
+            "use_sound":          bool(sess.get("use_sound", True)),
             "ticker_enabled":     bool(sess.get("ticker_enabled", True)),
             "enter_msg_tpl":      (sess.get("enter_msg_tpl") or "").strip(),
             "leave_msg_tpl":      (sess.get("leave_msg_tpl") or "").strip(),
@@ -1634,6 +1635,7 @@ class BridgeApp:
             "twit_list":            twit_list,
             "twit_filter_enabled":  bool(prof.get("twit_filter_enabled", True)),
             "broadcast_shield":     bool(prof.get("broadcast_shield", False)),
+            "use_sound":            bool(prof.get("use_sound", True)),
             "ticker_enabled":       bool(prof.get("ticker_enabled", True)),
             "enter_msg_tpl":        _sanitize_no_tilde(prof.get("enter_msg_tpl") or "", 200),
             "leave_msg_tpl":        _sanitize_no_tilde(prof.get("leave_msg_tpl") or "", 200),
@@ -1773,6 +1775,9 @@ class BridgeApp:
 
         if "broadcast_shield" in data:
             updates["broadcast_shield"] = bool(data.get("broadcast_shield"))
+
+        if "use_sound" in data:
+            updates["use_sound"] = bool(data.get("use_sound"))
 
         if "ticker_enabled" in data:
             updates["ticker_enabled"] = bool(data.get("ticker_enabled"))
