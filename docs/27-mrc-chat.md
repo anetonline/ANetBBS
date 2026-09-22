@@ -249,6 +249,31 @@ sudo systemctl restart anetbbs-mrc-bridge
 | Chat connects, then immediately drops back to the main menu | `mrc_tcp_listen_host` is set to a LAN IP instead of `127.0.0.1`/`0.0.0.0` -- see step 1. |
 | Stats screen shows blank/zero and never updates | `mrc_stats_file_path` isn't set, or no one is currently joined to a room on *this* bridge (see the stats section above) -- not necessarily a bug. |
 | Stats show real-looking but oddly small/zero numbers (e.g. 0 BBSes) | Running an older build from before this feature was reworked to relay the hub's real `STATS:` reply -- redeploy the current code. |
+| A departed caller's handle shows as stuck/timed-out on the hub's own side for a few minutes after leaving | Expected, current behavior -- see "Needing to `/identify` repeatedly" below. |
+
+### Needing to `/identify` repeatedly (unresolved, actively being investigated)
+
+A live report: an ANetBBS caller (web or terminal) can need to
+`/identify` again far more often than a `umrc-client` caller on the
+same bridge, even though MRC Trust is documented as lasting 30 days.
+Not yet root-caused. A real, live-evidence-backed regression already
+ruled out one theory: `mrc/bridge/main.py` used to send `LOGOFF` to
+the hub on every individual caller leaving a room, and a captured
+full packet trace showed that ended the hub's MRC Trust for that
+handle immediately -- so `LOGOFF` is not sent by default (an
+individual leave never needs to end the underlying hub connection;
+this bridge holds one shared connection for every local caller). The
+one accepted cost of staying silent is the "stuck on the hub's side"
+symptom noted in the table above.
+
+The `LOGOFF` wire format used in that original test already matched
+the documented spec exactly, so simply "fixing the format" is not
+expected to resolve it on its own -- an opt-in `mrc_send_logoff_on_leave`
+config key (default `false`) exists so this can be re-verified against
+a real hub without committing to the behavior change: enable it,
+leave a room, then immediately try rejoining with the same handle, and
+check whether a fresh `/identify` is now required. Report back whether
+this changes anything either way.
 
 ### Known simplifications
 
