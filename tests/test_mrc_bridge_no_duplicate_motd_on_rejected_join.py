@@ -168,5 +168,64 @@ class NoDuplicateMotdOnRejectedJoinTests(unittest.TestCase):
         self.assertTrue(sess["in_room"])
 
 
+class RedundantSameRoomJoinIsANoOpTests(unittest.TestCase):
+    """Regression test for the follow-on real live report (2026-09-22):
+    after the auto-rejoin-on-identify self-heal already puts a caller
+    back in their room and shows MOTD/CHATTERS exactly once (the fix
+    above), the caller can't tell that actually worked -- nothing says
+    "you're already in", so they type /join <the room they're already
+    in> just to be sure, and get the *entire* has-arrived/BANNERS/MOTD/
+    CHATTERS sequence a second time for a room they never left.
+    "either it needs to automatically join the lobby after
+    identifying [it already does] or not show the motd and chatters
+    until after joining [also already true] -- so a manual /join
+    naming your CURRENT room must be a real no-op."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _make_bridge(self._tmp.name)
+        self.ws_id = 902
+        self.ws = _FakeWs()
+        self.app.websockets[self.ws_id] = self.ws
+
+    def test_join_command_naming_current_room_requests_no_payloads(self):
+        _run(self.app._handle_join_room(
+            self.ws_id, {"handle": "StingRay", "room": "lobby"}))
+        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
+
+        calls_before = self.app.mrc.send_packet.call_count
+        _run(self.app._handle_server_cmd(self.ws_id, {"command": "JOIN lobby"}))
+        calls_after = self.app.mrc.send_packet.call_count
+
+        # The NEWROOM command itself still gets forwarded to the hub
+        # (harmless, and matches every other server_cmd's own
+        # unconditional-forward convention) -- what must NOT happen is
+        # a second announce+BANNERS+MOTD+CHATTERS cascade.
+        self.assertEqual(calls_after, calls_before + 1)
+        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
+
+    def test_client_still_gets_a_room_changed_confirmation(self):
+        _run(self.app._handle_join_room(
+            self.ws_id, {"handle": "StingRay", "room": "lobby"}))
+        self.ws.sent.clear()
+
+        _run(self.app._handle_server_cmd(self.ws_id, {"command": "JOIN lobby"}))
+
+        room_changed = [m for m in self.ws.sent if m.get("type") == "room_changed"]
+        self.assertEqual(len(room_changed), 1)
+
+    def test_join_command_naming_a_different_room_still_works_normally(self):
+        _run(self.app._handle_join_room(
+            self.ws_id, {"handle": "StingRay", "room": "lobby"}))
+        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
+
+        _run(self.app._handle_server_cmd(self.ws_id, {"command": "JOIN gopher"}))
+
+        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 2)
+        sess = self.app.db.get_session(str(self.ws_id))
+        self.assertEqual(sess["room"], "gopher")
+
+
 if __name__ == '__main__':
     unittest.main()

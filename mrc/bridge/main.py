@@ -2430,6 +2430,23 @@ class BridgeApp:
         packet slightly differently -- see _handle_server_cmd's own
         unconditional forward above vs. _handle_mrc_tcp_packet's)."""
         eff_nick = self._session_effective_nick(sess)
+
+        # Real live UX complaint found 2026-09-22: after the auto-
+        # rejoin-on-successful-identify self-heal already puts a caller
+        # back in their room (showing MOTD/CHATTERS once, correctly),
+        # nothing in the client visibly says "you don't need to do
+        # anything else" -- so a caller who isn't sure it actually
+        # worked types /join <the room they're already in> just to be
+        # sure, and gets the *entire* has-arrived/BANNERS/MOTD/CHATTERS
+        # sequence a second time for a room they never actually left.
+        # A manual /join naming the room you're already in is a no-op
+        # by definition -- skip the announce+payload cascade below
+        # entirely (still confirm room_changed so the client's own UI
+        # doesn't look like the command did nothing).
+        if sess.get("in_room") and MRCProtocol.norm_room(sess.get("room", "")) == new_room:
+            await self._send_to_session(session_id, {"type": "room_changed", "room": new_room})
+            return
+
         sess["waiting_for_identify"] = False
         sess["in_room"]              = True
         sess["room"]                 = new_room
