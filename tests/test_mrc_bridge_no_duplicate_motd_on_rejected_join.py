@@ -205,27 +205,26 @@ class RedundantSameRoomJoinIsANoOpTests(unittest.TestCase):
         self.assertEqual(calls_after, calls_before + 1)
         self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
 
-    def test_join_command_naming_current_room_in_different_case_is_still_a_no_op(self):
-        # Real live bug found 2026-09-22 testing the fix above: the web
-        # UI's own default room value is "Lobby" (capital L), but a
-        # caller typing /join by hand naturally types lowercase
-        # ("lobby") -- MRC room names are case-insensitive on the wire
-        # (the hub treats both the same), but norm_room() never
-        # case-folds, so the original same-room check ("Lobby" ==
-        # "lobby") silently never matched and the whole cascade fired
-        # again anyway. This is the exact real-world case that slipped
-        # through the test above, which used the same case in both
-        # places.
+    def test_join_command_naming_current_room_in_different_case_is_a_real_change(self):
+        # Real live correction 2026-09-22: a same-day attempt made this
+        # case-insensitive too (on the mistaken belief MRC room names
+        # are always case-insensitive -- see norm_room()'s own
+        # docstring for the full story). Reverted: real custom rooms
+        # ARE genuinely case-sensitive and distinct by case on the
+        # network, so joining "Lobby" and then typing "/join lobby"
+        # must be treated as a real room change, not silently
+        # swallowed as a no-op.
         _run(self.app._handle_join_room(
             self.ws_id, {"handle": "StingRay", "room": "Lobby"}))
         self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
 
-        calls_before = self.app.mrc.send_packet.call_count
         _run(self.app._handle_server_cmd(self.ws_id, {"command": "JOIN lobby"}))
-        calls_after = self.app.mrc.send_packet.call_count
 
-        self.assertEqual(calls_after, calls_before + 1)
-        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 1)
+        # A real room change -- CHATTERS gets requested again for the
+        # (genuinely different) "lobby" room.
+        self.assertEqual(_count_chatters_requests(self.app.mrc.send_packet), 2)
+        sess = self.app.db.get_session(str(self.ws_id))
+        self.assertEqual(sess["room"], "lobby")
 
     def test_client_still_gets_a_room_changed_confirmation(self):
         _run(self.app._handle_join_room(

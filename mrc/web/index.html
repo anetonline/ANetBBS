@@ -582,7 +582,7 @@
         <div id="join-panel" class="join-panel">
           <h2>Join MRC Chat</h2>
           <div><input type="text" id="handle-input" placeholder="Your handle" /></div>
-          <div><input type="text" id="room-input" placeholder="Room (default: Lobby)" value="Lobby" /></div>
+          <div><input type="text" id="room-input" placeholder="Room (default: lobby)" value="lobby" /></div>
           <div><button id="join-btn">Join Chat</button></div>
         </div>
         <div id="chat-panel" style="display:none;">
@@ -2156,7 +2156,16 @@
     // -----------------------------------------------------------------------
     joinBtn.addEventListener('click', () => {
       const handle = handleInput.value.trim();
-      const room   = roomInput.value.trim() || 'Lobby';
+      // Real live bug found 2026-09-22: this used to default to
+      // "Lobby" (capital L), but the hub's own canonical name for its
+      // well-known default room is lowercase "lobby" -- a session that
+      // joined via this default had its own room stored as "Lobby"
+      // while every incoming broadcast from the hub used "lobby", so
+      // (room names being genuinely case-sensitive on the real
+      // network, unlike this one specific hub-recognized default) it
+      // never matched a single room broadcast again. Matching the
+      // hub's own case here, not a general case-fold.
+      const room   = roomInput.value.trim() || 'lobby';
       if (!handle) return addMessage('✗ Please enter a handle', 'error');
       client.joinRoom(handle, room);
     });
