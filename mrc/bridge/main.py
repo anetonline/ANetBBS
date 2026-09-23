@@ -64,6 +64,21 @@ _BRIDGE_DIR = Path(__file__).parent
 _WEB_DIR    = _BRIDGE_DIR.parent / "web"
 
 MRC_MAX_MESSAGE_LEN = 140
+# Real gap found in a security review: handle_mrc_tcp_connection's
+# newline-delimited read loop (new this session, for native
+# umrc-client support) had no cap on how large its buffer could grow
+# while waiting for a '\n' -- the exact "unbounded buffer / no size
+# cap on a receive loop waiting for a line terminator" bug class
+# already fixed elsewhere in this codebase (BinkP, the MRC-IRC bridge,
+# the web/terminal IRC clients, QWK, and this same bridge's own
+# MRCConnection.receive_loop to the upstream hub), just missed here.
+# A real MRC packet is small (MRC_MAX_MESSAGE_LEN=140 for the message
+# field alone, plus a handful of short additional fields) -- this cap
+# is generous headroom above that, not a tight fit. Loopback-only by
+# default (mrc_tcp_listen_host), but the feature explicitly documents
+# an opt-in to 0.0.0.0 for remote umrc-client connections, at which
+# point an uncapped buffer here would be a remote memory DoS.
+MRC_TCP_MAX_LINE_BYTES = 8192
 
 
 def _find_config_path(explicit: Optional[str] = None) -> str:
@@ -2719,6 +2734,12 @@ class BridgeApp:
                         await self._handle_mrc_tcp_packet(conn_id, parsed)
                     except Exception:
                         logger.exception(f"Error handling MRC TCP packet from {conn_id}")
+                if len(buf) > MRC_TCP_MAX_LINE_BYTES:
+                    logger.warning(
+                        f"MRC TCP client {conn_id} sent {len(buf)} bytes with "
+                        f"no line terminator (cap {MRC_TCP_MAX_LINE_BYTES}) -- "
+                        f"closing connection")
+                    break
         except (asyncio.CancelledError, ConnectionResetError):
             pass
         except Exception as e:

@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.1.1`, September 2026)
+**Status: stable** (`v1.1.2`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -8,14 +8,18 @@ QWK echomail; inter-BBS instant messaging via MSP (RFC 1312); a built-in
 collaborative wiki and RSS reader; door-game support including stock
 Synchronet `.js` doors (LORD ships pre-installed and plays out of the box).
 
-## Quick install (Linux)
+## Install — pick your path
 
-**No root/sudo access, or would rather not?** See
-[`docs/01b-no-root-install.md`](docs/01b-no-root-install.md) — a
-complete, verified path to a fully working BBS (web UI, telnet, SSH)
-using nothing but your own account, no `sudo` anywhere. The rest of
-this section covers the full-featured `install.sh` path, which does
-need root.
+All four paths land on the same BBS; pick whichever fits your box.
+
+| Your setup                          | Use |
+|--------------------------------------|-----|
+| Linux, and `sudo` is fine            | [Quick install (Linux)](#quick-install-linux) below — the full `install.sh` wizard |
+| Linux, but no root/sudo access       | [`docs/01b-no-root-install.md`](docs/01b-no-root-install.md) — everything (web, telnet, SSH) using only your own account |
+| Docker (any OS)                      | [Quick install (Docker)](#quick-install-docker) below |
+| Windows                              | [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) — WSL2 or Docker Desktop, both confirmed working |
+
+## Quick install (Linux)
 
 You'll want a domain pointed at this box if you want the web admin and
 public web pages working with HTTPS — modern browsers refuse plain-HTTP
@@ -25,8 +29,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.1.1.tar.gz
-cd ANetBBS-v1.1.1
+tar xzf ANetBBS-v1.1.2.tar.gz
+cd ANetBBS-v1.1.2
 sudo bash install.sh
 ```
 
@@ -46,8 +50,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.1.1.tar.gz
-cd ANetBBS-v1.1.1
+tar xzf ANetBBS-v1.1.2.tar.gz
+cd ANetBBS-v1.1.2
 sudo bash update.sh
 ```
 
@@ -69,22 +73,25 @@ sudo bash install.sh --force      # Re-run install, overwriting an existing
 
 Prefer containers? Two options — a single-container quick start, or a
 proper multi-container `docker-compose` deployment (recommended for
-anything beyond kicking the tires). No pre-built image is published
-anywhere yet, so build from source first:
+anything beyond kicking the tires). Pre-built multi-arch images
+(amd64 + arm64, works on a Raspberry Pi) are published to GHCR on
+every release — no local build needed:
 
 ```
-docker build -f docker/Dockerfile -t anetbbs:local .
 cp .env.docker.example .env      # fill in SECRET_KEY, BBS_NAME, etc.
-# then set ANETBBS_IMAGE=anetbbs / ANETBBS_IMAGE_TAG=local in .env
 cp docker/compose/mrc-bridge-config.json.example mrc-bridge-config.json
 docker compose -f docker/compose/docker-compose.yml up -d
 ```
 
+`.env` already points at `ghcr.io/anetonline/anetbbs:latest` by
+default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.2`
+(or whatever release you want). Testing a local change instead of a
+published image? `docker build -f docker/Dockerfile -t anetbbs:local .`,
+then set `ANETBBS_IMAGE=anetbbs` / `ANETBBS_IMAGE_TAG=local` in `.env`.
+
 New to Docker? [`docs/22-containers.md`](docs/22-containers.md) has a
 full hand-held walkthrough (including the single-container option,
-what each command actually does, and troubleshooting). Multi-arch
-images (amd64 + arm64, works on a Raspberry Pi) are built via `docker
-buildx` once there's a registry to publish to.
+what each command actually does, and troubleshooting).
 
 ## Features
 

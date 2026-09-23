@@ -464,6 +464,11 @@ class MRCChat(BaseChatSystem):
         # permanent scrollback log. Each entry is
         # [expire_at_monotonic, unique_token, [rendered_lines]].
         self._transient_notices = []
+        # The asyncio.Task each _show_transient_notice() call spawns to
+        # expire itself -- stored (not fire-and-forget) so it can be
+        # cancelled on session teardown, same as _recv_task/_ping_task/
+        # _ticker_task below. Self-discards via add_done_callback.
+        self._pending_notice_tasks = set()
         self._split_screen     = True
         self._input_lock       = asyncio.Lock()
         self._input_buf        = []
@@ -1472,7 +1477,20 @@ class MRCChat(BaseChatSystem):
                     await self._redraw_chat_area()
                 except Exception:
                     pass
-        asyncio.create_task(_expire())
+        # Real gap found in a review: the task this create_task() call
+        # returns used to be discarded immediately -- unlike every
+        # other task in this class (_recv_task/_ping_task/_ticker_task,
+        # and core/session.py's own _presence_alert_task, the last of
+        # which was fixed for this exact reason once already) -- an
+        # unreferenced task is only weakly held by the event loop and
+        # can in principle be garbage-collected before it completes
+        # (per asyncio's own documented caveat), which would silently
+        # mean a notice never expires at all. Stored + cancelled on
+        # teardown in _connect_and_chat's finally: block, same as the
+        # others.
+        task = asyncio.create_task(_expire())
+        self._pending_notice_tasks.add(task)
+        task.add_done_callback(self._pending_notice_tasks.discard)
 
     def _active_transient_lines(self) -> list:
         """Non-expired _show_transient_notice() lines, filtered by
@@ -2612,6 +2630,10 @@ class MRCChat(BaseChatSystem):
     # ── Disconnect ───────────────────────────────────────────────────────────
 
     async def _disconnect(self):
+        for task in list(self._pending_notice_tasks):
+            if not task.done():
+                task.cancel()
+        self._pending_notice_tasks.clear()
         if self._ping_task and not self._ping_task.done():
             self._ping_task.cancel()
         self._ping_task = None

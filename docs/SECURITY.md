@@ -272,6 +272,24 @@ Read this whole file before exposing the BBS to the internet.
   where they were missing — nginx-level gzip for the reference deploy
   template, and a Flask-level `Cache-Control` fallback for installs
   running the app's own static file serving directly.
+- **The new native `umrc-client` support on the MRC bridge**
+  (`mrc_tcp_enabled` in `mrc/bridge/config.json`, see
+  `docs/27-mrc-chat.md`) is off by default, and its listener
+  (`mrc_tcp_listen_host`) defaults to `127.0.0.1` — loopback-only,
+  same posture as the bridge's own WebSocket listener — even when
+  enabled. It accepts a raw TCP connection from any process able to
+  reach that port; the connecting client isn't authenticated against a
+  BBS account (MRC's own network-level `/identify`/Trust is the real
+  authority, matching the existing web/terminal MRC clients' trust
+  model exactly). A security review of this new listener found and
+  fixed one real gap — the newline-delimited packet read loop had no
+  cap on buffered bytes while waiting for a line terminator, an
+  unbounded-buffer DoS shape this project has closed in several other
+  network listeners over past audits — now capped
+  (`MRC_TCP_MAX_LINE_BYTES`). Only set `mrc_tcp_listen_host` to
+  `0.0.0.0` if you deliberately want `umrc-client` reachable from
+  outside this box (a LAN or the internet); the firewall guidance in
+  `docs/PORTS.md` covers opening port 5010 for that case.
 
 ## What you MUST do for production
 

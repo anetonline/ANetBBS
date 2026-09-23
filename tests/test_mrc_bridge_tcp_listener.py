@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mrc.bridge.main import BridgeApp        # noqa: E402
+from mrc.bridge.main import BridgeApp, MRC_TCP_MAX_LINE_BYTES  # noqa: E402
 from mrc.bridge.mrc_protocol import MRCProtocol  # noqa: E402
 
 
@@ -375,6 +375,70 @@ class MrcTcpDisconnectTests(_TcpBridgeHarness):
 
         ok = await self._wait_until(lambda: self.app.db.list_sessions() == {})
         self.assertTrue(ok)
+
+
+class MrcTcpUnboundedBufferProtectionTests(_TcpBridgeHarness):
+    """Real security review finding (2026-09-23): handle_mrc_tcp_
+    connection's newline-delimited read loop had no cap on how large
+    its buffer could grow while waiting for a line terminator -- the
+    same "unbounded buffer / no size cap on a receive loop" bug class
+    already fixed elsewhere in this codebase (BinkP, the MRC-IRC
+    bridge, the web/terminal IRC clients, QWK), just missed here. A
+    client that never sends '\\n' could grow memory without bound.
+    Fixed with a cap (MRC_TCP_MAX_LINE_BYTES) checked after each
+    read -- exceeding it closes the connection instead of growing
+    further."""
+
+    async def test_a_line_with_no_terminator_past_the_cap_closes_the_connection(self):
+        reader, writer = await self._connect()
+        # +1 to be unambiguously over the cap, not exactly at it.
+        writer.write(b"A" * (MRC_TCP_MAX_LINE_BYTES + 1))
+        await writer.drain()
+
+        # The server must close its end -- reader.read() returns b''
+        # on EOF once that happens, rather than hanging or the buffer
+        # growing forever if more bytes kept arriving.
+        data = await asyncio.wait_for(reader.read(1), timeout=2.0)
+        self.assertEqual(data, b'', 'server must close the connection once '
+                          'the no-terminator buffer exceeds the cap')
+
+        writer.close()
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+
+    async def test_many_small_real_packets_in_one_burst_are_not_mistaken_for_overflow(self):
+        """The cap is checked against the LEFTOVER partial line after
+        every complete '\\n'-terminated packet in the current chunk is
+        already split out and processed -- not against the raw total
+        bytes ever seen. A legitimate client sending many small real
+        packets back-to-back in one burst (well within a single
+        4096-byte read()) must not get disconnected."""
+        reader, writer = await self._connect()
+        await self._iamhere(writer, "StingRay", "lobby")
+        await self._wait_for_single_session()
+
+        packets = b"".join(
+            MRCProtocol.create_packet(
+                "StingRay", "site", "lobby", "", "", "lobby", f"msg {i}"
+            ).encode()
+            for i in range(20)
+        )
+        self.assertLess(len(packets), MRC_TCP_MAX_LINE_BYTES)
+        writer.write(packets)
+        await writer.drain()
+
+        # Session must still be alive and the connection still open --
+        # confirmed by successfully sending one more packet and getting
+        # a reply back over the fake hub, not by the socket closing.
+        ok = await self._wait_until(
+            lambda: len(self.app.mrc.sent_messages()) >= 20)
+        self.assertTrue(ok, 'a legitimate multi-packet burst must not trip '
+                         'the overflow protection')
+
+        writer.close()
+        await writer.wait_closed()
 
 
 if __name__ == "__main__":

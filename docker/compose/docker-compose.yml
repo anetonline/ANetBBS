@@ -11,18 +11,24 @@
 # warning on the web service and the MRC_BRIDGE_HOST gotcha.
 #
 # Quick start (see docs/22-containers.md for the full walkthrough):
-#   docker build -f ../Dockerfile -t anetbbs:local ../..    # nothing's
-#                                                            # published
-#                                                            # yet, build first
 #   cp .env.docker.example .env            # fill in SECRET_KEY, BBS_NAME, etc.
-#                                           # + set ANETBBS_IMAGE=anetbbs /
-#                                           #   ANETBBS_IMAGE_TAG=local
+#                                           # already points ANETBBS_IMAGE at
+#                                           # the published ghcr.io image --
+#                                           # nothing to build unless you're
+#                                           # testing a local source change
 #   cp mrc-bridge-config.json.example mrc-bridge-config.json
 #   docker compose up -d
 #
 # Enable rlogin/FTP by uncommenting their `ports:` lines below AND
 # setting RLOGIN_ENABLED=true / FTP_ENABLED=true in .env (both default
 # off, matching install.sh's own default-off posture for these).
+#
+# Native umrc-client support: uncomment mrc-bridge's 5010 `ports:` line
+# below AND set "mrc_tcp_enabled": true + "mrc_tcp_listen_host":
+# "0.0.0.0" in mrc-bridge-config.json (loopback-only inside the
+# container is unreachable through a published port -- see
+# docs/22-containers.md). Off by default, matching install.sh's
+# default-off posture for this too.
 
 x-anetbbs-image: &anetbbs-image ${ANETBBS_IMAGE:-ghcr.io/anetonline/anetbbs}:${ANETBBS_IMAGE_TAG:-latest}
 
@@ -124,6 +130,7 @@ services:
     environment: *anetbbs-db-env
     ports:
       - "8080:8080"
+      # - "5010:5010"  # native umrc-client -- see the top-of-file note
     volumes:
       - anetbbs_mrc_data:/app/mrc/bridge/data
       - ./mrc-bridge-config.json:/app/mrc/bridge/config.json:ro

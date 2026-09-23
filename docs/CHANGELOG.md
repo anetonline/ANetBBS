@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.1`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.2`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.2 — Security/audit pass on the new umrc-client support; install docs reorganized (September 2026)
+
+A full review of the native `umrc-client` support added over the last couple of releases found and fixed two real gaps in its raw-TCP listener: the newline-delimited packet read loop had no cap on buffered bytes while waiting for a line terminator (the same unbounded-buffer bug class already closed elsewhere in this project — BinkP, the MRC↔IRC bridge, both IRC clients, QWK — just missed here since this listener is brand new), and the notice-expiry task added in the previous release wasn't tracked or cancelled on disconnect the way every other background task in that code already is. Both fixed and covered by dedicated regression tests. Neither was reachable by anything beyond the local box under this feature's loopback-only default.
+
+Documentation pass alongside the review: `docs/PORTS.md`, `docs/SECURITY.md`, and the Docker Compose walkthrough now cover the umrc-client listener's port and security posture, which had been missed when that feature first landed; a stale "untested" note on TradeWars support was corrected (it's been launch-confirmed for a while); and a few lingering "nothing's published to a registry yet" lines were cleaned up in the Docker docs — pre-built images have actually been published on every release for a long time.
+
+Also reorganized how the README and Quick Start guide present install options — a short table up top now points straight at whichever path fits (Linux with sudo, Linux without root, Docker, or Windows) instead of only surfacing the Linux path by default.
 
 ## v1.1.1 — MRC login/logout alert no longer sticks on screen inside chat (September 2026)
 

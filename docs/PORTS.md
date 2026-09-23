@@ -13,6 +13,7 @@
 | 11    | UDP   | yes     | SYSTAT         | "Who's online" lookup from peer BBSes (Finger-style) | `SYSTAT_PORT`   |
 | 79    | TCP   | yes     | Finger         | RFC 1288 Finger — per-user info queries          | `FINGER_LISTEN_PORT`|
 | 5001* | TCP   | yes     | MRC web bridge | Standalone service in `mrc/bridge/`              | `MRC_BRIDGE_PORT`   |
+| 5010† | TCP   | off     | MRC bridge (native `umrc-client`) | Raw-TCP listener so `umrc-client` can connect directly to the same bridge, no separate `umrc-bridge` process — see `docs/27-mrc-chat.md` | `mrc_tcp_listen_port` (`mrc_tcp_enabled`) in `mrc/bridge/config.json` |
 | 6400  | TCP   | off     | PETSCII (40-col) | Commodore 64/128 terminal support, fixed 40-column | `PETSCII40_PORT` (`PETSCII40_ENABLED`) |
 | 6401  | TCP   | off     | PETSCII (80-col) | Commodore 64/128 terminal support, fixed 80-column | `PETSCII80_PORT` (`PETSCII80_ENABLED`) |
 
@@ -25,9 +26,19 @@ actual default. `mrc/bridge/main.py` reads its port from
 `config.json`, not directly from the `.env` var, so if you ever hand-
 edit one, update the other to match.
 
+† `mrc_tcp_listen_host` defaults to `127.0.0.1` specifically
+(loopback-only), unlike every other port on this page — see
+"Listening interface" below for why that one's different from the
+rest.
+
 ## Listening interface
 
-All defaults bind `0.0.0.0`. Override with `WEB_HOST`, `MSP_BIND_HOST`,
+All defaults bind `0.0.0.0`, **except** `mrc_tcp_listen_host` (the
+native `umrc-client` listener above), which defaults to `127.0.0.1`
+on purpose — it's brand new, unauthenticated-until-IDENTIFY surface,
+so it stays loopback-only unless a sysop deliberately opts into
+`0.0.0.0` for LAN/internet-reachable `umrc-client` connections.
+Override the rest with `WEB_HOST`, `MSP_BIND_HOST`,
 `SYSTAT_BIND_HOST`, `TELNET_HOST`, `SSH_HOST`, `RLOGIN_HOST`,
 `FTP_HOST`, `FINGER_LISTEN_HOST`, and `BINKP_LISTEN_HOST` (the last one
 is read directly by `anetbbs/echomail/binkp_server.py` rather than
@@ -90,6 +101,10 @@ sudo iptables -A INPUT -p udp --dport 11    -j ACCEPT   # systat
 sudo iptables -A INPUT -p tcp --dport 79    -j ACCEPT   # finger
 sudo iptables -A INPUT -p tcp --dport 6400  -j ACCEPT   # petscii 40-col (if enabled)
 sudo iptables -A INPUT -p tcp --dport 6401  -j ACCEPT   # petscii 80-col (if enabled)
+sudo iptables -A INPUT -p tcp --dport 5010  -j ACCEPT   # umrc-client (only if mrc_tcp_enabled
+                                                          # AND mrc_tcp_listen_host is 0.0.0.0 --
+                                                          # loopback-only by default, nothing to
+                                                          # open here otherwise)
 ```
 
 To get listed in the official `sbbsimsg.lst` directory on Vertrauen,

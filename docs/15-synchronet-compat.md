@@ -134,7 +134,7 @@ at <https://github.com/SynchronetBBS/sbbs/tree/master/xtrn>.
 | `chksetup`               | ❌ Won't work           | Synchronet-internal setup checker   |
 | `msgmaint`               | ❌ Won't work           | Touches `msg_area` heavily          |
 | `pdo` (post-door object) | ❌ Won't work           | `xbase`-based                       |
-| `tw2002` (TradeWars JS)  | ⚠️ Untested             | `xbase` storage; would need testing |
+| `tw2002` (TradeWars JS)  | ✅ Launches correctly    | Confirmed live alongside LORD (see `docs/CHANGELOG.md`'s v1.0.83 entry) — not validated as thoroughly end-to-end as LORD |
 | `lord-style` doors       | ⚠️ Mixed                | Most use `console + user.handle` only |
 
 ## How to extend the shim

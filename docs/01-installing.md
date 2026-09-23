@@ -1,11 +1,20 @@
 # Quick Start
 
-> **Don't have root/sudo on this box, or would rather not run a
-> 2,000+ line script as root?** See
-> **[01b — No-Root Quick Start](01b-no-root-install.md)** instead — a
-> complete, verified path to a fully working BBS (web UI, telnet, SSH)
-> using nothing but your own account. The rest of this page assumes
-> you have (or are fine using) `sudo`.
+This page covers the full-featured `install.sh` path on Linux with
+`sudo`. Other setups:
+
+> - **No root/sudo on this box, or would rather not run a 2,000+ line
+>   script as root?** See
+>   **[01b — No-Root Quick Start](01b-no-root-install.md)** — a
+>   complete, verified path to a fully working BBS (web UI, telnet,
+>   SSH) using nothing but your own account.
+> - **Prefer Docker?** See [`22-containers.md`](22-containers.md) —
+>   pre-built images published on every release, no build needed.
+> - **On Windows?** See
+>   **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** — WSL2 or Docker
+>   Desktop, both confirmed working end-to-end.
+>
+> The rest of this page assumes Linux with `sudo`.
 
 ## Requirements
 

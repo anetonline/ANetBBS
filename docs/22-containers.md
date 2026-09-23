@@ -18,11 +18,13 @@ to run a production BBS). Neither replaces the other:
 Both share one image (`docker/Dockerfile`) — the only difference is
 which entrypoint/command each container runs.
 
-**No pre-built image is published anywhere yet.** Every command below
-builds the image from your own source checkout first. `docker pull` /
-a registry reference only becomes real once a release is actually
-tagged and pushed — don't run `docker pull ghcr.io/...` yet, it won't
-find anything.
+**Pre-built multi-arch images (amd64 + arm64) are published to GHCR on
+every tagged release** — `ghcr.io/anetonline/anetbbs:latest`, or pin a
+version like `:v1.1.2`. That's what `.env.docker.example` already
+points at by default, so most people never need to build anything
+locally. The walkthrough below still shows the local-build path too
+(`docker build`), since that's what you want if you're testing a
+change to the source rather than running a release as-is.
 
 **A transparency note on how tested this path is:** the single-container
 quick start has now been run end-to-end against a real Docker daemon
@@ -75,9 +77,16 @@ docker ps
 An empty table (just column headers, no permission error) means
 you're good.
 
-## Step 1 — build the image
+## Step 1 — get the image
 
-From the root of your ANetBBS source checkout:
+Easiest: pull the published image, nothing to build.
+
+```bash
+docker pull ghcr.io/anetonline/anetbbs:latest
+```
+
+Testing a local change instead? Build from source from the root of
+your ANetBBS source checkout:
 
 ```bash
 docker build -f docker/Dockerfile -t anetbbs:local .
@@ -86,7 +95,10 @@ docker build -f docker/Dockerfile -t anetbbs:local .
 The first build takes a few minutes (compiling a few Python
 dependencies that don't have prebuilt wheels for every platform). If
 it fails partway through, that's useful — it means something in the
-Dockerfile needs adjusting; save the full output.
+Dockerfile needs adjusting; save the full output. The rest of this
+walkthrough uses `anetbbs:local` in `docker run`/`.env` — swap in
+`ghcr.io/anetonline/anetbbs:latest` (or a pinned version tag) instead
+if you pulled rather than built.
 
 ## Step 2 — try the single-container quick start
 
@@ -224,8 +236,9 @@ cp /path/to/anetbbs-source/docker/compose/mrc-bridge-config.json.example mrc-bri
 
 Edit `.env`:
 - Fill in `SECRET_KEY`, `BBS_NAME`, `SYSOP_NAME`, `BBS_EMAIL` as before.
-- Since nothing's published to a registry yet, point at the image you
-  built locally in Step 1:
+- `ANETBBS_IMAGE`/`ANETBBS_IMAGE_TAG` already default to the published
+  `ghcr.io/anetonline/anetbbs:latest` — only change these if you built
+  locally in Step 1 instead and want to run that image:
   ```
   ANETBBS_IMAGE=anetbbs
   ANETBBS_IMAGE_TAG=local
@@ -267,6 +280,19 @@ codebase (no `masquerade_address` support) — under Docker's default
 bridge networking, passive FTP transfers will likely fail. If you need
 FTP working today, run the `terminal` container with `network_mode:
 host` instead, which sidesteps Docker's NAT entirely.
+
+### Enabling native `umrc-client` support
+
+Off by default (matching `install.sh`'s own default-off posture). Set
+`"mrc_tcp_enabled": true` in `mrc-bridge-config.json`, **and** change
+`"mrc_tcp_listen_host"` from its default `"127.0.0.1"` to `"0.0.0.0"`
+— loopback-only means loopback *inside the container's own network
+namespace*, which a published port can't reach at all, unlike on a
+bare-metal install where "loopback" and "this host" are the same
+thing. Then uncomment the `mrc-bridge` service's `5010:5010` `ports:`
+line in `docker-compose.yml`. See `docs/SECURITY.md` for what this
+listener's security posture actually is before opting in — it's brand
+new, less-reviewed surface than the rest of the bridge.
 
 ## The docker.sock trust boundary (read this before enabling)
 
@@ -376,9 +402,10 @@ This needs `ANETBBS_COMPOSE_DIR` set in `.env` to the absolute host
 path containing your `docker-compose.yml` (defaults to wherever you
 ran `docker compose up` from, which is usually right — only override
 if you launch compose from a script/cron job with a different working
-directory each time). This only matters once real images are being
-published somewhere pullable — not relevant while you're pointing
-`.env` at a locally built `anetbbs:local` image.
+directory each time). Only relevant when running the published GHCR
+image (the default) — not applicable while you're pointing `.env` at
+a locally built `anetbbs:local` image, since there's no new tag to
+pull.
 
 **Single-container mode has no in-place upgrade button** — clicking
 "Install Update" there returns a clear message instead of attempting
@@ -390,9 +417,11 @@ Step 2 above, with a new image tag).
 
 ## Multi-arch
 
-Images are meant to be built for both `linux/amd64` and `linux/arm64`
-(Raspberry Pi and other ARM hosts) via `docker buildx`, once there's a
-registry to push to:
+Handled automatically — every version tag push builds and publishes
+`linux/amd64` + `linux/arm64` images to GHCR via
+[`.github/workflows/docker-build.yml`](../.github/workflows/docker-build.yml),
+no manual step needed. The command that workflow runs, for reference
+(or if you're pushing to your own registry/fork instead):
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \

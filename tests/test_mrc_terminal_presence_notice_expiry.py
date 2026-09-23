@@ -182,6 +182,76 @@ class RedrawIncludesTransientLinesTests(unittest.TestCase):
         self.assertIn('Ariel just logged in', _written_text(chat))
 
 
+class NoticeExpiryTaskLifecycleTests(unittest.TestCase):
+    """Real gap found in a review (2026-09-23): _show_transient_notice's
+    expiry task used to be fire-and-forget (asyncio.create_task(...)
+    with the return value discarded), unlike every other task this
+    class spawns (_recv_task/_ping_task/_ticker_task, and
+    core/session.py's own _presence_alert_task, fixed for this exact
+    reason once already) -- an unreferenced task is only weakly held
+    by the event loop and can in principle be garbage-collected before
+    it runs, which would silently mean a notice never expires. Now
+    stored in _pending_notice_tasks and cancelled in _disconnect()."""
+
+    def test_expiry_task_is_tracked_while_pending(self):
+        # Checked from INSIDE the still-running loop, in the same
+        # asyncio.run() call: asyncio.run() cancels any leftover
+        # pending tasks as part of its own teardown once the passed
+        # coroutine returns, which would fire the expiry task's done-
+        # callback (removing it from the tracking set) before a
+        # check made only after _run() returns ever got to see it --
+        # a test-harness artifact, not something a real long-running
+        # chat session (one continuous event loop, no per-call
+        # asyncio.run()) would ever hit.
+        chat = _make_chat()
+        chat._redraw_chat_area = lambda: asyncio.sleep(0)  # no-op coroutine
+
+        async def _scenario():
+            await chat._show_transient_notice('*** Ariel just logged in ***', ttl=30)
+            return len(chat._pending_notice_tasks)
+        count = _run(_scenario())
+
+        self.assertEqual(count, 1,
+            'the expiry task must be stored, not fire-and-forget')
+
+    def test_expiry_task_self_discards_once_it_completes(self):
+        chat = _make_chat()
+        chat._redraw_chat_area = lambda: asyncio.sleep(0)  # no-op coroutine
+
+        async def _scenario():
+            await chat._show_transient_notice('*** Ariel just logged in ***', ttl=0.01)
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                if not chat._pending_notice_tasks:
+                    return
+        _run(_scenario())
+
+        self.assertEqual(chat._pending_notice_tasks, set(),
+            'a completed expiry task must remove itself from the tracking set')
+
+    def test_disconnect_cancels_any_still_pending_expiry_tasks(self):
+        """The scenario the fix specifically targets: a chat session
+        ends (real disconnect, /quit, error) while a notice's 30s
+        window hasn't elapsed yet -- the task must be cancelled, not
+        left dangling."""
+        chat = _make_chat()
+        chat._redraw_chat_area = lambda: asyncio.sleep(0)  # no-op coroutine
+        chat._ws = None
+        chat._aiohttp_session = None
+
+        async def _scenario():
+            await chat._show_transient_notice('*** Ariel just logged in ***', ttl=30)
+            task = next(iter(chat._pending_notice_tasks))
+            await chat._disconnect()
+            return task
+        task = _run(_scenario())
+
+        self.assertTrue(task.cancelled() or task.done(),
+            'the pending expiry task must be cancelled on disconnect')
+        self.assertEqual(chat._pending_notice_tasks, set(),
+            '_disconnect must clear the tracking set')
+
+
 class NoticeSinkWiringTests(unittest.TestCase):
     """Source-inspection technique (same as test_presence_alerts.py's
     test_presence_alert_task_is_cancelled_on_session_teardown) since
