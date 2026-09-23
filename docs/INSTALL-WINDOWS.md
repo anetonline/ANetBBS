@@ -17,15 +17,12 @@ ways to do that, both well-trodden and both free:
   Docker walkthrough; this page only covers what's different running
   it under Docker Desktop specifically rather than Docker-on-Linux.
 
-**A transparency note on how tested this page is:** everything below
-is written from how WSL2/Docker Desktop are documented to behave and
-how the existing Linux install path already works — this sandbox has
-no way to run an actual Windows box, so the WSL2 path in particular
-hasn't been confirmed end-to-end against real WSL2 the way the Docker
-single-container path has against a real Linux Docker daemon (see the
-transparency note at the top of `docs/22-containers.md`). If you try
-this on a real Windows machine and something doesn't match what's
-written here, please report it.
+**A transparency note on how tested this page is:** both paths have
+now been confirmed end-to-end on a real Windows machine — WSL2 running
+the normal `install.sh` wizard, and Docker Desktop (see the
+transparency note at the top of `docs/22-containers.md` for the
+Docker-specific confirmation details). If you hit something that
+doesn't match what's written here, please report it.
 
 ## Option 1 — WSL2 + Ubuntu
 

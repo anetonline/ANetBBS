@@ -1,3 +1,9 @@
+# ANetBBS v1.1.1 — MRC login/logout alert no longer sticks on screen inside chat (September 2026)
+
+Fixed a bug where the classic "*** X just logged in/out ***" alert (shown wherever a caller currently is in the BBS when someone else logs in or out) could stay on screen indefinitely once shown inside terminal MRC chat, instead of clearing on its own. Root cause: that alert writes directly into whatever the caller's screen is currently showing, but MRC chat manages its own fixed status-bar/scroll-region layout — the raw write landed somewhere MRC's own screen-drawing logic didn't know about, so it only ever got papered over by the next unrelated bit of chat activity, which during a quiet room could take a while. Now integrated into MRC chat's own display properly and auto-clears itself 30 seconds after it appears, regardless of how quiet the room is.
+
+Also confirmed both Windows install paths in `docs/INSTALL-WINDOWS.md` (WSL2 and Docker Desktop) end-to-end on a real Windows machine — that page no longer carries its earlier "unconfirmed" caveat.
+
 # ANetBBS v1.1.0 — Web MRC multi-line sending; uMRC live-testing fixes (September 2026)
 
 The web MRC chat client can now send messages longer than the old ~140-character single-line limit. Instead of silently blocking the Enter key or refusing to send ("Message too long"), a long message is now automatically split into multiple word-boundary "(1/3) ..." chunks and sent in sequence, matching how the terminal MRC client and uMRC itself have always handled this. Covers both web MRC clients that ship with ANetBBS. Join-rejection and similar chat errors also now show a brief on-screen notice instead of failing silently.

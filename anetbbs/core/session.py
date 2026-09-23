@@ -1316,10 +1316,25 @@ class BBSSession:
                         last_id = max(last_id, eid)
                         verb = 'logged in' if kind == 'login' else 'logged out'
                         color = '1;32' if kind == 'login' else '1;33'
+                        text = f"*** {username} just {verb} ***"
+                        # MRC chat (features/mrc_chat.py) manages its own
+                        # fixed status-bar/scroll-region screen layout --
+                        # a raw write here bypasses that model entirely,
+                        # landing wherever the cursor happens to sit
+                        # instead of a row MRC's own redraw logic knows
+                        # about, and (a real live report) just sits there
+                        # until the next unrelated chat redraw happens to
+                        # paint over it. Route through MRC's own
+                        # _show_transient_notice when it's the active
+                        # screen (self-clears after 30s); otherwise fall
+                        # back to the plain raw write exactly as before.
+                        sink = getattr(self, '_mrc_chat_notice_sink', None)
                         try:
-                            await self.write(
-                                f"\r\n\x1b[{color}m*** {username} just "
-                                f"{verb} ***\x1b[0m\r\n")
+                            if sink is not None:
+                                await sink(f"\x1b[{color}m{text}\x1b[0m")
+                            else:
+                                await self.write(
+                                    f"\r\n\x1b[{color}m{text}\x1b[0m\r\n")
                         except Exception:
                             pass
                 except asyncio.CancelledError:

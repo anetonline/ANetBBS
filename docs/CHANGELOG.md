@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.0`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.1`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.1 — MRC login/logout alert no longer sticks on screen inside chat (September 2026)
+
+Fixed a bug where the classic "*** X just logged in/out ***" alert (shown wherever a caller currently is in the BBS when someone else logs in or out) could stay on screen indefinitely once shown inside terminal MRC chat, instead of clearing on its own. Root cause: that alert writes directly into whatever the caller's screen is currently showing, but MRC chat manages its own fixed status-bar/scroll-region layout — the raw write landed somewhere MRC's own screen-drawing logic didn't know about, so it only ever got papered over by the next unrelated bit of chat activity, which during a quiet room could take a while. Now integrated into MRC chat's own display properly and auto-clears itself 30 seconds after it appears, regardless of how quiet the room is.
+
+Also confirmed both Windows install paths in `docs/INSTALL-WINDOWS.md` (WSL2 and Docker Desktop) end-to-end on a real Windows machine — that page no longer carries its earlier "unconfirmed" caveat.
 
 ## v1.1.0 — Web MRC multi-line sending; uMRC live-testing fixes (September 2026)
 

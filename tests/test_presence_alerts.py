@@ -330,6 +330,69 @@ class PresenceAlertsTests(unittest.TestCase):
         self.assertFalse(any('alice' in line for line in written),
                          f'alice must not be alerted about her own login: {written}')
 
+    def test_presence_alert_watchdog_routes_through_mrc_chat_notice_sink_when_present(self):
+        """Real live report (2026-09-23): the "*** X just logged in/out
+        ***" alert stayed on screen indefinitely while inside terminal
+        MRC chat instead of clearing after a while. Root cause was this
+        watchdog writing straight to the raw session stream, bypassing
+        MRC chat's own scroll-region screen model entirely -- see
+        features/mrc_chat.py's _show_transient_notice docstring for the
+        full story. Fixed by having the watchdog prefer a
+        `_mrc_chat_notice_sink` callable (set by MRCChat while it's the
+        active screen) over the raw self.write() fallback, when present.
+        This exercises the real watchdog code's routing decision, not a
+        re-implementation of it -- same construction pattern as
+        test_presence_alert_watchdog_writes_the_real_alert_line above,
+        just with the sink attribute also stubbed in."""
+        import asyncio
+        from anetbbs.core.session import BBSSession
+
+        fake = object.__new__(BBSSession)
+        fake.user = {'id': self.alice_id}
+        written = []
+        sunk = []
+
+        async def _fake_write(text):
+            written.append(text)
+
+        async def _fake_sink(text):
+            sunk.append(text)
+
+        fake.write = _fake_write
+        fake._mrc_chat_notice_sink = _fake_sink
+
+        async def _drive():
+            call_count = {'n': 0}
+
+            async def _fast_sleep(_secs):
+                call_count['n'] += 1
+                if call_count['n'] == 1:
+                    with self.app.app_context():
+                        from anetbbs.models import db, PresenceEvent
+                        db.session.add(PresenceEvent(
+                            user_id=self.bob_id, username='bob',
+                            kind='login', protocol='ssh'))
+                        db.session.commit()
+                    return
+                raise asyncio.CancelledError()
+
+            with patch('anetbbs.core.session.asyncio.sleep', _fast_sleep), \
+                 patch('anetbbs.features.bbs_ui._app', lambda: self.app):
+                fake._start_presence_alert_watchdog()
+                task = fake._presence_alert_task
+                try:
+                    await asyncio.wait_for(task, timeout=5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+        asyncio.run(_drive())
+
+        self.assertEqual(written, [],
+            f'raw self.write() must not be used when a sink is present: {written}')
+        self.assertTrue(
+            any('bob' in line and 'logged in' in line for line in sunk),
+            f'expected a "bob just logged in" line via the sink, got: {sunk}')
+
     def test_presence_alert_task_is_cancelled_on_session_teardown(self):
         """Real gap found in a security/performance audit (2026-08-31):
         unlike _hb_task/_kick_task/_budget_task, all cancelled in

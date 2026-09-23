@@ -456,6 +456,14 @@ class MRCChat(BaseChatSystem):
         self._action_overhead  = 0
         self._scrollback       = deque(maxlen=SCROLLBACK_LINES)
         self._display_lines    = deque(maxlen=SCROLLBACK_LINES)  # rendered lines for screen
+        # Short-lived notices (see _show_transient_notice) -- kept OUT of
+        # _scrollback/_display_lines deliberately: these are general
+        # cross-protocol "X just logged into the BBS" alerts (see
+        # core/session.py's _start_presence_alert_watchdog), not MRC room
+        # chat history, so they shouldn't pollute /mentions or the
+        # permanent scrollback log. Each entry is
+        # [expire_at_monotonic, unique_token, [rendered_lines]].
+        self._transient_notices = []
         self._split_screen     = True
         self._input_lock       = asyncio.Lock()
         self._input_buf        = []
@@ -653,6 +661,12 @@ class MRCChat(BaseChatSystem):
             })
 
             await self._enter_split_screen()
+            # Lets core/session.py's _start_presence_alert_watchdog (the
+            # general cross-protocol "X just logged in/out" alert) route
+            # through _show_transient_notice instead of a raw write --
+            # see that method's own docstring for the bug this fixes.
+            # Cleared in finally: below on the way out.
+            self.session._mrc_chat_notice_sink = self._show_transient_notice
             await self._emit(
                 f'\x1b[32mJoined #{self._room} as {self._handle}.\x1b[0m  '
                 'Type /helpserver for commands, /quit to leave.')
@@ -696,6 +710,8 @@ class MRCChat(BaseChatSystem):
         finally:
             await self._exit_split_screen()
             await self._disconnect()
+            if getattr(self.session, '_mrc_chat_notice_sink', None) == self._show_transient_notice:
+                self.session._mrc_chat_notice_sink = None
             presence = getattr(self.session, 'presence', None)
             if presence is not None:
                 try:
@@ -1386,6 +1402,92 @@ class MRCChat(BaseChatSystem):
 
         await self._redraw_chat_area()
 
+    async def _show_transient_notice(self, text: str, ttl: float = 30.0):
+        """Show a short-lived line -- currently only used for the
+        cross-protocol login/logout alert (core/session.py's
+        _start_presence_alert_watchdog) -- that renders like a normal
+        chat line but clears itself after `ttl` seconds instead of
+        sitting on screen indefinitely.
+
+        Real bug this replaces: that watchdog used to write straight to
+        the raw session stream, bypassing this class's own scroll-region
+        model entirely. In split-screen mode that raw write landed
+        wherever the physical cursor happened to be (not a row this
+        class's own row/column bookkeeping knew about), so it could only
+        ever get papered over by the NEXT real _redraw_chat_area() call
+        -- during a quiet stretch of chat, it just sat there
+        indefinitely instead of clearing on its own. Routing it through
+        here fixes the rendering; the separate _transient_notices list
+        (instead of just appending via _emit) is what gives it a real
+        timed expiry -- these are general BBS-wide presence alerts, not
+        MRC room chat history, so they shouldn't linger in /mentions or
+        the permanent scrollback either.
+
+        Plain-scroll sessions (PETSCII/ASCII, or split-screen toggled
+        off) have no managed "chat area" to redraw from -- a plain
+        terminal scroll naturally carries old text away as new text
+        arrives, and there's no way to reach back and erase something
+        that already scrolled past, so those fall back to the same raw
+        write the watchdog used to always do.
+        """
+        if not self._split_screen:
+            try:
+                await self.session.write(f'\r\n{text}\r\n')
+            except Exception:
+                pass
+            return
+
+        ts     = self._format_clock(self._local_now()) + ' '
+        ts_len = len(ts)
+        max_w  = max(20, self._chat_width - ts_len)
+        lines  = []
+        for i, wline in enumerate(_word_wrap(text, max_w, indent=' ' * ts_len)):
+            pfx = f'\x1b[2;37m{ts}\x1b[0m' if i == 0 else ' ' * ts_len
+            lines.append(pfx + wline)
+
+        token = object()
+        self._transient_notices.append([time.monotonic() + ttl, token, lines])
+
+        if self._scroll_offset > 0:
+            scroll_rows = self._scroll_rows()
+            total = len(self._display_lines) + sum(
+                len(n[2]) for n in self._transient_notices)
+            max_off = max(0, total - scroll_rows)
+            self._scroll_offset = min(max_off, self._scroll_offset + len(lines))
+
+        await self._redraw_chat_area()
+
+        async def _expire():
+            try:
+                await asyncio.sleep(ttl)
+            except asyncio.CancelledError:
+                return
+            before = len(self._transient_notices)
+            self._transient_notices = [
+                n for n in self._transient_notices if n[1] is not token]
+            if len(self._transient_notices) != before and self._scroll_offset > 0:
+                self._scroll_offset = max(0, self._scroll_offset - len(lines))
+            if self._connected:
+                try:
+                    await self._redraw_chat_area()
+                except Exception:
+                    pass
+        asyncio.create_task(_expire())
+
+    def _active_transient_lines(self) -> list:
+        """Non-expired _show_transient_notice() lines, filtered by
+        wall-clock time on every call (not just relying on that
+        method's own delayed removal task) so a redraw that happens to
+        fire just before the expiry task wakes up can never show a
+        notice past its own ttl."""
+        now = time.monotonic()
+        self._transient_notices = [
+            n for n in self._transient_notices if n[0] > now]
+        out = []
+        for _, _, lines in self._transient_notices:
+            out.extend(lines)
+        return out
+
     def _sidebar_lines(self, n_rows: int) -> list:
         """Pre-formatted, width-bounded strings for the nick-list
         sidebar -- a header line, then one nick per row, with a final
@@ -1425,7 +1527,10 @@ class MRCChat(BaseChatSystem):
         keystroke and from _enter_split_screen() on entry.
         """
         scroll_rows = self._scroll_rows()
-        all_lines   = list(self._display_lines)
+        # Transient notices (_show_transient_notice) render after real
+        # scrollback so they appear as the newest content, like any
+        # other just-arrived line.
+        all_lines   = list(self._display_lines) + self._active_transient_lines()
         total       = len(all_lines)
 
         if self._scroll_offset > 0:
