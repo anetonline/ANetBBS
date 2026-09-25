@@ -1348,7 +1348,22 @@ class BBSSession:
         """Collect 3 password-recovery security Q&A during terminal registration."""
         if not self.user:
             return
-        from ..models import SECURITY_QUESTIONS
+        from ..models import SecurityQuestion, PasswordRecoverySettings
+
+        # Real gap reported live (2026-09-25): a sysop can now turn this
+        # step off entirely (repeated complaints it felt too personal,
+        # now that SMTP-based recovery is a real alternative) -- same
+        # PasswordRecoverySettings switch the web registration form
+        # checks. Silently skipped here (not shown at all) rather than
+        # explained, since a disabled step has nothing to explain.
+        if not PasswordRecoverySettings.get().security_questions_enabled:
+            return
+        questions = [q.text for q in SecurityQuestion.query
+                    .filter_by(is_active=True)
+                    .order_by(SecurityQuestion.sort_order, SecurityQuestion.id)
+                    .all()]
+        if not questions:
+            return
 
         wrap_width = max(20, _prompt_width(self))
         header = '\r\n'.join(_wrap_text_lines(
@@ -1358,7 +1373,7 @@ class BBSSession:
         await self.write(f"\r\n\x1b[1;36m{header}\x1b[0m\r\n{intro}\r\n\r\n")
         indent = ' ' * 6  # matches the visible width of "  NN. " below
         wrap_width = max(20, wrap_width - len(indent))
-        for i, q in enumerate(SECURITY_QUESTIONS, 1):
+        for i, q in enumerate(questions, 1):
             wrapped = _wrap_text_lines(q, wrap_width)
             await self.write(f"  \x1b[33m{i:2}.\x1b[0m {wrapped[0]}\r\n")
             for cont in wrapped[1:]:
@@ -1366,10 +1381,11 @@ class BBSSession:
 
         qa_pairs = []
         used = set()
-        for slot in range(1, 4):
+        num_slots = min(3, len(questions))
+        for slot in range(1, num_slots + 1):
             while True:
-                q_prefix = f"Question {slot} of 3"
-                q_suffix = f" — enter a number (1-{len(SECURITY_QUESTIONS)}): "
+                q_prefix = f"Question {slot} of {num_slots}"
+                q_suffix = f" — enter a number (1-{len(questions)}): "
                 q_wrapped = _wrap_text_lines(q_prefix + q_suffix, _prompt_width(self))
                 # Bold only the "Question N of 3" portion -- always the
                 # start of the first wrapped line, since word-wrap never
@@ -1382,13 +1398,13 @@ class BBSSession:
                     await self.write("\r\nPlease enter a number.\r\n")
                     continue
                 idx = int(raw) - 1
-                if not (0 <= idx < len(SECURITY_QUESTIONS)):
-                    await self.write(f"\r\nChoose between 1 and {len(SECURITY_QUESTIONS)}.\r\n")
+                if not (0 <= idx < len(questions)):
+                    await self.write(f"\r\nChoose between 1 and {len(questions)}.\r\n")
                     continue
                 if idx in used:
                     await self.write("\r\nYou already used that question — choose a different one.\r\n")
                     continue
-                question = SECURITY_QUESTIONS[idx]
+                question = questions[idx]
                 wrapped_question = '\r\n'.join(
                     _wrap_text_lines(question, _prompt_width(self)))
                 answer = await self.read_line(f"{wrapped_question}\r\nYour answer: ")

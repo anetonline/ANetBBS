@@ -1365,7 +1365,12 @@ class SmtpConfig(db.Model):
         return row
 
 
-SECURITY_QUESTIONS = [
+# Bundled starting set, seeded into SecurityQuestion on first run (see
+# _create_default_data() in web_app.py) -- kept here only as the seed
+# source, not consumed directly anywhere else anymore. A sysop can
+# edit/retire/add to these from Admin -> Users -> Security Questions
+# (web) or the matching cfg TUI section.
+DEFAULT_SECURITY_QUESTIONS = [
     "What was the name of your first pet?",
     "What city were you born in?",
     "What is your mother's maiden name?",
@@ -1377,6 +1382,61 @@ SECURITY_QUESTIONS = [
     "What was the name of your first employer?",
     "What is the middle name of your oldest sibling?",
 ]
+
+
+class SecurityQuestion(db.Model):
+    """Sysop-editable password-recovery security question.
+
+    Real gap reported live (2026-09-25): these used to be a hardcoded
+    Python list (DEFAULT_SECURITY_QUESTIONS above, now only a seed
+    source) with no admin control at all -- a sysop couldn't retire a
+    question users found too personal, or add their own. Text-based
+    (UserSecurityAnswer.question stores the chosen QUESTION TEXT
+    directly, not a foreign key -- unchanged from the old hardcoded-list
+    era), so deactivating a question only stops it being offered to
+    NEW registrations; anyone who already answered it keeps a working
+    answer on file.
+    """
+    __tablename__ = 'security_questions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.String(300), nullable=False)
+    sort_order = db.Column(db.Integer, default=0, index=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+
+
+class PasswordRecoverySettings(db.Model):
+    """Sysop control over the account-recovery flow.
+
+    Email recovery itself piggybacks on the existing SmtpConfig/
+    mailer.py machinery (forgot_password() already emails a reset-token
+    link on every /forgot submission whenever SmtpConfig.enabled is
+    on) -- there's nothing new to toggle there. What IS new is
+    security_questions_enabled: whether new registrations are asked to
+    set up security questions at all, and whether /forgot's decoy/real
+    verify-question step is offered during recovery. Real report (Jerry,
+    2026-09-25): sysop had repeated complaints that the mandatory
+    3-question registration step felt too personal, and wanted a way to
+    turn it off entirely now that SMTP-based recovery is a real
+    alternative -- this is that switch.
+    """
+    __tablename__ = 'password_recovery_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    security_questions_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    @classmethod
+    def get(cls):
+        """Return the singleton settings row, creating it (questions
+        enabled, matching pre-existing behavior) if absent."""
+        row = cls.query.first()
+        if row is None:
+            row = cls()
+            db.session.add(row)
+            db.session.commit()
+        return row
 
 
 class UserSecurityAnswer(db.Model):

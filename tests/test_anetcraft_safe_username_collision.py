@@ -38,13 +38,12 @@ class AnetcraftSafeUsernameCollisionTests(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self._orig_save_dir = anetcraft_mod.SAVE_DIR
         anetcraft_mod.SAVE_DIR = Path(self._tmp)
-        self._orig_mp = dict(anetcraft_mod._MP)
-        anetcraft_mod._MP.clear()
+        # Multiplayer state lives entirely under SAVE_DIR/mp/ (see
+        # anetcraft.py's cross-process MP redesign), so redirecting
+        # SAVE_DIR per-test already isolates it.
 
     def tearDown(self):
         anetcraft_mod.SAVE_DIR = self._orig_save_dir
-        anetcraft_mod._MP.clear()
-        anetcraft_mod._MP.update(self._orig_mp)
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_punctuation_variant_usernames_do_not_collide(self):

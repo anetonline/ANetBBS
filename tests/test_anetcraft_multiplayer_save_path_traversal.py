@@ -37,13 +37,14 @@ class AnetcraftSavePathTraversalTests(unittest.TestCase):
         # _shared_save_path() function that always re-derives from
         # SAVE_DIR, closing that whole bug class rather than needing a
         # second thing to patch here.
-        self._orig_mp = dict(anetcraft_mod._MP)
-        anetcraft_mod._MP.clear()
+        #
+        # Multiplayer state itself now lives entirely under SAVE_DIR/mp/
+        # (see anetcraft.py's cross-process MP redesign) rather than a
+        # module-level dict, so redirecting SAVE_DIR per-test already
+        # isolates it -- nothing extra to snapshot/restore here.
 
     def tearDown(self):
         anetcraft_mod.SAVE_DIR = self._orig_save_dir
-        anetcraft_mod._MP.clear()
-        anetcraft_mod._MP.update(self._orig_mp)
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_safe_username_strips_traversal_characters(self):

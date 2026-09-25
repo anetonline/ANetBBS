@@ -42,7 +42,7 @@ class ForgotPasswordEnumerationTests(unittest.TestCase):
         with cls.app.app_context():
             db.create_all()
 
-            from anetbbs.models import User, UserSecurityAnswer, SECURITY_QUESTIONS
+            from anetbbs.models import User, UserSecurityAnswer, DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
             with_sq = User(username='forgotwithsq', email='withsq@example.com',
                            is_active=True)
             with_sq.set_password('correcthorsebatterystaple')

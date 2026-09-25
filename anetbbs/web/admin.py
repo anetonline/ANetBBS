@@ -3412,6 +3412,63 @@ def newuser_questions():
     return render_template('admin/newuser_questions.html', rows=rows)
 
 
+@admin_bp.route('/security-questions', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def security_questions():
+    """CRUD for password-recovery security questions, plus the on/off
+    switch for the whole feature. Real gap reported live (2026-09-25):
+    these used to be a hardcoded list with no admin control at all --
+    sysop had repeated user complaints they felt too personal, and
+    wanted to turn the step off now that SMTP-based recovery (already
+    configured -- see admin.smtp_settings) is a real alternative."""
+    from ..models import SecurityQuestion, PasswordRecoverySettings, SmtpConfig
+    settings = PasswordRecoverySettings.get()
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'toggle_enabled':
+            settings.security_questions_enabled = not settings.security_questions_enabled
+            db.session.commit()
+            flash('Security-question recovery is now '
+                 f'{"ON" if settings.security_questions_enabled else "OFF"}.',
+                 'success')
+        elif action == 'add':
+            text = (request.form.get('text') or '').strip()
+            if text:
+                db.session.add(SecurityQuestion(
+                    text=text[:300],
+                    sort_order=int(request.form.get('sort_order') or 0),
+                    is_active=True))
+                db.session.commit()
+                flash('Question added.', 'success')
+        elif action == 'edit':
+            qid = request.form.get('qid', type=int)
+            text = (request.form.get('text') or '').strip()
+            q = SecurityQuestion.query.get(qid)
+            if q and text:
+                q.text = text[:300]
+                db.session.commit()
+                flash('Question updated.', 'success')
+        elif action == 'toggle':
+            qid = request.form.get('qid', type=int)
+            q = SecurityQuestion.query.get(qid)
+            if q:
+                q.is_active = not bool(q.is_active)
+                db.session.commit()
+        elif action == 'delete':
+            qid = request.form.get('qid', type=int)
+            q = SecurityQuestion.query.get(qid)
+            if q:
+                db.session.delete(q); db.session.commit()
+                flash('Question deleted.', 'success')
+        return redirect(url_for('admin.security_questions'))
+    rows = (SecurityQuestion.query
+            .order_by(SecurityQuestion.sort_order, SecurityQuestion.id).all())
+    smtp = SmtpConfig.get()
+    return render_template('admin/security_questions.html', rows=rows,
+                           settings=settings, smtp=smtp)
+
+
 @admin_bp.route('/file-quotas', methods=['GET', 'POST'])
 @login_required
 @admin_required

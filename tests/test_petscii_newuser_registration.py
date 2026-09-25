@@ -151,7 +151,38 @@ class SecurityQuestionsWordWrapTests(unittest.TestCase):
     """Captures text passed to session.write() BEFORE petscii translation
     (case-swap, control-byte color codes, CR-only line endings -- see
     petscii_codec.py) so these tests exercise the wrap logic in
-    isolation instead of coupling to that unrelated encoding pipeline."""
+    isolation instead of coupling to that unrelated encoding pipeline.
+
+    _collect_security_questions() now reads the sysop-editable question
+    list and the on/off switch from the database (SecurityQuestion/
+    PasswordRecoverySettings -- see the real gap fixed 2026-09-25:
+    these used to be a hardcoded list), so it needs a real Flask app
+    context, not just the bare BBSSession these tests used to get away
+    with."""
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        cls._tmp_db = str(Path(__file__).resolve().parent
+                          / '.security_questions_wordwrap_test.db')
+        if os.path.exists(cls._tmp_db):
+            os.remove(cls._tmp_db)
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{cls._tmp_db}'
+        os.environ['FLASK_ENV'] = 'testing'
+
+        from anetbbs.web_app import create_app
+        cls.app = create_app('testing')
+        cls.app.config['TESTING'] = True
+
+    @classmethod
+    def tearDownClass(cls):
+        import os
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+        if os.path.exists(cls._tmp_db):
+            os.remove(cls._tmp_db)
 
     def _collect(self, session, choices):
         # Width is driven by the session's own forced_width (see
@@ -166,7 +197,8 @@ class SecurityQuestionsWordWrapTests(unittest.TestCase):
             captured.append(text)
         session.write = _capture_write
 
-        asyncio.run(session._collect_security_questions())
+        with self.app.app_context():
+            asyncio.run(session._collect_security_questions())
         return ''.join(captured)
 
     def test_every_question_line_fits_within_the_session_width(self):
@@ -180,7 +212,7 @@ class SecurityQuestionsWordWrapTests(unittest.TestCase):
                                  f'line exceeds 40 columns: {visible!r}')
 
     def test_long_question_text_survives_intact_across_wrapped_lines(self):
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         session, _writer = _make_session(forced_term_mode='petscii', forced_width=40)
         transcript = self._collect(
             session, ['1', 'answerone', '2', 'answertwo', '3', 'answerthree'])

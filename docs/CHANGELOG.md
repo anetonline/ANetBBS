@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.2`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.3`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.3 — Sysop-controlled password recovery; MSP directory in the terminal; MRC mentions fixed in every theme (September 2026)
+
+Password recovery is no longer a fixed, mandatory 3-security-question step. A sysop can now edit or retire individual questions, add new ones, and turn the whole security-question step on or off from Admin → Users → Password Recovery in the web UI — and that same control has also been added to the `anetbbs-cfg` terminal admin tool (Users & Security → Security Questions / Password Recovery Settings), so it's no longer a web-only capability. Email-based recovery already existed underneath (a reset link is sent automatically whenever SMTP is configured), but is now shown explicitly as its own recovery method on that same settings page, alongside the security-question toggle. Turning the security-question step off skips it entirely at registration and during a password-reset request, landing straight on a neutral "check your email" confirmation — the exact same page and wording whether or not the entered account actually exists, preserving the anti-enumeration protection that recovery flow already relied on.
+
+Native SSH/telnet users can now browse the InterBBS (MSP) directory of known BBSes — a new **V) BBS Directory** entry on the main menu, using the same scrollable lightbar list already used throughout the rest of the terminal UI. Selecting an entry shows a full detail screen (sysop, location, software and version, MSP/SYSTAT ports, last seen, and any notes) rather than jumping straight into composing a message; sending a message still has its own directory picker built in. Previously this was only browsable from the web UI.
+
+Fixed the terminal MRC chat mentions counter staying stuck at 00 in every theme except the default one (original/minimal/bitchx/2leet4u/least — the five "Mystic BBS"-style layouts). Those themes render through a separate status-bar drawing path that never actually wrote the live count into the screen position their own bundled art reserves for it, so it displayed whatever the static border art happened to bake in there and never changed no matter how many real mentions came in.
 
 ## v1.1.2 — Security/audit pass on the new umrc-client support; install docs reorganized (September 2026)
 

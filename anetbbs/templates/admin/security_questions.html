@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Password Recovery{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-shield-lock"></i> Password Recovery</h1>
+    <p class="small text-muted">
+        Controls how users can recover a lost password: security
+        questions asked at registration, and/or an emailed reset link.
+    </p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-envelope"></i> Email recovery</h5>
+        <p class="mb-2">
+            {% if smtp.enabled %}
+                <span class="badge bg-success">Available</span>
+                SMTP is configured — every recovery request emails a reset
+                link to the account's address on file.
+            {% else %}
+                <span class="badge bg-secondary">Not available</span>
+                SMTP isn't configured yet, so no reset email can be sent.
+            {% endif %}
+        </p>
+        <a href="{{ url_for('admin.smtp_settings') }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-gear"></i> SMTP Settings
+        </a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-patch-question"></i> Security questions</h5>
+        <p class="mb-2">
+            {% if settings.security_questions_enabled %}
+                <span class="badge bg-success">ON</span>
+                New users are asked to set up 3 security questions at
+                registration, and can use them to recover their password.
+            {% else %}
+                <span class="badge bg-secondary">OFF</span>
+                Registration skips security questions entirely. Recovery
+                relies on email — make sure SMTP is configured above.
+            {% endif %}
+        </p>
+        <form method="post" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="toggle_enabled">
+            <button class="btn btn-sm {% if settings.security_questions_enabled %}btn-outline-danger{% else %}btn-success{% endif %}">
+                {% if settings.security_questions_enabled %}Turn Off{% else %}Turn On{% endif %}
+            </button>
+        </form>
+        {% if not settings.security_questions_enabled and not smtp.enabled %}
+        <div class="alert alert-warning mt-2 mb-0 py-2">
+            <i class="bi bi-exclamation-triangle"></i>
+            Both recovery methods are currently off — a locked-out user
+            has no self-service way back in. Turn one of these on, or be
+            ready to reset passwords by hand under Admin → Users.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Question list</div>
+    <div class="card-body">
+        <p class="small text-muted">
+            Deactivating a question only stops it being offered to new
+            registrations — anyone who already answered it keeps a
+            working answer on file.
+        </p>
+
+        <form method="post" class="row g-2 mb-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-9">
+                <label class="form-label small mb-0">New question</label>
+                <input type="text" name="text" class="form-control"
+                       placeholder="What was the name of your first pet?" required maxlength="300">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Sort</label>
+                <input type="number" name="sort_order" class="form-control" value="0">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button class="btn btn-primary w-100"><i class="bi bi-plus"></i></button>
+            </div>
+        </form>
+
+        <table class="table table-sm align-middle">
+            <thead><tr><th>#</th><th>Question</th><th>Active</th><th></th></tr></thead>
+            <tbody>
+            {% for q in rows %}
+            <tr>
+                <td>{{ q.sort_order }}</td>
+                <td>
+                    <form method="post" class="d-flex gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="edit">
+                        <input type="hidden" name="qid" value="{{ q.id }}">
+                        <input type="text" name="text" value="{{ q.text }}"
+                               class="form-control form-control-sm" maxlength="300">
+                        <button class="btn btn-sm btn-outline-secondary" title="Save">
+                            <i class="bi bi-check-lg"></i>
+                        </button>
+                    </form>
+                </td>
+                <td>
+                    <form method="post" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="toggle">
+                        <input type="hidden" name="qid" value="{{ q.id }}">
+                        <button class="btn btn-sm {% if q.is_active %}btn-success{% else %}btn-outline-secondary{% endif %}">
+                            {% if q.is_active %}On{% else %}Off{% endif %}
+                        </button>
+                    </form>
+                </td>
+                <td>
+                    <form method="post" class="d-inline" onsubmit="return confirm('Delete this question? Existing answers to it are kept but can never be re-offered.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="qid" value="{{ q.id }}">
+                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">No questions defined.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

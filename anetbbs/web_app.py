@@ -1511,8 +1511,9 @@ def _backfill_binkp_node_network_id(app, engine, _sa):
 
 def _create_default_data():
     """Create default boards and admin user if they don't exist"""
-    from .models import Board, User, Game, GameCategory
-    
+    from .models import (Board, User, Game, GameCategory, SecurityQuestion,
+                         DEFAULT_SECURITY_QUESTIONS)
+
     # Create default boards
     default_boards = [
         {'name': 'General Discussion', 'description': 'General topics and discussions', 'order': 1},
@@ -1520,11 +1521,20 @@ def _create_default_data():
         {'name': 'Technical Support', 'description': 'Get help with technical issues', 'order': 3},
         {'name': 'Off-Topic', 'description': 'Off-topic discussions', 'order': 4},
     ]
-    
+
     for board_data in default_boards:
         if not Board.query.filter_by(name=board_data['name']).first():
             board = Board(**board_data)
             db.session.add(board)
+
+    # Seed the bundled starting security questions -- query-or-create per
+    # item (not a blind bulk insert) so this is idempotent across every
+    # restart and never duplicates on an existing install. A sysop's own
+    # edits/retirements/additions afterward are left alone -- this only
+    # ever adds a row back if its exact text is entirely missing.
+    for i, text in enumerate(DEFAULT_SECURITY_QUESTIONS):
+        if not SecurityQuestion.query.filter_by(text=text).first():
+            db.session.add(SecurityQuestion(text=text, sort_order=i, is_active=True))
 
     # Seed the first three community-requested MenuTranslation language
     # packs (Spanish, German, Portuguese) -- idempotent, never touches a

@@ -241,6 +241,12 @@ class World:
         self.data  = bytearray(WORLD_W * WORLD_H)
         self.dmg: dict[tuple, int] = {}   # (x,y) -> hit count
         self.furnaces: dict[tuple, dict] = {}   # (x,y) -> furnace state
+        # Multiplayer only: set to a callable(x, y, bid) that gets notified
+        # of every actual block change. set() is the single chokepoint every
+        # mutation in the whole file funnels through (mining, placing,
+        # explosions, portals, smelting output) -- hooking it here means MP
+        # world sync never has to special-case each of those call sites.
+        self._on_change = None
         self._gen()
 
     # ── accessors ──
@@ -258,6 +264,8 @@ class World:
                 self.furnaces.pop((x, y), None)
             self.data[self._i(x, y)] = bid
             self.dmg.pop((x, y), None)
+            if self._on_change is not None:
+                self._on_change(x, y, bid)
 
     def solid(self, x, y) -> bool:
         b = self.get(x, y)
@@ -711,7 +719,18 @@ MAX_MOBS = 20   # cap on total live mobs
 
 
 class Mob:
+    _next_id = 1   # per-process counter -- see the 'id' field note below
+
     def __init__(self, mob_type: str, x: float, y: float):
+        # Stable identity, used only by multiplayer to let a non-authority
+        # process reference a specific mob (e.g. an attack event) even
+        # though its own Mob objects are separate instances reconstructed
+        # from JSON. Only the MP mob-authority process ever assigns a FRESH
+        # id here (via this constructor); every other process only ever
+        # learns a mob's real id through from_dict(), so ids can never
+        # collide across processes even though each has its own counter.
+        self.id        = Mob._next_id
+        Mob._next_id  += 1
         self.type      = mob_type
         self.x         = x
         self.y         = y
@@ -732,7 +751,7 @@ class Mob:
     def by(self): return int(self.y)
 
     def to_dict(self) -> dict:
-        return {'type': self.type, 'x': self.x, 'y': self.y,
+        return {'id': self.id, 'type': self.type, 'x': self.x, 'y': self.y,
                 'vx': self.vx, 'vy': self.vy, 'hp': self.hp,
                 'on_ground': self.on_ground, 'facing': self.facing, 'fuse': self.fuse,
                 'tx': self.tx, 'ty': self.ty, 'phase': self.phase}
@@ -740,6 +759,8 @@ class Mob:
     @classmethod
     def from_dict(cls, d: dict) -> 'Mob':
         m = cls(d['type'], d['x'], d['y'])
+        if 'id' in d:
+            m.id = d['id']
         for k in ('vx', 'vy', 'hp', 'on_ground', 'facing', 'fuse', 'tx', 'ty', 'phase'):
             if k in d: setattr(m, k, d[k])
         return m
@@ -857,7 +878,101 @@ class Renderer:
 SAVE_DIR      = Path(__file__).parent.parent.parent / 'data' / 'doors' / 'anetcraft'
 PLAYER_COLORS = [(220,60,60),(60,80,220),(220,190,50),(60,200,180),
                  (200,60,200),(220,140,50),(100,210,60),(180,100,220)]
-_MP: dict     = {}   # module-level multiplayer shared state (all sessions share this)
+
+# ─── Multiplayer: real cross-process shared state ──────────────────────────
+#
+# Real bug found live (2026-09-25, a sysop playtest report of "I am not
+# seeing the multiplayer"): this used to be a plain module-level dict
+# (`_MP = {}`), which only works if every player's session runs inside the
+# SAME Python process. They don't -- every door session, builtin_python
+# games included, is spawned as its own separate OS subprocess by
+# door_runner.py/builtin_runner.py (confirmed by reading both; this is true
+# for native SSH/telnet AND the web terminal, since both route through the
+# same subprocess launcher). Two real players each got their own private,
+# empty `_MP`, so "Multiplayer" silently meant "solo, with extra steps" --
+# reproduced directly with two real concurrent subprocesses before this fix
+# (the second player's lobby never showed the first as online).
+#
+# Fixed by moving every piece of shared state onto disk under a new `mp/`
+# save subdirectory, polled/appended each tick -- the same host-authoritative,
+# file-polling design already proven out this session for the standalone
+# ANetCRAFT door's own C multiplayer (mp.c), adapted to this game's Python/
+# JSON idioms:
+#   mp/players/<user>.json  -- one tiny presence file per connected player,
+#                               written only by that player, every tick.
+#   mp/deltas.jsonl         -- append-only log of block changes, written by
+#                               whoever's local World actually changed (via
+#                               World._on_change, the single chokepoint every
+#                               mutation already funnels through); every
+#                               OTHER process tails it each tick to stay in
+#                               sync without re-transmitting the whole world.
+#   mp/mobs.json            -- the mob-authority's latest mob snapshot.
+#   mp/events.jsonl         -- attack intents from non-authority players
+#                               (only the authority actually mutates mob hp).
+#   mp/grants/<user>.jsonl  -- loot credited to a player by a kill the
+#                               authority processed on their behalf.
+#   mp/chat.jsonl           -- append-only chat log, tailed like deltas.
+#   multiplayer.json        -- full world snapshot (existing file/format,
+#                               now versioned); refreshed periodically by
+#                               the authority, who also truncates deltas/
+#                               chat right after so those logs never grow
+#                               unbounded.
+#
+# "Authority" (mob AI + periodic world snapshot) is not elected via any
+# lock or heartbeat message -- it falls out for free as a pure function of
+# the already-synced presence files: whoever has the SMALLEST recorded
+# join time among currently-fresh (non-stale) players. This is stable
+# (no flip-flopping while that player stays connected -- a reconnect gets a
+# brand new join time, so it can only ever hand off forward) and self-heals
+# the instant the current authority's presence goes stale, with no
+# coordination needed between processes.
+
+AC_MP_STALE_SECONDS = 6.0   # matches the C door's own AC_MP_STALE_SECONDS
+
+
+def _mp_root() -> Path:
+    d = SAVE_DIR / 'mp'
+    (d / 'players').mkdir(parents=True, exist_ok=True)
+    (d / 'grants').mkdir(parents=True, exist_ok=True)
+    return d
+
+def _mp_deltas_path() -> Path: return _mp_root() / 'deltas.jsonl'
+def _mp_mobs_path() -> Path:   return _mp_root() / 'mobs.json'
+def _mp_chat_path() -> Path:   return _mp_root() / 'chat.jsonl'
+def _mp_events_path() -> Path: return _mp_root() / 'events.jsonl'
+
+def _mp_player_path(username: str) -> Path:
+    return _mp_root() / 'players' / f'{_safe_username(username)}.json'
+
+def _mp_grant_path(username: str) -> Path:
+    return _mp_root() / 'grants' / f'{_safe_username(username)}.jsonl'
+
+
+def _mp_list_players() -> dict:
+    """Every currently-fresh connected player's last-published presence,
+    keyed by their real (unsanitized) username -- {} if none are online.
+    A player's own entry is included; callers that want "other players
+    only" filter out their own username themselves (matches the old
+    _MP['players'] dict's semantics, which also always included self)."""
+    out: dict = {}
+    now = time.time()
+    try:
+        entries = list((_mp_root() / 'players').iterdir())
+    except FileNotFoundError:
+        return out
+    for f in entries:
+        if f.suffix != '.json':
+            continue
+        try:
+            pdata = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if now - pdata.get('ts', 0) > AC_MP_STALE_SECONDS:
+            continue
+        uname = pdata.get('username')
+        if uname:
+            out[uname] = pdata
+    return out
 
 def _player_color(username: str) -> tuple:
     return PLAYER_COLORS[sum(ord(c) for c in username) % len(PLAYER_COLORS)]
@@ -906,6 +1021,133 @@ MOVE_SPD = 0.35
 SWIM_SPD = 0.18
 DAY_TICK = 7500    # ~10 min/day at 80ms/tick (was 500 = 40s, way too fast)
 
+# ─── In-game help (Jerry's ask, 2026-09-25: "very nice and detailed") ──────
+# One (title, lines) tuple per page; each page is rendered by
+# _render_help_overlay(). Kept to <=15 content lines and <=70 chars each
+# so every page fits the box cleanly without per-page layout math --
+# enforced by test_anetcraft_quit_confirm_and_help.py rather than trusted
+# by eye.
+HELP_PAGES: list[tuple] = [
+    ("CONTROLS", [
+        "A / D        Move left / right",
+        "W / Space    Jump (Survival)  /  Fly up (Creative)",
+        "S            Crouch, swim down (Survival)  /  Fly down (Creative)",
+        "Arrow keys   Move the mining/placing cursor",
+        "F            Mine a block, or attack a mob under the cursor",
+        "P            Place your held item",
+        "E            Eat your held item (if it's food)",
+        "U            Use/interact -- open a furnace, light a portal frame",
+        "1-9          Select a hotbar slot",
+        "I            Open/close your inventory",
+        "C            Open/close the crafting menu",
+        "R            In inventory: equip/unequip the selected armor piece",
+        "T            Chat -- multiplayer only",
+        "?            Open/close this help -- Left/Right or Space to page",
+        "Q            Quit -- asks to confirm, then returns to the main menu",
+    ]),
+    ("SURVIVAL, HEALTH & DEATH", [
+        "Survival mode: you start with nothing and must gather, craft,",
+        "build, and fight your way up through better tools and gear.",
+        "",
+        "Health (red bar): drops from mob attacks, fall damage, drowning,",
+        "fire, lava, and starvation -- regenerates slowly over time.",
+        "",
+        "Hunger (orange bar): drains slowly as you play. Once empty, it",
+        "starts costing you health instead -- eat food to refill it.",
+        "",
+        "Death: if your health reaches zero, you respawn at your original",
+        "starting point with full health and hunger, keeping everything",
+        "you're carrying. Death costs you a trip back, not your items.",
+        "",
+        "Creative mode: unlimited materials, free flight, instant block",
+        "breaking, no hunger or death -- built for building freely.",
+    ]),
+    ("MINING & TOOLS", [
+        "Hold F over a block within reach to mine it. Different tools",
+        "mine different materials much faster -- the right tool for the",
+        "block matters (a wood pickaxe struggles badly against stone).",
+        "",
+        "Tool tiers, weakest to strongest: Wood -> Stone -> Iron ->",
+        "Diamond. Each tier mines faster and, as a weapon, hits harder.",
+        "",
+        "Pickaxes mine stone/ore; Axes mine wood; Shovels mine dirt/",
+        "sand/gravel. The right tool type matters as much as its tier.",
+        "",
+        "Ore reveals itself as you dig deeper: coal and iron are common",
+        "near the surface; gold and diamond are found much deeper down.",
+        "",
+        "Rare ores are worth carrying tools for -- a diamond pickaxe and",
+        "sword, ever crafted, are what wakes the Ender Dragon's realm.",
+    ]),
+    ("CRAFTING, ARMOR & FURNACES", [
+        "Crafting Tables (place one, stand near it) unlock most recipes",
+        "-- tools, weapons, armor. A few basics (planks, sticks, torches)",
+        "can be crafted from anywhere, no table needed.",
+        "",
+        "Armor -- Leather / Iron / Gold / Diamond, four pieces each",
+        "(head/chest/legs/boots) -- reduces incoming damage. Craft it,",
+        "then equip from your inventory with R.",
+        "",
+        "Furnaces (place one, press U nearby to open) smelt raw",
+        "materials into usable ones: feed it fuel (coal, wood, planks,",
+        "sticks) plus a smeltable item (raw iron, raw gold, sand) and",
+        "wait for it to finish.",
+        "",
+        "Flint and Steel (Flint + an Iron Ingot) lights Nether portals.",
+    ]),
+    ("MOBS & COMBAT", [
+        "Passive:  Cow -- wanders peacefully, drops meat and leather.",
+        "",
+        "Hostile (mostly night & underground):",
+        "  Zombie       Chases and attacks on contact.",
+        "  Skeleton     Keeps its distance, drops bones.",
+        "  Creeper      Arms a fuse if you stay close, then explodes --",
+        "               damages you and clears nearby blocks. Back off!",
+        "",
+        "The Nether:  Blaze (flies, shoots from range) and Ghast (flies,",
+        "             slow, hits hard at range).",
+        "",
+        "Overworld/End:  Enderman -- tough, teleports, drops ender pearls.",
+        "",
+        "The End's boss:  Ender Dragon -- heals near standing obsidian",
+        "  pillars (knock those down first). Defeating it is the win.",
+    ]),
+    ("DIMENSIONS & PORTALS", [
+        "Beyond the Overworld, two more dimensions are reachable:",
+        "",
+        "The Nether: build an obsidian frame, light it with Flint and",
+        "Steel, and step through. A lava-and-netherrack world with",
+        "blazes, ghasts, glowstone, and nether quartz ore.",
+        "",
+        "The End: craft Eyes of Ender (Blaze Powder + an Ender Pearl,",
+        "both dropped by Nether/Enderman kills) and use them to complete",
+        "an End Portal Frame, then step through. Floating islands over a",
+        "bottomless void -- falling off is fatal -- leading to the",
+        "Ender Dragon's arena.",
+        "",
+        "Each dimension you've visited is remembered and saved separately",
+        "-- travel back and forth freely. (Not available in multiplayer",
+        "yet -- shared sessions stay in the Overworld.)",
+    ]),
+    ("MULTIPLAYER", [
+        "Pick Multiplayer from the main menu to play in a shared world",
+        "with anyone else currently online in it -- no separate host or",
+        "guest choice needed, everyone just joins the same place.",
+        "",
+        "Other players render in the world in their own color, and the",
+        "header shows how many people are currently online.",
+        "",
+        "T opens a chat line -- type a message and press Enter to send",
+        "it to everyone else sharing the world.",
+        "",
+        "Your inventory and health stay personal to you; the shared",
+        "world -- terrain and mobs -- is common to everyone in it.",
+        "",
+        "Dimension travel (Nether/End) isn't available in multiplayer",
+        "yet -- shared sessions stay in the Overworld.",
+    ]),
+]
+
 
 class ANetCraft:
     def __init__(self, session, username: str):
@@ -920,15 +1162,42 @@ class ANetCraft:
         self.running  = True
         self.tick     = 0
         self.msgs: list[list] = []           # [[text, expire_tick], ...]
-        self.mode     = 'game'               # 'game' | 'inv' | 'craft'
+        self.mode     = 'game'               # 'game' | 'inv' | 'craft' | 'help' | 'confirm_quit' | ...
+        self.help_page = 0
         self.inv_cur  = (0, 0)              # (row, col) — row=-1 means hotbar
         self.cft_cur  = 0
         self.game_mode    = 'survival'   # 'survival' | 'creative'
         self._mp_mode     = False
         self._chat_pending = False
         self._mobs: list[Mob] = []
+
+        # ── Multiplayer cross-process sync state ──
+        self._mp_joined_at      = 0.0
+        self._mp_world_version  = 0
+        self._mp_last_delta_pos = 0     # bytes of deltas.jsonl already applied
+        self._mp_last_chat_pos  = 0     # bytes of chat.jsonl already read
+        self._mp_other_players: dict[str, dict] = {}   # username -> presence
+        self._mp_chat: list[tuple] = []                # (user, text, expire_tick)
         self._keys    = _Keys()
         self._rend    = Renderer(VP_W, VP_H)
+        # Real bug reported live (2026-09-25): the row-22 divider visibly
+        # flashes/refreshes on its own. Root cause: unlike the world
+        # viewport (self._rend, properly diff-buffered -- only actually
+        # CHANGED cells get retransmitted), the header/status/hotbar/
+        # controls rows below get fully recomputed and rewritten every
+        # single tick (12.5Hz) regardless of whether anything in them
+        # actually changed -- a constant, unbroken stream of redundant
+        # writes for as long as a session runs. A solid divider row (80
+        # identical characters, one flat color) is the most visually
+        # flicker-sensitive content on screen for this: retransmitting it
+        # unchanged, every 80ms, for however long a session lasts, is
+        # exactly the shape of thing that shows up as a self-refreshing
+        # line even though the actual bytes never change. Fixed by only
+        # ever sending header/ui when their computed content actually
+        # differs from last tick -- the same diff principle the world
+        # viewport already uses, just applied here too.
+        self._last_header = ''
+        self._last_ui      = ''
 
         # ── Dimension travel ──
         self.dimension    = 'overworld'   # 'overworld' | 'nether' | 'end'
@@ -1001,35 +1270,83 @@ class ANetCraft:
             return False
 
     # ── multiplayer helpers ──────────────────────────────────────────────────
+    #
+    # See the big comment above _mp_root() for the overall cross-process
+    # design. "Host" here means "current mob/world-snapshot authority" --
+    # kept as _is_mp_host() (not renamed) since every call site already
+    # uses that name and the concept is the same, just no longer requires
+    # an explicit election message: it's whichever currently-fresh player
+    # has been connected the longest.
 
     def _is_mp_host(self) -> bool:
-        return _MP.get('host') == self.username
+        players = _mp_list_players()
+        me = players.get(self.username)
+        my_joined = me['joined_at'] if me else self._mp_joined_at
+        for uname, pdata in players.items():
+            if uname == self.username:
+                continue
+            other_joined = pdata.get('joined_at', 0)
+            if (other_joined, uname) < (my_joined, self.username):
+                return False
+        return True
 
     def _mp_join(self):
-        shared_save = _shared_save_path()
-        if not _MP:
-            if shared_save.exists():
-                try:
-                    d = json.loads(shared_save.read_text())
-                    world = World.from_dict(d['world'])
-                    mobs  = [Mob.from_dict(m) for m in d.get('mobs', [])]
-                    tick  = d.get('tick', 0)
-                except Exception:
-                    world, mobs, tick = World(), [], 0
-            else:
-                world, mobs, tick = World(), [], 0
-            _MP['world']   = world
-            _MP['mobs']    = mobs
-            _MP['tick']    = tick
-            _MP['players'] = {}
-            _MP['chat']    = []
-            _MP['host']    = self.username
+        self._mp_joined_at = time.time()
+        _mp_root()
 
-        self.world      = _MP['world']
-        self._mobs      = _MP['mobs']
-        self.tick       = _MP['tick']
-        self.game_mode  = 'survival'
-        self._mp_mode   = True
+        shared_save = _shared_save_path()
+        someone_already_here = bool(_mp_list_players())
+        if not shared_save.exists() and someone_already_here:
+            # Real race closed here: an existing player IS already
+            # connected (we're not the first), but hasn't published an
+            # initial snapshot yet -- e.g. they only just joined
+            # themselves a moment ago (periodic snapshots are otherwise
+            # ~60s apart, way too slow for a second player who joins
+            # within the first minute, which is the common case). Rather
+            # than silently generating our own unrelated random world,
+            # wait briefly for their initial snapshot (published
+            # immediately below, right after a fresh world is created)
+            # to show up.
+            for _ in range(40):   # up to ~2s
+                if shared_save.exists():
+                    break
+                time.sleep(0.05)
+
+        version = 0
+        if shared_save.exists():
+            try:
+                d = json.loads(shared_save.read_text())
+                world   = World.from_dict(d['world'])
+                tick    = d.get('tick', 0)
+                version = d.get('version', 0)
+            except Exception:
+                world, tick = World(), 0
+        else:
+            world, tick = World(), 0
+
+        self.world              = world
+        self.tick               = tick
+        self._mp_world_version  = version
+        self._mp_last_delta_pos = 0
+        self._mp_last_chat_pos  = 0
+        self._mp_chat           = []
+        self.game_mode          = 'survival'
+        self._mp_mode           = True
+
+        # Catch up on whatever's changed since that snapshot, and pick up
+        # the mob-authority's current mob list (empty/missing is fine --
+        # it just means nothing has been published yet, e.g. we're the
+        # very first player).
+        self._mp_apply_new_deltas()
+        self._mobs = self._mp_read_mobs()
+
+        if not shared_save.exists():
+            # We just generated a brand new world and no one beat us to
+            # publishing one -- leave an initial snapshot immediately
+            # (rather than waiting for the periodic ~60s cadence) so the
+            # very next player to join, even a second later, finds a
+            # real snapshot instead of racing into the branch above.
+            self._mp_publish_snapshot()
 
         inv_path = SAVE_DIR / f'mp_{_safe_username(self.username)}.json'
         if inv_path.exists():
@@ -1042,27 +1359,237 @@ class ANetCraft:
             surf = self.world._height(WORLD_W // 2)
             self.player = Player(float(WORLD_W // 2), float(surf - 2))
 
-        _MP['players'][self.username] = self.player
+        self.world._on_change = self._mp_on_local_block_change
+        self._mp_publish_presence()
 
     def _mp_leave(self):
-        if self.username in _MP.get('players', {}):
-            del _MP['players'][self.username]
+        self.world._on_change = None
         inv_path = SAVE_DIR / f'mp_{_safe_username(self.username)}.json'
-        inv_path.write_text(json.dumps(self.player.to_dict()))
-        if _MP.get('host') == self.username:
-            remaining = list(_MP.get('players', {}).keys())
-            if remaining:
-                _MP['host'] = remaining[0]
-            else:
-                self._mp_save()
-                _MP.clear()
+        try:
+            inv_path.write_text(json.dumps(self.player.to_dict()))
+        except OSError:
+            pass
+        try:
+            _mp_player_path(self.username).unlink(missing_ok=True)
+        except OSError:
+            pass
+        # If I was carrying authority, publish one last fully-caught-up
+        # snapshot so whoever takes over next doesn't start from a stale
+        # one plus however many deltas piled up since the last periodic
+        # publish.
+        if self._is_mp_host():
+            self._mp_publish_snapshot()
+
+    def _mp_on_local_block_change(self, x: int, y: int, bid: int):
+        """World._on_change hook -- fires for every block this process's
+        own code changed (mining, placing, explosions, portals, smelting
+        output...), regardless of which specific method did it."""
+        if not self._mp_mode:
+            return
+        try:
+            with open(_mp_deltas_path(), 'a') as f:
+                f.write(json.dumps({'x': x, 'y': y, 'bid': bid}) + '\n')
+        except OSError:
+            pass
+
+    def _mp_apply_new_deltas(self):
+        """Replays block changes OTHER processes made since our world was
+        last brought up to date. The authority never needs this for its
+        own world (it IS the source of truth), so callers only use it for
+        a non-authority player -- see _mp_join() (initial catch-up) and
+        the per-tick sync in run()."""
+        path = _mp_deltas_path()
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            return
+        # A shrink means the authority just rotated the log after
+        # publishing a fresh snapshot -- our byte offset no longer means
+        # anything in the new (empty) file, so start over from the top
+        # rather than mis-seeking into unrelated future data.
+        if self._mp_last_delta_pos > len(raw):
+            self._mp_last_delta_pos = 0
+        chunk = raw[self._mp_last_delta_pos:]
+        self._mp_last_delta_pos = len(raw)
+        if not chunk:
+            return
+        # Suppress the on_change hook while replaying -- otherwise every
+        # incoming delta would immediately get re-appended as if it were
+        # a brand new local change, echoing forever.
+        cb, self.world._on_change = self.world._on_change, None
+        try:
+            for line in chunk.split(b'\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                    self.world.set(d['x'], d['y'], d['bid'])
+                except (ValueError, KeyError):
+                    continue
+        finally:
+            self.world._on_change = cb
+
+    def _mp_read_mobs(self) -> list:
+        try:
+            data = json.loads(_mp_mobs_path().read_text())
+        except (OSError, ValueError):
+            return []
+        return [Mob.from_dict(m) for m in data]
+
+    def _mp_publish_mobs(self):
+        try:
+            _mp_mobs_path().write_text(
+                json.dumps([m.to_dict() for m in self._mobs]))
+        except OSError:
+            pass
+
+    def _mp_send_event(self, ev: dict):
+        try:
+            with open(_mp_events_path(), 'a') as f:
+                f.write(json.dumps(ev) + '\n')
+        except OSError:
+            pass
+
+    def _mp_process_events(self):
+        """Authority-only: drains attack intents queued by everyone else
+        and applies them to the real (authoritative) mob list."""
+        path = _mp_events_path()
+        try:
+            raw = path.read_text()
+        except FileNotFoundError:
+            return
+        if not raw:
+            return
+        try:
+            path.write_text('')
+        except OSError:
+            pass
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get('type') == 'attack':
+                self._mp_apply_attack(ev)
+
+    def _mp_apply_attack(self, ev: dict):
+        mob = next((m for m in self._mobs if m.id == ev.get('mob_id')), None)
+        if mob is None or mob.dead:
+            return
+        mob.hp -= ev.get('dmg', 0)
+        if mob.hp <= 0:
+            mob.dead = True
+            by = ev.get('by', self.username)
+            for drop_id, drop_cnt in MOB_DATA[mob.type]['drops']:
+                self._mp_grant(by, drop_id, drop_cnt)
+
+    def _mp_grant(self, username: str, item_id: int, count: int):
+        """Credits loot to a player -- directly if it's me, otherwise via
+        that player's own grants inbox (applied on their next tick)."""
+        if username == self.username:
+            self.player.add(item_id, count)
+            return
+        try:
+            with open(_mp_grant_path(username), 'a') as f:
+                f.write(json.dumps({'item': item_id, 'count': count}) + '\n')
+        except OSError:
+            pass
+
+    def _mp_apply_grants(self):
+        path = _mp_grant_path(self.username)
+        try:
+            raw = path.read_text()
+        except FileNotFoundError:
+            return
+        if not raw:
+            return
+        try:
+            path.write_text('')
+        except OSError:
+            pass
+        got = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                g = json.loads(line)
+                self.player.add(g['item'], g['count'])
+                got.append(f"+{g['count']} {item_name(g['item'])}")
+            except (ValueError, KeyError):
+                continue
+        if got:
+            self._msg('Loot: ' + ' '.join(got))
+
+    def _mp_publish_presence(self):
+        p = self.player
+        data = {
+            'username': self.username,
+            'x': p.x, 'y': p.y, 'facing': p.facing,
+            'hp': p.hp, 'hunger': p.hunger, 'game_mode': self.game_mode,
+            'joined_at': self._mp_joined_at, 'ts': time.time(),
+        }
+        try:
+            _mp_player_path(self.username).write_text(json.dumps(data))
+        except OSError:
+            pass
+
+    def _mp_tail_chat(self):
+        path = _mp_chat_path()
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            return
+        if self._mp_last_chat_pos > len(raw):
+            self._mp_last_chat_pos = 0
+            self._mp_chat = []
+        chunk = raw[self._mp_last_chat_pos:]
+        self._mp_last_chat_pos = len(raw)
+        if not chunk:
+            return
+        for line in chunk.split(b'\n'):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                u, cm = json.loads(line)
+            except ValueError:
+                continue
+            self._mp_chat.append((u, cm, self.tick + 750))
+
+    def _mp_send_chat(self, text: str):
+        try:
+            with open(_mp_chat_path(), 'a') as f:
+                f.write(json.dumps([self.username, text]) + '\n')
+        except OSError:
+            pass
+
+    def _mp_publish_snapshot(self):
+        """Authority-only: a full world resync point, published
+        periodically (see run()) -- refreshes multiplayer.json and
+        truncates the deltas/chat logs right after, so they never grow
+        without bound. Every other process detects the truncation (their
+        own tracked read position is now past end-of-file) and knows to
+        treat this snapshot as the new baseline."""
+        SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        self._mp_world_version += 1
+        data = {'world': self.world.to_dict(), 'tick': self.tick,
+                'version': self._mp_world_version}
+        try:
+            _shared_save_path().write_text(json.dumps(data))
+            _mp_deltas_path().write_text('')
+            _mp_chat_path().write_text('')
+            self._mp_last_delta_pos = 0
+            self._mp_last_chat_pos  = 0
+        except OSError:
+            pass
 
     def _mp_save(self):
-        SAVE_DIR.mkdir(parents=True, exist_ok=True)
-        data = {'world': _MP['world'].to_dict(),
-                'mobs':  [m.to_dict() for m in _MP['mobs']],
-                'tick':  _MP['tick']}
-        _shared_save_path().write_text(json.dumps(data))
+        self._mp_publish_snapshot()
 
     async def _mp_chat_prompt(self) -> str:
         buf = ''
@@ -1850,6 +2377,15 @@ class ANetCraft:
 
     def _attack_mob(self, mob: Mob):
         dmg = 4 + SWORD_DMG.get(self.player.held(), 0)
+        if self._mp_mode and not self._is_mp_host():
+            # Only the mob authority actually mutates shared mob state --
+            # send the intent and let it resolve hp/death/loot centrally,
+            # so two players hitting the same mob can't each grant
+            # themselves the kill drop.
+            self._mp_send_event({'type': 'attack', 'mob_id': mob.id,
+                                  'dmg': dmg, 'by': self.username})
+            self._msg(f'Hit {mob.type}!')
+            return
         mob.hp -= dmg
         if mob.hp <= 0:
             mob.dead = True
@@ -1871,7 +2407,7 @@ class ANetCraft:
         for mob in self._mobs:
             self._mob_physics(mob)
             self._mob_ai(mob)
-        # Remove dead mobs in-place (preserves list reference for MP shared state)
+        # Remove dead mobs in-place
         for m in [m for m in self._mobs if m.dead]:
             self._mobs.remove(m)
         if self.game_mode != 'creative':
@@ -2002,11 +2538,12 @@ class ANetCraft:
         # Other-player lookup (MP)
         op_cells: dict[tuple, tuple] = {}
         if self._mp_mode:
-            for uname, opl in _MP.get('players', {}).items():
+            for uname, opl in self._mp_other_players.items():
                 if uname == self.username: continue
                 col = _player_color(uname)
-                op_cells[(opl.bx(), opl.by())]     = ('╬', col)
-                op_cells[(opl.bx(), opl.by() - 1)] = ('Ö', col)
+                ox, oy = int(opl['x']), int(opl['y'])
+                op_cells[(ox, oy)]     = ('╬', col)
+                op_cells[(ox, oy - 1)] = ('Ö', col)
 
         for vy in range(VP_H):
             wy = self.cam_y + vy
@@ -2060,7 +2597,7 @@ class ANetCraft:
         else:
             coords = f'X:{p.bx():<4} Y:{p.by():<3}'
         if self._mp_mode:
-            online = len(_MP.get('players', {}))
+            online = len(self._mp_other_players)
             mode_s = f'[MULTI {online}P]'
         elif self.game_mode == 'creative':
             mode_s = '[CREATIVE]'
@@ -2088,10 +2625,10 @@ class ANetCraft:
         msg   = self._msg_text()
         div   = '═' * (VP_W + 2)
         out.append(f'{_at(22,1)}{_fg(80,80,80)}{div}{RST}')
-        if self._mp_mode and 'chat' in _MP:
-            _MP['chat'] = [m for m in _MP['chat'] if m[2] > self.tick]
-            if _MP['chat']:
-                u, cm, _ = _MP['chat'][-1]
+        if self._mp_mode:
+            self._mp_chat = [m for m in self._mp_chat if m[2] > self.tick]
+            if self._mp_chat:
+                u, cm, _ = self._mp_chat[-1]
                 short_u = u[:10]
                 out.append(f'{_at(22, 3)}{_fg(100,200,255)}{short_u}: {_fg(255,255,150)}{cm[:62]}{RST}')
             elif msg:
@@ -2228,13 +2765,93 @@ class ANetCraft:
 
         return ''.join(out)
 
+    def _render_help_overlay(self) -> str:
+        out = []
+        ox, oy, w, h = 3, 2, 74, 19
+        def box(r, c, s): out.append(f'{_at(oy+r, ox+c)}{s}')
+
+        border_bg = _bg(25,25,45)
+        box(0, 0, f'{border_bg}{_fg(180,180,255)}')
+        out.append('╔' + '═'*(w-2) + '╗')
+        for r in range(1, h-1):
+            box(r, 0, f'{border_bg}║{" "*(w-2)}║')
+        box(h-1, 0, f'{border_bg}╚' + '═'*(w-2) + '╝')
+
+        title, lines = HELP_PAGES[self.help_page]
+        box(1, 2, f'{_fg(220,220,255)}{BOLD}HELP -- {title}{RST}')
+        box(2, 2, f'{_fg(120,120,150)}Page {self.help_page+1}/{len(HELP_PAGES)}  --  '
+                  f'Left/Right or Space to page, ?  to close{RST}')
+        box(3, 2, f'{_fg(90,90,120)}' + '─'*(w-4) + RST)
+        for i, line in enumerate(lines):
+            box(4+i, 2, f'{border_bg}{_fg(210,210,220)}{line:<{w-4}}{RST}')
+
+        return ''.join(out)
+
+    def _render_confirm_quit_overlay(self) -> str:
+        out = []
+        ox, oy, w, h = 20, 8, 40, 7
+        def box(r, c, s): out.append(f'{_at(oy+r, ox+c)}{s}')
+
+        border_bg = _bg(45,20,20)
+        box(0, 0, f'{border_bg}{_fg(255,140,140)}')
+        out.append('╔' + '═'*(w-2) + '╗')
+        for r in range(1, h-1):
+            box(r, 0, f'{border_bg}║{" "*(w-2)}║')
+        box(h-1, 0, f'{border_bg}╚' + '═'*(w-2) + '╝')
+
+        box(2, 3, f'{border_bg}{_fg(255,220,120)}{BOLD}Quit to the main menu?{RST}')
+        box(4, 3, f'{border_bg}{_fg(180,220,180)}Your progress will be saved.{RST}')
+        box(5, 3, f'{border_bg}{_fg(150,255,150)}Y{_fg(200,200,200)}es'
+                  f'{" "*6}{_fg(255,150,150)}N{_fg(200,200,200)}o{RST}')
+
+        return ''.join(out)
+
     # ── input ────────────────────────────────────────────────────────────────
 
     def _handle_key(self, key: str):
         p = self.player
+
+        # Real gap reported live (2026-09-25): Q used to quit instantly
+        # and unconditionally, no matter the mode -- a single mistyped
+        # key (reported case: meaning to hit W) silently ended the whole
+        # session. Now it opens a confirm prompt instead; only Y actually
+        # ends the tick loop (which still saves/leaves-MP exactly as
+        # before in run()'s finally: block), and -- also per that
+        # report -- run() now loops back to the main menu afterward
+        # rather than fully exiting the door session.
+        if self.mode == 'confirm_quit':
+            if key in ('y', 'Y'):
+                # Just stop the loop -- _play_session()'s own finally:
+                # block already does the one correct save-or-leave-MP
+                # cleanup; duplicating it here would either double-save
+                # or (worse) run the wrong branch once _mp_mode changes.
+                self.running = False
+            elif key in ('n', 'N', 'ESC'):
+                self.mode = 'game'
+                self._rend.full_redraw()
+            return
+
         # Mode-switching
         if key in ('q', 'Q'):
-            self.running = False; return
+            self.mode = 'confirm_quit'
+            self._rend.full_redraw()
+            return
+
+        if self.mode == 'help':
+            if key in ('LEFT', 'a', 'A'):
+                self.help_page = max(0, self.help_page - 1)
+            elif key in ('RIGHT', 'd', 'D', ' '):
+                self.help_page = min(len(HELP_PAGES) - 1, self.help_page + 1)
+            elif key in ('?', 'ESC'):
+                self.mode = 'game'
+                self._rend.full_redraw()
+            return
+        if key == '?':
+            self.mode = 'help'
+            self.help_page = 0
+            self._rend.full_redraw()
+            return
+
         if key in ('i', 'I'):
             self.mode = 'game' if self.mode == 'inv'   else 'inv'
             self._rend.full_redraw(); return
@@ -2398,7 +3015,7 @@ class ANetCraft:
             out.append(_at(row, lx+2) + _fg(255,200,100) + BOLD + 'C' + RST +
                        W2 + '  New Game - Creative Mode' + RST)
             row += 2
-            online = len(_MP.get('players', {}))
+            online = len(_mp_list_players())
             mp_tag = f'  Multiplayer  ({online} online)' if online else '  Multiplayer'
             out.append(_at(row, lx+2) + _fg(100,220,255) + BOLD + 'M' + RST +
                        W2 + mp_tag + RST)
@@ -2434,39 +3051,63 @@ class ANetCraft:
     # ── main loop ────────────────────────────────────────────────────────────
 
     async def run(self):
-        result = await self._lobby()
-        if result is None:
-            return
-        action, mode = result
+        # Real gap reported live (2026-09-25): confirming Quit from
+        # inside a game session used to end the whole door session --
+        # the only way back to a fresh game was reconnecting entirely.
+        # Now it returns to this same main menu instead (matching the
+        # OpenDoors door rewrite's equivalent lobby behavior) -- the
+        # only thing that ends run() itself is quitting FROM the menu.
+        while True:
+            result = await self._lobby()
+            if result is None:
+                return
+            action, mode = result
 
-        if action == 'mp':
-            self._mp_join()
-        elif action == 'load':
-            if not self.load():
-                self._new_world('survival')
-                self._msg('Save corrupted — new world started.')
-        else:
-            self._new_world(mode)
+            if action == 'mp':
+                self._mp_join()
+            elif action == 'load':
+                if not self.load():
+                    self._new_world('survival')
+                    self._msg('Save corrupted — new world started.')
+            else:
+                self._new_world(mode)
 
-        self._update_cam()
-        self._sync_cursor()
-        await self.session.write(CLS + HIDE)
-        self._rend.full_redraw()
+            self._update_cam()
+            self._sync_cursor()
+            await self.session.write(CLS + HIDE)
+            self._rend.full_redraw()
+            self.mode = 'game'
+            self.running = True
+            self._last_header = ''
+            self._last_ui = ''
 
+            await self._play_session()
+
+    async def _play_session(self):
         try:
             while self.running:
                 t0 = time.monotonic()
 
-                # In MP: sync tick from shared state before processing
+                # Cross-process MP sync: publish where I am, pull in any
+                # block changes / chat / loot other processes posted since
+                # last tick, and refresh who's currently online. Runs
+                # every tick regardless of overlay mode (matches the fact
+                # that _render_ui()'s chat line already renders in every
+                # mode below).
                 if self._mp_mode:
-                    self.tick = _MP['tick']
+                    self._mp_publish_presence()
+                    if not self._is_mp_host():
+                        self._mp_apply_new_deltas()
+                    self._mp_tail_chat()
+                    self._mp_apply_grants()
+                    self._mp_other_players = _mp_list_players()
 
                 # Chat input (MP only) — suspend normal loop, collect text
                 if self._chat_pending:
                     self._chat_pending = False
                     msg = await self._mp_chat_prompt()
                     if msg:
-                        _MP['chat'].append((self.username, msg, self.tick + 750))
+                        self._mp_send_chat(msg)
                     self._rend.full_redraw()
 
                 # Read keys (non-blocking, poll window)
@@ -2488,20 +3129,23 @@ class ANetCraft:
                 if self.mode == 'game':
                     self._physics()
                     self._update_cam()
-                    # Only the MP host runs mob AI; SP always runs it
-                    if not self._mp_mode or self._is_mp_host():
+                    # Only the MP mob authority runs mob AI and publishes
+                    # the result; everyone else just reads its latest
+                    # published mob list. SP always simulates locally.
+                    if self._mp_mode:
+                        if self._is_mp_host():
+                            self._mp_process_events()
+                            self._tick_mobs()
+                            self._mp_publish_mobs()
+                        else:
+                            self._mobs = self._mp_read_mobs()
+                    else:
                         self._tick_mobs()
                     self._tick_hazards()
                     self._check_portal_teleport()
                 self._tick_furnaces()
 
-                # Advance tick
-                if self._mp_mode:
-                    if self._is_mp_host():
-                        _MP['tick'] += 1
-                    self.tick = _MP['tick']
-                else:
-                    self.tick += 1
+                self.tick += 1
 
                 # Hunger drain in survival mode (every ~32 sec of play)
                 if self.game_mode == 'survival' and self.tick % 400 == 1:
@@ -2529,13 +3173,26 @@ class ANetCraft:
                 else:
                     world_cells = ''
 
-                header  = self._render_header()
-                ui      = self._render_ui()
+                header = self._render_header()
+                if header == self._last_header:
+                    header = ''
+                else:
+                    self._last_header = header
+
+                ui = self._render_ui()
+                if ui == self._last_ui:
+                    ui = ''
+                else:
+                    self._last_ui = ui
+
                 overlay = ''
                 if self.mode == 'inv':       overlay = self._render_inv_overlay()
                 elif self.mode == 'craft':   overlay = self._render_craft_overlay()
                 elif self.mode == 'furnace': overlay = self._render_furnace_overlay()
                 elif self.mode == 'victory': overlay = self._render_victory_overlay()
+                elif self.mode == 'help':    overlay = self._render_help_overlay()
+                elif self.mode == 'confirm_quit':
+                    overlay = self._render_confirm_quit_overlay()
 
                 await self.session.write(header + world_cells + ui + overlay)
 
@@ -2547,6 +3204,11 @@ class ANetCraft:
         finally:
             if self._mp_mode:
                 self._mp_leave()
+                # Reset for the next lobby round -- run() loops back to
+                # the main menu rather than ending the session now, and
+                # a subsequent Continue/New Survival/New Creative choice
+                # must not still think it's in multiplayer.
+                self._mp_mode = False
             else:
                 self.save()
             await self.session.write(SHOW + CLS)

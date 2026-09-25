@@ -43,7 +43,7 @@ class NuvRegistrationNoAutoLoginTests(unittest.TestCase):
                 os.remove(path)
 
     def _register(self, client, username, email):
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         return client.post('/auth/register', data={
             'username': username,
             'email': email,

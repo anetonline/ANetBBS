@@ -52,7 +52,7 @@ class RegistrationAutoLoginCallerLogTests(unittest.TestCase):
                 os.remove(path)
 
     def test_registration_auto_login_writes_a_caller_log_row(self):
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         client = self.app.test_client()
         resp = client.post('/auth/register', data={
             'username': 'vanny', 'email': 'vanny@example.com',
@@ -76,7 +76,7 @@ class RegistrationAutoLoginCallerLogTests(unittest.TestCase):
             self.assertEqual(cl.service, 'web')
 
     def test_registration_auto_login_updates_login_count_and_last_login(self):
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         client = self.app.test_client()
         client.post('/auth/register', data={
             'username': 'wendy', 'email': 'wendy@example.com',

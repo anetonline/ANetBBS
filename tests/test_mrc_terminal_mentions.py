@@ -706,5 +706,70 @@ class KnownUsersRosterSourceTests(unittest.TestCase):
         self.assertEqual(''.join(chat._input_buf), 'StingRay: ')
 
 
+class MysticThemeMentionsTests(unittest.TestCase):
+    """Real bug reported live (2026-09-25): the mentions counter worked
+    in the default (and green/amber/cyan/mono) palette but stayed stuck
+    at 00 in every Mystic-style theme (original/minimal/bitchx/2leet4u/
+    least). Root cause: those themes render via a separate
+    _mystic_draw_status() path that never called _place('MENTIONS', ...)
+    at all -- a deliberate prior omission (Jerry, at the time: not
+    wanted on that screen) that Jerry has now asked to reverse. Uses the
+    REAL bundled theme .ini files (via load_theme_layout()), not a
+    fake/mocked layout -- confirms the actual shipped MENTIONS element
+    coordinates each theme declares actually get written to."""
+
+    def _chat_with_mystic_layout(self, palette_name, mention_count):
+        from mrc.mystic_client.theme_layout import load_theme_layout
+        chat = _make_chat('StingRay')
+        chat._palette_name = palette_name
+        chat._mystic_layout = load_theme_layout(palette_name, mode='default')
+        self.assertIsNotNone(
+            chat._mystic_layout,
+            f'{palette_name}: real bundled theme failed to load -- fix '
+            'the test/theme data before trusting the rest of this test')
+        chat._mention_count = mention_count
+        return chat
+
+    def test_every_bundled_mystic_theme_declares_a_mentions_element(self):
+        # Sanity check on the fixture itself, matching what the live
+        # investigation found: every one of these .ini files really
+        # does declare MENTIONS, so a failure below means the fix
+        # regressed, not that the test data is wrong.
+        from mrc.mystic_client.theme_layout import load_theme_layout
+        for name in ('original', 'minimal', 'bitchx', '2leet4u', 'least'):
+            layout = load_theme_layout(name, mode='default')
+            self.assertIsNotNone(layout, f'{name}: failed to load')
+            self.assertIsNotNone(layout.element('MENTIONS'),
+                                 f'{name}: no MENTIONS element declared')
+
+    def test_nonzero_mention_count_is_written_for_every_mystic_theme(self):
+        for name in ('original', 'minimal', 'bitchx', '2leet4u', 'least'):
+            chat = self._chat_with_mystic_layout(name, mention_count=3)
+            _run(chat._mystic_draw_status())
+            joined = ''.join(chat.session.written)
+            self.assertIn('03', joined,
+                          f'{name}: mention count 3 never written to screen')
+
+    def test_mention_count_over_99_is_capped_not_truncated_wrong(self):
+        chat = self._chat_with_mystic_layout('original', mention_count=150)
+        _run(chat._mystic_draw_status())
+        joined = ''.join(chat.session.written)
+        self.assertIn('99', joined)
+        self.assertNotIn('15', joined,
+                         'a 3-digit count must cap at 99, not truncate to '
+                         'the first 2 digits (which would silently show '
+                         'the wrong, much smaller number)')
+
+    def test_zero_mentions_clears_back_to_00_not_left_stale(self):
+        # Matches the unconditional-write behavior _place() already
+        # documents for every other element -- MENTIONS must be no
+        # exception, or a real mention count could get "stuck" after
+        # being read/cleared.
+        chat = self._chat_with_mystic_layout('original', mention_count=0)
+        _run(chat._mystic_draw_status())
+        joined = ''.join(chat.session.written)
+        self.assertIn('00', joined)
+
+
 if __name__ == '__main__':
     unittest.main()

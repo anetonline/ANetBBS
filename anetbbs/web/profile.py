@@ -15,8 +15,18 @@ from datetime import datetime, timedelta
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Post, Theme, UserSession, UserSecurityAnswer,
-                      SECURITY_QUESTIONS, UserField, UserFieldValue,
-                      get_builtin_field_config, UserSSHKey)
+                      SecurityQuestion, PasswordRecoverySettings, UserField,
+                      UserFieldValue, get_builtin_field_config, UserSSHKey)
+
+
+def _active_security_question_texts():
+    """Same source of truth as web/auth.py's _active_security_questions()
+    -- kept as a separate small helper here rather than a cross-module
+    import to avoid a profile.py -> auth.py dependency for one query."""
+    return [q.text for q in SecurityQuestion.query
+            .filter_by(is_active=True)
+            .order_by(SecurityQuestion.sort_order, SecurityQuestion.id)
+            .all()]
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
 
@@ -508,8 +518,14 @@ def akas():
 @login_required
 def security_questions():
     """Set or update security questions for password recovery."""
+    if not PasswordRecoverySettings.get().security_questions_enabled:
+        flash('Security-question password recovery is currently turned '
+             'off by the sysop.', 'info')
+        return redirect(url_for('profile.index'))
+
     existing = {qa.question: qa for qa in current_user.security_answers}
-    q_choices = [(q, q) for q in SECURITY_QUESTIONS]
+    active_questions = _active_security_question_texts()
+    q_choices = [(q, q) for q in active_questions]
 
     if request.method == 'POST':
         # Collect up to 3 question/answer pairs from the form
@@ -519,7 +535,7 @@ def security_questions():
             a = request.form.get(f'answer_{i}', '').strip()
             if not q or not a:
                 continue
-            if q not in SECURITY_QUESTIONS:
+            if q not in active_questions:
                 continue
             rec = existing.get(q)
             if rec:
@@ -537,7 +553,7 @@ def security_questions():
         submitted_questions = set()
         for i in range(1, 4):
             q = request.form.get(f'question_{i}', '').strip()
-            if q and q in SECURITY_QUESTIONS:
+            if q and q in active_questions:
                 submitted_questions.add(q)
         for qa in list(current_user.security_answers):
             if qa.question not in submitted_questions:

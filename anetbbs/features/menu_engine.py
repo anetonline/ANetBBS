@@ -122,6 +122,7 @@ async def _act_pm(ui, args):      await ui.session.write(_CLR); await ui.list_pm
 async def _act_pm_send(ui, args): await ui.session.write(_CLR); await ui.send_pm();          return None
 async def _act_imsg(ui, args):    await ui.session.write(_CLR); await ui.list_imsg_inbox();  return None
 async def _act_imsg_send(ui, args): await ui.session.write(_CLR); await ui.send_imsg();      return None
+async def _act_bbs_directory(ui, args): await ui.session.write(_CLR); await ui.browse_bbs_directory(); return None
 async def _act_bulletins(ui, args): await ui.session.write(_CLR); await ui.list_bulletins(); return None
 
 async def _act_echo(ui, args):
@@ -693,6 +694,7 @@ _ACTIONS = {
     'pm_send': _act_pm_send,
     'imsg': _act_imsg,
     'imsg_send': _act_imsg_send,
+    'bbs_directory': _act_bbs_directory,
     'bulletins': _act_bulletins,
     'echo': _act_echo,
     'echo_post': _act_echo_post,
@@ -1164,6 +1166,7 @@ DEFAULT_MENUS = [
             {'hotkey': 'N', 'label': 'New PM', 'action_type': 'pm_send', 'sort_order': 35},
             {'hotkey': 'I', 'label': 'InterBBS IM Inbox', 'action_type': 'imsg', 'sort_order': 36},
             {'hotkey': 'J', 'label': 'Send InterBBS IM', 'action_type': 'imsg_send', 'sort_order': 37},
+            {'hotkey': 'V', 'label': 'BBS Directory', 'action_type': 'bbs_directory', 'sort_order': 38},
             {'hotkey': 'E', 'label': 'Echomail', 'action_type': 'echo', 'sort_order': 40},
             {'hotkey': 'C', 'label': 'Compose Echomail', 'action_type': 'echo_post', 'sort_order': 45},
             {'hotkey': 'F', 'label': 'File Library', 'action_type': 'files', 'sort_order': 50},
@@ -1426,6 +1429,7 @@ ACTION_TYPE_CHOICES = [
     ('pm_send', 'Compose new PM'),
     ('imsg', 'InterBBS IM inbox (MSP)'),
     ('imsg_send', 'Send InterBBS IM (MSP)'),
+    ('bbs_directory', 'Browse the BBS directory (scrollable lightbar list)'),
     ('bulletins', 'Bulletins'),
     ('wall', 'Graffiti wall'),
     ('echo', 'Echomail areas'),

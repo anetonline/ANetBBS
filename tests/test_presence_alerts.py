@@ -107,7 +107,7 @@ class PresenceAlertsTests(unittest.TestCase):
         everyone else fine, but a NEW user completing registration and
         landing in an immediate session never did. Same SECURITY_QUESTIONS
         list register() itself validates against."""
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         client = self.app.test_client()
         resp = client.post('/auth/register', data={
             'username': 'carol', 'email': 'carol@example.com',

@@ -174,7 +174,7 @@ class AdminReviewNotificationTests(unittest.TestCase):
             self.app.config['NUV_ENABLED'] = True
 
         try:
-            from anetbbs.models import SECURITY_QUESTIONS
+            from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
 
             client = self.app.test_client()
             client.get('/auth/register')  # populate CSRF-exempt session state if needed

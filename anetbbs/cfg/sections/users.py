@@ -11,7 +11,9 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 
 from anetbbs.cfg import ui
-from anetbbs.models import db, User, IpBan, WordFilter, AutoBanConfig, RegistrationAttempt
+from anetbbs.models import (db, User, IpBan, WordFilter, AutoBanConfig,
+                            RegistrationAttempt, SecurityQuestion,
+                            PasswordRecoverySettings, SmtpConfig)
 
 USER_FIELDS = [
     {"key": "display_name", "label": "Display Name", "kind": "text_nullable"},
@@ -315,6 +317,119 @@ def _run_registration_attempts(stdscr):
                 empty_hint="(no registration attempts logged)")
 
 
+SECURITY_QUESTION_FIELDS = [
+    {"key": "text", "label": "Question", "kind": "text"},
+    {"key": "sort_order", "label": "Sort Order", "kind": "int"},
+    {"key": "is_active", "label": "Active", "kind": "bool"},
+]
+
+SECURITY_QUESTION_NEW_DEFAULTS = {"text": "", "sort_order": 0, "is_active": True}
+
+SECURITY_QUESTION_COLUMNS = [
+    ("Sort", 5, lambda q: q.sort_order),
+    ("Question", 55, lambda q: q.text),
+    ("Active", 6, lambda q: "Yes" if q.is_active else "No"),
+]
+
+PASSWORD_RECOVERY_FIELDS = [
+    {"key": "security_questions_enabled", "label": "Security Questions Enabled", "kind": "bool"},
+]
+
+
+def list_security_questions():
+    return SecurityQuestion.query.order_by(
+        SecurityQuestion.sort_order, SecurityQuestion.id).all()
+
+
+def values_from_security_question(q):
+    return {f["key"]: getattr(q, f["key"]) for f in SECURITY_QUESTION_FIELDS}
+
+
+def create_security_question(data):
+    q = SecurityQuestion(**data)
+    db.session.add(q)
+    db.session.commit()
+    return q
+
+
+def update_security_question(q, data):
+    for k, v in data.items():
+        setattr(q, k, v)
+    db.session.commit()
+
+
+def delete_security_question(q):
+    db.session.delete(q)
+    db.session.commit()
+
+
+def _add_security_question(stdscr):
+    data = ui.run_form(stdscr, "New Security Question", SECURITY_QUESTION_FIELDS,
+                       dict(SECURITY_QUESTION_NEW_DEFAULTS))
+    if data is None:
+        return
+    if not data.get("text"):
+        ui.show_message(stdscr, "Question text is required.", error=True)
+        return
+    create_security_question(data)
+
+
+def _edit_security_question(stdscr, q):
+    data = ui.run_form(stdscr, "Edit Security Question", SECURITY_QUESTION_FIELDS,
+                       values_from_security_question(q))
+    if data is None:
+        return
+    if not data.get("text"):
+        ui.show_message(stdscr, "Question text is required.", error=True)
+        return
+    update_security_question(q, data)
+
+
+def _delete_security_question(stdscr, q):
+    # Real gap reported live (2026-09-25): deactivating (not deleting)
+    # is the safe way to retire a question -- past answers referencing
+    # it by text keep working either way, but deleting just removes it
+    # from the sysop's own list, not from anyone's answer history.
+    if ui.confirm(stdscr, f"Delete question:\n\n  {q.text}\n\n"
+                          "Existing user answers to it are kept but it "
+                          "can never be offered again -- consider Edit "
+                          "-> Active=No instead if you might want it back."):
+        delete_security_question(q)
+
+
+def _run_security_questions(stdscr):
+    ui.run_list(
+        stdscr, "Security Questions", SECURITY_QUESTION_COLUMNS,
+        list_security_questions,
+        on_add=_add_security_question, on_edit=_edit_security_question,
+        on_delete=_delete_security_question,
+    )
+
+
+def _run_password_recovery(stdscr):
+    """Real gap reported live (2026-09-25): the security-question step
+    used to be hardcoded on with no admin control at all -- sysop had
+    repeated complaints it felt too personal, and wanted a way to turn
+    it off now that SMTP-based recovery (see the SMTP status line
+    below) is a real alternative. Email recovery itself has no separate
+    switch here -- it already sends automatically whenever SMTP is
+    configured (see the main cfg menu's Network/SMTP-equivalent
+    section, or Admin -> SMTP Settings on the web side); this form is
+    only about the security-question step."""
+    settings = PasswordRecoverySettings.get()
+    smtp = SmtpConfig.get()
+    smtp_line = ("Email recovery: AVAILABLE (SMTP is configured)" if smtp.enabled
+                else "Email recovery: NOT available (SMTP isn't configured)")
+    values = {f["key"]: getattr(settings, f["key"]) for f in PASSWORD_RECOVERY_FIELDS}
+    data = ui.run_form(stdscr, "Password Recovery Settings", PASSWORD_RECOVERY_FIELDS,
+                       values, help_lines=[smtp_line])
+    if data is None:
+        return
+    for k, v in data.items():
+        setattr(settings, k, v)
+    db.session.commit()
+
+
 def run(stdscr):
     items = [
         ("users", "Users"),
@@ -322,6 +437,8 @@ def run(stdscr):
         ("filters", "Word Filters"),
         ("autoban", "Login Auto-Ban Settings"),
         ("regattempts", "Registration Attempts"),
+        ("secquestions", "Security Questions"),
+        ("pwrecovery", "Password Recovery Settings"),
     ]
     while True:
         choice = ui.run_menu(stdscr, "Users & Security", items)
@@ -337,3 +454,7 @@ def run(stdscr):
             _run_auto_ban_config(stdscr)
         elif choice == "regattempts":
             _run_registration_attempts(stdscr)
+        elif choice == "secquestions":
+            _run_security_questions(stdscr)
+        elif choice == "pwrecovery":
+            _run_password_recovery(stdscr)

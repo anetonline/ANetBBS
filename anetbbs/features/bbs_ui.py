@@ -894,6 +894,97 @@ class BBSMenuUI:
             return None
         return (username, bbs_row['hostname'])
 
+    async def browse_bbs_directory(self):
+        """Real gap reported live (2026-09-25): terminal-mode users
+        could already send/receive MSP messages but had no way to
+        browse the BBS directory itself, unlike the web UI's own
+        /imsg/directory page. Reuses the exact same lightbar pattern
+        _msp_pick_directory_bbs() already established for the
+        recipient picker -- same query, same columns philosophy --
+        just as a standalone read-only browser (Enter shows a full
+        detail screen per entry and returns to the list, rather than
+        picking-and-continuing into a send flow)."""
+        from anetbbs.models import BbsDirectoryEntry
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        with _app().app_context():
+            entries = BbsDirectoryEntry.query.order_by(BbsDirectoryEntry.name).all()
+            rows = [{
+                'hostname': e.hostname, 'name': e.name or e.hostname,
+                'sysop': e.sysop or '', 'location': e.location or '',
+                'software': e.software or '',
+                'software_version': e.software_version or '',
+                'systat_port': e.systat_port or 11, 'msp_port': e.msp_port or 18,
+                'notes': e.notes or '', 'source': e.source or '',
+                # Eastern display, not raw UTC -- same shared conversion
+                # every other timestamp in this file already goes
+                # through (see fmt_eastern's own import at the top).
+                'last_seen': fmt_eastern(e.last_seen_at, '%Y-%m-%d %H:%M', 'never'),
+            } for e in entries]
+
+        if not rows:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('BBS Directory', ui_width(self.session)))
+            await self.session.write(
+                f"  {FG['gry']}No BBSes in the directory yet.{RESET}\r\n")
+            await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
+            return
+
+        sel = 0
+        while True:
+            async def render_header():
+                _w = ui_width(self.session)
+                await self.session.write(banner('BBS Directory', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'#':>3}  {'Name':<22}  {'Sysop':<16}  "
+                    f"{'Software':<16}  {'Last Seen':<16}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, row, selected):
+                sw = row['software']
+                if row['software_version']:
+                    sw = f"{sw} {row['software_version']}"
+                return (f"  {FG['grn']}{idx+1:>3}{RESET}  {row['name'][:22]:<22}  "
+                        f"{FG['dim']}{row['sysop'][:16]:<16}{RESET}  "
+                        f"{sw[:16]:<16}  {row['last_seen'][:16]:<16}")
+
+            def render_hint(s, total):
+                return (f"  {FG['cyan']}{s+1}/{total}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=details  "
+                        f"{FG['cyan']}Q{RESET}=back")
+
+            result = await self._rss_lightbar(rows, render_header, render_row,
+                                              render_hint, initial_sel=sel)
+            if result[0] != 'enter':
+                return
+            sel = result[1]
+            await self._show_bbs_directory_detail(rows[sel])
+
+    async def _show_bbs_directory_detail(self, row):
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+        _w = ui_width(self.session)
+        await self.session.write('\x1b[2J\x1b[H')
+        await self.session.write(banner(row['name'], _w))
+        fields = [
+            ('Hostname', row['hostname']),
+            ('Sysop', row['sysop'] or '(unknown)'),
+            ('Location', row['location'] or '(unknown)'),
+            ('Software', (f"{row['software']} {row['software_version']}".strip()
+                         or '(unknown)')),
+            ('MSP Port', str(row['msp_port'])),
+            ('SYSTAT Port', str(row['systat_port'])),
+            ('Last Seen', row['last_seen']),
+            ('Source', row['source'] or '(unknown)'),
+        ]
+        for label, value in fields:
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{label:<14}{RESET} {value}\r\n")
+        if row['notes']:
+            await self.session.write(
+                f"\r\n  {FG['cyan']}{BOLD}Notes{RESET}\r\n  {row['notes']}\r\n")
+        await self.session.write(f"\r\n  {FG['dim']}Press Enter to go back...{RESET}")
+        await self.session.read_line("")
+
     async def send_imsg(self):
         """Compose a fresh InterBBS IM from the terminal. Tries the BBS
         directory + live-online picker first; falls back to manual

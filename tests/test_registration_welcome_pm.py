@@ -43,7 +43,7 @@ class RegistrationWelcomePmTests(unittest.TestCase):
                 os.remove(path)
 
     def test_new_user_receives_a_welcome_pm_from_the_sysop(self):
-        from anetbbs.models import SECURITY_QUESTIONS, db, User
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS, db, User
 
         with self.app.app_context():
             # Seed a sysop account so register()'s welcome-PM branch has

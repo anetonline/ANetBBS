@@ -1557,6 +1557,14 @@ a `sbbsimsg.lst`/`anetbbs.lst` file from a master directory URL — the
 "Directory refresh" button on that page (`/imsg/directory/refresh`) —
 not by manually adding entries in admin.
 
+Terminal (SSH/telnet) users have their own scrollable directory
+browser too — **V) BBS Directory** on the main menu. It's the same
+directory the web page shows; picking an entry (Enter) opens a full
+detail screen (sysop, location, software/version, MSP/SYSTAT ports,
+last seen, and any notes) rather than jumping straight into a send —
+use **J) Send InterBBS IM** for that, which has its own directory
+picker built in.
+
 ## Encoding
 
 MSP is 8-bit clean. Outbound messages are encoded as UTF-8. Inbound
@@ -2011,6 +2019,7 @@ what they manage. All are under **Admin** in the navbar.
 | Tool | Path | What it does |
 |------|------|--------------|
 | New User Questions | `/admin/newuser-questions` | Custom sign-up questions shown right after registration; answers are stored per user. |
+| Password Recovery | `/admin/security-questions` | Edit/add/retire the security questions asked at registration, and turn the whole security-question step on or off — a sysop-controlled switch, not a hardcoded list. Also shows whether email-based recovery is available (needs SMTP configured — see Admin → SMTP Settings, `/admin/smtp`). Same controls exist in the `anetbbs-cfg` terminal tool, under Users & Security → Security Questions / Password Recovery Settings. |
 | Inactive Users | `/admin/inactive-users?days=N` | Accounts with no login in N days (default 90) — mass PM, deactivate, or delete. |
 | Registration Attempts | `/admin/registration-attempts` | Paginated log of every signup attempt, success and failure. |
 | Chat Bans | `/admin/chat-bans` | Mute a user from MRC chat — one room or all, optional expiry. Expired bans auto-clear the next time you open the page. |

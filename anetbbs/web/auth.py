@@ -19,9 +19,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
-                      UserSecurityAnswer, SECURITY_QUESTIONS,
+                      UserSecurityAnswer, SecurityQuestion,
+                      PasswordRecoverySettings,
                       EmailVerifyToken, AutoBanConfig)
 from ..features.rate_limit import rate_limit
+
+
+def _active_security_questions():
+    """Ordered question text for every sysop-enabled security question.
+    The single source of truth for both the registration form's choices
+    and the /forgot decoy-question pool -- see SecurityQuestion's own
+    docstring in models.py for why this replaced a hardcoded list."""
+    return [q.text for q in SecurityQuestion.query
+            .filter_by(is_active=True)
+            .order_by(SecurityQuestion.sort_order, SecurityQuestion.id)
+            .all()]
+
+
+def _security_questions_enabled():
+    return PasswordRecoverySettings.get().security_questions_enabled
 
 
 # In-memory country-lookup cache: ip -> (country_code, expiry_timestamp)
@@ -302,20 +318,57 @@ class RegisterForm(FlaskForm):
         DataRequired(),
         EqualTo('password', message='Passwords must match')
     ])
-    question_1 = SelectField('Security Question 1', validators=[DataRequired()])
-    answer_1   = StringField('Answer 1', validators=[DataRequired(), Length(min=2, max=200)])
-    question_2 = SelectField('Security Question 2', validators=[DataRequired()])
-    answer_2   = StringField('Answer 2', validators=[DataRequired(), Length(min=2, max=200)])
-    question_3 = SelectField('Security Question 3', validators=[DataRequired()])
-    answer_3   = StringField('Answer 3', validators=[DataRequired(), Length(min=2, max=200)])
+    # Real gap reported live (2026-09-25): these used to be unconditionally
+    # DataRequired -- every registration was forced through 3 personal
+    # security questions with no way for a sysop to turn that off. Left
+    # un-required at the class level; __init__ below adds DataRequired
+    # back only when PasswordRecoverySettings.security_questions_enabled
+    # is on (and active questions actually exist to choose from) --
+    # register()/the template both also check security_questions_enabled
+    # to hide the fields entirely rather than just leaving them optional
+    # and confusing.
+    question_1 = SelectField('Security Question 1', validators=[])
+    answer_1   = StringField('Answer 1', validators=[Length(min=0, max=200)])
+    question_2 = SelectField('Security Question 2', validators=[])
+    answer_2   = StringField('Answer 2', validators=[Length(min=0, max=200)])
+    question_3 = SelectField('Security Question 3', validators=[])
+    answer_3   = StringField('Answer 3', validators=[Length(min=0, max=200)])
     submit = SubmitField('Register')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        choices = [(q, q) for q in SECURITY_QUESTIONS]
-        self.question_1.choices = choices
-        self.question_2.choices = choices
-        self.question_3.choices = choices
+        choices = [(q, q) for q in _active_security_questions()]
+        self.security_questions_enabled = bool(choices) and _security_questions_enabled()
+        # SelectField.pre_validate() checks submitted data against
+        # .choices unconditionally -- NOT gated on DataRequired -- so
+        # when the feature is off (fields are left un-submitted, see
+        # the template's {% if %} guard) an empty POST value ('') must
+        # itself be a valid choice, or validation fails with "Not a
+        # valid choice" even though the field isn't required anymore.
+        if self.security_questions_enabled:
+            self.question_1.choices = choices
+            self.question_2.choices = choices
+            self.question_3.choices = choices
+            for q_field, a_field in (
+                (self.question_1, self.answer_1),
+                (self.question_2, self.answer_2),
+                (self.question_3, self.answer_3),
+            ):
+                q_field.validators = [DataRequired()]
+                a_field.validators = [DataRequired(), Length(min=2, max=200)]
+        else:
+            # A SelectField with nothing submitted for it processes to
+            # .data = None (process_formdata() no-ops on an empty
+            # valuelist), not '' -- so choices=[('', '')] alone still
+            # fails pre_validate's `self.data == v` scan (None != '').
+            # Pin .data explicitly rather than relying on what an
+            # absent field happens to process to.
+            self.question_1.choices = [('', '')]
+            self.question_2.choices = [('', '')]
+            self.question_3.choices = [('', '')]
+            self.question_1.data = ''
+            self.question_2.data = ''
+            self.question_3.data = ''
 
     def validate_username(self, field):
         if User.query.filter(
@@ -569,7 +622,7 @@ def register():
         ], 1):
             q = (q_field.data or '').strip()
             a = (a_field.data or '').strip()
-            if q and a and q in SECURITY_QUESTIONS:
+            if q and a and q in _active_security_questions():
                 db.session.add(UserSecurityAnswer(
                     user_id=user.id,
                     question=q,
@@ -848,90 +901,100 @@ def forgot_password():
                 or User.query.filter_by(email=ident).first())
 
         real_answers = list(user.security_answers) if (user and user.is_active) else []
+        questions_enabled = _security_questions_enabled()
 
-        if user and user.is_active and not real_answers:
-            # No security questions on file -- this account's real
-            # recovery path is the email/journal token, same as always.
-            # Still shown the decoy verify page below so the existence
-            # of this account isn't distinguishable from one with real
-            # security questions or one that doesn't exist at all.
-            #
-            # Token generation + the DB insert/commit stay synchronous
-            # here (fast, low-variance -- a local SQLite write, not a
-            # source of meaningfully exploitable timing signal, and
-            # keeping it synchronous means the token is reliably
-            # findable the instant this request returns, same as
-            # before). Only the SMTP send is backgrounded below (see
-            # the SECURITY round-2 docstring note above): it's real
-            # network I/O to a remote mail server, whose latency is
-            # both the dominant and the most attacker-measurable part
-            # of this branch's cost -- a slow/greylisting mail server
-            # could otherwise hang the whole request for seconds or
-            # even minutes, which was ALSO a real (non-security)
-            # responsiveness problem independent of the timing-oracle
-            # angle.
-            token = secrets.token_urlsafe(32)
-            db.session.add(PasswordResetToken(
-                user_id=user.id,
-                token=token,
-                expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
-                requested_ip=_client_ip(),
-            ))
-            db.session.commit()
-            reset_url = url_for('auth.reset_password', token=token,
-                                _external=True)
-            from ..mailer import smtp_enabled, send_password_reset_email
-            if smtp_enabled():
-                # Re-query by ID inside the thread's own app context
-                # rather than passing the live `user` ORM object
-                # across threads -- it's bound to this request's
-                # scoped session, which gets torn down once this
-                # request ends, matching the same
-                # pass-an-ID-not-a-live-object pattern already used by
-                # poll_network_now()/poll_binkp_node() elsewhere in
-                # this codebase for the exact same reason.
-                app = current_app._get_current_object()
-                user_id = user.id
+        # Real gap reported live (2026-09-25): a sysop can now turn the
+        # security-question step off entirely (repeated complaints that
+        # it felt too personal, now that SMTP-based recovery is a real
+        # alternative). With it off, EVERY matching active account goes
+        # through the same "issue + email/log a reset token" path the
+        # "no security questions on file" branch already used below
+        # (same anti-enumeration/timing posture: synchronous fast local
+        # DB write, backgrounded slow SMTP send -- see the SECURITY
+        # round-2 docstring above for why that split is the accepted
+        # line), and the question/verify step is skipped altogether
+        # rather than shown with a decoy.
+        if (not questions_enabled) or (user and user.is_active and not real_answers):
+            if user and user.is_active:
+                _issue_reset_token_and_notify(user)
 
-                def _send_reset_email(app, user_id, reset_url):
-                    with app.app_context():
-                        u = User.query.get(user_id)
-                        if u:
-                            send_password_reset_email(u, reset_url)
+            if not questions_enabled:
+                return render_template('auth/forgot_password_sent.html')
 
-                threading.Thread(target=_send_reset_email,
-                                 args=(app, user_id, reset_url),
-                                 daemon=True).start()
+        if questions_enabled:
+            nonce = secrets.token_urlsafe(24)
+            flask_session['sq_nonce'] = nonce
+            flask_session['sq_attempts'] = 0
+            if real_answers:
+                import random
+                chosen = random.choice(real_answers)
+                flask_session['sq_user_id'] = user.id
+                flask_session['sq_answer_id'] = chosen.id
+                flask_session.pop('sq_decoy_question', None)
             else:
-                current_app.logger.info(
-                    'Password reset requested for user %s — reset URL: %s',
-                    user.username, reset_url)
-            _log_activity(user.id, 'password_reset_requested')
-
-        nonce = secrets.token_urlsafe(24)
-        flask_session['sq_nonce'] = nonce
-        flask_session['sq_attempts'] = 0
-        if real_answers:
-            import random
-            chosen = random.choice(real_answers)
-            flask_session['sq_user_id'] = user.id
-            flask_session['sq_answer_id'] = chosen.id
-            flask_session.pop('sq_decoy_question', None)
-        else:
-            # No real account/question to bind to -- a fixed-pool decoy
-            # question that can never be answered correctly. Deterministic
-            # per identifier (not re-randomized on every submit) so a
-            # user who mistypes and resubmits sees a consistent question,
-            # same as the real flow always shows the same chosen question.
-            import hashlib
-            idx = int(hashlib.sha256(ident.encode('utf-8', errors='replace'))
-                      .hexdigest(), 16) % len(SECURITY_QUESTIONS)
-            flask_session['sq_user_id'] = None
-            flask_session['sq_answer_id'] = None
-            flask_session['sq_decoy_question'] = SECURITY_QUESTIONS[idx]
-        return redirect(url_for('auth.security_question_verify'))
+                # No real account/question to bind to -- a fixed-pool decoy
+                # question that can never be answered correctly. Deterministic
+                # per identifier (not re-randomized on every submit) so a
+                # user who mistypes and resubmits sees a consistent question,
+                # same as the real flow always shows the same chosen question.
+                active_questions = _active_security_questions()
+                import hashlib
+                idx = int(hashlib.sha256(ident.encode('utf-8', errors='replace'))
+                          .hexdigest(), 16) % max(1, len(active_questions))
+                flask_session['sq_user_id'] = None
+                flask_session['sq_answer_id'] = None
+                flask_session['sq_decoy_question'] = (
+                    active_questions[idx] if active_questions
+                    else 'What was the name of your first pet?')
+            return redirect(url_for('auth.security_question_verify'))
 
     return render_template('auth/forgot_password.html', form=form)
+
+
+def _issue_reset_token_and_notify(user):
+    """Issues a fresh PasswordResetToken for `user` and emails it (if
+    SMTP is configured) or logs the link for the sysop to relay by
+    hand. Factored out of forgot_password() since it's now needed both
+    for "no security questions on file" (questions feature on) and
+    "every matching account" (questions feature off) -- see the
+    SECURITY docstrings on forgot_password() for the timing/enumeration
+    reasoning this preserves: the DB write here stays synchronous, only
+    the SMTP send is backgrounded."""
+    token = secrets.token_urlsafe(32)
+    db.session.add(PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
+        requested_ip=_client_ip(),
+    ))
+    db.session.commit()
+    reset_url = url_for('auth.reset_password', token=token, _external=True)
+    from ..mailer import smtp_enabled, send_password_reset_email
+    if smtp_enabled():
+        # Re-query by ID inside the thread's own app context rather
+        # than passing the live `user` ORM object across threads --
+        # it's bound to this request's scoped session, which gets torn
+        # down once this request ends, matching the same
+        # pass-an-ID-not-a-live-object pattern already used by
+        # poll_network_now()/poll_binkp_node() elsewhere in this
+        # codebase for the exact same reason.
+        app = current_app._get_current_object()
+        user_id = user.id
+
+        def _send_reset_email(app, user_id, reset_url):
+            with app.app_context():
+                u = User.query.get(user_id)
+                if u:
+                    send_password_reset_email(u, reset_url)
+
+        threading.Thread(target=_send_reset_email,
+                         args=(app, user_id, reset_url),
+                         daemon=True).start()
+    else:
+        current_app.logger.info(
+            'Password reset requested for user %s — reset URL: %s',
+            user.username, reset_url)
+    _log_activity(user.id, 'password_reset_requested')
 
 
 def _clear_sq_session():
@@ -957,6 +1020,14 @@ def security_question_verify():
     """
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
+
+    # Defense in depth: a sysop can disable this step entirely
+    # (PasswordRecoverySettings). forgot_password() itself never sends
+    # anyone here once that's off, but a stale bookmark/session from
+    # before it was turned off shouldn't still work.
+    if not _security_questions_enabled():
+        _clear_sq_session()
+        return redirect(url_for('auth.forgot_password'))
 
     nonce = flask_session.get('sq_nonce')
     if not nonce:

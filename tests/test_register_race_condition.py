@@ -45,7 +45,7 @@ class RegisterRaceConditionTests(unittest.TestCase):
                 os.remove(path)
 
     def _register_payload(self, username, email):
-        from anetbbs.models import SECURITY_QUESTIONS
+        from anetbbs.models import DEFAULT_SECURITY_QUESTIONS as SECURITY_QUESTIONS
         return {
             'username': username, 'email': email,
             'password': 'correcthorsebatterystaple',

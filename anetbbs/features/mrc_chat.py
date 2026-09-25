@@ -977,9 +977,22 @@ class MRCChat(BaseChatSystem):
         still does not work, that is the character count down if I am
         not mistaken" -- correct, it's the same wire-length countdown
         the generic status bar already shows, see
-        _input_remaining_chars, just never wired in here). MENTIONS
-        deliberately isn't placed at all (Jerry: not wanted on this
-        screen)."""
+        _input_remaining_chars, just never wired in here).
+
+        MENTIONS: an earlier pass here deliberately left this one
+        unplaced (Jerry, at the time: not wanted on this screen). Real
+        bug reported live since (2026-09-25): every Mystic theme's
+        border art bakes in a static "00" placeholder at this element's
+        position (confirmed in each bundled .ans), and since nothing
+        ever wrote over it, every non-default theme looked permanently
+        stuck at 00 no matter how many real mentions came in -- only
+        the plain SGR-palette themes (default/green/amber/cyan/mono),
+        which use the generic (non-Mystic) status bar path below
+        instead, ever updated live. Jerry now wants it live here too --
+        placed the same unconditional way every other element above
+        already is, so it also correctly clears back to 00 rather than
+        getting stuck the other direction once real._place()'s own
+        earlier fix (see its own docstring) is what makes that safe."""
         layout = self._mystic_layout
         if layout is None:
             return
@@ -1023,6 +1036,11 @@ class MRCChat(BaseChatSystem):
         # (self._known_users), unlike the hub-wide stats above.
         _place('CHATTERS', str(len(self._known_users)))
         _place('BUFFER', str(self._input_remaining_chars()))
+        # Capped at 99 (not just left to _place()'s own length-based
+        # truncation) -- the bundled themes' MENTIONS field is 2 chars
+        # wide, and truncating "100" to "10" would silently understate
+        # a real count instead of just capping the display.
+        _place('MENTIONS', f'{min(self._mention_count, 99):02d}')
 
         if out:
             try:
