@@ -1818,6 +1818,62 @@ class BBSSession:
         except Exception:
             pass
 
+    async def _show_terminal_matrix(self, bbs_name: str):
+        """Stock pre-login "Matrix" splash -- a connection-options
+        banner shown before the Login/New User/Exit menu, gated behind
+        Config.TERMINAL_MATRIX_ENABLED (Admin -> Settings, off by
+        default). Promoted from a sysop's own private mods/core/
+        login_menu.py to a real built-in feature at Jerry's request
+        (2026-09-29), matching the same path the interactive lightbar
+        menu itself already took (started as a mod, proved out, got
+        promoted to core).
+
+        The banner ART goes through the normal _show_ansi_screen('matrix')
+        slot -- same resolution order as welcome.ans/goodbye.ans, so a
+        sysop can drop their own data/mods/text/matrix.ans (or
+        matrix132.ans / matrix.asc) for fully custom art, or edit it
+        live from Admin -> Content -> ANSI Editor, with a bundled stock
+        banner (anetbbs/screens/matrix.ans/.asc) as the final fallback.
+        The connection-ways list below it is deliberately NOT baked
+        into that art -- it's always generated live from current
+        config here, so port changes show up without re-editing any art.
+        """
+        await self.clear_screen()
+        await self._show_ansi_screen('matrix')
+
+        from ..features.bbs_ui import _app as _bbs_app
+        cfg = _bbs_app().config
+        lines = ['', '\x1b[36mWays to reach this BBS:\x1b[0m', '']
+        if cfg.get('TELNET_ENABLED', True):
+            lines.append(f"  \x1b[33m{'Telnet':<26}\x1b[0m port {cfg.get('TELNET_PORT', 2233)}")
+        if cfg.get('SSH_ENABLED', True):
+            lines.append(f"  \x1b[33m{'SSH':<26}\x1b[0m port {cfg.get('SSH_PORT', 2234)}")
+        if cfg.get('RLOGIN_ENABLED', False):
+            lines.append(f"  \x1b[33m{'Rlogin':<26}\x1b[0m port {cfg.get('RLOGIN_PORT', 513)}")
+        if cfg.get('PETSCII40_ENABLED', False):
+            lines.append(f"  \x1b[33m{'PETSCII (40-col, C64)':<26}\x1b[0m port {cfg.get('PETSCII40_PORT', 6400)}")
+        if cfg.get('PETSCII80_ENABLED', False):
+            lines.append(f"  \x1b[33m{'PETSCII (80-col, C128)':<26}\x1b[0m port {cfg.get('PETSCII80_PORT', 6401)}")
+        if cfg.get('FTP_ENABLED', False):
+            lines.append(f"  \x1b[33m{'FTP':<26}\x1b[0m port {cfg.get('FTP_PORT', 21)}")
+        domain = (cfg.get('BBS_DOMAIN', '') or '').strip()
+        web_port = cfg.get('WEB_PORT', 5000)
+        web_url = f"https://{domain}/" if domain else f"http://<this-host>:{web_port}/"
+        lines.append(f"  \x1b[33m{'Browser Terminal (ANSI)':<26}\x1b[0m {web_url}terminal/")
+        lines.append(f"  \x1b[33m{'Web / Boards':<26}\x1b[0m {web_url}")
+        lines.append('')
+        await self.write('\r\n'.join(lines) + '\r\n')
+        await self.read_line('\x1b[36mPress Enter to continue...\x1b[0m')
+
+        # _login_lightbar_menu()'s own _draw_full() never clears the
+        # screen itself -- it assumes it's drawing on a blank screen
+        # starting at row 1 (its redraw-on-scroll logic hardcodes
+        # absolute row numbers for that reason). Real bug found live in
+        # the private mod this was promoted from (2026-09-28): skipping
+        # this clear made the menu appear to redraw on top of leftover
+        # splash text and get visually corrupted on scroll.
+        await self.write('\x1b[2J\x1b[H')
+
     async def _login_lightbar_menu(self, bbs_name: str) -> str:
         """Interactive ANSI lightbar replacement for the old static
         numbered login box -- Up/Down (or Left/Right) moves the
@@ -2048,11 +2104,19 @@ class BBSSession:
                 # override this without touching core code at all --
                 # same idea as Synchronet's own login.js/logon.js in
                 # mods/. See core/mods_override.py.
+                async def _stock_login_flow():
+                    # Stock pre-login "Matrix" splash (Admin -> Settings,
+                    # off by default) -- only runs when no full
+                    # mods/core/login_menu.py override exists; the
+                    # override always wins over this toggle when present.
+                    if _bbs_app().config.get('TERMINAL_MATRIX_ENABLED'):
+                        await self._show_terminal_matrix(_bbs_name)
+                    return await self._login_lightbar_menu(_bbs_name)
+
                 from .mods_override import call_core_override
                 choice = await call_core_override(
                     'login_menu', 'render_login_menu',
-                    lambda: self._login_lightbar_menu(_bbs_name),
-                    self, _bbs_name)
+                    _stock_login_flow, self, _bbs_name)
 
             if choice == '1':
                 if await self.handle_login():

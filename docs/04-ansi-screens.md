@@ -31,6 +31,35 @@ Each screen has:
 | `welcome` | telnet visitors, before the login menu. SSH/rlogin auto-login skips it.     |
 | `goodbye` | every protocol on logoff                                                    |
 | `newuser` | shown right after a successful new-user registration                        |
+| `matrix`  | pre-login "Matrix" connection-options banner — only when `TERMINAL_MATRIX_ENABLED=true` (Admin → Settings, off by default); see below |
+
+### The `matrix` slot — pre-login connection-options banner
+
+A modern take on the classic dial-up BBS "press &lt;DEL&gt; to enter the
+Matrix" chooser: turn on `TERMINAL_MATRIX_ENABLED` (Admin → Settings)
+and every ANSI-terminal visitor sees a short banner plus a live list of
+ways to reach the BBS (Telnet/SSH/Rlogin/PETSCII/FTP ports, the web
+terminal URL — whichever protocols are actually enabled) before the
+usual Login/New User/Exit menu. There's a separate `WEB_MATRIX_ENABLED`
+toggle for the same idea on the web side (a landing page shown to
+logged-out visitors before the home page) — the two are independent,
+turn on either or both.
+
+The banner art itself follows the exact same resolution order as
+`welcome`/`goodbye`/`newuser` above — drop `data/mods/text/matrix.ans`
+(plus `matrix132.ans`/`matrix.asc` for wide/plain-ASCII variants) for
+fully custom art, or edit the `matrix` slot from Admin → BBS Menus →
+ANSI screens, same as any other slot. A bundled stock banner is shown
+if neither exists. The connection-ways list below the banner is
+**not** part of that art — it's always generated live from current
+config, so a port change shows up immediately without touching any
+art file.
+
+For a sysop who wants genuinely custom *logic* here, not just custom
+art (e.g. a completely different flow, not just a different banner),
+`data/mods/core/login_menu.py` remains available as a full override
+and always takes priority over both the toggle and any dropped art —
+see [doc 35](35-mods-directory.md).
 
 ## File-based override (welcome / goodbye / newuser / custom slots)
 

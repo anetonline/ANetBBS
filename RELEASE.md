@@ -1,3 +1,9 @@
+# ANetBBS v1.1.6 — Pre-login "Matrix" connection banner (terminal + web); login redirect fix (September 2026)
+
+Added an optional pre-login "Matrix" connection-options banner, on the classic dial-up BBS idea of a chooser shown before the normal login prompt. Two independent settings in Admin → Settings, both off by default: `TERMINAL_MATRIX_ENABLED` shows a banner plus a live list of ways to reach the BBS (whichever of Telnet/SSH/Rlogin/PETSCII/FTP/the web terminal are actually enabled) before the Login/New User/Exit menu; `WEB_MATRIX_ENABLED` shows an equivalent landing page to logged-out web visitors before the home page, shown once per browser session. The terminal banner's art can be fully customized by dropping `data/mods/text/matrix.ans` or editing the `matrix` slot from Admin → BBS Menus → ANSI screens, same as the existing welcome/goodbye screens; the connection list itself always reflects live configuration. A sysop who wants a fully custom pre-login page or menu, not just different art, can still use a `data/mods/core/login_menu.py` or `web_landing.py` override, which continues to take priority over either toggle.
+
+Fixed a real bug affecting every login-required page on the site, not just the new Matrix banner's own terminal link: after being redirected to log in from a page that requires an account, the login form discarded where the visitor was originally headed and always sent them to the home page afterward instead of back to the page they wanted.
+
 # ANetBBS v1.1.5 — Inter-BBS instant messages corrected against real Synchronet behavior (September 2026)
 
 Fixed the terminal Inter-BBS IM directory picker reporting "No reply, or nobody online there" for every BBS in the directory, even ones confirmed online. The web UI's own who's-online probe already falls back to a directory entry's IP address when the hostname alone doesn't resolve or reply; the terminal picker never had that fallback and always gave up after the hostname alone.

@@ -172,6 +172,15 @@ is the deeper escape hatch for when that's not enough.
 
 ### `data/mods/core/login_menu.py` — the pre-login menu
 
+**Before reaching for this**: if you just want the classic "matrix"
+connection-options banner before the Login/New User/Exit menu, turn on
+`TERMINAL_MATRIX_ENABLED` (Admin → Settings) instead — no code, and it
+even supports a custom `data/mods/text/matrix.ans` for the art alone.
+See [doc 4](04-ansi-screens.md#the-matrix-slot--pre-login-connection-options-banner).
+Use this override only when you need genuinely different *logic*, not
+just different art or copy — a mod here always wins over the toggle
+when both exist.
+
 The interactive Up/Down-lightbar menu shown to telnet visitors before
 they type a username:
 
@@ -233,6 +242,16 @@ and `show_sysop_tools_menu(session, bbs_ui)` respectively.
 (mirroring `chat_manager` above) an override can still call
 `game_manager.show_door_menu()`/`play_number_guess()`, or
 `bbs_ui.sysop_users()` and friends, instead of reimplementing them.
+
+**Before reaching for this**: if all you want is a connection-options
+"matrix" landing page (BBS name, a way to try the browser terminal, a
+list of how to connect directly), the `WEB_MATRIX_ENABLED` setting
+(Admin → Settings) gives you exactly that with zero code — see
+[doc 4](04-ansi-screens.md#the-matrix-slot--pre-login-connection-options-banner)
+(despite the name, that section covers both the terminal AND web
+toggles). Use `web_landing.py` only when you need genuinely custom
+logic or copy beyond what the toggle offers — a mod here always wins
+over the toggle when both exist.
 
 ### `data/mods/core/web_landing.py` — a custom pre-login web page
 

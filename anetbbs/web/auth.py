@@ -519,7 +519,20 @@ def login():
         # '/', must NOT start with '//' (protocol-relative URL: //evil.com),
         # must NOT start with '/\\' (Windows-path-like trick), and the parsed
         # URL must have an empty netloc (no host, no scheme).
-        next_page = request.args.get('next') or ''
+        #
+        # Real bug found live 2026-09-29: the login FORM posts to a plain
+        # /login with no query string (see templates/auth/login.html), so
+        # a `next` that arrived on the initial GET (e.g. Flask-Login's own
+        # @login_required redirect, ?next=/terminal/) only ever reached
+        # request.args on THAT GET -- by the time the form is actually
+        # submitted, it's a POST with an empty query string, and
+        # request.args.get('next') is always '' regardless of where the
+        # visitor was originally headed. Every @login_required page on the
+        # site silently dumped a not-yet-logged-in visitor back on the
+        # home page after login instead of where they were trying to go.
+        # Fixed by also carrying `next` through as a hidden form field
+        # (added in the same template) and checking request.form here too.
+        next_page = request.args.get('next') or request.form.get('next') or ''
         from urllib.parse import urlparse
         parsed = urlparse(next_page)
         is_safe = (

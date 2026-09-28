@@ -12,7 +12,10 @@
             <div class="card-body">
                 <form method="POST" action="{{ url_for('auth.login') }}">
                     {{ form.hidden_tag() }}
-                    
+                    {% if request.args.get('next') %}
+                    <input type="hidden" name="next" value="{{ request.args.get('next') }}">
+                    {% endif %}
+
                     <div class="mb-3">
                         {{ form.username.label(class="form-label") }}
                         {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}

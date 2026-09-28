@@ -127,12 +127,18 @@ htmlcov/
 # Scratch SQLite DBs some test files create directly under tests/ (most
 # use tempfile.TemporaryDirectory() instead, which self-cleans, but a
 # couple of older tests manage their own file path) -- covers the main
-# .db file AND WAL-mode's -wal/-shm companions, so a test run that gets
-# killed before its own cleanup runs can't leave these behind as an
-# untracked, unignored stray that leaks into a release tarball.
+# .db file, WAL-mode's -wal/-shm companions, AND rollback-mode's
+# -journal companion, so a test run that gets killed before its own
+# cleanup runs can't leave these behind as an untracked, unignored
+# stray. Real gap found live 2026-09-28: -journal wasn't covered here,
+# so build-release.sh's file list picked one up as "safe to ship" --
+# then it vanished (SQLite deletes a rollback journal the moment its
+# transaction closes) before tar actually ran, failing the whole build
+# with "Cannot stat: No such file or directory".
 tests/.*.db
 tests/.*.db-wal
 tests/.*.db-shm
+tests/.*.db-journal
 
 # Claude Code's own local session/config state -- never source, never
 # shippable, shouldn't be tracked or packaged under any circumstance.

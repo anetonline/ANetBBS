@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.5`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.6`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.6 — Pre-login "Matrix" connection banner (terminal + web); login redirect fix (September 2026)
+
+Added an optional pre-login "Matrix" connection-options banner, on the classic dial-up BBS idea of a chooser shown before the normal login prompt. Two independent settings in Admin → Settings, both off by default: `TERMINAL_MATRIX_ENABLED` shows a banner plus a live list of ways to reach the BBS (whichever of Telnet/SSH/Rlogin/PETSCII/FTP/the web terminal are actually enabled) before the Login/New User/Exit menu; `WEB_MATRIX_ENABLED` shows an equivalent landing page to logged-out web visitors before the home page, shown once per browser session. The terminal banner's art can be fully customized by dropping `data/mods/text/matrix.ans` or editing the `matrix` slot from Admin → BBS Menus → ANSI screens, same as the existing welcome/goodbye screens; the connection list itself always reflects live configuration. A sysop who wants a fully custom pre-login page or menu, not just different art, can still use a `data/mods/core/login_menu.py` or `web_landing.py` override, which continues to take priority over either toggle.
+
+Fixed a real bug affecting every login-required page on the site, not just the new Matrix banner's own terminal link: after being redirected to log in from a page that requires an account, the login form discarded where the visitor was originally headed and always sent them to the home page afterward instead of back to the page they wanted.
 
 ## v1.1.5 — Inter-BBS instant messages corrected against real Synchronet behavior (September 2026)
 

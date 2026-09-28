@@ -1246,6 +1246,8 @@ EDITABLE_SETTINGS = [
     ('MRC_BRIDGE_WS_PATH', 'MRC Bridge WS Path', 'text', False),
     ('MSP_ENABLED', 'MSP Enabled — inter-BBS instant messages (true/false)', 'text', True),
     ('MSP_PORT', 'MSP Port (default 18, needs CAP_NET_BIND_SERVICE)', 'text', True),
+    ('TERMINAL_MATRIX_ENABLED', 'Terminal pre-login Matrix splash — connection-options banner before login (true/false)', 'text', True),
+    ('WEB_MATRIX_ENABLED', 'Web pre-login Matrix landing page — connection-options page before the home page, logged-out visitors only (true/false)', 'text', False),
     ('BLOCKED_COUNTRIES', 'Blocked countries — comma-separated ISO codes (e.g. CN,RU,KP), blank = disabled (uses ip-api.com, no registration)', 'text', False),
     ('WIKI_MIN_POSTS', 'Wiki edit gate — minimum post count (0 = no gate)', 'text', False),
     ('WIKI_MIN_DAYS', 'Wiki edit gate — minimum account age in days (0 = no gate)', 'text', False),

@@ -381,6 +381,20 @@ class Config:
     SBBSIMSG_AUTO_REFRESH = True
     SBBSIMSG_REFRESH_SECONDS = 86400   # daily
 
+    # Pre-login "Matrix" splash -- a connection-options banner shown
+    # before the normal login prompt (terminal) / home page (web),
+    # modeled on the classic dial-up BBS "press <DEL> to enter the
+    # Matrix" chooser. Independent per surface, both off by default
+    # like every other opt-in feature here. The terminal one supports a
+    # sysop-droppable data/mods/text/matrix.ans (same convention as
+    # welcome.ans/goodbye.ans, see core/session.py's _show_ansi_screen)
+    # for fully custom art; a data/mods/core/login_menu.py or
+    # web_landing.py override (see core/mods_override.py) still takes
+    # priority over either toggle for a sysop who wants full custom
+    # control flow, not just custom art.
+    TERMINAL_MATRIX_ENABLED = os.environ.get('TERMINAL_MATRIX_ENABLED', 'false').lower() == 'true'
+    WEB_MATRIX_ENABLED = os.environ.get('WEB_MATRIX_ENABLED', 'false').lower() == 'true'
+
     # File uploads
     UPLOAD_MAX_SIZE = 100 * 1024 * 1024  # 100MB
     AVATAR_MAX_SIZE = 2 * 1024 * 1024  # 2MB

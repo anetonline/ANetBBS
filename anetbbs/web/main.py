@@ -2,7 +2,7 @@
 """
 Main blueprint for home page and general views
 """
-from flask import Blueprint, render_template, request, abort
+from flask import Blueprint, render_template, request, abort, current_app
 from flask_login import current_user
 from datetime import datetime, timedelta
 
@@ -115,6 +115,14 @@ def index():
         if has_core_override('web_landing'):
             landing = call_core_web_override(
                 'web_landing', 'render_web_landing', lambda: None, request)
+            if landing is not None:
+                return landing
+        elif current_app.config.get('WEB_MATRIX_ENABLED'):
+            # Stock built-in matrix (Admin -> Settings, off by default) --
+            # only consulted when no full mods/core/web_landing.py
+            # override exists; the override always wins when present.
+            from .matrix_landing import render_stock_web_matrix
+            landing = render_stock_web_matrix(request)
             if landing is not None:
                 return landing
 
