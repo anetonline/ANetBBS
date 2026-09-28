@@ -305,6 +305,14 @@ def heartbeat():
                              're-register to obtain a current one')
 
     entry.last_heartbeat_at = datetime.utcnow()
+    # Refresh source_ip on every heartbeat too, not just at initial
+    # register() -- a peer's IP can change (DHCP lease renewal, moving
+    # hosts) between registrations, and this is the field that lets a
+    # picker fall back to a raw IP when a peer's hostname doesn't
+    # resolve/reply to a SYSTAT probe (see anetbbs_directory.py's own
+    # puller and bbs_ui.py's _msp_pick_online_user()). Stale-but-present
+    # beats never-populated-at-all, which was the real gap before this.
+    entry.source_ip = _peer_ip()
     # Heartbeats can update soft metadata (sysop went on vacation,
     # version bumped, etc.). Anything pinned to identity (host,
     # contact_email) must use register, not heartbeat.
@@ -401,6 +409,7 @@ def _serialize_for_list():
         'bbses': [
             {
                 'host': e.host,
+                'ip': e.source_ip or '',
                 'msp_port': e.msp_port,
                 'systat_port': e.systat_port,
                 'name': e.name,

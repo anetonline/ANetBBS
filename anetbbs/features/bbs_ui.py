@@ -151,37 +151,6 @@ def _app():
     return _cached_app
 
 
-def _parse_file_selection(text, lo, hi):
-    """Parse a file-number selection string.
-
-    Accepts:
-      "5"       → [5]
-      "1,3,5"   → [1, 3, 5]
-      "1-5"     → [1, 2, 3, 4, 5]
-      "1-3,7"   → [1, 2, 3, 7]
-
-    Returns a sorted, deduplicated list of ints in [lo, hi], or None if
-    the input is not parseable as a numeric selection.
-    """
-    text = text.strip()
-    if not text:
-        return None
-    nums = set()
-    try:
-        for part in text.split(','):
-            part = part.strip()
-            if '-' in part:
-                a, b = part.split('-', 1)
-                for n in range(int(a.strip()), int(b.strip()) + 1):
-                    nums.add(n)
-            else:
-                nums.add(int(part))
-    except (ValueError, TypeError):
-        return None
-    valid = sorted(n for n in nums if lo <= n <= hi)
-    return valid if valid else None
-
-
 # ---------------------------------------------------------------------------
 # Top-level BBS menu
 # ---------------------------------------------------------------------------
@@ -301,10 +270,15 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_boards(self):
+        """Scrollable lightbar board list (converted from type-a-number
+        selection at Jerry's request, 2026-09-29 -- same _rss_lightbar
+        widget as the other inbox/thread-list/file-browser
+        conversions). S opens search_messages() -- the new message
+        search feature requested alongside these conversions."""
         from anetbbs.models import Board, Post, db
         from sqlalchemy import func
         from datetime import datetime as _dt
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+        from .ansi_ui import banner, FG, RESET, ui_width
         with _app().app_context():
             _user_level = int((self.session.user or {}).get('access_level', 10))
             _is_admin = bool((self.session.user or {}).get('is_admin'))
@@ -334,6 +308,7 @@ class BBSMenuUI:
             return
 
         sort_by_activity = False
+        sel = 0
 
         def _current_list():
             if sort_by_activity:
@@ -344,38 +319,175 @@ class BBSMenuUI:
         while True:
             board_list = _current_list()
             _w = ui_width(self.session)
-            # indent(2)+num(3)+sp(1) = 6 prefix; threads col = 16; spacing = 4
-            _name_w = max(28, _w - 6 - 16 - 4)
-            _desc_w = max(62, _w - 8)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Message Boards', _w))
-            for i, (_, name, desc, count, _last) in enumerate(board_list, 1):
+            _name_w = max(24, _w - 20)
+            _desc_w = max(20, _w - _name_w - 20)
+
+            async def render_header():
+                await self.session.write(banner('Message Boards', _w))
+                sort_label = 'Recent Activity' if sort_by_activity else 'Category'
                 await self.session.write(
-                    f"  {FG['yel']}{BOLD}{i:2d}{RESET}{FG['gry']}.{RESET} "
-                    f"{FG['grn']}{name:<{_name_w}}{RESET} "
-                    f"{FG['cyan']}({count:4d} threads){RESET}\r\n")
-                if desc:
-                    await self.session.write(
-                        f"      {FG['dim']}{desc[:_desc_w]}{RESET}\r\n")
-            await self.session.write(
-                f"\r\n  {FG['yel']}{BOLD}A{RESET}{FG['gry']}.{RESET} "
-                f"{FG['grn']}Sort: {'Recent Activity' if sort_by_activity else 'Category'}{RESET}"
-                f"  {FG['yel']}{BOLD}Q{RESET}{FG['gry']}.{RESET} "
-                f"{FG['red']}Return{RESET}\r\n")
-            await self.session.write(footer(_w) + '\r\n')
-            choice = (await self.session.read_line(
-                _prompt('Pick board (number / A / Q): ')) or '').strip()
-            if choice.upper() == 'Q' or not choice:
+                    f"  {FG['gry']}Sort: {sort_label} (A to toggle){RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, b, selected):
+                _, name, desc, count, _last = b
+                extra = f"  {FG['dim']}{desc[:_desc_w]}{RESET}" if desc else ''
+                return (f"  {FG['grn']}{name[:_name_w]:<{_name_w}}{RESET} "
+                        f"{FG['cyan']}({count:4d} threads){RESET}{extra}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Open  "
+                        f"{FG['cyan']}A{RESET}=Sort  {FG['cyan']}S{RESET}=Search  "
+                        f"{FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                board_list, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(board_list) - 1))
+
+            if result[0] == 'quit':
                 return
-            if choice.upper() == 'A':
-                sort_by_activity = not sort_by_activity
+            elif result[0] == 'enter':
+                sel = result[1]
+                await self.list_threads(board_list[sel][0], board_list[sel][1])
+            else:
+                key, sel = result[1], result[2]
+                if key == 'A':
+                    sort_by_activity = not sort_by_activity
+                    sel = 0
+                elif key == 'S':
+                    await self.search_messages()
+
+    async def search_messages(self):
+        """Search local message board posts AND echomail messages
+        (subject + body) across every board/area the caller can
+        access. New capability requested live 2026-09-29 alongside the
+        lightbar conversions ("no option to search for messages...
+        need to make ANetBBS more message/forum/reading friendly"),
+        extended to cover echomail too per Jerry's follow-up
+        confirmation the same day."""
+        from anetbbs.models import Board, Post, User, EchoArea, EchomailMessage, db
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+
+        term = (await self.session.read_line(
+            "\r\nSearch messages for: ") or '').strip()
+        if not term:
+            return
+
+        with _app().app_context():
+            _user_level = int((self.session.user or {}).get('access_level', 10))
+            _is_admin = bool((self.session.user or {}).get('is_admin'))
+            like = f'%{term}%'
+            results = []
+
+            _bq = Board.query.filter_by(is_active=True)
+            if not _is_admin:
+                _bq = _bq.filter(Board.min_access_level <= _user_level)
+            board_names = {b.id: b.name for b in _bq.all()}
+            if board_names:
+                matches = (Post.query
+                           .filter(Post.board_id.in_(board_names.keys()))
+                           .filter(db.or_(Post.subject.ilike(like),
+                                         Post.content.ilike(like)))
+                           .order_by(Post.created_at.desc())
+                           .limit(50).all())
+                for p in matches:
+                    author = User.query.get(p.author_id)
+                    # A matched REPLY must open via its ROOT post's id --
+                    # read_thread_v2() treats whatever id it's given as
+                    # the thread root and shows only ITS OWN replies, so
+                    # passing a reply's own id would silently show a
+                    # single-post "thread" missing the real original
+                    # post and every sibling reply.
+                    results.append({
+                        'kind': 'board', 'subject': p.subject or '(no subject)',
+                        'source': board_names[p.board_id],
+                        'who': author.username if author else '?',
+                        'when': p.created_at,
+                        'root_id': p.parent_id or p.id,
+                        'board_id': p.board_id, 'board_name': board_names[p.board_id],
+                    })
+
+            _eq = EchoArea.query.filter_by(is_active=True, is_subscribed=True)
+            if not _is_admin:
+                _eq = _eq.filter(EchoArea.is_sysop_only.is_(False),
+                                 EchoArea.min_access_level <= _user_level)
+            echo_tags = {a.id: a.tag for a in _eq.all()}
+            if echo_tags:
+                ematches = (EchomailMessage.query
+                           .filter(EchomailMessage.area_id.in_(echo_tags.keys()))
+                           .filter(db.or_(EchomailMessage.subject.ilike(like),
+                                         EchomailMessage.body.ilike(like)))
+                           .order_by(EchomailMessage.created_at.desc())
+                           .limit(50).all())
+                for m in ematches:
+                    # subject/from_name are remote-controlled (any FidoNet
+                    # peer can forge an inbound message's headers) -- same
+                    # sanitization read_echo_area()'s own row render
+                    # already applies, needed here too since this is a new
+                    # render path for the same untrusted data.
+                    results.append({
+                        'kind': 'echo',
+                        'subject': _strip_untrusted(m.subject) or '(no subject)',
+                        'source': echo_tags[m.area_id],
+                        'who': _strip_untrusted(m.from_name) or '?',
+                        'when': m.created_at,
+                        'msg_id': m.id, 'area_id': m.area_id,
+                        'area_tag': echo_tags[m.area_id],
+                    })
+
+            results.sort(key=lambda r: r['when'] or datetime.min, reverse=True)
+            results = results[:50]
+
+        _w = ui_width(self.session)
+        if not results:
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner('Search Results', _w))
+            await self.session.write(
+                f"  {FG['gry']}No matches for \"{term}\".{RESET}\r\n")
+            await self.session.read_line("\r\nPress Enter...")
+            return
+
+        sel = 0
+        while True:
+            _subj_w = max(24, _w - 50)
+
+            async def render_header():
+                await self.session.write(
+                    banner(f'Search: {term[:30]}', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'':6}{'Subject':<{_subj_w}}  "
+                    f"{'Board/Area':<16}  {'Author':<12}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, r, selected):
+                tag = f"{FG['yel']}[Echo]{RESET}" if r['kind'] == 'echo' else f"{FG['cyan']}[Brd] {RESET}"
+                return (f"  {tag} "
+                        f"{FG['wht']}{r['subject'][:_subj_w]:<{_subj_w}}{RESET}  "
+                        f"{FG['cyan']}{r['source'][:16]:<16}{RESET}  "
+                        f"{FG['grn']}{r['who'][:12]:<12}{RESET}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Read  "
+                        f"{FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                results, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(results) - 1))
+
+            if result[0] == 'quit':
+                return
+            if result[0] != 'enter':
+                sel = result[2]
                 continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(board_list):
-                    await self.list_threads(board_list[idx][0], board_list[idx][1])
-            except ValueError:
-                pass
+            sel = result[1]
+            r = results[sel]
+            if r['kind'] == 'board':
+                await self.read_thread_v2(r['root_id'], r['board_id'], r['board_name'])
+            else:
+                await self.read_echo_area(r['area_id'], r['area_tag'],
+                                          jump_to_msg_id=r['msg_id'])
 
     # list_threads/read_thread used to live here as class-body methods,
     # but both are dead code: `BBSMenuUI.list_threads = _list_threads_v2`
@@ -631,71 +743,96 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_pm_inbox(self):
+        """Scrollable lightbar PM inbox (converted from type-a-number
+        selection at Jerry's request, 2026-09-29 -- same _rss_lightbar
+        widget as the file-area browser and board thread list)."""
         from anetbbs.models import db, PrivateMessage, User
+        from .ansi_ui import banner, ui_width, FG, RESET, BOLD
         my_id = self.session.user['id']
-
-        with _app().app_context():
-            inbox = (PrivateMessage.query
-                     .filter_by(recipient_id=my_id, is_deleted_recipient=False)
-                     .order_by(PrivateMessage.created_at.desc())
-                     .limit(50).all())
-            i_list = []
-            for m in inbox:
-                sender = User.query.get(m.sender_id)
-                i_list.append((m.id, m.subject, sender.username if sender else '?',
-                               m.created_at, m.read_at is not None, m.body))
-
-        if not i_list:
-            from .ansi_ui import banner, FG, RESET, ui_width
-            _w = ui_width(self.session)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('PM Inbox', _w))
-            await self.session.write(
-                f"  {FG['gry']}Your inbox is empty.{RESET}\r\n")
-            await self.session.read_line("\r\nPress Enter...")
-            return
+        sel = 0
 
         while True:
-            from .ansi_ui import banner as _bnr, ui_width as _uw, FG, RESET
-            _w = _uw(self.session)
-            _subj_w = max(38, _w - 36)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr('PM Inbox', _w))
-            for i, (_, subj, who, when, was_read, _) in enumerate(i_list, 1):
-                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
-                mark = ' ' if was_read else '*'
-                await self.session.write(f"  {i:2d}.{mark} {subj[:_subj_w]:<{_subj_w}} from {who[:12]:<12} {ts}\r\n")
-            choice = (await self.session.read_line("\r\nPick message (number) or Q: ") or '').strip()
-            if choice.upper() == 'Q' or not choice:
+            with _app().app_context():
+                inbox = (PrivateMessage.query
+                         .filter_by(recipient_id=my_id, is_deleted_recipient=False)
+                         .order_by(PrivateMessage.created_at.desc())
+                         .limit(50).all())
+                i_list = []
+                for m in inbox:
+                    sender = User.query.get(m.sender_id)
+                    i_list.append((m.id, m.subject, sender.username if sender else '?',
+                                   m.created_at, m.read_at is not None, m.body))
+
+            _w = ui_width(self.session)
+            _subj_w = max(30, _w - 44)
+
+            if not i_list:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('PM Inbox', _w))
+                await self.session.write(
+                    f"  {FG['gry']}Your inbox is empty.{RESET}\r\n")
+                await self.session.read_line("\r\nPress Enter...")
                 return
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(i_list):
-                    pm_id, subj, who, when, _, body = i_list[idx]
-                    ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
-                    await self.session.write("\r\n" + "═" * _w + "\r\n")
-                    await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
-                    await self.session.write("─" * _w + "\r\n")
-                    await self._page_lines(
-                        [self._linkify_url_line(l) for l in self._wrap_text(body or '', _w)])
-                    # Mark as read
-                    with _app().app_context():
-                        pm = PrivateMessage.query.get(pm_id)
-                        if pm and pm.read_at is None:
-                            pm.read_at = datetime.utcnow()
-                            db.session.commit()
-            except ValueError:
-                pass
+
+            async def render_header():
+                await self.session.write(banner('PM Inbox', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'':2}{'Subject':<{_subj_w}}  "
+                    f"{'From':<12}  {'When':<12}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, m, selected):
+                _, subj, who, when, was_read, _ = m
+                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
+                mark = ' ' if was_read else f"{FG['yel']}*{RESET}"
+                return (f"  {mark} "
+                        f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
+                        f"{FG['grn']}{who[:12]:<12}{RESET}  "
+                        f"{FG['gry']}{ts}{RESET}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Read  "
+                        f"{FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                i_list, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(i_list) - 1))
+
+            if result[0] == 'quit':
+                return
+            if result[0] != 'enter':
+                sel = result[2]
+                continue
+            sel = result[1]
+            pm_id, subj, who, when, _, body = i_list[sel]
+            ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write("\r\n" + "═" * _w + "\r\n")
+            await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
+            await self.session.write("─" * _w + "\r\n")
+            await self._page_lines(
+                [self._linkify_url_line(l) for l in self._wrap_text(body or '', _w)])
+            # Mark as read
+            with _app().app_context():
+                pm = PrivateMessage.query.get(pm_id)
+                if pm and pm.read_at is None:
+                    pm.read_at = datetime.utcnow()
+                    db.session.commit()
 
     # ------------------------------------------------------------------
     # Inter-BBS Instant Messages (RFC 1312 / MSP)
     # ------------------------------------------------------------------
 
     async def list_imsg_inbox(self):
-        """Read / reply / delete InterBBS instant messages from the terminal."""
+        """Read / reply / delete InterBBS instant messages from the
+        terminal. Scrollable lightbar (converted from type-a-number
+        selection at Jerry's request, 2026-09-29 -- same _rss_lightbar
+        widget as the PM inbox/thread-list/file-browser conversions)."""
         from anetbbs.models import db, InstantMessage
         from anetbbs.msp.client import send_msp
         from anetbbs.msp.protocol import MSP_DEFAULT_PORT
+        from .ansi_ui import banner, FG, RESET, BOLD, ui_width
         my_id = self.session.user['id']
 
         with _app().app_context():
@@ -717,45 +854,59 @@ class BBSMenuUI:
                      '\n'.join(_strip_untrusted(ln) for ln in (m.body or '').split('\n')))
                     for m in ims]
 
-        from .ansi_ui import banner as _bnr, FG as _F, RESET as _R, ui_width as _uw
-        _w = _uw(self.session)
-        _prev_w = max(30, _w - 36)
         if not rows:
             await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr('Inter-BBS Instant Messages', _w))
+            await self.session.write(banner('Inter-BBS Instant Messages', ui_width(self.session)))
             await self.session.write(
-                f"  {_F['gry']}No InterBBS instant messages.{_R}\r\n")
+                f"  {FG['gry']}No InterBBS instant messages.{RESET}\r\n")
             await self.session.read_line("\r\nPress Enter...")
             return
 
+        sel = 0
         while True:
-            _w = _uw(self.session)
-            _prev_w = max(30, _w - 36)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(_bnr('Inter-BBS Instant Messages', _w))
-            for i, (_, who, host, when, was_read, body) in enumerate(rows, 1):
-                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
-                mark = ' ' if was_read else '*'
-                preview = body.replace('\r', ' ').replace('\n', ' ')[:_prev_w]
+            _w = ui_width(self.session)
+            _prev_w = max(24, _w - 44)
+
+            async def render_header():
+                await self.session.write(banner('Inter-BBS Instant Messages', _w))
                 await self.session.write(
-                    f"  {i:2d}.{mark} {who[:18]:<18} {ts}  {preview}\r\n")
-            choice = (await self.session.read_line(
-                "\r\nPick # to read, R# to reply, D# to delete, Q to quit: ")
-                      or '').strip().upper()
-            if not choice or choice == 'Q':
+                    f"  {FG['cyan']}{BOLD}{'':2}{'From':<18}  {'When':<12}  "
+                    f"{'Preview':<{_prev_w}}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, row, selected):
+                _, who, host, when, was_read, body = row
+                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
+                mark = ' ' if was_read else f"{FG['yel']}*{RESET}"
+                preview = body.replace('\r', ' ').replace('\n', ' ')[:_prev_w]
+                return (f"  {mark} "
+                        f"{FG['wht']}{who[:18]:<18}{RESET}  "
+                        f"{FG['gry']}{ts:<12}{RESET}  {preview}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Read  "
+                        f"{FG['cyan']}R{RESET}=Reply  {FG['cyan']}D{RESET}=Delete  "
+                        f"{FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                rows, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(rows) - 1))
+
+            if result[0] == 'quit':
                 return
-            cmd, num = ('R', choice[1:]) if choice.startswith('R') else \
-                       ('D', choice[1:]) if choice.startswith('D') else \
-                       ('V', choice)
-            try:
-                idx = int(num) - 1
-                if not (0 <= idx < len(rows)):
+            elif result[0] == 'enter':
+                cmd, sel = 'V', result[1]
+            else:
+                key, sel = result[1], result[2]
+                cmd = key if key in ('R', 'D') else None
+                if cmd is None:
                     continue
-            except ValueError:
-                continue
-            mid, who, host, when, _, body = rows[idx]
+
+            mid, who, host, when, _, body = rows[sel]
 
             if cmd == 'V':
+                await self.session.write('\x1b[2J\x1b[H')
                 await self.session.write("\r\n" + "═" * _w + "\r\n")
                 ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
                 await self.session.write(f"  From: {who}\r\n  Host: {host}\r\n  Date: {ts}\r\n")
@@ -767,6 +918,7 @@ class BBSMenuUI:
                     if im and not im.is_read:
                         im.is_read = True
                         db.session.commit()
+                        rows[sel] = (mid, who, host, when, True, body)
 
             elif cmd == 'D':
                 with _app().app_context():
@@ -774,10 +926,11 @@ class BBSMenuUI:
                     if im:
                         db.session.delete(im)
                         db.session.commit()
-                rows.pop(idx)
+                rows.pop(sel)
                 await self.session.write("\r\nDeleted.\r\n")
                 if not rows:
                     return
+                sel = min(sel, len(rows) - 1)
 
             elif cmd == 'R':
                 # Reply: who is "user@bbsname" or just "user"; strip any @ part.
@@ -802,6 +955,7 @@ class BBSMenuUI:
                 )
                 await self.session.write(
                     "\r\nSent.\r\n" if ok else "\r\nDelivery failed.\r\n")
+                await self.session.read_line("Press Enter...")
 
     async def _msp_pick_directory_bbs(self):
         """BBS directory lightbar picker. Returns the picked dict (with
@@ -1578,7 +1732,11 @@ class BBSMenuUI:
 
         await self.session.read_line(_prompt('\r\nPress Enter to continue...'))
 
-    async def read_echo_area(self, area_id, tag):
+    async def read_echo_area(self, area_id, tag, jump_to_msg_id=None):
+        """jump_to_msg_id: pre-select a specific message (by id) instead
+        of starting at the top of the list -- used by search_messages()
+        so a matching echomail hit opens with that message already
+        highlighted rather than making the caller scroll to find it."""
         from anetbbs.models import EchomailMessage, EchoArea
         from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
@@ -1638,6 +1796,11 @@ class BBSMenuUI:
                     f"{FG['cyan']}Q{RESET}=back")
 
         last_sel = 0
+        if jump_to_msg_id is not None:
+            for _i, _row in enumerate(m_list):
+                if _row[0] == jump_to_msg_id:
+                    last_sel = _i
+                    break
         while True:
             result = await self._rss_lightbar(
                 m_list, render_header_msgs, render_row_msg, render_hint_msgs,
@@ -1906,18 +2069,30 @@ class BBSMenuUI:
     async def _file_area_browse(self, area_id, area_name, area_filter,
                                 can_upload, uploads_dir, web_base, protos,
                                 storage_path=''):
-        """Paginated file browser. Reads disk (storage_path) when available,
-        falls back to FileUpload+TicFile DB tables otherwise."""
+        """Scrollable lightbar file browser (converted from the old
+        N=Next/P=Prev + type-a-number pager at Jerry's request,
+        2026-09-29 -- matches the file AREA picker, which already used
+        _rss_lightbar). Reads disk (storage_path) when available, falls
+        back to FileUpload+TicFile DB tables otherwise.
+
+        Enter downloads the highlighted file; V shows its extended
+        description (same _view_file_desc() as before); Space toggles
+        it into/out of a batch-download set (kept in `batch_set`,
+        keyed by each file's own `path`, which is unique across every
+        f_list-building branch below); B downloads everything currently
+        marked (_batch_download() already existed -- this was never
+        about building batch download, just replacing how you select
+        files for it). U still uploads, same as before.
+        """
         from anetbbs.models import FileUpload, TicFile, User, FileArea
-        from .ansi_ui import FG, RESET, BOLD, ui_width
+        from .ansi_ui import FG, RESET, BOLD, ui_width, banner
         app = _app()
-        PAGE = 9   # 9 × 2-line entries + 4 header + 2 nav = 24 lines, fits 80×25
-        page = 0
+        batch_set = set()
+        sel = 0
 
         while True:
             _w = ui_width(self.session)
-            _name_w = max(32, _w - 56)
-            _desc_w = max(60, _w - 12)
+            _name_w = max(24, _w - 44)
             with app.app_context():
                 f_list = []
 
@@ -1995,98 +2170,85 @@ class BBSMenuUI:
 
                 total = len(f_list)
 
-            page_files = f_list[page * PAGE: (page + 1) * PAGE]
-            pages = max(1, (total + PAGE - 1) // PAGE)
-
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(
-                f"{FG['cyan']}{BOLD}"
-                f"{'─'*_w}\r\n"
-                f" {area_name}  "
-                f"{FG['gry']}(page {page+1}/{pages}, {total} files){RESET}"
-                f"{FG['cyan']}{BOLD}\r\n"
-                f"{'─'*_w}{RESET}\r\n\r\n")
-
-            if not page_files:
+            # An empty area still needs to offer Upload (and Back) --
+            # _rss_lightbar() itself auto-quits on an empty row list, so
+            # handle this case before ever calling it.
+            if not f_list:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner(area_name, _w))
                 await self.session.write(
-                    f"  {FG['gry']}(no files here yet){RESET}\r\n")
+                    f"  {FG['gry']}(no files here yet){RESET}\r\n\r\n")
+                if can_upload and protos:
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}U{RESET}=Upload  "
+                        f"{FG['cyan']}Q{RESET}=Back: ") or '').strip().upper()
+                    if ans == 'U':
+                        await self._upload_terminal_file(
+                            area_id, uploads_dir, protos, storage_path)
+                        continue
+                else:
+                    await self.session.read_line(
+                        f"  {FG['cyan']}Press Enter to go back...{RESET}")
+                return
 
-            for i, f in enumerate(page_files, page * PAGE + 1):
+            async def render_header():
+                await self.session.write(banner(area_name, _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'':4}{'Name':<{_name_w}}  "
+                    f"{'Size':>10}  {'Source':<12}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, f, selected):
+                mark = f"{FG['grn']}[x]{RESET}" if f['path'] in batch_set else '[ ]'
                 sz = (f"{f['size']:>10,}" if isinstance(f['size'], int)
                       else f"{str(f['size']):>10}")
                 src = ('FTN' if f['tic_id'] else f['who'][:10])
-                await self.session.write(
-                    f"  {FG['yel']}{i:3d}.{RESET} "
-                    f"{FG['wht']}{f['name'][:_name_w]:<{_name_w}}{RESET} "
-                    f"{FG['gry']}{sz}  {src:<12}{RESET}\r\n")
-                if f['desc']:
-                    await self.session.write(
-                        f"        {FG['dim']}{f['desc'][:_desc_w]}{RESET}\r\n")
+                return (f"  {mark} "
+                        f"{FG['wht']}{f['name'][:_name_w]:<{_name_w}}{RESET} "
+                        f"{FG['gry']}{sz}  {src:<12}{RESET}")
 
-            nav = []
-            if page > 0:     nav.append("P=Prev")
-            if (page+1) < pages: nav.append("N=Next")
-            nav.append("#=DL  #,#=Batch  V#=Info")
-            if can_upload and protos: nav.append("U=Upload")
-            nav.append("Q=Back")
+            def render_hint(s, tot):
+                parts = [f"{s+1}/{tot} ({total} total)", "Up/Dn=Move",
+                        "Enter=DL", "V=Info", "Space=Mark"]
+                if batch_set:
+                    parts.append(f"B=DL Batch({len(batch_set)})")
+                if can_upload and protos:
+                    parts.append("U=Upload")
+                parts.append("Q=Back")
+                return '  '.join(f"{FG['cyan']}{p}{RESET}" for p in parts)
 
-            choice = (await self.session.read_line(
-                f"\r\n{FG['cyan']}[{'  '.join(nav)}]:{RESET} ")
-                      or '').strip()
+            result = await self._rss_lightbar(
+                f_list, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(f_list) - 1))
 
-            cu = choice.upper()
-            if cu == 'Q' or not choice:  return
-            if cu == 'N' and (page+1) < pages:
-                page += 1; continue
-            if cu == 'P' and page > 0:
-                page -= 1; continue
-            if cu == 'U' and can_upload and protos:
-                await self._upload_terminal_file(
-                    area_id, uploads_dir, protos, storage_path)
-                continue
-
-            # V# — view extended description
-            if cu.startswith('V') and len(cu) > 1:
-                try:
-                    num = int(cu[1:].strip())
-                    local_idx = num - page * PAGE - 1
-                    if 0 <= local_idx < len(page_files):
-                        await self._view_file_desc(page_files[local_idx])
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                sel = result[1]
+                await self._download_file(f_list[sel], web_base, protos)
+            else:
+                key, sel = result[1], result[2]
+                if key == 'V':
+                    await self._view_file_desc(f_list[sel])
+                elif key == ' ':
+                    path = f_list[sel]['path']
+                    if path in batch_set:
+                        batch_set.discard(path)
+                    else:
+                        batch_set.add(path)
+                elif key == 'B':
+                    if batch_set:
+                        batch = [f for f in f_list if f['path'] in batch_set]
+                        await self._batch_download(batch, web_base, protos)
+                        batch_set.clear()
                     else:
                         await self.session.write(
-                            f"{FG['red']}Number not on this page.{RESET}\r\n")
-                except ValueError:
-                    await self.session.write(
-                        f"{FG['red']}Enter V followed by a file number.{RESET}\r\n")
-                continue
-
-            # Parse batch (1,3,5 or 1-5) or single number
-            nums = _parse_file_selection(choice, page * PAGE + 1,
-                                         page * PAGE + len(page_files))
-            if nums is None:
-                await self.session.write(
-                    f"{FG['red']}Enter a number, range (1-5), list (1,3,5), or command.{RESET}\r\n")
-                continue
-
-            if len(nums) == 1:
-                local_idx = nums[0] - page * PAGE - 1
-                if 0 <= local_idx < len(page_files):
-                    await self._download_file(page_files[local_idx], web_base, protos)
-                else:
-                    await self.session.write(
-                        f"{FG['red']}Number not on this page.{RESET}\r\n")
-            else:
-                # Batch download
-                batch = []
-                for n in nums:
-                    li = n - page * PAGE - 1
-                    if 0 <= li < len(page_files):
-                        batch.append(page_files[li])
-                if batch:
-                    await self._batch_download(batch, web_base, protos)
-                else:
-                    await self.session.write(
-                        f"{FG['red']}No valid files in that selection.{RESET}\r\n")
+                            f"\r\n{FG['red']}No files marked -- press "
+                            f"Space to mark files first.{RESET}\r\n")
+                        await self.session.read_line("Press Enter...")
+                elif key == 'U' and can_upload and protos:
+                    await self._upload_terminal_file(
+                        area_id, uploads_dir, protos, storage_path)
 
     async def _view_file_desc(self, f):
         """Show extended description for a file, with word-wrap."""
@@ -4767,8 +4929,13 @@ BBSMenuUI.change_password = _change_password
 
 # Override list_threads to add 'N' for new thread + 'R' from inside read_thread
 async def _list_threads_v2(self, board_id, board_name):
+    """Scrollable lightbar thread list (converted from type-a-number
+    selection at Jerry's request, 2026-09-29 -- matches the file-area
+    browser conversion, same _rss_lightbar widget the BBS directory and
+    file pickers already use)."""
     from anetbbs.models import Post, User
-    from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+    from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+    sel = 0
     while True:
         with _app().app_context():
             threads = (Post.query
@@ -4783,35 +4950,54 @@ async def _list_threads_v2(self, board_id, board_name):
 
         _w = ui_width(self.session)
         _subj_w = max(35, _w - 40)
-        await self.session.write('\x1b[2J\x1b[H')
-        await self.session.write(banner(board_name, _w))
+
         if not t_list:
-            await self.session.write(f"  {FG['gry']}(no threads yet){RESET}\r\n")
-        for i, (_, subj, who, when, n_replies) in enumerate(t_list, 1):
+            await self.session.write('\x1b[2J\x1b[H')
+            await self.session.write(banner(board_name, _w))
+            await self.session.write(
+                f"  {FG['gry']}(no threads yet){RESET}\r\n\r\n")
+            ans = (await self.session.read_line(
+                f"  {FG['cyan']}N{RESET}=New Thread  "
+                f"{FG['cyan']}Q{RESET}=Back: ") or '').strip().upper()
+            if ans == 'N':
+                await self._post_compose(board_id, board_name)
+                continue
+            return
+
+        async def render_header():
+            await self.session.write(banner(board_name, _w))
+            await self.session.write(
+                f"  {FG['cyan']}{BOLD}{'Rep':<5}{'Subject':<{_subj_w}}  "
+                f"{'Author':<14}{'When':<12}{RESET}\r\n"
+                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+        def render_row(idx, t, selected):
+            _, subj, who, when, n_replies = t
             ts = fmt_eastern(when, '%m-%d %H:%M', '?')
             rep = f"[{n_replies}]" if n_replies else "   "
-            await self.session.write(
-                f"  {FG['yel']}{BOLD}{i:2d}{RESET}"
-                f"{FG['gry']}.{RESET} "
-                f"{FG['cyan']}{rep:<5}{RESET}"
-                f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
-                f"{FG['grn']}{who[:14]:<14}{RESET}"
-                f"{FG['gry']}{ts}{RESET}\r\n")
-        await self.session.write('\r\n' + footer(_w) + '\r\n')
-        choice = (await self.session.read_line(
-            _prompt('Number / N=new / Q=back: ')) or '').strip()
-        u = choice.upper()
-        if u == 'Q' or not choice:
+            return (f"  {FG['cyan']}{rep:<5}{RESET}"
+                    f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
+                    f"{FG['grn']}{who[:14]:<14}{RESET}"
+                    f"{FG['gry']}{ts}{RESET}")
+
+        def render_hint(s, tot):
+            return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                    f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Read  "
+                    f"{FG['cyan']}N{RESET}=New  {FG['cyan']}Q{RESET}=Back")
+
+        result = await self._rss_lightbar(
+            t_list, render_header, render_row, render_hint,
+            initial_sel=min(sel, len(t_list) - 1))
+
+        if result[0] == 'quit':
             return
-        if u == 'N':
-            await self._post_compose(board_id, board_name)
-            continue
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(t_list):
-                await self.read_thread_v2(t_list[idx][0], board_id, board_name)
-        except ValueError:
-            pass
+        elif result[0] == 'enter':
+            sel = result[1]
+            await self.read_thread_v2(t_list[sel][0], board_id, board_name)
+        else:
+            key, sel = result[1], result[2]
+            if key == 'N':
+                await self._post_compose(board_id, board_name)
 BBSMenuUI.list_threads = _list_threads_v2
 
 

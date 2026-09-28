@@ -214,18 +214,22 @@ class MessageBoardReadThreadAnviewTests(unittest.TestCase):
         """End-to-end from the real, reachable menu entry point:
         list_boards() -> self.list_threads(...) -- which at runtime IS
         _list_threads_v2, since BBSMenuUI.list_threads gets reassigned to
-        it at import time. Picking thread #1 must reach read_thread_v2
-        (ANView), not the dead class-body read_thread."""
+        it at import time. Picking the first (highlighted) thread via
+        the lightbar must reach read_thread_v2 (ANView), not the dead
+        class-body read_thread. (list_threads was converted from
+        type-a-number selection to a real arrow-key lightbar
+        2026-09-29, same as bbs_ui.py's other list screens -- Enter on
+        the already-highlighted first thread replaces the old '1'.)"""
         from anetbbs.features.bbs_ui import BBSMenuUI
 
         _StubANView.last_instance = None
         _StubANView.next_result = 'back'
         session = FakeSession()
-        session._inputs = ['1', 'Q']
+        session._keys = ['ENTER', 'Q']
 
-        async def _read_line(prompt=''):
-            return session._inputs.pop(0) if session._inputs else 'Q'
-        session.read_line = _read_line
+        async def _read_key_arrow():
+            return session._keys.pop(0) if session._keys else 'Q'
+        session.read_key_arrow = _read_key_arrow
         ui = BBSMenuUI(session)
 
         with patch('anetbbs.features.bbs_ui._app', return_value=self.app), \
@@ -236,6 +240,65 @@ class MessageBoardReadThreadAnviewTests(unittest.TestCase):
                              'picking a thread from the real list_threads entry '
                              'point must reach the ANView reader')
         self.assertEqual(_StubANView.last_instance.subject, 'Root Subject')
+
+
+    def test_empty_board_offers_new_thread_not_a_dead_end(self):
+        """A board with zero threads must still let a caller start one
+        -- _rss_lightbar() itself auto-quits on an empty row list, so
+        list_threads must handle this before ever calling it."""
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        from anetbbs.models import db, Board
+
+        with self.app.app_context():
+            empty_board = Board(name='Empty Board', description='x')
+            db.session.add(empty_board)
+            db.session.commit()
+            empty_board_id = empty_board.id
+
+        session = FakeSession()
+        session._lines = ['N']
+
+        async def _read_line(prompt=''):
+            return session._lines.pop(0) if session._lines else 'Q'
+        session.read_line = _read_line
+        ui = BBSMenuUI(session)
+
+        captured = {}
+
+        async def _fake_post_compose(self, board_id, board_name, parent_id=None):
+            captured['called'] = True
+
+        with patch('anetbbs.features.bbs_ui._app', return_value=self.app), \
+             patch.object(BBSMenuUI, '_post_compose', _fake_post_compose):
+            asyncio.run(ui.list_threads(empty_board_id, 'Empty Board'))
+
+        self.assertTrue(captured.get('called'),
+                        'N on an empty board must still reach _post_compose')
+
+    def test_n_hotkey_from_within_the_lightbar_starts_a_new_thread(self):
+        """N pressed while the lightbar itself is showing (not just the
+        empty-board fallback prompt) must also reach _post_compose."""
+        from anetbbs.features.bbs_ui import BBSMenuUI
+
+        session = FakeSession()
+        session._keys = ['N']
+
+        async def _read_key_arrow():
+            return session._keys.pop(0) if session._keys else 'Q'
+        session.read_key_arrow = _read_key_arrow
+        ui = BBSMenuUI(session)
+
+        captured = {}
+
+        async def _fake_post_compose(self, board_id, board_name, parent_id=None):
+            captured['called'] = True
+
+        with patch('anetbbs.features.bbs_ui._app', return_value=self.app), \
+             patch.object(BBSMenuUI, '_post_compose', _fake_post_compose):
+            asyncio.run(ui.list_threads(self.board_id, 'Test Board'))
+
+        self.assertTrue(captured.get('called'),
+                        'N from within the populated lightbar must reach _post_compose')
 
 
 if __name__ == '__main__':

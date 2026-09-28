@@ -94,6 +94,10 @@ class BoardListActivitySortTests(unittest.TestCase):
                         'manual Board.order (1 < 3)')
 
     def test_terminal_activity_toggle_reorders_board_list(self):
+        # list_boards() was converted to a real arrow-key lightbar
+        # 2026-09-29 (same _rss_lightbar widget as the other inbox/
+        # thread-list conversions) -- 'A' and 'Q' now arrive via
+        # read_key_arrow(), not read_line().
         from anetbbs.features.bbs_ui import BBSMenuUI
 
         class _FakeSession:
@@ -106,7 +110,7 @@ class BoardListActivitySortTests(unittest.TestCase):
             async def write(self, text):
                 self.written.append(text)
 
-            async def read_line(self, prompt=''):
+            async def read_key_arrow(self):
                 if not self._keys:
                     return 'Q'
                 return self._keys.pop(0)

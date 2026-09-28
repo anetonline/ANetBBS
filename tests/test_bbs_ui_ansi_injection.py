@@ -172,8 +172,11 @@ class BbsUiAnsiInjectionTests(unittest.TestCase):
         user_dict = {'id': user_id, 'username': 'imsg_victim', 'access_level': 10}
         # List view shows the injected sender in the row; 'Q' quits before
         # opening the message (proves the LIST render itself is sanitized,
-        # not just the detail view).
-        session = _FakeSession(user_dict, responses=['Q'])
+        # not just the detail view). list_imsg_inbox() now uses the
+        # _rss_lightbar widget (arrow-key navigation) instead of
+        # read_line() number entry, same as the other inbox conversions
+        # -- so this drives it via keys, not responses.
+        session = _FakeSession(user_dict, keys=['Q'])
         ui = BBSMenuUI(session)
 
         with self._patched_app():
@@ -185,10 +188,11 @@ class BbsUiAnsiInjectionTests(unittest.TestCase):
         self.assertIn('Sender', transcript)
 
         # Now open the message (detail view renders "From: ..." plus the
-        # body). '1' picks the message, '' answers _page_lines()'s
-        # "Press Enter to continue" prompt for the (short, one-line) body,
-        # then 'Q' quits the outer inbox loop.
-        session2 = _FakeSession(user_dict, responses=['1', '', 'Q'])
+        # body). ENTER picks the (only, already-highlighted) message,
+        # '' answers _page_lines()'s "Press Enter to continue" prompt
+        # for the (short, one-line) body, then 'Q' quits the outer inbox
+        # loop's next lightbar redraw.
+        session2 = _FakeSession(user_dict, responses=[''], keys=['ENTER', 'Q'])
         ui2 = BBSMenuUI(session2)
         with self._patched_app():
             asyncio.run(ui2.list_imsg_inbox())

@@ -1,4 +1,4 @@
 """
 AnetBBS - A Modern Python-based BBS system with Web and Telnet support
 """
-__version__ = '1.1.6'
+__version__ = '1.1.7'

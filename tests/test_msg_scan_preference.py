@@ -59,6 +59,17 @@ class _FakeSession:
                 'the scripted response queue is empty')
         return self._responses.pop(0)
 
+    async def read_key_arrow(self):
+        # list_pm_inbox()/list_threads() etc. now use the _rss_lightbar
+        # widget (arrow-key navigation) instead of read_line() number
+        # entry -- without this, a jump-in test that reaches one of
+        # those readers would hit an AttributeError inside
+        # _maybe_scan_new_messages()'s own broad try/except, which
+        # silently swallows it, masking whether the reader actually
+        # completed rather than genuinely exercising it. 'Q' backs
+        # straight out, same as this fake's read_line() default.
+        return 'Q'
+
     async def _show_notification_summary(self):
         # _maybe_scan_new_messages() (a real BBSSession method, called
         # unbound against this fake below) calls self._show_notification_summary()
@@ -153,12 +164,50 @@ class MsgScanPreferenceTests(unittest.TestCase):
         self.assertIn('YOU HAVE NEW NOTIFICATIONS', joined)
 
     def test_nothing_pending_shows_no_jump_in_offer(self):
+        # One scripted response for the new "No new messages... Press
+        # ENTER" pause added below -- see test_nothing_pending_shows_
+        # an_explicit_no_new_messages_message for that fix's own test.
         session = _FakeSession(self.user_id, [''], msg_scan_pref='auto')
         with self.app.app_context():
             self._run(session)
         joined = session.transcript()
         self.assertNotIn('YOU HAVE NEW NOTIFICATIONS', joined)
         self.assertNotIn('Read now?', joined)
+        self.assertEqual(session.read_line_calls, 1)
+
+    def test_nothing_pending_shows_an_explicit_no_new_messages_message(self):
+        # Real bug reported live 2026-09-29: nothing pending used to
+        # return completely silently -- on a fast connection this
+        # looked exactly like a bug ("I pressed Y and it just flashed
+        # to the main menu"), since there was zero feedback a scan even
+        # happened. Classic BBS software always says something here.
+        session = _FakeSession(self.user_id, [''], msg_scan_pref='auto')
+        with self.app.app_context():
+            self._run(session)
+        joined = session.transcript()
+        self.assertIn('No new messages', joined)
+        self.assertIn('Press ENTER to continue', joined)
+
+    def test_nothing_pending_still_pauses_after_explicit_ask_yes(self):
+        # 'ask' -> '' (default Yes) -> the new "No new messages" pause -> ''
+        session = _FakeSession(self.user_id, ['', ''], msg_scan_pref='ask')
+        with self.app.app_context():
+            self._run(session)
+        joined = session.transcript()
+        self.assertIn('Scan for new messages?', joined)
+        self.assertIn('No new messages', joined)
+
+    def test_nothing_pending_petscii_gets_one_line_no_pause(self):
+        # PETSCII has no ANSI-native reader follow-up to offer, but it
+        # should still get the one-line text -- just without consuming
+        # a keystroke, since PETSCII's own dedicated menu loop handles
+        # pacing itself.
+        session = _FakeSession(self.user_id, [], msg_scan_pref='auto',
+                               term_mode='petscii')
+        with self.app.app_context():
+            self._run(session)
+        joined = session.transcript()
+        self.assertIn('No new messages', joined)
         self.assertEqual(session.read_line_calls, 0)
 
     def test_jump_in_offer_only_lists_whats_actually_pending(self):

@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.6`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.7`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.7 — Federation directory IP publishing; login-message-scan feedback (September 2026)
+
+Fixed the terminal Inter-BBS IM directory picker still failing to probe federation-network (A-Net) directory entries even after the previous release's hostname-to-IP fallback. Root cause traced further back: the federation hub already captured each peer's real connecting IP address at registration, but never published it in the directory feed it distributes to other BBSes, so nothing ever had an IP on file to fall back to. The hub now publishes that address (kept fresh on every heartbeat, not just initial registration), and the directory picker can actually use it.
+
+Fixed the terminal login-time "scan for new messages?" feature answering with no feedback at all when there was nothing new — it looked exactly like the feature wasn't working. It now always says something, even when the answer is "No new messages," matching classic BBS convention.
+
+Converted six more terminal list screens from typing a number to a real arrow-key lightbar, matching the file-area picker and BBS directory browser: the file listing inside a file area (which previously used N=Next/P=Prev paging — the batch-download and extended-description-view features already existed, this only changes how files get selected for them, via Space to mark and B to download everything marked), the message-board list and its thread list, the private-message inbox, and the Inter-BBS instant-message inbox (reply and delete are now R/D hotkeys against the highlighted message instead of typed R#/D# prefixes).
+
+Added message search to the terminal client — a real gap, not just a UI conversion: there was previously no way to search messages from the terminal at all. Reachable via the new S hotkey on the message-board list, it searches subject and body text across both local message boards and echomail (FidoNet-style network messages), across every board/area the caller can actually access, and opens a matching result into its full thread/area context rather than showing it in isolation.
 
 ## v1.1.6 — Pre-login "Matrix" connection banner (terminal + web); login redirect fix (September 2026)
 

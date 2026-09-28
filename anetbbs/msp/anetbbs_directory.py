@@ -98,6 +98,18 @@ def refresh(app):
                     source='anetbbs',
                 )
                 db.session.add(entry)
+            # Real gap found live 2026-09-29: this puller never captured
+            # an IP at all, unlike the sbbsimsg.lst puller (directory.py)
+            # -- every anetbbs.lst-sourced entry's ip_address stayed NULL
+            # forever, so the terminal MSP picker's hostname-then-IP
+            # fallback (bbs_ui.py's _msp_pick_online_user()) had nothing
+            # to fall back to for any of them, only ever trying the
+            # hostname. Now that the hub publishes each peer's real
+            # source_ip (captured at register()/heartbeat() time, see
+            # web/registry.py), store it the same way directory.py does.
+            new_ip = (b.get('ip') or '').strip()
+            if new_ip:
+                entry.ip_address = new_ip
             entry.name = (b.get('name') or host)[:160]
             entry.sysop = (b.get('sysop') or '')[:120] or None
             entry.location = (b.get('location') or '')[:120] or None

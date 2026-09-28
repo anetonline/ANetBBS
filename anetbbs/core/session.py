@@ -2900,7 +2900,27 @@ class BBSSession:
                     return
 
             result = await self._show_notification_summary()
-            if not result or self.term_mode == 'petscii':
+            if not result:
+                # Real gap reported live 2026-09-29: when the scan came
+                # back empty, this returned completely silently -- on a
+                # fast connection it looked exactly like a bug ("I
+                # pressed Y and it just flashed to the main menu"),
+                # since there was zero visible feedback that a scan
+                # even happened. Classic BBS software (Synchronet,
+                # Mystic, Spitfire) always says SOMETHING here, even
+                # when the answer is "nothing new." PETSCII still skips
+                # this (its own dedicated menu loop isn't built for
+                # these ANSI-native reader follow-ups, same reasoning
+                # as the has_board/has_echo shortcut below), but even
+                # PETSCII gets the one-line "no new messages" text.
+                if self.term_mode != 'petscii':
+                    await self.read_line(
+                        '\r\n\x1b[1;32mNo new messages.\x1b[0m\r\n'
+                        '\x1b[1mPress ENTER to continue...\x1b[0m')
+                else:
+                    await self.write('\r\nNo new messages.\r\n')
+                return
+            if self.term_mode == 'petscii':
                 return
             pm_n, unread_notifs = result
             has_board = any(n.kind in ('reply', 'mention') for n in unread_notifs)
